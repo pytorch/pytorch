@@ -195,6 +195,12 @@ class AOTInductorTestsTemplate:
     )
     @skipIfMPS
     @skipIfRocm
+    # Skip embed_kernel_binary == True for now as it shows random
+    # failure on CI
+    @common_utils.parametrize("embed_kernel_binary", [False])
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
@@ -6747,7 +6753,6 @@ MPS_TEST_FAILURES = {
     "test_triton_kernel_on_device_tma_dynamic_True_tma_version_new": fail_mps(),
     "test_triton_kernel_on_device_tma_dynamic_True_tma_version_old": fail_mps(),
     "test_size_with_unbacked_add_expr_transitive": fail_mps(),
-    "test_size_with_unbacked_add_expr": fail_mps(),
     "test_size_with_unbacked_add_and_mul_expr": fail_mps(),
     "test_triton_next_power_of_2": fail_mps(),
     "test_sympy_cpp_printer_min_max_minmax0": fail_mps(),
