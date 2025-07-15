@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import contextlib
 import itertools
 from collections.abc import KeysView, Sequence
 from contextlib import contextmanager, nullcontext
@@ -1178,9 +1179,30 @@ def aot_module_simplified(
         full_args, aot_config, fake_mode, shape_env, ignore_shape_env
     )
 
-    def dispatch_and_compile():
-        functional_call = create_functional_call(mod, params_spec, params_len)
-        with compiled_autograd._disable():
+    with contextlib.ExitStack() as stack:
+        while True:
+            # We only care if the forward will return an OutputCode.
+            if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
+                local = should_use_local_autograd_cache()
+                remote = should_use_remote_autograd_cache()
+                if local or remote:
+                    set_feature_use("aot_autograd_remote_cache", remote)
+                    compiled_fn = AOTAutogradCache.try_load(
+                        mod,
+                        fake_flat_args,
+                        aot_config,
+                        cudagraphs,
+                        boxed_forward_device_index,
+                        local,
+                        remote,
+                    )
+                    if compiled_fn is not None:
+                        break
+
+            functional_call = create_functional_call(mod, params_spec, params_len)
+
+            stack.enter_context(compiled_autograd._disable())
+
             compiled_fn, _ = create_aot_dispatcher_function(
                 functional_call,
                 fake_flat_args,
@@ -1188,29 +1210,7 @@ def aot_module_simplified(
                 fake_mode,
                 shape_env,
             )
-        return compiled_fn
-
-    while True:
-        # We only care if the forward will return an OutputCode.
-        if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
-            local = should_use_local_autograd_cache()
-            remote = should_use_remote_autograd_cache()
-            if local or remote:
-                set_feature_use("aot_autograd_remote_cache", remote)
-                compiled_fn = AOTAutogradCache.try_load(
-                    mod,
-                    fake_flat_args,
-                    aot_config,
-                    cudagraphs,
-                    boxed_forward_device_index,
-                    local,
-                    remote,
-                )
-                if compiled_fn is not None:
-                    break
-
-        compiled_fn = dispatch_and_compile()
-        break
+            break
 
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
         # This function is called by the flatten_graph_inputs wrapper, which boxes
