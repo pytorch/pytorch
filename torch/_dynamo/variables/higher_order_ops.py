@@ -708,7 +708,7 @@ def speculate_subgraph(
 
             if restore_side_effects:
                 new_side_effects = tx.output.side_effects.clone()
-                prev_side_effects.track_runhead_tensor_and_symvar_side_effects(
+                prev_side_effects.track_runahead_tensor_and_symvar_side_effects(
                     new_side_effects
                 )
                 tx.output.side_effects = prev_side_effects

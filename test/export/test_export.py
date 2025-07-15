@@ -1602,10 +1602,20 @@ class GraphModule(torch.nn.Module):
         target = 2
         args = (x, trigger, target)
         ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
-        self.assertExpectedInline(
-            str(tuple(ep.range_constraints.values())),
-            """(VR[0, int_oo], VR[0, int_oo])""",
-        )
+        if is_training_ir_test(self._testMethodName):
+            # In strict mode export's result capturing compiler, we create
+            # 2 new symints when re-fakifying the symint inputs.
+            # Then in run_decompositions, ep.range_constraints was updated
+            # where it checks the var_to_range and put the two newly added ones into the range_constraints.
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo], VR[-int_oo, int_oo], VR[-int_oo, int_oo])""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo])""",
+            )
 
         self.assertEqual(m(*args), ep.module()(*args))
 
