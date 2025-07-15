@@ -1506,12 +1506,13 @@ def _disable():
 
 # return to starting state of a new process
 def reset() -> None:
-    global compiled_autograd_enabled
+    global compiled_autograd_enabled, in_compiled_autograd_initial_trace
     compiled_autograd_enabled = False
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
     torch._C._dynamo.compiled_autograd.clear_cache()
+    in_compiled_autograd_initial_trace = False
     global COMPILE_COUNTER
     COMPILE_COUNTER = itertools.count()
 
