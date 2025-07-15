@@ -21,7 +21,7 @@ set -ex -o pipefail
 # Argument 2: What version of the docs we are building.
 version="${2:-${DOCS_VERSION:-main}}"
 if [ -z "$version" ]; then
-echo "error: python_doc_push_script.sh: version (arg2) not specified"
+  echo "error: python_doc_push_script.sh: version (arg2) not specified"
   exit 1
 fi
 
@@ -29,7 +29,7 @@ fi
 # (pytorch_docs/$install_path)
 install_path="${1:-${DOCS_INSTALL_PATH:-${DOCS_VERSION}}}"
 if [ -z "$install_path" ]; then
-echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
+  echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
 fi
 
@@ -41,14 +41,13 @@ fi
 # Argument 3: The branch to push to. Usually is "site"
 branch="${3:-${DOCS_BRANCH:-site}}"
 if [ -z "$branch" ]; then
-echo "error: python_doc_push_script.sh: branch (arg3) not specified"
+  echo "error: python_doc_push_script.sh: branch (arg3) not specified"
   exit 1
 fi
 
 echo "install_path: $install_path  version: $version"
 
-
-build_docs () {
+build_docs() {
   set +e
   set -o pipefail
   make "$1" 2>&1 | tee /tmp/docs_build.txt
@@ -66,7 +65,6 @@ build_docs () {
   set -ex -o pipefail
   return $code
 }
-
 
 git clone https://github.com/pytorch/docs pytorch_docs -b "$branch" --depth 1
 pushd pytorch_docs
@@ -96,7 +94,7 @@ if [ "$is_main_doc" = true ]; then
   #
   # Also: see docs/source/conf.py for "coverage_ignore*" items, which should
   # be documented then removed from there.
-  lines=$(wc -l build/coverage/python.txt 2>/dev/null |cut -f1 -d' ')
+  lines=$(wc -l build/coverage/python.txt 2>/dev/null | cut -f1 -d' ')
   undocumented=$((lines - 2))
   if [ $undocumented -lt 0 ]; then
     echo coverage output not found

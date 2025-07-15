@@ -7,7 +7,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   BASE_URL="https://repo.anaconda.com/miniconda"
   CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
   if [[ $(uname -m) == "aarch64" ]] || [[ "$BUILD_ENVIRONMENT" == *xpu* ]] || [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-    BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"  # @lint-ignore
+    BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download" # @lint-ignore
     CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
   fi
 
@@ -15,7 +15,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   MINOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 2)
 
   case "$MAJOR_PYTHON_VERSION" in
-    3);;
+    3) ;;
     *)
       echo "Unsupported ANACONDA_PYTHON_VERSION: $ANACONDA_PYTHON_VERSION"
       exit 1
@@ -25,7 +25,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
 
-  SCRIPT_FOLDER="$( cd "$(dirname "$0")" ; pwd -P )"
+  SCRIPT_FOLDER="$(
+    cd "$(dirname "$0")"
+    pwd -P
+  )"
   source "${SCRIPT_FOLDER}/common_utils.sh"
 
   pushd /tmp
@@ -56,9 +59,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
-  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
-             python="$ANACONDA_PYTHON_VERSION" \
-             ${SYSROOT_DEP}
+  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION" \
+    ${SYSROOT_DEP}
 
   # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
   # which is provided in libstdcxx 12 and up.
@@ -84,10 +86,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
   # Magma is installed from a tarball in the ossci-linux bucket into the conda env
   if [ -n "$CUDA_VERSION" ]; then
-    conda_run ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION})
+    conda_run ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<<${CUDA_VERSION})
   fi
 
-  if [[ "$UBUNTU_VERSION" == "24.04"* ]] ; then
+  if [[ "$UBUNTU_VERSION" == "24.04"* ]]; then
     conda_install_through_forge libstdcxx-ng=14
   fi
 

@@ -28,9 +28,9 @@ fi
 # The logic here is copied from .ci/pytorch/common_utils.sh
 TRITON_PINNED_COMMIT=$(get_pinned_commit ${TRITON_TEXT_FILE})
 
-if [ -n "${UBUNTU_VERSION}" ];then
-    apt update
-    apt-get install -y gpg-agent
+if [ -n "${UBUNTU_VERSION}" ]; then
+  apt update
+  apt-get install -y gpg-agent
 fi
 
 # Keep the current cmake and numpy version here, so we can reinstall them later
@@ -38,7 +38,7 @@ CMAKE_VERSION=$(get_pip_version cmake)
 NUMPY_VERSION=$(get_pip_version numpy)
 
 if [ -z "${MAX_JOBS}" ]; then
-    export MAX_JOBS=$(nproc)
+  export MAX_JOBS=$(nproc)
 fi
 
 # Git checkout triton

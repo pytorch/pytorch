@@ -91,7 +91,6 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export VALGRIND=OFF
 fi
 
-
 if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
   # There are additional warnings on s390x, maybe due to newer gcc.
   # Skip this check for now
@@ -199,7 +198,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   timeout 30 xpu-smi discovery || true
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
+if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   # JIT C++ extensions require ninja.
   pip_install "ninja==1.10.2"
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
@@ -216,58 +215,58 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=true:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0:check_initialization_order=true:debug=true
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-        export ASAN_OPTIONS="${ASAN_OPTIONS}:protect_shadow_gap=0"
-    fi
-    export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
-    export PYTORCH_TEST_WITH_ASAN=1
-    export PYTORCH_TEST_WITH_UBSAN=1
-    # TODO: Figure out how to avoid hard-coding these paths
-    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer
-    export TORCH_USE_RTLD_GLOBAL=1
-    # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
-    # default behavior.
-    #
-    # The reason for this is that without RTLD_GLOBAL, if we load multiple
-    # libraries that depend on libtorch (as is the case with C++ extensions), we
-    # will get multiple copies of libtorch in our address space.  When UBSAN is
-    # turned on, it will do a bunch of virtual pointer consistency checks which
-    # won't work correctly.  When this happens, you get a violation like:
-    #
-    #    member call on address XXXXXX which does not point to an object of
-    #    type 'std::_Sp_counted_base<__gnu_cxx::_Lock_policy::_S_atomic>'
-    #    XXXXXX note: object is of type
-    #    'std::_Sp_counted_ptr<torch::nn::LinearImpl*, (__gnu_cxx::_Lock_policy)2>'
-    #
-    # (NB: the textual types of the objects here are misleading, because
-    # they actually line up; it just so happens that there's two copies
-    # of the type info floating around in the address space, so they
-    # don't pointer compare equal.  See also
-    #   https://github.com/google/sanitizers/issues/1175
-    #
-    # UBSAN is kind of right here: if we relied on RTTI across C++ extension
-    # modules they would indeed do the wrong thing;  but in our codebase, we
-    # don't use RTTI (because it doesn't work in mobile).  To appease
-    # UBSAN, however, it's better if we ensure all the copies agree!
-    #
-    # By the way, an earlier version of this code attempted to load
-    # libtorch_python.so with LD_PRELOAD, which has a similar effect of causing
-    # it to be loaded globally.  This isn't really a good idea though, because
-    # it depends on a ton of dynamic libraries that most programs aren't gonna
-    # have, and it applies to child processes.
+  export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=true:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0:check_initialization_order=true:debug=true
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    export ASAN_OPTIONS="${ASAN_OPTIONS}:protect_shadow_gap=0"
+  fi
+  export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
+  export PYTORCH_TEST_WITH_ASAN=1
+  export PYTORCH_TEST_WITH_UBSAN=1
+  # TODO: Figure out how to avoid hard-coding these paths
+  export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer
+  export TORCH_USE_RTLD_GLOBAL=1
+  # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
+  # default behavior.
+  #
+  # The reason for this is that without RTLD_GLOBAL, if we load multiple
+  # libraries that depend on libtorch (as is the case with C++ extensions), we
+  # will get multiple copies of libtorch in our address space.  When UBSAN is
+  # turned on, it will do a bunch of virtual pointer consistency checks which
+  # won't work correctly.  When this happens, you get a violation like:
+  #
+  #    member call on address XXXXXX which does not point to an object of
+  #    type 'std::_Sp_counted_base<__gnu_cxx::_Lock_policy::_S_atomic>'
+  #    XXXXXX note: object is of type
+  #    'std::_Sp_counted_ptr<torch::nn::LinearImpl*, (__gnu_cxx::_Lock_policy)2>'
+  #
+  # (NB: the textual types of the objects here are misleading, because
+  # they actually line up; it just so happens that there's two copies
+  # of the type info floating around in the address space, so they
+  # don't pointer compare equal.  See also
+  #   https://github.com/google/sanitizers/issues/1175
+  #
+  # UBSAN is kind of right here: if we relied on RTTI across C++ extension
+  # modules they would indeed do the wrong thing;  but in our codebase, we
+  # don't use RTTI (because it doesn't work in mobile).  To appease
+  # UBSAN, however, it's better if we ensure all the copies agree!
+  #
+  # By the way, an earlier version of this code attempted to load
+  # libtorch_python.so with LD_PRELOAD, which has a similar effect of causing
+  # it to be loaded globally.  This isn't really a good idea though, because
+  # it depends on a ton of dynamic libraries that most programs aren't gonna
+  # have, and it applies to child processes.
 
-    LD_PRELOAD=$(clang --print-file-name=libclang_rt.asan-x86_64.so)
-    export LD_PRELOAD
-    # Disable valgrind for asan
-    export VALGRIND=OFF
+  LD_PRELOAD=$(clang --print-file-name=libclang_rt.asan-x86_64.so)
+  export LD_PRELOAD
+  # Disable valgrind for asan
+  export VALGRIND=OFF
 
-    (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
-    echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
-    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
-    #(cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
-    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_vptr_ubsan()")
-    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
+  (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
+  echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
+  (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
+  #(cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
+  (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_vptr_ubsan()")
+  (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
 # The torch._C._crash_if_debug_asserts_fail() function should only fail if both of the following are true:
@@ -275,12 +274,12 @@ fi
 # 2. The value 424242 is passed in
 # This tests that the debug asserts are working correctly.
 if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
-    echo "We are in debug mode: $BUILD_ENVIRONMENT. Expect the python assertion to fail"
-    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
+  echo "We are in debug mode: $BUILD_ENVIRONMENT. Expect the python assertion to fail"
+  (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
 elif [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
-    # Noop when debug is disabled. Skip bazel jobs because torch isn't available there yet.
-    echo "We are not in debug mode: $BUILD_ENVIRONMENT. Expect the assertion to pass"
-    (cd test && python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
+  # Noop when debug is disabled. Skip bazel jobs because torch isn't available there yet.
+  echo "We are not in debug mode: $BUILD_ENVIRONMENT. Expect the assertion to pass"
+  (cd test && python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
 fi
 
 if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
@@ -324,7 +323,7 @@ test_python_smoke() {
 
 test_h100_distributed() {
   # Distributed tests at H100
-  time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # This test requires multicast support
   time python test/run_test.py --include distributed/_composable/fsdp/test_fully_shard_comm.py -k TestFullyShardAllocFromPG $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
@@ -332,7 +331,7 @@ test_h100_distributed() {
 
 test_h100_symm_mem() {
   # symmetric memory test
-  time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_symmetric_memory.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nccl.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -345,7 +344,6 @@ test_lazy_tensor_meta_reference_disabled() {
   time python test/run_test.py --include lazy/test_ts_opinfo.py --verbose
   export -n TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE
 }
-
 
 test_dynamo_wrapped_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
@@ -377,7 +375,6 @@ test_einops() {
   time python test/run_test.py --einops --verbose --upload-artifacts-while-running
   assert_git_not_dirty
 }
-
 
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
@@ -502,7 +499,7 @@ pr_time_benchmarks() {
   mkdir -p "$TEST_REPORTS_DIR"
   PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
-  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
+  cat "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
   PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks python benchmarks/dynamo/pr_time_benchmarks/check_results.py "benchmarks/dynamo/pr_time_benchmarks/expected_results.csv" "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "$TEST_REPORTS_DIR/new_expected_results.csv"
 }
 
@@ -549,19 +546,19 @@ test_cachebench() {
 
   for mode in "${mode_options[@]}"; do
     $TASKSET python "benchmarks/dynamo/cachebench.py" \
-        --mode "$mode" \
-        --device cuda \
-        --benchmark "$BENCHMARK" \
-        --repeat 3 \
-        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}.json"
+      --mode "$mode" \
+      --device cuda \
+      --benchmark "$BENCHMARK" \
+      --repeat 3 \
+      --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}.json"
 
     $TASKSET python "benchmarks/dynamo/cachebench.py" \
-        --mode "$mode" \
-        --dynamic \
-        --device cuda \
-        --benchmark "$BENCHMARK" \
-        --repeat 3 \
-        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}_dynamic.json"
+      --mode "$mode" \
+      --dynamic \
+      --device cuda \
+      --benchmark "$BENCHMARK" \
+      --repeat 3 \
+      --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}_dynamic.json"
   done
 }
 
@@ -570,11 +567,11 @@ test_verify_cachebench() {
   TEST_OUTPUT="$TMP_TEST_REPORTS_DIR/test.json"
 
   $TASKSET python "benchmarks/dynamo/cachebench.py" \
-      --mode training \
-      --device cpu \
-      --model nanogpt \
-      --benchmark torchbench \
-      --output "$TEST_OUTPUT"
+    --mode training \
+    --device cpu \
+    --model nanogpt \
+    --benchmark torchbench \
+    --output "$TEST_OUTPUT"
 
   # -s checks file exists and is non empty
   if [[ ! -s "$TEST_OUTPUT" ]]; then
@@ -633,61 +630,61 @@ test_perf_for_dashboard() {
     for target in "${targets[@]}"; do
       local target_flag=("--${target}")
       if [[ "$target" == "performance" ]]; then
-        target_flag+=( --cold-start-latency)
+        target_flag+=(--cold-start-latency)
       elif [[ "$target" == "accuracy" ]]; then
-        target_flag+=( --no-translation-validation)
+        target_flag+=(--no-translation-validation)
       fi
 
       if [[ "$DASHBOARD_TAG" == *freezing-true* ]]; then
-        target_flag+=( --freezing)
+        target_flag+=(--freezing)
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+          "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+          "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-            --dynamic-batch-only "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+          "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
+          --dynamic-batch-only "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+          "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
-            --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+          "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *freeze_autotune_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
         TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
-            --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+          "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
         if [[ "$target" == "accuracy" ]]; then
           # Also collect Export pass rate and display as a separate row
           $TASKSET python "benchmarks/dynamo/$suite.py" \
-              "${target_flag[@]}" --"$mode" --"$dtype" --export --disable-cudagraphs "$@" \
-              --output "$TEST_REPORTS_DIR/${backend}_export_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+            "${target_flag[@]}" --"$mode" --"$dtype" --export --disable-cudagraphs "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_export_${suite}_${dtype}_${mode}_${device}_${target}.csv"
         fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+          "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
         TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+          "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cudagraphs_low_precision-true* ]] && [[ "$mode" == "inference" ]]; then
         # TODO: This has a new dtype called quant and the benchmarks script needs to be updated to support this.
@@ -723,7 +720,7 @@ test_single_dynamo_benchmark() {
 
   local partition_flags=()
   if [[ -n "$NUM_TEST_SHARDS" && -n "$shard_id" ]]; then
-    partition_flags=( --total-partitions "$NUM_TEST_SHARDS" --partition-id "$shard_id" )
+    partition_flags=(--total-partitions "$NUM_TEST_SHARDS" --partition-id "$shard_id")
   fi
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
@@ -844,7 +841,7 @@ test_inductor_torchbench_smoketest_perf() {
   done
 }
 
-test_inductor_set_cpu_affinity(){
+test_inductor_set_cpu_affinity() {
   JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
   export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
@@ -875,15 +872,14 @@ test_inductor_set_cpu_affinity(){
   export TASKSET="taskset -c $start_cpu-$end_cpu"
 }
 
-test_inductor_torchbench_cpu_smoketest_perf(){
+test_inductor_torchbench_cpu_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
   test_inductor_set_cpu_affinity
   MODELS_SPEEDUP_TARGET=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
 
-  grep -v '^ *#' < "$MODELS_SPEEDUP_TARGET" | while IFS=',' read -r -a model_cfg
-  do
+  grep -v '^ *#' <"$MODELS_SPEEDUP_TARGET" | while IFS=',' read -r -a model_cfg; do
     local model_name=${model_cfg[0]}
     local data_type=${model_cfg[2]}
     local speedup_target=${model_cfg[5]}
@@ -911,7 +907,7 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   done
 }
 
-test_torchbench_gcp_smoketest(){
+test_torchbench_gcp_smoketest() {
   pushd "${TORCHBENCHPATH}"
   python test.py -v
   popd
@@ -921,7 +917,6 @@ test_python_gloo_with_tls() {
   source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
   assert_git_not_dirty
 }
-
 
 test_aten() {
   # Test ATen
@@ -1056,7 +1051,7 @@ test_libtorch_api() {
   fi
 }
 
-test_xpu_bin(){
+test_xpu_bin() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
@@ -1242,37 +1237,37 @@ test_xla() {
 }
 
 function check_public_api_test_fails {
-    test_name=$1
-    invalid_item_name=$2
-    invalid_item_desc=$3
+  test_name=$1
+  invalid_item_name=$2
+  invalid_item_desc=$3
 
-    echo "Running public API test '${test_name}'..."
-    test_output=$(python test/test_public_bindings.py -k "${test_name}" 2>&1) && ret=$? || ret=$?
+  echo "Running public API test '${test_name}'..."
+  test_output=$(python test/test_public_bindings.py -k "${test_name}" 2>&1) && ret=$? || ret=$?
 
-    # Ensure test fails correctly.
-    if [ "$ret" -eq 0 ]; then
-        cat << EOF
+  # Ensure test fails correctly.
+  if [ "$ret" -eq 0 ]; then
+    cat <<EOF
 Expected the public API test '${test_name}' to fail after introducing
 ${invalid_item_desc}, but it succeeded! Check test/test_public_bindings.py
 for any changes that may have broken the test.
 EOF
-        return 1
-    fi
+    return 1
+  fi
 
-    # Ensure invalid item is in the test output.
-    echo "${test_output}" | grep -q "${invalid_item_name}" && ret=$? || ret=$?
+  # Ensure invalid item is in the test output.
+  echo "${test_output}" | grep -q "${invalid_item_name}" && ret=$? || ret=$?
 
-    if [ $ret -ne 0 ]; then
-        cat << EOF
+  if [ $ret -ne 0 ]; then
+    cat <<EOF
 Expected the public API test '${test_name}' to identify ${invalid_item_desc}, but
 it didn't! It's possible the test may not have run. Check test/test_public_bindings.py
 for any changes that may have broken the test.
 EOF
-        return 1
-    fi
+    return 1
+  fi
 
-    echo "Success! '${test_name}' identified ${invalid_item_desc} ${invalid_item_name}."
-    return 0
+  echo "Success! '${test_name}' identified ${invalid_item_desc} ${invalid_item_name}."
+  return 0
 }
 
 # Do NOT run this test before any other tests, like test_python_shard, etc.
@@ -1287,7 +1282,7 @@ test_forward_backward_compatibility() {
   new_filename=$(mktemp XXXXXXXX.py -p "${TORCH_INSTALL_DIR}")
 
   BAD_PUBLIC_FUNC=$(
-  cat << 'EOF'
+    cat <<'EOF'
 def new_public_func():
   pass
 
@@ -1296,55 +1291,55 @@ new_public_func.__module__ = None
 EOF
   )
 
-  echo "${BAD_PUBLIC_FUNC}" >> "${new_filename}"
+  echo "${BAD_PUBLIC_FUNC}" >>"${new_filename}"
   invalid_api="torch.$(basename -s '.py' "${new_filename}").new_public_func"
   echo "Created an invalid public API function ${invalid_api}..."
 
   check_public_api_test_fails \
-      "test_correct_module_names" \
-      "${invalid_api}" \
-      "an invalid public API function" && ret=$? || ret=$?
+    "test_correct_module_names" \
+    "${invalid_api}" \
+    "an invalid public API function" && ret=$? || ret=$?
 
   rm -v "${new_filename}"
 
   if [ "$ret" -ne 0 ]; then
-      exit 1
+    exit 1
   fi
 
   # Step 2. Make sure that the public API test "test_correct_module_names" fails when an existing
   # file is modified to introduce an invalid public API function.
   EXISTING_FILEPATH="${TORCH_INSTALL_DIR}/nn/parameter.py"
   cp -v "${EXISTING_FILEPATH}" "${EXISTING_FILEPATH}.orig"
-  echo "${BAD_PUBLIC_FUNC}" >> "${EXISTING_FILEPATH}"
+  echo "${BAD_PUBLIC_FUNC}" >>"${EXISTING_FILEPATH}"
   invalid_api="torch.nn.parameter.new_public_func"
   echo "Appended an invalid public API function to existing file ${EXISTING_FILEPATH}..."
 
   check_public_api_test_fails \
-      "test_correct_module_names" \
-      "${invalid_api}" \
-      "an invalid public API function" && ret=$? || ret=$?
+    "test_correct_module_names" \
+    "${invalid_api}" \
+    "an invalid public API function" && ret=$? || ret=$?
 
   mv -v "${EXISTING_FILEPATH}.orig" "${EXISTING_FILEPATH}"
 
   if [ "$ret" -ne 0 ]; then
-      exit 1
+    exit 1
   fi
 
   # Step 3. Make sure that the public API test "test_modules_can_be_imported" fails when a module
   # cannot be imported.
   new_module_dir=$(mktemp XXXXXXXX -d -p "${TORCH_INSTALL_DIR}")
-  echo "invalid syntax garbage" > "${new_module_dir}/__init__.py"
+  echo "invalid syntax garbage" >"${new_module_dir}/__init__.py"
   invalid_module_name="torch.$(basename "${new_module_dir}")"
 
   check_public_api_test_fails \
-      "test_modules_can_be_imported" \
-      "${invalid_module_name}" \
-      "a non-importable module" && ret=$? || ret=$?
+    "test_modules_can_be_imported" \
+    "${invalid_module_name}" \
+    "a non-importable module" && ret=$? || ret=$?
 
   rm -rv "${new_module_dir}"
 
   if [ "$ret" -ne 0 ]; then
-      exit 1
+    exit 1
   fi
 
   # Next, build torch from the merge base.
@@ -1383,8 +1378,8 @@ EOF
   git submodule sync && git submodule update --init --recursive
   # FC: verify new model can be load with old code.
   if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
-      echo "FC check failed: new model cannot be load in old code"
-      return 1
+    echo "FC check failed: new model cannot be load in old code"
+    return 1
   fi
   python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
@@ -1393,8 +1388,8 @@ EOF
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
   # BC: verify old model can be load with new code
   if ! python ../load_torchscript_model.py /tmp/model_old.pt; then
-      echo "BC check failed: old model cannot be load in new code"
-      return 1
+    echo "BC check failed: old model cannot be load in new code"
+    return 1
   fi
   popd
   set +x
@@ -1501,8 +1496,7 @@ test_vec256() {
     mkdir -p test/test-reports/vec256
     pushd build/bin
     vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
-    for vec256_exec in $vec256_tests
-    do
+    for vec256_exec in $vec256_tests; do
       $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
     done
     popd
@@ -1549,27 +1543,27 @@ test_executorch() {
 
 test_linux_aarch64() {
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
-        test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
-        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops test_cpp_extensions_open_device_registration \
-        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
+    test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
+    test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops test_cpp_extensions_open_device_registration \
+    --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
   python test/run_test.py --include dynamo/test_compile dynamo/test_backends dynamo/test_comptime dynamo/test_config \
-       dynamo/test_functions dynamo/test_fx_passes_pre_grad dynamo/test_interop dynamo/test_model_output dynamo/test_modules \
-       dynamo/test_optimizers dynamo/test_recompile_ux dynamo/test_recompiles \
-       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
+    dynamo/test_functions dynamo/test_fx_passes_pre_grad dynamo/test_interop dynamo/test_model_output dynamo/test_modules \
+    dynamo/test_optimizers dynamo/test_recompile_ux dynamo/test_recompiles \
+    --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Inductor tests
   python test/run_test.py --include inductor/test_torchinductor inductor/test_benchmark_fusion inductor/test_codecache \
-       inductor/test_config inductor/test_control_flow inductor/test_coordinate_descent_tuner inductor/test_fx_fusion \
-       inductor/test_group_batch_fusion inductor/test_inductor_freezing inductor/test_inductor_utils \
-       inductor/test_inplacing_pass inductor/test_kernel_benchmark inductor/test_layout_optim \
-       inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
-       inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
-       inductor/test_split_cat_fx_passes inductor/test_compile inductor/test_torchinductor \
-       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
-       inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
-       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
+    inductor/test_config inductor/test_control_flow inductor/test_coordinate_descent_tuner inductor/test_fx_fusion \
+    inductor/test_group_batch_fusion inductor/test_inductor_freezing inductor/test_inductor_utils \
+    inductor/test_inplacing_pass inductor/test_kernel_benchmark inductor/test_layout_optim \
+    inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
+    inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
+    inductor/test_split_cat_fx_passes inductor/test_compile inductor/test_torchinductor \
+    inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
+    inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
+    --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
 test_operator_benchmark() {
@@ -1584,15 +1578,14 @@ test_operator_benchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
-      --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
-      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.json" \
+    --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
+    --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.json"
 
   pip_install pandas
   python check_perf_csv.py \
-      --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
-      --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
+    --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
+    --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
 }
-
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
@@ -1647,11 +1640,11 @@ elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
-  id=$((SHARD_NUMBER-1))
+  id=$((SHARD_NUMBER - 1))
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
-  id=$((SHARD_NUMBER-1))
+  id=$((SHARD_NUMBER - 1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
   install_torchaudio cuda
@@ -1671,7 +1664,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   fi
   install_torchvision
   TORCH_CUDA_ARCH_LIST="8.0;8.6" install_torchao
-  id=$((SHARD_NUMBER-1))
+  id=$((SHARD_NUMBER - 1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
