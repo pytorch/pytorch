@@ -1,5 +1,4 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
-#include <c10/cuda/CUDAException.h>
 #include <c10/util/irange.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
