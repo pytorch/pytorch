@@ -18,7 +18,7 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C
@@ -236,10 +236,10 @@ def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
 
 
-def _extract_arch_version(arch_string: str):
+def _extract_arch_version(arch_string: str) -> int:
     """Extracts the architecture string from a CUDA version"""
-    base = arch_string.split("_")[1]
-    base = base.removesuffix("a")
+    base = arch_string.split("_", maxsplit=2)[1]
+    base = base.removesuffix("a").removesuffix("f")
     return int(base)
 
 
@@ -1775,6 +1775,9 @@ def _compile_kernel(
 
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
+
+
+_POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 
 
 __all__ = [
