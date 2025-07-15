@@ -1,6 +1,7 @@
-from ..decorators import substitute_in_graph
-
 import pickle
+from typing import Any
+
+from ..decorators import substitute_in_graph
 
 
 __all__ = [
@@ -9,12 +10,21 @@ __all__ = [
 ]
 
 
-@substitute_in_graph(pickle.dumps, can_constant_fold_through=True)
-def dumps(obj, protocol=None, *, fix_imports=True, buffer_callback=None):
-    return pickle.dumps(obj, protocol=protocol, fix_imports=fix_imports, buffer_callback=buffer_callback)
+@substitute_in_graph(
+    pickle.dumps,
+    skip_signature_check=True,
+    can_constant_fold_through=True,
+    graph_break_if_cannot_constant_fold=True,
+)
+def dumps(obj: Any, protocol: int | None = None, **kwargs) -> Any:  # type: ignore[no-untyped-def]
+    return pickle.dumps(obj, protocol=protocol, **kwargs)
 
 
-@substitute_in_graph(pickle.loads, can_constant_fold_through=True)
-def loads(data, /, *, fix_imports=True, encoding="ASCII", errors="strict",
-           buffers=()):
-    return pickle.loads(data, fix_imports=fix_imports, encoding=encoding, errors=errors, buffers=buffers)
+@substitute_in_graph(
+    pickle.loads,
+    skip_signature_check=True,
+    can_constant_fold_through=True,
+    graph_break_if_cannot_constant_fold=True,
+)
+def loads(data, **kwargs):  # type:ignore[no-untyped-def]
+    return pickle.loads(data, **kwargs)

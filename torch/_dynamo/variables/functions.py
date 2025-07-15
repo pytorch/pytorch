@@ -1926,6 +1926,13 @@ class PolyfilledFunctionVariable(VariableTracker):
             self.wrapped_fn, "__torch_dynamo_can_constant_fold_through__", False
         )
 
+    def graph_break_if_cannot_constant_fold(self):
+        return getattr(
+            self.wrapped_fn,
+            "__torch_dynamo_graph_break_if_cannot_constant_fold__",
+            False,
+        )
+
     def get_function(self):
         return self.as_python_constant()
 
@@ -1945,6 +1952,24 @@ class PolyfilledFunctionVariable(VariableTracker):
                 )
             )
             return VariableTracker.build(tx, result)
+
+        if (
+            self.can_constant_fold_through()
+            and self.graph_break_if_cannot_constant_fold()
+        ):
+            name = getattr(self.fn, "__name__", str(self.fn))
+            unimplemented_v2(
+                gb_type="unsupported polyfill call",
+                context=f"Cannot trace polyfill function `{name}` due to non-constant arguments.",
+                explanation=(
+                    f"The function `{name}` was marked as only traceable when all arguments are constant. "
+                    "This restriction is set by the Dynamo compiler to ensure correct graph generation."
+                ),
+                hints=[
+                    f"Refactor or avoid using the function `{name}` in traced code.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         # Special case for sum on tuple/list of ints
         if (
