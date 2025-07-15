@@ -167,7 +167,7 @@ class LayoutManager {
 //
 // it checks a few things in between node executions...
 //
-// 1. ensures all 'alive' values are within the bounds of thier lifetimes
+// 1. ensures all 'alive' values are within the bounds of their lifetimes
 //    - this is the definition of a sanity check since the live-sets are built
 //      from the lifetimes lol. if this fails, something is very very wrong
 // 2. ensures that all planned values are within the bounds of their
