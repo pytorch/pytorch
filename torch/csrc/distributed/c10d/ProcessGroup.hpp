@@ -78,6 +78,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         const std::optional<std::string> group_desc = std::nullopt)
         : timeout(timeout), group_name(group_name), group_desc(group_desc) {}
     ~MergeOptions() override = default;
+    MergeOptions(const MergeOptions&) = delete;
+    MergeOptions& operator=(const MergeOptions&) = delete;
 
     std::chrono::milliseconds timeout;
     std::string group_name;
