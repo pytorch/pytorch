@@ -46,13 +46,14 @@ class ExecutionFrame {
   }
 
   template <typename CB>
-  auto withMemoryPlanner(CB&& cb) {
+  auto withManagedMemory(CB&& cb) {
     if (!layoutManager_) {
-      return std::forward<CB>(cb)();
+      return std::forward<CB>(cb)(nullptr);
     }
 
     LayoutManagerGuard guard(*layoutManager_);
-    return std::forward<CB>(cb)();
+    return std::forward<CB>(cb)(
+        const_cast<const LayoutManager*>(layoutManager_.get()));
   }
 
   std::vector<c10::IValue> tryMoveUserOutputs();

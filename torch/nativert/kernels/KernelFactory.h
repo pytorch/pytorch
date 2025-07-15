@@ -74,10 +74,10 @@ class KernelFactory {
 
   ExecutionKernels initializeNodeKernels(
       const Graph& graph,
-      std::shared_ptr<Weights> weights,
+      const std::shared_ptr<Weights>& weights,
       const torch::nativert::ExecutorConfig& executorConfig,
       const Placement& placement,
-      std::shared_ptr<caffe2::serialize::PyTorchStreamReader>
+      const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           pytorchStreamReader = nullptr,
       const MakeProxyExecutorFn& makeProxyExecutorFunc = nullptr);
 
