@@ -146,8 +146,6 @@ def reduce_package_graph_module(
     return _deserialize_graph_module(forward, body)
 
 
-
-
 # We create a dummy class here because symbolic_trace pulls the forward()
 # function off of the class, rather than the instance. This class is used
 # in _deserialize_graph_module() below.

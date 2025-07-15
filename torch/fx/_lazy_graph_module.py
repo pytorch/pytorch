@@ -127,7 +127,6 @@ class _LazyGraphModule(GraphModule):
 
     forward = _lazy_forward
 
-
     def __reduce_package__(self, exporter: PackageExporter):
         """
         Follow GraphModule.__reduce__ but call 'self._real_recompile' rather
