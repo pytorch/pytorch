@@ -1557,7 +1557,7 @@ class TestCutlassBackend(TestCase):
     def test_maybe_append_choice_caching_correctness(self):
         """
         Test if maybe_append_choice's caching leads to correct results and
-        shorter maybe_append_choice time. 
+        shorter maybe_append_choice time.
         """
 
         class TestModule(torch.nn.Module):
