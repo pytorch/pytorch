@@ -439,31 +439,8 @@ def common_pre_export_passes(
     # TODO: Import here to prevent circular dependency
     from torch.onnx._internal.fx import passes
 
-    # Apply decomposition table to the input graph.
-    module = passes.Decompose(
-        fx_module,
-        options.decomposition_table,  # type: ignore[arg-type]
-        enable_dynamic_axes=options.dynamic_shapes,
-        allow_fake_constant=options.fake_context is not None,
-    ).run(*fx_module_args)
-
-    # ONNX does not support views and mutations.
-    # Functionalize to get a semantically equivalent graph without mutations.
-    module = passes.Functionalize(
-        module,
-        enable_dynamic_axes=options.dynamic_shapes,
-        allow_fake_constant=options.fake_context is not None,
-    ).run(*fx_module_args)
-
-    # Input mutations are detected and distilled after `Functionalize` pass.
-    # Remove them since ONNX inference does not need them.
-    module = passes.RemoveInputMutation(module).run(*fx_module_args)
-
     # ONNX does not support concept of (implicit) type promotion.
     # Insert type casts explicitly where needed.
-    module = passes.InsertTypePromotion(module).run()
-
-    if isinstance(original_model, torch.nn.Module):
-        module = passes.RestoreParameterAndBufferNames(module, original_model).run()
+    module = passes.InsertTypePromotion(fx_module).run()
 
     return module
