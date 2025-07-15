@@ -211,17 +211,16 @@ def _numpy_compatible_indexing(index):
     return tuple(converted)
 
 
-def _get_seq_type_and_depth(s):
-    """Returns the type and depth of a sequence for indexing purposes."""
-    if not isinstance(s, Sequence):
-        if isinstance(s, torch.Tensor):
-            assert s.dtype in (torch.bool, torch.int64)
-            return bool if s.dtype == torch.bool else int, s.ndim
-        return type(s), 0
-    if not s or s[0] == s:
-        return type(s), 0
-    seq_type, depth = _get_seq_type_and_depth(s[0])
-    return seq_type, depth + 1
+def _get_bool_depth(s):
+    """Returns the depth of a boolean sequence/tensor"""
+    if isinstance(s, bool):
+        return True, 0
+    if isinstance(s, torch.Tensor) and s.dtype == torch.bool:
+        return True, s.ndim
+    if not (isinstance(s, Sequence) and s and s[0] != s):
+        return False, 0
+    is_bool, depth = _get_bool_depth(s[0])
+    return is_bool, depth + 1
 
 
 def _numpy_empty_ellipsis_patch(index, tensor_ndim):
@@ -255,9 +254,9 @@ def _numpy_empty_ellipsis_patch(index, tensor_ndim):
     # Count non-ellipsis dimensions consumed by the index
     consumed_dims = 0
     for idx in index:
-        seq_type, seq_depth = _get_seq_type_and_depth(idx)
-        if seq_type is bool:
-            consumed_dims += seq_depth
+        is_bool, depth = _get_bool_depth(idx)
+        if is_bool:
+            consumed_dims += depth
         elif idx is Ellipsis or idx is None:
             continue
         else:
