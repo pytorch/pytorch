@@ -487,7 +487,7 @@ class TestExport(TestCase):
             eps = [ep]
             if test_serdes:
                 # test dynamic shapes serialization
-                # test that behavior remains the same when exporting with ser/des specs:
+                # test that behavior remains the same when exporting with Ser/Des specs:
                 # serialize + deserialize original specs, and export.
                 ep_serdes = export(
                     model,
@@ -927,7 +927,7 @@ graph():
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
-    @testing.expectedFailureCppSerDes  # Cpp serder seems to fail parsing complicated guards
+    @testing.expectedFailureCppSerDes  # Cpp Ser/Der seems to fail parsing complicated guards
     def test_export_statically_known_true(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -5011,7 +5011,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    @testing.expectedFailureCppSerDes  # cpp ser/der not handling complicated symbols
+    @testing.expectedFailureCppSerDes  # cpp Ser/Der not handling complicated symbols
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 

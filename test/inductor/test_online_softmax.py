@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
+    serialTest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
 
@@ -77,12 +78,17 @@ class TestOnlineSoftmax(TestCase):
         out, source_codes = run_and_get_code(f, x)
         return source_codes[0]
 
+    @serialTest()
     def test_codegen_3pass_softmax_due_to_disable(self):
-        with inductor_config.patch(online_softmax=False):
+        with inductor_config.patch(
+            online_softmax=False,
+            realize_acc_reads_size_threshold=float("inf"),
+        ):
             wrapper_code = self.get_softmax_wrapper()
 
         self.assertEqual(wrapper_code.count("for r0_offset in"), 3)
 
+    @serialTest()
     @parametrize("V", [2048, 50304])
     @parametrize("use_log_softmax", [False, True])
     def test_codegen_online_softmax(self, use_log_softmax, V):

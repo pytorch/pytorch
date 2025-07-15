@@ -26,6 +26,7 @@ from torch._inductor.utils import (
     run_fw_bw_and_get_code,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -177,9 +178,10 @@ class CudaReproTests(TestCase):
             inputs = [q, k, v, mask]
 
             def f(q, k, v, mask):
-                return F.scaled_dot_product_attention(
-                    q, k, v, attn_mask=mask, dropout_p=0.0
-                )
+                with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+                    return F.scaled_dot_product_attention(
+                        q, k, v, attn_mask=mask, dropout_p=0.0
+                    )
 
             f_compiled = torch.compile(f)
 
