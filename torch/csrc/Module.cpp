@@ -421,9 +421,9 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   b->cdata = tmp;
 
   a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
-      getPyInterpreter(), a_);
+      getPyInterpreter(), a_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
   b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
-      getPyInterpreter(), b_);
+      getPyInterpreter(), b_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

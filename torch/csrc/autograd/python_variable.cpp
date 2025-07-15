@@ -2151,7 +2151,7 @@ static PyObject* THPVariable_NewWithVar(
       v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
       const auto& var = THPVariable_Unpack(v);
       var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
-          getPyInterpreter(), obj);
+          getPyInterpreter(), obj, status);
       if (check_has_torch_dispatch(obj)) {
         var.unsafeGetTensorImpl()->set_python_dispatch(true);
       }
