@@ -39,7 +39,7 @@ from torch.utils._pytree import tree_map_only
 __all__ = [
     "BlockMask",
     "flex_attention",
-    "FlexAttentionKernelOptions",
+    "FlexKernelOptions",
     "create_block_mask",
     "create_mask",
     "create_nested_block_mask",
@@ -52,7 +52,7 @@ _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 
 
-class FlexAttentionKernelOptions(TypedDict, total=False):
+class FlexKernelOptions(TypedDict, total=False):
     """Options for controlling the behavior of FlexAttention kernels.
 
     These options are passed to the underlying Triton kernels to control performance
@@ -76,9 +76,9 @@ class FlexAttentionKernelOptions(TypedDict, total=False):
             output = flex_attention(q, k, v, kernel_options=kernel_opts)
 
             # Using TypedDict (recommended for type safety)
-            from torch.nn.attention.flex_attention import FlexAttentionKernelOptions
+            from torch.nn.attention.flex_attention import FlexKernelOptions
 
-            kernel_opts: FlexAttentionKernelOptions = {
+            kernel_opts: FlexKernelOptions = {
                 "BLOCK_M": 64,
                 "BLOCK_N": 64,
                 "PRESCALE_QK": True,
@@ -86,7 +86,7 @@ class FlexAttentionKernelOptions(TypedDict, total=False):
             output = flex_attention(q, k, v, kernel_options=kernel_opts)
 
             # Forward/backward specific options
-            kernel_opts: FlexAttentionKernelOptions = {
+            kernel_opts: FlexKernelOptions = {
                 "fwd_BLOCK_M": 64,
                 "bwd_BLOCK_M1": 32,
                 "PRESCALE_QK": False,
@@ -1374,7 +1374,7 @@ def flex_attention(
     scale: Optional[float] = None,
     enable_gqa: bool = False,
     return_lse: bool = False,
-    kernel_options: Optional[FlexAttentionKernelOptions] = None,
+    kernel_options: Optional[FlexKernelOptions] = None,
 ) -> Union[Tensor, tuple[Tensor, Tensor]]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -1410,9 +1410,9 @@ def flex_attention(
         scale (Optional[float]): Scaling factor applied prior to softmax. If none, the default value is set to :math:`\frac{1}{\sqrt{E}}`.
         enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA) and broadcasts key/value heads to query heads.
         return_lse (bool): Whether to return the logsumexp of the attention scores. Default is False.
-        kernel_options (Optional[Union[FlexAttentionKernelOptions, Dict[str, Any]]]):
+        kernel_options (Optional[FlexKernelOptions]):
             Options to control the behavior of the underlying Triton kernels.
-            See :class:`FlexAttentionKernelOptions` for available options and usage examples.
+            See :class:`FlexKernelOptions` for available options and usage examples.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.
