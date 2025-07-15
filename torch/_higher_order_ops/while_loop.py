@@ -294,9 +294,9 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
                 )
             # Note: [unspecialize constant tensor carry]
             # We need to disable constant specialization for tensor inputs that become loop carries.
-            # Here's the problem: when a user creates a constant tensor e.g. torch.zeros(), PyTorch calls aten.lift_fresh_copy
-            # to create a safe copy (avoiding aliasing issues). This creates a FakeTensor with constant=True.
-            # But when this FakeTensor becomes a loop carry variable, we have a problem:
+            # Here's the problem: when a user creates a constant tensor e.g. torch.tensor(0), PyTorch calls aten.lift_fresh_copy
+            # to create a safe copy (avoiding aliasing issues), which creates a FakeTensor with constant=True.
+            # But when this FakeTensor becomes a loop carry, we have a problem:
             # - Operations like .item() will read the constant value and bake it into the traced code
             # - This is incorrect because carry variables change between loop iterations
             # - The traced code would use the wrong constant value for all iterations
