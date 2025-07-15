@@ -1,6 +1,7 @@
 # TorchGen/ Directory - Code Generation Engine
 
 TorchGen is PyTorch's code generation system that automatically generates C++ implementations, Python bindings, and dispatch logic from high-level operator definitions.
+This is a standalone subset of the tools codegen that is shipped with the PyTorch package so it can be used out of tree more easily.
 
 ## 🏗️ Directory Organization
 
@@ -63,6 +64,16 @@ TorchGen is PyTorch's code generation system that automatically generates C++ im
 
 ## 🚀 Running Code Generation
 
+### Build Integration
+```bash
+# Code generation runs automatically during build
+eval $BUILD_CONFIG python setup.py develop
+
+# Force regeneration
+python setup.py clean
+eval $BUILD_CONFIG python setup.py develop
+```
+
 ### Manual Generation
 ```bash
 # Generate all code (typically done during build)
@@ -73,16 +84,6 @@ python -m torchgen.gen \
 # Generate specific components
 python -m torchgen.gen_backend_stubs
 python -m torchgen.gen_lazy_tensor
-```
-
-### Build Integration
-```bash
-# Code generation runs automatically during build
-eval $BUILD_CONFIG python setup.py develop
-
-# Force regeneration
-python setup.py clean
-eval $BUILD_CONFIG python setup.py develop
 ```
 
 ## 🔄 Development Workflow
@@ -107,15 +108,6 @@ eval $BUILD_CONFIG python setup.py develop
 
 ## 🧪 Testing Code Generation
 
-### Unit Tests
-```bash
-# Test torchgen components
-python -m pytest torchgen/test/
-
-# Test specific generation modules
-python -c "import torchgen.gen; print('Generation imports work')"
-```
-
 ### Integration Tests
 ```bash
 # Test generated code compiles and works
@@ -126,6 +118,7 @@ python -c "import torch; torch.add(torch.tensor([1]), torch.tensor([2]))"
 ## 🔧 Advanced Features
 
 ### Structured Kernels (`api/structured.py`)
+TODO(Claude): This paragraph is wrong. Also confusing wrt to structured_delegate option in `native_functions.yaml`
 - Generates optimized implementations for operations with multiple variants
 - Handles broadcasting, type promotion, and memory layout automatically
 - Reduces code duplication across similar operations

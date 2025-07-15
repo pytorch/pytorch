@@ -6,24 +6,24 @@ Collection of build scripts, code generation tools, and development utilities us
 
 ### Code Generation
 - **`autograd/`** - Autograd code generation and derivative definitions
-- **`jit/`** - TorchScript code generation utilities
+- **`jit/`** - TorchScript code generation utilities TODO(Claude): can you verify this
 - **`pyi/`** - Python stub file generation for type hints
 
 ### Build System
-- **`setup_helpers/`** - Build configuration and dependency detection
-- **`build_pytorch_libs.py`** - Core library build script
+- **`setup_helpers/`** - Build configuration and dependency detection to support setup.py
+- **`build_pytorch_libs.py`** - Core C++ library build script
 - **`build_libtorch.py`** - Standalone C++ library build
 - **`cmake.py`** - CMake integration utilities
+- **`packaging/`** - Wheel building and distribution
 
 ### Development Tools
-- **`linter/`** - Code linting and formatting tools
+- **`linter/`** - Code linting and formatting tools for lintrunner
 - **`testing/`** - Test selection and CI integration
 - **`stats/`** - Performance monitoring and statistics collection
 - **`code_analyzer/`** - Static code analysis tools
 
 ### Platform Support
 - **`amd_build/`** - AMD ROCm/HIP transpilation from CUDA
-- **`packaging/`** - Wheel building and distribution
 
 ## 🔧 Key Components
 

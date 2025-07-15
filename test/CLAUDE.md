@@ -7,7 +7,7 @@ Comprehensive test suite for PyTorch covering all components from Python API to 
 ### Core Test Framework
 - **`run_test.py`** - Main test runner script with sharding, filtering, and CI integration
 - **`conftest.py`** - Pytest configuration and shared fixtures
-- **`HowToWriteTestsUsingFileCheck.md`** - Guide for testing with FileCheck
+- **`HowToWriteTestsUsingFileCheck.md`** - Guide for testing with FileCheck TODO(Claude): this is just some weird inductor test
 
 ### Test Categories
 
@@ -16,7 +16,6 @@ Comprehensive test suite for PyTorch covering all components from Python API to 
 - **`test_autograd.py`** - Automatic differentiation system
 - **`test_nn.py`** - Neural network modules and functions
 - **`test_ops.py`** - Operator correctness and edge cases
-- **`test_jit.py`** - TorchScript compilation and execution
 
 #### Device-Specific Tests
 - **`test_cuda.py`** - CUDA functionality and GPU operations
@@ -30,6 +29,7 @@ Comprehensive test suite for PyTorch covering all components from Python API to 
 - **`test_quantization.py`** - Quantization algorithms
 - **`test_distributed.py`** - Multi-process training
 - **`test_profiler.py`** - Performance profiling tools
+- **`test_jit.py`** - TorchScript compilation and execution TODO(Claude): Note that TorchScript is depreacted, some of these tests are ok to break
 
 #### Backend-Specific Directories
 - **`autograd/`** - Autograd-specific test cases
@@ -53,6 +53,7 @@ python test/run_test.py -i test_torch
 python test/run_test.py -i test_nn
 python test/run_test.py -i test_autograd
 
+TODO(Claude): Add real-life test example here like below for the single test method
 # Run tests with specific patterns
 python test/run_test.py -k "test_add"
 python test/run_test.py -k "TestNN"
@@ -94,6 +95,7 @@ Part of development work is figuring out which tests are relevant for your chang
 - **Build system changes**: Test core functionality and CI integration
 
 ### Writing New Tests
+TODO(Claude): There a few principles here: you only add a new class for a new major feature. You will add new function for unit test, all op-related things should go in OpInfo db.
 ```python
 # Standard test pattern
 class TestMyFeature(TestCase):
@@ -114,30 +116,12 @@ class TestMyFeature(TestCase):
 - **`@skipIf`** - Conditional test skipping
 - **`gradcheck`** - Automatic gradient verification
 
-## 🚀 Performance Testing
-
-### Benchmarking
-```bash
-# Run benchmark utilities
-python test/benchmark_utils/test_benchmark_utils.py
-
-# Bottleneck detection
-python test/bottleneck_test/test.py
-```
-
-### Memory Testing
-```bash
-# Test with memory debugging
-PYTORCH_TEST_WITH_ASAN=1 python test/run_test.py -i test_torch
-
-# CUDA memory testing
-python test/run_test.py -i test_cuda_trace
-```
+TODO(Claude): Add details on the instantiate_* methods see for example at the bottom of test_autograd.py. What they do, why some test_foo() functions take more arguments than others, etc
 
 ## 🐛 Common Testing Issues
 
 ### Test Failures
-- **Numerical precision**: Use appropriate tolerances in assertions
+- **Numerical precision**: Changing tolerance should be last resort. Refactor the test to be numerically stable.
 - **Device availability**: Check CUDA/MPS availability before device-specific tests
 - **Random seed**: Set seeds for reproducible tests
 - **Resource cleanup**: Ensure proper cleanup of GPU memory, files, etc.
@@ -145,7 +129,6 @@ python test/run_test.py -i test_cuda_trace
 ### Test Environment
 - **Dependencies**: Some tests require optional dependencies (CUDA, MKL, etc.)
 - **Hardware**: Device-specific tests need appropriate hardware
-- **Timing**: Some tests are sensitive to timing/performance
 
 ### CI Integration
 - **Sharding**: Tests are automatically sharded in CI
@@ -161,3 +144,5 @@ python test/run_test.py -i test_cuda_trace
 - CI runs tests in sharded mode across multiple workers
 - Test results are often XML-formatted for CI integration
 - Memory and performance tests require special attention to cleanup
+
+TODO(Claude): The usual pattern here is to only run specific tests locally, up to one file locally. Then use github to get broad signal on multiple OS, hw, platform. And iterate locally depending on what was seen to fail on github CI
