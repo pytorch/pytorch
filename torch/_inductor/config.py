@@ -1003,6 +1003,11 @@ autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 # config specific to codegen/cpp.py
 class cpp:
+    """
+    Settings for cpp backend.
+    This class provides a centralized location for managing cpp backend settings.
+    """
+
     # set to torch.get_num_threads()
     threads = -1
 
@@ -1118,6 +1123,10 @@ class cpp:
     # Use a small dequant buffer for wgt of woq int4 size as: [q_group_size, Nr]
     use_small_dequant_buffer = False
 
+    force_inline_kernel = (
+        os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
+
 
 class triton:
     """
@@ -1157,6 +1166,9 @@ class triton:
     # Warn loudly when the number of cudagraphs due to dynamic shape
     # exceeds this limit
     cudagraph_dynamic_shape_warn_limit: Optional[int] = 50
+
+    # force a python GC before recording cudagraphs
+    force_cudagraph_gc = os.environ.get("TORCHINDUCTOR_CUDAGRAPH_GC", "0") != "0"
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False

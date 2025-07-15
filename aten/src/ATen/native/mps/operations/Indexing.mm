@@ -121,8 +121,8 @@ static void validateInputData(const TensorIteratorBase& iter,
   const auto scalar_type = inputTensor.scalar_type();
 
   if (accumulate) {
-    // No atomic support for the rest of dtypes
-    TORCH_CHECK(supportedFloatingType(scalar_type) || scalar_type == kInt || scalar_type == kBool);
+    // No atomic support for the complex dtypes
+    TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || supportedFloatingType(scalar_type));
   } else {
     TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || supportedFloatingType(scalar_type) ||
                     scalar_type == ScalarType::ComplexFloat || scalar_type == ScalarType::ComplexHalf,

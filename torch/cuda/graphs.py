@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import gc
-import time
 import typing
 from typing import Callable, Optional, overload, TYPE_CHECKING, Union
 from typing_extensions import ParamSpec, Self, TypeAlias, TypeVar
@@ -175,13 +174,6 @@ class CUDAGraph(torch._C._CUDAGraph):
         return super().raw_cuda_graph()
 
 
-# The gc clock lets us limit how often we do a full garbage collection
-# before capturing a cudagraph. We won't automatically do a GC more often
-# than _GC_CLOCK_DELAY seconds.
-_GC_CLOCK: Optional[float] = None
-_GC_CLOCK_DELAY: float = 10.0
-
-
 class graph:
     r"""Context-manager that captures CUDA work into a :class:`torch.cuda.CUDAGraph` object for later replay.
 
@@ -240,17 +232,17 @@ class graph:
 
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
+        torch.cuda.synchronize()
 
-        # Originally we unconditionally garbage collected here. On one hand
-        # that's better because we're more likely to collect memory, but on the
-        # other hand it is REALLY expensive, especially for doing multiple
-        # cudagraph captures in a row.
-        global _GC_CLOCK
-        if (last := _GC_CLOCK) is None or time.time() - last >= _GC_CLOCK_DELAY:
-            # Enough time has passed - do the full collection.
-            torch.cuda.synchronize()
+        from torch._inductor import config
+
+        if config.triton.force_cudagraph_gc:
+            # Originally we unconditionally garbage collected here. On one hand
+            # that's nice because we have a chance to collect more memory, but
+            # on the other hand it is REALLY expensive, especially for doing
+            # multiple cudagraph captures in a row. In theory it will only help
+            # when a dead python cycle is holding onto CUDA memory.
             gc.collect()
-            _GC_CLOCK = time.time()
 
         torch.cuda.empty_cache()
 
