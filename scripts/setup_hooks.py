@@ -77,6 +77,12 @@ def ensure_tool_installed(tool: str, force_update: bool = True) -> None:
 
 ensure_pipx()
 
+# Ensure the path pipx installs binaies to is part of the system path.
+# Modifies the shell's configuration files (like ~/.bashrc, ~/.zshrc, etc.)
+#  to include the directory where pipx installs executables in your PATH
+#  variable.
+run(["pipx", "ensurepath"])
+
 # Ensure pre-commit is installed globally via pipx
 ensure_tool_installed("pre-commit", force_update=True)
 # Don't force a lintrunner update b/c it might break folks
