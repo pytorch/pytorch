@@ -6,7 +6,7 @@ Pre‑push hook wrapper for Lintrunner.
 ✓ Installs Lintrunner once (`pip install lintrunner`) if missing
 ✓ Stores a hash of .lintrunner.toml in the venv
 ✓ Re-runs `lintrunner init` if that file's hash changes
-✓ Pure Python – works on macOS, Linux, Windows
+✓ Pure Python – works on macOS, Linux, and Windows
 """
 
 from __future__ import annotations
