@@ -13,7 +13,6 @@ Run this from the repo root (inside or outside any project venv):
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
