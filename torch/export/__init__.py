@@ -2,7 +2,7 @@ import os
 import warnings
 import zipfile
 from collections.abc import Mapping
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -38,7 +38,14 @@ __all__ = [
 import torch.export.custom_ops
 
 from .decomp_utils import CustomDecompTable
-from .dynamic_shapes import AdditionalInputs, Constraint, Dim, dims, ShapesCollection
+from .dynamic_shapes import (
+    AdditionalInputs,
+    Constraint,
+    Dim,
+    dims,
+    DynShapesType,
+    ShapesCollection,
+)
 from .exported_program import (
     default_decompositions,
     ExportedProgram,
@@ -57,7 +64,7 @@ def export_for_training(
     args: tuple[Any, ...],
     kwargs: Optional[Mapping[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Mapping[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[DynShapesType] = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
@@ -156,7 +163,7 @@ def export(
     args: tuple[Any, ...],
     kwargs: Optional[Mapping[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Mapping[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[DynShapesType] = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
@@ -515,7 +522,7 @@ def draft_export(
     args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[DynShapesType] = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
 ) -> ExportedProgram:

@@ -6,11 +6,10 @@ import re
 import tempfile
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 import torch
 import torch._logging._internal
-import torch._logging.structured
 import torch.utils._pytree as pytree
 from torch._export.passes.insert_custom_op_guards import (
     get_op_profiles,
@@ -19,7 +18,7 @@ from torch._export.passes.insert_custom_op_guards import (
 )
 
 from ._trace import _export
-from .dynamic_shapes import _DimHint, _DimHintType, Dim
+from .dynamic_shapes import _DimHint, _DimHintType, Dim, DynShapesType
 from .exported_program import ExportedProgram
 
 
@@ -364,7 +363,7 @@ def draft_export(
     args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[DynShapesType] = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
     pre_dispatch: bool = True,
