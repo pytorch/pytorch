@@ -22,7 +22,6 @@ AOTITorchError aoti_torch_mps_malloc(
       id<MTLBuffer> metal_buffer = [device newBufferWithLength:num_bytes options:MTLResourceCPUCacheModeWriteCombined | MTLResourceStorageModeShared];
       TORCH_CHECK(metal_buffer, "Failed to allocate memory on MPS device");
       *buffer = (void*)metal_buffer;
-      std::cout << "aoti_torch_mps_malloc " << static_cast<void*>(metal_buffer) << " " << num_bytes << std::endl;
   });
 }
 
