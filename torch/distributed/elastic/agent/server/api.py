@@ -104,7 +104,11 @@ class WorkerSpec:
             self.entrypoint = self.fn
         assert self.entrypoint
 
-        if self.numa_options is not None and not isinstance(self.entrypoint, str):
+        if (
+            self.numa_options is not None
+            and not self.numa_options.should_fall_back_if_binding_fails
+            and not isinstance(self.entrypoint, str)
+        ):
             raise ValueError("numa_options is only supported for str entrypoints.")
 
     def get_entrypoint_name(self):

@@ -1,5 +1,7 @@
 import os
 import shutil
+import subprocess
+import traceback
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -7,6 +9,7 @@ from enum import Enum
 from typing import Callable, TypeVar
 
 import torch
+from torch._utils_internal import signpost_event
 
 
 _NUMACTL_COMMAND = "numactl"
@@ -27,6 +30,15 @@ class AffinityMode(str, Enum):
 @dataclass(frozen=True)
 class NumaOptions:
     affinity_mode: AffinityMode
+    """
+    If true, we will silently return the original command if any of the following occur:
+    - An exception is raised as we compute the wrapped command.
+    - During a dry run of the wrapped command, numactl fails for any reason.
+
+    You should avoid using this option! It is only intended as a safety mechanism for facilitating
+    mass rollouts of numa binding.
+    """
+    should_fall_back_if_binding_fails: bool = False
 
 
 def maybe_wrap_with_numa_bindings(
@@ -53,16 +65,19 @@ def maybe_wrap_with_numa_bindings(
 
     wrapped_local_rank_to_args = {}
     for local_rank, args in local_rank_to_args.items():
-        numactl_command_options = _maybe_get_numactl_options(
-            command_args=(entrypoint, *[str(arg) for arg in args]),
-            gpu_index=local_rank,
-            numa_options=numa_options,
-        )
-        if numactl_command_options is None:
-            # NOTE: If any element of the batch fails to apply NUMA bindings
-            # for any reason, we do not apply NUMA bindings to any element of the batch,
-            # for maximum safety. This only applies if fallback is enabled.
-            return (entrypoint, local_rank_to_args)
+        try:
+            numactl_command_options = _maybe_get_numactl_options(
+                command_args=(entrypoint, *[str(arg) for arg in args]),
+                gpu_index=local_rank,
+                numa_options=numa_options,
+            )
+        except Exception:
+            if numa_options.should_fall_back_if_binding_fails:
+                # NOTE: If any element of the batch fails to apply NUMA bindings
+                # for any reason, we do not apply NUMA bindings to any element of the batch,
+                # for maximum safety. This only applies if fallback is enabled.
+                return (entrypoint, local_rank_to_args)
+            raise
         wrapped_local_rank_to_args[local_rank] = (
             *numactl_command_options,
             entrypoint,
@@ -76,7 +91,7 @@ def _maybe_get_numactl_options(
     command_args: tuple[str, ...],
     gpu_index: int,
     numa_options: NumaOptions,
-) -> None | tuple[str, ...]:
+) -> tuple[str, ...]:
     """
     Args:
         command_args: The args for a command, such as might be input to Popen.
@@ -89,20 +104,78 @@ def _maybe_get_numactl_options(
         Depending on numa_options, something like
             ("--cpunodebind=0", "--preferred=0")
     """
-    _raise_if_numactl_not_available()
+    try:
+        _raise_if_numactl_not_available()
+        if numa_options.affinity_mode == AffinityMode.NODE:
+            numactl_command_options = _get_node_numactl_options(gpu_index=gpu_index)
+        elif numa_options.affinity_mode == AffinityMode.SOCKET:
+            numactl_command_options = _get_socket_numactl_options(gpu_index=gpu_index)
+        elif numa_options.affinity_mode == AffinityMode.EXCLUSIVE:
+            numactl_command_options = _get_exclusive_numactl_options(
+                gpu_index=gpu_index
+            )
+        elif numa_options.affinity_mode == AffinityMode.CORE_COMPLEX:
+            numactl_command_options = _get_core_complex_numactl_options(
+                gpu_index=gpu_index
+            )
+        else:
+            raise ValueError(
+                f"Affinity mode {numa_options.affinity_mode} not supported."
+            )
 
-    if numa_options.affinity_mode == AffinityMode.NODE:
-        numactl_command_options = _get_node_numactl_options(gpu_index=gpu_index)
-    elif numa_options.affinity_mode == AffinityMode.SOCKET:
-        numactl_command_options = _get_socket_numactl_options(gpu_index=gpu_index)
-    elif numa_options.affinity_mode == AffinityMode.EXCLUSIVE:
-        numactl_command_options = _get_exclusive_numactl_options(gpu_index=gpu_index)
-    elif numa_options.affinity_mode == AffinityMode.CORE_COMPLEX:
-        numactl_command_options = _get_core_complex_numactl_options(gpu_index=gpu_index)
-    else:
-        raise ValueError(f"Affinity mode {numa_options.affinity_mode} not supported.")
+        if numa_options.should_fall_back_if_binding_fails:
+            _raise_if_numactl_fails_dry_run(numactl_options=numactl_command_options)
 
-    return numactl_command_options
+        return numactl_command_options
+    except Exception:
+        signpost_event(
+            category="numa_binding",
+            name="wrap_command_exception",
+            parameters={
+                "traceback": traceback.format_exc(),
+                "will_fall_back": numa_options.should_fall_back_if_binding_fails,
+                "original_command_args": command_args,
+                "gpu_index": gpu_index,
+                "numa_options": numa_options,
+            },
+        )
+        raise
+
+
+def _raise_if_numactl_fails_dry_run(*, numactl_options: tuple[str, ...]) -> None:
+    noop_args = _get_assembled_command_from_pieces(
+        # Execute arbitrary noop
+        command_args=("true",),
+        numactl_options=numactl_options,
+    )
+    try:
+        subprocess.run(
+            noop_args,
+            stdout=subprocess.DEVNULL,
+            # These allow us to capture the stderr as text
+            stderr=subprocess.PIPE,
+            text=True,
+            # Raise exception if nonzero exit status.
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"""Our binding logic inferred to prepend your command with options {noop_args[:-1]}.
+            Before doing that, we did a noop dry run with args {noop_args}, but that command failed.
+            This should NOT happen, and likely suggests a bug in pytorch's numa binding logic.
+
+            The {_NUMACTL_COMMAND} command itself had this stderr:
+
+            {e.stderr}
+            """
+        ) from e
+
+
+def _get_assembled_command_from_pieces(
+    *, command_args: tuple[str, ...], numactl_options: tuple[str, ...]
+) -> tuple[str, ...]:
+    # Syntax for invoking a command but with numactl activated is numactl <args> command <args>
+    return (_NUMACTL_COMMAND, *numactl_options, *command_args)
 
 
 def _raise_if_numactl_not_available() -> None:
