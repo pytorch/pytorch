@@ -270,7 +270,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   fi
 else
   # install build-system requirements before running setup.py commands
-  python -mpip install -r requirements-build.txt
+  python -m pip install -r requirements-build.txt
 
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
