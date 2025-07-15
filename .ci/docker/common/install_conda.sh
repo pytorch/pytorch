@@ -21,9 +21,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
       exit 1
       ;;
   esac
-
-  # Make sure CONDA is non interactive
-  export CONDA_ALWAYS_YES="true"
   
   mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
@@ -57,6 +54,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     export SYSROOT_DEP="sysroot_linux-64=2.17"
   fi
 
+  # Accept tos
+  as_jenkins conda tos accept --override-channels --channel main
+  as_jenkins conda tos accept --override-channels --channel r
+  
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
