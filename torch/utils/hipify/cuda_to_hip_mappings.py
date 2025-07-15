@@ -8910,6 +8910,8 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
                 API_PYTORCH,
             ),
         ),
+        ("cuda::CUDAEvent", ("hip::HIPEventMasqueradingAsCUDA", API_PYTORCH)),
+        ("CUDAEvent", ("HIPEventMasqueradingAsCUDA", API_PYTORCH)),
         ("cuda::CUDAStream", ("hip::HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         ("CUDAStream", ("HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         (
@@ -8963,6 +8965,10 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         (
             "c10/cuda/CUDACachingAllocator.h",
             ("ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h", API_PYTORCH),
+        ),
+        (
+            "c10/cuda/CUDAEvent.h",
+            ("ATen/hip/impl/HIPEventMasqueradingAsCUDA.h", API_PYTORCH),
         ),
         (
             "c10/cuda/CUDAStream.h",
