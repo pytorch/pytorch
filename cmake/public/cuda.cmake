@@ -110,7 +110,7 @@ if(CUDA_FOUND)
       # Force CUDA to be processed for again next time
       # TODO: I'm not sure if this counts as an implementation detail of
       # FindCUDA
-      set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
+      set(cuda_version_from_findcuda ${CUDA_VERSION_STRING})
       unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
       # Not strictly necessary, but for good luck.
       unset(CUDA_VERSION CACHE)
