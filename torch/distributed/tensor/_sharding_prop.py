@@ -101,7 +101,32 @@ class ShardingPropagator:
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
-        Register a sharding strategy generator for an operator.
+        Register a :class:`OpStrategy` generator for an operator.
+
+        During the sharding propagation, DTensor wants to enumerate all
+        acceptable sharding specs (:class:`OpSpec`) for an operator,
+        and by "acceptable" we mean that the operator can be executed on
+        the ``_local_tensor`` of DTensor args/kwargs (with ``OpSpec.input_specs``)
+        and the output(s) constitute valid DTensor(s) (with ``OpSpec.output_specs``).
+
+        ``strategy_func`` is the function that enumerates such acceptable specs
+        for the operator ``op_overload``. One general approach to write ``strategy_func``
+        is, if the operator has simple arguments structure (e.g. mm, bmm), first enumerating
+        all sharding specs for the operands, and then filtering out the ones that
+        are not valid. For example, for ``mm``, the operands are two 2D tensors, and
+        if both ``input`` and ``mat2`` have sharding placements ``[Shard(0)]``, then this
+        is not an acceptable ``input_specs``.
+
+        Once we have a way to enumerate all acceptable sharding specs, we can use each
+        of them to construct a :class:`OpSpec`. The ``OpSpec.input_specs`` directly comes
+        from the sharding spec, and the ``OpSpec.output_specs`` is therefore determined
+        (e.g. ``[Shard(1)]`` @ ``[Shard(0)]`` yields ``[Partial()]``). In addition,
+        :class:`OpSpec` also contains ``redistribute_cost`` which records the redistribution
+        cost from each :class:`OpSpec` in the source :class:`OpStrategy.strategies` to
+        the target sharding spec, for each operand.
+
+        The ``strategy_func`` should return a :class:`OpStrategy` which contains a list of
+        all the :class:`OpSpec`s generated in the above.
         """
         self.op_strategy_funcs[op_overload] = strategy_func
         if schema_info is not None:
