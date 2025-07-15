@@ -1232,16 +1232,19 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
-  // Check what type of scaling we are doing based on inputs
+  // Check what type of scaling we are doing based on inputs. This list is sorted
+  // by decreasing priority. We prefer "simpler" schemes as they are supported
+  // more broadly (more GPU archs, more CUDA versions) and because they are more
+  // efficient. This tends to matter only for small matmuls (e.g., 1x1x128).
   auto [scaling_choice_a, scaling_choice_b] = get_joint_scaling(
     {
       std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),
       std::make_pair(ScalingType::RowWise, ScalingType::RowWise),
-      std::make_pair(ScalingType::BlockWise1x16, ScalingType::BlockWise1x16),
-      std::make_pair(ScalingType::BlockWise1x32, ScalingType::BlockWise1x32),
-      std::make_pair(ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
+      std::make_pair(ScalingType::BlockWise128x128, ScalingType::BlockWise1x128),
       std::make_pair(ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
-      std::make_pair(ScalingType::BlockWise128x128, ScalingType::BlockWise1x128)
+      std::make_pair(ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
+      std::make_pair(ScalingType::BlockWise1x32, ScalingType::BlockWise1x32),
+      std::make_pair(ScalingType::BlockWise1x16, ScalingType::BlockWise1x16)
     },
     mat1, mat2, scale_a, scale_b);
 
@@ -1420,10 +1423,14 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.a_scale_ptr = args.scale_mata_ptr;
       params.lda = args.lda;
       params.a_dtype = args.mata->scalar_type();
+      params.a_scale_dtype = args.scale_mata_dtype.value();
+      params.a_scaling_type = args.scaling_mata_type.value();
       params.b = args.matb->data_ptr();
       params.b_scale_ptr = args.scale_matb_ptr;
       params.ldb = args.ldb;
       params.b_dtype = args.matb->scalar_type();
+      params.b_scale_dtype = args.scale_matb_dtype.value();
+      params.b_scaling_type = args.scaling_matb_type.value();
       params.bias_ptr = bias ? bias->data_ptr(): nullptr;
       params.bias_dtype = bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_;
       params.c = args.result->data_ptr();
@@ -1431,7 +1438,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.ldc = args.result_ld;
       params.c_dtype = out_dtype_;
       params.use_fast_accum = use_fast_accum;
-      params.use_rowwise = scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise;
       if (transa_ && transb_) {
         TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T)
       }
