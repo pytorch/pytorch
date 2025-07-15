@@ -32,7 +32,9 @@ def ensure_lintrunner() -> None:
     if shutil.which("lintrunner"):
         print("✅ lintrunner is already installed")
         return
-    sys.exit("❌ lintrunner is required but was not found on your PATH. Please install it via `pipx install lintrunner` before running this script.")
+    sys.exit(
+        "❌ lintrunner is required but was not found on your PATH. Please install it via `pipx install lintrunner` before running this script."
+    )
 
 
 def compute_file_hash(path: Path) -> str:

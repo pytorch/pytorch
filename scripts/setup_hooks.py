@@ -63,6 +63,7 @@ def ensure_pipx() -> None:
             "    Restart your terminal or add pipx's bin directory to PATH and retry.\n"
         )
 
+
 def ensure_tool_installed(tool: str, force_update: bool = True) -> None:
     if force_update or not which(tool):
         print(f"Ensuring latest {tool} via pipx …")
@@ -73,13 +74,14 @@ def ensure_tool_installed(tool: str, force_update: bool = True) -> None:
                 "    Restart your terminal or add pipx's bin directory to PATH and retry.\n"
             )
 
+
 ensure_pipx()
 
 # Ensure pre-commit is installed globally via pipx
 ensure_tool_installed("pre-commit", force_update=True)
 # Don't force a lintrunner update b/c it might break folks
-# who already have it installed in a different way 
-ensure_tool_installed("lintrunner") 
+# who already have it installed in a different way
+ensure_tool_installed("lintrunner")
 
 # ───────────────────────────────────────────
 # 3. Activate (or refresh) the pre‑push hook
