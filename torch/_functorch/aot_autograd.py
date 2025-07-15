@@ -94,6 +94,7 @@ from ._aot_autograd.runtime_wrappers import (  # noqa: F401
 from ._aot_autograd.schemas import (  # noqa: F401
     AOTConfig,
     AOTDispatchCompiler,
+    AOTGraphCapture,
     AOTState,
     BackwardSignature,
     FakifiedFlatArgs,
@@ -857,12 +858,12 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 def prepare_aot_module_simplified(
     mod: nn.Module,
     args,
-    fw_compiler: AOTDispatchCompiler,
-    bw_compiler: AOTDispatchCompiler,
+    fw_compiler: Optional[AOTDispatchCompiler],
+    bw_compiler: Optional[AOTDispatchCompiler],
     partition_fn: Callable,
     decompositions: dict,
     keep_inference_input_mutations,
-    inference_compiler: AOTDispatchCompiler,
+    inference_compiler: Optional[AOTDispatchCompiler],
     boxed_forward_device_index: BoxedDeviceIndex,
     ignore_shape_env: bool,
 ):
@@ -1049,6 +1050,134 @@ def aot_module_simplified(
     forward.named_buffers = mod.named_buffers
 
     return forward
+
+
+def aot_export_joint_opaque(
+    stack: contextlib.ExitStack,
+    mod: nn.Module,
+    args,
+    *,
+    decompositions: Optional[dict] = None,
+    keep_inference_input_mutations=False,
+    ignore_shape_env=False,
+) -> tuple[AOTState, AOTGraphCapture]:
+    """
+    This API captures the joint graph for an nn.Module.  However, unlike
+    aot_export_joint_simple or aot_export_module(trace_joint=True), the
+    calling convention of the produced joint graph is *largely left
+    unspecified* (making this unsuitable for export to external systems).
+    In return, we provide:
+
+        1. Feature parity with aot_module_simplified, including handling for
+           more complicated cases such as multiple differentiable outputs,
+           input mutations that must be handled outside of the graph, tensor
+           subclasses, etc.
+
+        2. The ability to take a (potentially modified) joint graph
+           and transform it back into a callable eager module with the same
+           API as the original.  This module is also guaranteed to be
+           traceable by AOTAutograd (so you can mark it with allow_in_graph)
+           if you need to do subsequent processing on it in the context of
+           another pass.
+
+    It is always OK to make internal changes to joint graph which do not
+    affect the external calling convention.  We also allow systems to interact
+    with the external calling convention on a case-by-case basis.  At the
+    moment, the only downstream user of this API is autoparallel, which relies
+    on the following capabilities:
+
+    - It must be able to reliably identify inputs, outputs, tangents, params,
+      buffers and grads from the joint graph inputs (as these must be treated
+      differently when generating sharding constraints).
+
+    - It must be able to map the publicly visible input arguments to the inputs
+      of the joint graph.
+
+    - You must be able to change the size/stride of inputs and outputs (even
+      if they were originally static shapes).  This includes parameters.
+
+    - NB: A NON-requirement for autoparallel is the ability to replace a plain
+      tensor input with a tensor subclass input.  Although it might
+      superficially seem that we need to do this (as parameters transform from
+      plain tensors to DTensors), this actually NOT necessary; in autoparallel we
+      instead prefer to change the external calling convention to take the local
+      tensors of the virtual DTensors.
+
+    In general, however, you cannot naively assume a correspondence between
+    args and the actual arguments of the graph; inputs maybe deduplicated or
+    otherwise transformed in unexpected ways, and we reserve the right to
+    change the calling convention in incompatible ways in newer versions of
+    PyTorch.
+
+    Note: When using this API, you must create and enter an ExitStack context manager, which
+    will be passed into this function.  This context manager must remain active
+    if you .  (TODO: We may relax this requirement by having AOTAutograd
+    keep track of how to reconstruct all the context managers at a later point in time.)
+
+    NB: You're not obligated to do a /full/ compile in stage2; instead you can leave
+    the forward/backward compilers unspecified in which case the partitioned FX graphs
+    will directly run.  The overall autograd Function can be allowed in graph so
+    you can reprocess it in the context of a (potentially larger) compiled
+    region later.
+
+    NB: These APIs do NOT hit cache, as we only ever cache the final compile results,
+    not the intermediate export result.
+    """
+
+    (
+        functional_call,
+        params_flat,
+        fake_flat_args,
+        aot_config,
+        fake_mode,
+        shape_env,
+    ) = prepare_aot_module_simplified(
+        mod,
+        args,
+        None,
+        None,
+        None,
+        decompositions,
+        keep_inference_input_mutations,
+        None,
+        None,
+        ignore_shape_env,
+    )
+
+    # TODO: Maybe this should be in create_aot_state?  Not sure, that would
+    # increase its scope
+    stack.enter_context(compiled_autograd._disable())
+
+    aot_state = create_aot_state(
+        stack,
+        functional_call,
+        fake_flat_args,
+        aot_config,
+        fake_mode,
+        shape_env,
+    )
+    # NB: no cache lookup!
+    aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
+
+    # Invariant: the compiled function takes all of params_flat as argument,
+    # you cannot change structure of this but you can change the inputs
+
+    return aot_state, aot_graph_capture
+
+
+def aot_compile_joint_opaque(
+    aot_state: AOTState, aot_graph_capture: AOTGraphCapture
+) -> callable:
+    """
+    Companion function for aot_export_joint_opaque which compiles the opaque joint
+    graph into a callable function that follows a standard calling convention.
+    params_flat all are arguments.
+
+    Note: We do NOT instantiate the module; this gives you the flexibility to subclass it and
+    customize its behavior without having to worry about FQN rebinding.
+    """
+    compiled_fn, _ = aot_stage2_compile(aot_state, aot_graph_capture)
+    return compiled_fn
 
 
 def aot_export_module(
