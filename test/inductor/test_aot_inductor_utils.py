@@ -222,7 +222,7 @@ def check_model(
         if not isinstance(model, types.FunctionType):
             model = model.to(self.device)
 
-        # For non mixed device inputs with default "cpu",set the device manully.
+        # For non mixed device inputs with default "cpu",set the device manually.
         if all(
             t.device.type == "cpu"
             for t in example_inputs

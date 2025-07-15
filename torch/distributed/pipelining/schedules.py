@@ -319,6 +319,26 @@ class _PipelineSchedule(ABC):
         """
         raise NotImplementedError
 
+    def eval(self, *args, target=None, losses: Optional[list] = None, **kwargs):
+        """
+        Run one iteration of the pipeline schedule with *whole-batch* input.
+        Will chunk the input into microbatches automatically, and go through the
+        microbatches by calling forward only.
+
+        args: positional arguments to the model (as in non-pipeline case).
+        kwargs: keyword arguments to the model (as in non-pipeline case).
+        target: target values for the loss function.
+        losses: a list to store the losses for each microbatch.
+        """
+        # Save the original has_backward state
+        original_has_backward = self._has_backward
+        try:
+            self._has_backward = False
+            return self.step(*args, target=target, losses=losses, **kwargs)
+        finally:
+            # Restore the original state
+            self._has_backward = original_has_backward
+
     def _check_inputs(
         self,
         arg_mbs: Optional[list] = None,
@@ -500,47 +520,43 @@ or equal to the number of stages ({self._num_stages})."
         microbatches according to the schedule implementation.
 
         The schedule will call forward and backward on the microbatches according to the
-        schedule specification; however, backward operations will be skipped if this method
-        is called under a `with torch.no_grad()` context.
+        schedule specification.
 
         args: positional arguments to the model (as in non-pipeline case).
         kwargs: keyword arguments to the model (as in non-pipeline case).
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
-        # Save the original has_backward state
-        original_has_backward = self._has_backward
-
-        # Set has_backward based on current gradient computation state
-        self._has_backward = self._has_backward and torch.is_grad_enabled()
+        if not torch.is_grad_enabled():
+            raise RuntimeError(
+                "step() requires gradients to be enabled for backward computation; "
+                "it should not be used under torch.no_grad() context. "
+                "Please call eval() instead."
+            )
 
         # Set the same has_backward flag for stage object
         self._stage.has_backward = self._has_backward
 
-        try:
-            # Clean per iteration
-            self._stage.clear_runtime_states()
+        # Clean per iteration
+        self._stage.clear_runtime_states()
 
-            # Split inputs into microbatches
-            args_split, kwargs_split = self._split_inputs(args, kwargs)
+        # Split inputs into microbatches
+        args_split, kwargs_split = self._split_inputs(args, kwargs)
 
-            # Split target into microbatches
-            if target is not None:
-                targets_split = list(torch.tensor_split(target, self._n_microbatches))
-            else:
-                targets_split = None
+        # Split target into microbatches
+        if target is not None:
+            targets_split = list(torch.tensor_split(target, self._n_microbatches))
+        else:
+            targets_split = None
 
-            # Run microbatches
-            self._step_microbatches(args_split, kwargs_split, targets_split, losses)
+        # Run microbatches
+        self._step_microbatches(args_split, kwargs_split, targets_split, losses)
 
-            # Return merged results per original format
-            if self._stage.is_last:
-                return self._merge_outputs(self._stage.output_chunks)
-            else:
-                return None
-        finally:
-            # Restore the original state
-            self._has_backward = original_has_backward
+        # Return merged results per original format
+        if self._stage.is_last:
+            return self._merge_outputs(self._stage.output_chunks)
+        else:
+            return None
 
     def _get_pipeline_order(self) -> Optional[dict[int, list[Optional[_Action]]]]:
         """
@@ -1356,42 +1372,39 @@ class PipelineScheduleMulti(_PipelineSchedule):
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
-        # Save the original has_backward state
-        original_has_backward = self._has_backward
-
-        # Set has_backward based on current gradient computation state
-        self._has_backward = self._has_backward and torch.is_grad_enabled()
+        if not torch.is_grad_enabled():
+            raise RuntimeError(
+                "step() requires gradients to be enabled for backward computation; "
+                "it should not be used under torch.no_grad() context. "
+                "Please call eval() instead."
+            )
 
         # Set the same has_backward flag for stage object
         for stage in self._stages:
             stage.has_backward = self._has_backward
 
-        try:
-            # Clean per iteration
-            for stage in self._stages:
-                stage.clear_runtime_states()
+        # Clean per iteration
+        for stage in self._stages:
+            stage.clear_runtime_states()
 
-            # Split inputs into microbatches
-            args_split, kwargs_split = self._split_inputs(args, kwargs)
+        # Split inputs into microbatches
+        args_split, kwargs_split = self._split_inputs(args, kwargs)
 
-            # Split target into microbatches
-            if target is not None:
-                targets_split = list(torch.tensor_split(target, self._n_microbatches))
-            else:
-                targets_split = None
+        # Split target into microbatches
+        if target is not None:
+            targets_split = list(torch.tensor_split(target, self._n_microbatches))
+        else:
+            targets_split = None
 
-            # Run microbatches
-            self._step_microbatches(args_split, kwargs_split, targets_split, losses)
+        # Run microbatches
+        self._step_microbatches(args_split, kwargs_split, targets_split, losses)
 
-            # Return merged results per original format
-            for stage in self._stages:
-                if stage.is_last:
-                    return self._merge_outputs(stage.output_chunks)
-            # Does not contain the last stage
-            return None
-        finally:
-            # Restore the original state
-            self._has_backward = original_has_backward
+        # Return merged results per original format
+        for stage in self._stages:
+            if stage.is_last:
+                return self._merge_outputs(stage.output_chunks)
+        # Does not contain the last stage
+        return None
 
     def _step_microbatches(
         self,

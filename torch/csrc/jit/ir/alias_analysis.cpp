@@ -53,7 +53,7 @@ class MutableTypePtrHelper {
   //     Tensor with shape information removed. For example, a Tensor
   //     of dimension 4 would map to the same type as a Tensor of
   //     dimension 1. This allows us to treat all subclasses of Tensor
-  //     as a single, homogenous "Tensor" type.
+  //     as a single, homogeneous "Tensor" type.
   std::optional<AliasTypeSet> mapTypeToAliasTypeSet(const TypePtr& type) {
     if (mutable_type_cache_) {
       const AliasTypeSet* result = mapTypeToBorrowedAliasTypeSet(type);

@@ -2366,7 +2366,7 @@ class FakeTensorMode(TorchDispatchMode):
         # (aot autograd, torchdynamo) where each operation is run consecutively.
         # Because each operation is run in order, we can trace out and support
         # sequences like: x = torch.tensor(0.); y = x.add_(1)
-        # Whenver a constant is written to but with inputs that cannot be evaluated
+        # Whenever a constant is written to but with inputs that cannot be evaluated
         # statically, such as random_(), we invalidate all constants that alias the input
         # We will rely on functionalization for use of fake tensors constants as persistent
         # objects on an FX Graph.
@@ -2780,7 +2780,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             nonlocal flat_arg_fake_tensors
             if not self.is_our_fake(x):
-                if torch.Tag.inplace_view in func.tags:
+                if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags:
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                     raise AssertionError(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"

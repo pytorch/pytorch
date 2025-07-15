@@ -116,7 +116,7 @@ class ScheduleTest(MultiProcContinousTest):
         "ScheduleClass",
         [ScheduleGPipe, Schedule1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS],
     )
-    def test_no_grad_context(self, ScheduleClass):
+    def test_eval_inference_mode(self, ScheduleClass):
         if ScheduleClass in [ScheduleInterleaved1F1B, ScheduleLoopedBFS]:
             # Multi-stage schedules
             stages_per_rank = 2
@@ -146,42 +146,41 @@ class ScheduleTest(MultiProcContinousTest):
                 for stage_module, stage_idx in zip(stage_modules, stage_indices)
             ]
 
-            # Test with torch.no_grad() context
+            # Test with eval() method for inference
             schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn, scale_grads=False)
 
             # Clear gradients
             for stage_module in stage_modules:
                 stage_module.zero_grad()
 
-            with torch.no_grad():
-                if self.rank == 0:
-                    schedule.step(x)
-                elif self.rank == self.world_size - 1:
-                    losses = []
-                    schedule.step(target=target, losses=losses)
-                else:
-                    schedule.step()
+            if self.rank == 0:
+                schedule.eval(x)
+            elif self.rank == self.world_size - 1:
+                losses = []
+                schedule.eval(target=target, losses=losses)
+            else:
+                schedule.eval()
 
-            # Check that gradients were NOT computed under no_grad
-            grad_computed_no_grad = False
+            # Check that gradients were NOT computed during eval
+            grad_computed_eval = False
             for stage_module in stage_modules:
                 for param in stage_module.parameters():
                     if param.grad is not None:
-                        grad_computed_no_grad = True
+                        grad_computed_eval = True
                         break
-                if grad_computed_no_grad:
+                if grad_computed_eval:
                     break
 
-            # Verify that gradients were not computed under no_grad
+            # Verify that gradients were not computed during eval
             self.assertFalse(
-                grad_computed_no_grad,
-                "Gradients should not be computed under torch.no_grad()",
+                grad_computed_eval,
+                "Gradients should not be computed during eval()",
             )
 
-            # Verify that losses are still computed even under no_grad
+            # Verify that losses are still computed during eval
             if self.rank == self.world_size - 1:
                 self.assertTrue(
-                    len(losses) > 0, "Losses should be computed even under no_grad"
+                    len(losses) > 0, "Losses should be computed during eval()"
                 )
         else:
             # Single-stage schedules
@@ -208,39 +207,38 @@ class ScheduleTest(MultiProcContinousTest):
                 self.device,
             )
 
-            # Test with torch.no_grad() context
+            # Test with eval() method for inference
             schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
             # Get stage module for gradient checking
             stage_module = pipe.get_stage_module(self.rank)
             stage_module.zero_grad()
 
-            with torch.no_grad():
-                if self.rank == 0:
-                    schedule.step(x)
-                elif self.rank == self.world_size - 1:
-                    losses = []
-                    schedule.step(target=target, losses=losses)
-                else:
-                    schedule.step()
+            if self.rank == 0:
+                schedule.eval(x)
+            elif self.rank == self.world_size - 1:
+                losses = []
+                schedule.eval(target=target, losses=losses)
+            else:
+                schedule.eval()
 
-            # Check that gradients were NOT computed under no_grad
-            grad_computed_no_grad = False
+            # Check that gradients were NOT computed during eval
+            grad_computed_eval = False
             for param in stage_module.parameters():
                 if param.grad is not None:
-                    grad_computed_no_grad = True
+                    grad_computed_eval = True
                     break
 
-            # Verify that gradients were not computed under no_grad
+            # Verify that gradients were not computed during eval
             self.assertFalse(
-                grad_computed_no_grad,
-                "Gradients should not be computed under torch.no_grad()",
+                grad_computed_eval,
+                "Gradients should not be computed during eval()",
             )
 
-            # Verify that losses are still computed even under no_grad
+            # Verify that losses are still computed during eval
             if self.rank == self.world_size - 1:
                 self.assertTrue(
-                    len(losses) > 0, "Losses should be computed even under no_grad"
+                    len(losses) > 0, "Losses should be computed during eval()"
                 )
 
     @requires_nccl()
