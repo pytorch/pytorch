@@ -97,7 +97,7 @@ if(HIP_FOUND)
     NO_DEFAULT_PATH
     PATHS ${ROCM_INCLUDE_DIRS}
   )
-  if(EXISTS "${ROCM_HEADER_PATH}/rocm-core/rocm_version.h")
+  if(ROCM_VERSION_HEADER_PATH MATCHES "rocm-core/rocm_version.h$")
     set(ROCM_LIB_NAME "ROCM")
   else()
     set(ROCM_LIB_NAME "HIP")
