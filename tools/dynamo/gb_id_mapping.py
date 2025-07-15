@@ -41,7 +41,7 @@ def next_gb_id(reg):
     return f"GB{(max(ids, default=0) + 1):04d}"
 
 
-def get_editor_input(prompt_text="", existing_content=""):
+def get_editor_input(prompt_text=""):
     """
     Opens the user's preferred editor (vim by default) to get multi-line input.
     Returns the content entered by the user.
@@ -59,9 +59,6 @@ def get_editor_input(prompt_text="", existing_content=""):
                 "# Tip: For code, you can use markdown code blocks with ```python\n\n"
             )
 
-        if existing_content:
-            tf.write(existing_content)
-            tf.write("\n")
 
         tf.flush()
 
