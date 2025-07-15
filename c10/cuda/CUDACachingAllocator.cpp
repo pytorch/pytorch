@@ -3287,71 +3287,71 @@ class DeviceCachingAllocator {
         EventPool::Event event = std::move(e.first);
         Block* block = e.second;
 
-        if (!event->query())
+        if (!event->query()) {
           // Return the ownership of the Event (unique ptr)
           e.first = std::move(event);
-        break;
+          break;
+        }
+
+        block->event_count--;
+        if (block->event_count == 0) {
+          free_block(block, context);
+        }
+        it->second.pop_front();
       }
 
-      block->event_count--;
-      if (block->event_count == 0) {
-        free_block(block, context);
+      if (it->second.empty()) {
+        it = cuda_events.erase(it);
+      } else {
+        it++;
       }
-      it->second.pop_front();
-    }
-
-    if (it->second.empty()) {
-      it = cuda_events.erase(it);
-    } else {
-      it++;
     }
   }
-}
 
   // Iterates over sizes of all memory blocks for given device in given pool
   void cache_info_aux(const BlockPool& pool, size_t* largest) {
-  for (const auto& block : pool.blocks) {
-    const auto blocksize = block->size;
-    if (blocksize > *largest) {
-      *largest = blocksize;
+    for (const auto& block : pool.blocks) {
+      const auto blocksize = block->size;
+      if (blocksize > *largest) {
+        *largest = blocksize;
+      }
     }
   }
-}
 
-void record_trace(
-    TraceEntry::Action action,
-    size_t addr,
-    size_t size,
-    cudaStream_t stream,
-    c10::DeviceIndex device,
-    MempoolId_t mempool_id,
-    std::shared_ptr<GatheredContext> context) {
-  if (!record_history && trace_trackers_.empty())
-    return;
-  std::string compile_string = "N/A";
-  if (!compile_context.empty()) {
-    compile_string = compile_context.top();
-  }
-  auto te = TraceEntry(
-      action,
-      device,
-      addr,
-      size,
-      stream,
-      mempool_id,
-      getApproximateTime(),
-      record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
-      compile_string);
+  void record_trace(
+      TraceEntry::Action action,
+      size_t addr,
+      size_t size,
+      cudaStream_t stream,
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      std::shared_ptr<GatheredContext> context) {
+    if (!record_history && trace_trackers_.empty())
+      return;
+    std::string compile_string = "N/A";
+    if (!compile_context.empty()) {
+      compile_string = compile_context.top();
+    }
+    auto te = TraceEntry(
+        action,
+        device,
+        addr,
+        size,
+        stream,
+        mempool_id,
+        getApproximateTime(),
+        record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
+        compile_string);
 
-  // Callbacks should not include any Pytorch call
-  for (const auto& cb : trace_trackers_) {
-    cb(te);
-  }
+    // Callbacks should not include any Pytorch call
+    for (const auto& cb : trace_trackers_) {
+      cb(te);
+    }
 
-  if (record_history) {
-    alloc_buffer.insertEntries(te);
+    if (record_history) {
+      alloc_buffer.insertEntries(te);
+    }
   }
-}
 };
 
 // Returns whether to force all allocations to bypass the caching allocator and
