@@ -32,7 +32,7 @@ void GraphExecutorBase::fillUserInputs(
 
 ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
     ExecutionFrame& executionFrame,
-    std::vector<std::vector<c10::IValue>> inputsList,
+    const std::vector<std::vector<c10::IValue>>& inputsList,
     const uint32_t warmupRuns,
     const uint32_t mainRuns) {
   // TODO: add support for memory profiling
@@ -112,7 +112,7 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
   results.totalNodesCount = numNodes;
   for (const auto& r : results.timePerNodeType) {
     const std::string& target = r.first;
-    results.percentPerNodeType[target] = r.second * 100.0 / results.totalTime;
+    results.percentPerNodeType[target] = r.second * 100.0f / results.totalTime;
   }
   return results;
 }
