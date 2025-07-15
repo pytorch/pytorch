@@ -285,12 +285,34 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         #   iteration. Ideally, we should know that the final output is >= 0 but we didn't constrain the
         #   unbacked symint output of subgraph as of today because this requires a smart range analysis.
         fake_mode: FakeTensorMode = _find_or_create_fake_mode()
+
+        def _unspecialize_carried_inputs(x):
+            if isinstance(x, (int, torch.SymInt)):
+                return _create_unbacked_symint(
+                    fake_mode, ignore_fresh_unbacked_symbols=True
+                )
+            # We need to disable constant specialization for tensor inputs that become loop carries.
+            # Here's the problem: when a user creates a constant tensor e.g. torch.zeros(), PyTorch calls aten.lift_fresh_copy
+            # to create a safe copy (avoiding aliasing issues). This creates a FakeTensor with constant=True.
+            # But when this FakeTensor becomes a loop carry variable, we have a problem:
+            # - Operations like .item() will read the constant value and bake it into the traced code
+            # - This is incorrect because carry variables change between loop iterations
+            # - The traced code would use the wrong constant value for all iterations
+            # Solution: We clone the constant tensors and mark the cloned tensor as non-constant so they won't
+            # be specialized to fixed values during tracing body_fn or cond_fn.
+            elif (
+                isinstance(x, torch.Tensor)
+                and hasattr(x, "constant")
+                and x.constant is not None
+            ):
+                x = x.clone()
+                x.constant = None
+            return x
+
         unspecialized_carried_inputs = pytree.tree_map_only(
-            (int, torch.SymInt),
+            (int, torch.SymInt, torch.Tensor),
             # For temporarily created unbacked symints, we don't need to bind them to any proxy
-            lambda _: _create_unbacked_symint(
-                fake_mode, ignore_fresh_unbacked_symbols=True
-            ),
+            lambda x: _unspecialize_carried_inputs(x),
             carried_inputs,
         )
 
