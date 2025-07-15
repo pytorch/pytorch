@@ -32,7 +32,6 @@ if [[ ${BUILD_NAME} == *-full* ]]; then
   UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_full"
 fi
 
-
 do_backup() {
   local backup_dir
   backup_dir=$1
