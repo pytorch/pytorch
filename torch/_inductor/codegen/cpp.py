@@ -2869,13 +2869,13 @@ class CppVecKernel(CppKernel):
                 if self.ranges[self.tiling_idx] % self.tiling_factor
                 else sympy.Integer(0)
             )
-            if not welford_helper_vec_range.is_number or welford_helper_vec_range >= 10:
+            if not welford_helper_vec_range.is_number or welford_helper_vec_range > 32:
                 self._use_welford_helper(
                     acc_vec, welford_helper_val, welford_helper_vec_range, dtype
                 )
             if (
                 not masked_welford_helper_vec_range.is_number
-                or masked_welford_helper_vec_range >= 10
+                or masked_welford_helper_vec_range > 32
             ):
                 self._use_welford_helper(
                     masked_acc_vec,
@@ -2894,7 +2894,7 @@ class CppVecKernel(CppKernel):
                 if self.tail_size
                 else welford_helper_vec_range
             )
-            if welford_helper_vec_range_.is_number and welford_helper_vec_range_ < 10:
+            if welford_helper_vec_range_.is_number and welford_helper_vec_range_ <= 32:
                 self.stores.writeline(
                     f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value)};"
                 )
@@ -3117,8 +3117,13 @@ class CppVecKernel(CppKernel):
             return f"{self._get_mask_type()}"
         return vec_type
 
-    def _welford_helper_init(
-        self, welford_helper_val, welford_helper_vec_range, dtype, num_threads=None
+    def _welford_helper_prefix_suffix(
+        self,
+        acc_vec,
+        welford_helper_val,
+        welford_helper_vec_range,
+        dtype,
+        num_threads=None,
     ):
         vec_num_range_thread = (
             CeilDiv(welford_helper_vec_range, num_threads)
@@ -3137,9 +3142,20 @@ class CppVecKernel(CppKernel):
         if isinstance(num_chunks, sympy.Integer) and num_chunks <= 1:
             # When the number of chunks <= 1, there is no need to use cascade summation to improve
             # reduction accuracy. We can initialize a static WelfordHelper to improve performance.
-            return f"static {welford_helper_init_line}"
+            welford_helper_init_line = f"static {welford_helper_init_line}"
         else:
-            return welford_helper_init_line
+            if num_threads:
+                self.local_reduction_stores.writeline(
+                    f"{acc_vec}_local = welford_combine({acc_vec}_local, &{welford_helper_val});"
+                )
+            else:
+                self.non_parallel_reduction_suffix.writeline(
+                    f"{acc_vec} = welford_combine({acc_vec}, &{welford_helper_val});"
+                )
+        if num_threads:
+            self.local_reduction_init.writeline(welford_helper_init_line)
+        else:
+            self.non_parallel_reduction_prefix.writeline(welford_helper_init_line)
 
     def _use_welford_helper(
         self, acc_vec, welford_helper_val, welford_helper_vec_range, dtype
@@ -3147,21 +3163,11 @@ class CppVecKernel(CppKernel):
         num_threads = (
             "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
         )
-        self.non_parallel_reduction_prefix.writeline(
-            self._welford_helper_init(
-                welford_helper_val, welford_helper_vec_range, dtype
-            )
+        self._welford_helper_prefix_suffix(
+            acc_vec, welford_helper_val, welford_helper_vec_range, dtype
         )
-        self.local_reduction_init.writeline(
-            self._welford_helper_init(
-                welford_helper_val, welford_helper_vec_range, dtype, num_threads
-            )
-        )
-        self.non_parallel_reduction_suffix.writeline(
-            f"{acc_vec} = welford_combine({acc_vec}, &{welford_helper_val});"
-        )
-        self.local_reduction_stores.writeline(
-            f"{acc_vec}_local = welford_combine({acc_vec}_local, &{welford_helper_val});"
+        self._welford_helper_prefix_suffix(
+            acc_vec, welford_helper_val, welford_helper_vec_range, dtype, num_threads
         )
 
     def reduction_combine_vec(
