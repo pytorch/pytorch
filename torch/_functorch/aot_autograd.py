@@ -1118,6 +1118,7 @@ def aot_module_simplified(
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),
     }
+    assert not params, params
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = list(params_flat)
     params_len = len(params_flat)
