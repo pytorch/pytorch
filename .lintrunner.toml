@@ -1605,7 +1605,10 @@ is_formatter = true
 # the same line, merge conflicts should not arise in git or hg
 [[linter]]
 code = 'MERGE_CONFLICTLESS_CSV'
-include_patterns = ['benchmarks/dynamo/ci_expected_accuracy/*.csv']
+include_patterns = [
+    'benchmarks/dynamo/ci_expected_accuracy/*.csv',
+    'benchmarks/dynamo/pr_time_benchmarks/expected_results.csv',
+]
 command = [
     'python3',
     'tools/linter/adapters/no_merge_conflict_csv_linter.py',
