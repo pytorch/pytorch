@@ -2704,30 +2704,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         target_lengths = torch.tensor([30, 25, 20])
         input_lengths = torch.tensor([50, 50, 50])
         targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+        inputs = torch.randn(50, 3, 15, dtype=torch.float)
         with self.assertRaises(RuntimeError):
             _input_lengths = input_lengths.to(dtype=torch.float)
-            torch.nn.functional.ctc_loss(log_probs, targets, _input_lengths, target_lengths)
+            torch.nn.functional.ctc_loss(inputs, targets, _input_lengths, target_lengths)
         with self.assertRaises(RuntimeError):
             target_lengths = target_lengths.to(dtype=torch.float)
-            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+            torch.nn.functional.ctc_loss(inputs, targets, input_lengths, target_lengths)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_lengthchecks_cuda(self):
         for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
             for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
                 targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device='cuda')
-                log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
+                inputs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda')
                 with self.assertRaises(RuntimeError):
-                    torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+                    torch.nn.functional.ctc_loss(inputs, targets, input_lengths, target_lengths)
 
     def test_CTCLoss_lengthchecks_cpu(self):
         for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
             for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
                 targets = torch.randint(1, 15, (3, 29), dtype=torch.int)
-                log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+                inputs = torch.randn(50, 3, 15, dtype=torch.float)
                 with self.assertRaises(RuntimeError):
-                    torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+                    torch.nn.functional.ctc_loss(inputs, targets, input_lengths, target_lengths)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_long_targets(self):
@@ -2736,20 +2736,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         batch_size = 4
         target_length = 1200
 
-        log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.double).log_softmax(2).requires_grad_()
+        inputs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.double).requires_grad_()
         targets = torch.randint(low=1, high=vocab_size - 1, size=(batch_size, target_length), dtype=torch.long)
         input_lengths = batch_size * [input_length]
         target_lengths = batch_size * [target_length]
 
-        res_cpu = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+        res_cpu = torch.nn.functional.ctc_loss(inputs, targets, input_lengths, target_lengths,
                                                reduction='sum', zero_infinity=True)
         grad_out = torch.randn_like(res_cpu)
-        grad_cpu, = torch.autograd.grad(res_cpu, log_probs, grad_out)
+        grad_cpu, = torch.autograd.grad(res_cpu, inputs, grad_out)
 
         with torch.backends.cudnn.flags(enabled=False):
-            res_gpu = torch.nn.functional.ctc_loss(log_probs.cuda(), targets.cuda(), input_lengths, target_lengths,
+            res_gpu = torch.nn.functional.ctc_loss(inputs.cuda(), targets.cuda(), input_lengths, target_lengths,
                                                    reduction='sum', zero_infinity=True)
-            grad_gpu, = torch.autograd.grad(res_gpu, log_probs, grad_out.cuda())
+            grad_gpu, = torch.autograd.grad(res_gpu, inputs, grad_out.cuda())
         self.assertEqual(res_cpu, res_gpu, atol=1e-4, rtol=0)
         self.assertEqual(grad_cpu, grad_gpu, atol=1e-4, rtol=0)
 
@@ -2763,7 +2763,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         target = torch.randint(low=1, high=C, size=(S,), dtype=torch.int)
         input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.int)
         target_lengths = torch.tensor(S, dtype=torch.int)
-        inp = torch.randn(T, N, C, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
+        inp = torch.randn(T, N, C, dtype=torch.float, device='cuda').requires_grad_()
         with cudnn.flags(enabled=True):
             res_gpu = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
@@ -2780,14 +2780,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
         target_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
         for device in devices:
-            inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+            inp = torch.randn(T, N, C, dtype=torch.float, device=device).requires_grad_()
             res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
             self.assertTrue((res == 0).all().item())
             res.sum().backward()
             self.assertTrue((inp.grad == 0).all().item())
         target_lengths = torch.full(size=(N,), fill_value=1, dtype=torch.int)
         for device in devices:
-            inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+            inp = torch.randn(T, N, C, dtype=torch.float, device=device).requires_grad_()
             res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
             self.assertTrue((res == torch.inf).all().item())
             res.sum().backward()
@@ -2798,20 +2798,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         target_lengths = [60, 25, 20]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int, device='cuda')
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
-        res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+        inputs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').requires_grad_()
+        res = torch.nn.functional.ctc_loss(inputs, targets, input_lengths, target_lengths,
                                            reduction='sum', zero_infinity=True)
         with torch.backends.cudnn.flags(enabled=False):
-            res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths,
+            res2 = torch.nn.functional.ctc_loss(inputs, targets.cuda().long(), input_lengths, target_lengths,
                                                 reduction='sum', zero_infinity=True)
-        res_cpu = torch.nn.functional.ctc_loss(log_probs.cpu(), targets.cpu(), input_lengths, target_lengths,
+        res_cpu = torch.nn.functional.ctc_loss(inputs.cpu(), targets.cpu(), input_lengths, target_lengths,
                                                reduction='sum', zero_infinity=True)
 
         self.assertEqual(res2, res, atol=1e-4, rtol=0)
         self.assertEqual(res_cpu, res.cpu(), atol=1e-4, rtol=0)
-        g1, = torch.autograd.grad(res, log_probs)
-        g2, = torch.autograd.grad(res2, log_probs)
-        g3, = torch.autograd.grad(res_cpu, log_probs)
+        g1, = torch.autograd.grad(res, inputs)
+        g2, = torch.autograd.grad(res2, inputs)
+        g3, = torch.autograd.grad(res_cpu, inputs)
         self.assertEqual(g2, g3, atol=1e-4, rtol=0)
         self.assertEqual(g1, g2, atol=1e-4, rtol=0)
         self.assertTrue((g1 == g1).all().item())  # check that we don't have NaN
