@@ -4,7 +4,6 @@ import inspect
 import logging
 import sys
 from collections import defaultdict
-from collections.abc import Mapping
 from enum import auto, Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
@@ -39,8 +38,6 @@ __all__ = [
     "AdditionalInputs",
 ]
 
-
-DynShapesType = Union[Mapping[str, Any], tuple[Any, ...], list[Any]]
 
 log = logging.getLogger(__name__)
 
@@ -564,7 +561,7 @@ def _process_equalities(
 def _tree_map_with_path(
     func: Callable[..., Any],
     tree: Any,
-    *dynamic_shapes: DynShapesType,
+    *dynamic_shapes: Any,
     tree_name: Optional[str] = None,
 ) -> Any:
     """
@@ -901,7 +898,7 @@ def _warn_on_None_dynamic_shape_dimension():
 
 def _check_dynamic_shapes(
     combined_args: dict[str, Any],
-    dynamic_shapes: Optional[DynShapesType],
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
 ):
     """
     Checks the dynamic_shapes specification for correctness,
@@ -1031,7 +1028,7 @@ def _check_dynamic_shapes(
 
 def _process_dynamic_shapes(
     combined_args: dict[str, Any],
-    dynamic_shapes: Optional[DynShapesType],
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
 ) -> list[Constraint]:
     """
     Reads the dynamic_shapes specification and produces a list of constraints.
@@ -1208,7 +1205,7 @@ def _process_dynamic_shapes(
 
 
 def _get_dim_name_mapping(
-    dynamic_shapes: Optional[DynShapesType],
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
 ):
     name_to_dim = {}
     for dim in tree_flatten(
@@ -1231,8 +1228,8 @@ def _get_dim_name_mapping(
 
 def refine_dynamic_shapes_from_suggested_fixes(
     msg: str,
-    dynamic_shapes: DynShapesType,
-) -> DynShapesType:
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any]],
+) -> Union[dict[str, Any], tuple[Any], list[Any]]:
     """
     When exporting with :func:`dynamic_shapes`, export may fail with a ConstraintViolation error if the specification
     doesn't match the constraints inferred from tracing the model. The error message may provide suggested fixes -
