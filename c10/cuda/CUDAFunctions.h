@@ -96,7 +96,7 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
   // here explicitly.
   hipStreamCaptureStatus captureStatus;
   C10_CUDA_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
-  if (captureStatus == hipStreamCaptureStatusNone) {
+  if (C10_LIKELY(captureStatus == hipStreamCaptureStatusNone)) {
     C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
   } else {
     C10_CUDA_CHECK(hipErrorStreamCaptureUnsupported);
