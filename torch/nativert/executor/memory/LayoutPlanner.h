@@ -8,7 +8,6 @@
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/LeftRight.h>
 
-#include <torch/nativert/executor/memory/AliasAnalyzer.h>
 #include <torch/nativert/executor/memory/FunctionSchema.h>
 #include <torch/nativert/executor/memory/LayoutPlannerAlgorithm.h>
 #include <torch/nativert/executor/memory/LayoutPlannerSettings.h>
@@ -62,17 +61,7 @@ class LayoutPlanner {
   const std::vector<ValueId>& get_planned_values() const;
   const std::vector<ValueId>& get_unplanned_values() const;
 
-#ifndef NDEBUG
-  const AliasAnalyzer& get_alias_analyzer() const {
-    return alias_analyzer_;
-  }
-#endif
-
-  size_t num_values() const {
-    return managed_values_.size();
-  }
-
-  bool is_managed(ValueId id) {
+  C10_ALWAYS_INLINE bool is_managed(ValueId id) {
     TORCH_CHECK_LT(static_cast<size_t>(id), managed_values_.size());
     return managed_values_[id];
   }
@@ -131,9 +120,6 @@ class LayoutPlanner {
   LayoutPlannerAlgorithm* algorithm_;
   c10::LeftRight<LayoutPlan> plan_;
 
-#ifndef NDEBUG
-  AliasAnalyzer alias_analyzer_;
-#endif
   torch::nativert::LayoutPlannerSettings settings_;
 };
 

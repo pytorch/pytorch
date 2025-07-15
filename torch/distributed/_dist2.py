@@ -16,6 +16,7 @@ import torch
 from torch._C._distributed_c10d import (
     _current_process_group,
     _set_process_group,
+    Backend,
     ProcessGroup,
     ReduceOp,
     Store,
@@ -46,7 +47,7 @@ class ProcessGroupFactory(Protocol):
         world_size: int,
         timeout: timedelta,
         device: torch.device,
-        **kwargs: object,
+        pg_options: Backend.Options,
     ) -> ProcessGroup: ...
 
 
@@ -70,11 +71,11 @@ def _gloo_factory(
     world_size: int,
     timeout: timedelta,
     device: torch.device,
-    **kwargs: object,
+    pg_options: Backend.Options,
 ) -> ProcessGroup:
     from torch.distributed import ProcessGroupGloo
 
-    assert len(kwargs) == 0, "Gloo backend received unexpected kwargs"
+    assert pg_options is None, "Gloo backend does not support options"
 
     backend_class = ProcessGroupGloo(store, rank, world_size, timeout)
     backend_class._set_sequence_number_for_group()
@@ -100,18 +101,15 @@ def _nccl_factory(
     world_size: int,
     timeout: timedelta,
     device: torch.device,
-    **kwargs: object,
+    pg_options: Backend.Options,
 ) -> ProcessGroup:
     from torch.distributed import ProcessGroupNCCL
 
-    opts = ProcessGroupNCCL.Options()
-    opts._timeout = timeout
-    for k, v in kwargs.items():
-        if not hasattr(opts, k):
-            raise KeyError(f"Unknown option {k}")
-        setattr(opts, k, v)
+    assert isinstance(pg_options, ProcessGroupNCCL.Options)
 
-    backend_class = ProcessGroupNCCL(store, rank, world_size, opts)
+    pg_options._timeout = timeout
+
+    backend_class = ProcessGroupNCCL(store, rank, world_size, pg_options)
     backend_class._set_sequence_number_for_group()
     backend_class.eager_connect_single_device(device)
 
@@ -130,7 +128,7 @@ def new_group(
     backend: str,
     timeout: timedelta,
     device: Union[str, torch.device],
-    **kwargs: object,
+    pg_options: Backend.Options,
 ) -> ProcessGroup:
     """
     Create a new process group with the given backend and options. This group is
@@ -141,8 +139,7 @@ def new_group(
         backend: The backend to use for the process group.
         timeout: The timeout for collective operations.
         device: The device to use for the process group.
-        **kwargs: All remaining arguments are passed to the backend constructor.
-                  See the backend specific documentation for details.
+        pg_options: The options to use for the process group.
 
     Returns:
         A new process group.
@@ -155,7 +152,7 @@ def new_group(
     store, rank, world_size = next(iter(rendezvous("env://")))
     store.set_timeout(timeout)
 
-    return _BACKENDS[backend](store, rank, world_size, timeout, device, **kwargs)
+    return _BACKENDS[backend](store, rank, world_size, timeout, device, pg_options)
 
 
 def current_process_group() -> ProcessGroup:

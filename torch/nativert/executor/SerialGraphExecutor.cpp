@@ -14,16 +14,10 @@ std::vector<c10::IValue> SerialGraphExecutor::execute(
 
 std::vector<c10::IValue> SerialGraphExecutor::executeWithPrefilledFrame(
     ExecutionFrame& executionFrame) {
-  executionFrame.withManagedMemory([&](const LayoutManager* layout_manager) {
+  executionFrame.withMemoryPlanner([&]() {
     // Execute kernels for all nodes except prim.Input and prim.Output
     for (NodeIndex nodeIdx = 1; nodeIdx < nodeKernels_.size() - 1; ++nodeIdx) {
       nodeKernels_[nodeIdx]->compute(executionFrame);
-
-#ifndef NDEBUG
-      if (layout_manager != nullptr) {
-        layout_manager->assert_no_overlapping_storages(nodeIdx);
-      }
-#endif
 
       // don't free intermediate values when static memory planning is enabled
       if (executorConfig_.tryFreeUnmanagedValuesAfterUse) {
