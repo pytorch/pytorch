@@ -310,6 +310,7 @@ class Backend:
     def supports_coalescing(self) -> bool: ...
     @property
     def supports_time_estimate(self) -> bool: ...
+    def set_timeout(self, timeout: timedelta) -> None: ...
     @property
     def options(self) -> Options: ...
     def rank(self) -> int: ...
@@ -349,7 +350,15 @@ class ProcessGroup:
     ) -> None: ...
     def rank(self) -> int: ...
     def size(self) -> int: ...
+    def split_group(
+        self,
+        new_ranks: list[int],
+        timeout: Optional[timedelta] = None,
+        pg_options: Optional[Backend.Options] = None,
+        group_desc: Optional[str] = None,
+    ) -> Optional[ProcessGroup]: ...
     def abort(self) -> None: ...
+    def set_timeout(self, timeout: timedelta) -> None: ...
     def shutdown(self) -> None: ...
     @overload
     def broadcast(
@@ -362,6 +371,7 @@ class ProcessGroup:
         self,
         tensor: Tensor,
         root: int,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def allreduce(
@@ -374,12 +384,14 @@ class ProcessGroup:
         self,
         tensors: list[Tensor],
         op=...,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def allreduce(
         self,
         tensor: Tensor,
         op=...,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     def allreduce_coalesced(
         self,
@@ -404,6 +416,7 @@ class ProcessGroup:
         tensor: Tensor,
         root: int,
         op=...,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def allgather(
@@ -417,6 +430,7 @@ class ProcessGroup:
         self,
         output_tensors: list[Tensor],
         input_tensor: Tensor,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     def _allgather_base(
         self,
@@ -449,6 +463,7 @@ class ProcessGroup:
         output_tensors: list[Tensor],
         input_tensor: Tensor,
         root: int,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def scatter(
@@ -463,6 +478,7 @@ class ProcessGroup:
         output_tensor: Tensor,
         input_tensors: list[Tensor],
         root: int,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def reduce_scatter(
@@ -476,6 +492,8 @@ class ProcessGroup:
         self,
         output_tensors: Tensor,
         input_tensor: list[Tensor],
+        op=...,
+        timeout: timedelta | None = None,
     ) -> Work: ...
     def _reduce_scatter_base(
         self,
@@ -499,6 +517,7 @@ class ProcessGroup:
         input: Tensor,
         output_split_sizes: list[int],
         input_split_sizes: list[int],
+        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def alltoall(
@@ -512,6 +531,7 @@ class ProcessGroup:
         self,
         output: list[Tensor],
         input: list[Tensor],
+        timeout: timedelta | None = None,
     ) -> Work: ...
     def send(
         self,
@@ -526,7 +546,10 @@ class ProcessGroup:
         tag: int,
     ) -> Work: ...
     def recv_anysource(self, tensors: list[Tensor], tag: int) -> Work: ...
+    @overload
     def barrier(self, opts=...) -> Work: ...
+    @overload
+    def barrier(self, timeout: timedelta | None = None) -> Work: ...
     def boxed(self) -> ScriptObject: ...
     @staticmethod
     def unbox(obj: ScriptObject) -> ProcessGroup: ...
@@ -801,3 +824,6 @@ class ProcessGroupXCCL(Backend):
         rank: int,
         size: int,
     ): ...
+
+def _set_process_group(pg: ProcessGroup) -> None: ...
+def _current_process_group() -> ProcessGroup: ...

@@ -26,7 +26,6 @@ jobs:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
-
   lintrunner-clang:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
@@ -50,7 +49,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter
+      docker-image: ci-image:pytorch-linux-jammy-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0

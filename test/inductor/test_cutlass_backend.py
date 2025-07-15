@@ -1554,9 +1554,10 @@ class TestCutlassBackend(TestCase):
             self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    def test_maybe_append_choice_caching(self):
+    def test_maybe_append_choice_caching_correctness(self):
         """
-        Test if maybe_append_choice's caching leads to correct results.
+        Test if maybe_append_choice's caching leads to correct results and
+        shorter maybe_append_choice time. 
         """
 
         class TestModule(torch.nn.Module):
@@ -1886,7 +1887,13 @@ class TestCutlassBackend(TestCase):
         """
         full_ops = _gen_ops_cached(arch, cuda_version)
         ops = pytree.tree_flatten(full_ops)[0]
+        
+        # sanity check
         self.assertGreater(len(ops), 1000, "Too few ops generated")
+
+        # test if configuration name is unique
+        op_config_names = [op.configuration_name() for op in ops]
+        self.assertEqual(len(op_config_names), len(set(op_config_names)))
 
         serializer = get_cutlass_operation_serializer()
         self.assertIsNotNone(serializer)
