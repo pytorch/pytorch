@@ -35,15 +35,16 @@ static inline void atomic_add_helper(
     device ::metal::atomic<uint>* data,
     long offset,
     T value) {
-  auto ptr = data + (offset >> 1);
+  constexpr auto elem_per_enum = sizeof(uint) / sizeof(T);
+  auto ptr = data + (offset / elem_per_enum);
   auto old = ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
   union {
     uint i;
-    T t[2];
+    T t[elem_per_enum];
   } val;
   do {
     val.i = old;
-    val.t[offset & 1] += value;
+    val.t[offset & (elem_per_enum - 1)] += value;
   } while (!::metal::atomic_compare_exchange_weak_explicit(
       ptr,
       &old,
@@ -56,7 +57,31 @@ template <>
 struct AtomicType<half> {
   using type = ::metal::atomic<uint>;
   static inline void atomic_add(device type* data, long offset, half value) {
-    atomic_add_helper<half>(data, offset, value);
+    atomic_add_helper(data, offset, value);
+  }
+};
+
+template <>
+struct AtomicType<short> {
+  using type = ::metal::atomic<uint>;
+  static inline void atomic_add(device type* data, long offset, short value) {
+    atomic_add_helper(data, offset, value);
+  }
+};
+
+template <>
+struct AtomicType<char> {
+  using type = ::metal::atomic<uint>;
+  static inline void atomic_add(device type* data, long offset, char value) {
+    atomic_add_helper(data, offset, value);
+  }
+};
+
+template <>
+struct AtomicType<uchar> {
+  using type = ::metal::atomic<uint>;
+  static inline void atomic_add(device type* data, long offset, char value) {
+    atomic_add_helper(data, offset, value);
   }
 };
 
