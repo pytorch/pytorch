@@ -2,7 +2,6 @@
 """
 Pre‑push hook wrapper for Lintrunner.
 
-✓ Skips entirely on CI (when $CI is set)
 ✓ Installs Lintrunner once (`pip install lintrunner`) if missing
 ✓ Stores a hash of .lintrunner.toml in the venv
 ✓ Re-runs `lintrunner init` if that file's hash changes
@@ -74,20 +73,15 @@ def maybe_initialize_lintrunner() -> None:
 
 
 def main() -> None:
-    # 1. Skip in CI
-    if os.environ.get("CI"):
-        print("⚙️ CI detected — skipping lintrunner")
-        sys.exit(0)
-
     print(f"🐍 Lintrunner is using Python: {sys.executable}", file=sys.stderr)
 
-    # 2. Ensure lintrunner binary is available
+    # 1. Ensure lintrunner binary is available
     ensure_lintrunner()
 
-    # 3. Check for plugin updates and re-init if needed
+    # 2. Check for plugin updates and re-init if needed
     maybe_initialize_lintrunner()
 
-    # 4. Run lintrunner with any passed arguments and propagate its exit code
+    # 3. Run lintrunner with any passed arguments and propagate its exit code
     args = sys.argv[1:]  # Forward all arguments to lintrunner
     result = subprocess.call(["lintrunner"] + args)
     sys.exit(result)
