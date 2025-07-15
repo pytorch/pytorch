@@ -119,8 +119,6 @@ class TORCH_API TCPStore : public Store {
 
   std::vector<uint8_t> queuePop(const std::string& key, bool block) override;
 
-  std::vector<uint8_t> queuePeep(const std::string& key, bool block) override;
-
   int64_t queueLen(const std::string& key) override;
 
   // Waits for all workers to join.
