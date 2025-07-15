@@ -1524,24 +1524,29 @@ GB0199:
         in eager. Please double check that your code doesn't contain a similar error
         when actually running eager/uncompiled.
 GB0200:
+-   Gb_type: broo
+    Context: hh
+    Explanation: hiii
+    Hints: []
+GB0201:
 -   Gb_type: builtin isinstance() cannot determine type of argument
     Context: isinstance({arg}, {isinstance_type})
     Explanation: Dynamo doesn't have a rule to determine the type of argument {arg}
     Hints:
     -   This is likely to be a Dynamo bug. Please report an issue to PyTorch.
-GB0201:
+GB0202:
 -   Gb_type: call `torch.from_numpy` with `torch._dynamo.config.trace_numpy=False`
     Context: trace_numpy={config.trace_numpy}
     Explanation: Attempted to call `torch.from_numpy` with config `torch._dynamo.config.trace_numpy`
       set to `False`.
     Hints:
     -   Change `torch._dynamo.config.trace_numpy` to `True`.
-GB0202:
+GB0203:
 -   Gb_type: call_id() without associated real value
     Context: call_id {self}
     Explanation: Dynamo could not find an associated real value for the tensor.
     Hints: []
-GB0203:
+GB0204:
 -   Gb_type: "can't handle functions not implemented in python "
     Context: '{fn}'
     Explanation: Dynamo can only handle functions defined in python
@@ -1551,13 +1556,13 @@ GB0203:
         in your compile code. This is primarily used in conjunction with `torch.inference_mode`.
         Consider using `torch.no_grad` instead because `torch.no_grad` leads to same
         improvements as `inference_mode` when `torch.compile` is used.
-GB0204:
+GB0205:
 -   Gb_type: constant fold exception
     Context: attempted to run function {fn} with arguments {args}
     Explanation: Encountered exception when attempting to constant fold.
     Hints:
     -   This is likely to be a Dynamo bug. Please report an issue to PyTorch.
-GB0205:
+GB0206:
 -   Gb_type: copy.deepcopy()
     Context: copy.deepcopy({x})
     Explanation: Dynamo does not support copy.deepcopy()
@@ -1566,13 +1571,13 @@ GB0205:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0206:
+GB0207:
 -   Gb_type: dataclass fields failure
     Context: 'obj: {obj}; variable type: {type(obj)}'
     Explanation: Dataclass fields handling fails for {obj}. Expected it to be a user-defined
       object.
     Hints: []
-GB0207:
+GB0208:
 -   Gb_type: dtype mismatch between tensor and its gradient
     Context: 'tensor dtype: {value.dtype}; grad dtype: {safe_grad(value).dtype}'
     Explanation: Inconsistent dtype between tensor and its gradient. This can happen
@@ -1581,7 +1586,7 @@ GB0207:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0208:
+GB0209:
 -   Gb_type: failed to broadcast when attempting Tensor comparison op
     Context: '{op.__name__}({left}, {right})'
     Explanation: Dynamo was unable to broad cast the arguments {left}, {right} when
@@ -1590,7 +1595,7 @@ GB0208:
     -   Dynamo has detected that tracing the code will result in an error when running
         in eager. Please double check that your code doesn't contain a similar error
         when actually running eager/uncompiled.
-GB0209:
+GB0210:
 -   Gb_type: failed to call dict.fromkeys()
     Context: '{user_cls.__name__}.fromkeys(): {args} {kwargs}'
     Explanation: Failed to call {user_cls.__name__}.fromkeys() because arguments could
@@ -1598,7 +1603,7 @@ GB0209:
     Hints:
     -   Manually convert the argument to a list.
     -   Ensure all keys are hashable.
-GB0210:
+GB0211:
 -   Gb_type: failed to call str() on user defined object
     Context: str(arg)
     Explanation: User defined object has no __str__ or __repr__ method
@@ -1606,13 +1611,13 @@ GB0210:
     -   Dynamo has detected that tracing the code will result in an error when running
         in eager. Please double check that your code doesn't contain a similar error
         when actually running eager/uncompiled.
-GB0211:
+GB0212:
 -   Gb_type: failed to convert numpy.ndarray to Tensor
     Context: str(value)
     Explanation: Exception encountered when attempting to convert numpy.ndarray to
       Tensor
     Hints: []
-GB0212:
+GB0213:
 -   Gb_type: functools.partial() with non-literal keyword
     Context: 'non-literal keyword: {k}'
     Explanation: functools.partial() expects literal/string keywords
@@ -1620,7 +1625,7 @@ GB0212:
     -   Dynamo has detected that tracing the code will result in an error when running
         in eager. Please double check that your code doesn't contain a similar error
         when actually running eager/uncompiled.
-GB0213:
+GB0214:
 -   Gb_type: functools.wraps
     Context: '{fn}'
     Explanation: "`torch.compile` can't trace `functools.wraps` on functions defined
@@ -1629,26 +1634,26 @@ GB0213:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0214:
+GB0215:
 -   Gb_type: getattr with no source
     Context: var_getattr {self} {name}
     Explanation: Dynamo does not know how to access an attribute on an `nn.Module`
       instance that lacks a source. This is usually an internal error in Dynamo.
     Hints:
     -   This is likely to be a Dynamo bug. Please report an issue to PyTorch.
-GB0215:
+GB0216:
 -   Gb_type: getattr() on nn.Module with pending mutation
     Context: getattr({obj}, {name}, {default})
     Explanation: Intentionally graph breaking on getattr() on a nn.Module with a pending
       mutation
     Hints: []
-GB0216:
+GB0217:
 -   Gb_type: getattr() with non-constant name argument
     Context: getattr({obj}, {name_var}, {default})
     Explanation: getattr() with non-constant name argument is not supported
     Hints:
     -   Ensure the name argument of getattr() is a string
-GB0217:
+GB0218:
 -   Gb_type: id() with unsupported args
     Context: str(args)
     Explanation: Dynamo doesn't know how to trace id() call with args {args}
@@ -1658,7 +1663,7 @@ GB0217:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0218:
+GB0219:
 -   Gb_type: improper torch.get_device_module arguments
     Context: args={args}, kwargs={kwargs}
     Explanation: torch.get_device_module accepts 1 optional argument `device`
@@ -1666,19 +1671,19 @@ GB0218:
     -   Dynamo has detected that tracing the code will result in an error when running
         in eager. Please double check that your code doesn't contain a similar error
         when actually running eager/uncompiled.
-GB0219:
+GB0220:
 -   Gb_type: input iterator to itertools.cycle has too many items
     Context: next({self})
     Explanation: 'Has reached internal Dynamo max iterator limit: {MAX_ITERATOR_LIMIT}'
     Hints: []
-GB0220:
+GB0221:
 -   Gb_type: invalid call to builtin op handler
     Context: 'invalid args to {self_handler}: {args} {kwargs}'
     Explanation: Encountered TypeError when trying to handle op {fn.__name__}
     Hints:
     -   This graph break may be difficult to debug. Please report an issue to PyTorch
         for assistance.
-GB0221:
+GB0222:
 -   Gb_type: isinstance() called on user defined object with C extensions
     Context: isinstance({arg}, {isinstance_type})
     Explanation: User-defined object with C extensions can have torch.Tensor attributes;
@@ -1687,7 +1692,7 @@ GB0221:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0222:
+GB0223:
 -   Gb_type: issubclass() with non-constant arguments
     Context: issubclass({left_ty}, {right_ty})
     Explanation: issubclass() with non-constant arguments not supported.
@@ -1696,7 +1701,7 @@ GB0222:
     -   Dynamo has detected that tracing the code will result in an error when running
         in eager. Please double check that your code doesn't contain a similar error
         when actually running eager/uncompiled.
-GB0223:
+GB0224:
 -   Gb_type: key not found in dict
     Context: Key {arg.value}
     Explanation: msg
@@ -1705,20 +1710,20 @@ GB0223:
     -   Dynamo has detected that tracing the code will result in an error when running
         in eager. Please double check that your code doesn't contain a similar error
         when actually running eager/uncompiled.
-GB0224:
+GB0225:
 -   Gb_type: list elements are pointing to the list itself
     Context: ''
     Explanation: Dynamo does not support lists whose items reference to itself
     Hints:
     -   Avoid using self referential list
-GB0225:
+GB0226:
 -   Gb_type: mapping proxy affected by dictionary mutation
     Context: 'Source: {self.source}, Dict mutation detected'
     Explanation: msg
     Hints:
     -   Avoid modifying dictionaries that might be referenced by mapping proxy objects
     -   Or avoid using the mapping proxy objects after modifying its underlying dictionary
-GB0226:
+GB0227:
 -   Gb_type: mapping proxy cannot be reconstructed
     Context: 'Source: {self.source}'
     Explanation: msg
@@ -1727,12 +1732,12 @@ GB0226:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0227:
+GB0228:
 -   Gb_type: missing BUILD_SET handler
     Context: ''
     Explanation: Missing BUILD_SET bytecode handler (for testing purposes).
     Hints: []
-GB0228:
+GB0229:
 -   Gb_type: namedtuple construction
     Context: args={args}, kwargs={kwargs}
     Explanation: '`torch.compile` only support certain input types for namedtuple'
@@ -1740,7 +1745,7 @@ GB0228:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0229:
+GB0230:
 -   Gb_type: ndarray.astype(object)
     Context: call_method {self} {name} {args} {kwargs}
     Explanation: "`ndarray.astype('O')` or `ndarray.astype(object)` is not supported
@@ -1749,25 +1754,25 @@ GB0229:
     Hints:
     -   This graph break is fundamental - it is unlikely that Dynamo will ever be
         able to trace through your code. Consider finding a workaround.
-GB0230:
+GB0231:
 -   Gb_type: non-const argument in nn.Module method
     Context: 'call_method: {self} {name} {args} {kwargs}'
     Explanation: Dynamo does not support calling method `{name}` of ``nn.Module``
       {module} with non-constant arguments.
     Hints: []
-GB0231:
+GB0232:
 -   Gb_type: non-const keys in dict_keys
     Context: 'non-const keys: {[k for k in value if not ConstantVariable.is_literal(k)]}'
     Explanation: Dynamo expects dict_keys keys to be constants.
     Hints:
     -   Ensure your dict_keys keys are constants (e.g. int, float, strings)
-GB0232:
+GB0233:
 -   Gb_type: non-const keys in mappingproxy
     Context: 'non-const keys: {[k for k in value.keys() if not ConstantVariable.is_literal(k)]}'
     Explanation: Dynamo expects mappingproxy keys to be constants.
     Hints:
     -   Ensure your mappingproxy keys are constants (e.g. int, float, strings)
-GB0233:
+GB0234:
 -   Gb_type: non-constant `requires_grad` argument to `torch.nn.Parameter`
     Context: requires_grad={requires_grad}
     Explanation: Dynamo does not support this.
@@ -1776,7 +1781,7 @@ GB0233:
     -   Dynamo has detected that tracing the code will result in an error when running
         in eager. Please double check that your code doesn't contain a similar error
         when actually running eager/uncompiled.
-GB0234:
+GB0235:
 -   Gb_type: non-generator contextlib.contextmanager
     Context: str(self.vt.get_code())
     Explanation: Cannot compile function decorated with `@contextlib.contextmanager`
@@ -1784,14 +1789,14 @@ GB0234:
     Hints:
     -   Use `yield` in the function body instead of `return`.
     -   Remove the `@contextlib.contextmanager` decorator.
-GB0235:
+GB0236:
 -   Gb_type: proxy not set
     Context: as_proxy {self}
     Explanation: Dynamo requires the autograd.Function context to be initialized with
       a proxy.
     Hints:
     -   This is likely to be a Dynamo bug. Please report an issue to PyTorch.
-GB0236:
+GB0237:
 -   Gb_type: setattr() on Tensor.requires_grad
     Context: setattr({obj}, {name}, {val})
     Explanation: setattr() on Tensor.requires_grad not supported. Mutating requires_grad
@@ -1801,7 +1806,7 @@ GB0236:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0237:
+GB0238:
 -   Gb_type: sort with non-constant keys
     Context: str(first_non_constant_key)
     Explanation: 'Cannot perform sort with non-constant key. First non-constant key
@@ -1809,14 +1814,14 @@ GB0237:
       but we can sort ints.'
     Hints:
     -   Use something else as the key.
-GB0238:
+GB0239:
 -   Gb_type: torch.* op returned non-Tensor
     Context: 'example_value type: {typestr(example_value)}; op: {proxy.node.op}; target:
       {proxy.node.target}'
     Explanation: torch.* ops that return a non-Tensor cannot be traced into the Dynamo
       FX graph output
     Hints: []
-GB0239:
+GB0240:
 -   Gb_type: torch.autograd._unsafe_preserve_version_counter escaped from compiled
       region
     Context: str(self)
@@ -1826,7 +1831,7 @@ GB0239:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0240:
+GB0241:
 -   Gb_type: torch.compile call with > 1 args
     Context: args={args}, kwargs={kwargs}
     Explanation: Attempted to call `torch.compile` with > 1 args. Dynamo does not
@@ -1836,14 +1841,14 @@ GB0240:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0241:
+GB0242:
 -   Gb_type: torch.distributed package is not available!
     Context: ''
     Explanation: The PyTorch package doesn't include torch.distributed when building
       from source.
     Hints:
     -   Set USE_DISTRIBUTED=1 to enable it when building PyTorch from source.
-GB0242:
+GB0243:
 -   Gb_type: torch.nn.Module with a non-function custom __getattr__
     Context: var_getattr {self} {name}
     Explanation: Dynamo detected a nn.Module object with a custom `__getattr__` method,
@@ -1857,7 +1862,7 @@ GB0242:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0243:
+GB0244:
 -   Gb_type: torch.profiler object escaped from compiled region
     Context: str(self)
     Explanation: Dynamo doesn't support compiling a region that returns a torch.profiler
@@ -1866,7 +1871,7 @@ GB0243:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0244:
+GB0245:
 -   Gb_type: unimplemented builtin op on tensor arguments
     Context: 'partial tensor op: {self} {args} {kwargs}'
     Explanation: Dynamo does not know how to trace builtin operator {self.fn} with
@@ -1875,7 +1880,7 @@ GB0244:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0245:
+GB0246:
 -   Gb_type: unsupported SymNode comparison op
     Context: '{op.__name__}({left}, {right})'
     Explanation: Dynamo does not support the comparison op {op.__name__} with SymNode
@@ -1884,7 +1889,7 @@ GB0245:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0246:
+GB0247:
 -   Gb_type: unsupported Tensor comparison op
     Context: '{op.__name__}({left}, {right})'
     Explanation: Dynamo does not support the comparison op {op.__name__} with Tensor
@@ -1893,7 +1898,7 @@ GB0246:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0247:
+GB0248:
 -   Gb_type: unsupported grid type for triton hop check_grid
     Context: grid type = {type(grid)}
     Explanation: '`torch.compile` only supports list-like grid for check_grid'
@@ -1901,7 +1906,7 @@ GB0247:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0248:
+GB0249:
 -   Gb_type: unsupported hasattr operation
     Context: Class {self.user_cls}
     Explanation: msg
@@ -1910,7 +1915,7 @@ GB0248:
     -   It may be possible to write Dynamo tracing rules for this code. Please report
         an issue to PyTorch if you encounter this graph break often and it is causing
         performance issues.
-GB0249:
+GB0250:
 -   Gb_type: unsupported index(Tensor)
     Context: ''
     Explanation: Dynamo does not support tracing builtin index() on a Tensor

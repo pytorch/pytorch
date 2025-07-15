@@ -2,15 +2,16 @@
 
 import argparse
 import ast
-import re
-import sys
-import subprocess
-import tempfile
 import os
+import re
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import LiteralScalarString
+
 
 yaml = YAML()
 yaml.default_flow_style = False
@@ -46,16 +47,17 @@ def get_editor_input(prompt_text="", existing_content=""):
     Returns the content entered by the user.
     """
 
-    editor = os.environ.get('EDITOR', 'vim')
+    editor = os.environ.get("EDITOR", "vim")
 
-    with tempfile.NamedTemporaryFile(mode='w+', suffix='.md', delete=False) as tf:
+    with tempfile.NamedTemporaryFile(mode="w+", suffix=".md", delete=False) as tf:
         if prompt_text:
             tf.write(f"# {prompt_text}\n")
             tf.write("# Please enter your additional information below this line.\n")
             tf.write("# Lines starting with # will be ignored.\n")
             tf.write("# You can include code blocks, explanations, examples, etc.\n")
-            tf.write("# Tip: For code, you can use markdown code blocks with ```python\n\n")
-
+            tf.write(
+                "# Tip: For code, you can use markdown code blocks with ```python\n\n"
+            )
 
         if existing_content:
             tf.write(existing_content)
@@ -63,15 +65,16 @@ def get_editor_input(prompt_text="", existing_content=""):
 
         tf.flush()
 
-
         try:
             subprocess.call([editor, tf.name])
         except FileNotFoundError:
             print(f"Editor '{editor}' not found. Falling back to vi.")
             try:
-                subprocess.call(['vi', tf.name])
+                subprocess.call(["vi", tf.name])
             except FileNotFoundError:
-                print("No suitable editor found. Please set the EDITOR environment variable.")
+                print(
+                    "No suitable editor found. Please set the EDITOR environment variable."
+                )
                 os.unlink(tf.name)
                 return None
 
@@ -79,9 +82,9 @@ def get_editor_input(prompt_text="", existing_content=""):
         content = tf.read()
 
         # Remove comment lines and clean up
-        lines = content.split('\n')
-        cleaned_lines = [line for line in lines if not line.strip().startswith('#')]
-        result = '\n'.join(cleaned_lines).strip()
+        lines = content.split("\n")
+        cleaned_lines = [line for line in lines if not line.strip().startswith("#")]
+        result = "\n".join(cleaned_lines).strip()
 
         os.unlink(tf.name)
 
@@ -235,7 +238,7 @@ def find_unimplemented_v2_calls(path, dynamo_dir=None):
     return results
 
 
-def cmd_add_new_gb_type(gb_type, file_path, registry_path, use_additional_info=False):
+def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=False):
     """
     Add a new graph break type to the registry.
 
@@ -243,7 +246,7 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, use_additional_info=F
         gb_type: The graph break type to add
         file_path: Path to the file containing the unimplemented_v2 call
         registry_path: Path to the registry YAML file
-        use_additional_info: Whether to open editor for additional info input
+        additional_info: Whether to open editor for additional info input
     """
     registry_path = Path(registry_path)
     reg = load_registry(registry_path)
@@ -265,7 +268,7 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, use_additional_info=F
         return False
 
     # Handle additional info input via editor
-    if use_additional_info:
+    if additional_info:
         print(f"Opening editor for additional information for '{gb_type}'...")
         editor_content = get_editor_input(f"Additional information for {gb_type}")
         if editor_content:
@@ -284,7 +287,11 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, use_additional_info=F
             "Context": matching_call["context"],
             "Explanation": matching_call["explanation"],
             "Hints": matching_call["hints"] or [],
-            **({"Additional_Info": additional_info_list} if additional_info_list else {}),
+            **(
+                {"Additional_Info": additional_info_list}
+                if additional_info_list
+                else {}
+            ),
         }
     ]
 
@@ -300,7 +307,7 @@ def cmd_update_gb_type(
     file_path,
     registry_path,
     new_gb_type=None,
-    use_additional_info=False,
+    additional_info=False,
 ):
     """
     Update an existing graph break type in the registry by adding a new version
@@ -311,7 +318,7 @@ def cmd_update_gb_type(
         file_path: Path to the file containing the updated unimplemented_v2 call
         registry_path: Path to the registry YAML file
         new_gb_type: Optional new gb_type name to replace the old one
-        use_additional_info: Whether to open editor for additional info input
+        additional_info: Whether to open editor for additional info input
     """
     registry_path = Path(registry_path)
     reg = load_registry(registry_path)
@@ -348,11 +355,15 @@ def cmd_update_gb_type(
     new_additional_info_list = []
     added_new_info = False
 
-    if use_additional_info:
+    if additional_info:
         existing_additional_info_list = reg[gb_id][0].get("Additional_Info", [])
-        print(f"Opening editor for additional information for '{matching_call['gb_type']}'...")
+        print(
+            f"Opening editor for additional information for '{matching_call['gb_type']}'..."
+        )
 
-        editor_content = get_editor_input(f"Additional information for {matching_call['gb_type']}")
+        editor_content = get_editor_input(
+            f"Additional information for {matching_call['gb_type']}"
+        )
 
         if editor_content:
             new_additional_info_list = existing_additional_info_list.copy()
@@ -436,8 +447,12 @@ def test_verify_gb_id_mapping(dynamo_dir, registry_path):
         print(
             "  • GB_TYPE: The graph break type string used in your unimplemented_v2 call"
         )
-        print("  • PATH_TO_FILE: Path to the file containing your new unimplemented_v2 call")
-        print("  • --additional-info: Open an editor to enter detailed additional information")
+        print(
+            "  • PATH_TO_FILE: Path to the file containing your new unimplemented_v2 call"
+        )
+        print(
+            "  • --additional-info: Open an editor to enter detailed additional information"
+        )
 
         print(
             '- If you updated an existing callsite: python tools/dynamo/gb_id_mapping.py update "GB_TYPE" PATH_TO_FILE '
@@ -446,7 +461,9 @@ def test_verify_gb_id_mapping(dynamo_dir, registry_path):
         print("  • GB_TYPE: The original graph break type to update")
         print("  • PATH_TO_FILE: Path to the file containing the updated call")
         print("  • --new_gb_type: New name if you changed the graph break type")
-        print("  • --additional-info: Open an editor to enter detailed additional information")
+        print(
+            "  • --additional-info: Open an editor to enter detailed additional information"
+        )
         print(
             "- Recreate registry (Only do this if a complete reset is needed): python tools/dynamo/gb_id_mapping.py create"
         )
@@ -517,8 +534,9 @@ def main():
         "file_path", help="Path to the file containing the unimplemented_v2 call"
     )
     add_parser.add_argument(
-        "--additional-info", action="store_true",
-        help="Open editor to add detailed additional information"
+        "--additional-info",
+        action="store_true",
+        help="Open editor to add detailed additional information",
     )
 
     update_parser = subparsers.add_parser(
@@ -533,8 +551,9 @@ def main():
         "--new_gb_type", help="New gb_type name if it has changed", default=None
     )
     update_parser.add_argument(
-        "--additional-info", action="store_true",
-        help="Open editor to add detailed additional information"
+        "--additional-info",
+        action="store_true",
+        help="Open editor to add detailed additional information",
     )
 
     verify_parser = subparsers.add_parser(
