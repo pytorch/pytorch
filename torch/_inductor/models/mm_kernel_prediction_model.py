@@ -86,7 +86,9 @@ class NeuralNetwork(nn.Module):
 
 
 def get_nn_x(
-    df: pd.DataFrame, mean: torch.Tensor | None = None, std: torch.Tensor | None = None
+    df: pd.DataFrame,
+    mean: Optional[torch.Tensor] = None,
+    std: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Standardize the data and convert it to a tensor."""
     x_df = df[
@@ -360,7 +362,7 @@ import functools
 
 
 @functools.lru_cache
-def get_model() -> ModelWrapper | None:
+def get_model() -> Optional[ModelWrapper]:
     if not torch.cuda.is_available():
         return None
     return ModelWrapper()
