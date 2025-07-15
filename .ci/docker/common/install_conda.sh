@@ -6,7 +6,7 @@ set -ex
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"  # @lint-ignore
   CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
-  
+
   MAJOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 1)
   MINOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 2)
 
@@ -48,7 +48,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   else
     export SYSROOT_DEP="sysroot_linux-64=2.17"
   fi
-  
+
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
