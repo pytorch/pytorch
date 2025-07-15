@@ -181,7 +181,7 @@ cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 # Note: compiling entry and kernel separately may have a non-negligible impact on the performance.
 # see https://github.com/pytorch/pytorch/issues/156037
 cpp_wrapper_build_separate: bool = (
-    os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "0") == "1"
+    os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "1") == "1"
 )
 
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
@@ -1060,11 +1060,6 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_FALLBACK_SCATTER_REDUCE_SUM", "1") == "1"
     )
 
-    # Use funsafe-math-optimizations when compiling
-    enable_unsafe_math_opt_flag = (
-        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_UNSAFE_MATH_OPT_FLAG", "0") == "1"
-    )
-
     # Use ffp-contract when compiling
     # Options: "off" (default), "on", "fast"
     # Per https://godbolt.org/z/bf4bvfc9r , clang/gcc has different behavior for "fast"
@@ -1350,9 +1345,9 @@ class aot_inductor:
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
-    # to use which cpp compiler optimization level, default to O1
-    compile_wrapper_opt_level = os.environ.get(
-        "AOT_INDUCTOR_COMPILE_WRAPPER_OPT_LEVEL", "O1"
+    # to use which cpp compiler optimization level, default to O2.
+    compile_wrapper_opt_level: str = os.environ.get(
+        "AOT_INDUCTOR_COMPILE_WRAPPER_OPT_LEVEL", "O2"
     )
 
     # option for debug printing/saving for intermediate tensor values for aot inductor
@@ -1464,7 +1459,7 @@ class aot_inductor:
     compile_standalone: bool = False
 
     # Whether to enable link-time-optimization
-    enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
+    enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "1") == "1"
 
 
 class cuda:
