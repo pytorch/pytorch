@@ -4,6 +4,8 @@
 # python test/distributed/test_cupy_as_tensor.py
 
 import os
+from dataclasses import dataclass
+
 import torch
 from torch.multiprocessing.reductions import reduce_tensor
 from torch.testing._internal.common_distributed import MultiProcContinousTest
@@ -12,7 +14,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfRocm,
 )
-from dataclasses import dataclass
 
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -30,14 +31,18 @@ class CupyWrapper:
     def __cuda_array_interface__(self):
         return {
             "shape": (self.size_in_bytes,),
-            "typestr": '|u1',
+            "typestr": "|u1",
             "data": (self.data_ptr, False),
             "version": 3,
         }
 
 
-def from_buffer(data_ptr: int, size_in_bytes: int, device: str, dtype: torch.dtype) -> torch.Tensor:
-    data = torch.as_tensor(CupyWrapper(data_ptr, size_in_bytes), device=device).view(dtype)
+def from_buffer(
+    data_ptr: int, size_in_bytes: int, device: str, dtype: torch.dtype
+) -> torch.Tensor:
+    data = torch.as_tensor(CupyWrapper(data_ptr, size_in_bytes), device=device).view(
+        dtype
+    )
     assert data.data_ptr() == data_ptr
     return data
 
@@ -79,7 +84,12 @@ class CupyAsTensorTest(MultiProcContinousTest):
             args = list(args)
             args[6] = self.rank
             ipc_tensor = func(*args)
-            tensor = from_buffer(ipc_tensor.data_ptr(), ipc_tensor.numel() * ipc_tensor.element_size(), self.device, ipc_tensor.dtype)
+            tensor = from_buffer(
+                ipc_tensor.data_ptr(),
+                ipc_tensor.numel() * ipc_tensor.element_size(),
+                self.device,
+                ipc_tensor.dtype,
+            )
 
         torch.distributed.barrier()
         if self.rank == 1:
