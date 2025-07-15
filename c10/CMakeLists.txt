@@ -76,6 +76,9 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
 
   # ---[ Dependency of c10
+  # Moving earlier than usages of C10_USE_* as headeronly will set those
+  target_link_libraries(c10 PUBLIC headeronly)
+
   if(C10_USE_GFLAGS)
     target_link_libraries(c10 PUBLIC gflags)
   endif()
@@ -84,7 +87,6 @@ if(NOT BUILD_LIBTORCHLESS)
     target_link_libraries(c10 PUBLIC glog::glog)
   endif()
 
-  target_link_libraries(c10 PUBLIC headeronly)
   target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
   target_link_libraries(c10 PRIVATE nlohmann)
   target_link_libraries(c10 PRIVATE moodycamel)
