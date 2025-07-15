@@ -4870,13 +4870,13 @@ class AOTInductorTestsTemplate:
         a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
 
-        if HAS_GPU:
+        if self.device == "mps":
+            kernel_calls = [("aoti_torch_mps_addmm_out", 2)]
+        elif self.device == GPU_TYPE:
             kernel_calls = [
                 ("triton_poi_fused_0", 1),
                 (f"aoti_torch_{GPU_TYPE}_addmm_out", 2),
             ]
-        elif self.device == "mps":
-            kernel_calls = [("aoti_torch_mps_addmm_out", 2)]
         else:
             kernel_calls = [("aoti_torch_cpu_addmm_out", 2)]
 
