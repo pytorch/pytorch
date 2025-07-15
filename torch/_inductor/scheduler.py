@@ -2161,6 +2161,9 @@ class Scheduler:
                 self, self.nodes, config.simplefsdp.estimate_verbose
             )
         if config.simplefsdp.enable_bucket_ir:
+            assert not config.allow_buffer_reuse, (
+                "bucketing algorithm requires torch._inductor.config.allow_buffer_reuse to be False"
+            )
             self.nodes = bucket.bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
             )
