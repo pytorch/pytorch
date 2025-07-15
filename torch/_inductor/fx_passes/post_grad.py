@@ -660,19 +660,19 @@ def lazy_init():
         extra_check=prepare_softmax_extra_check,
     )
 
-    # for dtype in [torch.bfloat16, torch.float32]:
-    #     register_replacement(
-    #         addmm_gelu_pattern,
-    #         addmm_gelu_replacement,
-    #         [
-    #             torch.empty(5, dtype=dtype),
-    #             torch.empty(3, 4, dtype=dtype),
-    #             torch.empty(4, 5, dtype=dtype),
-    #         ],
-    #         trace_fn=fwd_only,
-    #         pass_dicts=pass_patterns[2],
-    #         extra_check=is_valid_addmm_activation_fusion,
-    #     )
+    for dtype in [torch.bfloat16, torch.float32]:
+        register_replacement(
+            addmm_gelu_pattern,
+            addmm_gelu_replacement,
+            [
+                torch.empty(5, dtype=dtype),
+                torch.empty(3, 4, dtype=dtype),
+                torch.empty(4, 5, dtype=dtype),
+            ],
+            trace_fn=fwd_only,
+            pass_dicts=pass_patterns[2],
+            extra_check=is_valid_addmm_activation_fusion,
+        )
 
     register_replacement(
         addmm_relu_pattern,
