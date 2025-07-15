@@ -43,6 +43,7 @@ class ArgInfo:
 @clear_on_fresh_cache
 class CUDATemplate(KernelTemplate):
     index_counter = itertools.count()
+    # dict of cache key to (code, size_args)
     code_cache: dict[str, tuple[str, tuple[int, ...]]] = {}
     cache_clear = staticmethod(code_cache.clear)
 
