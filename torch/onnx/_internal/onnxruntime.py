@@ -944,9 +944,6 @@ class OrtBackend:
             # It's first time seeing such as graph. Let's make a new session
             # (type: onnxruntime.InferenceSession) for it.
 
-            graph_module = passes.MovePlaceholderToFront(
-                graph_module,
-            ).run()
             # Generate reference outputs. They are used to indicate output
             # tensors' types and devices when calling ORT.
             #
