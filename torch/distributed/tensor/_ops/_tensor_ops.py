@@ -1074,7 +1074,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     ],
     RuntimeSchemaInfo(1),
 )
-def split_strategy(op_schema: OpSchema) -> TupleStrategy:
+def split_strategy(op_schema: OpSchema) -> OpStrategy:
     input_strategy = op_schema.args_schema[0]
     split_size_or_sections = op_schema.args_schema[1]
     assert isinstance(input_strategy, OpStrategy)
@@ -1097,23 +1097,27 @@ def split_strategy(op_schema: OpSchema) -> TupleStrategy:
     )
     assert isinstance(output_size_list, Sized)
 
-    split_strategies = []
+    all_strategies = []
+    for strategy in input_strategy.strategies:
+        spec = strategy.output_spec
+        placements = spec.placements
+        if is_tensor_dim_sharded(spec, dim=dim):
+            # if the input is sharded on the split dim, we need to unshard it
+            placements = unshard_tensor_dim(spec.placements, dim=dim)
 
-    for _ in range(len(output_size_list)):
-        op_strategy = OpStrategy([])
-
-        for strategy in input_strategy.strategies:
-            spec = strategy.output_spec
-            placements = spec.placements
-            if is_tensor_dim_sharded(spec, dim=dim):
-                # if the input is sharded on the split dim, we need to unshard it
-                placements = unshard_tensor_dim(spec.placements, dim=dim)
-
-            spec = DTensorSpec(spec.mesh, placements)
-
-            op_strategy.strategies.append(
-                OpSpec(output_specs=spec, input_specs=([spec]))
+        input_spec = DTensorSpec(spec.device_mesh, placements, spec.tensor_meta)
+        output_specs = tuple(
+            DTensorSpec(spec.device_mesh, placements)
+            for _ in range(len(output_size_list))
+        )
+        all_strategies.append(
+            OpSpec(
+                output_specs=output_specs,
+                input_specs=(input_spec,),
+                redistribute_cost=[
+                    generate_redistribute_costs(input_strategy, input_spec)
+                ],
             )
-        split_strategies.append(op_strategy)
+        )
 
-    return TupleStrategy(split_strategies)
+    return OpStrategy(all_strategies)

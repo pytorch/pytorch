@@ -7,7 +7,6 @@
 #include <atomic>
 #include <mutex>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 namespace c10::CachingAllocator {
@@ -181,7 +180,7 @@ class C10_API AcceleratorAllocatorConfig {
 
   // Returns the vector of division factors used for rounding up allocation
   // sizes. These divisions apply to size intervals between 1MB and 64GB.
-  static const std::vector<size_t>& roundup_power2_divisions() {
+  static std::vector<size_t> roundup_power2_divisions() {
     return instance().roundup_power2_divisions_;
   }
 
@@ -220,13 +219,6 @@ class C10_API AcceleratorAllocatorConfig {
     return instance().last_allocator_settings_;
   }
 
-  // Returns the set of valid keys for the allocator configuration.
-  // This set is used to validate the presence and correctness of keys in
-  // device-specific configuration parsers.
-  static const std::unordered_set<std::string>& getKeys() {
-    return instance().keys_;
-  }
-
   // Parses the environment variable `env` to update the allocator settings.
   // If the environment variable is not set, it does nothing.
   // The configuration string should be a comma-separated list of key-value
@@ -235,24 +227,16 @@ class C10_API AcceleratorAllocatorConfig {
   // "max_split_size_mb:100,max_non_split_rounding_mb:20,garbage_collection_threshold:0.5,roundup_power2_divisions:[64:8,256:4,1024:4,>:1],expandable_segments:true,pinned_use_background_threads:true"
   void parseArgs(const std::string& env);
 
-  // Registers a device-specific configuration parser hook and its key. This
-  // allows backends to parse additional device-specific configuration options
-  // from the environment variable. The hook should be a function that takes a
-  // string (the environment variable value) and parses it to set
-  // device-specific configuration options. The hook will be called when the
-  // environment variable is parsed. If a hook is already registered, it will be
-  // replaced with the new one.
+  // Registers a device-specific configuration parser hook. This allows
+  // backends to parse additional device-specific configuration options from the
+  // environment variable. The hook should be a function that takes a string
+  // (the environment variable value) and parses it to set device-specific
+  // configuration options.
+  // The hook will be called when the environment variable is parsed.
+  // If a hook is already registered, it will be replaced with the new one.
   void registerDeviceConfigParserHook(
-      std::function<void(const std::string&)>&& hook,
-      const std::unordered_set<std::string>& keys) {
+      std::function<void(const std::string&)> hook) {
     device_config_parser_hook_ = std::move(hook);
-    for (auto& key : keys) {
-      TORCH_CHECK(
-          keys_.insert(key).second,
-          "Duplicated key '",
-          key,
-          "' found in device-specific configuration parser hook registration");
-    }
   }
 
   // Calls the registered device-specific configuration parser hook with the
@@ -325,17 +309,6 @@ class C10_API AcceleratorAllocatorConfig {
   // This allows backends (e.g., CUDA, XPU) to register a custom parser for
   // their own environment configuration extensions.
   std::function<void(const std::string&)> device_config_parser_hook_{nullptr};
-
-  // A set of valid configuration keys, including both common and
-  // device-specific options. This set is used to validate the presence and
-  // correctness of keys during parsing.
-  std::unordered_set<std::string> keys_{
-      "max_split_size_mb",
-      "max_non_split_rounding_mb",
-      "garbage_collection_threshold",
-      "roundup_power2_divisions",
-      "expandable_segments",
-      "pinned_use_background_threads"};
 };
 
 C10_API inline void setAllocatorSettings(const std::string& env) {
@@ -349,22 +322,16 @@ C10_API inline std::string getAllocatorSettings() {
 
 struct DeviceConfigParserHookRegistry {
   explicit DeviceConfigParserHookRegistry(
-      std::function<void(const std::string&)>&& hook,
-      const std::unordered_set<std::string>& keys) {
+      std::function<void(const std::string&)> hook) {
     AcceleratorAllocatorConfig::instance().registerDeviceConfigParserHook(
-        std::move(hook), keys);
+        std::move(hook));
   }
 };
 
-// Assume each config parser has `parseArgs` and `getKeys` methods
-#define REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(parser_cls)      \
+#define REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(hook)            \
   namespace {                                                 \
   static at::CachingAllocator::DeviceConfigParserHookRegistry \
-      g_device_config_parse_hook_registry_instance(           \
-          [](const std::string& env) {                        \
-            parser_cls::instance().parseArgs(env);            \
-          },                                                  \
-          parser_cls::getKeys());                             \
+      g_device_config_parse_hook_registry_instance(hook);     \
   }
 
 } // namespace c10::CachingAllocator
