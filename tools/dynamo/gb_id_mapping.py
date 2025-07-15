@@ -2,10 +2,20 @@
 
 import argparse
 import ast
-import json
 import re
 import sys
+import subprocess
+import tempfile
+import os
 from pathlib import Path
+
+from ruamel.yaml import YAML
+from ruamel.yaml.scalarstring import LiteralScalarString
+
+yaml = YAML()
+yaml.default_flow_style = False
+yaml.map_indent = 2
+yaml.sequence_indent = 4
 
 
 def get_source_segment(source, node):
@@ -15,18 +25,67 @@ def get_source_segment(source, node):
 def load_registry(path):
     if path.exists():
         with path.open() as f:
-            return json.load(f)
+            return yaml.load(f) or {}
     return {}
 
 
 def save_registry(reg, path):
+    """Save registry with clean formatting using ruamel.yaml."""
     with path.open("w") as f:
-        json.dump(reg, f, indent=2)
+        yaml.dump(reg, f)
 
 
 def next_gb_id(reg):
     ids = [int(x[2:]) for x in reg if x.startswith("GB") and x[2:].isdigit()]
     return f"GB{(max(ids, default=0) + 1):04d}"
+
+
+def get_editor_input(prompt_text="", existing_content=""):
+    """
+    Opens the user's preferred editor (vim by default) to get multi-line input.
+    Returns the content entered by the user.
+    """
+
+    editor = os.environ.get('EDITOR', 'vim')
+
+    with tempfile.NamedTemporaryFile(mode='w+', suffix='.md', delete=False) as tf:
+        if prompt_text:
+            tf.write(f"# {prompt_text}\n")
+            tf.write("# Please enter your additional information below this line.\n")
+            tf.write("# Lines starting with # will be ignored.\n")
+            tf.write("# You can include code blocks, explanations, examples, etc.\n")
+            tf.write("# Tip: For code, you can use markdown code blocks with ```python\n\n")
+
+
+        if existing_content:
+            tf.write(existing_content)
+            tf.write("\n")
+
+        tf.flush()
+
+
+        try:
+            subprocess.call([editor, tf.name])
+        except FileNotFoundError:
+            print(f"Editor '{editor}' not found. Falling back to vi.")
+            try:
+                subprocess.call(['vi', tf.name])
+            except FileNotFoundError:
+                print("No suitable editor found. Please set the EDITOR environment variable.")
+                os.unlink(tf.name)
+                return None
+
+        tf.seek(0)
+        content = tf.read()
+
+        # Remove comment lines and clean up
+        lines = content.split('\n')
+        cleaned_lines = [line for line in lines if not line.strip().startswith('#')]
+        result = '\n'.join(cleaned_lines).strip()
+
+        os.unlink(tf.name)
+
+        return result if result else None
 
 
 def clean_string(s):
@@ -176,14 +235,15 @@ def find_unimplemented_v2_calls(path, dynamo_dir=None):
     return results
 
 
-def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None):
+def cmd_add_new_gb_type(gb_type, file_path, registry_path, use_additional_info=False):
     """
     Add a new graph break type to the registry.
 
     Args:
         gb_type: The graph break type to add
         file_path: Path to the file containing the unimplemented_v2 call
-        registry_path: Path to the registry JSON file
+        registry_path: Path to the registry YAML file
+        use_additional_info: Whether to open editor for additional info input
     """
     registry_path = Path(registry_path)
     reg = load_registry(registry_path)
@@ -204,6 +264,19 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None)
         )
         return False
 
+    # Handle additional info input via editor
+    if use_additional_info:
+        print(f"Opening editor for additional information for '{gb_type}'...")
+        editor_content = get_editor_input(f"Additional information for {gb_type}")
+        if editor_content:
+            # Start with a list containing the new content
+            additional_info_list = [LiteralScalarString(editor_content)]
+        else:
+            print("No additional information provided.")
+            additional_info_list = []
+    else:
+        additional_info_list = []
+
     gb_id = next_gb_id(reg)
     reg[gb_id] = [
         {
@@ -211,12 +284,14 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None)
             "Context": matching_call["context"],
             "Explanation": matching_call["explanation"],
             "Hints": matching_call["hints"] or [],
-            **({"Additional_Info": [additional_info]} if additional_info else {}),
+            **({"Additional_Info": additional_info_list} if additional_info_list else {}),
         }
     ]
 
     save_registry(reg, registry_path)
     print(f"Added {gb_type} to registry with ID {gb_id}")
+    if additional_info_list:
+        print("Additional information included in registry entry.")
     return True
 
 
@@ -225,7 +300,7 @@ def cmd_update_gb_type(
     file_path,
     registry_path,
     new_gb_type=None,
-    additional_info=None,
+    use_additional_info=False,
 ):
     """
     Update an existing graph break type in the registry by adding a new version
@@ -234,8 +309,9 @@ def cmd_update_gb_type(
     Args:
         old_gb_type: The current graph break type to update
         file_path: Path to the file containing the updated unimplemented_v2 call
-        registry_path: Path to the registry JSON file
+        registry_path: Path to the registry YAML file
         new_gb_type: Optional new gb_type name to replace the old one
+        use_additional_info: Whether to open editor for additional info input
     """
     registry_path = Path(registry_path)
     reg = load_registry(registry_path)
@@ -269,6 +345,25 @@ def cmd_update_gb_type(
         )
         return False
 
+    new_additional_info_list = []
+    added_new_info = False
+
+    if use_additional_info:
+        existing_additional_info_list = reg[gb_id][0].get("Additional_Info", [])
+        print(f"Opening editor for additional information for '{matching_call['gb_type']}'...")
+
+        editor_content = get_editor_input(f"Additional information for {matching_call['gb_type']}")
+
+        if editor_content:
+            new_additional_info_list = existing_additional_info_list.copy()
+            new_additional_info_list.append(LiteralScalarString(editor_content))
+            added_new_info = True
+        else:
+            print("No additional information provided.")
+            new_additional_info_list = existing_additional_info_list
+    else:
+        new_additional_info_list = reg[gb_id][0].get("Additional_Info", [])
+
     new_entry = {
         "Gb_type": matching_call["gb_type"],
         "Context": matching_call["context"],
@@ -276,15 +371,9 @@ def cmd_update_gb_type(
         "Hints": matching_call["hints"] or [],
     }
 
-    if additional_info:
-        additional_info_list = reg[gb_id][0].get("Additional_Info", [])
-        new_entry["Additional_Info"] = (
-            additional_info_list + [additional_info]
-            if additional_info_list
-            else [additional_info]
-        )
-    elif "Additional_Info" in reg[gb_id][0]:
-        new_entry["Additional_Info"] = reg[gb_id][0]["Additional_Info"]
+    # Add additional info list if it exists
+    if new_additional_info_list:
+        new_entry["Additional_Info"] = new_additional_info_list
 
     reg[gb_id].insert(0, new_entry)
 
@@ -292,6 +381,8 @@ def cmd_update_gb_type(
     print(
         f"Updated {old_gb_type} to {matching_call['gb_type']} in registry with ID {gb_id}"
     )
+    if added_new_info:
+        print("Additional information updated with new entry.")
     return True
 
 
@@ -302,7 +393,7 @@ def test_verify_gb_id_mapping(dynamo_dir, registry_path):
     script_dir = Path(__file__).resolve().parent
     dynamo_dir = script_dir.parent.parent / "torch" / "_dynamo"
     registry_path = (
-        script_dir.parent.parent / "torch" / "_dynamo" / "graph_break_registry.json"
+        script_dir.parent.parent / "torch" / "_dynamo" / "graph_break_registry.yaml"
     )
 
     python_files = list(dynamo_dir.glob("**/*.py"))
@@ -330,7 +421,7 @@ def test_verify_gb_id_mapping(dynamo_dir, registry_path):
     if mismatches:
         print(
             "Found the unimplemented_v2 or unimplemented_v2_with_warning calls below that "
-            "don't match the registry in graph_break_registry.json."
+            "don't match the registry in graph_break_registry.yaml."
         )
         for gb_type, file_path, reason in mismatches:
             print(f"  - {gb_type} in {file_path}: {reason}")
@@ -339,23 +430,23 @@ def test_verify_gb_id_mapping(dynamo_dir, registry_path):
 
         print(
             "- If you added a new callsite: python tools/dynamo/gb_id_mapping.py add "
-            '"GB_TYPE" PATH_TO_FILE --additional-info "INFO"'
+            '"GB_TYPE" PATH_TO_FILE [--additional-info]'
         )
 
         print(
             "  • GB_TYPE: The graph break type string used in your unimplemented_v2 call"
-            "  • PATH_TO_FILE: Path to the file containing your new unimplemented_v2 call"
-            "  • --additional-info: Optional extra information to include in the registry entry"
         )
+        print("  • PATH_TO_FILE: Path to the file containing your new unimplemented_v2 call")
+        print("  • --additional-info: Open an editor to enter detailed additional information")
 
         print(
             '- If you updated an existing callsite: python tools/dynamo/gb_id_mapping.py update "GB_TYPE" PATH_TO_FILE '
-            '--new_gb_type "NEW_NAME" --additional-info "INFO"'
+            '[--new_gb_type "NEW_NAME"] [--additional-info]'
         )
         print("  • GB_TYPE: The original graph break type to update")
         print("  • PATH_TO_FILE: Path to the file containing the updated call")
         print("  • --new_gb_type: New name if you changed the graph break type")
-        print("  • --additional-info: Optional extra information to add")
+        print("  • --additional-info: Open an editor to enter detailed additional information")
         print(
             "- Recreate registry (Only do this if a complete reset is needed): python tools/dynamo/gb_id_mapping.py create"
         )
@@ -395,12 +486,12 @@ def create_registry(dynamo_dir, registry_path):
         ]
 
     with open(registry_path, "w") as f:
-        json.dump(registry, f, indent=2)
+        yaml.dump(registry, f)
 
 
 def main():
     repo_root = Path(__file__).resolve().parent.parent.parent
-    registry_path = repo_root / "torch" / "_dynamo" / "graph_break_registry.json"
+    registry_path = repo_root / "torch" / "_dynamo" / "graph_break_registry.yaml"
 
     try:
         import torch._dynamo
@@ -426,7 +517,8 @@ def main():
         "file_path", help="Path to the file containing the unimplemented_v2 call"
     )
     add_parser.add_argument(
-        "--additional-info", help="Optional additional information to include"
+        "--additional-info", action="store_true",
+        help="Open editor to add detailed additional information"
     )
 
     update_parser = subparsers.add_parser(
@@ -441,7 +533,8 @@ def main():
         "--new_gb_type", help="New gb_type name if it has changed", default=None
     )
     update_parser.add_argument(
-        "--additional-info", help="Optional additional information to include"
+        "--additional-info", action="store_true",
+        help="Open editor to add detailed additional information"
     )
 
     verify_parser = subparsers.add_parser(
@@ -458,7 +551,7 @@ def main():
         "--registry-path",
         type=str,
         default=str(registry_path),
-        help="Path to save the registry JSON file",
+        help="Path to save the registry YAML file",
     )
 
     args = parser.parse_args()
