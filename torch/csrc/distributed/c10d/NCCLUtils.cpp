@@ -573,6 +573,27 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   return hash;
 }
 
+// NCCL uses Non-negative int to represent in-group according to API
+// requirement. We take a list of ranks and generate a hash value based on the
+// list and ensure its range of 32-bit int.
+int genNcclSplitColor(const std::vector<int>& ranks) {
+  // Combine the hash values using a simple reducer (std::hash + fold)
+  std::size_t combined_hash = std::accumulate(
+      ranks.begin(),
+      ranks.end(),
+      std::size_t(0),
+      [](std::size_t acc, int rank) {
+        return acc ^
+            (std::hash<int>{}(rank) + 0x9e3779b9 + (acc << 6) + (acc >> 2));
+      });
+
+  // max positive value of int32_t
+  constexpr int32_t max_c_int = std::numeric_limits<int32_t>::max();
+  int color = static_cast<int>(
+      std::abs(static_cast<int64_t>(combined_hash)) % max_c_int);
+  return color;
+}
+
 // Default value: 30 minutes
 int nccl_nonblocking_timeout() {
   static int timeout = -2; // -2 means not initialized
