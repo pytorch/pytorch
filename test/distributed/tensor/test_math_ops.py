@@ -759,6 +759,58 @@ class DistMathOpsTest(DTensorTestBase):
                     self.assertTrue(output_dtensor.placements[0].is_shard(shard_dim))
                 self.assertEqual(output_dtensor.full_tensor(), output)
 
+    @with_comms
+    def test_conj_complex_dtensor(self):
+        mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        freqs_cis = torch.randn(
+            1, 1, dtype=torch.complex64, requires_grad=False, device=self.device_type
+        )
+        freqs_cis_dt = distribute_tensor(
+            freqs_cis, device_mesh=mesh, placements=[Replicate()]
+        )
+
+        local_result = freqs_cis.conj() + 1
+        with comm_mode:
+            dtensor_result = freqs_cis_dt.conj() + 1
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        self.assertEqual(local_result, dtensor_result.full_tensor())
+
+    @with_comms
+    def test_rotary_embedding_complex_ops(self):
+        mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        def apply_rotary_emb(xq, freqs_cis):
+            xq_ = torch.view_as_complex(xq)
+            xq_out = torch.view_as_real(xq_ * freqs_cis)
+            return xq_out
+
+        xq = torch.randn(1, 1, 2, requires_grad=True, device=self.device_type)
+        freqs_cis = torch.randn(
+            1, 1, dtype=torch.complex64, requires_grad=False, device=self.device_type
+        )
+
+        xq_dt = distribute_tensor(xq, device_mesh=mesh, placements=[Replicate()])
+        freqs_cis_dt = distribute_tensor(
+            freqs_cis, device_mesh=mesh, placements=[Replicate()]
+        )
+
+        with comm_mode:
+            xq_out_dt = apply_rotary_emb(xq_dt, freqs_cis_dt)
+            xq_out_dt.sum().backward()
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        dtensor_grad = xq_dt.grad.full_tensor()
+
+        xq.grad = None
+        xq_out = apply_rotary_emb(xq, freqs_cis)
+        xq_out.sum().backward()
+
+        self.assertEqual(dtensor_grad, xq.grad)
+
 
 if __name__ == "__main__":
     run_tests()
