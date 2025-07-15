@@ -16,11 +16,16 @@ from parameterized import parameterized_class
 
 import torch
 from torch._inductor.codecache import get_kernel_bin_format
-from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
+from torch._inductor.package import load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_cache
 from torch.export import Dim
-from torch.export.pt2_archive._package import load_pt2, load_weights_to_pt2_contents
+from torch.export.pt2_archive._package import (
+    AOTICompiledModel,
+    load_pt2,
+    load_weights_to_pt2_contents,
+)
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     skipIfRocm,
@@ -249,6 +254,9 @@ class TestAOTInductorPackage(TestCase):
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
     @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         self.check_package_cpp_only()
@@ -294,6 +302,9 @@ class TestAOTInductorPackage(TestCase):
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfRocm  # doesn't support multi-arch binary
     @skipIfXpu  # doesn't support multi-arch binary
@@ -338,6 +349,9 @@ class TestAOTInductorPackage(TestCase):
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfXpu  # build system may be different
     def test_compile_after_package_static(self):
@@ -396,6 +410,9 @@ class TestAOTInductorPackage(TestCase):
             with self.assertRaisesRegex(Exception, "Invalid AOTI model name"):
                 self.cmake_compile(model, example_inputs, options, "")
 
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfRocm  # doesn't support multi-arch binary
     @skipIfXpu  # doesn't support multi-arch binary

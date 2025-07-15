@@ -114,7 +114,7 @@ hf_Reformer,pass,23
 
 
 
-hf_T5_base,eager_2nd_run_OOM,0
+hf_T5_base,pass,4
 
 
 
@@ -170,7 +170,7 @@ nanogpt,pass,7
 
 
 
-nvidia_deeprecommender,pass,7
+nvidia_deeprecommender,fail_accuracy,7
 
 
 
