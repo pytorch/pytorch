@@ -404,7 +404,7 @@ def test_verify_gb_id_mapping(dynamo_dir, registry_path):
     script_dir = Path(__file__).resolve().parent
     dynamo_dir = script_dir.parent.parent / "torch" / "_dynamo"
     registry_path = (
-        script_dir.parent.parent / "torch" / "_dynamo" / "graph_break_registry.yaml"
+        script_dir.parent.parent / "torch" / "_dynamo" / "graph_break_registry.yml"
     )
 
     python_files = list(dynamo_dir.glob("**/*.py"))
@@ -508,7 +508,7 @@ def create_registry(dynamo_dir, registry_path):
 
 def main():
     repo_root = Path(__file__).resolve().parent.parent.parent
-    registry_path = repo_root / "torch" / "_dynamo" / "graph_break_registry.yaml"
+    registry_path = repo_root / "torch" / "_dynamo" / "graph_break_registry.yml"
 
     try:
         import torch._dynamo

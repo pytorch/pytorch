@@ -1324,7 +1324,7 @@ def main() -> None:
         "utils/model_dump/skeleton.html",
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
-        "_dynamo/graph_break_registry.yaml",
+        "_dynamo/graph_break_registry.yml",
     ]
 
     if not BUILD_LIBTORCH_WHL:
