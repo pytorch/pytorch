@@ -4,12 +4,12 @@ import logging
 import os
 import sys
 import tempfile
-import typing_extensions
 from typing import Any, Callable, Optional, TypeVar
-from typing_extensions import ParamSpec
 
 import torch
+import typing_extensions
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
+from typing_extensions import ParamSpec
 
 
 _T = TypeVar("_T")
@@ -337,3 +337,7 @@ def deprecated():
         return func
 
     return decorator
+
+
+def get_default_numa_affinity() -> None | str:
+    return None

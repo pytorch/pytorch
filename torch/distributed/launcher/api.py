@@ -11,7 +11,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Union
 
+import torch
+
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
+from torch._utils_internal import get_default_numa_affinity
 from torch.distributed.elastic import events, metrics
 from torch.distributed.elastic.agent.server.api import WorkerSpec
 from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
@@ -24,7 +27,7 @@ from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
-from torch.distributed.numa_binding import NumaOptions
+from torch.distributed.numa_binding import AffinityMode, NumaOptions
 
 
 __all__ = ["LaunchConfig", "elastic_launch", "launch_agent"]
@@ -104,6 +107,18 @@ class LaunchConfig:
         # Post-processing to enable refactoring to introduce logs_specs due to non-torchrun API usage
         if self.logs_specs is None:
             self.logs_specs = DefaultLogsSpecs()
+
+        if self.numa_options is None and torch.cuda.is_available():
+            default_affinity = get_default_numa_affinity()
+            if default_affinity is not None:
+                self.numa_options = NumaOptions(
+                    affinity_mode=AffinityMode(default_affinity),
+                    # Be safe and fall back while rolling out
+                    # default numa bindings if any errors occur. We can remove this fallback
+                    # once we are confident that the logic is always correct.
+                    should_fall_back_if_binding_fails=True,
+                )
+                logger.info("Using default numa options = %s", self.numa_options)
 
 
 class elastic_launch:

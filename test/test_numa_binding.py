@@ -8,6 +8,7 @@ from unittest.mock import mock_open, patch
 import torch
 from torch.distributed.elastic.agent.server.api import WorkerSpec
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, start_processes
+from torch.distributed.launcher.api import LaunchConfig
 from torch.distributed.numa_binding import (
     _get_ranges_str_from_ints,
     _get_set_of_int_from_ranges_str,
@@ -43,6 +44,7 @@ class NumaBindingTest(TestCase):
         self._context_managers_to_apply_to_all_tests = [
             patch("torch.cuda.device_count", self._mock_device_count),
             patch("torch.cuda.get_device_properties", self._mock_get_device_properties),
+            patch("torch.cuda.is_available", self._mock_is_available),
             patch("builtins.open", new=self._mock_open),
             patch("os.listdir", new=self._mock_listdir),
             patch("os.sched_getaffinity", new=self._mock_sched_getaffinity),
@@ -162,6 +164,10 @@ class NumaBindingTest(TestCase):
             contents=f"0-{self._mock_num_numa_nodes - 1}",
         )
 
+    @staticmethod
+    def _mock_is_available() -> bool:
+        return torch.cuda.device_count() > 0
+
     def _get_corresponding_pci_numa_node_file_path(
         self, *, device_properties: MockDeviceProperties
     ) -> str:
@@ -205,7 +211,9 @@ class NumaBindingTest(TestCase):
 
         Does not actually create the processes.
         """
-        with patch("subprocess.Popen") as mock_popen:
+        with patch(
+            "torch.distributed.elastic.multiprocessing.subprocess_handler.subprocess_handler.Popen"
+        ) as mock_popen:
             start_processes(
                 name="test_process",
                 entrypoint="echo",
@@ -222,7 +230,7 @@ class NumaBindingTest(TestCase):
             call_args = next(
                 call_args
                 for call_args in mock_popen.call_args_list
-                if call_args.kwargs["env"].get("LOCAL_RANK") == str(local_rank)
+                if call_args.kwargs.get("env", {}).get("LOCAL_RANK") == str(local_rank)
             )
             return call_args.kwargs["args"]
 
@@ -269,6 +277,86 @@ class NumaBindingTest(TestCase):
                 "echo",
                 "Hello, world!",
             ),
+        )
+
+    def test_default_numa_binding(self) -> None:
+        self._add_mock_hardware(
+            num_sockets=1,
+            num_numa_nodes_per_socket=1,
+            num_gpus_per_numa_node=1,
+            num_l3_caches_per_numa_node=1,
+            num_physical_core_per_l3_cache=1,
+        )
+
+        with patch(
+            "torch.distributed.launcher.api.get_default_numa_affinity",
+            return_value="node",
+        ):
+            launch_config = LaunchConfig(
+                min_nodes=1,
+                max_nodes=1,
+                nproc_per_node=1,
+            )
+        self.assertEqual(
+            launch_config.numa_options,
+            NumaOptions(
+                affinity_mode=AffinityMode.NODE, should_fall_back_if_binding_fails=True
+            ),
+        )
+
+    def test_fallback(self) -> None:
+        self._add_mock_hardware(
+            num_sockets=1,
+            num_numa_nodes_per_socket=1,
+            num_gpus_per_numa_node=1,
+            num_l3_caches_per_numa_node=1,
+            num_physical_core_per_l3_cache=1,
+        )
+
+        with (
+            patch("torch.distributed.numa_binding.signpost_event") as signpost_patch,
+            patch(
+                "torch.distributed.numa_binding._get_node_numactl_options",
+                # Some arbitrary invalid numactl option
+                return_value=("--cpunodebHAHAHind=paulwuzhere",),
+            ),
+        ):
+            command_args = (
+                self._start_test_processes_and_get_command_args_for_local_rank(
+                    numa_options=NumaOptions(
+                        affinity_mode=AffinityMode.NODE,
+                        should_fall_back_if_binding_fails=True,
+                    ),
+                    local_rank=0,
+                )
+            )
+        self.assertIn(
+            "subprocess.CalledProcessError",
+            signpost_patch.call_args.kwargs["parameters"]["traceback"],
+        )
+        self.assertEqual(
+            command_args,
+            # No numa bindings due to exception
+            (
+                "echo",
+                "Hello, world!",
+            ),
+        )
+
+    def test_explicit_numa_options_overrides_default(self) -> None:
+        with patch(
+            "torch.distributed.launcher.api.get_default_numa_affinity",
+            return_value="node",
+        ):
+            launch_config = LaunchConfig(
+                min_nodes=1,
+                max_nodes=1,
+                nproc_per_node=1,
+                numa_options=NumaOptions(affinity_mode=AffinityMode.EXCLUSIVE),
+            )
+        self.assertEqual(
+            launch_config.numa_options,
+            NumaOptions(affinity_mode=AffinityMode.EXCLUSIVE),
         )
 
     def test_socket_numa_binding_with_multiple_numa_per_socket(self) -> None:
