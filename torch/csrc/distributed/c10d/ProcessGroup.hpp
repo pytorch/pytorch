@@ -72,9 +72,9 @@ C10_EXPORT bool allow_inflight_collective_as_graph_input();
 class TORCH_API ProcessGroup : public torch::CustomClassHolder {
  public:
   struct TORCH_API MergeOptions : torch::CustomClassHolder {
-   explicit MergeOptions(
-        std::string group_name,
-        std::chrono::milliseconds timeout = kBackendDefaultTimeout)
+    explicit MergeOptions(
+        const std::string group_name,
+        const std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
         : timeout(timeout), group_name(group_name) {}
     ~MergeOptions() override = default;
 
@@ -981,7 +981,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.
   virtual c10::intrusive_ptr<ProcessGroup> mergeRemoteGroup(
-      const c10::intrusive_ptr<Store> store,
+      const c10::intrusive_ptr<Store>& store,
       const MergeOptions& opts,
       const int& rank,
       const int& size);
