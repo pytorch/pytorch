@@ -5,7 +5,8 @@ set -ex
 # Optionally install conda
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   BASE_URL="https://repo.anaconda.com/miniconda"
-  CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
+  # pin to version before required TOS
+  CONDA_FILE="Miniconda3-py310_25.5.1-0-Linux-x86_64.sh"
   if [[ $(uname -m) == "aarch64" ]] || [[ "$BUILD_ENVIRONMENT" == *xpu* ]] || [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"  # @lint-ignore
     CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
@@ -53,10 +54,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   else
     export SYSROOT_DEP="sysroot_linux-64=2.17"
   fi
-
-  # Accept tos
-  as_jenkins conda tos accept --override-channels --channel main
-  as_jenkins conda tos accept --override-channels --channel r
   
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
