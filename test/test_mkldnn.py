@@ -492,7 +492,7 @@ class TestMkldnn(TestCase):
             C = torch.randint(1, 3, (1,)).item() * groups
             x_shape = (N, C) + input_shapes[dim]
             data = torch.randn(x_shape, dtype=torch.float32)
-            # conv: mkldnn tranpose conv fp32
+            # conv: mkldnn transpose conv fp32
             # conv_ref: thnn transpose conv fp32
             conv = conv_module[dim](in_channels=C,
                                     out_channels=M,

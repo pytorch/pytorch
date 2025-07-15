@@ -655,6 +655,9 @@ class PyCodegen:
 
         self.extend_output(create_call_function(len(graphargs), False))
 
+    def create_import_name(self, module_name) -> Instruction:
+        return create_instruction("IMPORT_NAME", argval=module_name)
+
     def load_import_from(self, module_name, object_name) -> None:
         source = AttrSource(self.tx.import_source(module_name), object_name)
         # Note: This approach is somewhat aggressive because typically, a source is marked
