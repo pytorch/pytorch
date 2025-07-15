@@ -6,6 +6,7 @@ from datetime import timedelta
 
 import torch
 import torch.distributed._dist2 as dist2
+from torch._C._distributed_c10d import MergeOptions
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_gloo,
@@ -211,6 +212,26 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
             self.assertEqual(backend.options._timeout, timedelta(seconds=30))
         else:
             self.assertEqual(subgroup, None)
+
+    def test_remote_group_merge(self) -> None:
+        group = self.new_group()
+        subgroup_1 = group.split_group([0], timeout=timedelta(seconds=30))
+        subgroup_2 = group.split_group([1], timeout=timedelta(seconds=30))
+        merge_options = MergeOptions("merged_pg", timedelta(seconds=40))
+        if self.rank == 0:
+            assert subgroup_1 is not None
+            store = subgroup_1.store()
+            merged_pg = subgroup_1.merge_remote_group(store, merge_options, 0, 2)
+            self.assertEqual(merged_pg.size(), 2)
+            backend = merged_pg._get_backend(self.device)
+            self.assertEqual(backend.options._timeout, timedelta(seconds=40))
+        else:
+            assert subgroup_2 is not None
+            store = subgroup_2.store()
+            merged_pg = subgroup_2.merge_remote_group(store, merge_options, 1, 2)
+            self.assertEqual(merged_pg.size(), 2)
+            backend = merged_pg._get_backend(self.device)
+            self.assertEqual(backend.options._timeout, timedelta(seconds=40))
 
 
 class ProcessGroupGlooTest(Dist2MultiProcessTestCase):

@@ -897,6 +897,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return backendTypeToBackend_.at(backendType);
   }
 
+  c10::intrusive_ptr<Store> getStore() {
+    return store_;
+  }
+
   // Return device types supported by this ProcessGroup.
   // Note: the return type is `Device` rather than `DeviceType` for the purpose
   // of easy comparison at Python level. The `Device` will have default index

@@ -48,6 +48,7 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
@@ -2063,6 +2064,7 @@ communication mechanism.
           .def("rank", &::c10d::ProcessGroup::getRank, R"(Get the rank of this process group.)")
           .def("size", &::c10d::ProcessGroup::getSize, R"(Get the size of this process group.)")
           .def("name", &::c10d::ProcessGroup::getBackendName, R"(Get the name of this process group.)")
+          .def("store", &::c10d::ProcessGroup::getStore, R"(Get the store of this process group.)")
           .def(
               "split_group",
               &::c10d::ProcessGroup::splitGroup,
@@ -3075,7 +3077,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_readwrite("_timeout", &::c10d::Backend::Options::timeout);
 
   intrusive_ptr_class_<::c10d::ProcessGroup::MergeOptions>(
-      processGroup, "MergeOptions", R"(Class for ProcessGroup Merge Options)")
+      module, "MergeOptions", R"(Class for ProcessGroup Merge Options)")
       .def(
           py::init([](const std::string& group_name,
                       const std::chrono::milliseconds& timeout) {
