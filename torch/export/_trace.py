@@ -10,7 +10,6 @@ import time
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Optional, Union
-from typing_extensions import TypeAlias
 
 import torch
 import torch._dynamo
@@ -78,6 +77,7 @@ from torch.export.dynamic_shapes import (
     _DimHintType,
     _IntWrapper,
     _process_dynamic_shapes,
+    DynShapesType,
 )
 from torch.export.exported_program import OutputKind
 from torch.fx._symbolic_trace import _ConstantAttributeType
@@ -108,10 +108,6 @@ from .graph_signature import _convert_to_export_graph_signature, ExportGraphSign
 
 
 log = logging.getLogger(__name__)
-
-
-# Type alias for dynamic shapes specification
-_DynamicShapesSpec: TypeAlias = Union[dict[str, Any], tuple[Any, ...], list[Any]]
 
 
 @dataclasses.dataclass
@@ -742,7 +738,7 @@ def _export_to_torch_ir(
     f: Callable,
     args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[DynShapesType] = None,
     *,
     preserve_module_call_signature: tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
@@ -1197,7 +1193,7 @@ def _process_export_inputs(
     kwargs: Optional[dict[str, object]],
     dynamic_shapes: Optional[
         Union[
-            _DynamicShapesSpec,
+            DynShapesType,
             torch.export.AdditionalInputs,
             torch.export.ShapesCollection,
         ]
@@ -1206,7 +1202,7 @@ def _process_export_inputs(
     tuple[object, ...],
     dict[str, object],
     TreeSpec,
-    Optional[_DynamicShapesSpec],
+    Optional[DynShapesType],
     Callable[[ExportedProgram], None],
 ]:
     """
@@ -1245,7 +1241,7 @@ def _process_export_inputs(
     _, original_in_spec = pytree.tree_flatten((args, kwargs))
 
     verify_additional_inputs: Callable[[ExportedProgram], None]
-    out_dynamic_shapes: Optional[_DynamicShapesSpec]
+    out_dynamic_shapes: Optional[DynShapesType]
     if isinstance(dynamic_shapes, torch.export.AdditionalInputs):
         verify_additional_inputs = dynamic_shapes.verify  # type: ignore[assignment]
         out_dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)  # type: ignore[assignment]
@@ -1391,7 +1387,7 @@ def _strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
+    dynamic_shapes: Optional[DynShapesType],
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
@@ -1725,6 +1721,7 @@ def _export_to_aten_ir_make_fx(
             gm.graph.eliminate_dead_code(_is_impure)
 
         # create graph signature
+        assert out_spec.spec is not None, "out_spec.spec is None!"
         input_names = _graph_input_names(gm)
         output_names = _graph_output_names(gm)
         sig = GraphSignature(
@@ -1739,7 +1736,7 @@ def _export_to_aten_ir_make_fx(
             buffers_to_mutate={},
             user_inputs_to_mutate={},
             in_spec=in_spec,
-            out_spec=out_spec,  # type: ignore[arg-type]
+            out_spec=out_spec.spec,
             backward_signature=None,
             input_tokens=[],
             output_tokens=[],
@@ -1829,7 +1826,7 @@ def _non_strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
+    dynamic_shapes: Optional[DynShapesType],
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
@@ -1932,6 +1929,7 @@ def _non_strict_export(
     fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
     def _produce_guards_callback(gm):
+        assert dynamic_shapes is None or isinstance(dynamic_shapes, (dict, list, tuple))
         return produce_guards_and_solve_constraints(
             fake_mode=fake_mode,
             gm=gm,
@@ -2003,7 +2001,7 @@ def _export_for_training(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[DynShapesType] = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
@@ -2088,7 +2086,7 @@ def _export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[DynShapesType] = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),

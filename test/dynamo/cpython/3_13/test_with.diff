@@ -1,0 +1,114 @@
+diff --git a/test/dynamo/cpython/3_13/test_with.py b/test/dynamo/cpython/3_13/test_with.py
+index 8e9ed8500c7..e1ebaa68b83 100644
+--- a/test/dynamo/cpython/3_13/test_with.py
++++ b/test/dynamo/cpython/3_13/test_with.py
+@@ -1,3 +1,23 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_with.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for the with statement specified in PEP 343."""
+ 
+ 
+@@ -104,7 +124,7 @@ class MockNested(Nested):
+         return Nested.__exit__(self, *exc_info)
+ 
+ 
+-class FailureTestCase(unittest.TestCase):
++class FailureTestCase(__TestCase):
+     def testNameError(self):
+         def fooNotDeclared():
+             with foo: pass
+@@ -194,6 +214,7 @@ class ContextmanagerAssertionMixin(object):
+ 
+     def setUp(self):
+         self.TEST_EXCEPTION = RuntimeError("test exception")
++        super().setUp()
+ 
+     def assertInWithManagerInvariants(self, mock_manager):
+         self.assertTrue(mock_manager.enter_called)
+@@ -237,7 +258,7 @@ class ContextmanagerAssertionMixin(object):
+         self.assertTrue(mock_generator.stopped)
+ 
+ 
+-class NonexceptionalTestCase(unittest.TestCase, ContextmanagerAssertionMixin):
++class NonexceptionalTestCase(__TestCase, ContextmanagerAssertionMixin):
+     def testInlineGeneratorSyntax(self):
+         with mock_contextmanager_generator():
+             pass
+@@ -289,7 +310,7 @@ class NonexceptionalTestCase(unittest.TestCase, ContextmanagerAssertionMixin):
+         self.assertAfterWithGeneratorInvariantsNoError(foo)
+ 
+ 
+-class NestedNonexceptionalTestCase(unittest.TestCase,
++class NestedNonexceptionalTestCase(__TestCase,
+     ContextmanagerAssertionMixin):
+     def testSingleArgInlineGeneratorSyntax(self):
+         with Nested(mock_contextmanager_generator()):
+@@ -355,7 +376,7 @@ class NestedNonexceptionalTestCase(unittest.TestCase,
+         self.assertAfterWithManagerInvariantsNoError(mock_nested)
+ 
+ 
+-class ExceptionalTestCase(ContextmanagerAssertionMixin, unittest.TestCase):
++class ExceptionalTestCase(ContextmanagerAssertionMixin, __TestCase):
+     def testSingleResource(self):
+         cm = mock_contextmanager_generator()
+         def shouldThrow():
+@@ -550,7 +571,7 @@ class ExceptionalTestCase(ContextmanagerAssertionMixin, unittest.TestCase):
+         self.assertRaises(ZeroDivisionError, failAsBool)
+ 
+ 
+-class NonLocalFlowControlTestCase(unittest.TestCase):
++class NonLocalFlowControlTestCase(__TestCase):
+ 
+     def testWithBreak(self):
+         counter = 0
+@@ -607,7 +628,7 @@ class NonLocalFlowControlTestCase(unittest.TestCase):
+             self.fail("Didn't raise RuntimeError")
+ 
+ 
+-class AssignmentTargetTestCase(unittest.TestCase):
++class AssignmentTargetTestCase(__TestCase):
+ 
+     def testSingleComplexTarget(self):
+         targets = {1: [0, 1, 2]}
+@@ -651,7 +672,7 @@ class AssignmentTargetTestCase(unittest.TestCase):
+             self.assertEqual(c, 4)
+ 
+ 
+-class ExitSwallowsExceptionTestCase(unittest.TestCase):
++class ExitSwallowsExceptionTestCase(__TestCase):
+ 
+     def testExitTrueSwallowsException(self):
+         class AfricanSwallow:
+@@ -676,7 +697,7 @@ class ExitSwallowsExceptionTestCase(unittest.TestCase):
+             self.fail("ZeroDivisionError should have been raised")
+ 
+ 
+-class NestedWith(unittest.TestCase):
++class NestedWith(__TestCase):
+ 
+     class Dummy(object):
+         def __init__(self, value=None, gobble=False):
+@@ -796,4 +817,4 @@ class NestedWith(unittest.TestCase):
+ 
+ 
+ if __name__ == '__main__':
+-    unittest.main()
++    run_tests()
