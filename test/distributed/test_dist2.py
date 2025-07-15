@@ -28,10 +28,14 @@ class ProcessGroupTest(TestCase):
         os.environ["MASTER_PORT"] = "29500"
 
         pg1 = dist2.new_group(
-            backend="gloo", timeout=timedelta(seconds=60), device="cpu", pg_options=None
+            backend="gloo",
+            timeout=timedelta(seconds=60),
+            device="cpu",
         )
         pg2 = dist2.new_group(
-            backend="gloo", timeout=timedelta(seconds=60), device="cpu", pg_options=None
+            backend="gloo",
+            timeout=timedelta(seconds=60),
+            device="cpu",
         )
 
         self.assertIsNone(dist2.current_process_group())
@@ -227,7 +231,6 @@ class ProcessGroupGlooTest(Dist2MultiProcessTestCase):
             backend="gloo",
             timeout=timedelta(seconds=60),
             device=self.device,
-            pg_options=None,
         )
 
 
@@ -242,15 +245,10 @@ class ProcessGroupNCCLTest(Dist2MultiProcessTestCase):
 
         self.device = torch.device("cuda", self.rank)
 
-        from torch.distributed import ProcessGroupNCCL
-
-        opts = ProcessGroupNCCL.Options()
-
         return dist2.new_group(
             backend="nccl",
             timeout=timedelta(seconds=60),
             device=self.device,
-            pg_options=opts,
         )
 
 
