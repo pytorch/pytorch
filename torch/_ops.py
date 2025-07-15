@@ -424,7 +424,8 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                             f"Hint: set {curr_mode}'s supports_higher_order_operators to True."
                             f" This causes all higher order operators to pass through {curr_mode}'s __torch_dispatch__,"
                             f" so handle them accordingly by"
-                            f" adding support for HigerOrderOperators (in this case, {self._name} in {curr_mode}.__torch_dispatch__ or"
+                            f" adding support for HigerOrderOperators (in this case, {self._name}) in"
+                            f" {curr_mode}.__torch_dispatch__ or"
                             f" returning NotImplemented when not supported."
                         )
                 if result is not NotImplemented:
@@ -465,7 +466,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
             # All handlers returned NotImplemented
             raise TypeError(
-                f"Operation '{self._name}' is not supported for the given input types. "
+                f"HigherOrderOperator '{self._name}' is not supported for the given input types. "
                 f"This typically happens when using custom tensor types or dispatch modes that don't "
                 f"have implementations for this operation.\n\n"
                 f"Current mode: {curr_mode}\n"
