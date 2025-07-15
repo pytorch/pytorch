@@ -86,7 +86,7 @@ inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
     throw python_error();
   }
   TORCH_CHECK_VALUE(
-      value <= std::numeric_limits<uint32_t>::max()overflow == 0,
+      value <= std::numeric_limits<uint32_t>::max(),
       "Overflow when unpacking long long");
   return (uint32_t)value;
 }
