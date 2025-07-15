@@ -128,31 +128,35 @@ class FlexAttentionKernelOptions(TypedDict, total=False):
     """Thread block size for second K/V dimension in backward pass. Use as 'bwd_BLOCK_N2'.
     Default is determined by autotuning."""
 
-    # Numerical behavior options
     PRESCALE_QK: NotRequired[bool]
     """Whether to pre-scale QK by 1/sqrt(d) and change of base. This is slightly faster but
-    may have slightly more numerical error. Default: False."""
+    may have more numerical error. Default: False."""
 
     ROWS_GUARANTEED_SAFE: NotRequired[bool]
     """If True, guarantees that at least one value in each row is not masked out.
     Allows skipping safety checks for better performance. Only set this if you are certain
-    your mask guarantees this property. Default: False."""
+    your mask guarantees this property. For example, causal attention is guaranteed safe
+    because each query has at least 1 key-value to attend to. Default: False."""
 
     BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
     """If True, guarantees that all blocks in the mask are contiguous.
-    Allows optimizing block traversal. Only set if using dense masks. Default: False."""
+    Allows optimizing block traversal. For example, causal masks would satisfy this,
+    but prefix_lm + sliding window would not. Default: False."""
 
     WRITE_DQ: NotRequired[bool]
-    """Controls whether gradients with respect to biases are computed in the DQ iteration
-    loop of the backward pass. Set to False if you don't need bias gradients. Default: True."""
+    """Controls whether gradient scatters are done in the DQ iteration loop of the backward pass.
+    Setting this to False will force this to happen in the DK loop which depending on your
+    specific score_mod and mask_mod might be faster. Default: True."""
 
     FORCE_USE_FLEX_ATTENTION: NotRequired[bool]
     """If True, forces the use of the flex attention kernel instead of potentially using
-    the more optimized flex-decoding kernel for short sequences. Default: False."""
+    the more optimized flex-decoding kernel for short sequences. This can be a helpful
+    option for debugging. Default: False."""
 
     USE_TMA: NotRequired[bool]
     """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
-    This is experimental and may not work on all hardware. Default: False."""
+    This is experimental and may not work on all hardware, currently specific
+    to NVIDIA GPUs Hopper+. Default: False."""
 
     # ROCm-specific options
     kpack: NotRequired[int]
