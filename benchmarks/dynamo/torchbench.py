@@ -14,11 +14,11 @@ import torch
 
 
 try:
-    from .common import BenchmarkRunner, load_yaml_file, loss_return_hook, main
+    from .common import BenchmarkRunner, load_yaml_file, main
 except ImportError:
-    from common import BenchmarkRunner, load_yaml_file, loss_return_hook, main
+    from common import BenchmarkRunner, load_yaml_file, main
 
-from torch._dynamo.testing import collect_results
+from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
 
 
@@ -340,9 +340,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         ]:
             _reassign_parameters(model)
 
-        if is_training:
-            model.register_forward_hook(loss_return_hook())
-
         # Models that must be in train mode while training
         if is_training and (
             not use_eval_mode or model_name in self._config["only_training"]
@@ -454,6 +451,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 tolerance = 8 * 1e-2
         return tolerance, cosine
 
+    def compute_loss(self, pred):
+        return reduce_to_scalar_loss(pred)
+
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast(**self.autocast_arg):
             if isinstance(inputs, dict):
@@ -466,9 +466,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         self.optimizer_zero_grad(mod)
         with self.autocast(**self.autocast_arg):
             if isinstance(cloned_inputs, dict):
-                loss, *_ = mod(**cloned_inputs)
+                pred = mod(**cloned_inputs)
             else:
-                loss, *_ = mod(*cloned_inputs)
+                pred = mod(*cloned_inputs)
+            loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:

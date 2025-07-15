@@ -10,21 +10,9 @@ import warnings
 
 
 try:
-    from .common import (
-        BenchmarkRunner,
-        download_retry_decorator,
-        load_yaml_file,
-        loss_return_hook,
-        main,
-    )
+    from .common import BenchmarkRunner, download_retry_decorator, load_yaml_file, main
 except ImportError:
-    from common import (
-        BenchmarkRunner,
-        download_retry_decorator,
-        load_yaml_file,
-        loss_return_hook,
-        main,
-    )
+    from common import BenchmarkRunner, download_retry_decorator, load_yaml_file, main
 
 import torch
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
@@ -350,13 +338,8 @@ class TimmRunner(BenchmarkRunner):
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
 
-        if is_training:
-            if model_name in SCALED_COMPUTE_LOSS:
-                model.register_forward_hook(
-                    loss_return_hook(lambda *args: reduce_to_scalar_loss(*args) / 1000)
-                )
-            else:
-                model.register_forward_hook(loss_return_hook())
+        if model_name in SCALED_COMPUTE_LOSS:
+            self.compute_loss = self.scaled_compute_loss
 
         if is_training and not use_eval_mode:
             model.train()
@@ -424,6 +407,15 @@ class TimmRunner(BenchmarkRunner):
             self.num_classes
         )
 
+    def compute_loss(self, pred):
+        # High loss values make gradient checking harder, as small changes in
+        # accumulation order upsets accuracy checks.
+        return reduce_to_scalar_loss(pred)
+
+    def scaled_compute_loss(self, pred):
+        # Loss values need zoom out further.
+        return reduce_to_scalar_loss(pred) / 1000.0
+
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast(**self.autocast_arg):
             return mod(*inputs)
@@ -432,7 +424,10 @@ class TimmRunner(BenchmarkRunner):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
         with self.autocast(**self.autocast_arg):
-            loss, *_ = mod(*cloned_inputs)
+            pred = mod(*cloned_inputs)
+            if isinstance(pred, tuple):
+                pred = pred[0]
+            loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:
