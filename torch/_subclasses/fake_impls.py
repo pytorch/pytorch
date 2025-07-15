@@ -14,7 +14,6 @@ import torch._logging
 import torch._prims_common as utils
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
-from torch._prims import view_of
 from torch._prims_common import (
     contiguous_for_memory_format_or_false,
     elementwise_dtypes,
@@ -481,6 +480,7 @@ def _view_has_unbacked_input(a, shape):
 
 
 def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
+    from torch._prims import view_of
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
     # Creates a valid shape
@@ -549,7 +549,8 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
 
 
 @register_op_impl(aten.view.default)
-def _view_meta(a, *shape):
+@register_op_impl(aten._unsafe_view.default)
+def _view_meta(fake_mode, func, a, *shape):
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
     ):

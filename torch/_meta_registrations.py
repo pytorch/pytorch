@@ -4317,11 +4317,6 @@ def meta_index_put_(self, indices, values, accumulate=False):
     return self
 
 
-@register_meta(aten.alias.default)
-def meta_alias(self):
-    return self.view(self.shape)
-
-
 def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype=None):
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
