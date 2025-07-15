@@ -9,7 +9,6 @@ namespace c10 { namespace hip {
 // See Note [Masquerading as CUDA] for motivation
 
 struct HIPEventMasqueradingAsCUDA {
-  // Constructors
   HIPEventMasqueradingAsCUDA() noexcept = default;
   HIPEventMasqueradingAsCUDA(unsigned int flags) noexcept
       : event_(HIPEvent(flags)) {}
@@ -18,14 +17,12 @@ struct HIPEventMasqueradingAsCUDA {
       const cudaIpcEventHandle_t* handle)
       : event_(HIPEvent(device_index, handle)) {}
 
-  // New constructor, just for this.  Does NOT coerce.
-  explicit HIPEventMasqueradingAsCUDA(HIPEvent stream) : stream_(std::move(stream)) {}
-
   ~HIPEventMasqueradingAsCUDA() = default;
 
   HIPEventMasqueradingAsCUDA(const HIPEventMasqueradingAsCUDA&) = delete;
-  HIPEventMasqueradingAsCUDA& operator=(const HIPEventMasqueradingAsCUDA&) =
-      delete;
+  HIPEventMasqueradingAsCUDA& operator=(const HIPEventMasqueradingAsCUDA&) = delete;
+  HIPEventMasqueradingAsCUDA(HIPEventMasqueradingAsCUDA&& other) noexcept = default;
+  CUDAEvent& operator=(CUDAEvent&& other) noexcept noexcept = default;
 
   operator cudaEvent_t() const {
     return event_.event();
