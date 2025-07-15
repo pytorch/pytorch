@@ -2143,6 +2143,7 @@ def clone_inputs(
     example_inputs: dict[str, Union[T, tuple[T, ...]]],
 ) -> dict[str, list[T]]: ...
 
+
 @overload
 def clone_inputs(example_inputs: Sequence[T]) -> list[T]: ...
 
