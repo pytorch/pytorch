@@ -19,7 +19,12 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -508,40 +513,78 @@ class DistMatrixOpsTest(DTensorTestBase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @with_comms
     @skip_unless_torch_gpu
-    def test_grouped_mm(self):
+    @parametrize(
+        "kwargs",
+        [
+            {
+                # 2D x 3D case from MoE layer
+                "inp_shape": (64, 16),
+                "w1_shape": (2, 16, 32),
+                "w2_shape": (2, 32, 16),
+                "inp_placements": [Replicate()],
+                "w1_placements": [Shard(2)],
+                "w2_placements": [Shard(1)],
+                "expected_comm_counts_fwd": 0,
+                "expected_comm_counts_bwd": 1,
+                "expected_out_placements": [Partial()],
+            },
+            {
+                # Case that would have invalid strides on inp * mat1 when sharded
+                "inp_shape": (64, 16),
+                "w1_shape": (2, 16, 16),
+                "w2_shape": (2, 16, 16),
+                "inp_placements": [Replicate()],
+                "w1_placements": [Shard(2)],
+                "w2_placements": [Shard(1)],
+                "expected_comm_counts_fwd": 2,
+                "expected_comm_counts_bwd": 4,
+                "expected_out_placements": [Replicate()],
+            },
+        ],
+    )
+    def test_grouped_mm(self, kwargs):
         # TODO: torch._grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
-        # Here we only test the 2D x 3D Tensor Parallel use case in an MoE layer.
         # More tests need to be added.
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         comm_mode = CommDebugMode()
         dtype = torch.bfloat16
-
         inp = torch.rand(
-            64, 16, device=self.device_type, dtype=dtype, requires_grad=True
+            *kwargs["inp_shape"],
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
         )
         w1 = torch.rand(
-            2, 16, 32, device=self.device_type, dtype=dtype, requires_grad=True
+            *kwargs["w1_shape"],
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
         )
         w2 = torch.rand(
-            2, 32, 16, device=self.device_type, dtype=dtype, requires_grad=True
+            *kwargs["w2_shape"],
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
         )
         offs = torch.tensor([16, 64], device=self.device_type, dtype=torch.int32)
 
         h = torch._grouped_mm(inp, w1, offs=offs)
         out = torch._grouped_mm(h, w2, offs=offs)
 
-        dist_inp = distribute_tensor(inp, device_mesh, [Replicate()])
+        dist_inp = distribute_tensor(inp, device_mesh, kwargs["inp_placements"])
         # colwise sharded
-        dist_w1 = distribute_tensor(w1, device_mesh, [Shard(2)])
+        dist_w1 = distribute_tensor(w1, device_mesh, kwargs["w1_placements"])
         # rowwise sharded
-        dist_w2 = distribute_tensor(w2, device_mesh, [Shard(1)])
+        dist_w2 = distribute_tensor(w2, device_mesh, kwargs["w2_placements"])
         dist_offs = distribute_tensor(offs, device_mesh, [Replicate()])
 
         with comm_mode:
             dist_h = torch._grouped_mm(dist_inp, dist_w1, offs=dist_offs)
             dist_out = torch._grouped_mm(dist_h, dist_w2, offs=dist_offs)
-            self.assertEqual(comm_mode.get_total_counts(), 0)
-            self.assertTrue(dist_out.placements[0].is_partial())
+            self.assertEqual(
+                comm_mode.get_total_counts(), kwargs["expected_comm_counts_fwd"]
+            )
+            self.assertEqual(dist_out.placements, kwargs["expected_out_placements"])
             self.assertEqual(dist_out.full_tensor(), out)
 
         out_grad = torch.ones_like(out)
@@ -552,15 +595,19 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         with comm_mode:
             dist_out.backward(dist_out_grad)
-            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertEqual(
+                comm_mode.get_total_counts(), kwargs["expected_comm_counts_bwd"]
+            )
             self.assertEqual(
                 comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
-                1,
+                kwargs["expected_comm_counts_bwd"],
             )
         self.assertEqual(dist_inp.grad.full_tensor(), inp.grad)
         self.assertEqual(dist_w1.grad.full_tensor(), w1.grad)
         self.assertEqual(dist_w2.grad.full_tensor(), w2.grad)
 
+
+instantiate_parametrized_tests(DistMatrixOpsTest)
 
 if __name__ == "__main__":
     run_tests()
