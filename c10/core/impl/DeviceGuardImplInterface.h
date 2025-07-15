@@ -250,19 +250,17 @@ struct C10_API DeviceGuardImplInterface {
 // A no-op device guard impl that doesn't do anything interesting.  Useful
 // for devices that don't actually have a concept of device index.  Prominent
 // examples are CPU and Meta.
-template <DeviceType D>
+template <DeviceType D, int default_index = -1>
 struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
   NoOpDeviceGuardImpl() = default;
-  NoOpDeviceGuardImpl(int default_index, bool fail_on_event_functions)
-  : default_index_(default_index), fail_on_event_functions_(fail_on_event_functions_) {}
   DeviceType type() const override {
     return D;
   }
   Device exchangeDevice(Device) const override {
-    return Device(D, default_index_); // no-op
+    return Device(D, default_index); // no-op
   }
   Device getDevice() const override {
-    return Device(D, default_index_);
+    return Device(D, default_index);
   }
   void setDevice(Device) const override {
     // no-op
@@ -272,19 +270,19 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
   }
   Stream getStream(Device) const noexcept override {
     // no-op
-    return Stream(Stream::DEFAULT, Device(D, default_index_));
+    return Stream(Stream::DEFAULT, Device(D, default_index));
   }
 
   Stream getNewStream(Device, int priority = 0) const override {
     // no-op
     (void)priority;
-    return Stream(Stream::DEFAULT, Device(D, default_index_));
+    return Stream(Stream::DEFAULT, Device(D, default_index));
   }
 
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream) const noexcept override {
     // no-op
-    return Stream(Stream::DEFAULT, Device(D, default_index_));
+    return Stream(Stream::DEFAULT, Device(D, default_index));
   }
   DeviceIndex deviceCount() const noexcept override {
     return 1;
@@ -296,19 +294,13 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
       const Stream& /*stream*/,
       const DeviceIndex /*device_index*/,
       const EventFlag /*flag*/) const override {
-    if (fail_on_event_functions_) {
-      TORCH_CHECK(false, D, " backend doesn't support events.");
-    }
+    //TORCH_CHECK(false, D, " backend doesn't support events.");
   }
   void block(void* /*event*/, const Stream& /*stream*/) const override {
-    if (fail_on_event_functions_) {
-      TORCH_CHECK(false, D, " backend doesn't support events.")
-    }
+    //TORCH_CHECK(false, D, " backend doesn't support events.")
   }
   bool queryEvent(void* /*event*/) const override {
-    if (fail_on_event_functions_) {
-      TORCH_CHECK(false, D, " backend doesn't support events.")
-    }
+    //TORCH_CHECK(false, D, " backend doesn't support events.")
     return true;
   }
   void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
@@ -321,16 +313,6 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
   void synchronizeStream(const Stream& /*stream*/) const override {
     // Don't wait for anything.
   }
-
-  // This is the index of devices when Device / Stream related functions
-  // are called. For CPU device, this is traditionally -1.
-  // However, if using this guard for other keys, such as PrivateUse1, the 
-  // autograd engine expects to have 1 thread per device and will use 
-  // this index to get streams. If -1 it will get a CPU stream instead.
-  const int default_index_ = -1;
-
-  // Whether functions like block will fail or will do nothing (true NoOp).
-  const bool fail_on_event_functions_ = true;
 };
 
 // The registry is NON-owning.  Each stored pointer is std::atomic so

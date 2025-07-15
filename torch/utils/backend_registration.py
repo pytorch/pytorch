@@ -482,6 +482,20 @@ def setup_privateuseone_for_python_backend(rename=None):
     else:
         rename = "privateuseone"
     torch.utils.generate_methods_for_privateuse1_backend()
-    torch.autograd.grad_mode.set_multithreading_enabled(False)
     torch._register_device_module(rename, BackendModule())
-    torch._C.setup_privateuseone_for_python_use()
+    #torch._C.setup_privateuseone_for_python_use()
+    class Hook:
+        def is_available(self): return True
+        def has_primary_context(self): return True
+        def is_built(self): return True
+    torch._C.register_privateuseone_hook(Hook())
+
+    class Guard:
+        def get_device_id(self): 
+            return 0
+        def set_device_id(self, id): 
+            return None
+        def exchange_device_id(self, id): 
+            return None
+
+    torch._C.register_privateuseone_device_guard(Guard())
