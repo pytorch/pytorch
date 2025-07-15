@@ -77,7 +77,9 @@ lintrunner -m main
 ```
 
 ## 🔧 Common Development Tasks
-TODO(Claude): mention that you should always use ccache
+
+### Performance Tips
+Use `ccache` to speed up C++ compilation - install with your package manager and it will be automatically detected.
 
 ### After Modifying Python Files
 No rebuild needed with `-e` install - changes are immediately available.

@@ -6,7 +6,7 @@ Collection of build scripts, code generation tools, and development utilities us
 
 ### Code Generation
 - **`autograd/`** - Autograd code generation and derivative definitions
-- **`jit/`** - TorchScript code generation utilities TODO(Claude): can you verify this
+- **`jit/`** - JIT unboxing code generation for TorchScript
 - **`pyi/`** - Python stub file generation for type hints
 
 ### Build System

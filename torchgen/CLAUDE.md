@@ -117,11 +117,9 @@ python -c "import torch; torch.add(torch.tensor([1]), torch.tensor([2]))"
 
 ## 🔧 Advanced Features
 
-### Structured Kernels (`api/structured.py`)
-TODO(Claude): This paragraph is wrong. Also confusing wrt to structured_delegate option in `native_functions.yaml`
-- Generates optimized implementations for operations with multiple variants
-- Handles broadcasting, type promotion, and memory layout automatically
-- Reduces code duplication across similar operations
+### Structured Calling Convention (`api/structured.py`)
+- Translates JIT schema to structured functions API (fixes historical native API problems)
+- Uses precomputed parameters and argument replacement for optimized implementations
 
 ### Auto-Heuristics (`_autoheuristic/`)
 - Machine learning-based performance optimization

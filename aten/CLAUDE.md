@@ -33,12 +33,14 @@ ATen (A Tensor library) is PyTorch's C++ tensor computation library providing th
 - `src/ATen/TensorIterator.h` - Efficient tensor iteration framework
 - `src/ATen/core/Tensor.h` - Core tensor interface
 - `src/ATen/Dispatch.h` - Type dispatch system for kernels
-TODO(Claude): add something about per-op headers as you can see it used at the top of aten/src/ATen/native/TensorShape.cpp where the AT_PER_OPERATOR_HEADERS is used.
+
+### Per-Operator Headers
+Use `#ifndef AT_PER_OPERATOR_HEADERS` pattern to conditionally include individual operator headers vs. monolithic headers for faster compilation.
 
 ### Code Generation
 - `src/ATen/native/native_functions.yaml` - Operator definitions for codegen
 - `src/ATen/templates/` - Jinja2 templates for generating C++ code
-- Generated files appear in build directory TODO(Claude): where should we put a claude.md that describes where to find these generated files in build/?
+- Generated files appear in `build/aten/src/ATen/` directory after build
 
 ### Testing
 ```bash
@@ -59,7 +61,7 @@ eval $BUILD_CONFIG python setup.py develop
 1. Add definition to `src/ATen/native/native_functions.yaml`
 2. Implement kernel in `src/ATen/native/` (CPU) and `src/ATen/native/cuda/` (CUDA)
 3. Rebuild PyTorch
-4. Add entry in OpInfo database in `torch/testing/_internal/common_method_invocation.py` TODO(Claude): check this file and add more details here
+4. Add OpInfo entry in `torch/testing/_internal/common_methods_invocations.py` for comprehensive testing
 
 ## 🐛 Common Issues
 

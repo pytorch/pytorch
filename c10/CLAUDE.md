@@ -45,7 +45,7 @@ C10, historically build to support both Caffe2 (C2) and ATen (A10), contains the
 ## 🧪 Testing
 
 ### Running C10 Tests
-TODO(Claude): There are no real tests that matter here, things need to be tested from python at the top level
+C10 components are primarily tested through higher-level PyTorch tests rather than isolated unit tests.
 
 ## 🔄 Development Workflow
 

@@ -7,7 +7,7 @@ Comprehensive test suite for PyTorch covering all components from Python API to 
 ### Core Test Framework
 - **`run_test.py`** - Main test runner script with sharding, filtering, and CI integration
 - **`conftest.py`** - Pytest configuration and shared fixtures
-- **`HowToWriteTestsUsingFileCheck.md`** - Guide for testing with FileCheck TODO(Claude): this is just some weird inductor test
+- **`HowToWriteTestsUsingFileCheck.md`** - Guide for testing with FileCheck (primarily for Inductor tests)
 
 ### Test Categories
 
@@ -29,7 +29,7 @@ Comprehensive test suite for PyTorch covering all components from Python API to 
 - **`test_quantization.py`** - Quantization algorithms
 - **`test_distributed.py`** - Multi-process training
 - **`test_profiler.py`** - Performance profiling tools
-- **`test_jit.py`** - TorchScript compilation and execution TODO(Claude): Note that TorchScript is depreacted, some of these tests are ok to break
+- **`test_jit.py`** - TorchScript compilation and execution (note: TorchScript is deprecated)
 
 #### Backend-Specific Directories
 - **`autograd/`** - Autograd-specific test cases
@@ -53,9 +53,9 @@ python test/run_test.py -i test_torch
 python test/run_test.py -i test_nn
 python test/run_test.py -i test_autograd
 
-TODO(Claude): Add real-life test example here like below for the single test method
 # Run tests with specific patterns
 python test/run_test.py -k "test_add"
+python test/run_test.py test_torch.py::TestTorch::test_add_cuda
 python test/run_test.py -k "TestNN"
 ```
 
@@ -95,7 +95,11 @@ Part of development work is figuring out which tests are relevant for your chang
 - **Build system changes**: Test core functionality and CI integration
 
 ### Writing New Tests
-TODO(Claude): There a few principles here: you only add a new class for a new major feature. You will add new function for unit test, all op-related things should go in OpInfo db.
+
+Test organization principles:
+- Add new test class only for major new features
+- Add new test methods for unit tests within existing classes
+- For new operators, add OpInfo entries rather than individual test methods
 ```python
 # Standard test pattern
 class TestMyFeature(TestCase):
@@ -116,7 +120,10 @@ class TestMyFeature(TestCase):
 - **`@skipIf`** - Conditional test skipping
 - **`gradcheck`** - Automatic gradient verification
 
-TODO(Claude): Add details on the instantiate_* methods see for example at the bottom of test_autograd.py. What they do, why some test_foo() functions take more arguments than others, etc
+### Test Instantiation Patterns
+- `instantiate_device_type_tests()` - Generates device-specific test variants (CPU, CUDA, etc.)
+- `instantiate_parametrized_tests()` - Creates parameterized test combinations
+- Test methods with extra args (device, dtype) are automatically called from these instantiated new tests
 
 ## 🐛 Common Testing Issues
 
@@ -145,4 +152,7 @@ TODO(Claude): Add details on the instantiate_* methods see for example at the bo
 - Test results are often XML-formatted for CI integration
 - Memory and performance tests require special attention to cleanup
 
-TODO(Claude): The usual pattern here is to only run specific tests locally, up to one file locally. Then use github to get broad signal on multiple OS, hw, platform. And iterate locally depending on what was seen to fail on github CI
+### Development Testing Strategy
+- Run specific tests locally (single file maximum)
+- Use GitHub CI for broad coverage across OS/hardware/platforms
+- Iterate locally based on CI failures
