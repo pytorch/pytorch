@@ -110,7 +110,7 @@ class TestPartitionFunctions:
 
     @staticmethod
     def forward6(a, b, c):
-        # add should have its own partition, as neither branchs are supported
+        # add should have its own partition, as neither branches are supported
         add = a + 1
         # left branch
         relu = add.relu()
@@ -283,7 +283,7 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward15, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
         (TestPartitionFunctions.forward16, [["permute_1", "add_1", "add"]], True),
         (TestPartitionFunctions.forward16, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
-        # should be empty partition, not a partiton with empty nodes
+        # should be empty partition, not a partition with empty nodes
         (TestPartitionFunctions.forward18, [], False),
     ])
     def test_partitioner(self, fn, expected_partition, bookend_non_compute_pass):
@@ -344,9 +344,9 @@ class TestFXGraphPasses(JitTestCase):
         [['add', 'add_1', 'add_2']],  # vertical fusion
         [['add_2', 'add_3']],         # horizontal fusion
         [['add_3', 'add_4']],
-        [['add_6', 'add_5']],     # arbitray node order
-        [['add_4', 'add_1', 'add_3', 'add_2']],           # arbitray node order
-        [['add_5', 'add_6'], ['add_1', 'add_2', 'add_3', 'add_4']],  # arbitray partition order
+        [['add_6', 'add_5']],     # arbitrary node order
+        [['add_4', 'add_1', 'add_3', 'add_2']],           # arbitrary node order
+        [['add_5', 'add_6'], ['add_1', 'add_2', 'add_3', 'add_4']],  # arbitrary partition order
         [['add_5', 'linear2']],   # includes call_function + call_module node
         [['add_6', 'relu']],   # includes call_function + call_module node
         [['param', 'add_2']],   # includes get_attr + call_module nodes

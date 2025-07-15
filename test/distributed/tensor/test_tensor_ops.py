@@ -708,6 +708,34 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(sharded_out.full_tensor(), global_out)
         self.assertEqual(sharded_dtensor.grad.full_tensor(), global_tensor.grad)
 
+    @with_comms
+    def test_split_on_partial(self):
+        self.run_subtests(
+            {
+                "reduce_op": ["sum", "avg", "product", "min", "max"],
+                "split_size": [2, 3, 4],
+                "split_dim": [0, 1],
+            },
+            self._test_split_on_partial,
+        )
+
+    def _test_split_on_partial(self, reduce_op: str, split_size: int, split_dim: int):
+        torch.manual_seed(self.rank)
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        partial_tensor = torch.randn(8, 8, device=self.device_type)
+        partial_dt = DTensor.from_local(
+            local_tensor=partial_tensor,
+            device_mesh=mesh,
+            placements=[Partial(reduce_op=reduce_op)],
+        )
+        self._test_op_on_dtensor(
+            torch.split,
+            partial_dt,
+            split_size,
+            dim=split_dim,
+        )
+
 
 if __name__ == "__main__":
     run_tests()
