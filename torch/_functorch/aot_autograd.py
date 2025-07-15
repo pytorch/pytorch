@@ -854,29 +854,20 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     return AOTModule()
 
 
-def aot_module_simplified(
+def prepare_aot_module_simplified(
     mod: nn.Module,
     args,
     fw_compiler: AOTDispatchCompiler,
-    bw_compiler: Optional[AOTDispatchCompiler] = None,
-    partition_fn: Callable = default_partition,
-    decompositions: Optional[dict] = None,
-    keep_inference_input_mutations=False,
-    inference_compiler: Optional[AOTDispatchCompiler] = None,
-    cudagraphs: Optional[BoxedBool] = None,
-    boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-    ignore_shape_env: bool = False,
-) -> nn.Module:
-    """
-    This is the simplified or low overhead version of aot_module. For frontends
-    like TorchDynamo, the input functions/modules to AOT are static and have
-    unpacked inputs/outputs. This gives us an opportunity to remove the
-        (1) pytree overhead to parse inputs/outputs,
-        (2) AOT Autograd cache,
-        (3) Reading of params/buffers in every forward call
-
-    :func:`aot_module_simplified` removes these overheads.
-    """
+    bw_compiler: AOTDispatchCompiler,
+    partition_fn: Callable,
+    decompositions: dict,
+    keep_inference_input_mutations,
+    inference_compiler: AOTDispatchCompiler,
+    boxed_forward_device_index: BoxedDeviceIndex,
+    ignore_shape_env: bool,
+):
+    # TODO: There's something a bit suspicious here; typically simplified
+    # module shouldn't actually have any parameters...
     params = {
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),
@@ -884,14 +875,6 @@ def aot_module_simplified(
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = list(params_flat)
     params_len = len(params_flat)
-
-    if cudagraphs is None:
-        cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
-
-    if bw_compiler is None:
-        bw_compiler = fw_compiler
-    if inference_compiler is None:
-        inference_compiler = fw_compiler
 
     full_args = []
     # First, the params
@@ -940,31 +923,91 @@ def aot_module_simplified(
     fake_flat_args = process_inputs(
         full_args, aot_config, fake_mode, shape_env, ignore_shape_env
     )
+    functional_call = create_functional_call(mod, params_spec, params_len)
+
+    return (
+        functional_call,
+        params_flat,
+        fake_flat_args,
+        aot_config,
+        fake_mode,
+        shape_env,
+    )
+
+
+def aot_module_simplified(
+    mod: nn.Module,
+    args,
+    fw_compiler: AOTDispatchCompiler,
+    bw_compiler: Optional[AOTDispatchCompiler] = None,
+    partition_fn: Callable = default_partition,
+    decompositions: Optional[dict] = None,
+    keep_inference_input_mutations=False,
+    inference_compiler: Optional[AOTDispatchCompiler] = None,
+    # TODO: This doesn't seem to be used in any nontrivial way, check if it's
+    # actually needed
+    cudagraphs: Optional[BoxedBool] = None,
+    boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
+    ignore_shape_env: bool = False,
+) -> nn.Module:
+    """
+    This is the simplified or low overhead version of aot_module. For frontends
+    like TorchDynamo, the input functions/modules to AOT are static and have
+    unpacked inputs/outputs. This gives us an opportunity to remove the
+        (1) pytree overhead to parse inputs/outputs,
+        (2) AOT Autograd cache,
+        (3) Reading of params/buffers in every forward call
+
+    :func:`aot_module_simplified` removes these overheads.
+    """
+
+    if cudagraphs is None:
+        cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
+    if bw_compiler is None:
+        bw_compiler = fw_compiler
+    if inference_compiler is None:
+        inference_compiler = fw_compiler
 
     with contextlib.ExitStack() as stack:
-        while True:
-            # We only care if the forward will return an OutputCode.
-            if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
-                local = should_use_local_autograd_cache()
-                remote = should_use_remote_autograd_cache()
-                if local or remote:
-                    set_feature_use("aot_autograd_remote_cache", remote)
-                    compiled_fn = AOTAutogradCache.try_load(
-                        mod,
-                        fake_flat_args,
-                        aot_config,
-                        cudagraphs,
-                        boxed_forward_device_index,
-                        local,
-                        remote,
-                    )
-                    if compiled_fn is not None:
-                        break
+        (
+            functional_call,
+            params_flat,
+            fake_flat_args,
+            aot_config,
+            fake_mode,
+            shape_env,
+        ) = prepare_aot_module_simplified(
+            mod,
+            args,
+            fw_compiler,
+            bw_compiler,
+            partition_fn,
+            decompositions,
+            keep_inference_input_mutations,
+            inference_compiler,
+            boxed_forward_device_index,
+            ignore_shape_env,
+        )
 
-            functional_call = create_functional_call(mod, params_spec, params_len)
+        compiled_fn = None
 
+        if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
+            local = should_use_local_autograd_cache()
+            remote = should_use_remote_autograd_cache()
+            if local or remote:
+                set_feature_use("aot_autograd_remote_cache", remote)
+                compiled_fn = AOTAutogradCache.try_load(
+                    mod,
+                    fake_flat_args,
+                    aot_config,
+                    cudagraphs,
+                    boxed_forward_device_index,
+                    local,
+                    remote,
+                )
+
+        if compiled_fn is None:
             stack.enter_context(compiled_autograd._disable())
-
             aot_state = create_aot_state(
                 stack,
                 functional_call,
@@ -975,36 +1018,30 @@ def aot_module_simplified(
             )
             aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
             compiled_fn, _ = aot_stage2_compile(aot_state, aot_graph_capture)
-            break
 
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
         # This function is called by the flatten_graph_inputs wrapper, which boxes
         # the inputs so that they can be freed before the end of this scope.
         # For overhead reasons, this is not the default wrapper, see comment:
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
-        def boxed_forward(runtime_args: list[Any]):
+        def forward(runtime_args: list[Any]):
             flat_args = []
             flat_args.extend(params_flat)
             flat_args.extend(runtime_args)
             runtime_args.clear()
             return compiled_fn(flat_args)
 
-        # Just for convenience
-        boxed_forward.zero_grad = mod.zero_grad
-        boxed_forward.named_parameters = mod.named_parameters
-        boxed_forward.named_buffers = mod.named_buffers
-        return boxed_forward
-
-    # TODO: There is something deeply wrong here; compiled_fn running with
-    # the boxed calling convention, but aot_module_simplified somehow
-    # historically returned a function that was not the boxed calling
-    # convention.  This should get fixed...
-    # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
-    def forward(*runtime_args: tuple[Any]):
-        full_args = []
-        full_args.extend(params_flat)
-        full_args.extend(runtime_args)
-        return compiled_fn(full_args)
+    else:
+        # TODO: There is something deeply wrong here; compiled_fn running with
+        # the boxed calling convention, but aot_module_simplified somehow
+        # historically returned a function that was not the boxed calling
+        # convention.  This should get fixed...
+        # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
+        def forward(*runtime_args: tuple[Any]):
+            full_args = []
+            full_args.extend(params_flat)
+            full_args.extend(runtime_args)
+            return compiled_fn(full_args)
 
     # Just for convenience
     forward.zero_grad = mod.zero_grad
