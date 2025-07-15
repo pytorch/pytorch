@@ -1166,6 +1166,7 @@ exclude_patterns = [
     'aten/src/ATen/native/q*/**',
     'aten/src/ATen/native/[a-pA-P]*/**',
     'aten/src/ATen/[a-mA-M]*/**',
+    'test/**',
 ]
 init_command = [
     'python3',
