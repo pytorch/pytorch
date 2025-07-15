@@ -136,15 +136,12 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
   }
 
   std::string passthrough_parameters_args;
+  std::regex script_regex(R"(--script=[^,]*script\.ld)");
+  std::string replacement =
+      "--script=" + target_dir + k_separator + "script.ld";
   for (auto& arg : compile_options["passthrough_args"]) {
-    std::string arg_str = arg.get<std::string>();
-    std::string target = "script.ld";
-    std::string replacement = target_dir;
-    replacement.append(k_separator).append(target);
-    size_t pos = arg_str.find(target);
-    if (pos != std::string::npos) {
-      arg_str.replace(pos, target.length(), replacement);
-    }
+    std::string arg_str =
+        std::regex_replace(arg.get<std::string>(), script_regex, replacement);
     passthrough_parameters_args += arg_str + " ";
   }
 
