@@ -115,7 +115,7 @@ from .utils import (
     sympy_subs,
     tensor_is_aligned,
 )
-from .virtualized import ops, OpsValue, V
+from .virtualized import NullHandler, ops, OpsValue, V
 
 
 if TYPE_CHECKING:
@@ -5522,7 +5522,13 @@ class ExternKernel(InputsKernel):
         example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
-        if shape_env := V.fake_mode.shape_env:
+        # NOTE(yf225): check V.current_node first in order to avoid the "V.current_node is NullHandler" issue
+        # when the FallbackKernel is created within an Inductor scheduler IR pass.
+        # Arguably we could also do `with ir.IRNode.current_origins(origins), V.graph.set_current_node(n), V.set_current_node(n):`
+        # when issuing FallbackKernel.create() in the IR pass, but I also want to avoid needing to create a parallel FX graph for a scheduler IR only pass.
+        if (shape_env := V.fake_mode.shape_env) and not isinstance(
+            V.current_node, NullHandler
+        ):
             node_meta_val = V.current_node.meta.get("val")
             ctx: AbstractContextManager[None] = nullcontext()
             if V.current_node.target == torch._higher_order_ops.effects.with_effects:
