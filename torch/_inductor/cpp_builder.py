@@ -593,7 +593,17 @@ def _get_optimization_cflags(min_optimize: bool = False) -> list[str]:
             if config.aot_inductor.debug_compile
             else [wrapper_opt_level, "DNDEBUG"]
         )
-        cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
+        cflags.extend(
+            (
+                f"ffp-contract={config.cpp.enable_floating_point_contract_flag}",
+                "fno-trapping-math",
+                "fno-signed-zeros",
+                "fno-math-errno",
+            )
+        )
+
+        if is_gcc():
+            cflags.extend(("fexcess-precision=fast", "fno-tree-loop-vectorize"))
 
         if not config.is_fbcode():
             if platform.machine() == "ppc64le":
