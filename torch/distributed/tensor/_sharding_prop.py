@@ -130,11 +130,15 @@ class ShardingPropagator:
 
         The optional ``schema_info`` tells which non-DTensor args/kwargs could affect the
         cache and whether `pytree` is needed to flatten the nested args. For example,
-        op ``aten.cat.default`` has a ``List[Tensor]`` argument ``tensors`` and an ``int``
+        ``aten.cat.default`` op has a ``List[Tensor]`` argument ``tensors`` and an ``int``
         argument ``dim``. Because ``dim`` affects the sharding propagation result, we want
         to pass ``RuntimeSchemaInfo(static_argnum=1)`` because the argument index of ``dim``
         is 1. Besides, we also want to set ``needs_pytree=True`` because ``tensors`` needs
-        be flattened in sharding propagation.
+        be flattened in sharding propagation. Another example is ``aten.histc.default``.
+        ``histc`` has 4 arguments (self, bins, min, max) and the last two would affect
+        sharding propagation along with the :class:`DTensor` argument ``self``. Since the
+        argument index of ``min`` is 2, the `schema_info` should be
+        `RuntimeSchemaInfo(static_argnum=2)`.
         """
         self.op_strategy_funcs[op_overload] = strategy_func
         if schema_info is not None:
