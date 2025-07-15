@@ -5,9 +5,6 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/Exception.h>
 
-#include <cstdint>
-#include <utility>
-
 /*
  * `cudaEventExternal` is a torch-specific flag that is used to
  * indicate that the CUDAEvent will be used only for synchronization
@@ -19,7 +16,7 @@
  */
 #define cudaEventExternal 0x08
 
-namespace at::cuda {
+namespace c10::cuda {
 
 /*
  * CUDAEvents are movable not copyable wrappers around CUDA's events.
@@ -53,7 +50,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_deletion(
-            at::kCUDA, reinterpret_cast<uintptr_t>(event_));
+            c10::kCUDA, reinterpret_cast<uintptr_t>(event_));
       }
       C10_CUDA_CHECK_WARN(cudaEventDestroy(event_));
     }
@@ -81,9 +78,9 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     return left.event_ < right.event_;
   }
 
-  std::optional<at::Device> device() const {
+  std::optional<c10::Device> device() const {
     if (is_created_) {
-      return at::Device(at::kCUDA, device_index_);
+      return c10::Device(c10::kCUDA, device_index_);
     } else {
       return {};
     }
@@ -157,7 +154,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(
-          at::kCUDA,
+          c10::kCUDA,
           reinterpret_cast<uintptr_t>(event_),
           reinterpret_cast<uintptr_t>(stream.stream()));
     }
@@ -184,7 +181,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_wait(
-            at::kCUDA,
+            c10::kCUDA,
             reinterpret_cast<uintptr_t>(event_),
             reinterpret_cast<uintptr_t>(stream.stream()));
       }
@@ -220,7 +217,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_synchronization(
-            at::kCUDA, reinterpret_cast<uintptr_t>(event_));
+            c10::kCUDA, reinterpret_cast<uintptr_t>(event_));
       }
       C10_CUDA_CHECK(cudaEventSynchronize(event_));
     }
@@ -257,7 +254,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_creation(
-          at::kCUDA, reinterpret_cast<uintptr_t>(event_));
+          c10::kCUDA, reinterpret_cast<uintptr_t>(event_));
     }
     is_created_ = true;
   }
@@ -281,16 +278,16 @@ class EventPool {
  public:
   using Event = std::unique_ptr<
       c10::cuda::CUDAEvent,
-      std::function<void(at::cuda::CUDAEvent*)>>;
-  EventPool() : pools_(at::cuda::device_count()) {}
+      std::function<void(c10::cuda::CUDAEvent*)>>;
+  EventPool() = default;
 
   Event get(DeviceIndex device) {
     TORCH_INTERNAL_ASSERT(0 <= device);
     TORCH_INTERNAL_ASSERT(device < static_cast<DeviceIndex>(pools_.size()));
     auto& pool = pools_[device];
-    auto destructor = [&pool](at::cuda::CUDAEvent* event) {
+    auto destructor = [&pool](c10::cuda::CUDAEvent* event) {
       std::lock_guard<std::mutex> g(pool.mutex_);
-      pool.event_pool_.push_back(std::unique_ptr<at::cuda::CUDAEvent>(event));
+      pool.event_pool_.push_back(std::unique_ptr<c10::cuda::CUDAEvent>(event));
     };
 
     // Try to acquire an event from the per-device pool.
@@ -304,7 +301,8 @@ class EventPool {
     }
     // otherwise, allocate a new event that will be returned to the pool on
     // destruction.
-    return Event(std::make_unique<at::cuda::CUDAEvent>().release(), destructor);
+    return Event(
+        std::make_unique<c10::cuda::CUDAEvent>().release(), destructor);
   }
 
   void empty_cache() {
@@ -317,9 +315,10 @@ class EventPool {
  private:
   struct PerDevicePool {
     alignas(64) std::mutex mutex_;
-    std::vector<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
+    std::vector<std::unique_ptr<c10::cuda::CUDAEvent>> event_pool_;
   };
-  std::vector<PerDevicePool> pools_;
+  std::vector<PerDevicePool> pools_ =
+      std::vector<PerDevicePool>(c10::cuda::device_count());
 };
 
-} // namespace at::cuda
+} // namespace c10::cuda
