@@ -12,12 +12,14 @@ import itertools
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, NewType, Optional, Union
+from typing import Any, Callable, NewType, Optional, Protocol, TypeVar, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import Source
+from torch._inductor.output_code import OutputCode
+from torch._inductor.utils import InputType
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
@@ -1096,3 +1098,46 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
 
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any
+
+
+FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
+
+
+TOutputCode = TypeVar("TOutputCode", bound=OutputCode)
+
+
+class AOTDispatchCompiler(Protocol):
+    """
+    Represents a fw or bw_compiler passed to AOTAutograd.
+    """
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+    ) -> Any: ...
+
+
+# TODO: bikeshed on this name
+class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
+    """
+    Represents an AOTDispatchCompiler that returns an OutputCode, and is
+    therefore cacheable. SerializableAOTDispatchCompiler always return an OutputCode.
+    A _CompileFxCallable usually gets converted into an AOTDispatchCompiler after binding all of
+    the kwargs in _CompileFxKwargs.
+    """
+
+    def __init__(
+        self,
+        output_code_ty: type[TOutputCode],
+        compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
+    ):
+        self.output_code_ty = output_code_ty
+        self.compiler_fn = compiler_fn
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+    ) -> OutputCode:
+        return self.compiler_fn(gm, example_inputs)
