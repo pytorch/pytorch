@@ -1126,7 +1126,7 @@ class DeviceCachingAllocator {
   // outstanding cuda events
   ska::flat_hash_map<
       cuda::CUDAStream,
-      std::deque<std::pair<EventPool::Event, Block*>>>
+      std::deque<std::pair<CUDAEventPool::Event, Block*>>>
       cuda_events;
 
   // record used memory.
@@ -3164,9 +3164,9 @@ class DeviceCachingAllocator {
     }
   }
 
-  EventPool::Event create_event_internal(c10::DeviceIndex idx) {
+  CUDAEventPool::Event create_event_internal(c10::DeviceIndex idx) {
     // Leak the event pool to avoid shutdown issues.
-    static auto* event_pool = new EventPool();
+    static auto* event_pool = new CUDAEventPool();
     return event_pool->get(idx);
   }
 
@@ -3192,7 +3192,7 @@ class DeviceCachingAllocator {
           continue;
         }
 
-        EventPool::Event event = std::move(e->first);
+        CUDAEventPool::Event event = std::move(e->first);
 
         event->synchronize();
 
@@ -3241,7 +3241,7 @@ class DeviceCachingAllocator {
     for (auto& stream : streams) {
       C10_CUDA_CHECK(c10::cuda::SetDevice(stream.device_index()));
 
-      EventPool::Event event = create_event_internal(stream.device_index());
+      CUDAEventPool::Event event = create_event_internal(stream.device_index());
       event->record(stream);
 
       block->event_count++;
@@ -3284,7 +3284,7 @@ class DeviceCachingAllocator {
       // Iterate over this stream's (event, block) pairs.
       while (!it->second.empty()) {
         auto& e = it->second.front();
-        EventPool::Event event = std::move(e.first);
+        CUDAEventPool::Event event = std::move(e.first);
         Block* block = e.second;
 
         if (!event->query()) {
