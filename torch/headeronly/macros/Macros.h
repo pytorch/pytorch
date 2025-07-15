@@ -4,8 +4,8 @@
 
 /* Main entry for torch/headeronly/macros (used to be c10/macros).
  *
- * In your code, include torch/headeronly/macros/Macros.h directly, instead of individual
- * files in this folder.
+ * In your code, include torch/headeronly/macros/Macros.h directly, instead of
+ * individual files in this folder.
  */
 
 // For build systems that do not directly depend on CMake and directly build
