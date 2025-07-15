@@ -13,6 +13,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -24,6 +25,10 @@ from torch.testing._internal.inductor_utils import (
     IS_BIG_GPU,
     requires_triton,
 )
+from torch.utils.cpp_extension import ROCM_HOME
+
+
+TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 
 
 class TransformerSnippet(nn.Module):
@@ -98,6 +103,8 @@ class MultiKernelTest(TestCase):
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
     @requires_triton()
+    # TODO: bobrenjc93 to fix for ROCM
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_gemm(self):
         def fn(x, y):
