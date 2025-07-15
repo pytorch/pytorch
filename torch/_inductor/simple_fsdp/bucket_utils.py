@@ -250,14 +250,19 @@ def bucket_all_gathers(
     # must schedule all the all_gather input nodes first, before the bucketed all_gather node
     param_all_gather_inputs_orig: list[Union[ir.IRNode, scheduler.SchedulerBuffer]] = []
     for ag_input_ir_node in ag_input_ir_nodes:
-        if ag_input_sched_buf := name_to_buf.get(ag_input_ir_node.get_name()):
+        if ag_input_ir_node.is_input_buffer() or isinstance(
+            ag_input_ir_node, ir.ReinterpretView
+        ):
+            param_all_gather_inputs_orig.append(ag_input_ir_node)
+        elif ag_input_sched_buf := name_to_buf.get(ag_input_ir_node.get_name()):
             if not return_ag_only:
                 schedule_snode_fn(ag_input_sched_buf.defining_op)
                 grouped_ag_num += 1
             param_all_gather_inputs_orig.append(ag_input_sched_buf.node)
         else:
-            assert ag_input_ir_node.is_input_buffer()
-            param_all_gather_inputs_orig.append(ag_input_ir_node)
+            raise ValueError("Unexpected node type")
+            # assert ag_input_ir_node.is_input_buffer()
+            # param_all_gather_inputs_orig.append(ag_input_ir_node)
 
     # schedule the bucketed all_gather node
     param_all_gather_inputs_flattened = [
@@ -379,11 +384,14 @@ def bucket_reduce_scatters(
     unsharded_grads = []
     unsharded_grads_fx_nodes = [n.args[0] for n in orig_rs_fx_nodes]
     for rs_input_ir_node in rs_input_ir_nodes:
-        if rs_input_sched_buf := name_to_buf.get(rs_input_ir_node.get_name()):
+        if rs_input_ir_node.is_input_buffer() or isinstance(
+            rs_input_ir_node, ir.ReinterpretView
+        ):
+            unsharded_grads.append(rs_input_ir_node)
+        elif rs_input_sched_buf := name_to_buf.get(rs_input_ir_node.get_name()):
             unsharded_grads.append(rs_input_sched_buf.node)
         else:
-            assert rs_input_ir_node.is_input_buffer()
-            unsharded_grads.append(rs_input_ir_node)
+            raise ValueError("Unexpected node type")
     reduce_dtype = unsharded_grads_fx_nodes[0].meta["val"].dtype
     # Only float32 and bfloat16 are supported for now.
     # To support fp16, please see FSDP2 `_get_gradient_divide_factors`.
