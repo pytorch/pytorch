@@ -2346,7 +2346,7 @@ def is_collective(
 
     from . import ir
 
-    return (
+    ret = (
         isinstance(node, ir._CollectiveKernel)
         and not isinstance(node, ir._WaitKernel)
         and (op is None or node.op_overload is op)
@@ -2373,6 +2373,7 @@ def is_collective(
             )
         )
     )
+    return ret
 
 
 def is_wait(node: Optional[Union[IRNode, Operation]]) -> bool:
