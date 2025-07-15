@@ -28,6 +28,7 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
+from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._ordered_set import OrderedSet
@@ -2716,7 +2717,10 @@ class Scheduler:
             return backend.benchmark_fused_nodes(nodes)
 
     def generate_kernel_code_from_nodes(
-        self, nodes: Sequence[BaseSchedulerNode], benchmark_kernel: bool
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        benchmark_kernel: bool,
+        hint_override: Optional[int] = None,
     ) -> str:
         """
         Benchmark fused list of nodes and return the execution time
@@ -2727,7 +2731,9 @@ class Scheduler:
         self.current_device = device
         backend = self.get_backend(device)
         with dynamo_timed("benchmark_fused_nodes"):
-            return backend.generate_kernel_code_from_nodes(nodes, benchmark_kernel)
+            return backend.generate_kernel_code_from_nodes(
+                nodes, benchmark_kernel, hint_override=hint_override
+            )
 
     def benchmark_codegened_module(
         self, module: ModuleType, device: torch.device
@@ -2789,7 +2795,7 @@ class Scheduler:
                     min_node_unfused = next(
                         (
                             timing
-                            for timing in multi_node.choice_timings
+                            for timing in multi_node.choice_timings()
                             if isinstance(
                                 timing,
                                 torch._inductor.select_algorithm.ExternKernelCaller,
@@ -2801,7 +2807,23 @@ class Scheduler:
                     min_node_unfused,
                     torch._inductor.ir.TritonTemplateCallerBase,
                 ):
-                    node.node.finalize_as_triton_caller(min_node_unfused)
+                    if config.multi_kernel_hints:
+                        callers: dict[Optional[int], TritonTemplateCallerBase] = {}
+                        callers[None] = min_node_unfused
+
+                        for hint in config.multi_kernel_hints:
+                            timings = multi_node.choice_timings(hint_override=hint)
+                            triton_timings = {
+                                k: v
+                                for k, v in timings.items()
+                                if isinstance(k, TritonTemplateCallerBase)
+                            }
+                            choice = min(triton_timings.items(), key=lambda x: x[1])[0]
+                            callers[hint] = choice
+
+                        node.node.finalize_as_triton_callers(callers)
+                    else:
+                        node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
 
                 out_tensorbox = min_node_unfused.output_node()
@@ -2924,10 +2946,10 @@ class Scheduler:
         async_compile = torch._inductor.async_compile.AsyncCompile()
 
         def compile_kernel(
-            nodes: Sequence[BaseSchedulerNode],
+            nodes: Sequence[BaseSchedulerNode], hint_override: Optional[int] = None
         ) -> tuple[Optional[LambdaFuture], ModuleType]:
             src_code = self.generate_kernel_code_from_nodes(
-                nodes, benchmark_kernel=True
+                nodes, benchmark_kernel=True, hint_override=hint_override
             )
             mod = PyCodeCache.load(src_code)
             if not async_compile.use_process_pool():
@@ -2949,8 +2971,58 @@ class Scheduler:
             )
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
 
+            hint_override_best_fusion_choice: dict[
+                Optional[int], TritonTemplateCallerBase
+            ] = {}
+            future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
+            for hint_override in config.multi_kernel_hints:
+                choice_timings = multi_node.choice_timings(hint_override)
+                for choice, unfused_time in sorted(
+                    choice_timings.items(), key=lambda x: x[1]
+                ):
+                    if not isinstance(
+                        choice, torch._inductor.select_algorithm.TritonTemplateCaller
+                    ):
+                        continue
+                    with multi_node.swap_as_triton_caller(choice):
+                        future_choices.append(
+                            (
+                                choice,
+                                *compile_kernel(
+                                    node_list_fused, hint_override=choice.hint_override
+                                ),
+                            )
+                        )
+
+                min_ms_fused = float("inf")
+                ms_fused_choice: Optional[TritonTemplateCallerBase] = None
+                new_timings = {}
+                for choice, future, mod_fused in future_choices:
+                    try:
+                        if future is not None:
+                            future.result()
+                    except Exception as e:
+                        if fusion_log.isEnabledFor(logging.DEBUG):
+                            fusion_log.debug(
+                                "Exception in compiling %s: %s",
+                                "prologue" if not epilogue_fusion else "epilogue",
+                                str(e),
+                            )
+                        continue
+                    with multi_node.swap_as_triton_caller(choice):
+                        ms_fused, path = self.benchmark_codegened_module(
+                            mod_fused, device
+                        )
+                        new_timings[choice] = ms_fused
+                        if ms_fused < min_ms_fused:
+                            min_ms_fused = ms_fused
+                            ms_fused_choice = choice
+                multi_node._choice_timings[hint_override] = new_timings
+                assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
+                hint_override_best_fusion_choice[hint_override] = ms_fused_choice
+
             # Eagerly compile and benchmark non-template nodes
-            choice_timings = multi_node.choice_timings
+            choice_timings = multi_node.choice_timings()
             _, ms1 = multi_node.get_min_choice()
             ms2, path2 = (
                 self.benchmark_fused_nodes(node_list_2)
@@ -3025,8 +3097,15 @@ class Scheduler:
                 log_fusion(min_ms_fused, ms1, ms2)
 
                 if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
-                    multi_node.finalize_as_triton_caller(ms_fused_choice)
-                    multi_node._choice_timings = new_timings
+                    if config.multi_kernel_hints:
+                        hint_override_best_fusion_choice[None] = ms_fused_choice
+                        multi_node.finalize_as_triton_callers(
+                            hint_override_best_fusion_choice
+                        )
+                    else:
+                        multi_node.finalize_as_triton_caller(ms_fused_choice)
+
+                    multi_node._choice_timings[None] = new_timings
                     return True
                 else:
                     return False
@@ -5010,7 +5089,10 @@ class BaseScheduling:
         raise NotImplementedError
 
     def generate_kernel_code_from_nodes(
-        self, nodes: Sequence[BaseSchedulerNode], benchmark_kernel: bool
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        benchmark_kernel: bool,
+        hint_override: Optional[int] = None,
     ) -> str:
         """
         Generate a kernel given a list of pre-fused nodes.

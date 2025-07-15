@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_sort.py b/test/dynamo/cpython/3_13/test_sort.py
-index 2a7cfb7affa..d661ae544b9 100644
+index 2a7cfb7affa..58b9b796362 100644
 --- a/test/dynamo/cpython/3_13/test_sort.py
 +++ b/test/dynamo/cpython/3_13/test_sort.py
-@@ -1,3 +1,54 @@
+@@ -1,3 +1,57 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_sort.py
 +
 +import sys
 +import torch
@@ -57,7 +60,7 @@ index 2a7cfb7affa..d661ae544b9 100644
  from test import support
  import random
  import unittest
-@@ -39,7 +90,7 @@ def check(tag, expected, raw, compare=None):
+@@ -39,7 +93,7 @@ def check(tag, expected, raw, compare=None):
              nerrors += 1
              return
  
@@ -66,7 +69,7 @@ index 2a7cfb7affa..d661ae544b9 100644
      def testStressfully(self):
          # Try a variety of sizes at and around powers of 2, and at powers of 10.
          sizes = [0]
-@@ -151,7 +202,7 @@ class TestBase(unittest.TestCase):
+@@ -151,7 +205,7 @@ class TestBase(unittest.TestCase):
                  self.assertEqual(forced, native)
  #==============================================================================
  
@@ -75,7 +78,7 @@ index 2a7cfb7affa..d661ae544b9 100644
  
      def test_bug453523(self):
          # bug 453523 -- list.sort() crasher.
-@@ -188,7 +239,7 @@ class TestBugs(unittest.TestCase):
+@@ -188,7 +242,7 @@ class TestBugs(unittest.TestCase):
  
  #==============================================================================
  
@@ -84,7 +87,7 @@ index 2a7cfb7affa..d661ae544b9 100644
  
      def test_decorated(self):
          data = 'The quick Brown fox Jumped over The lazy Dog'.split()
-@@ -309,7 +360,7 @@ def check_against_PyObject_RichCompareBool(self, L):
+@@ -309,7 +363,7 @@ def check_against_PyObject_RichCompareBool(self, L):
              self.assertIs(opt, ref)
              #note: not assertEqual! We want to ensure *identical* behavior.
  
@@ -93,7 +96,7 @@ index 2a7cfb7affa..d661ae544b9 100644
      def test_safe_object_compare(self):
          heterogeneous_lists = [[0, 'foo'],
                                 [0.0, 'foo'],
-@@ -408,4 +459,4 @@ class TestOptimizedCompares(unittest.TestCase):
+@@ -408,4 +462,4 @@ class TestOptimizedCompares(unittest.TestCase):
  #==============================================================================
  
  if __name__ == "__main__":
