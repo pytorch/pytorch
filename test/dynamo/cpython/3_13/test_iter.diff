@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_iter.py b/test/dynamo/cpython/3_13/test_iter.py
-index 1b9f3cf7624..d0c68f4314c 100644
+index 1b9f3cf7624..d2fc26ddc72 100644
 --- a/test/dynamo/cpython/3_13/test_iter.py
 +++ b/test/dynamo/cpython/3_13/test_iter.py
-@@ -1,3 +1,57 @@
+@@ -1,3 +1,60 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_iter.py
 +
 +import sys
 +import torch
@@ -60,7 +63,7 @@ index 1b9f3cf7624..d0c68f4314c 100644
  # Test iterators.
  
  import sys
-@@ -104,7 +158,7 @@ class EmptyIterClass:
+@@ -104,7 +161,7 @@ class EmptyIterClass:
  
  # Main test suite
  
@@ -69,7 +72,7 @@ index 1b9f3cf7624..d0c68f4314c 100644
  
      # Helper to check that an iterator returns a given sequence
      def check_iterator(self, it, seq, pickle=True):
-@@ -635,6 +689,7 @@ class TestCase(unittest.TestCase):
+@@ -635,6 +692,7 @@ class TestCase(unittest.TestCase):
                  pass
  
      # Test zip()'s use of iterators.
@@ -77,7 +80,7 @@ index 1b9f3cf7624..d0c68f4314c 100644
      def test_builtin_zip(self):
          self.assertEqual(list(zip()), [])
          self.assertEqual(list(zip(*[])), [])
-@@ -1187,4 +1242,4 @@ class TestCase(unittest.TestCase):
+@@ -1187,4 +1245,4 @@ class TestCase(unittest.TestCase):
  
  
  if __name__ == "__main__":
