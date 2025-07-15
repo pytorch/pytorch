@@ -215,25 +215,6 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   return newGroup;
 }
 
-std::vector<uint8_t> toByteVector(uint64_t value) {
-  std::vector<uint8_t> bytes(8);
-  for (int i = 0; i < 8; ++i) {
-    bytes[i] = static_cast<uint8_t>((value >> (i * 8)) & 0xFF);
-  }
-  return bytes;
-}
-
-uint64_t fromByteVector(const std::vector<uint8_t>& bytes) {
-  if (bytes.size() != 8) {
-    throw std::invalid_argument("Expected 8 bytes for uint64_t");
-  }
-  uint64_t value = 0;
-  for (int i = 0; i < 8; ++i) {
-    value |= static_cast<uint64_t>(bytes[i]) << (i * 8);
-  }
-  return value;
-}
-
 c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
     const c10::intrusive_ptr<Store>& store,
     const MergeOptions& opts,
