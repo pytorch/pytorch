@@ -399,10 +399,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<Backend> merge(
-      const c10::intrusive_ptr<Store> store,
+      const c10::intrusive_ptr<Store>& store,
       const c10::intrusive_ptr<Options> opts,
-      const int rank,
-      const int size) {
+      const int& rank,
+      const int& size) {
     TORCH_CHECK(
         false,
         "Backend ",

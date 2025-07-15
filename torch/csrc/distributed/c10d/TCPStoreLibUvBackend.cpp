@@ -1543,7 +1543,7 @@ void LibUVStoreDaemon::queuePop(
   sw.send();
 }
 
-void LibUVStoreDaemon::queuePop(
+void LibUVStoreDaemon::queuePeep(
     const std::string& key,
     const c10::intrusive_ptr<UvHandle>& client) {
   auto& queue = queues_[key];

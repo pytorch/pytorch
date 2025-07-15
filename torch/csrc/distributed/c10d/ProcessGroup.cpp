@@ -5,7 +5,6 @@
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <string_view>
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
@@ -237,26 +236,10 @@ uint64_t fromByteVector(const std::vector<uint8_t>& bytes) {
 
 c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
     const c10::intrusive_ptr<Store> store,
-    const MergeOptions& opts) {
+    const MergeOptions& opts,
+    const int& rank,
+    const int& size) {
   c10::intrusive_ptr<ProcessGroup> newGroup;
-  // Do we need to figure out world size?
-  // We assume store's server has not shut down.
-  // We need a unique hash value to decide group rank since we cannot
-  // rely on the global rank now.
-  std::mt19937_64 rng(std::random_device{}());
-  uint64_t val = rng();
-  store->queuePush("merge", toByteVector(val));
-  store->waitForWorkers();
-  int worldSize = static_cast<int>(store->queueLen("merge"));
-  int groupRank;
-  for (auto i = 0; i < world_size; i++) {
-    auto value = fromByteVector(store->queuePeep("merge", true));
-    if (value == val) {
-      groupRank = i;
-    }
-    store->queuePeep("merge", true);
-  }
-
   // TODO: Do we need to check all groups have same deviceTypeToBackendType_?
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
@@ -266,7 +249,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
     auto backendOpts = parentBackend->getBackendOptions();
     backendOpts->group_name = opts.group_name;
     backendOpts->timeout = opts.timeout;
-    auto mergedBackend = parentBackend->merge(store, backendOpts, groupRank, worldSize);
+    auto mergedBackend = parentBackend->merge(store, backendOpts, rank, size);
 
     // TODO: Figure out a better way for merge group desc.
     std::string groupDesc = c10::str(getGroupDesc(), ":merge");
@@ -274,7 +257,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
 
     if (!newGroup) {
       newGroup = c10::make_intrusive<ProcessGroup>(
-          store_->clone(), mergedBackend->getRank(), mergedBackend->getSize());
+          store_->clone(), rank, size);
       newGroup->setDefaultBackend(backendType_);
       newGroup->setGroupName(opts.group_name);
       newGroup->setGroupDesc(groupDesc);

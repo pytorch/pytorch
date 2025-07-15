@@ -982,7 +982,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // The current rank must be included in the list of new_ranks.
   virtual c10::intrusive_ptr<ProcessGroup> mergeRemoteGroup(
       const c10::intrusive_ptr<Store> store,
-      const MergeOptions& opts);
+      const MergeOptions& opts,
+      const int& rank,
+      const int& size);
 
  protected:
   // Implementations of this interface need to call this to setup

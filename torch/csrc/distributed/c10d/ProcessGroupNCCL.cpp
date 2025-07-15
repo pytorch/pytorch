@@ -1350,15 +1350,15 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
-c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
-    const c10::intrusive_ptr<Store> store,
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::merge(
+    const c10::intrusive_ptr<Store>& store,
     const c10::intrusive_ptr<Backend::Options> opts,
-    const int rank,
-    const int size) {
+    const int& rank,
+    const int& size) {
   auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
   TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
-      store->clone(), groupRank, size, ncclOpts);
+      store->clone(), rank, size, ncclOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
