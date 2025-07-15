@@ -8967,6 +8967,10 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             ("ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h", API_PYTORCH),
         ),
         (
+            "ATen/cuda/CUDAEvent.h", # To keep BC, we have to keep this mapping
+            ("ATen/hip/HIPEvent.h", API_PYTORCH),
+        ),
+        (
             "c10/cuda/CUDAEvent.h",
             ("ATen/hip/impl/HIPEventMasqueradingAsCUDA.h", API_PYTORCH),
         ),
