@@ -18,7 +18,6 @@ import pandas as pd  # type: ignore[import-untyped]
 import torch
 import torch._inductor.config as config
 import torch.nn as nn
-from torch._inductor.kernel_lut import TritonGEMMConfig
 
 
 log = logging.getLogger(__name__)
@@ -272,36 +271,6 @@ class ModelWrapper:
             int(kwargs["BLOCK_K"]),
             int(kwargs["num_stages"]),
             int(kwargs["num_warps"]),
-        )
-
-    @staticmethod
-    def vec_params(
-        m: int, n: int, k: int, dsize: int, params: TritonGEMMConfig
-    ) -> tuple[int, int, int, int, int, int, int, int, int]:
-        """
-        Convert matrix multiplication parameters and config to a feature vector.
-
-        Args:
-            m: First dimension of matrix multiplication
-            n: Second dimension of matrix multiplication
-            k: Third dimension of matrix multiplication
-            dsize: Data size in bits (e.g., 16 for float16, 32 for float32)
-            config: Configuration object containing kernel parameters
-
-        Returns:
-            Tuple containing the extracted features
-        """
-
-        return (
-            int(m),
-            int(n),
-            int(k),
-            int(dsize),
-            int(params.block_m),
-            int(params.block_n),
-            int(params.block_k),
-            int(params.num_stages),
-            int(params.num_warps),
         )
 
     def encode(

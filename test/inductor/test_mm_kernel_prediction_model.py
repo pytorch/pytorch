@@ -11,7 +11,6 @@ from torch._inductor.config import (
     parse_matmul_gemm_autotune_benchmark_space,
     parse_matmul_gemm_autotune_search_space,
 )
-from torch._inductor.kernel_lut import TritonGEMMConfig
 from torch._inductor.models.mm_kernel_prediction_model import (
     _sanitize_path,
     get_model,
@@ -257,63 +256,6 @@ class TestMMKernelPredictionModel(TestCase):
                 torch.allclose(t[1, :], torch.ones(len(cols), device="cuda"))
             )
 
-    def test_model_wrapper(self) -> None:
-        # Don't load the real full model
-        with mock.patch("torch._inductor.aoti_load_package") as mock_load:
-            mock_load.return_value = NeuralNetwork(
-                n_inputs=3, hidden_layer_widths=[4, 4]
-            )
-
-            wrapper = ModelWrapper()
-
-        # Test vec method
-        class MockConfig:
-            def all_kwargs(self):
-                return {
-                    "BLOCK_M": 128,
-                    "BLOCK_N": 64,
-                    "BLOCK_K": 32,
-                    "num_stages": 3,
-                    "num_warps": 4,
-                }
-
-        config = MockConfig()
-        result = wrapper.vec(256, 128, 64, 16, config)
-        expected = (256, 128, 64, 16, 128, 64, 32, 3, 4)
-        self.assertEqual(result, expected)
-
-        # Test vec_params method
-        params = mock.MagicMock(spec=TritonGEMMConfig)
-        params.block_m = 128
-        params.block_n = 64
-        params.block_k = 32
-        params.num_stages = 3
-        params.num_warps = 4
-
-        result = ModelWrapper.vec_params(256, 128, 64, 16, params)
-        expected = (256, 128, 64, 16, 128, 64, 32, 3, 4)
-        self.assertEqual(result, expected)
-
-        # Test encode method
-        configs = [config]
-        with self.assertRaisesRegex(ValueError, "Unsupported dtype"):
-            wrapper.encode(256, 128, 64, torch.int32, configs)
-
-        # Mock the get_nn_x function
-        expected_shape = (1, 12)
-
-        result = wrapper.encode(256, 128, 64, torch.float16, configs)
-        self.assertEqual(result.shape, expected_shape)
-
-        # bfloat16 should have the same encoding as float16
-        result_bfloat = wrapper.encode(256, 128, 64, torch.bfloat16, configs)
-        self.assertEqual(result_bfloat.shape, expected_shape)
-        self.assertTrue(torch.allclose(result_bfloat, result))
-
-        # Test with float32
-        result = wrapper.encode(256, 128, 64, torch.float32, configs)
-        self.assertGreater(result[0, 0].item(), result_bfloat[0, 0].item())
-
     def test_sanitize_path(self) -> None:
         """Test the _sanitize_path function with various inputs."""
         # Test basic sanitization
@@ -384,11 +326,14 @@ class TestMMKernelPredictionModel(TestCase):
         """Test ModelWrapper initialization with fallback to H100 model."""
         mock_model = NeuralNetwork(n_inputs=12, hidden_layer_widths=[64, 32])
 
-        with mock.patch("torch.cuda.is_available", return_value=True), mock.patch(
-            "torch.cuda.get_device_name", return_value="Unknown GPU"
-        ), mock.patch("os.path.exists") as mock_exists, mock.patch(
-            "torch._inductor.aoti_load_package", return_value=mock_model
-        ) as mock_load:
+        with (
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("torch.cuda.get_device_name", return_value="Unknown GPU"),
+            mock.patch("os.path.exists") as mock_exists,
+            mock.patch(
+                "torch._inductor.aoti_load_package", return_value=mock_model
+            ) as mock_load,
+        ):
             # Unknown GPU model doesn't exist, so it falls back to H100
             mock_exists.return_value = False
 
@@ -408,8 +353,9 @@ class TestMMKernelPredictionModel(TestCase):
         mock_output = torch.tensor([[1.5, 2.0]], device="cuda")
         mock_model.return_value = mock_output
 
-        with mock.patch("torch.cuda.is_available", return_value=True), mock.patch(
-            "torch._inductor.aoti_load_package", return_value=mock_model
+        with (
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("torch._inductor.aoti_load_package", return_value=mock_model),
         ):
             wrapper = ModelWrapper()
 
@@ -421,8 +367,9 @@ class TestMMKernelPredictionModel(TestCase):
 
     def test_model_wrapper_decode(self) -> None:
         """Test the decode method."""
-        with mock.patch("torch.cuda.is_available", return_value=True), mock.patch(
-            "torch._inductor.aoti_load_package"
+        with (
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("torch._inductor.aoti_load_package"),
         ):
             wrapper = ModelWrapper()
 
@@ -436,11 +383,13 @@ class TestMMKernelPredictionModel(TestCase):
         """Test ModelWrapper initialization with explicit device name."""
         mock_model = NeuralNetwork(n_inputs=12, hidden_layer_widths=[64, 32])
 
-        with mock.patch("torch.cuda.is_available", return_value=True), mock.patch(
-            "os.path.exists", return_value=True
-        ), mock.patch(
-            "torch._inductor.aoti_load_package", return_value=mock_model
-        ) as mock_load:
+        with (
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("os.path.exists", return_value=True),
+            mock.patch(
+                "torch._inductor.aoti_load_package", return_value=mock_model
+            ) as mock_load,
+        ):
             ModelWrapper(device_name="Custom GPU")
 
             # Should have used the provided device name
@@ -458,8 +407,9 @@ class TestMMKernelPredictionModel(TestCase):
 
         # Test when CUDA is available
         mock_model = NeuralNetwork(n_inputs=12, hidden_layer_widths=[64, 32])
-        with mock.patch("torch.cuda.is_available", return_value=True), mock.patch(
-            "torch._inductor.aoti_load_package", return_value=mock_model
+        with (
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("torch._inductor.aoti_load_package", return_value=mock_model),
         ):
             # Clear the cache first
             get_model.cache_clear()
@@ -496,8 +446,9 @@ class TestMMKernelPredictionModel(TestCase):
         """Test ModelWrapper encode method with edge cases."""
         mock_model = NeuralNetwork(n_inputs=12, hidden_layer_widths=[64, 32])
 
-        with mock.patch("torch.cuda.is_available", return_value=True), mock.patch(
-            "torch._inductor.aoti_load_package", return_value=mock_model
+        with (
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("torch._inductor.aoti_load_package", return_value=mock_model),
         ):
             wrapper = ModelWrapper()
 
