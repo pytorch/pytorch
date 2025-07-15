@@ -328,7 +328,7 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
     if rs_exists:
         assert len(rs_snode_to_wait_snode) > 0
     else:
-        return snodes, rs_exists
+        return snodes
 
     # Step 2: Put reduce_scatter nodes into buckets
     rs_snode_to_bucket_id = {}
@@ -514,4 +514,4 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                 bucket_id_is_scheduled[bucket_id] = True
         else:
             continue
-    return new_order, rs_exists
+    return new_order

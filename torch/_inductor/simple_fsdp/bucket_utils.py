@@ -8,7 +8,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import ir, scheduler
 from ..dependencies import StarDep, WeakDep
-from ..utils import buf_name_to_fused_snode
+from ..utils import buf_name_to_fused_snode, is_collective
 from ..virtualized import V
 from .estimator import OpType
 
@@ -29,6 +29,16 @@ def get_fx_node(
     origins_with_expected_op = [o for o in origins if o.target == expected_op]
     assert len(origins_with_expected_op) == 1
     return origins_with_expected_op[0]
+
+
+def has_reduce_scatter_in_nodes(snodes: list["scheduler.BaseSchedulerNode"]) -> bool:
+    for snode in snodes:
+        if is_collective(
+            snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
+        ):
+            return True
+
+    return False
 
 
 def _schedule_snode(
