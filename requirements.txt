@@ -2,7 +2,6 @@
 
 # Build System requirements
 setuptools>=70.1.0,<80.0  # setuptools develop deprecated on 80.0
-wheel
 cmake>=3.27
 ninja
 numpy
@@ -25,3 +24,4 @@ optree>=0.13.0
 psutil
 sympy>=1.13.3
 typing-extensions>=4.13.2
+wheel
