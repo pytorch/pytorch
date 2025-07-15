@@ -247,23 +247,35 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 void OperatorEntry::deregisterKernel_(
   const c10::Dispatcher& dispatcher,
   std::optional<DispatchKey> dispatch_key,
-  AnnotatedKernelContainerIterator kernel
-) {
-  // Redirect catchAll deregistrations to CompositeImplicitAutograd.
-  DispatchKey dk = dispatch_key.has_value() ? *dispatch_key : DispatchKey::CompositeImplicitAutograd;
-  auto found = kernels_.find(dk);
-  TORCH_INTERNAL_ASSERT(found != kernels_.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator is ", toString(name_));
-  auto& k = found->second;
+  AnnotatedKernelContainerIterator kernel) {
+// Redirect catchAll deregistrations to CompositeImplicitAutograd.
+DispatchKey dk = dispatch_key.has_value()
+    ? *dispatch_key
+    : DispatchKey::CompositeImplicitAutograd;
+auto found = kernels_.find(dk);
+TORCH_INTERNAL_ASSERT(
+    found != kernels_.end(),
+    "Tried to deregister a kernel for dispatch key ",
+    toString(dispatch_key),
+    " but there are no kernels registered for this dispatch key. The operator is ",
+    toString(name_));
+auto& k = found->second;
 #ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
-  // We are about to remove the array from the map, no need to do anything.
+// We are about to remove the array from the map, no need to do anything.
 #else
-  k.erase(kernel);
+k.erase(kernel);
 #endif
-  if (k.empty()) {
-    // the invariant says we don't want empty lists but instead remove the list from the map
-    kernels_.erase(found);
-  }
-  updateDispatchTable_(dispatcher, dk);
+if (k.empty()) {
+  // the invariant says we don't want empty lists but instead remove the list
+  // from the map
+  kernels_.erase(found);
+}
+// The KernelFunction object in dispatchTable
+// (1) s a copy of the object in kernels_
+// (2) is the one that gets returned by getComputedKernelForDispatchKey
+// so we cannot call invalidate tokens on kernel here and need to invalidate
+// the tokens on that one instead.
+updateDispatchTable_(dispatcher, dk, /*invalidate_tokens=*/true);
 }
 
 void OperatorEntry::updateFallback(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
@@ -303,6 +315,17 @@ bool OperatorEntry::hasComputedKernelForDispatchKey(DispatchKey k) const {
   const auto dispatch_ix = getDispatchTableIndexForDispatchKey(k);
   TORCH_INTERNAL_ASSERT(dispatch_ix >= 0 && dispatch_ix < c10::num_runtime_entries, toString(k), dispatch_ix);
   return dispatchTable_[dispatch_ix].isValid();
+}
+
+SafeKernelFunction OperatorEntry::getComputedKernelForDispatchKey(
+    DispatchKey k) const {
+  TORCH_CHECK(
+      !isAliasDispatchKey(k),
+      "Alias keys do not have runtime kernel registrations.");
+  const auto dispatch_ix = getDispatchTableIndexForDispatchKey(k);
+  TORCH_CHECK(dispatchTable_[dispatch_ix].isValid())
+
+  return SafeKernelFunction(&dispatchTable_[dispatch_ix]);
 }
 
 const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispatch_key) const{
@@ -450,13 +473,22 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 // dispatch keys (e.g. runtime keys and their associated autograd keys,
 // or alias keys and their associated keysets).
 // This function should be considered a private helper for updateDispatchTable_()
-void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
+void OperatorEntry::updateDispatchTableEntry_(
+    const c10::Dispatcher& dispatcher,
+    DispatchKey dispatch_key,
+    bool invalidateTokens) {
   const auto dispatch_ix = getDispatchTableIndexForDispatchKey(dispatch_key);
   if (C10_UNLIKELY(dispatch_ix == -1)) {
     return;
   }
-  dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
-  dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
+  // Invalidate tokens for the old dispatch table entry before replacing it
+  if (invalidateTokens) {
+    dispatchTable_[dispatch_ix].invalidateTokens();
+  }
+  dispatchTable_[dispatch_ix] =
+      computeDispatchTableEntry(dispatcher, dispatch_key);
+  dispatchKeyExtractor_.setOperatorHasFallthroughForKey(
+      dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
 }
 
 // synchronizes the dispatch table entries for a given dispatch key *and its
@@ -464,32 +496,40 @@ void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher,
 // dispatcher.
 // After a kernel has been registered to a dispatch key, a call to this
 // function will synchronize the dispatcher state. See e.g. registerKernel()
-void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
-  // Handle Undefined separately since it isn't a runtime key but we have an entry in dispatchTable_.
-  // See Note [Undefined in dispatchTable_]
+void OperatorEntry::updateDispatchTable_(
+    const c10::Dispatcher& dispatcher,
+    DispatchKey dispatch_key,
+    bool invalidate_tokens) {
+  // Handle Undefined separately since it isn't a runtime key but we have an
+  // entry in dispatchTable_. See Note [Undefined in dispatchTable_]
   if (dispatch_key == DispatchKey::Undefined) {
-    updateDispatchTableEntry_(dispatcher, dispatch_key);
+    updateDispatchTableEntry_(dispatcher, dispatch_key, invalidate_tokens);
     return;
   }
   for (auto k : c10::getRuntimeDispatchKeySet(dispatch_key)) {
-    updateDispatchTableEntry_(dispatcher, k);
+    updateDispatchTableEntry_(dispatcher, k, invalidate_tokens);
   }
-  // Registration to CompositeExplicitAutogradNonFunctional, CompositeExplicitAutograd and CompositeImplicitAutograd should be populated to Undefined.
-  // We cannot do this above since Undefined cannot be represented in DispatchKeySet.
-  if (dispatch_key == DispatchKey::CompositeImplicitAutograd
-   || dispatch_key == DispatchKey::CompositeExplicitAutograd
-   || dispatch_key == DispatchKey::CompositeExplicitAutogradNonFunctional) {
-    updateDispatchTableEntry_(dispatcher, DispatchKey::Undefined);
+  // Registration to CompositeExplicitAutogradNonFunctional,
+  // CompositeExplicitAutograd and CompositeImplicitAutograd should be populated
+  // to Undefined. We cannot do this above since Undefined cannot be represented
+  // in DispatchKeySet.
+  if (dispatch_key == DispatchKey::CompositeImplicitAutograd ||
+      dispatch_key == DispatchKey::CompositeExplicitAutograd ||
+      dispatch_key == DispatchKey::CompositeExplicitAutogradNonFunctional) {
+    updateDispatchTableEntry_(
+        dispatcher, DispatchKey::Undefined, invalidate_tokens);
   }
   // Note [Refresh Runtime Autograd entries in dispatchTable_]
-  // Registering to backend key might affect computed entry at its Autograd backend key due to (2.1) & (2.3).
-  // In theory, we should only have to check if the given runtime key has "dense" functionality,
-  // e.g. DispatchKey::CPU (which is composed of DispatchKey::Dense and BackendComponent::CPUBit).
-  // However, there are some backends that should be included in this set that don't have the dense key set.
-  // E.g. DispatchKey::Meta, DispatchKey::MAIA.
+  // Registering to backend key might affect computed entry at its Autograd
+  // backend key due to (2.1) & (2.3). In theory, we should only have to check
+  // if the given runtime key has "dense" functionality, e.g. DispatchKey::CPU
+  // (which is composed of DispatchKey::Dense and BackendComponent::CPUBit).
+  // However, there are some backends that should be included in this set that
+  // don't have the dense key set. E.g. DispatchKey::Meta, DispatchKey::MAIA.
   if (c10::isBackendDispatchKey(dispatch_key)) {
-    DispatchKey autograd_key = getAutogradKeyFromBackend(toBackendComponent(dispatch_key));
-    updateDispatchTableEntry_(dispatcher, autograd_key);
+    DispatchKey autograd_key =
+        getAutogradKeyFromBackend(toBackendComponent(dispatch_key));
+    updateDispatchTableEntry_(dispatcher, autograd_key, invalidate_tokens);
   }
 }
 

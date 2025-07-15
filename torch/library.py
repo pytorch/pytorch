@@ -45,6 +45,7 @@ __all__ = [
     "register_torch_dispatch",
     "register_vmap",
     "get_ctx",
+    "get_kernel",
     "custom_op",
     "triton_op",
     "wrap_triton",
@@ -1480,6 +1481,51 @@ def get_ctx() -> "torch._library.fake_impl.FakeImplCtx":
     (see :func:`torch.library.register_fake` for more usage details.
     """
     return torch._library.fake_impl.global_ctx_getter()
+
+
+def get_kernel(
+    op: _op_identifier, dispatch_key: Union[str, torch.DispatchKey]
+) -> torch._C._SafeKernelFunction:
+    """Returns the computed kernel for a given operator and dispatch key.
+
+    This function retrieves the kernel that would be executed for a given
+    operator and dispatch key combination. The returned SafeKernelFunction
+    can be used to call the kernel directly.
+
+    Args:
+        op: Operator name (along with the overload) or OpOverload object
+            Can be a string (e.g., "aten::add.Tensor"), an OpOverload, or a CustomOpDef.
+        dispatch_key (str | torch.DispatchKey): The dispatch key to get the kernel for.
+            Can be a string (e.g., "CPU", "CUDA") or a DispatchKey enum value.
+
+    Returns:
+        torch._C._SafeKernelFunction: A safe kernel function that can be used to
+            call the kernel.
+
+    Raises:
+        RuntimeError: If the operator does not exist.
+
+    Example:
+        >>> import torch
+        >>> # Get the CPU kernel for torch.add
+        >>> kernel = torch.library.get_kernel("aten::add.Tensor", "CPU")
+        >>>
+        >>> # You can also use DispatchKey enum
+        >>> kernel = torch.library.get_kernel("aten::add.Tensor", torch.DispatchKey.CPU)
+        >>>
+        >>> # Or use an OpOverload directly
+        >>> kernel = torch.library.get_kernel(torch.ops.aten.add.Tensor, "CPU")
+    """
+    if not isinstance(op, (str, torch._ops.OpOverload)):
+        raise ValueError(f"get_kernel({op}): got unexpected type for op: {type(op)}")
+
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+
+    if isinstance(dispatch_key, str):
+        dispatch_key = torch._C.DispatchKey.__members__[dispatch_key]
+
+    return torch._C._dispatch_get_computed_kernel_for_dispatch_key(op, dispatch_key)
 
 
 _OPCHECK_DEFAULT_UTILS = (
