@@ -432,7 +432,7 @@ def test_verify_gb_id_mapping(dynamo_dir, registry_path):
     if mismatches:
         print(
             "Found the unimplemented_v2 or unimplemented_v2_with_warning calls below that "
-            "don't match the registry in graph_break_registry.yaml."
+            "don't match the registry in graph_break_registry.yml."
         )
         for gb_type, file_path, reason in mismatches:
             print(f"  - {gb_type} in {file_path}: {reason}")
