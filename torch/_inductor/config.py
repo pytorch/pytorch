@@ -445,6 +445,12 @@ force_same_precision: bool = Config(
     default=False,
 )
 
+# Size hints for multi-kernel dispatch.
+# A reasonable default value of this config would be [64, 256, 4096]
+# TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
+# as expected before turning it on for everyone.
+multi_kernel_hints: list[int] = []
+
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
 # ATen: default Pytorch ATen kernels.
@@ -997,6 +1003,11 @@ autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 # config specific to codegen/cpp.py
 class cpp:
+    """
+    Settings for cpp backend.
+    This class provides a centralized location for managing cpp backend settings.
+    """
+
     # set to torch.get_num_threads()
     threads = -1
 
@@ -1111,6 +1122,10 @@ class cpp:
 
     # Use a small dequant buffer for wgt of woq int4 size as: [q_group_size, Nr]
     use_small_dequant_buffer = False
+
+    force_inline_kernel = (
+        os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
 
 
 class triton:
@@ -1298,7 +1313,7 @@ class triton:
     # - For Nvidia GPUs, the compute capability should be >= 9.0
     # - The innermost stride of a descriptor should be 1
     # - The size of the block shape in the innermost dimension should load / store
-    # atleast 16 bytes.
+    #   at least 16 bytes.
     # - Tensors are 16 byte aligned. Enabling this option therefore requires
     #   assume_aligned_inputs to also be enabled
     # TMA descriptors are only going to be generated if the above conditions
@@ -1377,6 +1392,10 @@ class aot_inductor:
     # flag to force weight to be appended to the shared library and mapped by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
+
+    # Default value of use_consts_asm_build is True, it will build by assembly language.
+    # When the value is False, it will build by c++ language.
+    use_consts_asm_build = True
 
     package: bool = False
     package_cpp_only: Optional[bool] = None
