@@ -2586,19 +2586,14 @@ class FakeTensorMode(TorchDispatchMode):
             if fast_impl is not None:
                 return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
 
-        # special handling for funcs registered through `register_op_impl`,
-        # e.g., manipulating args on constructor calls to construct meta tensors
-        # and then afterwards wrapping them to a FakeTensor
-        for run_impl_check, op_impl in op_implementations_checks:
-            if run_impl_check(func):
-                op_impl_out = op_impl(self, func, *args, **kwargs)
-                if op_impl_out is not NotImplemented:
-                    return maybe_propagate_real_tensors(op_impl_out)
-
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
 
-        if func not in meta_table and not self.cpp_meta_supports_symint(func):
+        if (
+            func not in meta_table
+            and not self.cpp_meta_supports_symint(func)
+            and not (has_symbolic_sizes and func in self._view_fake_tensor_impl_ops)
+        ):
             from torch._decomp import decomposition_table
 
             # Prefer Python decompositions over C++ ones
@@ -2693,6 +2688,15 @@ class FakeTensorMode(TorchDispatchMode):
                     return maybe_propagate_real_tensors(result)
                 else:
                     raise e
+
+        # special handling for funcs registered through `register_op_impl`,
+        # e.g., manipulating args on constructor calls to construct meta tensors
+        # and then afterwards wrapping them to a FakeTensor
+        for run_impl_check, op_impl in op_implementations_checks:
+            if run_impl_check(func):
+                op_impl_out = op_impl(self, func, *args, **kwargs)
+                if op_impl_out is not NotImplemented:
+                    return maybe_propagate_real_tensors(op_impl_out)
 
         def maybe_run_unsafe_fallback(
             error: Optional[RuntimeError] = None,
@@ -2895,6 +2899,10 @@ class FakeTensorMode(TorchDispatchMode):
         aten.view_as_complex.default,
         aten.set_.source_Storage_storage_offset,
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
+    )
+
+    _view_fake_tensor_impl_ops = ordered_set(
+        aten.view.default, aten._unsafe_view.default
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:

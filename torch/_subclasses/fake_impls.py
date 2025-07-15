@@ -549,6 +549,7 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
 
 
 @register_op_impl(aten.view.default)
+@register_op_impl(aten._unsafe_view.default)
 def _view_meta(fake_mode, func, a, *shape):
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
