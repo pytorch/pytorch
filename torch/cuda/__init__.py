@@ -236,10 +236,10 @@ def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
 
 
-def _extract_arch_version(arch_string: str):
+def _extract_arch_version(arch_string: str) -> int:
     """Extracts the architecture string from a CUDA version"""
-    base = arch_string.split("_")[1]
-    base = base.removesuffix("a")
+    base = arch_string.split("_", maxsplit=2)[1]
+    base = base.removesuffix("a").removesuffix("f")
     return int(base)
 
 
@@ -995,7 +995,7 @@ def device_count() -> int:
     r"""
     Return the number of GPUs available.
 
-    .. note:: This API will NOT posion fork if NVML discovery succeeds.
+    .. note:: This API will NOT poison fork if NVML discovery succeeds.
         See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     global _cached_device_count
