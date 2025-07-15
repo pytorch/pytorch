@@ -345,6 +345,13 @@ class OpSchema:
             return_types[0].type, torch.TensorType
         )
 
+    def return_type_list_tensor_like(self) -> bool:
+        # returns True if the return type is a List
+        return_types = self.op._schema.returns
+        return len(return_types) == 1 and isinstance(
+            return_types[0].type, torch.ListType
+        )
+
     def return_type_tensor(self) -> bool:
         return_types = self.op._schema.returns
         # all dispatch ops only return Tensor or Tuple[Tensor] for tensor like
