@@ -17,7 +17,7 @@ namespace {
 using Block = HostBlock<CUDAStream>;
 
 struct CUDACachingHostAllocatorImpl
-    : public CachingHostAllocatorImpl<CUDAStream, EventPool::Event> {
+    : public CachingHostAllocatorImpl<CUDAStream, CUDAEventPool::Event> {
  private:
   std::unordered_map<void*, bool> use_host_register;
 
@@ -90,14 +90,14 @@ struct CUDACachingHostAllocatorImpl
   }
 
   void record_stream(
-      std::optional<std::vector<EventPool::Event>>& events,
+      std::optional<std::vector<CUDAEventPool::Event>>& events,
       CUDAStream stream) override {
     auto event = create_event_internal(stream.device_index());
     event->record(stream);
     events->push_back(std::move(event));
   }
 
-  bool query_event(EventPool::Event& event) override {
+  bool query_event(CUDAEventPool::Event& event) override {
     return event->query();
   }
 
@@ -106,9 +106,9 @@ struct CUDACachingHostAllocatorImpl
         pinned_use_background_threads();
   }
 
-  EventPool::Event create_event_internal(DeviceIndex idx) {
+  CUDAEventPool::Event create_event_internal(DeviceIndex idx) {
     // Leak the event pool to avoid shutdown issue.
-    static auto* event_pool = new EventPool();
+    static auto* event_pool = new CUDAEventPool();
     return event_pool->get(idx);
   }
 
