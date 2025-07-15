@@ -48,18 +48,14 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   // Note: event destruction done on creating device to avoid creating a
   // CUDA context on other devices.
   ~CUDAEvent() {
-    try {
-      if (is_created_) {
-        CUDAGuard guard(device_index_);
-        const c10::impl::PyInterpreter* interp =
-            c10::impl::GPUTrace::get_trace();
-        if (C10_UNLIKELY(interp)) {
-          (*interp)->trace_gpu_event_deletion(
-              at::kCUDA, reinterpret_cast<uintptr_t>(event_));
-        }
-        C10_CUDA_CHECK(cudaEventDestroy(event_));
+    if (is_created_) {
+      CUDAGuard guard(device_index_);
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_event_deletion(
+            at::kCUDA, reinterpret_cast<uintptr_t>(event_));
       }
-    } catch (...) { /* No throw */
+      C10_CUDA_CHECK_WARN(cudaEventDestroy(event_));
     }
   }
 
@@ -67,11 +63,11 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   CUDAEvent& operator=(const CUDAEvent&) = delete;
 
   CUDAEvent(CUDAEvent&& other) noexcept {
-    moveHelper(std::move(other));
+    moveHelper(other);
   }
   CUDAEvent& operator=(CUDAEvent&& other) noexcept {
     if (this != &other) {
-      moveHelper(std::move(other));
+      moveHelper(other);
     }
     return *this;
   }
@@ -266,7 +262,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     is_created_ = true;
   }
 
-  void moveHelper(CUDAEvent&& other) {
+  void moveHelper(CUDAEvent& other) {
     std::swap(flags_, other.flags_);
     std::swap(is_created_, other.is_created_);
     std::swap(was_recorded_, other.was_recorded_);
