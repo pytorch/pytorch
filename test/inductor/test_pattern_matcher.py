@@ -635,6 +635,60 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(res1, res2)
 
+    def test_addmm_activation(self):
+        def fn_addmm_relu(input, mat1, mat2):
+            return torch.nn.functional.relu(torch.addmm(input, mat1, mat2))
+
+        def fn_addmm_gelu(input, mat1, mat2):
+            return torch.nn.functional.gelu(torch.addmm(input, mat1, mat2))
+        
+        def fn_add_mm_relu(input, mat1, mat2):
+            return torch.nn.functional.relu(torch.add(input, torch.mm(mat1, mat2)))
+
+        def fn_add_mm_gelu(input, mat1, mat2):
+            return torch.nn.functional.gelu(torch.add(input, torch.mm(mat1, mat2)))
+
+        args = [
+            torch.randn(20, device="cuda"),
+            torch.randn(10, 15, device="cuda"),
+            torch.randn(15, 20, device="cuda"),
+        ]
+
+        for fn, atol in (
+            (fn_addmm_relu, 1e-8),
+            (fn_add_mm_relu, 1e-8),
+            (fn_addmm_gelu, 1e-3),
+            (fn_add_mm_gelu, 1e-3),
+        ):
+            expected = fn(*args)
+            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(actual, expected, atol=atol, rtol=0)
+            self.assertTrue("_addmm_activation" in code)
+
+        for fn in (fn_addmm_relu, fn_addmm_gelu):
+            counters.clear()
+            torch.compile(
+                fn,
+                # replacement disabled on max_autotune_gemm
+                options={"max_autotune_gemm": True},
+            )(*args)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+
+        args_not_replaced = [
+            # addmm + activation with a rank-2 input
+            # is not fusable, hence not replaced
+            torch.randn(10, 20, device="cuda"),  # input
+            torch.randn(10, 15, device="cuda"),  # mat1
+            torch.randn(15, 20, device="cuda"),  # mat2
+        ]
+
+        for fn in (fn_addmm_relu, fn_addmm_gelu):
+            counters.clear()
+            torch.compile(fn)(*args_not_replaced)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+
     @inductor_config.patch(
         {
             "max_autotune_gemm_backends": "ATEN",
