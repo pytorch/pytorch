@@ -1887,7 +1887,7 @@ class TestCutlassBackend(TestCase):
         """
         full_ops = _gen_ops_cached(arch, cuda_version)
         ops = pytree.tree_flatten(full_ops)[0]
-        
+
         # sanity check
         self.assertGreater(len(ops), 1000, "Too few ops generated")
 
