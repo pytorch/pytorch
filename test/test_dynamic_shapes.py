@@ -3286,7 +3286,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
     def test_unbacked_reshape2(self):
         cnt = CompileCounterWithBackend("inductor")
 
-        # This reshape requires a clone when the input is not contiguous and we cant compute strides.
+        # This reshape requires a clone when the input is not contiguous and we can't compute strides.
         # reshape (u2, u3) -> (u0, u1)
         def func(x, y):
             u0, u1 = y.tolist()
@@ -3421,7 +3421,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
     def test_invalid_view_unbacked_view(self):
         cnt = CompileCounterWithBackend("inductor")
 
-        # This view (u2, u3) -> (u0, u1) cant happen in general unless we know that input is contigous or we have
+        # This view (u2, u3) -> (u0, u1) can't happen in general unless we know that input is contiguous or we have
         # hints to to compute strides.
         def func(x, y):
             u0, u1 = y.tolist()
@@ -3452,7 +3452,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
         func(torch.ones(5, 6, 7, 8))
         self.assertEqual(cnt.frame_count, 1)
-        # it can be dynamic in all dimentions except dim=2
+        # it can be dynamic in all dimensions except dim=2
         func(torch.ones(4, 9, 7, 10))
         self.assertEqual(cnt.frame_count, 1)
 

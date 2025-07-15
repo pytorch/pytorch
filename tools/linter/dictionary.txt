@@ -13,6 +13,11 @@ fro
 froms
 Halfs
 hsa
+inp
+inps
+inpt
+inpts
+matA
 nd
 nin
 NotIn
@@ -31,6 +36,7 @@ rebuilt
 reenable
 reenabled
 requestor
+ser
 serde
 serder
 serdes
