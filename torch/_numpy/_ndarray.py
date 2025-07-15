@@ -244,12 +244,12 @@ def _numpy_empty_ellipsis_patch(index, tensor_ndim):
             ellipsis_pos = i
             break
 
-    maybe_sequeeze = lambda x: x
+    maybe_squeeze = lambda x: x
     maybe_unsqueeze = lambda x: x
 
     # If no ellipsis, no patch needed
     if ellipsis_pos is None:
-        return index, maybe_sequeeze, maybe_unsqueeze
+        return index, maybe_squeeze, maybe_unsqueeze
 
     # Count non-ellipsis dimensions consumed by the index
     consumed_dims = 0
@@ -278,16 +278,16 @@ def _numpy_empty_ellipsis_patch(index, tensor_ndim):
             end_ndims = 1 + sum(
                 1 for idx in index[ellipsis_pos + 1 :] if isinstance(idx, slice)
             )
-            maybe_sequeeze = lambda x: x.squeeze(-end_ndims)
+            maybe_squeeze = lambda x: x.squeeze(-end_ndims)
 
             def maybe_unsqueeze(x):
                 if isinstance(x, torch.Tensor) and x.ndim >= end_ndims:
                     return x.unsqueeze(-end_ndims)
                 return x
 
-            return new_index, maybe_sequeeze, maybe_unsqueeze
+            return new_index, maybe_squeeze, maybe_unsqueeze
 
-    return index, maybe_sequeeze, maybe_unsqueeze
+    return index, maybe_squeeze, maybe_unsqueeze
 
 
 # Used to indicate that a parameter is unspecified (as opposed to explicitly
