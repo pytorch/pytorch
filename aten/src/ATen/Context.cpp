@@ -538,7 +538,8 @@ at::BlasBackend Context::blasPreferredBackend() {
   return blas_preferred_backend;
 }
 
-bool ckSupported() {
+bool Context::ckSupported() {
+#ifdef USE_ROCM
   static const std::vector<std::string> supported_archs = {
     "gfx90a", "gfx942", "gfx950"
   };
@@ -550,6 +551,9 @@ bool ckSupported() {
     }
   }
   return true;
+#else
+  return false;
+#endif
 }
 
 void Context::setBlasPreferredBackend(at::BlasBackend b) {
