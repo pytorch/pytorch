@@ -110,7 +110,7 @@ class StagingOptions:
         use_async_staging (bool): Enable asynchronous staging using a
             background thread pool. Allows overlapping computation with
             staging operations. Requires CUDA. Default: True
-        use_non_blocking_copy (bool): Use non-blocking CUDA memory
+        use_non_blocking_copy (bool): Use non-blocking device memory
             copies with stream synchronization. Improves performance by
             allowing CPU work to continue during GPU transfers. Default: True
 
@@ -186,7 +186,7 @@ class DefaultStager(AsyncStager):
 
         if self._config.use_non_blocking_copy:
             assert torch.accelerator.is_available(), (
-                "Non-blocking copy requires CUDA/XPU"
+                "Non-blocking copy requires that the current accelerator is available."
             )
 
         self._staging_future: Optional[Future[STATE_DICT_TYPE]] = None
