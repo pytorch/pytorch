@@ -323,7 +323,7 @@ class _PipelineSchedule(ABC):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
         Will chunk the input into microbatches automatically, and go through the
-        microbatches by calling forward only.
+        microbatches, calling forward only.
 
         args: positional arguments to the model (as in non-pipeline case).
         kwargs: keyword arguments to the model (as in non-pipeline case).
@@ -518,9 +518,6 @@ or equal to the number of stages ({self._num_stages})."
         Run one iteration of the pipeline schedule with *whole-batch* input.
         Will chunk the input into microbatches automatically, and go through the
         microbatches according to the schedule implementation.
-
-        The schedule will call forward and backward on the microbatches according to the
-        schedule specification.
 
         args: positional arguments to the model (as in non-pipeline case).
         kwargs: keyword arguments to the model (as in non-pipeline case).
