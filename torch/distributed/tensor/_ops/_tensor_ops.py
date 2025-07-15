@@ -1083,16 +1083,6 @@ def split_strategy(op_schema: OpSchema) -> TupleStrategy:
     )
     dim = normalize_dim(split_dim, input_ndim)
 
-    # tensor to split cannot have Partial for now
-    for arg_strategy in input_strategy.strategies:
-        arg_spec = arg_strategy.output_spec
-        if is_tensor_partial(arg_spec):
-            raise NotImplementedError(
-                f"splitting distributed tensor with "
-                f"Partial placement is not implemented!\n"
-                f"DTensorSpec={arg_strategy}"
-            )
-
     def size_split(N, i) -> list:
         # Last chunk will be smaller if the tensor size N
         # along the given dimension dim is not divisible by i.
