@@ -17,6 +17,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
@@ -104,7 +105,7 @@ class MultiKernelTest(TestCase):
 
     @requires_triton()
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_gemm(self):
         def fn(x, y):
@@ -131,7 +132,7 @@ class MultiKernelTest(TestCase):
 
     @requires_triton()
     # TODO: bobrenjc93 to fix multi-kernel for ROCM
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_relu_fused_gemm(self):
         def fn(x, y):
