@@ -232,8 +232,9 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
     backendOpts->timeout = opts.timeout;
     auto mergedBackend = parentBackend->merge(store, backendOpts, rank, size);
 
-    // TODO: Figure out a better way for merge group desc.
-    std::string groupDesc = c10::str(getGroupDesc(), ":merge");
+    std::string groupDesc = opts.group_desc.has_value()
+        ? opts.group_desc.value()
+        : c10::str(getGroupDesc(), ":merge");
     mergedBackend->setGroupDesc(groupDesc);
 
     if (!newGroup) {

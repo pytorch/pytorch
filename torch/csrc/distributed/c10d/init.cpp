@@ -3080,7 +3080,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       module, "MergeOptions", R"(Class for ProcessGroup Merge Options)")
       .def(
           py::init([](const std::string& group_name,
-                      const std::chrono::milliseconds& timeout) {
+                      const std::chrono::milliseconds& timeout,
+                      const std::optional<std::string> group_desc) {
             // gil_scoped_release is not safe as a call_guard in init.
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
@@ -3089,10 +3090,13 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                 group_name, timeout);
           }),
           py::arg("group_name"),
-          py::arg("timeout") = kProcessGroupDefaultTimeout)
+          py::arg("timeout") = kProcessGroupDefaultTimeout,
+          py::arg("group_desc") = std::nullopt)
       .def_readonly(
           "group_name", &::c10d::ProcessGroup::MergeOptions::group_name)
-      .def_readwrite("_timeout", &::c10d::ProcessGroup::MergeOptions::timeout);
+      .def_readwrite("_timeout", &::c10d::ProcessGroup::MergeOptions::timeout)
+      .def_readonly(
+          "group_desc", &::c10d::ProcessGroup::MergeOptions::group_desc);
 
 #ifdef USE_C10D_GLOO
   static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";

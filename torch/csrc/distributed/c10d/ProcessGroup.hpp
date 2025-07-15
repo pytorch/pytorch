@@ -74,12 +74,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   struct TORCH_API MergeOptions : torch::CustomClassHolder {
     explicit MergeOptions(
         const std::string group_name,
-        const std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
-        : timeout(timeout), group_name(group_name) {}
+        const std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
+        const std::optional<std::string> group_desc = std::nullopt)
+        : timeout(timeout), group_name(group_name), group_desc(group_desc) {}
     ~MergeOptions() override = default;
 
     std::chrono::milliseconds timeout;
     std::string group_name;
+    std::optional<std::string> group_desc;
   };
 
   enum BackendType : uint8_t {
