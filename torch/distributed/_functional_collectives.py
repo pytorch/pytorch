@@ -26,7 +26,7 @@ except Exception:
         "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly"
     )
 
-    def is_torchdynamo_compiling():
+    def is_torchdynamo_compiling():  # type: ignore
         return False
 
 
