@@ -135,7 +135,7 @@ def scan(
             and the second output  of ``combine_fn`` represents a slice of the output.
             This function must be pure, i.e., no lifted arguments are supported at the moment
             and may not have any side effects.
-        init (torch.Tensor or pytree with tensor leaves): The inital scan carry, a tensor, or nested pytree of tensors.
+        init (torch.Tensor or pytree with tensor leaves): The initial scan carry, a tensor, or nested pytree of tensors.
             The ``init`` is expected to have the same pytree structure as the first output element (i.e. carry)
             of ``combine_fn``.
         xs (torch.Tensor or pytree with tensor leaves): The input tensor, or nested pytree of tensors.
@@ -154,7 +154,7 @@ def scan(
         - The combine_fn shouldn't have any aliasing between input-input, input-output, and output-output. E.g. return a view
             or the same tensor as input is not supported. As a workaround, can clone the output to avoid aliasing.
 
-        - The combine_fn shoudn't mutate any inputs. We'll remove the mutation restriction for inference soon. Please file an issue
+        - The combine_fn shouldn't mutate any inputs. We'll remove the mutation restriction for inference soon. Please file an issue
             if you input mutation support for training is needed.
 
         - The combine_fn's init carry should match the next_carry in pytree structure and in tensor metadata.
@@ -585,7 +585,7 @@ class ScanAutogradOp(torch.autograd.Function):
             carry, y = _extract_carry_and_out(combine_fn(*args), num_leaves_init)
             return [
                 *carry,
-                # We additionally checkpoint all the intemediate carry outputs for backward.
+                # We additionally checkpoint all the intermediate carry outputs for backward.
                 *[
                     n_c.clone().detach() if isinstance(n_c, torch.Tensor) else n_c
                     for n_c in carry
@@ -793,7 +793,7 @@ class ScanAutogradOp(torch.autograd.Function):
         # Prepare the bwd_init
         bwd_init = [*initial_g_additional_inputs, *g_c_T]
 
-        # 5.) Perform the backwrad scan:
+        # 5.) Perform the backward scan:
         # The ``combine_fn_bw_wrapped`` receives the
         # initial_g_additional_inputs and the last carry as the ``bwd_init`` and the
         # gradients of the outputs (g_ys), as well as the fw_carries and the fw_xs of the forward as the ``bwd_xs``
