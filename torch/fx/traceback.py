@@ -123,6 +123,11 @@ class NodeSource:
             "from_node": [node.to_dict() for node in self.from_node],
         }
 
+    def __eq__(self, other: object):
+        if not isinstance(other, NodeSource):
+            return False
+        return self.to_dict() == other.to_dict()
+
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
