@@ -59,7 +59,6 @@ import sympy
 
 import torch
 from torch._inductor.analysis.device_info import datasheet_tops
-from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
@@ -1099,6 +1098,8 @@ def fresh_cache(
     generated with this cache instance.
     """
     clear_caches()
+
+    from torch._inductor.cpp_builder import normalize_path_separator
 
     inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
