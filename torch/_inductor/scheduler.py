@@ -2153,8 +2153,59 @@ class Scheduler:
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
             )
-        if config.reorder_for_compute_comm_overlap:
-            self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+
+        from torch._logging import trace_structured
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "scheduler_nodes_before_comm_overlap_DEBUG",
+                "encoding": "string",
+            },
+            payload_fn=lambda: "\n\n".join(
+                [
+                    f"NODE[{i}]"
+                    + n.debug_str()
+                    + f" BUFFER_NAMES:{n.get_buffer_names()}"
+                    for i, n in enumerate(self.nodes)
+                ]
+            ),
+        )
+        # if config.reorder_for_compute_comm_overlap:
+        #     self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+
+        def _insert_debug_nodes():
+            # from .memory import estimate_peak_memory, FreeableInputBuffer, get_freeable_input_buf
+            # graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+            # graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+            # name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
+            #     self.nodes, graph_inputs
+            # )
+            # peak_memory, curr_memory = estimate_peak_memory(
+            #     self.nodes, name_to_freeable_input_buf, graph_outputs
+            # )
+            # print(f"XXX ESTIMATE_CURR_MEMORY:{curr_memory}")
+            def new_foo_node():
+                node = ir.FallbackKernel(
+                    layout = NoneLayout(device=torch.device("cpu")),
+                    kernel = torch.ops._test.foo.default,
+                    tensor_args = [],
+                    nontensor_args = [],
+                    unflatten_args = lambda x, y: ([], {}),
+                )
+                node.operation_name = "foo_op"
+                debug_node = ExternKernelSchedulerNode(
+                    self,
+                    node
+                )
+                return debug_node
+            new_nodes = []
+            new_nodes.append(new_foo_node())
+            for node in self.nodes:
+                new_nodes.append(node)
+                new_nodes.append(new_foo_node())
+            self.nodes = new_nodes
+        _insert_debug_nodes()
+
         self.process_grouped_nodes()
 
         if torch._inductor.config.graph_partition:
