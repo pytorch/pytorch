@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import contextlib
 import itertools
 from collections.abc import KeysView, Sequence
 from contextlib import contextmanager, nullcontext
@@ -365,7 +366,7 @@ AOT_COUNTER = itertools.count()
 #
 # We view every forward output when creating out tangent tensors to handle the problematic
 # case in which a subclass does extra aliasing between graph outputs/inputs in a way that
-# is not visible above the sublass.
+# is not visible above the subclass.
 #
 # Ordinarily, when constructing the joint function that we want to trace in AOTAutograd,
 # we're guaranteed that the tangent tensors that we pass
@@ -872,7 +873,7 @@ def aot_function(
         This API is experimental and likely to change.
 
     Args:
-        fn (Callable): A Python function that takes one ore more arguments. Must
+        fn (Callable): A Python function that takes one or more arguments. Must
             return one or more Tensors.
         fw_compiler (Callable): A Python function that accepts an Fx graph with
             Aten ops and input args, and returns a Callable that semantically is
@@ -1178,9 +1179,30 @@ def aot_module_simplified(
         full_args, aot_config, fake_mode, shape_env, ignore_shape_env
     )
 
-    def dispatch_and_compile():
-        functional_call = create_functional_call(mod, params_spec, params_len)
-        with compiled_autograd._disable():
+    with contextlib.ExitStack() as stack:
+        while True:
+            # We only care if the forward will return an OutputCode.
+            if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
+                local = should_use_local_autograd_cache()
+                remote = should_use_remote_autograd_cache()
+                if local or remote:
+                    set_feature_use("aot_autograd_remote_cache", remote)
+                    compiled_fn = AOTAutogradCache.try_load(
+                        mod,
+                        fake_flat_args,
+                        aot_config,
+                        cudagraphs,
+                        boxed_forward_device_index,
+                        local,
+                        remote,
+                    )
+                    if compiled_fn is not None:
+                        break
+
+            functional_call = create_functional_call(mod, params_spec, params_len)
+
+            stack.enter_context(compiled_autograd._disable())
+
             compiled_fn, _ = create_aot_dispatcher_function(
                 functional_call,
                 fake_flat_args,
@@ -1188,28 +1210,7 @@ def aot_module_simplified(
                 fake_mode,
                 shape_env,
             )
-        return compiled_fn
-
-    # We only care if the forward will return an OutputCode.
-    if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
-        local = should_use_local_autograd_cache()
-        remote = should_use_remote_autograd_cache()
-        if local or remote:
-            set_feature_use("aot_autograd_remote_cache", remote)
-            compiled_fn = AOTAutogradCache.load(
-                dispatch_and_compile,
-                mod,
-                fake_flat_args,
-                aot_config,
-                cudagraphs,
-                boxed_forward_device_index,
-                local,
-                remote,
-            )
-        else:
-            compiled_fn = dispatch_and_compile()
-    else:
-        compiled_fn = dispatch_and_compile()
+            break
 
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
         # This function is called by the flatten_graph_inputs wrapper, which boxes
@@ -1260,7 +1261,7 @@ def aot_export_module(
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
     pre_dispatch: bool = False,
-    # If None, will be infered from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
+    # If None, will be inferred from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, GraphSignature]:
@@ -1459,7 +1460,7 @@ def aot_export_joint_simple(
     *,
     trace_joint: bool,
     # It looks like the main consequence of this API is that for dynamic shapes,
-    # it will assume that parms/buffers are static.
+    # it will assume that params/buffers are static.
     # With the new inferred dynamic shapes API, maybe this doesn't matter?
     num_params_buffers: int = 0,
     decompositions: Optional[dict] = None,
@@ -1570,8 +1571,9 @@ def _aot_export_function(
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
     pre_dispatch: bool = False,
-    # If None, `dynamic_shapes` will be infered from inputs, but the inferred result might be wrong.
+    # If None, `dynamic_shapes` will be inferred from inputs, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
+    keep_input_mutations: bool = False,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
@@ -1610,7 +1612,7 @@ def _aot_export_function(
         # For now there's no use case involving keeping input mutations in the graph
         # (which we can only do in the inference case anyway).
         # We can add this later if we need to.
-        keep_inference_input_mutations=False,
+        keep_inference_input_mutations=keep_input_mutations,
         dynamic_shapes=dynamic_shapes,
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
