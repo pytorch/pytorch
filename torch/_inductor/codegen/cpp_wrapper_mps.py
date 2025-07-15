@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 import sympy
 
@@ -13,6 +13,10 @@ from .wrapper import PythonWrapperCodegen
 
 
 class CppWrapperMps(CppWrapperGpu):
+    """
+    Generates cpp wrapper for running on MPS and calls metal kernels
+    """
+
     def __init__(self) -> None:
         super().__init__()
         self._used_kernel_names: OrderedSet[str] = OrderedSet()
@@ -31,14 +35,14 @@ class CppWrapperMps(CppWrapperGpu):
         kernel_name: str,
         call_args: list[str],
         *,
-        device=None,
-        triton=True,
-        arg_types=None,
-        raw_keys=None,
-        raw_args=None,
-        triton_meta=None,
-        graph_name="",
-        original_fxnode_name=None,
+        device: Optional[torch.device] = None,
+        triton: bool = True,
+        arg_types: Optional[tuple[Any, ...]] = None,
+        raw_keys: Optional[tuple[Any, ...]] = None,
+        raw_args: Optional[tuple[Any, ...]] = None,
+        triton_meta: Optional[dict[str, Any]] = None,
+        graph_name: str = "",
+        original_fxnode_name: Optional[str] = None,
     ) -> None:
         """
         Generates MPS kernel call code. It should look something like:
