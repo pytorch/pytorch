@@ -10,6 +10,7 @@ from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen.cuda.cutlass_cache import maybe_fetch_ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.scheduler import BaseSchedulerNode
@@ -41,8 +42,6 @@ from .cutlass_utils import (
     torch_dtype_to_cutlass_type,
     XW_DTYPES,
 )
-
-from torch._inductor.autotune_process import TensorMeta
 
 
 GemmOperation = Any
@@ -567,8 +566,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         # pre-computation
         layout_repr: str = str(layout)
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]] = TensorMeta.from_irnodes(self.input_nodes)
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]] = TensorMeta.from_irnodes(self.output_node)
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]] = (
+            TensorMeta.from_irnodes(self.input_nodes)
+        )
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]] = (
+            TensorMeta.from_irnodes(self.output_node)
+        )
 
         with dynamo_timed("CUTLASSGemmTemplate.maybe_append_choice"):
             for name, op in ops:

@@ -101,12 +101,7 @@ class CUDATemplate(KernelTemplate):
         ).hexdigest()
 
     def generate_code_and_args(
-        self,
-        op: "GemmOperation",
-        name: str,
-        input_key: str,
-        layout_repr: str,
-        **kwargs
+        self, name: str, input_key: str, layout_repr: str, **kwargs
     ) -> tuple[str, tuple[int, ...]]:
         """
         Generate code and args with caching. We cache the code even if runtime
@@ -128,7 +123,7 @@ class CUDATemplate(KernelTemplate):
             runtime_arg_values=self.get_runtime_arg_values(**kwargs),
         )
         with patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)):
-            code = self.render(kernel=kernel, op=op, **kwargs)
+            code = self.render(kernel=kernel, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
             autotuning_log.debug("Generated Code:\n%s", code)
             autotuning_log.debug(
@@ -163,7 +158,6 @@ class CUDATemplate(KernelTemplate):
 
     def generate(  # type: ignore[override]
         self,
-        op: "GemmOperation",
         name: str,
         description: str,
         input_key: str,
@@ -185,7 +179,6 @@ class CUDATemplate(KernelTemplate):
             A CUDATemplateCaller object representing the generated CUDA template caller.
         """
         code, extra_args = self.generate_code_and_args(
-            op=op,
             name=name,
             input_key=input_key,
             layout_repr=layout_repr,
@@ -206,6 +199,8 @@ class CUDATemplate(KernelTemplate):
             source_code=code,
         )
 
+        # kwargs has "op" argument in case of CUTLASSGemmTemplate
+        op = kwargs["op"]
         if not op:
             supports_epilogue_fusion = False
         else:
@@ -227,7 +222,6 @@ class CUDATemplate(KernelTemplate):
             render = functools.partial(
                 self.render,
                 kernel=kernel,
-                op=op,
                 template_buffer_node=template_node,
                 epilogue_nodes=epilogue_nodes,
                 **kwargs,  # includes "op" argument in case of CUTLASSGemmTemplate
