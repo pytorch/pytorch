@@ -28,6 +28,7 @@ from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import aoti_model_name_from_config
 from torch.torch_version import TorchVersion
 
 
@@ -1505,6 +1506,7 @@ class CppBuilder:
         self._aot_mode: bool = False
 
         self._name = name
+        self._target_name = aoti_model_name_from_config()
 
         # Code start here, initial self internal variables firstly.
         self._build_option = BuildOption
@@ -1730,25 +1732,29 @@ class CppBuilder:
         """
 
         definitions = " ".join(self._build_option.get_definitions())
+        target_library_type = (
+            "STATIC" if config.aot_inductor.compile_standalone else "SHARED"
+        )
+
         contents = textwrap.dedent(
             f"""
             cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
-            project(aoti_model LANGUAGES CXX)
+            project({self._target_name} LANGUAGES CXX)
             set(CMAKE_CXX_STANDARD 17)
 
             # May need to point CMAKE_PREFIX_PATH to the right torch location
             find_package(Torch REQUIRED)
 
             # Set a shared library target
-            add_library(aoti_model SHARED)
+            add_library({self._target_name} {target_library_type})
 
             # Add macro definitions
-            target_compile_definitions(aoti_model PRIVATE {definitions})
+            target_compile_definitions({self._target_name} PRIVATE {definitions})
 
             # Add compile flags
-            target_compile_options(aoti_model PRIVATE {self._cflags_args})
+            target_compile_options({self._target_name} PRIVATE {self._cflags_args})
             # Backend specific flags
-            target_compile_options(aoti_model PRIVATE {self._passthrough_parameters_args} -c)
+            target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
 
             """
         )
@@ -1823,7 +1829,7 @@ class CppBuilder:
         # Remove the directory part of file_path
         src_path = "${CMAKE_CURRENT_SOURCE_DIR}/" + Path(src_path).name
         with open(cmake_path, "a") as f:
-            f.write(f"target_sources(aoti_model PRIVATE {src_path})\n")
+            f.write(f"target_sources({self._target_name} PRIVATE {src_path})\n")
 
     def save_kernel_asm_to_cmake(self, cmake_path: str, asm_files: list[str]) -> None:
         # TODO: make this work beyond CUDA
@@ -1837,9 +1843,9 @@ class CppBuilder:
                     """
                 )
                 f.write(contents)
-            f.write("add_dependencies(aoti_model ${KERNEL_TARGETS})\n")
+            f.write(f"add_dependencies({self._target_name} ${{KERNEL_TARGETS}})\n")
             f.write(
-                "target_link_libraries(aoti_model PRIVATE ${KERNEL_OBJECT_FILES})\n"
+                f"target_link_libraries({self._target_name} PRIVATE ${{KERNEL_OBJECT_FILES}})\n"
             )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
@@ -1848,10 +1854,10 @@ class CppBuilder:
         contents = textwrap.dedent(
             f"""
             # Add linker flags
-            target_link_options(aoti_model PRIVATE {lflags})
+            target_link_options({self._target_name} PRIVATE {lflags})
 
             # Add libraries
-            target_link_libraries(aoti_model PRIVATE {libs})
+            target_link_libraries({self._target_name} PRIVATE {libs})
          """
         )
 
