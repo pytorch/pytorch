@@ -10,4 +10,4 @@
 #    If not satisfied: Go to 3)
 
 BASEDIR=$(dirname "$0")
-(< $BASEDIR/generated_dirs.txt xargs -i find {} -type f) | xargs git add -f
+(<$BASEDIR/generated_dirs.txt xargs -i find {} -type f) | xargs git add -f
