@@ -340,10 +340,13 @@ def estimate_peak_memory(
     memory = [0 for _ in range(len(nodes) + 1)]
 
     # for each buffer, update memory when created and when freed
-    for buf_info in buf_info_list:
+    for i, buf_info in enumerate(buf_info_list):
+        print(f"XXX BUF_INFO[{i}]:{buf_info.buffer.get_name()} size_alloc:{buf_info.size_alloc} size_free:{buf_info.size_free}")
+        print(f"XXX start_step:{buf_info.start_step} end_step:{buf_info.end_step}")
         memory[buf_info.start_step] += buf_info.size_alloc
         memory[buf_info.end_step + 1] -= buf_info.size_free
-
+    for i, m in enumerate(memory):
+        print(f"XXX MEM_ALLOC_AFTER_NODE[{i}]={m}")
     # get peak memory by compute the cumulative memories
     max_memory = 0
     cur_memory = 0

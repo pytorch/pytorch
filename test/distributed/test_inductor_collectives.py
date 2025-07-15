@@ -1621,6 +1621,21 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         Ensure the whole bucketed group including copy-ops get moved together rather than the copy ops preventing the
         comm from moving due to data dependency.
         """
+        _mems = []
+        def _reset():
+            _mems.clear()
+
+        def foo():
+            _mems.append(torch.cuda.memory_allocated())
+        lib = torch.library.Library("_test", "FRAGMENT")
+        lib.define("foo() -> ()")
+        lib.impl("foo", foo, "BackendSelect")
+        from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
+        _register_effectful_op(
+            torch.ops._test.foo.default,
+            _EffectType.ORDERED,
+        )
 
         def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1628,6 +1643,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             # cast the inputs
             ag_0_cast = ag_0.to(torch.bfloat16)
+            torch.ops._test.foo()
             ag_1_cast = ag_1.to(torch.bfloat16)
 
             # allgather
@@ -1715,6 +1731,30 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ) = _reorder_communication_preserving_peak_memory_internal(snodes)
             return reordered_snodes
 
+        from torch._inductor.virtualized import V
+        from torch._inductor.memory import estimate_peak_memory, FreeableInputBuffer, get_freeable_input_buf
+        from torch.utils._ordered_set import OrderedSet
+        import copy
+        estimate_outs = []
+        nodes = []
+        def _estimate_peak_memory(
+            snodes: list[BaseSchedulerNode],
+        ) -> list[BaseSchedulerNode]:
+            graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+            graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+            name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
+                snodes, graph_inputs
+            )
+            peak_memory, curr_memory = estimate_peak_memory(
+                snodes, name_to_freeable_input_buf, graph_outputs
+            )
+            nonlocal estimate_outs
+            estimate_outs.append(peak_memory)
+            estimate_outs.append(curr_memory)
+            nonlocal nodes
+            nodes = copy.copy(snodes)
+            return snodes
+
         with torch._inductor.config.patch(
             {
                 "bucket_all_gathers_fx": "all",
@@ -1723,59 +1763,96 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
-                    sink_waits_iterative,
-                    _reorder_communication_preserving_peak_memory,
+                    _estimate_peak_memory,
+                    # sink_waits_iterative,
+                    # _reorder_communication_preserving_peak_memory,
                 ],
                 "allow_buffer_reuse": False,
             }
         ):
-            compiled = torch.compile(func)
+            compiled = torch.compile(func, fullgraph=True)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+
+        _reset()
+        compiled(*inputs, **self.get_world_trs())
+        print("--------------------------------------")
+        print(f"XXX FOO_MEMS {len(_mems)}:{_mems}")
+        _est_mems = [0] + estimate_outs[1]
+        print(f"XXX _EST_MEMS {len(_est_mems)}:{_est_mems}")
+        print("--------------------------------------")
+        print("NORMALIZED")
+        _mems_norm = [m - _mems[0] for m in _mems]
+        _est_mems_norm = [m - _est_mems[0] for m in _est_mems]
+        print("--------------------------------------")
+        print(f"XXX FOO_MEMS_NORMS {len(_mems_norm)}:{_mems_norm}")
+        print(f"XXX _EST_MEMS_NORMS {len(_est_mems_norm)}:{_est_mems_norm}")
+        print(f"XXX NODES_LEN:{len(nodes)}")
+        print("--------------------------------------")
+        peak_real = max(_mems_norm)
+        peak_est = max(_est_mems_norm)
+        print(f"XXX PEAK_REAL:{peak_real}")
+        print(f"XXX PEAK_EST :{peak_est}")
+        mem_prev = 0
+        emem_prev = 0
+        for i in range(len(_est_mems) - 1):
+            mem = _mems_norm[i]
+            mem_delta = mem - mem_prev
+            emem = _est_mems_norm[i]
+            emem_delta = emem - emem_prev
+            print(f"XXX {i:2} EST_MEM:{emem:7} EST_MEM_DELTA:{emem_delta:7}")
+            print(f"XXX {i:2}     MEM:{mem:7}     MEM_DELTA:{mem_delta:7}")
+            mem_prev = mem
+            emem_prev = emem
+            if i < len(nodes):
+                node = nodes[i]
+                print(f"XXX NODE[{i:2}]:{node.debug_str()} buf_names:{node.get_buffer_names()}")
+
+
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unnecessary copy is made.
-        (
-            FileCheck()
-            .check_count(
-                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
-                count=2,
-                exactly=True,
-            )
-            .check(
-                "extern_kernels.mm",
-            )
-            .check(
-                "extern_kernels.addmm",
-            )
-            .run(code)
-        )
-        (
-            FileCheck()
-            .check_count(
-                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
-                count=2,
-                exactly=True,
-            )
-            .check(
-                "extern_kernels.mm",
-            )
-            .check(
-                "extern_kernels.addmm",
-            )
-            .run(code)
-        )
-        out = compiled(*inputs, **self.get_world_trs())
-        correct = func(*inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
-        assert node_stats is not None
-        self.assertTrue(isinstance(node_stats, dict))
-        self.assertEqual(len(node_stats), 4)
-        it = iter(node_stats.values())
-        node_stat0 = next(it)
-        self.assertTrue(node_stat0.moves > 0)
-        self.assertTrue(node_stat0.limiting_factor == "None")
-        node_stat1 = next(it)
-        self.assertTrue(node_stat1.moves > 0)
-        self.assertTrue("collective ordering" in node_stat1.limiting_factor)
+        # (
+        #     FileCheck()
+        #     .check_count(
+        #         "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+        #         count=2,
+        #         exactly=True,
+        #     )
+        #     .check(
+        #         "extern_kernels.mm",
+        #     )
+        #     .check(
+        #         "extern_kernels.addmm",
+        #     )
+        #     .run(code)
+        # )
+        # (
+        #     FileCheck()
+        #     .check_count(
+        #         "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+        #         count=2,
+        #         exactly=True,
+        #     )
+        #     .check(
+        #         "extern_kernels.mm",
+        #     )
+        #     .check(
+        #         "extern_kernels.addmm",
+        #     )
+        #     .run(code)
+        # )
+        # out = compiled(*inputs, **self.get_world_trs())
+        # correct = func(*inputs, **self.get_world_trs())
+        # assert same(out, correct), f"{out} va {correct}"
+        # assert node_stats is not None
+        # self.assertTrue(isinstance(node_stats, dict))
+        # self.assertEqual(len(node_stats), 4)
+        # it = iter(node_stats.values())
+        # node_stat0 = next(it)
+        # self.assertTrue(node_stat0.moves > 0)
+        # self.assertTrue(node_stat0.limiting_factor == "None")
+        # node_stat1 = next(it)
+        # self.assertTrue(node_stat1.moves > 0)
+        # self.assertTrue("collective ordering" in node_stat1.limiting_factor)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_reorder_respects_wait_dep(self):

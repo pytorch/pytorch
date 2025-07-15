@@ -680,6 +680,7 @@ def _sink_waits_iterative_internal(
     curr = snodes[-1]
 
     processed_waits = OrderedSet()  # type: ignore[var-annotated]
+    swap_i = 0
     while _prev[curr] is not None:
         if contains_wait(curr) and curr not in processed_waits:
             processed_waits.add(curr)
@@ -761,6 +762,7 @@ def _sink_waits_iterative_internal(
 
                 info.moves += 1
                 info.moves_info += f"+{candidate.get_name()}"
+                print(f"XXX SWAP {candidate.get_name()} vs {_group_names(group_head, group_tail)}")
 
                 # group_head_prev -0-> candidate -1-> group_head...group_tail -2-> candidate_next
                 mem_deltas = {}
@@ -791,6 +793,19 @@ def _sink_waits_iterative_internal(
                         _prev_curr_memory + mem_deltas[n]
                     )
 
+                ### DEBUG_PEAK
+                new_snodes = _group_nodes(_head, None)
+                new_peak_memory, new_curr_memory = estimate_peak_memory(
+                    new_snodes, name_to_freeable_input_buf, graph_outputs
+                )
+                print(f"XXX SWAP {swap_i}")
+                print(f"XXX NEW_PEAK:{new_peak_memory} old_peak:{peak_memory}")
+                for i, node in enumerate(new_snodes):
+                    print(f"XXX {node.get_name()} CURR:{new_curr_memory[i]} ITER_CURR:{_curr_memory[node]}")
+                swap_i += 1
+                if new_peak_memory > peak_memory:
+                    assert False
+                ### DEBUG_PEAK
                 candidate = _next[group_tail]
         curr = _prev[curr]  # type: ignore[assignment]
 
