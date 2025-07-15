@@ -77,6 +77,7 @@ lintrunner -m main
 ```
 
 ## 🔧 Common Development Tasks
+TODO(Claude): mention that you should always use ccache
 
 ### After Modifying Python Files
 No rebuild needed with `-e` install - changes are immediately available.
