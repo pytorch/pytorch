@@ -18,6 +18,13 @@ else()
   set(C10_LIB c10)
 endif()
 
+set(C10_USE_GFLAGS ${USE_GFLAGS})  # also used in torch/headeronly
+set(C10_USE_GLOG ${USE_GLOG})  # also used in torch/headeronly
+set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})  # also used in torch/headeronly
+set(C10_USE_NUMA ${USE_NUMA})  # also used in torch/headeronly
+set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})  # also used in torch/headeronly
+set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})  # also used in torch/headeronly
+
   # Note: if you want to add ANY dependency to the c10 library, make sure you
   # check with the core PyTorch developers as the dependency will be
   # transitively passed on to all libraries dependent on PyTorch.

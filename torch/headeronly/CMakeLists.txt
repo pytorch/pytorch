@@ -8,12 +8,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Main build file for torch/headeronly, except there's no build cuz this lib is header-only!
 
 # ---[ Configure macro file.
-set(C10_USE_GFLAGS ${USE_GFLAGS} PARENT_SCOPE) # used in cmake_macros.h.in
-set(C10_USE_GLOG ${USE_GLOG} PARENT_SCOPE) # used in cmake_macros.h.in
-set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS} PARENT_SCOPE) # used in cmake_macros.h.in
-set(C10_USE_NUMA ${USE_NUMA} PARENT_SCOPE) # used in cmake_macros.h.in
-set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME} PARENT_SCOPE) # used in cmake_macros.h.in
-set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT} PARENT_SCOPE) # used in cmake_macros.h.in
 set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
 set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
 set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
