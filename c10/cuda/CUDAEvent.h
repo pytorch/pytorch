@@ -274,12 +274,12 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
 // avoid constantly calling cudaEventCreate/cudaEventDestroy. This results in
 // significant improvements in multithreaded workloads with high allocation
 // rates.
-class EventPool {
+class CUDAEventPool {
  public:
   using Event = std::unique_ptr<
       c10::cuda::CUDAEvent,
       std::function<void(c10::cuda::CUDAEvent*)>>;
-  EventPool() = default;
+  CUDAEventPool() = default;
 
   Event get(DeviceIndex device) {
     TORCH_INTERNAL_ASSERT(0 <= device);
