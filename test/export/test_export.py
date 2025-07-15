@@ -249,6 +249,10 @@ def is_training_ir_test(test_name):
     )
 
 
+def is_training_ir_strict_test(test_name):
+    return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX)
+
+
 def is_cpp_runtime_test(test_name):
     return test_name.endswith(CPP_RUNTIME_STRICT_SUFFIX) or test_name.endswith(
         CPP_RUNTIME_NONSTRICT_SUFFIX
@@ -1602,7 +1606,7 @@ class GraphModule(torch.nn.Module):
         target = 2
         args = (x, trigger, target)
         ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
-        if is_training_ir_test(self._testMethodName):
+        if is_training_ir_strict_test(self._testMethodName):
             # In strict mode export's result capturing compiler, we create
             # 2 new symints when re-fakifying the symint inputs.
             # Then in run_decompositions, ep.range_constraints was updated
