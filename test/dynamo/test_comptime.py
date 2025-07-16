@@ -57,11 +57,11 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-FakeTensor(..., size=(s77,))
+FunctionalTensor(_to_functional_tensor(FakeTensor(..., size=(s77,))))
 2
-[FakeTensor(..., size=(s77,)), 2]
-(FakeTensor(..., size=(s77,)), 2)
-{'foo': FakeTensor(..., size=(s77,))}
+[FunctionalTensor(_to_functional_tensor(FakeTensor(..., size=(s77,)))), 2]
+(FunctionalTensor(_to_functional_tensor(FakeTensor(..., size=(s77,)))), 2)
+{'foo': FunctionalTensor(_to_functional_tensor(FakeTensor(..., size=(s77,))))}
 range(1, 3, 1)
 Employee(name='foo', id=2)
 UserDefinedListVariable(mylist)
@@ -160,7 +160,7 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-- FakeTensor(..., size=(2,))
+- FunctionalTensor(_to_functional_tensor(FakeTensor(..., size=(2,))))
 """,
         )
 
@@ -186,8 +186,8 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-x = FakeTensor(..., size=(2,))
-y = FakeTensor(..., size=(2,))
+x = FunctionalTensor(_to_functional_tensor(FakeTensor(..., size=(2,))))
+y = FunctionalTensor(_to_functional_tensor(FakeTensor(..., size=(2,))))
 """,
         )
 
