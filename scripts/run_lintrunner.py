@@ -2,7 +2,6 @@
 """
 Pre‑push hook wrapper for Lintrunner.
 
-✓ Installs Lintrunner once (`pip install lintrunner`) if missing
 ✓ Stores a hash of .lintrunner.toml in the venv
 ✓ Re-runs `lintrunner init` if that file's hash changes
 ✓ Pure Python – works on macOS, Linux, and Windows
@@ -19,11 +18,12 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TOML_PATH = REPO_ROOT / ".lintrunner.toml"
+LINTRUNNER_TOML_PATH = REPO_ROOT / ".lintrunner.toml"
 
 # This is the path to the pre-commit-managed venv
 VENV_ROOT = Path(sys.executable).parent.parent
-MARKER_PATH = VENV_ROOT / ".lintrunner_plugins_hash"
+# Stores the hash of .lintrunner.toml from the last time we ran `lintrunner init` 
+INITIALIZED_LINTRUNNER_TOML_HASH_PATH = VENV_ROOT / ".lintrunner_plugins_hash"
 
 
 def ensure_lintrunner() -> None:
@@ -32,7 +32,7 @@ def ensure_lintrunner() -> None:
         print("✅ lintrunner is already installed")
         return
     sys.exit(
-        "❌ lintrunner is required but was not found on your PATH. Please run the `python scripts/setup_hooks.py` to install to configure lintrunner before using this script."
+        "❌ lintrunner is required but was not found on your PATH. Please run the `python scripts/setup_hooks.py` to install to configure lintrunner before using this script. If `git push` still fails, you may need to open an new terminal"
     )
 
 
@@ -54,14 +54,14 @@ def read_stored_hash(path: Path) -> str | None:
         return None
 
 
-def maybe_initialize_lintrunner() -> None:
+def initialize_lintrunner_if_needed() -> None:
     """Runs lintrunner init if .lintrunner.toml changed since last run."""
-    if not TOML_PATH.exists():
+    if not LINTRUNNER_TOML_PATH.exists():
         print("⚠️ No .lintrunner.toml found. Skipping init.")
         return
 
-    current_hash = compute_file_hash(TOML_PATH)
-    stored_hash = read_stored_hash(MARKER_PATH)
+    current_hash = compute_file_hash(LINTRUNNER_TOML_PATH)
+    stored_hash = read_stored_hash(INITIALIZED_LINTRUNNER_TOML_HASH_PATH)
 
     if current_hash == stored_hash:
         print("✅ Lintrunner plugins already initialized and up to date.")
@@ -69,7 +69,7 @@ def maybe_initialize_lintrunner() -> None:
 
     print("🔁 Running `lintrunner init` …", file=sys.stderr)
     subprocess.check_call(["lintrunner", "init"])
-    MARKER_PATH.write_text(current_hash)
+    INITIALIZED_LINTRUNNER_TOML_HASH_PATH.write_text(current_hash)
 
 
 def main() -> None:
@@ -79,7 +79,7 @@ def main() -> None:
     ensure_lintrunner()
 
     # 2. Check for plugin updates and re-init if needed
-    maybe_initialize_lintrunner()
+    initialize_lintrunner_if_needed()
 
     # 3. Run lintrunner with any passed arguments and propagate its exit code
     args = sys.argv[1:]  # Forward all arguments to lintrunner
