@@ -7717,8 +7717,9 @@ class GraphModule(torch.nn.Module):
 
     class while_loop_cond_graph_0(torch.nn.Module):
         def forward(self, it_1: "Sym(u0)", x_1: "f32[s77, 3]"):
-            sym_size_int: "Sym(s77)" = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
-            lt: "Sym(u0 < s77)" = it_1 < sym_size_int;  it_1 = sym_size_int = None
+            sym_size_int_1: "Sym(s77)" = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
+
+            lt: "Sym(u0 < s77)" = it_1 < sym_size_int_1;  it_1 = sym_size_int_1 = None
             return lt
 
     class while_loop_body_graph_0(torch.nn.Module):

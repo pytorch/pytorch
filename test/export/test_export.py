@@ -7430,6 +7430,31 @@ def forward(self, x):
         ep = export(Simple(), example_inputs)
         self.assertEqual(ep.module()(*example_inputs), Simple()(*example_inputs))
 
+    @testing.expectedFailureCppRuntime
+    def test_while_loop_index_assertions(self):
+        from torch._higher_order_ops import while_loop
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                def cond_fn(idx, acc):
+                    i = idx.item()
+                    torch._check(i >= 0)
+                    return i < x.size(0)
+
+                def body_fn(idx, acc):
+                    i = idx.item()
+                    torch._check_is_size(i, max=x.size(0) - 1)
+                    return idx + 1, acc + x[i]
+
+                acc = torch.zeros(x.size(1))
+                n = torch.full((), 0, dtype=torch.int64)
+                _, out = while_loop(cond_fn, body_fn, [n, acc])
+                return out
+
+        x = torch.randn(8, 4)
+        ep = export(Foo(), (x,))
+        self.assertTrue(torch.allclose(x.sum(dim=0), ep.module()(x)))
+
     def test_constrain_size_with_various_cases(self):
         class Module1(torch.nn.Module):
             def forward(self, x, y):

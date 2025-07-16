@@ -682,12 +682,13 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
         ):
             shape_env = _get_shape_env_from_gm(gm)
             if shape_env:
-                insert_deferred_runtime_asserts(
-                    gm,
-                    shape_env,
-                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                    export=True,
-                )
+                for _gm in gm.modules():
+                    insert_deferred_runtime_asserts(
+                        _gm,
+                        shape_env,
+                        f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                        export=True,
+                    )
 
         # insert runtime assertions for aten.to nodes
         _insert_aten_to_metadata_assert_pass(gm)

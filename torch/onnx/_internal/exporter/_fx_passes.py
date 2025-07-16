@@ -37,8 +37,10 @@ def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.Graph
         torch.ops.aten._assert_scalar.default,
         torch.ops.aten._assert_tensor_metadata.default,
     }
-    for node in graph_module.graph.nodes:
-        if node.op == "call_function" and node.target in aten_assertion_targets:
-            graph_module.graph.erase_node(node)
-    graph_module.recompile()
+    for gm in graph_module.modules():
+        if isinstance(gm, torch.fx.GraphModule):
+            for node in gm.graph.nodes:
+                if node.op == "call_function" and node.target in aten_assertion_targets:
+                    gm.graph.erase_node(node)
+            gm.recompile()
     return graph_module

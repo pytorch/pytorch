@@ -294,10 +294,10 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
             carried_inputs,
         )
 
-        cond_graph = reenter_make_fx(cond_fn)(
+        body_graph = reenter_make_fx(body_fn)(
             *unspecialized_carried_inputs, *additional_inputs
         )
-        body_graph = reenter_make_fx(body_fn)(
+        cond_graph = reenter_make_fx(cond_fn)(
             *unspecialized_carried_inputs, *additional_inputs
         )
 
