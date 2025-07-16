@@ -90,59 +90,14 @@ class ReplicateTest(MultiProcessTestCase):
             store=dist.FileStore(self.file_name, self.world_size),
         )
 
-    def run_subtests(self, *args, **kwargs):
-        return run_subtests(self, *args, **kwargs)
-
-    @skip_if_lt_x_gpu(2)
-    def test_replicate_net_module(self):
-        """This tests that replicate works on a simple net module"""
-        self._init_pg()
-        model = Net()
-        replicate_model = deepcopy(model)
-        layers = [
-            replicate_model.fc1,
-            replicate_model.fc2,
-            replicate_model.fc3,
-        ]
-
-        for i, layer in enumerate(layers):
-            if i % 2 == 0:
-                replicate(layer)
-            else:
-                fully_shard(layer)
-
-        replicate_model = replicate(replicate_model)
-
-        for parameter in replicate_model.fc1.parameters():
-            self.assertEqual(parameter.placements, (Replicate(), Shard(dim=0)))
-
-        for parameter in replicate_model.fc2.parameters():
-            self.assertEqual(parameter.placements, (Shard(dim=0),))
-
-    @skip_if_lt_x_gpu(2)
-    def test_replicate_managed_modules(self):
-        """
-        This tests to ensure that if a module is not fully_sharded or replicated, it is still managed by the parent module
-        """
-        self._init_pg()
-        model = Net()
-        replicate_model = deepcopy(model)
-
-        replicate(replicate_model.fc1)
-        fully_shard(replicate_model.fc2)
-
-        replicate_model = replicate(replicate_model)
-        managed_modules = _get_managed_modules((replicate_model,))
-
-        self.assertEqual(len(managed_modules), 2)
-
     @skip_if_lt_x_gpu(2)
     def test_replicate_transformer(self):
         """
         This tests that replicate works on a transformer model with fully_shard and replicate layers
         """
         self._init_pg()
-        self.run_subtests(
+        run_subtests(
+            self,
             {
                 "sharding_strategy": ["replicate", "fully_shard"],
             },
@@ -162,9 +117,9 @@ class ReplicateTest(MultiProcessTestCase):
         replicate_model = deepcopy(model)
 
         for i, layer in enumerate(replicate_model.layers):
-            if i % 2 == 0:
+            if i % 3 == 0:
                 replicate(layer)
-            else:
+            elif i % 3 == 1:
                 fully_shard(layer)
 
         if sharding_strategy == "replicate":
@@ -176,14 +131,19 @@ class ReplicateTest(MultiProcessTestCase):
         self._composable_api_module_check(replicate_model, sharding_strategy)
 
         for i, layer in enumerate(replicate_model.layers):
-            if i % 2 == 0:
+            if i % 3 == 0:
                 self.assertTrue("replicate" in _get_registry(layer))
                 for parameter in layer.parameters():
                     self.assertEqual(parameter.placements, (Replicate(), Shard(dim=0)))
-            else:
+            elif i % 3 == 1:
                 self.assertTrue("fully_shard" in _get_registry(layer))
                 for parameter in layer.parameters():
                     self.assertEqual(parameter.placements, (Shard(dim=0),))
+
+        managed_modules = _get_managed_modules((replicate_model,))
+
+        if sharding_strategy == "replicate":
+            self.assertEqual(len(managed_modules), 7)
 
     @skip_if_lt_x_gpu(2)
     def test_replicate_device_mesh(self):
