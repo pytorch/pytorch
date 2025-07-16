@@ -81,8 +81,8 @@ class NodeSource:
             self.from_node = []
 
         # cache the action string and dict representation for performance.
-        self._action_string = None
-        self._dict = None
+        self._action_string: Optional[str] = None
+        self._dict: Optional[dict[str, Any]] = None
 
     @property
     def name(self) -> str:
@@ -130,6 +130,7 @@ class NodeSource:
                 "from_node": [node.to_dict() for node in self.from_node],
             }
 
+        assert self._dict is not None
         return self._dict
 
     def __eq__(self, other: object):
