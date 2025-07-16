@@ -157,7 +157,7 @@ class NodeSource:
         """
         Recursively deserialize from_node metadata from dictionary data.
         It is used to deserialize the from_node field from serialized metadata.
-        Please use contructor NodeSource(node, ...) to create a NodeSource object.
+        Please use constructor NodeSource(node, ...) to create a NodeSource object.
         """
         if d is None:
             return None
@@ -192,7 +192,7 @@ class NodeSource:
             node_source.node_info = None
 
         # Recursively deserialize nested from_node
-        node_source.from_node = [cls._from_dict(fn) for fn in d.get("from_node", [])]
+        node_source.from_node = [cls._from_dict(fn) for fn in d.get("from_node", [])]  # type: ignore[misc]
         return node_source
 
 
