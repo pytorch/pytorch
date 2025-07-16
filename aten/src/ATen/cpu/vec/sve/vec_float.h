@@ -314,6 +314,9 @@ class Vectorized<float> {
   Vectorized<float> exp_u20() const {
     return exp();
   }
+  Vectorized<float> fexp_u20() const {
+    return exp();
+  }
   Vectorized<float> fmod(const Vectorized<float>& q) const {USE_SLEEF(
       { return Vectorized<float>(Sleef_fmodfx_sve(values, q)); },
       {
