@@ -446,9 +446,60 @@ class RMSNormBackward(BenchmarkKernel):
             self.benchmark_single_shape((x, w, dy), setting=f"shape: [{M}, {N}]")
 
 
+class LayerNormForward(BenchmarkKernel):
+    def __init__(self):
+        super().__init__()
+        self.available_backends = ["eager", "compiled", "quack"]
+
+    def get_shapes(self) -> tuple[tuple[int, ...], ...]:
+        return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768), (32768,65536), (16384,131072), (8192,262144))
+
+    def get_memory_bytes(self, args, kwargs) -> int:
+        x, w = args
+        M, N = x.shape
+        # Read x ([M, N]), w ([N]), write y ([M, N])
+        return 2 * M * N * x.dtype.itemsize + N * w.dtype.itemsize  
+
+    def get_flops(self, args, kwargs) -> int:
+        return 0
+
+    def layernorm_ref(self, x: torch.Tensor, w: torch.Tensor, eps: float = 1e-6):
+        x_f32 = x.float()
+        return F.layer_norm(x_f32, w.shape, w, None, eps).to(x.dtype)
+
+    def eager(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, w = args
+        fn = lambda: self.layernorm_ref(x, w)
+        return fn
+
+    def compiled(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, w = args
+        compiled_layernorm = torch.compile(self.layernorm_ref, mode="max-autotune-no-cudagraphs")
+        fn = lambda: compiled_layernorm(x, w, eps=1e-6)
+        return fn
+
+    def quack(self, args, kwargs) -> Any:
+        from quack.layernorm import layernorm
+
+        x, w = args
+        fn = lambda: layernorm(x, w, eps=1e-6)
+        return fn
+
+    def benchmark(self):
+        for (M, N) in self.get_shapes():
+            print(f"Tensor dimensions: [{M}, {N}]")
+            torch_dtype = cutlass_torch.dtype(cutlass.BFloat16)
+            x = torch.randn(M, N, device="cuda", dtype=torch_dtype)
+            w = torch.randn(N, device="cuda", dtype=torch.float32)
+            self.benchmark_single_shape((x, w), setting=f"shape: [{M}, {N}]")
+
+
 CrossEntropyForward().benchmark()
 CrossEntropyBackward().benchmark()
 SoftmaxForward().benchmark()
 SoftmaxBackward().benchmark()
 RMSNormForward().benchmark()
 RMSNormBackward().benchmark()
+LayerNormForward().benchmark()
