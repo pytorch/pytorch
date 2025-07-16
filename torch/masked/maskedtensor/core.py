@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import warnings
-from typing import Any
+from typing import Any, cast
 from typing_extensions import TypeIs
 
 import torch
@@ -370,5 +370,6 @@ class MaskedTensor(torch.Tensor):
                 device_to = arg.device
         else:
             device_to = kwargs.get("device", current_device)
-        self._masked_mask = self._masked_mask.to(device=device_to)
-        return super().to(*args, **kwargs)
+        masked_tensor = cast(MaskedTensor, super().to(*args, **kwargs))
+        masked_tensor._masked_mask = self._masked_mask.to(device=device_to)
+        return masked_tensor
