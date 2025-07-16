@@ -158,9 +158,8 @@ sycl::event deconvolution(
     int64_t groups,
     Attr& attr,
     const std::vector<sycl::event>& deps) {
-  auto engine = GpuEngineManager::Instance().get_engine(
-      {c10::kXPU, c10::xpu::current_device()});
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last_suggested = use_channels_last_for_conv(src, weight);
 
@@ -249,9 +248,8 @@ sycl::event deconvolution_backward_data(
     int64_t groups,
     bool bias_defined,
     const std::vector<sycl::event>& deps) {
-  auto engine = GpuEngineManager::Instance().get_engine(
-      {c10::kXPU, c10::xpu::current_device()});
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last_suggested =
       use_channels_last_for_conv(diff_dst, weight);
@@ -303,7 +301,8 @@ sycl::event deconvolution_backward_data(
           _dilation,
           _padding,
           _padding,
-          deconv_fwd_pd);
+          deconv_fwd_pd,
+          pattr);
 
   // create memory
   dnnl::memory diff_dst_m, wei_m, diff_src_m;
@@ -346,9 +345,8 @@ sycl::event deconvolution_backward_weights(
     IntArrayRef dilation,
     int64_t groups,
     const std::vector<sycl::event>& deps) {
-  auto engine = GpuEngineManager::Instance().get_engine(
-      {c10::kXPU, c10::xpu::current_device()});
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last_suggested = use_channels_last_for_conv(src, diff_dst);
 

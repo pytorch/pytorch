@@ -16,7 +16,7 @@ import time
 import unittest
 import uuid
 from contextlib import closing
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from unittest import mock
 from unittest.mock import MagicMock, Mock, patch
 
@@ -59,7 +59,7 @@ def get_test_launch_config(
     nproc_per_node: int,
     run_id: str = "",
     rdzv_backend: str = "etcd",
-    config: Optional[Dict[str, Any]] = None,
+    config: Optional[dict[str, Any]] = None,
 ) -> LaunchConfig:
     rdzv_configs = {}
     if config:
@@ -411,3 +411,10 @@ class ElasticLaunchTest(unittest.TestCase):
                 launch_agent(config, simple_rank_scale, [])
             rdzv_handler_mock.shutdown.assert_called_once()
             record_event_mock.assert_called_once()
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

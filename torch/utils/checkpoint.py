@@ -11,7 +11,6 @@ from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._functorch._aot_autograd.functional_utils import is_fun
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -329,6 +328,7 @@ class CheckpointFunction(torch.autograd.Function):
 def noop_context_fn():
     return contextlib.nullcontext(), contextlib.nullcontext()
 
+# Note: [torch.compile and checkpoint]
 # TorchDynamo does not step inside utils.checkpoint function.  The flow
 # looks likes this
 #  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
@@ -858,14 +858,15 @@ class _CheckpointFrame:
         if not len(self.weak_holders) == self.recomp_counter[gid]:
             # 2. During recompute, fewer tensors were saved
             #
-            # We know that everytime we save something do original forward
+            # We know that every time we save something do original forward
             # we append to weak_holder, and every time we save a tensor
             # during recompute we increment recompute_counter.
             raise CheckpointError(
                 "torch.utils.checkpoint: A different number of tensors was saved "
                 "during the original forward and recomputation.\n"
                 f"Number of tensors saved during forward: {len(self.weak_holders)}\n"
-                f"Number of tensors saved during recomputation: {self.recomp_counter[gid]}"
+                f"Number of tensors saved during recomputation: {self.recomp_counter[gid]}.\n"
+                f"{_debug_tip_msg}"
             )
 
         # 3. During recompute, the same tensors were saved, but they
@@ -902,8 +903,17 @@ class _CheckpointFrame:
             raise CheckpointError(
                 "torch.utils.checkpoint: Recomputed values for the following tensors "
                 "have different metadata than during the forward pass.\n"
-                f"{mismatched_tensors}"
+                f"{mismatched_tensors}.\n"
+                f"{_debug_tip_msg}"
             )
+
+
+_debug_tip_msg = """
+Tip: To see a more detailed error message, either pass `debug=True` to
+`torch.utils.checkpoint.checkpoint(...)` or wrap the code block
+with `with torch.utils.checkpoint.set_checkpoint_debug_enabled(True):` to
+enable checkpoint‑debug mode globally.
+"""
 
 
 _checkpoint_error_template = """ \
@@ -1068,7 +1078,8 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
                     return x
                 raise CheckpointError(
                     "torch.utils.checkpoint: trying to save more tensors during "
-                    "recomputation than during the original forward pass."
+                    "recomputation than during the original forward pass.\n"
+                    f"{_debug_tip_msg}"
                 )
 
             holder = target_frame.weak_holders[recomp_idx]()
@@ -1093,6 +1104,16 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             return x
 
         super().__init__(pack_hook, unpack_hook)
+
+
+# torch._disable_dynamo creates a reference cycle with decorated function
+# This function is used to ensure that the decorated function does not have
+# a closure, so that other objects aren't also kept alive.
+# https://github.com/pytorch/pytorch/issues/154642
+# Note: does not work when fn is compiled
+@torch._disable_dynamo
+def _run_fn_with_dynamo_disabled(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
 
 
 class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
@@ -1121,7 +1142,8 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     with _recomputation_hook(
                         weakref.ref(frame), gid
                     ), torch.autograd.enable_grad():
-                        frame.recompute_fn(*args)
+                        # See Note: [compiled autograd and checkpoint unpack hook]
+                        _run_fn_with_dynamo_disabled(frame.recompute_fn, *args)
                 except _StopRecomputationError:
                     pass
                 frame.is_recomputed[gid] = True
@@ -1153,12 +1175,8 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
-    # There should probably be a better way to do this...
-    # TODO: unify _is_compiling across all compile stacks
-    for arg in args:
-        if isinstance(arg, torch.Tensor) and is_fun(arg):
-            return True
-    return False
+    # Checking that a functional mode is active should always do what we want
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None
 
 
 class _VersionWrapper:
@@ -1252,7 +1270,7 @@ class CheckpointPolicy(enum.Enum):
 
 
 def _policy_from_bool(b):
-    # For backward compatability
+    # For backward compatibility
     return CheckpointPolicy.MUST_SAVE if b else CheckpointPolicy.PREFER_RECOMPUTE
 
 
@@ -1290,7 +1308,13 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
 
         out = func(*args, **kwargs)
 
-        any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
+        # HOPs don't support func._schema
+        # HOPs don't alias -> this is always true today and will be always true for a long time
+        # TODO HOPs don't mutate -> this is always true today but will not be true forever
+        if isinstance(func, torch._ops.HigherOrderOperator):
+            any_ret_has_alias_info = False
+        else:
+            any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
             self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out))
@@ -1389,7 +1413,7 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
     #     context_fn anyway, so proceed as usual.
     if isinstance(policy_fn_or_list, list):
         for op in policy_fn_or_list:
-            if not isinstance(op, torch._ops.OpOverload):
+            if not isinstance(op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
                 _extra_msg = (
                     "Please update the OpOverloadPacket to a specific OpOverload."
                     "For example, if you have `torch.ops.aten.mm`, change it to `torch.ops.aten.mm.default`."
@@ -1546,3 +1570,17 @@ def _checkpoint_without_reentrant_generator(
         )
 
     return
+
+# Note: [compiled autograd and checkpoint unpack hook]
+# When tracing via compiled autograd, this hook will be visible to the
+# compiler if the forward of this checkpointed region ran in eager.
+# If the forward had ran under compile, it would have been wrapped in a
+# higher order op. See Note: [torch.compile and checkpoint].
+#
+# Since we run the recomputation hook under a enable_grad context,
+# AOTDispatch will trace a joint graph for this hook, and may
+# save different activations than in eager. This conflicts with the
+# strict activation count checks in `frame.check_recomputed_tensors_match`.
+# So, we disable this hook to force it to recompute eager checkpointed regions
+# in eager. This could be removed if we can disable the partitioner for this
+# graph segment.

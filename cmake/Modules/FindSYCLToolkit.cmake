@@ -12,6 +12,16 @@ if(DEFINED ENV{SYCL_ROOT})
   set(SYCL_ROOT $ENV{SYCL_ROOT})
 elseif(DEFINED ENV{CMPLR_ROOT})
   set(SYCL_ROOT $ENV{CMPLR_ROOT})
+else()
+  # Use the default path to ensure proper linking with torch::xpurt when the user is working with libtorch.
+  if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+    set(SYCL_ROOT "/opt/intel/oneapi/compiler/latest")
+  elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
+    set(SYCL_ROOT "C:/Program Files (x86)/Intel/oneAPI/compiler/latest")
+  endif()
+  if(NOT EXISTS ${SYCL_ROOT})
+    set(SYCL_ROOT "")
+  endif()
 endif()
 
 string(COMPARE EQUAL "${SYCL_ROOT}" "" nosyclfound)
@@ -46,7 +56,9 @@ function(parse_sycl_compiler_version version_number)
   set(${version_number} "${VERSION_NUMBER_MATCH}" PARENT_SCOPE)
 endfunction()
 
-parse_sycl_compiler_version(SYCL_COMPILER_VERSION)
+if(SYCL_COMPILER)
+  parse_sycl_compiler_version(SYCL_COMPILER_VERSION)
+endif()
 
 if(NOT SYCL_COMPILER_VERSION)
   set(SYCL_FOUND False)
@@ -87,12 +99,10 @@ set(PYTORCH_2_5_SYCL_TOOLKIT_VERSION 20249999)
 
 # By default, we use libsycl.so on Linux and sycl.lib on Windows as the SYCL library name.
 if (SYCL_COMPILER_VERSION VERSION_LESS_EQUAL PYTORCH_2_5_SYCL_TOOLKIT_VERSION)
-  # Don't use if(LINUX) here since this requires cmake>=3.25 and file is installed
+  # Don't use if(WIN32) here since this requires cmake>=3.25 and file is installed
   # and used by other projects.
   # See: https://cmake.org/cmake/help/v3.25/variable/LINUX.html
-  if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-    set(sycl_lib_suffix "-preview")
-  elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
+  if(CMAKE_SYSTEM_NAME MATCHES "Windows")
     # On Windows, the SYCL library is named sycl7.lib until PYTORCH_2_5_SYCL_TOOLKIT_VERSION.
     # sycl.lib is supported in the later version.
     set(sycl_lib_suffix "7")

@@ -10,7 +10,6 @@ import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Dict, List
 
 
 logging.basicConfig(
@@ -25,7 +24,7 @@ REQUIREMENTS_PATH = ROOT_PATH / "requirements.txt"
 
 
 def run_cmd(
-    cmd: List[str], capture_output: bool = False
+    cmd: list[str], capture_output: bool = False
 ) -> subprocess.CompletedProcess[bytes]:
     logger.debug("Running command: %s", " ".join(cmd))
     return subprocess.run(
@@ -63,13 +62,13 @@ def venv(interpreter: str) -> Iterator[str]:
 
 
 class Builder:
-    # The python interpeter that we should be using
+    # The python interpreter that we should be using
     interpreter: str
 
     def __init__(self, interpreter: str) -> None:
         self.interpreter = interpreter
 
-    def setup_py(self, cmd_args: List[str]) -> bool:
+    def setup_py(self, cmd_args: list[str]) -> bool:
         return (
             run_cmd([self.interpreter, str(SETUP_PY_PATH), *cmd_args]).returncode == 0
         )
@@ -106,7 +105,7 @@ def parse_args() -> argparse.Namespace:
         "--destination",
         default="dist/",
         type=str,
-        help=("Destination to put the compailed binaries" ""),
+        help="Destination to put the compiled binaries",
     )
     return parser.parse_args()
 
@@ -114,7 +113,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     pythons = args.python or [sys.executable]
-    build_times: Dict[str, float] = dict()
+    build_times: dict[str, float] = dict()
 
     if len(pythons) > 1 and args.destination == "dist/":
         logger.warning(
@@ -125,7 +124,7 @@ def main() -> None:
         with venv(interpreter) as venv_interpreter:
             builder = Builder(venv_interpreter)
             # clean actually requires setuptools so we need to ensure we
-            # install requriements before
+            # install requirements before
             builder.install_requirements()
             builder.clean()
 

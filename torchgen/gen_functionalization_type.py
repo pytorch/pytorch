@@ -197,7 +197,7 @@ def is_tensor_like(a: Argument | TensorOptionsArguments | SelfArgument) -> bool:
 # We need to wrap / unwrap various arguments from the op in the functionalization kernels.
 # Some op schemas include non-owning types though (like TensorList),
 # and when we unwrap them we expect to get out an owning type!.
-# We also return a lambda that tells you how to conver the non-owning type argument into the owning type.
+# We also return a lambda that tells you how to convert the non-owning type argument into the owning type.
 def get_owning_type(t: CType) -> tuple[CType, Callable[[str], str]]:
     if t == BaseCType(tensorListT):
         return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
@@ -405,7 +405,7 @@ def emit_view_functionalization_body(
         // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
         {unwrap_tensor_args_str}
         at::AutoDispatchSkipFunctionalize guard;
-        return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+        return at::_ops::{noop_api_name}::call({", ".join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
       auto inverse_return_mode = (
@@ -418,22 +418,22 @@ def emit_view_functionalization_body(
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
-      if (compute_reference_meta) {{
+      if (compute_reference_meta && !disable_meta_reference()) {{
         {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
+        reference_tensor_output = at::_ops::{noop_api_name}::call({", ".join(meta_call_args)});
       }}
       // This function adds the above view meta to the current tensor and replays them off the base,
       // mutating the size/stride info of the current FunctionalTensorWrapper.
       // Because of this, we need to make sure to run the reference shape function above,
-      // BEFORE doing this (otherwise we'll end up runnin the reference function using the wrong sizes/strides)
+      // BEFORE doing this (otherwise we'll end up running the reference function using the wrong sizes/strides)
       at::functionalization::impl::mutate_view_meta({view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
       // XLA/LTC don't implement the logic to propagate strides correctly, so we need to rely
       // on a reference implementation here (instead of relying on the output from the forward lambda
       // having the correct stride info)
-      if (compute_reference_meta) {{
+      if (compute_reference_meta && !disable_meta_reference()) {{
         at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
       }}
       return {view_tensor_name};
@@ -447,7 +447,7 @@ def emit_view_functionalization_body(
       if (!at::functionalization::impl::isFunctionalTensor({view_tensor_name})) {{
         // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
         at::AutoDispatchSkipFunctionalize guard;
-        return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+        return at::_ops::{noop_api_name}::call({", ".join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
       auto inverse_return_mode = (
@@ -458,26 +458,26 @@ def emit_view_functionalization_body(
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
-      if (compute_reference_meta) {{
+      if (compute_reference_meta && !disable_meta_reference()) {{
         {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
+        reference_tensor_output = at::_ops::{noop_api_name}::call({", ".join(meta_call_args)});
       }}
       {return_type} tmp_output;
       {{
         at::AutoDispatchSkipFunctionalize guard;
         if (reapply_views) {{
-          tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+          tmp_output = at::_ops::{noop_api_name}::call({", ".join(view_redispatch_args)});
         }} else {{
-          tmp_output = at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
+          tmp_output = at::_ops::{api_name}::call({", ".join(view_redispatch_args)});
         }}
       }}
       {symbolic_inputs_check}
       auto view_meta = {spec.new()};
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
-      if (compute_reference_meta) {{
+      if (compute_reference_meta && !disable_meta_reference()) {{
         at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
       }}
       return out;
@@ -657,7 +657,7 @@ def emit_inplace_functionalization_body(
             [
                 f"""
       at::functionalization::impl::replace_(
-        {a.name}, {'std::get<' + str(i) + '>(tmp_output)' if len(f.func.returns) > 1 else 'tmp_output'});
+        {a.name}, {"std::get<" + str(i) + ">(tmp_output)" if len(f.func.returns) > 1 else "tmp_output"});
       at::functionalization::impl::commit_update({a.name});"""
                 for (i, a) in enumerate(f.func.arguments.out)
                 if a.annotation and a.annotation.is_write and a.type.is_tensor_like()
@@ -686,14 +686,14 @@ def emit_inplace_functionalization_body(
 
     return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
-      if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()}) {{
+      if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()} && !disable_meta_reference()) {{
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
         // (We can only do this for inplace ops today though, because they technically all support meta tensors).
         {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(a.name for a in meta_call_ctx)});
+        at::_ops::{f.func.name.unambiguous_name()}::call({", ".join(a.name for a in meta_call_ctx)});
       }}
       {unwrap_tensor_args_str}
       if (!({check_all_mutated_args_are_functional})) {{
@@ -707,16 +707,16 @@ def emit_inplace_functionalization_body(
         }} else {{
          // case 2: arguments are not functional tensors, so we no-op and redispatch.
          at::AutoDispatchSkipFunctionalize guard;
-         {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
-         {return_from_mutable_noop_redispatch(f, 'tmp_output')}
+         {maybe_create_output(f, "tmp_output")}at::_ops::{f.func.name.unambiguous_name()}::call({", ".join(inplace_exprs)});
+         {return_from_mutable_noop_redispatch(f, "tmp_output")}
         }}
       }} else {{
         {return_type} tmp_output;
         {{
           at::AutoDispatchSkipFunctionalize guard;
-          tmp_output = at::_ops::{g.functional.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});
+          tmp_output = at::_ops::{g.functional.func.name.unambiguous_name()}::call({", ".join(functional_exprs)});
         }}
-        {wrap_propagate_mutations_and_return(f, g.functional, 'tmp_output')}
+        {wrap_propagate_mutations_and_return(f, g.functional, "tmp_output")}
       }}
     }}"""
 
@@ -930,7 +930,7 @@ std::shared_ptr<at::functionalization::ViewMeta> {self.classname}::to_out_index(
         name = functionalization.classname(self.f.func, with_namespace=True)
         return [f"  create_binding_with_pickle<{name}>(functionalization);"]
 
-    # Generate an instanciation of this specialized class.
+    # Generate an instantiation of this specialized class.
     def new(self, out_index: str = "0") -> str:
         name = functionalization.classname(self.f.func, with_namespace=True)
         ctor_arguments = functionalization.base_ctor_arguments(

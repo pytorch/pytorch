@@ -1433,7 +1433,7 @@ Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) 
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
   // the content of result is overwritten by 'apply_cholesky_inverse'
-#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
+#if defined(USE_LINALG_SOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
@@ -1865,8 +1865,6 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
   // We require to perform ?geqrf_gpu again due to this bug in MAGMA:
   // - ?geqrf_gpu allows fast computation of Q via ?orgqr_gpu, but doesn't give R properly.
   // - ?geqrf2_gpu gives correct R, but doesn't allow computation of Q via ?orgqr_gpu
-  // Refer to the below link for more details:
-  // http://icl.cs.utk.edu/magma/forum/viewtopic.php?f=2&t=1015&p=2800&hilit=geqrf_gpu#p2800
     case at::LinalgBackend::Magma:
       return geqrf_magma(input, tau);
     case at::LinalgBackend::Cusolver:

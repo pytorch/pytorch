@@ -2,7 +2,7 @@
 
 import torch
 from torch.cuda.amp import autocast
-from typing import Optional, Tuple
+from typing import Optional
 
 import unittest
 from test_jit import JitTestCase
@@ -319,7 +319,7 @@ class TestAutocast(JitTestCase):
 
     # TODO: fix and enable this test?
     #   (we could technically fix this, but is it really worth it?)
-    @unittest.skipIf(True, "unsuported autocast syntax")
+    @unittest.skipIf(True, "unsupported autocast syntax")
     def test_reused_autocast_expr(self):
         @torch.jit.script
         def fn(a, b, c, d):
@@ -923,7 +923,7 @@ class TestJitTraceAutocast(JitTestCase):
 
 
     def test_script_autocast_enable_and_check(self):
-        def fn(x, y) -> Tuple[torch.Tensor, bool, torch.Tensor, bool, torch.Tensor, bool]:
+        def fn(x, y) -> tuple[torch.Tensor, bool, torch.Tensor, bool, torch.Tensor, bool]:
             b1 = torch.is_autocast_cpu_enabled()
             v1 = torch.mm(x, y)
             with torch.autocast(device_type="cpu", enabled=True):

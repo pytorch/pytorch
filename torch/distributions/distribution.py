@@ -16,6 +16,11 @@ __all__ = ["Distribution"]
 class Distribution:
     r"""
     Distribution is the abstract base class for probability distributions.
+
+    Args:
+        batch_shape (torch.Size): The shape over which parameters are batched.
+        event_shape (torch.Size): The shape of a single sample (without batching).
+        validate_args (bool, optional): Whether to validate arguments. Default: None.
     """
 
     has_rsample = False
@@ -44,7 +49,7 @@ class Distribution:
         batch_shape: torch.Size = torch.Size(),
         event_shape: torch.Size = torch.Size(),
         validate_args: Optional[bool] = None,
-    ):
+    ) -> None:
         self._batch_shape = batch_shape
         self._event_shape = event_shape
         if validate_args is not None:
@@ -68,7 +73,7 @@ class Distribution:
                     continue  # skip checking lazily-constructed args
                 value = getattr(self, param)
                 valid = constraint.check(value)
-                if not valid.all():
+                if not torch._is_all_true(valid):
                     raise ValueError(
                         f"Expected parameter {param} "
                         f"({type(value).__name__} of shape {tuple(value.shape)}) "
@@ -313,7 +318,7 @@ class Distribution:
             return
         assert support is not None
         valid = support.check(value)
-        if not valid.all():
+        if not torch._is_all_true(valid):
             raise ValueError(
                 "Expected value argument "
                 f"({type(value).__name__} of shape {tuple(value.shape)}) "

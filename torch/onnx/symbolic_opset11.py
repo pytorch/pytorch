@@ -7,7 +7,7 @@ from __future__ import annotations
 import functools
 import sys
 import warnings
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import torch
 from torch import _C
@@ -21,6 +21,10 @@ from torch.onnx import (
     utils,
 )
 from torch.onnx._internal import jit_utils, registration
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -561,15 +565,15 @@ def topk(g: jit_utils.GraphContext, self, k, dim, largest, sorted, out=None):
 
 @_onnx_symbolic("aten::sort")
 @symbolic_helper.parse_args("v", "i", "i", "none")
-def sort(g: jit_utils.GraphContext, self, dim, decending, out=None):
-    return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
+def sort(g: jit_utils.GraphContext, self, dim, descending, out=None):
+    return symbolic_helper._sort_helper(g, self, dim, descending=descending, out=out)
 
 
 @_onnx_symbolic("aten::argsort")
 @symbolic_helper.parse_args("v", "i", "i", "none")
-def argsort(g: jit_utils.GraphContext, self, dim, decending, out=None):
+def argsort(g: jit_utils.GraphContext, self, dim, descending, out=None):
     _, indices = symbolic_helper._sort_helper(
-        g, self, dim, decending=decending, out=out
+        g, self, dim, descending=descending, out=out
     )
     return indices
 

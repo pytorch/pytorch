@@ -131,7 +131,7 @@ class TupleCType(CType):
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
-        return f'::std::tuple<{",".join([e.cpp_type() for e in self.elems])}>'
+        return f"::std::tuple<{','.join([e.cpp_type() for e in self.elems])}>"
 
     def remove_const_ref(self) -> CType:
         return TupleCType([e.remove_const_ref() for e in self.elems])

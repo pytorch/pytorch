@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from functools import reduce
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 from torch.nn import functional as F
@@ -32,13 +32,13 @@ class DataNormSparsifier(BaseDataSparsifier):
         zeros_per_block: Number of zeros in a sparse block
     Note::
         All arguments to the DataNormSparsifier constructor are "default"
-        arguments and could be overriden by the configuration provided in the
+        arguments and could be overridden by the configuration provided in the
         `add_data` step.
     """
 
     def __init__(
         self,
-        data_list: Optional[List[tuple[str, Any]]] = None,
+        data_list: Optional[list[tuple[str, Any]]] = None,
         sparsity_level: float = 0.5,
         sparse_block_shape: tuple[int, int] = (1, 4),
         zeros_per_block: Optional[int] = None,

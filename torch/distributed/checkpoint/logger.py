@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
+import logging
 import time
-from typing import Any, Callable, Dict, List, TypeVar
+from typing import Any, Callable, TypeVar
 from typing_extensions import ParamSpec
 from uuid import uuid4
 
@@ -9,7 +10,10 @@ import torch.distributed.c10d_logger as c10d_logger
 from torch.distributed.checkpoint.logging_handlers import DCP_LOGGER_NAME
 
 
-__all__: List[str] = []
+logger = logging.getLogger()
+
+
+__all__: list[str] = []
 
 global _dcp_logger
 _dcp_logger = c10d_logger._get_or_create_logger(DCP_LOGGER_NAME)
@@ -18,7 +22,7 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 
-def _msg_dict_from_dcp_method_args(*args, **kwargs) -> Dict[str, Any]:
+def _msg_dict_from_dcp_method_args(*args, **kwargs) -> dict[str, Any]:
     """
     Extracts log data from dcp method args
     """
@@ -52,7 +56,7 @@ def _msg_dict_from_dcp_method_args(*args, **kwargs) -> Dict[str, Any]:
     return msg_dict
 
 
-def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
+def _get_msg_dict(func_name, *args, **kwargs) -> dict[str, Any]:
     msg_dict = _msg_dict_from_dcp_method_args(*args, **kwargs)
     msg_dict.update(c10d_logger._get_msg_dict(func_name, *args, **kwargs))
 
@@ -101,3 +105,14 @@ def _dcp_method_logger(
         return wrapper
 
     return decorator
+
+
+def _init_logger(rank: int):
+    logger.setLevel(logging.INFO)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        f"[{rank}] %(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)

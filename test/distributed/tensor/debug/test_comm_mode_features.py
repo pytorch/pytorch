@@ -1,18 +1,17 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-from typing import Any, Dict
+from typing import Any
 
 import torch
-from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.api import distribute_tensor, DTensor
+from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfHpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -57,8 +56,8 @@ class TestCommModeFeatures(DTensorTestBase):
         Used to generate the ground-truth parameter and sharding info for a given distributed model to
         verify comm_mode correctness
         """
-        module_parameters_dict: Dict[str, Any] = {}
-        module_sharding_dict: Dict[str, Any] = {}
+        module_parameters_dict: dict[str, Any] = {}
+        module_sharding_dict: dict[str, Any] = {}
 
         for name, parameters in model.named_parameters():
             # splits name into module name to create FQN and parameter name
@@ -112,6 +111,7 @@ class TestCommModeFeatures(DTensorTestBase):
         )
         self.check_same_set_of_keys(module_sharding_dict, comm_mode.get_sharding_info())
 
+    @skipIfHpu
     @with_comms
     def test_MLPStacked_distributed_sharding_display(self):
         """
@@ -144,10 +144,10 @@ class TestCommModeFeatures(DTensorTestBase):
         model2 = MLPStacked(self.device_type)
 
         parallelize_plan = {
-            "MLPStacked.layers.0.net1": ColwiseParallel(),
-            "MLPStacked.layers.0.net2": RowwiseParallel(),
-            "MLPStacked.layers.1.net1": ColwiseParallel(),
-            "MLPStacked.layers.1.net2": RowwiseParallel(),
+            "layers.0.net1": ColwiseParallel(),
+            "layers.0.net2": RowwiseParallel(),
+            "layers.1.net1": ColwiseParallel(),
+            "layers.1.net2": RowwiseParallel(),
         }
 
         model2 = parallelize_module(model2, device_mesh, parallelize_plan)
@@ -219,6 +219,7 @@ class TestCommModeFeatures(DTensorTestBase):
             1,
         )
 
+    @skipIfHpu
     @skip_unless_torch_gpu
     @with_comms
     def test_transformer_module_tracing(self, is_seq_parallel=False):

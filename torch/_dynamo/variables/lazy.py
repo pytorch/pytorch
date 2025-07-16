@@ -1,7 +1,7 @@
 import collections
 import functools
 import inspect
-from typing import Any, Callable, Dict, final, Optional, Union
+from typing import Any, Callable, final, Optional, Union
 from typing_extensions import Self
 
 from ..utils import is_function_or_wrapper
@@ -17,22 +17,27 @@ class LazyCache:
             assert source
         self.value = value
         self.source = source
+        self.name_hint: Optional[str] = None
         self.vt: Optional[VariableTracker] = None
 
     def realize(self) -> None:
         assert self.vt is None
         from ..symbolic_convert import InstructionTranslator
+        from . import builder
 
         tx = InstructionTranslator.current_tx()
 
         if isinstance(self.value, LazySymNodeFormatString):
-            source = None
+            self.vt = builder.SourcelessBuilder.create(tx, self.value)
         else:
-            source = self.source
+            self.vt = builder.VariableBuilder(tx, self.source)(self.value)
 
-        self.vt = VariableTracker.build(tx, self.value, source)
+        if self.name_hint is not None:
+            self.vt.set_name_hint(self.name_hint)
+
         del self.value
         del self.source
+        del self.name_hint
 
 
 @final
@@ -92,6 +97,12 @@ class LazyVariableTracker(VariableTracker):
         assert not self.is_realized()
         return self._cache.value
 
+    def set_name_hint(self, name: str) -> None:
+        if self.is_realized():
+            self._cache.vt.set_name_hint(name)  # type: ignore[union-attr]
+        else:
+            self._cache.name_hint = name
+
     def __str__(self) -> str:
         if self.is_realized():
             return repr(self.unwrap())
@@ -108,7 +119,7 @@ class LazyVariableTracker(VariableTracker):
     def realize_all(
         cls,
         value: Any,
-        cache: Optional[Dict[int, tuple[Any, Any]]] = None,
+        cache: Optional[dict[int, tuple[Any, Any]]] = None,
     ) -> Any:
         """
         Walk an object and realize all LazyVariableTrackers inside it.

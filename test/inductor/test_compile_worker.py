@@ -53,6 +53,19 @@ class TestCompileWorker(TestCase):
         finally:
             pool.shutdown()
 
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_quiesce(self):
+        pool = SubprocPool(2)
+        try:
+            a = pool.submit(operator.add, 100, 1)
+            pool.quiesce()
+            pool.wakeup()
+            b = pool.submit(operator.sub, 100, 1)
+            self.assertEqual(a.result(), 101)
+            self.assertEqual(b.result(), 99)
+        finally:
+            pool.shutdown()
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

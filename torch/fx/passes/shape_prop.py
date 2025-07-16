@@ -1,12 +1,13 @@
 # mypy: ignore-errors
 
 import traceback
-from typing import Any, Dict, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple, Optional
 
 import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import detect_fake_mode
+from torch._prims_common import contiguous_for_memory_format_or_false
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_aggregate, Node
@@ -24,14 +25,18 @@ class TensorMetadata(NamedTuple):
     shape: torch.Size
     dtype: torch.dtype
     requires_grad: bool
-    stride: Tuple[int, ...]
+    stride: tuple[int, ...]
     memory_format: Optional[torch.memory_format]
 
     # Quantization metadata
     is_quantized: bool
-    qparams: Dict[str, Any]
+    qparams: dict[str, Any]
 
 
+# When include_contiguity is True, we will set contiguity when its always true for the tensor.
+# Some tensors can represent both contiguous and non-contiguous tensors. e.g: (u0, u1) with (u2, u3).
+# In such situation contiguity is not set. We could also make it a tri-state i.e: (def_contiguous,
+# def_not_contiguous and unknown).
 def _extract_tensor_metadata(
     result: torch.Tensor, include_contiguity=True
 ) -> TensorMetadata:
@@ -52,12 +57,14 @@ def _extract_tensor_metadata(
             torch.channels_last_3d,
         }
         for query_format in memory_formats:
-            if result.is_contiguous(memory_format=query_format):
+            if contiguous_for_memory_format_or_false(
+                result, memory_format=query_format
+            ):
                 memory_format = query_format
                 break
 
     is_quantized = result.is_quantized
-    qparams: Dict[str, Any] = {}
+    qparams: dict[str, Any] = {}
     if is_quantized:
         qscheme = result.qscheme()
         qparams["qscheme"] = qscheme
@@ -176,7 +183,7 @@ class ShapeProp(torch.fx.Interpreter):
         except Exception as e:
             traceback.print_exc()
             raise RuntimeError(
-                f"ShapeProp error for: node={n.format_node()} with " f"meta={n.meta}"
+                f"ShapeProp error for: node={n.format_node()} with meta={n.meta}"
             ) from e
 
         found_tensor = False

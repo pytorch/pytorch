@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import operator
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.export._trace
@@ -76,20 +76,20 @@ def get_dequantized(
     if qscheme is torch.per_tensor_affine:
         return dequantize_per_tensor(
             val,
-            scale,
-            zero_point,
-            qmin,
-            qmax,
+            scale,  # type: ignore[arg-type]
+            zero_point,  # type: ignore[arg-type]
+            qmin,  # type: ignore[arg-type]
+            qmax,  # type: ignore[arg-type]
             dtype,
         )
     elif qscheme is torch.per_channel_affine:
         return dequantize_per_channel(
             val,
-            scale,
-            zero_point,
-            axis,
-            qmin,
-            qmax,
+            scale,  # type: ignore[arg-type]
+            zero_point,  # type: ignore[arg-type]
+            axis,  # type: ignore[arg-type]
+            qmin,  # type: ignore[arg-type]
+            qmax,  # type: ignore[arg-type]
             dtype,
         )
     else:
@@ -269,9 +269,9 @@ def _conv1d_op_with_squeeze(
     inp: torch.Tensor,
     weight: torch.Tensor,
     bias: Optional[torch.Tensor],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     groups: int,
 ) -> torch.Tensor:
     # In quantized version, conv1d is emulated using conv2d with squeeze and unsqueeze
@@ -292,7 +292,7 @@ def _conv1d_op_with_squeeze(
 
 
 def _transform_conv_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.Node):
-    """Conv specfic transformation function."""
+    """Conv specific transformation function."""
     assert isinstance(node.target, torch._ops.OpOverload)
     opname = node.target._opname
     scale_node, zero_point_node = node.args[2], node.args[3]
@@ -347,7 +347,7 @@ def _transform_conv_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.No
 
 
 def _transform_linear_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.Node):
-    """Linear specfic transformation function."""
+    """Linear specific transformation function."""
     scale_node, zero_point_node = node.args[2], node.args[3]
 
     inp_node, param_node = node.args[0], node.args[1]

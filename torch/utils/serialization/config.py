@@ -13,11 +13,13 @@ class load:
     endianness: _Optional["_LoadEndianess"] = None
     # MAP_PRIVATE = 2
     mmap_flags: _Optional[int] = None if sys.platform == "win32" else 2
+    calculate_storage_offsets: bool = False
 
 
 class save:
     compute_crc32: bool = True
     use_pinned_memory_for_d2h: bool = False
+    storage_alignment: int = 64
 
 
 _install_config_module(sys.modules[__name__])

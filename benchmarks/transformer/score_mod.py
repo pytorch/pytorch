@@ -6,7 +6,7 @@ from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Optional, Union
 
 import numpy as np
 from tabulate import tabulate
@@ -46,12 +46,12 @@ class ExperimentConfig:
     dtype: torch.dtype
     calculate_bwd_time: bool
     cal_bandwidth: bool
-    backends: List[str]
+    backends: list[str]
 
     def __post_init__(self):
-        assert (
-            len(self.shape) == 6
-        ), "Shape must be of length 6"  # [B, Hq, M, Hkv, N, D]
+        assert len(self.shape) == 6, (
+            "Shape must be of length 6"
+        )  # [B, Hq, M, Hkv, N, D]
 
     def asdict(self):
         # Convert the dataclass instance to a dictionary
@@ -80,7 +80,7 @@ class ExperimentResults:
 @dataclass(frozen=True)
 class Experiment:
     config: ExperimentConfig
-    results: Dict[str, ExperimentResults]  # backend -> ExperimentResults
+    results: dict[str, ExperimentResults]  # backend -> ExperimentResults
 
     def asdict(self):
         dict1 = self.config.asdict()
@@ -271,9 +271,9 @@ def run_single_backend_sdpa(
         if config.calculate_bwd_time:
             # TODO: debug backward pass for njt
             if eager_sdpa and not config.attn_type == "document_mask":
-                dOut = torch.randn_like(out_eager.transpose(1, 2)).transpose(1, 2)
+                d_out = torch.randn_like(out_eager.transpose(1, 2)).transpose(1, 2)
                 backward_eager_time = benchmark_torch_function_in_microseconds(
-                    out_eager.backward, dOut, retain_graph=True
+                    out_eager.backward, d_out, retain_graph=True
                 )
             else:
                 backward_eager_time = float("nan")
@@ -340,9 +340,9 @@ def run_single_backend_FA(
 
     if config.calculate_bwd_time:
         if FA:
-            dOut = torch.randn_like(out_FA)
+            d_out = torch.randn_like(out_FA)
             backward_FA_time = benchmark_torch_function_in_microseconds(
-                out_FA.backward, dOut, retain_graph=True
+                out_FA.backward, d_out, retain_graph=True
             )
         else:
             backward_FA_time = float("nan")
@@ -357,7 +357,7 @@ def run_single_experiment(
     config: ExperimentConfig,
     dynamic=False,
     max_autotune=False,
-) -> Dict[str, ExperimentResults]:
+) -> dict[str, ExperimentResults]:
     device = torch.device("cuda")
     batch_size, q_heads, q_seq_len, kv_heads, kv_seq_len, head_dim = config.shape
     query, key, value = generate_inputs(
@@ -432,9 +432,9 @@ def run_single_experiment(
             )
 
     if config.calculate_bwd_time:
-        dOut = torch.randn_like(out_compile)
+        d_out = torch.randn_like(out_compile)
         backward_compile_time = benchmark_torch_function_in_microseconds(
-            out_compile.backward, dOut, retain_graph=True
+            out_compile.backward, d_out, retain_graph=True
         )
     sparsity = block_mask.sparsity() / 100.0 if block_mask is not None else 0.0
     sparsity = sparsity if config.attn_type != "document_mask" else 0.5
@@ -504,7 +504,7 @@ def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> fl
     return total_flops / results.fwd_time / 1e6  # in TFLOPs/
 
 
-def get_average_speedups(results: List[Experiment], type: str, backend: str):
+def get_average_speedups(results: list[Experiment], type: str, backend: str):
     # Calculate speedups
     speedups = [
         calculate_speedup(r.results["compiled"], r.results[backend], type)
@@ -533,7 +533,7 @@ def get_average_speedups(results: List[Experiment], type: str, backend: str):
     return table_data
 
 
-def print_results(results: List[Experiment], save_path: Optional[str] = None):
+def print_results(results: list[Experiment], save_path: Optional[str] = None):
     table_data = defaultdict(list)
     for experiment in results:
         backends = experiment.config.backends + ["compiled"]
@@ -1024,16 +1024,16 @@ def generate_eager_sdpa(
 def generate_experiment_configs(
     calculate_bwd: bool,
     dtype: torch.dtype,
-    batch_sizes: List[int],
-    num_heads: List[tuple[int, int]],
-    seq_lens: List[int],
-    head_dims: List[int],
-    score_mods_str: List[str],
+    batch_sizes: list[int],
+    num_heads: list[tuple[int, int]],
+    seq_lens: list[int],
+    head_dims: list[int],
+    score_mods_str: list[str],
     decoding: bool,
-    kv_cache_size: List[int],
+    kv_cache_size: list[int],
     cal_bandwidth: bool,
-    backends: List[str],
-) -> List[ExperimentConfig]:
+    backends: list[str],
+) -> list[ExperimentConfig]:
     assert not (calculate_bwd and decoding), "Decoding does not support backward"
 
     if decoding:

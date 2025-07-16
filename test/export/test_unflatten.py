@@ -1,49 +1,23 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
 import copy
-import dataclasses
 import unittest
-from contextlib import contextmanager
-from dataclasses import dataclass
 from re import escape
-from typing import Any, List
+from typing import Any, List, Optional
 
 import torch
 import torch._dynamo as torchdynamo
-from functorch.experimental.control_flow import cond, map
-from torch import Tensor
-from torch._export.utils import (
-    get_buffer,
-    get_param,
-    is_buffer,
-    is_param,
-    register_dataclass_as_pytree_node,
-)
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch.export import Constraint, Dim, export, FlatArgsAdapter, unflatten
-from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch.export import export, FlatArgsAdapter, unflatten
 from torch.export.unflatten import _disable_interpreter
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.utils._pytree import (
-    LeafSpec,
-    tree_flatten,
-    tree_unflatten,
-    TreeSpec,
-    treespec_dumps,
-    treespec_loads,
-)
+from torch.utils._pytree import TreeSpec
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -259,7 +233,7 @@ class TestUnflatten(TestCase):
             new_inps = *inps, torch.rand(2, 3)
             with self.assertRaisesRegex(
                 TypeError,
-                "There is no flat args adapter sepcified. Are you sure you are calling this with the right arguments?",
+                "There is no flat args adapter specified. Are you sure you are calling this with the right arguments?",
             ):
                 unflattened(new_inps)
 
@@ -270,6 +244,8 @@ class TestUnflatten(TestCase):
                     target_spec: TreeSpec,
                     input_spec: TreeSpec,
                     input_args: List[Any],
+                    metadata: dict[str, Any],
+                    obj: Optional[Any] = None,
                 ) -> List[Any]:
                     while len(input_args) > 2:
                         input_args.pop(-1)
@@ -903,7 +879,7 @@ class TestUnflatten(TestCase):
         fn_count_sym_size = lambda graph: [node.target for node in graph.nodes].count(
             torch.ops.aten.sym_size.int
         )
-        self.assertEqual(fn_count_sym_size(unflat.graph), 1)
+        self.assertEqual(fn_count_sym_size(unflat.graph), 3)
         self.assertEqual(fn_count_sym_size(unflat.m1.graph), 1)
         self.assertEqual(fn_count_sym_size(unflat.m2.graph), 0)
 
@@ -977,6 +953,57 @@ class TestUnflatten(TestCase):
         # torch.compile submodule
         unflattened.foo = torch.compile(unflattened.foo, fullgraph=True)
         self.compare_outputs(orig_eager, unflattened, inputs)
+
+    def test_unflatten_none(self):
+        class M2(torch.nn.Module):
+            def forward(self, x, y):
+                return x + x, None
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m2 = M2()
+
+            def forward(self, x, y):
+                x = x + x
+                return self.m2(x, y)
+
+        ep = export(
+            M(), (torch.rand(2, 3), None), preserve_module_call_signature=("m2",)
+        )
+        unflattened = unflatten(ep)
+        inp = (torch.randn(2, 3), None)
+        self.assertTrue(torch.allclose(M()(*inp)[0], unflattened(*inp)[0]))
+
+    def test_unflatten_empty_branch(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                if x is None:
+                    return torch.ones(3), torch.ones(3)
+                else:
+                    return x + x, x * x
+
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = M()
+
+            def forward(self, x, y):
+                a, b = self.m(x)
+                c, d = self.m(y)
+                return a + b + c + d
+
+        ep = torch.export.export(M1(), (torch.randn(3), None))
+        unf = torch.export.unflatten(ep)
+        inp = (torch.randn(3), None)
+        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
+
+        ep = torch.export.export(
+            M1(), (torch.randn(3), None), preserve_module_call_signature="m"
+        )
+        unf = torch.export.unflatten(ep)
+        inp = (torch.randn(3), None)
+        self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
 
 
 if __name__ == "__main__":

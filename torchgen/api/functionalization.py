@@ -153,7 +153,7 @@ def is_multi_output(func: FunctionSchema) -> bool:
 
 # `ViewMeta` specialization constructor parameters.
 def base_ctor_arguments(func: FunctionSchema) -> list[Binding]:
-    # All specializations are paremeterized by `has_symbolic_inputs` flag.
+    # All specializations are parameterized by `has_symbolic_inputs` flag.
     arguments = [has_symbolic_inputs_binding]
 
     # If `func` might return more than 1 value, we also parameterize this specialization

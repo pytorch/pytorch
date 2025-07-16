@@ -20,6 +20,8 @@ ExperimentalConfig::ExperimentalConfig(
     bool adjust_profiler_step,
     bool disable_external_correlation,
     bool profile_all_threads,
+    bool capture_overload_names,
+    std::string custom_profiler_config,
     bool adjust_timestamps)
     : profiler_metrics{std::move(profiler_metrics)},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
@@ -29,6 +31,8 @@ ExperimentalConfig::ExperimentalConfig(
       adjust_profiler_step{adjust_profiler_step},
       disable_external_correlation{disable_external_correlation},
       profile_all_threads{profile_all_threads},
+      capture_overload_names{capture_overload_names},
+      custom_profiler_config(std::move(custom_profiler_config)),
       adjust_timestamps{adjust_timestamps} {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {

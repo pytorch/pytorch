@@ -8,7 +8,7 @@ import os
 import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict
+from typing import Any
 
 from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
@@ -86,7 +86,7 @@ def get_perf_stats(
     return perf_stats
 
 
-def generate_partition_key(repo: str, doc: Dict[str, Any]) -> str:
+def generate_partition_key(repo: str, doc: dict[str, Any]) -> str:
     """
     Generate an unique partition key for the document on DynamoDB
     """
@@ -95,7 +95,9 @@ def generate_partition_key(repo: str, doc: Dict[str, Any]) -> str:
     test_name = doc["test_name"]
     filename = doc["filename"]
 
-    hash_content = hashlib.md5(json.dumps(doc).encode("utf-8")).hexdigest()
+    hash_content = hashlib.md5(
+        json.dumps(doc).encode("utf-8"), usedforsecurity=False
+    ).hexdigest()
     return f"{repo}/{workflow_id}/{job_id}/{test_name}/{filename}/{hash_content}"
 
 

@@ -14,7 +14,8 @@ import functools
 import math
 import sys
 import warnings
-from typing import Callable, Sequence, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
+from typing_extensions import deprecated
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -23,12 +24,14 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _constants, _deprecation, _type_utils, errors, symbolic_helper
+from torch.onnx import _constants, _type_utils, errors, symbolic_helper
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils, registration
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -469,7 +472,7 @@ def _floor_divide(g: jit_utils.GraphContext, self, other):
         out = true_divide(g, self, other)
         return g.op("Floor", out)
     else:
-        # Integer division does trunction rounding
+        # Integer division does truncation rounding
         div = g.op("Div", self, other)
         # Division is negative if: self < 0 != other < 0
         zero = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
@@ -1196,9 +1199,9 @@ def prelu(g: jit_utils.GraphContext, self, weight):
             weight_rank = 0
 
     if self_rank is not None and weight_rank is not None:
-        assert (
-            self_rank >= weight_rank
-        ), f"rank(x) should be >= rank(slope) but got {self_rank} < {weight_rank}"
+        assert self_rank >= weight_rank, (
+            f"rank(x) should be >= rank(slope) but got {self_rank} < {weight_rank}"
+        )
     return g.op("PRelu", self, weight)
 
 
@@ -3313,91 +3316,55 @@ def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_co
 
 
 @_onnx_symbolic("aten::_cast_Byte")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Byte(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.UINT8)
 
 
 @_onnx_symbolic("aten::_cast_Char")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Char(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT8)
 
 
 @_onnx_symbolic("aten::_cast_Short")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Short(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT16)
 
 
 @_onnx_symbolic("aten::_cast_Int")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Int(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
 
 
 @_onnx_symbolic("aten::_cast_Long")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Long(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
 
 
 @_onnx_symbolic("aten::_cast_Half")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Half(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT16)
 
 
 @_onnx_symbolic("aten::_cast_Float")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Float(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
 
 @_onnx_symbolic("aten::_cast_Double")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Double(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.DOUBLE)
 
 
 @_onnx_symbolic("aten::_cast_Bool")
-@_deprecation.deprecated(
-    "2.0",
-    "the future",
-    "Avoid using this function and create a Cast node instead",
-)
+@deprecated("Avoid using this function and create a Cast node instead")
 def _cast_Bool(g: jit_utils.GraphContext, input, non_blocking):
     return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.BOOL)
 
@@ -3888,7 +3855,7 @@ def unsqueeze(g: jit_utils.GraphContext, self, dim):
 @_onnx_symbolic("aten::sort")
 # TODO(justinchuby): Support multiple quantized args in output
 @symbolic_helper.parse_args("v", "i", "i", "none")
-def sort(g: jit_utils.GraphContext, self, dim, decending, out=None):
+def sort(g: jit_utils.GraphContext, self, dim, descending, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
             "Sort", "Out parameter is not supported for sort", self
@@ -4089,9 +4056,9 @@ def repeat_interleave(
                 "Unsupported for cases with dynamic repeats",
                 self,
             )
-        assert (
-            repeats_sizes[0] == input_sizes[dim]
-        ), "repeats must have the same size as input along dim"
+        assert repeats_sizes[0] == input_sizes[dim], (
+            "repeats must have the same size as input along dim"
+        )
         reps = repeats_sizes[0]
     else:
         raise errors.SymbolicValueError("repeats must be 0-dim or 1-dim tensor", self)
@@ -5348,7 +5315,7 @@ def index(g: jit_utils.GraphContext, self, index):
         #   2. prim::Constant[value=...] or tensor output
         #           representing advanced indexing. E.g. tensor[[0, 1], [2, 0]].
         # For more info on advanced indexing,
-        # check https://docs.scipy.org/doc/numpy/reference/arrays.indexing.html#advanced-indexing
+        # check https://numpy.org/doc/stable/user/basics.indexing.html#advanced-indexing
 
         # Consider a general case of
         #       t: [x_1, y_1, y_2, ..., x_m, ..., y_n]
@@ -5422,7 +5389,7 @@ def index(g: jit_utils.GraphContext, self, index):
 
             cum_adv_index_shape_tensor = _shape_as_tensor(g, cum_adv_index)
             # check if all advanced indices are consecutive.
-            # Refer to https://docs.scipy.org/doc/numpy/reference/arrays.indexing.html#combining-advanced-and-basic-indexing
+            # Refer to https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
             # to understand how the subarray position is decided.
             if adv_idx_indices == list(
                 range(adv_idx_indices[0], adv_idx_indices[-1] + 1)

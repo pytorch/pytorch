@@ -2,7 +2,7 @@
 
 import functools
 import warnings
-from typing import Any, Callable, List, Union
+from typing import Any, Callable, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -102,8 +102,8 @@ def is_sdpa_error(func, idx, e):
 
 
 def try_convert_fake_to_real(
-    ten_list: List[Union[FakeTensor, Any]]
-) -> List[Union[FakeTensor, torch.Tensor, Any]]:
+    ten_list: list[Union[FakeTensor, Any]],
+) -> list[Union[FakeTensor, torch.Tensor, Any]]:
     """
     Attempt to convert fake tensors to a corresponding real tensor with the correct underlying storage by looking up
     the FakeTensorMode meta to real storage mapping. On failure to find the storage mapping, the FakeTensor will
@@ -266,9 +266,9 @@ class CrossRefFakeMode(TorchDispatchMode):
         if fake_r is not None:
             r_flat = pytree.tree_leaves(r)
             f_flat = pytree.tree_leaves(fake_r)
-            assert len(f_flat) == len(
-                r_flat
-            ), f"{context} mismatch in number of returns {len(f_flat)} != {len(r_flat)}"
+            assert len(f_flat) == len(r_flat), (
+                f"{context} mismatch in number of returns {len(f_flat)} != {len(r_flat)}"
+            )
 
             if self.check_aliasing:
                 _check_alias_info(
@@ -279,9 +279,9 @@ class CrossRefFakeMode(TorchDispatchMode):
                 zip(pytree.tree_leaves(r), pytree.tree_leaves(fake_r))
             ):
                 r_is_ten = isinstance(r_out, torch.Tensor)
-                assert r_is_ten == isinstance(
-                    f_out, torch.Tensor
-                ), f"{context} mismatched number of tensor outputs"
+                assert r_is_ten == isinstance(f_out, torch.Tensor), (
+                    f"{context} mismatched number of tensor outputs"
+                )
                 if r_is_ten:
                     try:
                         _check_fake_real_tensors(

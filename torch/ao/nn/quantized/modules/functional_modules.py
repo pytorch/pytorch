@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import List
 
 import torch
 from torch import Tensor
@@ -78,7 +77,7 @@ class FloatFunctional(torch.nn.Module):
 
     r"""Operation equivalent to ``torch.cat``"""
 
-    def cat(self, x: List[Tensor], dim: int = 0) -> Tensor:
+    def cat(self, x: list[Tensor], dim: int = 0) -> Tensor:
         r = torch.cat(x, dim=dim)
         r = self.activation_post_process(r)
         return r
@@ -144,7 +143,7 @@ class FXFloatFunctional(torch.nn.Module):
 
     r"""Operation equivalent to ``torch.cat``"""
 
-    def cat(self, x: List[Tensor], dim: int = 0) -> Tensor:
+    def cat(self, x: list[Tensor], dim: int = 0) -> Tensor:
         r = torch.cat(x, dim=dim)
         return r
 
@@ -267,7 +266,7 @@ class QFunctional(torch.nn.Module):
 
     r"""Operation equivalent to ``torch.ops.quantized.cat``"""
 
-    def cat(self, x: List[Tensor], dim: int = 0) -> Tensor:
+    def cat(self, x: list[Tensor], dim: int = 0) -> Tensor:
         r = ops.quantized.cat(x, scale=self.scale, zero_point=self.zero_point, dim=dim)
         r = self.activation_post_process(r)
         return r
@@ -289,9 +288,9 @@ class QFunctional(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        assert (
-            type(mod) == FloatFunctional
-        ), "QFunctional.from_float expects an instance of FloatFunctional"
+        assert type(mod) == FloatFunctional, (
+            "QFunctional.from_float expects an instance of FloatFunctional"
+        )
         scale, zero_point = mod.activation_post_process.calculate_qparams()  # type: ignore[operator]
         new_mod = QFunctional()
         new_mod.scale = float(scale)

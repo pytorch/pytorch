@@ -1,13 +1,22 @@
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/util/CallOnce.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
+
+#ifndef WIN32
+#include <pthread.h>
+#endif
+
 namespace torch::utils {
 namespace {
 
 std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> is_initialized{};
+std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> is_in_bad_fork{};
+std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+    at_fork_once_flags{};
 
 } // anonymous namespace
 
@@ -56,6 +65,30 @@ void device_lazy_init(at::DeviceType device_type) {
 
 void set_requires_device_init(at::DeviceType device_type, bool value) {
   is_initialized[static_cast<int>(device_type)] = !value;
+}
+
+bool is_device_in_bad_fork(at::DeviceType device_type) {
+  return is_in_bad_fork[static_cast<int>(device_type)];
+}
+
+void set_device_in_bad_fork(at::DeviceType device_type, bool value) {
+  is_in_bad_fork[static_cast<int>(device_type)] = value;
+}
+
+// Should be called before the first device runtime call.
+void register_fork_handler_for_device_init(at::DeviceType device_type) {
+#ifndef WIN32
+  auto& flag = at_fork_once_flags[static_cast<int>(device_type)];
+  c10::call_once(flag, [device_type]() {
+    static at::DeviceType at_fork_device_type = device_type;
+    pthread_atfork(nullptr, nullptr, []() {
+      set_device_in_bad_fork(at_fork_device_type, true);
+      if (is_device_lazy_init_supported(at_fork_device_type)) {
+        set_requires_device_init(at_fork_device_type, true);
+      }
+    });
+  });
+#endif
 }
 
 } // namespace torch::utils

@@ -6,8 +6,9 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import Sequence
 from threading import Lock
-from typing import Any, Callable, List, Optional, Sequence, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 
@@ -57,7 +58,7 @@ class StrobelightCLIFunctionProfiler:
 
     StrobelightCLIFunctionProfiler can be used to profile a python function and
     generate a strobelight link with the results. It works on meta servers but
-    does not requries an fbcode target.
+    does not requires an fbcode target.
     When stop_at_error is false(default), error during profiling does not prevent
     the work function from running.
 
@@ -76,8 +77,8 @@ class StrobelightCLIFunctionProfiler:
         run_user_name: str = "pytorch-strobelight-ondemand",
         timeout_wait_for_running_sec: int = 60,
         timeout_wait_for_finished_sec: int = 60,
-        recorded_env_variables: Optional[List[str]] = None,
-        sample_tags: Optional[List[str]] = None,
+        recorded_env_variables: Optional[list[str]] = None,
+        sample_tags: Optional[list[str]] = None,
         stack_max_len: int = 127,
         async_stack_max_len: int = 127,
     ):

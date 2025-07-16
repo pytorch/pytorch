@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import sys
 import warnings
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -22,6 +22,10 @@ from torch.onnx import (
 )
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils, registration
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -95,7 +99,7 @@ def _floor_divide(g: jit_utils.GraphContext, self, other):
         out = opset9.true_divide(g, self, other)
         return g.op("Floor", out)
     else:
-        # Integer division does trunction rounding
+        # Integer division does truncation rounding
         div = g.op("Div", self, other)
         # Division is negative if: self < 0 != other < 0
         zero = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
@@ -112,8 +116,8 @@ def _floor_divide(g: jit_utils.GraphContext, self, other):
 
 @_onnx_symbolic("aten::sort")
 @symbolic_helper.parse_args("v", "i", "i", "none")
-def sort(g: jit_utils.GraphContext, self, dim, decending, out=None):
-    return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
+def sort(g: jit_utils.GraphContext, self, dim, descending, out=None):
+    return symbolic_helper._sort_helper(g, self, dim, descending=descending, out=out)
 
 
 @_onnx_symbolic("aten::topk")

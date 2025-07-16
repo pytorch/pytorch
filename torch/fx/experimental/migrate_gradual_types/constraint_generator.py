@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import operator
 import warnings
-from typing import Callable, Dict, Iterable, TypeVar
+from collections.abc import Iterable
+from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -57,7 +58,7 @@ from torch.nn.modules.conv import Conv2d
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
-_INFERENCE_RULES: Dict[Target, Callable] = {}
+_INFERENCE_RULES: dict[Target, Callable] = {}
 
 MAX_TENSOR_RANK = 4
 
@@ -531,7 +532,7 @@ def view_inference_rule(n: Node, symbols, constraints, counter):
 
         else:
             num_constraints.append(BinConstraintD(t, Dyn, op_neq))
-            t2_type.append(t)
+            t2_type.append(t)  # type: ignore[arg-type]
 
     t2_type = TensorType(t2_type)  # type: ignore[assignment]
 
@@ -680,7 +681,7 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
     # tensor output case
     elif isinstance(n.args[1], tuple):
         # create and store the new tensor variable
-        get_item_output, counter = gen_tvar(counter)
+        get_item_output, counter = gen_tvar(counter)  # type: ignore[arg-type,assignment]
         symbols[n] = get_item_output
 
         # retrieve arg variables
@@ -1072,7 +1073,7 @@ def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
             e1 = symbols[n.args[0]]
             return [BinConstraintT(my_output, e1, op_eq)], counter
         elif isinstance(symbols[n.args[0]], DVar):
-            my_output, counter = gen_dvar(counter)
+            my_output, counter = gen_dvar(counter)  # type: ignore[arg-type,assignment]
             symbols[n] = my_output
             e1 = symbols[n.args[0]]
 
@@ -1094,7 +1095,7 @@ def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
             e2 = symbols[n.args[1]]
             return [BinConstraintT(my_output, e2, op_eq)], counter
         elif isinstance(symbols[n.args[1]], DVar):
-            my_output, counter = gen_dvar(counter)
+            my_output, counter = gen_dvar(counter)  # type: ignore[arg-type,assignment]
             symbols[n] = my_output
             e2 = symbols[n.args[1]]
 
@@ -1227,7 +1228,7 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
     )
 
 
-@register_inference_rule("dim")  # type: ignore[attr-defined]
+@register_inference_rule("dim")
 def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     my_dim, counter = gen_dvar(counter)
@@ -1253,7 +1254,7 @@ def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
     return [Disj([Conj([input_dyn, output_dyn]), Disj(c1)])], counter
 
 
-@register_inference_rule(torch._C._nn.linear)  # type: ignore[attr-defined]
+@register_inference_rule(torch._C._nn.linear)
 def torch_linear_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     weight_dims, counter = gen_tensor_dims(2, counter)

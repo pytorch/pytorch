@@ -203,7 +203,7 @@ See :ref:`jit_unsupported` for a list of unsupported PyTorch functions and modul
 Python Functions and Modules
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Many of Python's `built-in functions <https://docs.python.org/3/library/functions.html>`_ are supported in TorchScript.
-The :any:`math` module is also supported (see :ref:`math-module` for details), but no other Python modules
+The :any:`math` module is also supported, but no other Python modules
 (built-in or third party) are supported.
 
 
@@ -310,7 +310,7 @@ your model code correctly.
 
 Interpreting Graphs
 ~~~~~~~~~~~~~~~~~~~
-TorchScript also has a representation at a lower level than the code pretty-
+TorchScript also has a representation at a lower level than the code pretty-\
 printer, in the form of IR graphs.
 
 TorchScript uses a static single assignment (SSA) intermediate representation

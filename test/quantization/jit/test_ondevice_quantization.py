@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
 import io
-from typing import Dict
 
 import torch
 import torch._C
@@ -449,8 +448,8 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
             self.assertTrue(torch.allclose(ref_output, output))
 
             # Now serialize to flabuffer and load from fb and check
-            dict: Dict[str, str] = {}
-            bytes = torch._C._save_mobile_module_to_bytes(m._c, dict)
+            dict_: dict[str, str] = {}
+            bytes = torch._C._save_mobile_module_to_bytes(m._c, dict_)
             m = LiteScriptModule(torch._C._load_mobile_module_from_bytes(bytes))
             fb_output = m(*inputs)
             self.assertTrue(torch.allclose(ref_output, fb_output))
@@ -529,3 +528,10 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
     def test_device_side_api(self):
         model = MyConvLinearModule()
         self._check_device_side_api(model)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

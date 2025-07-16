@@ -59,6 +59,11 @@ class C10_XPU_API XPUStream {
     return queue();
   }
 
+  /// Implicit conversion to sycl::queue*.
+  operator sycl::queue*() const {
+    return &queue();
+  }
+
   /// Implicit conversion to Stream (a.k.a., forget that the stream is a
   /// XPU stream).
   operator Stream() const {

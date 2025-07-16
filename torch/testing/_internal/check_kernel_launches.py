@@ -3,7 +3,6 @@
 import os
 import re
 import sys
-from typing import List
 
 __all__ = [
     "check_code_for_cuda_kernel_launches",
@@ -15,7 +14,7 @@ __all__ = [
 # launch a kernel without some safety? Use this as a quick workaround
 # for a problem with the checker, fix the checker, then de-exclude
 # the files in question.
-exclude_files: List[str] = []
+exclude_files: list[str] = []
 
 # Without using a C++ AST we can't 100% detect kernel launches, so we
 # model them as having the pattern "<<<parameters>>>(arguments);"
@@ -113,8 +112,8 @@ def check_file(filename):
         return 0
     if should_exclude_file(filename):
         return 0
-    with open(filename) as fo:
-        contents = fo.read()
+    with open(filename) as f:
+        contents = f.read()
         unsafeCount = check_code_for_cuda_kernel_launches(contents, filename)
     return unsafeCount
 

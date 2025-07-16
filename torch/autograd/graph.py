@@ -9,7 +9,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    Deque,
     Literal,
     NamedTuple,
     Optional,
@@ -242,7 +241,7 @@ class saved_tensors_hooks:
     Use this context-manager to define how intermediary results of an operation
     should be packed before saving, and unpacked on retrieval.
 
-    In that context, the ``pack_hook`` function will be called everytime an
+    In that context, the ``pack_hook`` function will be called every time an
     operation saves a tensor for backward (this includes intermediary results
     saved using
     :func:`~torch.autograd.function._ContextMethodMixin.save_for_backward` but
@@ -273,7 +272,7 @@ class saved_tensors_hooks:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def pack_hook(x):
         ...     print("Packing", x)
-        ...     return x
+        ...     return x.detach()
         >>>
         >>> def unpack_hook(x):
         ...     print("Unpacking", x)
@@ -296,6 +295,11 @@ class saved_tensors_hooks:
     .. warning ::
         Only one pair of hooks is allowed at a time. When recursively nesting this
         context-manager, only the inner-most pair of hooks will be applied.
+
+    .. warning ::
+        To avoid reference cycle, the return value of ``pack_hook`` cannot hold a
+        reference to the input tensor. For example, use `lambda x: x.detach()`
+        instead of `lambda x: x` as the pack hook.
     """
 
     def __init__(
@@ -505,9 +509,9 @@ def register_multi_grad_hook(
             def inner_hook(grad: torch.Tensor) -> None:
                 nonlocal count, nb_calls, buffer, fn
                 id = torch._C._current_graph_task_id()
-                assert (
-                    id != -1
-                ), "expected this hook to be called inside a backward call"
+                assert id != -1, (
+                    "expected this hook to be called inside a backward call"
+                )
                 count[id] = count.get(id, 0)
                 buffer[id] = buffer.get(id, [None] * len_tensors)
 
@@ -662,31 +666,41 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
     ) -> Any:
         kwargs = kwargs or {}
 
+        def maybe_clone(t: torch.Tensor) -> None:
+            tid = _get_tid(t)
+            sid = _get_sid(t)
+            ctx = self.ctx
+            if sid in ctx.sid_to_tid:
+                for tid in ctx.sid_to_tid[sid]:
+                    if tid not in ctx.tid_to_weakhandle:
+                        # We know that if tid is in sid_to_tid, then it must also be in
+                        # tid_to_weakhandle. However, it is possible for the tensor to be
+                        # saved at one point, but cleared by backward before it is modified
+                        # in-place. Consider the following example:
+                        #
+                        # >>> a = torch.randn(2, 3, requires_grad=True).clone()
+                        # >>> out = (a**2).sum()
+                        # >>> out.backward()
+                        # >>> a.sin_()
+                        continue
+                    handle = ctx.tid_to_weakhandle[tid]
+                    if handle in ctx.cloned:
+                        # The same exact tensor has been cloned already
+                        continue
+                    ctx.cloned[handle] = ctx.original[handle].clone()
+                    del ctx.original[handle]
+
         for idx, arg in enumerate(func._schema.arguments):
             if arg.alias_info is not None and arg.alias_info.is_write:
-                t = kwargs["out"] if arg.is_out else args[idx]
-                tid = _get_tid(t)
-                sid = _get_sid(t)
-                ctx = self.ctx
-                if sid in ctx.sid_to_tid:
-                    for tid in ctx.sid_to_tid[sid]:
-                        if tid not in ctx.tid_to_weakhandle:
-                            # We know that if tid is in sid_to_tid, then it must also be in
-                            # tid_to_weakhandle. However, it is possible for the tensor to be
-                            # saved at one point, but cleared by backward before it is modified
-                            # in-place. Consider the following example:
-                            #
-                            # >>> a = torch.randn(2, 3, requires_grad=True).clone()
-                            # >>> out = (a**2).sum()
-                            # >>> out.backward()
-                            # >>> a.sin_()
-                            continue
-                        handle = ctx.tid_to_weakhandle[tid]
-                        if handle in ctx.cloned:
-                            # The same exact tensor has been cloned already
-                            continue
-                        ctx.cloned[handle] = ctx.original[handle].clone()
-                        del ctx.original[handle]
+                if arg.is_out:
+                    maybe_clone(kwargs["out"])
+                elif isinstance(args[idx], list):
+                    # Foreach case. (Possible optimization: if most of the
+                    # tensors need to be cloned, use a for each clone?)
+                    for t in args[idx]:
+                        maybe_clone(t)
+                else:
+                    maybe_clone(args[idx])
 
         return func(*args, **kwargs)
 
@@ -706,9 +720,9 @@ class _AllowMutationOnSavedContext:
 
 
 @contextlib.contextmanager
-def allow_mutation_on_saved_tensors() -> (
-    Generator[_AllowMutationOnSavedContext, None, None]
-):
+def allow_mutation_on_saved_tensors() -> Generator[
+    _AllowMutationOnSavedContext, None, None
+]:
     """Context manager under which mutating tensors saved for backward is allowed.
 
     Under this context manager, tensors saved for backward are cloned on mutation,
@@ -764,7 +778,7 @@ def _register_logging_hooks_on_whole_graph(
         if not roots:
             return
         seen: set[Node] = set()
-        q: Deque[Node] = deque()
+        q: deque[Node] = deque()
         for node in roots:
             if node is not None:
                 seen.add(node)
@@ -782,7 +796,7 @@ def _register_logging_hooks_on_whole_graph(
 
     def fmt(t: Optional[torch.Tensor]) -> str:
         # Avoid circular import
-        from torch.testing._internal.common_utils import dtype_abbrs
+        from torch.utils._dtype_abbrs import dtype_abbrs
 
         if t is None:
             return "None"

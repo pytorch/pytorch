@@ -12,7 +12,7 @@ import collections
 import contextlib
 import logging
 from functools import wraps
-from typing import Callable, DefaultDict, Dict, List, Optional, Set
+from typing import Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -41,6 +41,7 @@ from .functional_utils import (
 )
 from .schemas import (
     InputAliasInfo,
+    MemoryFormatMeta,
     MutationType,
     OutputAliasInfo,
     OutputType,
@@ -60,7 +61,7 @@ static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_input
 # We assume tangents memory format to be similar to corresponding output's memory_format.
 # The idea is that we are technically making a guess about the strides of our tangents,
 # while we trace out the joint.
-# If runtime specfied tangents will not have the same memory format as predicted traced tangents,
+# If runtime specified tangents will not have the same memory format as predicted traced tangents,
 # we coerce them at runtime to traced tangents memory format.
 
 
@@ -73,16 +74,16 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
 
     out = x.detach()
 
-    suggest_memory_format = torch._prims_common.suggest_memory_format
     is_subclass = is_traceable_wrapper_subclass(out)
 
-    memory_format = suggest_memory_format(out)
+    memory_format = MemoryFormatMeta.from_tensor(out)
 
-    was = out
-    out = out.contiguous(memory_format=memory_format)
-    updated = out is not was
+    if memory_format.memory_format is not None:
+        was = out
+        out = out.contiguous(memory_format=memory_format.memory_format)
+        updated = was is not out
 
-    # For subclass we keep memory format of outer strides at the beggining of the list
+    # For subclass we keep memory format of outer strides at the beginning of the list
     out_memory_format = [memory_format] if is_subclass else memory_format
 
     # Note [Tangents memory format, Part 2]
@@ -150,13 +151,13 @@ def run_functionalized_fw_and_collect_metadata(
     # TODO: refactor to kill this flag
     is_train: bool = False,
     # Note: this is guaranteed to be set when running under dynamo
-    static_input_indices: Optional[List[int]] = None,
+    static_input_indices: Optional[list[int]] = None,
     pre_dispatch: bool = False,
     # is_export is technically only needed to avoid using functionalization V2
     # during analysis
     is_export: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
-    memo: Dict[Tensor, Tensor] = {}
+    memo: dict[Tensor, Tensor] = {}
 
     def _to_fun(t):
         if isinstance(t, Tensor):
@@ -173,8 +174,8 @@ def run_functionalized_fw_and_collect_metadata(
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
 
-        input_info: List[InputAliasInfo] = []
-        output_info: List[OutputAliasInfo] = []
+        input_info: list[InputAliasInfo] = []
+        output_info: list[OutputAliasInfo] = []
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
@@ -275,15 +276,16 @@ def run_functionalized_fw_and_collect_metadata(
         out_tensor_ids = {id(o): i for i, o in enumerate(flat_f_outs)}
 
         # Keep track of which outputs alias other outputs
-        out_tensor_alias_counts: DefaultDict = collections.defaultdict(int)
+        out_tensor_alias_counts: collections.defaultdict = collections.defaultdict(int)
         # This tells us, for a given group of outputs that alias each other,
         # whether they e.g. all came from an unbind call
-        num_aliased_tensors_that_are_multi_output_views: DefaultDict = (
+        num_aliased_tensors_that_are_multi_output_views: collections.defaultdict = (
             collections.defaultdict(int)
         )
 
-        out_storage_to_metadata_key_to_tensors: DefaultDict[
-            Optional[StorageWeakRef], DefaultDict[MetadataKey, Set[torch.Tensor]]
+        out_storage_to_metadata_key_to_tensors: collections.defaultdict[
+            Optional[StorageWeakRef],
+            collections.defaultdict[MetadataKey, set[torch.Tensor]],
         ] = collections.defaultdict(lambda: collections.defaultdict(set))
 
         curr_storage = None
@@ -382,8 +384,8 @@ def run_functionalized_fw_and_collect_metadata(
                     ].add(o)
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
-        intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
-        intermediate_bases: List[torch.Tensor] = []
+        intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
+        intermediate_bases: list[torch.Tensor] = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #
@@ -569,9 +571,9 @@ from a multi-output view call"
                             output_type = (
                                 OutputType.alias_of_intermediate_save_as_output
                             )
-                            intermediate_base_tensor_id_to_output_idx[
-                                id(o._base)
-                            ] = new_out_idx
+                            intermediate_base_tensor_id_to_output_idx[id(o._base)] = (
+                                new_out_idx
+                            )
                             intermediate_bases.append(o._base)
             elif (
                 # See https://github.com/pytorch/pytorch/issues/100348 for this case.
@@ -581,7 +583,7 @@ from a multi-output view call"
                 and not o.requires_grad
             ):
                 # In theory we could use any of these tensors to regenerate the aliased outputs from,
-                # since they all alias each other and have identical metatadata
+                # since they all alias each other and have identical metadata
                 out_alias = outs_with_identical_metadata_that_require_grad[0]
                 existing_out_idx = out_tensor_ids[id(out_alias)]
                 output_type = OutputType.alias_of_intermediate_base_is_user_output
@@ -700,7 +702,7 @@ from a multi-output view call"
             # (a * b).sum().backward()
             #
             # We can not deduce it easily now, so introducing a debug config to be able to turn off this for specific cases.
-            # NJT gurantees to have its tangent as NJT, because it has dedicated integration in Autograd
+            # NJT guarantees to have its tangent as NJT, because it has dedicated integration in Autograd
             # See torch/csrc/autograd/python_function.cpp, use_zeros_like.
             (
                 _plain_fake_tensor_like_subclass(inp)

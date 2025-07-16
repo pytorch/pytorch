@@ -49,7 +49,7 @@ class CppSignature:
 
     # Is this a fallback C++ binding?  Fallback bindings are enabled by
     # manual_cpp_binding: True and are alternate, non-public API that
-    # lets manual C++ binding implementors access the binding that would
+    # lets manual C++ binding implementers access the binding that would
     # have been automatically generated
     fallback_binding: bool = False
 
@@ -336,7 +336,9 @@ def kernel_signature(
     meta = backend_index.get_kernel(f)
     symint = meta is not None and meta.supports_symint()
     if symint:
-        assert f.func.has_symint(), f"attempted to define symint kernel for {backend_index.dispatch_key} without SymInt in schema"
+        assert f.func.has_symint(), (
+            f"attempted to define symint kernel for {backend_index.dispatch_key} without SymInt in schema"
+        )
     if backend_index.external:
         return DispatcherSignature.from_schema(f.func, prefix=prefix, symint=symint)
     else:
