@@ -324,6 +324,7 @@ C10_API inline std::string getAllocatorSettings() {
 struct DeviceConfigParserHookRegistry {
   explicit DeviceConfigParserHookRegistry(
       std::function<void(const std::string&)> hook) {
+    // Use static method to avoid static initialization order fiasco issues
     AcceleratorAllocatorConfig::registerDeviceConfigParserHook(std::move(hook));
   }
 };
