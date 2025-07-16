@@ -128,6 +128,19 @@ class NodeSource:
             return False
         return self.to_dict() == other.to_dict()
 
+    def __hash__(self):
+        # Create a hash based on the dictionary representation
+        # We need to convert the dict to a hashable form
+        def _make_hashable(obj):
+            if isinstance(obj, dict):
+                return tuple(sorted((k, _make_hashable(v)) for k, v in obj.items()))
+            elif isinstance(obj, list):
+                return tuple(_make_hashable(item) for item in obj)
+            else:
+                return obj
+
+        return hash(_make_hashable(self.to_dict()))
+
 
 @compatibility(is_backward_compatible=False)
 @contextmanager
