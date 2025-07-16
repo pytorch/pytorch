@@ -22,13 +22,7 @@ class MyDeviceTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, size, dtype, raw_data=None, requires_grad=False):
         # Use a meta Tensor here to be used as the wrapper
-        like = torch.empty(tuple(size), dtype=dtype, device="cpu")
-        res = torch.Tensor._make_wrapper_subclass(
-            cls,
-            like.size(),
-            requires_grad=requires_grad,
-            device="privateuseone",
-        )
+        res = torch._C.create_empty_tensor(size, dtype)
         res.raw_data = raw_data
         return res
 

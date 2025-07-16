@@ -488,14 +488,15 @@ def setup_privateuseone_for_python_backend(rename=None):
         def is_available(self): return True
         def has_primary_context(self): return True
         def is_built(self): return True
-    torch._C.register_privateuseone_hook(Hook())
+    torch._C._hook = Hook()
+    torch._C.register_python_privateuseone_hook(torch._C._hook)
 
     class Guard:
         def get_device_id(self): 
             return 0
-        def set_device_id(self, id): 
+        def set_device(self, id): 
             return None
-        def exchange_device_id(self, id): 
+        def exchange_device(self, id): 
             return None
-
-    torch._C.register_privateuseone_device_guard(Guard())
+    torch._C._guard = Guard()
+    torch._C.register_python_privateuseone_device_guard(torch._C._guard)

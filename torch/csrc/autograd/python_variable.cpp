@@ -698,15 +698,12 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // dispatch and then go again, triggering segfault.  TBH I'm thinking I want
   // to delete this function entirely
   
-  if (r.device(7).type() == at::DeviceType::CPU || 
-      r.device(7).type() == at::DeviceType::CUDA) {
-    py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
-    TORCH_CHECK_TYPE(
-        attr.ptr() != nullptr &&
-            attr.ptr() != torch::disabled_torch_dispatch_impl(),
-        ((PyTypeObject*)cls)->tp_name,
-        "is a CPU or CUDA tensor; it must define __torch_dispatch__");
-  }
+  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+  TORCH_CHECK_TYPE(
+      attr.ptr() != nullptr &&
+          attr.ptr() != torch::disabled_torch_dispatch_impl(),
+      ((PyTypeObject*)cls)->tp_name,
+      "is a CPU or CUDA tensor; it must define __torch_dispatch__");
 
   const auto options = TensorOptions()
                            .dtype(r.scalartype(5))

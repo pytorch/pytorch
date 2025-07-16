@@ -146,6 +146,10 @@ static THPGenerator* THPDefaultCPUGenerator = nullptr;
 
 bool registerPythonPrivateUse1Hook(py::object hook);
 bool registerPythonPrivateUse1DeviceGuard(py::object guard);
+at::Tensor createEmptyTensor(
+  const std::vector<int64_t>& shape,
+  c10::ScalarType dtype
+);
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -2687,6 +2691,7 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("register_python_privateuseone_hook", &registerPythonPrivateUse1Hook);
   py_module.def("register_python_privateuseone_device_guard", &registerPythonPrivateUse1DeviceGuard);
+  py_module.def("create_empty_tensor", &createEmptyTensor);
   torch::set_disabled_torch_function_impl(
       PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);
@@ -2781,12 +2786,18 @@ struct PythonPrivateUse1DeviceGuard final : public c10::impl::DeviceGuardImplInt
     return c10::DeviceType::PrivateUse1;
   }
   c10::Device exchangeDevice(c10::Device device) const override {
+    py::gil_scoped_acquire gil;
     underlying_python_guard_.attr("exchange_device")(device.index());
     return getDevice();
   }
   c10::Device getDevice() const override {
-    py::object py_device_id = underlying_python_guard_.attr("get_device_id");
+    py::gil_scoped_acquire _;
     int device_id;
+    if (underlying_python_guard_.is_none()) {
+      std::cout << "I am None" << std::endl;
+      return c10::Device(type(), 0);
+    }
+    py::object py_device_id = underlying_python_guard_.attr("get_device_id");
     if (py_device_id.is_none()) {
       device_id = 0;
     } else {
@@ -2795,10 +2806,12 @@ struct PythonPrivateUse1DeviceGuard final : public c10::impl::DeviceGuardImplInt
     return c10::Device(type(), device_id);
   }
   void setDevice(c10::Device device) const override {
+    py::gil_scoped_acquire gil;
     underlying_python_guard_.attr("set_device")(device.index());
     // no-op
   }
   void uncheckedSetDevice(c10::Device device) const noexcept override {
+    py::gil_scoped_acquire gil;
     try {
       underlying_python_guard_.attr("set_device")(device.index());
     } catch (const py::error_already_set& e) {
@@ -2864,5 +2877,38 @@ bool registerPythonPrivateUse1DeviceGuard(py::object guard) {
   static PythonPrivateUse1DeviceGuard python_guard(guard);
   c10::impl::registerDeviceGuard(c10::DeviceType::PrivateUse1, &python_guard);
   return true;
+}
+
+at::Tensor createEmptyTensor(
+  const std::vector<int64_t>& shape,
+  c10::ScalarType dtype
+) {
+  c10::Storage storage{
+    c10::Storage::use_byte_size_t{},
+    0,
+    c10::GetAllocator(c10::kMeta),
+    true,
+  };
+
+  c10::Device device(c10::DeviceType::PrivateUse1, 0);
+  storage.set_data_ptr_noswap(at::DataPtr{nullptr, device});
+  c10::DispatchKeySet key_set({c10::DispatchKey::PrivateUse1});
+  at::Tensor tensor = at::detail::make_tensor<at::TensorImpl>(
+    std::move(storage), 
+    key_set, 
+    c10::scalarTypeToTypeMeta(dtype)
+  );
+
+  std::vector<int64_t> strides(shape.size());
+  int64_t size = 1;
+  for (int i = strides.size() - 1; i >=0; --i) {
+    strides[i] = size;
+    size *= shape[i];
+  }
+
+  tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
+    shape, strides, 0
+  );
+  return tensor;
 }
 
