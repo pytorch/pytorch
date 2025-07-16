@@ -335,8 +335,8 @@ class OptimizedModule(torch.nn.Module):
         "get_compiler_config",
         "forward",
         "_forward",
-        "_super_module_initialized",
         # attributes set and used by nn.Module
+        "training",
         "_parameters",
         "_buffers",
         "_non_persistent_buffers_set",
@@ -363,14 +363,15 @@ class OptimizedModule(torch.nn.Module):
         # We also can't use regular setattr because `super().__setattr__` will
         # complain for module value before `super().__init__()`
         object.__setattr__(self, "_orig_mod", mod)
-        self._super_module_initialized = False
         super().__init__()
-        self._super_module_initialized = True
 
-        # Installs the params/buffer
+        # Initializes `OptimizedModule`-specific attributes.
         self._orig_mod = mod  # `super().__setattr__` will register this module
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
+
+        # Immediately sync some state attributes for BC and ergonomics, see
+        # https://github.com/pytorch/pytorch/issues/122414
         self.training = self._orig_mod.training
 
     def _initialize(self):
@@ -423,18 +424,6 @@ class OptimizedModule(torch.nn.Module):
         self.__dict__ = state
         self._initialize()
 
-    @property
-    def training(self):
-        return self._orig_mod.training
-
-    @training.setter
-    def training(self, value):
-        # Ignore the `training` mutation in `super().__init__()`, since that's
-        # setting the default on `nn.Module`, but we are mirroring the
-        # `training` attr in `self._orig_mod`.
-        if self._super_module_initialized:
-            self._orig_mod.training = value
-
     def __getattr__(self, name):
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
@@ -472,6 +461,7 @@ class OptimizedModule(torch.nn.Module):
         return self._forward(*args, **kwargs)
 
     def __dir__(self):
+        # Pull in attributes from `_orig_mod` because we mirror them.
         orig_mod_attrs = self._orig_mod.__dir__()
         return orig_mod_attrs + [
             attr for attr in super().__dir__() if attr not in orig_mod_attrs
