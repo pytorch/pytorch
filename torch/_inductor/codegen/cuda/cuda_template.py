@@ -65,6 +65,11 @@ class CUDATemplate(KernelTemplate):
         self.input_reorder = input_reorder
         self.layout = layout
 
+    @classmethod
+    @functools.lru_cache(None)
+    def _template_from_string(cls, source: str) -> Any:
+        return KernelTemplate._template_from_string(source)
+
     @staticmethod
     def supports_epilogue_fusion(op: GemmOperation) -> bool:
         return False
