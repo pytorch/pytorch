@@ -16,6 +16,7 @@ import queue
 import threading
 import warnings
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
@@ -35,7 +36,6 @@ from torch.utils.data.sampler import (
     Sampler,
     SequentialSampler,
 )
-from typing_extensions import Self
 
 
 if TYPE_CHECKING:
