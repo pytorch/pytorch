@@ -352,6 +352,7 @@ struct DeviceConfigParserHookRegistry {
   explicit DeviceConfigParserHookRegistry(
       std::function<void(const std::string&)>&& hook,
       const std::unordered_set<std::string>& keys) {
+    // Use static method to avoid static initialization order fiasco issues
     AcceleratorAllocatorConfig::registerDeviceConfigParserHook(
         std::move(hook), keys);
   }

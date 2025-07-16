@@ -111,7 +111,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   }
 
   static const std::unordered_set<std::string>& getKeys() {
-    return instance().keys_;
+    return keys_;
   }
 
   static CUDAAllocatorConfig& instance() {
@@ -163,7 +163,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_pinned_use_cuda_host_register{false};
   std::atomic<bool> m_use_async_allocator{false};
   std::atomic<bool> m_is_allocator_loaded{false};
-  std::unordered_set<std::string> keys_{
+  inline static std::unordered_set<std::string> keys_{
       "backend",
       // keep BC for Rocm: `cuda` -> `cud` `a`, to avoid hipify issues
       // NOLINTBEGIN(bugprone-suspicious-missing-comma,-warnings-as-errors)
