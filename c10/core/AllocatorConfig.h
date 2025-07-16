@@ -235,7 +235,7 @@ class C10_API AcceleratorAllocatorConfig {
   // provided environment string. This allows backends to parse additional
   // device-specific configuration options from the environment variable.
   // If no hook is registered, this function does nothing.
-  static void callDeviceConfigParserHook(const std::string& env) const {
+  static void callDeviceConfigParserHook(const std::string& env) {
     if (device_config_parser_hook_) {
       device_config_parser_hook_(env);
     }
