@@ -8,7 +8,7 @@ namespace at {
    Computes ceil(a / b)
 */
 template <
-    typename Res,
+    typename Res = void,
     typename T,
     typename U,
     typename = std::enable_if_t<
@@ -23,7 +23,7 @@ C10_ALWAYS_INLINE C10_HOST_DEVICE
    Computes ceil(a / b) * b; i.e., rounds up `a` to the next highest
    multiple of b
 */
-template <typename Res, typename T, typename U>
+template <typename Res = void, typename T, typename U>
 C10_ALWAYS_INLINE C10_HOST_DEVICE
     std::conditional_t<std::is_same_v<Res, void>, std::common_type_t<T, U>, Res>
     round_up(T a, U b) {
