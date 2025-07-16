@@ -36,10 +36,10 @@ from .functional_utils import (
     has_metadata_mutation,
     MetadataKey,
     to_fun,
+    ViewMetaSequence,
     was_inductor_storage_resized,
 )
 from .schemas import (
-    FunctionalTensorMetadataEq,
     InputAliasInfo,
     MemoryFormatMeta,
     MutationType,
@@ -606,7 +606,7 @@ from a multi-output view call"
             #
             # The FunctionalTensor will be saved if one of the 2 conditions below
             # is true:
-            functional_tensor = None
+            view_meta_sequence = None
             if (
                 # 1. If the output_type is either of:
                 #    (i) alias_of_intermediate;
@@ -638,7 +638,7 @@ from a multi-output view call"
                 and not input_info[base_idx].mutates_metadata
             ):
                 if isinstance(o, FunctionalTensor):
-                    functional_tensor = FunctionalTensorMetadataEq(o.elem)
+                    view_meta_sequence = ViewMetaSequence(o)
 
             out_info = OutputAliasInfo(
                 output_type=output_type,
@@ -646,7 +646,7 @@ from a multi-output view call"
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
                 requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
-                functional_tensor=functional_tensor,
+                view_meta_sequence=view_meta_sequence,
             )
             output_info.append(out_info)
 

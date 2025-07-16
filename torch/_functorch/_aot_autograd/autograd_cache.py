@@ -283,19 +283,6 @@ def check_cacheable(gm: torch.fx.GraphModule):
         check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
 
 
-def check_metadata_cacheable(metadata: ViewAndMutationMeta):
-    """
-    When view replay is turned on, we bypass autograd cache if
-    the output is aliased.
-    """
-    if config.view_replay_for_aliased_outputs:
-        for info in metadata.output_info:
-            if info.functional_tensor is not None:
-                raise BypassAOTAutogradCache(
-                    "Cannot cache a graph with functional tensor"
-                )
-
-
 class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
@@ -757,7 +744,6 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
         """
         Perform any preparations to make the cache entry ready for serialization.
         """
-        check_metadata_cacheable(self.runtime_metadata)
         self.compiled_fw.pre_save()
         if self.compiled_bw is not None:
             self.compiled_bw.pre_save()

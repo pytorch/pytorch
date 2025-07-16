@@ -43,6 +43,8 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
+    gen_functionalization_view_meta_classes_decl,
+    gen_functionalization_view_meta_classes_impl,
     GenCompositeViewCopyKernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
@@ -2492,48 +2494,48 @@ def gen_source_files(
         },
     )
 
+    def gen_op_headers(
+        g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
+    ) -> list[str]:
+        if isinstance(g, NativeFunctionsViewGroup):
+            # view ops always get a functionalization kernel
+            headers = [
+                f"#include <ATen/ops/{g.view.root_name}_native.h>",
+                f"#include <ATen/ops/{g.view.root_name}_ops.h>",
+            ]
+            if g.view_copy is not None:
+                headers += [
+                    f"#include <ATen/ops/{g.view_copy.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.view_copy.root_name}_ops.h>",
+                ]
+            return headers
+        elif isinstance(g, NativeFunctionsGroup):
+            headers = [
+                f"#include <ATen/ops/{g.functional.root_name}_native.h>",
+                f"#include <ATen/ops/{g.functional.root_name}_ops.h>",
+                f"#include <ATen/ops/{g.out.root_name}_native.h>",
+                f"#include <ATen/ops/{g.out.root_name}_ops.h>",
+            ]
+            if g.inplace is not None:
+                headers += [
+                    f"#include <ATen/ops/{g.inplace.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.inplace.root_name}_ops.h>",
+                ]
+            if g.mutable is not None:
+                headers += [
+                    f"#include <ATen/ops/{g.mutable.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.mutable.root_name}_ops.h>",
+                ]
+            return headers
+        else:
+            return [
+                f"#include <ATen/ops/{g.root_name}_native.h>",
+                f"#include <ATen/ops/{g.root_name}_ops.h>",
+            ]
+
     def functionalization_env_callable(
         g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
     ) -> dict[str, list[str]]:
-        def gen_op_headers(
-            g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
-        ) -> list[str]:
-            if isinstance(g, NativeFunctionsViewGroup):
-                # view ops always get a functionalization kernel
-                headers = [
-                    f"#include <ATen/ops/{g.view.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.view.root_name}_ops.h>",
-                ]
-                if g.view_copy is not None:
-                    headers += [
-                        f"#include <ATen/ops/{g.view_copy.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.view_copy.root_name}_ops.h>",
-                    ]
-                return headers
-            elif isinstance(g, NativeFunctionsGroup):
-                headers = [
-                    f"#include <ATen/ops/{g.functional.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.functional.root_name}_ops.h>",
-                    f"#include <ATen/ops/{g.out.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.out.root_name}_ops.h>",
-                ]
-                if g.inplace is not None:
-                    headers += [
-                        f"#include <ATen/ops/{g.inplace.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.inplace.root_name}_ops.h>",
-                    ]
-                if g.mutable is not None:
-                    headers += [
-                        f"#include <ATen/ops/{g.mutable.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.mutable.root_name}_ops.h>",
-                    ]
-                return headers
-            else:
-                return [
-                    f"#include <ATen/ops/{g.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.root_name}_ops.h>",
-                ]
-
         return {
             "ops_headers": gen_op_headers(g),
             "func_definitions": gen_functionalization_definition(
@@ -2596,6 +2598,31 @@ def gen_source_files(
                     view_groups,
                 )
             )
+        },
+    )
+
+    cpu_fm.write(
+        "ViewMetaClasses.h",
+        lambda: {
+            "view_meta_declarations": list(
+                concatMap(
+                    lambda g: gen_functionalization_view_meta_classes_decl(selector, g),
+                    view_groups,
+                )
+            )
+        },
+    )
+
+    cpu_fm.write(
+        "ViewMetaClasses.cpp",
+        lambda: {
+            "view_meta_implementations": list(
+                concatMap(
+                    lambda g: gen_functionalization_view_meta_classes_impl(selector, g),
+                    view_groups,
+                )
+            ),
+            "op_headers": list(concatMap(gen_op_headers, view_groups)),
         },
     )
 

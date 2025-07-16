@@ -315,6 +315,7 @@ set(GENERATED_CXX_PYTHON
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_enum_tag.cpp"
+  "${TORCH_SRC_DIR}/csrc/functionalization/generated/ViewMetaClassesPythonBinding.cpp"
   )
 
 set(GENERATED_H_PYTHON
@@ -378,6 +379,7 @@ add_custom_command(
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyNonNativeIr.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
+    "${TORCH_ROOT}/aten/src/ATen/templates/ViewMetaClassesPythonBinding.cpp"
     ${autograd_python}
     ${autograd_yaml}
     ${autograd_templates}

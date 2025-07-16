@@ -30,6 +30,7 @@ from torch._C import (
     _cpu,
     _dynamo,
     _export,
+    _functionalization,
     _functorch,
     _lazy,
     _lazy_ts_backend,
@@ -66,7 +67,6 @@ from torch.types import (
 from torch.utils._python_dispatch import TorchDispatchMode
 
 # This module is defined in torch/csrc/Module.cpp
-
 K = TypeVar("K")  # noqa: PYI001
 T = TypeVar("T")  # noqa: PYI001
 S = TypeVar("S", bound=torch.Tensor)  # noqa: PYI001

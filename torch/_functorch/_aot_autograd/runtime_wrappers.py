@@ -181,7 +181,7 @@ class AliasOfInputHandler:
         self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
-        self.functional_tensor = info.functional_tensor
+        self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(self, orig_inputs, fw_outs, out):
@@ -190,7 +190,7 @@ class AliasOfInputHandler:
             aliased_base_tensor,
             self.unwrap_out(out),
             self.requires_grad,
-            self.functional_tensor,
+            self.view_meta_sequence,
             replay_views=self.replay_views,
         )
 
@@ -221,7 +221,7 @@ class AliasOfIntermediateHandler:
 
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
-        self.functional_tensor = info.functional_tensor
+        self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(self, orig_inputs, fw_outs, out):
@@ -230,7 +230,7 @@ class AliasOfIntermediateHandler:
             self._unwrap_aliased_base_tensor(aliased_base_tensor),
             self.unwrap_out(out),
             self.requires_grad,
-            self.functional_tensor,
+            self.view_meta_sequence,
             replay_views=self.replay_views,
         )
 
