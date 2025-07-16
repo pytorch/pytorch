@@ -115,7 +115,7 @@ at::Tensor& reshape_copy_out(
   return out;
 }
 
-static at::Tensor& flatten_copy_out(
+at::Tensor& flatten_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
     int64_t start_dim,
