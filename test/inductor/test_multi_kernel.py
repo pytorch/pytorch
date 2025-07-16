@@ -13,7 +13,6 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -26,11 +25,6 @@ from torch.testing._internal.inductor_utils import (
     IS_BIG_GPU,
     requires_triton,
 )
-from torch.utils.cpp_extension import ROCM_HOME
-
-
-TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
-
 
 class TransformerSnippet(nn.Module):
     def __init__(self) -> None:
