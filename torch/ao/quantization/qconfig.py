@@ -568,9 +568,11 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig], mod: torch.nn.Module) -> N
         )
 
 
-QConfigAny = Optional[QConfig]
-if sys.version_info < (3, 14):
+if sys.version_info < (3, 12):
+    QConfigAny = Optional[QConfig]
     QConfigAny.__module__ = "torch.ao.quantization.qconfig"
+else:
+    type QConfigAny = Optional[QConfig]
 
 
 def _add_module_to_qconfig_obs_ctr(
