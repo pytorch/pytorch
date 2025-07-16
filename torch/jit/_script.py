@@ -1246,7 +1246,7 @@ def script(
     subsequently passed by reference between Python and TorchScript with zero copy overhead.
 
     ``torch.jit.script`` can be used as a function for modules, functions, dictionaries and lists
-     and as a decorator ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
+     and as a decorator ``@torch.jit.script`` for torchscript-classes and functions.
 
     Args:
         obj (Callable, class, or nn.Module):  The ``nn.Module``, function, class type,
