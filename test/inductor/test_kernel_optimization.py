@@ -4,7 +4,7 @@ import torch
 import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu, serialTest
 
 
 class TestEinsumtoPointwise(torch.nn.Module):
@@ -62,6 +62,7 @@ class TestKernelOptimization(TestCase):
         },
         post_grad_fusion_options={},
     )
+    @serialTest()  # Needs slightly more memory on GPUs
     def test_einsum_to_pointwise(self):
         counters.clear()
         module = TestEinsumtoPointwise().to(GPU_TYPE)
