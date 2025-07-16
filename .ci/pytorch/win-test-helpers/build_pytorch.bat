@@ -42,7 +42,7 @@ call choco upgrade -y cmake --no-progress --installargs 'ADD_CMAKE_TO_PATH=Syste
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
-call pip install mkl-include==2021.4.0 mkl-devel==2021.4.0
+call pip install mkl==2024.2.0 mkl-static==2024.2.0 mkl-include==2024.2.0
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
