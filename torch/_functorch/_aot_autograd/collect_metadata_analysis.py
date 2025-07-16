@@ -28,6 +28,13 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 
+from .descriptors import (
+    AOTInput,
+    InputMutationTangentAOTInput,
+    OutputAOTOutput,
+    OutputIntermediateBaseTangentAOTInput,
+    OutputTangentAOTInput,
+)
 from .functional_utils import (
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
@@ -147,6 +154,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
 def run_functionalized_fw_and_collect_metadata(
     f,
     *,
+    flat_args_descs: list[AOTInput],
     keep_input_mutations: bool,
     # TODO: refactor to kill this flag
     is_train: bool = False,
@@ -195,7 +203,13 @@ def run_functionalized_fw_and_collect_metadata(
         with disable_above, mode, suppress_pending:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
+            flat_f_args_descs = flat_args_descs
             flat_f_outs = f(*flat_f_args)
+            # NB: this is just to setup the input descriptors, we will
+            # recreate these descriptors (with the same convention!) when we
+            # actually do the trace
+            flat_f_outs_descs = [OutputAOTOutput(i) for i in range(len(flat_f_outs))]
+
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
             # Also, prevent memoization from applying.
@@ -386,6 +400,7 @@ def run_functionalized_fw_and_collect_metadata(
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
         intermediate_bases: list[torch.Tensor] = []
+        intermediate_bases_descs: list[AOTInput] = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #
@@ -410,7 +425,7 @@ def run_functionalized_fw_and_collect_metadata(
         # the autograd engine mistakenly assumes that 'x' and 'out' are aliased, treating 'x' as 'out._base'.
         # This misinterpretation leads to an 'alias_of_input' flag, causing an unnecessary as_strided() call to be generated,
         # which could lead to issues later in the code.
-        for o in flat_f_outs:
+        for o, desc in zip(flat_f_outs, flat_f_outs_descs):
             functional_tensor_storage_changed = isinstance(
                 o, FunctionalTensor
             ) and torch._functionalize_was_storage_changed(  # type: ignore[attr-defined]
@@ -575,6 +590,9 @@ from a multi-output view call"
                                 new_out_idx
                             )
                             intermediate_bases.append(o._base)
+                            intermediate_bases_descs.append(
+                                OutputIntermediateBaseTangentAOTInput(desc)
+                            )
             elif (
                 # See https://github.com/pytorch/pytorch/issues/100348 for this case.
                 # This protects against the specific case where a user fn returns (output, output.detach())
@@ -675,69 +693,86 @@ from a multi-output view call"
                 or torch._functorch.config.disable_guess_zero_tangent_for_mutated_input_subclass
             )
 
-        f_input_tangents = [
-            # Note: [AOTAutograd Tangent Subclassness for mutated inputs]
-            # Generally when creating tangents to trace with, we assume that tangents will have
-            # the same subclass-ness as their forward outs
-            # however: for tangents that correspond to input mutations, in practice it is more likely
-            # that these tangents will be plain tensors of zeros at runtime, so we tweak our guess
-            # to assume that these tangents should always be plaint tensors.
-            # Example:
-            #  def f(x):
-            #      x.mul_(2)
-            #      return x + 1
-            #  out = f(x)
-            #  out.sum().backward()
-            # In the above code, we will have a tangent "x_updated_tangent",
-            # which will be a plain tensor of zeros, *unless* x is used in some compute after executing f
-            #
-            # However, there are exceptions to this logic. If a view is created from mutated input and is used in backward,
-            # The tangent for this subclass input will be a subclass tensor.
-            # Example:
-            #  def f(a, b):
-            #      a.mul_(2)
-            #      b.mul_(3)
-            #      return b.view(b.shape), a + b
-            # a_out, b_out = f(..., Subclass)
-            # (a * b).sum().backward()
-            #
-            # We can not deduce it easily now, so introducing a debug config to be able to turn off this for specific cases.
-            # NJT gurantees to have its tangent as NJT, because it has dedicated integration in Autograd
-            # See torch/csrc/autograd/python_function.cpp, use_zeros_like.
-            (
-                _plain_fake_tensor_like_subclass(inp)
-                if is_traceable_wrapper_subclass(inp)
-                and not _is_subclass_mutated_input_tangent_always_subclass(inp)
-                else inp
-            )
-            for inp, info in zip(flat_f_args, input_info)
-            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
-            and info.mutates_data
-            and info.requires_grad
-        ]
-        f_output_tangents = [
-            o
-            for o, info in zip(flat_f_outs, output_info)
-            if info.output_type
-            in [
-                OutputType.non_alias,
-                OutputType.unsafe_view_alias,
-                OutputType.custom_function_view,
+        f_input_tangents, f_input_tangents_descs = zip(
+            *[
+                # Note: [AOTAutograd Tangent Subclassness for mutated inputs]
+                # Generally when creating tangents to trace with, we assume that tangents will have
+                # the same subclass-ness as their forward outs
+                # however: for tangents that correspond to input mutations, in practice it is more likely
+                # that these tangents will be plain tensors of zeros at runtime, so we tweak our guess
+                # to assume that these tangents should always be plaint tensors.
+                # Example:
+                #  def f(x):
+                #      x.mul_(2)
+                #      return x + 1
+                #  out = f(x)
+                #  out.sum().backward()
+                # In the above code, we will have a tangent "x_updated_tangent",
+                # which will be a plain tensor of zeros, *unless* x is used in some compute after executing f
+                #
+                # However, there are exceptions to this logic. If a view is created from mutated input and is used in backward,
+                # The tangent for this subclass input will be a subclass tensor.
+                # Example:
+                #  def f(a, b):
+                #      a.mul_(2)
+                #      b.mul_(3)
+                #      return b.view(b.shape), a + b
+                # a_out, b_out = f(..., Subclass)
+                # (a * b).sum().backward()
+                #
+                # We can not deduce it easily now, so introducing a debug config to be able to turn off this for specific cases.
+                # NJT gurantees to have its tangent as NJT, because it has dedicated integration in Autograd
+                # See torch/csrc/autograd/python_function.cpp, use_zeros_like.
+                (
+                    (
+                        _plain_fake_tensor_like_subclass(inp)
+                        if is_traceable_wrapper_subclass(inp)
+                        and not _is_subclass_mutated_input_tangent_always_subclass(inp)
+                        else inp
+                    ),
+                    InputMutationTangentAOTInput(inp_desc),
+                )
+                for inp, inp_desc, info in zip(
+                    flat_f_args, flat_f_args_descs, input_info
+                )
+                if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
+                and info.mutates_data
+                and info.requires_grad
             ]
-            and issubclass(info.raw_type, torch.Tensor)
-            and info.requires_grad
-        ]
+        )
+        f_output_tangents, f_output_tangents_descs = zip(
+            *[
+                (o, OutputTangentAOTInput(desc))
+                for o, info, desc in zip(flat_f_outs, output_info, flat_f_outs_descs)
+                if info.output_type
+                in [
+                    OutputType.non_alias,
+                    OutputType.unsafe_view_alias,
+                    OutputType.custom_function_view,
+                ]
+                and issubclass(info.raw_type, torch.Tensor)
+                and info.requires_grad
+            ]
+        )
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
+        f_tangents_descs = (
+            f_input_tangents_descs + f_output_tangents_descs + intermediate_bases_descs
+        )
+
+        # TODO: I'm pretty sure you don't need a tree_map here
         traced_tangents = pytree.tree_map(from_fun, f_tangents)
         traced_tangents = pytree.tree_map(
             view_avoid_dupes_with_primals, traced_tangents
         )
-
         traced_tangents = [
             coerce_tangent_and_suggest_memory_format(tt)[0]
             for i, tt in enumerate(traced_tangents)
         ]
+        # NB: update this if the maps above ever change structure.
+        # Also, it might be helpful to add coercion information to the tangent desc!
+        traced_tangents_descs = f_tangents_descs
+
         nonlocal static_input_indices
         static_input_indices = static_input_indices or []
         if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
@@ -798,6 +833,7 @@ from a multi-output view call"
             num_intermediate_bases=len(intermediate_bases),
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
+            traced_tangents_descs=traced_tangents_descs,
             subclass_inp_meta=create_subclass_meta(flat_args),
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(

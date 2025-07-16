@@ -17,6 +17,13 @@ from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.types import IntLikeType
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
+from .descriptors import (
+    AOTInput,
+    AOTOutput,
+    SubclassGetAttrAOTInput,
+    SubclassSizeAOTInput,
+    SubclassStrideAOTInput,
+)
 from .schemas import (
     MutationType,
     PlainTensorMeta,
@@ -112,8 +119,8 @@ def create_subclass_metadata(
 
     new_start_idx = (
         new_start_idx
-        + count_symints * len(filter_symints(a.size()))
-        + count_symints * len(filter_symints(a.stride()))
+        + count_symints * len(enumerate_filter_symints(a.size()))
+        + count_symints * len(enumerate_filter_symints(a.stride()))
     )
 
     return (
@@ -167,17 +174,20 @@ def create_subclass_meta(
     return infos
 
 
-def filter_symints(lst: Iterable[IntLikeType]):
+def enumerate_filter_symints(lst: Iterable[IntLikeType]) -> list[tuple[int, SymInt]]:
     # Capture all SymInts from the iterable.
     def symint_check(s: IntLikeType) -> bool:
         return isinstance(s, SymInt) and not s.node.is_nested_int()
 
-    return [s for s in lst if symint_check(s)]
+    return [(i, s) for i, s in enumerate(lst) if symint_check(s)]
 
 
 def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> list[bool]:
     # Non-nested symints are replaced with None in `make_runtime_safe()`
     return [s is None for s in lst]
+
+
+AOTDescriptor = TypeVar("AOTDescriptor", AOTInput, AOTOutput)
 
 
 # This function takes in a pytree of arguments and unwraps any tensor
@@ -195,32 +205,48 @@ def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> list
 # this function below.
 def unwrap_tensor_subclasses(
     wrapped_args: list[Union[Tensor, int]],
+    wrapped_args_descs: list[AOTDescriptor],
     *,
     append_symints: bool,
-):
-    def flatten_subclass(t: Union[Tensor, int], *, out=None):
+) -> tuple[list[Union[Tensor, int]], list[AOTDescriptor]]:
+    def flatten_subclass(
+        t: Union[Tensor, int],
+        source: AOTInput,
+        *,
+        out: Optional[tuple[list[Union[Tensor, int, SymInt]], list[AOTInput]]] = None,
+    ):
         # unwrap a subclass into plain tensors and their size/stride if "append_symint"
         # is True
         if not is_traceable_wrapper_subclass(t):
-            out.append(t)
+            out[0].append(t)
+            out[1].append(source)
             return
 
         attrs, _ = t.__tensor_flatten__()
 
+        # TODO: Need to parameterize the AOTInput/AOTOutput
+
         for attr in attrs:
             inner_tensor = getattr(t, attr)
-            flatten_subclass(inner_tensor, out=out)
+            flatten_subclass(
+                inner_tensor, SubclassGetAttrAOTInput(source, attr), out=out
+            )
 
         if append_symints:
-            out.extend(filter_symints(t.size()))
-            out.extend(filter_symints(t.stride()))
+            sizes = enumerate_filter_symints(t.size())
+            strides = enumerate_filter_symints(t.stride())
+            out[0].extend(s for _, s in sizes)
+            out[1].extend(SubclassSizeAOTInput(source, i) for i, _ in sizes)
+            out[0].extend(s for _, s in strides)
+            out[1].extend(SubclassStrideAOTInput(source, i) for i, _ in strides)
 
     xs_inner: list[Union[int, Tensor, SymInt]] = []
+    sources_inner: list[AOTInput] = []
 
-    for x in wrapped_args:
-        flatten_subclass(typing.cast(Tensor, x), out=xs_inner)
+    for x, source in zip(wrapped_args, wrapped_args_descs):
+        flatten_subclass(typing.cast(Tensor, x), source, out=(xs_inner, sources_inner))
 
-    return xs_inner
+    return xs_inner, sources_inner
 
 
 # subclass_metas is needed at runtime to compute which indices are symints in
@@ -305,8 +331,8 @@ def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
         if is_traceable_wrapper_subclass(arg):
             num_indices = (
                 len(get_plain_tensors(typing.cast(Tensor, arg), out=[]))
-                + len(filter_symints(arg.size()))
-                + len(filter_symints(arg.stride()))
+                + len(enumerate_filter_symints(arg.size()))
+                + len(enumerate_filter_symints(arg.stride()))
             )
 
         for _ in range(num_indices):

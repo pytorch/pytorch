@@ -17,8 +17,9 @@ import operator
 import time
 import traceback
 from collections import defaultdict
+from collections.abc import Sequence
 from contextlib import nullcontext
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -72,7 +73,10 @@ from .runtime_wrappers import (
 from .schemas import (
     AOTConfig,
     AOTGraphCapture,
+    AOTOutput,
     AOTState,
+    FlatFn,
+    FxValue,
     MutationType,
     ViewAndMutationMeta,
 )
@@ -86,9 +90,6 @@ from .utils import (
     unlift_tokens,
 )
 
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 zip = strict_zip
 
@@ -113,18 +114,34 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
 
 def aot_stage1_graph_capture(
     aot_state: AOTState,
-    flat_fn: Callable,
+    orig_flat_fn: FlatFn,
 ) -> AOTGraphCapture:
+    # NB: flat_fn at this point coincides with the initial info from forward
+    # metadata collection returning a list[Tensor].  We are now going to
+    # augment the output to return a tuple[list[Tensor], list[AOTOutput]] and
+    # then preserve this convention through the rest of the passes.
+
+    out_descs = aot_state.fw_metadata.output_descs
+
+    def flat_fn(*args: FxValue) -> tuple[Sequence[FxValue], Sequence[AOTOutput]]:
+        out = orig_flat_fn(*args)
+        assert len(out) == len(out_descs), (out, out_descs)
+        return out, out_descs
+
     aot_config = aot_state.aot_config
 
     wrappers = _create_wrappers_for_dispatch(aot_state.needs_autograd)
-    flat_fn, aot_state.flat_args, aot_state.fw_metadata = pre_compile(
-        wrappers,
-        flat_fn,
-        aot_state.flat_args,
-        aot_config,
-        fw_metadata=aot_state.fw_metadata,
+    flat_fn, aot_state.flat_args, aot_state.flat_args_descs, aot_state.fw_metadata = (
+        pre_compile(
+            wrappers,
+            flat_fn,
+            aot_state.flat_args,
+            aot_state.flat_args_descs,
+            aot_config,
+            fw_metadata=aot_state.fw_metadata,
+        )
     )
+
     # NB: This is currently only used for backwards, where fwd/bwd
     # deterministic TLS can be different
     aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
@@ -132,21 +149,31 @@ def aot_stage1_graph_capture(
     if aot_state.needs_autograd and not aot_config.pre_dispatch:
         # FYI: this being moved to trigger in export is new, seems fine!
         with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
-            graph, updated_flat_args, maybe_subclass_meta = aot_dispatch_autograd_graph(
+            graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
+                aot_dispatch_autograd_graph(
+                    flat_fn,
+                    aot_state.flat_args,
+                    aot_state.flat_args_descs,
+                    aot_config,
+                    fw_metadata=aot_state.fw_metadata,
+                )
+            )
+    else:
+        graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
+            aot_dispatch_base_graph(
                 flat_fn,
                 aot_state.flat_args,
+                aot_state.flat_args_descs,
                 aot_config,
                 fw_metadata=aot_state.fw_metadata,
             )
-    else:
-        graph, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(
-            flat_fn, aot_state.flat_args, aot_config, fw_metadata=aot_state.fw_metadata
         )
 
     return AOTGraphCapture(
         wrappers=wrappers,
         graph=graph,
         updated_flat_args=updated_flat_args,
+        updated_flat_args_descs=updated_flat_args_descs,
         maybe_subclass_meta=maybe_subclass_meta,
     )
 
