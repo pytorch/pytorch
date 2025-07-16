@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from re import M
 from typing import Any, Callable
 import cutlass
 import cutlass.torch as cutlass_torch
@@ -245,5 +246,102 @@ class CrossEntropyBackward(BenchmarkKernel):
             self.benchmark_single_shape((x, target, dloss), setting=f"shape: [{M}, {N}]")
 
 
+class SoftmaxForward(BenchmarkKernel):
+    def __init__(self):
+        super().__init__()
+        self.available_backends = ["eager", "compiled", "quack"]
+
+    def get_shapes(self) -> tuple[tuple[int, ...], ...]:
+        return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768), (32768,65536), (16384,131072), (8192,262144))
+
+    def get_memory_bytes(self, args, kwargs) -> int:
+        x, = args
+        M, N = x.shape
+        return 2 * M * N * x.dtype.itemsize
+
+    def get_flops(self, args, kwargs) -> int:
+        return 0
+
+    def eager(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, = args
+        return lambda: F.softmax(x, dim=-1)
+
+    def compiled(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, = args
+        compiled_softmax = torch.compile(lambda x: F.softmax(x, dim=-1), mode="max-autotune-no-cudagraphs")
+        fn = lambda: compiled_softmax(x)
+        return fn
+
+    def quack(self, args, kwargs=None) -> Any:
+        from quack.softmax import softmax
+
+        assert kwargs is None
+        x, = args
+        fn = lambda: softmax(x)
+        return fn
+
+    def benchmark(self):
+        for (M, N) in self.get_shapes():
+            print(f"Tensor dimensions: [{M}, {N}]")
+            torch_dtype = cutlass_torch.dtype(cutlass.BFloat16)
+            x = 0.1 * torch.randn(M, N, device="cuda", dtype=torch_dtype)
+            self.benchmark_single_shape((x,), setting=f"shape: [{M}, {N}]")
+
+
+class SoftmaxBackward(BenchmarkKernel):
+    def __init__(self):
+        super().__init__()
+        self.available_backends = ["eager", "compiled", "quack"]
+
+    def get_shapes(self) -> tuple[tuple[int, ...], ...]:
+        return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768), (32768,65536), (16384,131072), (8192,262144))
+    
+    def get_memory_bytes(self, args, kwargs) -> int:
+        # Memory: read dy and y, write ax backward
+        x, dy = args
+        M, N = x.shape
+        return 3 * M * N * x.dtype.itemsize
+
+    def get_flops(self, args, kwargs) -> int:
+        return 0
+
+    def eager(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, dy = args
+        y = F.softmax(x, dim=-1)
+        fn = lambda: torch.autograd.grad(y, x, grad_outputs=dy, retain_graph=True)
+        return fn
+
+    def compiled(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, dy = args
+        compiled_softmax = torch.compile(lambda x: F.softmax(x, dim=-1), mode="max-autotune-no-cudagraphs")
+        y = compiled_softmax(x)
+        fn = lambda: torch.autograd.grad(y, x, grad_outputs=dy, retain_graph=True)
+        return fn
+
+    def quack(self, args, kwargs=None) -> Any:
+        from quack.softmax import softmax
+
+        assert kwargs is None
+        x, dy = args
+
+        y = softmax(x)
+        fn = lambda: torch.autograd.grad(y, x, grad_outputs=dy, retain_graph=True)
+        return fn
+
+    def benchmark(self):
+        for (M, N) in self.get_shapes():
+            print(f"Tensor dimensions: [{M}, {N}]")
+            torch_dtype = cutlass_torch.dtype(cutlass.BFloat16)
+            x = 0.1 * torch.randn(M, N, device="cuda", dtype=torch_dtype, requires_grad=True)
+            dy = torch.randn(M, N, device="cuda", dtype=torch_dtype)
+            self.benchmark_single_shape((x, dy), setting=f"shape: [{M}, {N}]")
+
+
 CrossEntropyForward().benchmark()
 CrossEntropyBackward().benchmark()
+SoftmaxForward().benchmark()
+SoftmaxBackward().benchmark()
