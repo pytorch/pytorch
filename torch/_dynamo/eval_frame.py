@@ -328,15 +328,31 @@ class OptimizedModule(torch.nn.Module):
     get_compiler_config: Callable[[], Any]
 
     _opt_mod_attributes = {
+        # attributes set and used by OptimizedModule
         "_orig_mod",
         "dynamo_ctx",
         "_torchdynamo_orig_callable",
         "get_compiler_config",
         "forward",
         "_forward",
-        "__dict__",
-        "named_children_walk",
-        "_super_module_initialized",
+        # attributes set and used by nn.Module
+        "training",
+        "_parameters",
+        "_buffers",
+        "_non_persistent_buffers_set",
+        "_backward_pre_hooks",
+        "_backward_hooks",
+        "_is_full_backward_hook",
+        "_forward_hooks",
+        "_forward_hooks_with_kwargs",
+        "_forward_hooks_always_called",
+        "_forward_pre_hooks",
+        "_forward_pre_hooks_with_kwargs",
+        "_state_dict_hooks",
+        "_state_dict_pre_hooks",
+        "_load_state_dict_pre_hooks",
+        "_load_state_dict_post_hooks",
+        "_modules",
     }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx) -> None:
@@ -347,15 +363,12 @@ class OptimizedModule(torch.nn.Module):
         # We also can't use regular setattr because `super().__setattr__` will
         # complain for module value before `super().__init__()`
         object.__setattr__(self, "_orig_mod", mod)
-        self._super_module_initialized = False
         super().__init__()
-        self._super_module_initialized = True
 
         # Installs the params/buffer
         self._orig_mod = mod  # `super().__setattr__` will register this module
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
-        self.training = self._orig_mod.training
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
@@ -406,18 +419,6 @@ class OptimizedModule(torch.nn.Module):
     def __setstate__(self, state):
         self.__dict__ = state
         self._initialize()
-
-    @property
-    def training(self):
-        return self._orig_mod.training
-
-    @training.setter
-    def training(self, value):
-        # Ignore the `training` mutation in `super().__init__()`, since that's
-        # setting the default on `nn.Module`, but we are mirroring the
-        # `training` attr in `self._orig_mod`.
-        if self._super_module_initialized:
-            self._orig_mod.training = value
 
     def __getattr__(self, name):
         if name == "_orig_mod":
