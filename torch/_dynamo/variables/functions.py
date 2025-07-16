@@ -1942,34 +1942,28 @@ class PolyfilledFunctionVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if self.can_constant_fold_through() and check_unspec_or_constant_args(
-            args, kwargs
-        ):
-            result = (
-                self.fn(  # use the original function which is faster than the polyfill
+        if self.can_constant_fold_through():
+            if check_unspec_or_constant_args(args, kwargs):
+                result = self.fn(  # use the original function which is faster than the polyfill
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
-            )
-            return VariableTracker.build(tx, result)
+                return VariableTracker.build(tx, result)
 
-        if (
-            self.can_constant_fold_through()
-            and self.graph_break_if_cannot_constant_fold()
-        ):
-            name = getattr(self.fn, "__name__", str(self.fn))
-            unimplemented_v2(
-                gb_type="unsupported polyfill call",
-                context=f"Cannot trace polyfill function `{name}` due to non-constant arguments.",
-                explanation=(
-                    f"The function `{name}` was marked as only traceable when all arguments are constant. "
-                    "This restriction is set by the Dynamo compiler to ensure correct graph generation."
-                ),
-                hints=[
-                    f"Refactor or avoid using the function `{name}` in traced code.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
+            if self.graph_break_if_cannot_constant_fold():
+                name = getattr(self.fn, "__name__", str(self.fn))
+                unimplemented_v2(
+                    gb_type="unsupported polyfill call",
+                    context=f"Cannot trace polyfill function `{name}` due to non-constant arguments.",
+                    explanation=(
+                        f"The function `{name}` was marked as only traceable when all arguments are constant. "
+                        "This restriction is set by the Dynamo compiler to ensure correct graph generation."
+                    ),
+                    hints=[
+                        f"Refactor or avoid using the function `{name}` in traced code.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
         # Special case for sum on tuple/list of ints
         if (

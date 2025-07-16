@@ -1,5 +1,5 @@
 import pickle
-from typing import Any
+from typing import Any, Optional
 
 from ..decorators import substitute_in_graph
 
@@ -16,7 +16,7 @@ __all__ = [
     can_constant_fold_through=True,
     graph_break_if_cannot_constant_fold=True,
 )
-def dumps(obj: Any, protocol: int | None = None, **kwargs) -> Any:  # type: ignore[no-untyped-def]
+def dumps(obj: Any, protocol: Optional[int] = None, **kwargs) -> Any:  # type: ignore[no-untyped-def]
     return pickle.dumps(obj, protocol=protocol, **kwargs)
 
 
