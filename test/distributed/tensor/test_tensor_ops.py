@@ -2,7 +2,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-import torch.distributed._functional_collectives as funcol
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -725,24 +724,17 @@ class DistTensorOpsTest(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         partial_tensor = torch.randn(8, 8, device=self.device_type)
-        replicate_tensor = partial_tensor.detach().clone()
-        replicate_tensor = funcol.all_reduce(
-            replicate_tensor, reduce_op, mesh
-        )  # all reduce to full tensor
-        replicate_tensor_list = replicate_tensor.split(split_size, dim=split_dim)
-
         partial_dt = DTensor.from_local(
             local_tensor=partial_tensor,
             device_mesh=mesh,
             placements=[Partial(reduce_op=reduce_op)],
         )
-        partial_dt_list = partial_dt.split(split_size, dim=split_dim)
-
-        replicate_dt_full_tensor_list = [dt.full_tensor() for dt in partial_dt_list]
-        for replicate_tensor, replicate_dt_full_tensor in zip(
-            replicate_tensor_list, replicate_dt_full_tensor_list
-        ):
-            self.assertEqual(replicate_tensor, replicate_dt_full_tensor)
+        self._test_op_on_dtensor(
+            torch.split,
+            partial_dt,
+            split_size,
+            dim=split_dim,
+        )
 
 
 if __name__ == "__main__":

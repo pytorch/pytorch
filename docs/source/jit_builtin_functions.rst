@@ -3,8 +3,8 @@
 TorchScript Builtins
 ====================
 
-This is a full reference of functions and Tensor methods accessible in TorchScript
-
-.. contents:: :local:
+.. warning::
+    TorchScript is deprecated, please use
+    `torch.export <https://docs.pytorch.org/docs/stable/export.html>`__ instead.
 
 .. automodule:: torch.jit.supported_ops
