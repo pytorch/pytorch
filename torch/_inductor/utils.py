@@ -1099,13 +1099,17 @@ def fresh_cache(
     """
     clear_caches()
 
-    inductor_cache_dir = tempfile.mkdtemp(dir=dir)
+    from torch._inductor.cpp_builder import normalize_path_separator
+
+    inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
-            triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
+            triton_cache_dir = normalize_path_separator(
+                os.path.join(inductor_cache_dir, "triton")
+            )
             with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
                 yield
                 if isinstance(cache_entries, dict):
@@ -2178,7 +2182,10 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
-    from torch.testing._internal.common_cuda import SM80OrLater
+    SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
+        8,
+        0,
+    )
 
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
 
