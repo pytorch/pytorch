@@ -598,7 +598,10 @@ def as_sparse_gradcheck(gradcheck):
                     and obj.requires_grad
                     and obj.layout in sparse_layouts
                 ):
-                    d = dict(layout=obj.layout, shape=obj.shape)
+                    d = {
+                        "layout": obj.layout,
+                        "shape": obj.shape,
+                    }
                     if not masked:
                         # Materialize unspecified elements with zero values
                         batch_dim = obj.ndim - obj.dense_dim() - obj.sparse_dim()

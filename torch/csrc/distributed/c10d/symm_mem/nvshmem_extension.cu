@@ -19,6 +19,7 @@
 #endif  // Must be done before nvshmem.h is included
 
 #include <nvshmem.h>
+#include <nvshmemx.h>
 
 namespace c10d::nvshmem_extension {
 

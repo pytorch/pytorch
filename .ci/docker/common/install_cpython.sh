@@ -66,7 +66,7 @@ function do_cpython_build {
         ln -s pip3 ${prefix}/bin/pip
     fi
     # install setuptools since python 3.12 is required to use distutils
-    ${prefix}/bin/pip install wheel==0.34.2 setuptools==68.2.2
+    ${prefix}/bin/pip install wheel==0.45.1 setuptools==80.9.0
     local abi_tag=$(${prefix}/bin/python -c "from wheel.pep425tags import get_abbr_impl, get_impl_ver, get_abi_tag; print('{0}{1}-{2}'.format(get_abbr_impl(), get_impl_ver(), get_abi_tag()))")
     ln -sf ${prefix} /opt/python/${abi_tag}
 }
