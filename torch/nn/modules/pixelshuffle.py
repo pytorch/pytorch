@@ -4,7 +4,7 @@ from torch import Tensor
 from .module import Module
 
 
-__all__ = ["PixelShuffle", "PixelUnshuffle"]
+__all__: list[str] = []
 
 
 class PixelShuffle(Module):
@@ -56,9 +56,15 @@ class PixelShuffle(Module):
         self.upscale_factor = upscale_factor
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.pixel_shuffle(input, self.upscale_factor)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"upscale_factor={self.upscale_factor}"
 
 
@@ -109,7 +115,17 @@ class PixelUnshuffle(Module):
         self.downscale_factor = downscale_factor
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.pixel_unshuffle(input, self.downscale_factor)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"downscale_factor={self.downscale_factor}"
+
+
+PixelShuffle.__module__ = "torch.nn"
+PixelUnshuffle.__module__ = "torch.nn"

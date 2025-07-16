@@ -7,7 +7,7 @@ from torch.types import _size
 from .module import Module
 
 
-__all__ = ["Flatten", "Unflatten"]
+__all__: list[str] = []
 
 
 class Flatten(Module):
@@ -50,9 +50,15 @@ class Flatten(Module):
         self.end_dim = end_dim
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return input.flatten(self.start_dim, self.end_dim)
 
     def extra_repr(self) -> str:
+        """
+        Returns the extra representation of the module.
+        """
         return f"start_dim={self.start_dim}, end_dim={self.end_dim}"
 
 
@@ -152,7 +158,17 @@ class Unflatten(Module):
         )
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return input.unflatten(self.dim, self.unflattened_size)
 
     def extra_repr(self) -> str:
+        """
+        Returns the extra representation of the module.
+        """
         return f"dim={self.dim}, unflattened_size={self.unflattened_size}"
+
+
+Flatten.__module__ = "torch.nn"
+Unflatten.__module__ = "torch.nn"

@@ -11,15 +11,7 @@ from .lazy import LazyModuleMixin
 from .module import Module
 
 
-__all__ = [
-    "BatchNorm1d",
-    "LazyBatchNorm1d",
-    "BatchNorm2d",
-    "LazyBatchNorm2d",
-    "BatchNorm3d",
-    "LazyBatchNorm3d",
-    "SyncBatchNorm",
-]
+__all__: list[str] = []
 
 
 class _NormBase(Module):
@@ -193,9 +185,11 @@ class _BatchNorm(_NormBase):
         return F.batch_norm(
             input,
             # If buffers are not to be tracked, ensure that they won't be updated
-            self.running_mean
-            if not self.training or self.track_running_stats
-            else None,
+            (
+                self.running_mean
+                if not self.training or self.track_running_stats
+                else None
+            ),
             self.running_var if not self.training or self.track_running_stats else None,
             self.weight,
             self.bias,
@@ -728,6 +722,9 @@ class SyncBatchNorm(_BatchNorm):
             )
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         self._check_input_dim(input)
         self._check_non_zero_input_channels(input)
 
@@ -882,3 +879,12 @@ class SyncBatchNorm(_BatchNorm):
             )
         del module
         return module_output
+
+
+BatchNorm1d.__module__ = "torch.nn"
+LazyBatchNorm1d.__module__ = "torch.nn"
+BatchNorm2d.__module__ = "torch.nn"
+LazyBatchNorm2d.__module__ = "torch.nn"
+BatchNorm3d.__module__ = "torch.nn"
+LazyBatchNorm3d.__module__ = "torch.nn"
+SyncBatchNorm.__module__ = "torch.nn"

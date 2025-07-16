@@ -9,7 +9,7 @@ from torch.nn.parameter import Parameter
 from .module import Module
 
 
-__all__ = ["Embedding", "EmbeddingBag"]
+__all__: list[str] = []
 
 
 class Embedding(Module):
@@ -546,3 +546,7 @@ class EmbeddingBag(Module):
         )
         embeddingbag.weight.requires_grad = not freeze
         return embeddingbag
+
+
+Embedding.__module__ = "torch.nn"
+EmbeddingBag.__module__ = "torch.nn"

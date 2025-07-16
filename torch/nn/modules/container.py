@@ -18,14 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping
 
 
-__all__ = [
-    "Container",
-    "Sequential",
-    "ModuleList",
-    "ModuleDict",
-    "ParameterList",
-    "ParameterDict",
-]
+__all__: list[str] = []
 
 T = TypeVar("T", bound=Module)
 _V = TypeVar("_V")
@@ -170,6 +163,9 @@ class Sequential(Module):
             )
 
     def pop(self, key: Union[int, slice]) -> Module:
+        """
+        Pop ``key`` from self.
+        """
         v = self[key]
         del self[key]
         return v
@@ -240,6 +236,9 @@ class Sequential(Module):
     # TestScript.test_sequential_intermediary_types).  Cannot annotate
     # with Any as TorchScript expects a more precise type
     def forward(self, input):
+        """
+        Runs the forward pass.
+        """
         for module in self:
             input = module(input)
         return input
@@ -746,6 +745,9 @@ class ParameterList(Module):
         return self
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         child_lines = []
         for k, p in enumerate(self):
             if isinstance(p, torch.Tensor):
@@ -1017,3 +1019,11 @@ class ParameterDict(Module):
     def __ior__(self, other: ParameterDict) -> Self:
         self.update(other)
         return self
+
+
+Container.__module__ = "torch.nn"
+Sequential.__module__ = "torch.nn"
+ModuleDict.__module__ = "torch.nn"
+ModuleList.__module__ = "torch.nn"
+ParameterDict.__module__ = "torch.nn"
+ParameterList.__module__ = "torch.nn"

@@ -16,16 +16,7 @@ from torch.nn.utils.rnn import PackedSequence
 from .module import Module
 
 
-__all__ = [
-    "RNNBase",
-    "RNN",
-    "LSTM",
-    "GRU",
-    "RNNCellBase",
-    "RNNCell",
-    "LSTMCell",
-    "GRUCell",
-]
+__all__: list[str] = []
 
 _rnn_impls = {
     "RNN_TANH": _VF.rnn_tanh,
@@ -253,8 +244,8 @@ class RNNBase(Module):
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
         unique_data_ptrs = {
-            p.data_ptr()  # type: ignore[union-attr]
-            for p in self._flat_weights
+            p.data_ptr()
+            for p in self._flat_weights  # type: ignore[union-attr]
         }
         if len(unique_data_ptrs) != len(self._flat_weights):
             return
@@ -652,6 +643,9 @@ class RNN(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
+        """
+        Runs the forward pass.
+        """
         self._update_flat_weights()
 
         num_directions = 2 if self.bidirectional else 1
@@ -1821,3 +1815,13 @@ class GRUCell(RNNCellBase):
             ret = ret.squeeze(0)
 
         return ret
+
+
+GRU.__module__ = "torch.nn"
+GRUCell.__module__ = "torch.nn"
+LSTM.__module__ = "torch.nn"
+LSTMCell.__module__ = "torch.nn"
+RNN.__module__ = "torch.nn"
+RNNBase.__module__ = "torch.nn"
+RNNCell.__module__ = "torch.nn"
+RNNCellBase.__module__ = "torch.nn"

@@ -11,23 +11,7 @@ from .utils import _ntuple, _pair, _quadruple
 
 # TODO: grad_output size asserts in THNN
 
-__all__ = [
-    "CircularPad1d",
-    "CircularPad2d",
-    "CircularPad3d",
-    "ConstantPad1d",
-    "ConstantPad2d",
-    "ConstantPad3d",
-    "ReflectionPad1d",
-    "ReflectionPad2d",
-    "ReflectionPad3d",
-    "ReplicationPad1d",
-    "ReplicationPad2d",
-    "ReplicationPad3d",
-    "ZeroPad1d",
-    "ZeroPad2d",
-    "ZeroPad3d",
-]
+__all__: list[str] = []
 
 
 class _CircularPadNd(Module):
@@ -722,6 +706,9 @@ class ZeroPad1d(ConstantPad1d):
         super().__init__(padding, 0.0)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"{self.padding}"
 
 
@@ -776,6 +763,9 @@ class ZeroPad2d(ConstantPad2d):
         super().__init__(padding, 0.0)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"{self.padding}"
 
 
@@ -818,4 +808,24 @@ class ZeroPad3d(ConstantPad3d):
         super().__init__(padding, 0.0)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"{self.padding}"
+
+
+CircularPad1d.__module__ = "torch.nn"
+CircularPad2d.__module__ = "torch.nn"
+CircularPad3d.__module__ = "torch.nn"
+ConstantPad1d.__module__ = "torch.nn"
+ConstantPad2d.__module__ = "torch.nn"
+ConstantPad3d.__module__ = "torch.nn"
+ReflectionPad1d.__module__ = "torch.nn"
+ReflectionPad2d.__module__ = "torch.nn"
+ReflectionPad3d.__module__ = "torch.nn"
+ReplicationPad1d.__module__ = "torch.nn"
+ReplicationPad2d.__module__ = "torch.nn"
+ReplicationPad3d.__module__ = "torch.nn"
+ZeroPad1d.__module__ = "torch.nn"
+ZeroPad2d.__module__ = "torch.nn"
+ZeroPad3d.__module__ = "torch.nn"

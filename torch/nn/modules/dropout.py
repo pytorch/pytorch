@@ -4,14 +4,7 @@ from torch import Tensor
 from .module import Module
 
 
-__all__ = [
-    "Dropout",
-    "Dropout1d",
-    "Dropout2d",
-    "Dropout3d",
-    "AlphaDropout",
-    "FeatureAlphaDropout",
-]
+__all__: list[str] = []
 
 
 class _DropoutNd(Module):
@@ -67,6 +60,9 @@ class Dropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.dropout(input, self.p, self.training, self.inplace)
 
 
@@ -112,6 +108,9 @@ class Dropout1d(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.dropout1d(input, self.p, self.training, self.inplace)
 
 
@@ -164,6 +163,9 @@ class Dropout2d(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.dropout2d(input, self.p, self.training, self.inplace)
 
 
@@ -209,6 +211,9 @@ class Dropout3d(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.dropout3d(input, self.p, self.training, self.inplace)
 
 
@@ -251,6 +256,9 @@ class AlphaDropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.alpha_dropout(input, self.p, self.training)
 
 
@@ -302,4 +310,15 @@ class FeatureAlphaDropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.feature_alpha_dropout(input, self.p, self.training)
+
+
+AlphaDropout.__module__ = "torch.nn"
+Dropout.__module__ = "torch.nn"
+Dropout1d.__module__ = "torch.nn"
+Dropout2d.__module__ = "torch.nn"
+Dropout3d.__module__ = "torch.nn"
+FeatureAlphaDropout.__module__ = "torch.nn"

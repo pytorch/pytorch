@@ -11,12 +11,7 @@ from .lazy import LazyModuleMixin
 from .module import Module
 
 
-__all__ = [
-    "Bilinear",
-    "Identity",
-    "LazyLinear",
-    "Linear",
-]
+__all__: list[str] = []
 
 
 class Identity(Module):
@@ -44,6 +39,9 @@ class Identity(Module):
         super().__init__()
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return input
 
 
@@ -112,6 +110,9 @@ class Linear(Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in ``__init__``.
+        """
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
         # uniform(-1/sqrt(in_features), 1/sqrt(in_features)). For details, see
         # https://github.com/pytorch/pytorch/issues/57109
@@ -122,9 +123,15 @@ class Linear(Module):
             init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.linear(input, self.weight, self.bias)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}"
 
 
@@ -218,15 +225,24 @@ class Bilinear(Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in ``__init__``.
+        """
         bound = 1 / math.sqrt(self.weight.size(1))
         init.uniform_(self.weight, -bound, bound)
         if self.bias is not None:
             init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input1: Tensor, input2: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.bilinear(input1, input2, self.weight, self.bias)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return (
             f"in1_features={self.in1_features}, in2_features={self.in2_features}, "
             f"out_features={self.out_features}, bias={self.bias is not None}"
@@ -279,10 +295,16 @@ class LazyLinear(LazyModuleMixin, Linear):
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in ``__init__``.
+        """
         if not self.has_uninitialized_params() and self.in_features != 0:
             super().reset_parameters()
 
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
+        """
+        Infers ``in_features`` based on ``input`` and initializes parameters.
+        """
         if self.has_uninitialized_params():
             with torch.no_grad():
                 self.in_features = input.shape[-1]
@@ -298,5 +320,11 @@ class LazyLinear(LazyModuleMixin, Linear):
             )
             self.in_features = input.shape[-1]
 
+
+Bilinear.__module__ = "torch.nn"
+Identity.__module__ = "torch.nn"
+LazyLinear.__module__ = "torch.nn"
+Linear.__module__ = "torch.nn"
+NonDynamicallyQuantizableLinear.__module__ = "torch.nn"
 
 # TODO: PartialLinear - maybe in sparse?

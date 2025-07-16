@@ -8,7 +8,7 @@ from torch.nn.common_types import _ratio_2_t, _ratio_any_t, _size_2_t, _size_any
 from .module import Module
 
 
-__all__ = ["Upsample", "UpsamplingNearest2d", "UpsamplingBilinear2d"]
+__all__: list[str] = []
 
 
 class Upsample(Module):
@@ -169,6 +169,9 @@ class Upsample(Module):
         self.recompute_scale_factor = recompute_scale_factor
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.interpolate(
             input,
             self.size,
@@ -185,6 +188,9 @@ class Upsample(Module):
         super().__setstate__(state)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         if self.scale_factor is not None:
             info = "scale_factor=" + repr(self.scale_factor)
         else:
@@ -291,3 +297,8 @@ class UpsamplingBilinear2d(Upsample):
         scale_factor: Optional[_ratio_2_t] = None,
     ) -> None:
         super().__init__(size, scale_factor, mode="bilinear", align_corners=True)
+
+
+Upsample.__module__ = "torch.nn"
+UpsamplingBilinear2d.__module__ = "torch.nn"
+UpsamplingNearest2d.__module__ = "torch.nn"
