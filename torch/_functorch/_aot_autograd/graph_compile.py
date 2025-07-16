@@ -51,10 +51,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from .dispatch_and_compile_graph import (
-    aot_dispatch_autograd_graph,
-    aot_dispatch_base_graph,
-)
+from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
     AOTDedupeWrapper,
@@ -896,7 +893,7 @@ def create_wrap_fn(fn, args):
 
 
 def prepare_hook_gm(aot_config, fn, args):
-    from torch._functorch._aot_autograd.dispatch_and_compile_graph import _create_graph
+    from torch._functorch._aot_autograd.graph_capture import _create_graph
 
     fn, args = create_wrap_fn(fn, args)
     gm = _create_graph(fn, args, aot_config=aot_config)

@@ -49,15 +49,13 @@ from torch._export.utils import (
 )
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
+from torch._functorch._aot_autograd.graph_capture_wrappers import create_functional_call
 from torch._functorch._aot_autograd.input_output_analysis import (
     _graph_input_names,
     _graph_output_names,
 )
 from torch._functorch._aot_autograd.schemas import GraphSignature
 from torch._functorch._aot_autograd.subclass_utils import get_subclass_typing_container
-from torch._functorch._aot_autograd.traced_function_transforms import (
-    create_functional_call,
-)
 from torch._functorch._aot_autograd.utils import (
     create_tree_flattened_fn,
     register_buffer_assignment_hook,

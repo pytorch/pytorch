@@ -3211,7 +3211,7 @@ class TestUbackedOps(TestCase):
             self.assertEqual(compiled_result, eager_result)
 
         log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
         with ctx():
             make_non_contiguous_tensor_and_test(4)
@@ -3246,7 +3246,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
         log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
         with ctx():
             compiled_result = compiled_func(x, torch.tensor([10]))
@@ -3305,7 +3305,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         torch._dynamo.decorators.mark_unbacked(x, 1)
 
         log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
         with ctx():
             result_eager = func(x, torch.tensor([5, 20]))
@@ -3355,7 +3355,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
         # Pass a contiguous tensor. A recompilation will happen due to 0/1 speciialization on stride.
         log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
         with ctx():
             # This used to hit could guard on data-dependent expression Eq(10, u3) x.stride[0]==10. and x.size()=[u2, u3].
