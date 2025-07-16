@@ -405,10 +405,8 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
 
   // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
   // associated with the TensorImpl. Swap this field as well.
-  std::optional<PyObject*> obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->get_pyobj();
-  std::optional<PyObject*> obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->get_pyobj();
+  PyObject* obj_a = a->cdata->unsafeGetTensorImpl()->pyobj_slot()->get_pyobj();
+  PyObject* obj_b = b->cdata->unsafeGetTensorImpl()->pyobj_slot()->get_pyobj();
   TORCH_CHECK(obj_a == a_);
   TORCH_CHECK(obj_b == b_);
 
