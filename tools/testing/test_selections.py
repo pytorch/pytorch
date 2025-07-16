@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
-USE_3_PROCS = "sm86" in BUILD_ENVIRONMENT or "cuda" not in BUILD_ENVIRONMENT
+USE_3_PROCS = "sm" in BUILD_ENVIRONMENT or "cuda" not in BUILD_ENVIRONMENT
 
 # NUM_PROCS_FOR_SHARDING_CALC must remain consistent across all shards of a job
 # to ensure that sharding is consistent, NUM_PROCS is the actual number of procs
