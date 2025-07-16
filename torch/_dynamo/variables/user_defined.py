@@ -610,7 +610,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             ):
                 if not torch._dynamo.config.enable_trace_contextlib:
                     unimplemented_v2(
-                        gb_type="attemped to trace contextlib.contextmanager",
+                        gb_type="attempted to trace contextlib.contextmanager",
                         context=f"args={args}",
                         explanation="Tracing contextlib.contextmanager is disabled.",
                         hints=[
