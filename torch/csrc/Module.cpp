@@ -2874,8 +2874,9 @@ bool registerPythonPrivateUse1DeviceGuard(py::object guard) {
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     return false;
   }
-  static PythonPrivateUse1DeviceGuard python_guard(guard);
-  c10::impl::registerDeviceGuard(c10::DeviceType::PrivateUse1, &python_guard);
+  c10::impl::registerDeviceGuard(
+    c10::DeviceType::PrivateUse1, 
+    new PythonPrivateUse1DeviceGuard(guard));
   return true;
 }
 
