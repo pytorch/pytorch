@@ -702,8 +702,8 @@ Graph breaks can also be encountered on data-dependent control flow (`if
 x.shape[0] > 2`) when shapes are not being specialized, as a tracing compiler cannot
 possibly deal with without generating code for a combinatorially exploding
 number of paths. In such cases, users will need to rewrite their code using
-special control flow operators. Currently, we support {ref}`torch.cond <cond>`
-to express if-else like control flow (more coming soon!).
+special control flow operators. Currently, we support {ref}`control flow operators <control_flow_operators>`
+to express if-else like or iterative control flow.
 
 ### Missing Fake/Meta/Abstract Kernels for Operators
 
@@ -728,7 +728,7 @@ draft_export
 torch.compiler_transformations
 torch.compiler_ir
 generated/exportdb/index
-cond
+control_flow_operators
 ```
 
 ```{toctree}
