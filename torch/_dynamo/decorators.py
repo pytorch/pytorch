@@ -7,15 +7,12 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 
 import functools
 import inspect
-import sys
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
-from torch._environment import is_fbcode
-from torch._vendor.packaging.version import Version
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -31,11 +28,11 @@ from .eval_frame import (
 )
 from .exc import IncorrectUsage
 from .external_utils import (
-    _dynamo_config_patch_proxy_dunder_call,
     get_nonrecursive_disable_wrapper,
     is_compiling,
+    wrap_dunder_call_ctx_manager,
 )
-from .utils import is_function
+from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
 
 
 if TYPE_CHECKING:
@@ -742,40 +739,34 @@ def mark_static_address(t, guard=True):
         t._dynamo_static_input_type = "unguarded"  # type: ignore[attr-defined]
 
 
-# Note: this carefully avoids eagerly import einops.
-# TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
+# One day, Dynamo will support tracing into einops directly (no allow_in_graph needed)
+# Note that PyTorch supports multiple versions of einops, so when that day comes,
+# we still need to be really careful about version matches.
 def _allow_in_graph_einops():
-    mod = sys.modules.get("einops")
-    if mod is None:
-        return
-    else:
-        # version > 0.8.1 does allow_in_graph out of tree
-        # for BC we need to keep this in fbcode
-        # internal xref https://fb.workplace.com/groups/1026248852325474/permalink/1107135774236781/
-        if Version(mod.__version__) <= Version("0.8.1") or is_fbcode():
-            import einops
+    import einops
 
-            try:
-                # requires einops > 0.6.1, torch >= 2.0
-                from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
-                    _ops_were_registered_in_torchdynamo,
-                )
+    try:
+        # requires einops > 0.6.1, torch >= 2.0
+        from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
+            _ops_were_registered_in_torchdynamo,
+        )
 
-                # einops > 0.6.1 will call the op registration logic as it is imported.
-            except ImportError:
-                # einops <= 0.6.1
-                allow_in_graph(einops.rearrange)
-                allow_in_graph(einops.reduce)
-                if hasattr(einops, "repeat"):
-                    allow_in_graph(einops.repeat)  # available since einops 0.2.0
-                if hasattr(einops, "einsum"):
-                    allow_in_graph(einops.einsum)  # available since einops 0.5.0
-                if hasattr(einops, "pack"):
-                    allow_in_graph(einops.pack)  # available since einops 0.6.0
-                if hasattr(einops, "unpack"):
-                    allow_in_graph(einops.unpack)  # available since einops 0.6.0
+        # einops > 0.6.1 will call the op registration logic as it is imported.
+    except ImportError:
+        # einops <= 0.6.1
+        allow_in_graph(einops.rearrange)
+        allow_in_graph(einops.reduce)
+        if hasattr(einops, "repeat"):
+            allow_in_graph(einops.repeat)  # available since einops 0.2.0
+        if hasattr(einops, "einsum"):
+            allow_in_graph(einops.einsum)  # available since einops 0.5.0
+        if hasattr(einops, "pack"):
+            allow_in_graph(einops.pack)  # available since einops 0.6.0
+        if hasattr(einops, "unpack"):
+            allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
+# Note: this carefully avoids eagerly import einops.
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
 
@@ -791,7 +782,7 @@ class DynamoConfigPatchProxy:
 
     # Decorator implementation that simply sets up `self` as a context manager.
     # Placed in external_utils so that we can trace through it.
-    __call__ = _dynamo_config_patch_proxy_dunder_call
+    __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self):
         return self.config_patch.__enter__()
@@ -872,6 +863,14 @@ def patch_dynamo_config(
     return DynamoConfigPatchProxy(config_patch)
 
 
+@overload
+def dont_skip_tracing(fn: None = None) -> DynamoConfigPatchProxy: ...
+
+
+@overload
+def dont_skip_tracing(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
 def dont_skip_tracing(fn=None):
     """
     Context manager/decorator to trace into functions intentionally marked by developers to be skipped
@@ -883,3 +882,27 @@ def dont_skip_tracing(fn=None):
     if fn:
         return ctx(fn)
     return ctx
+
+
+class SetFullgraphDecoratorContextManager:
+    def __init__(self, fullgraph):
+        self.fullgraph = fullgraph
+
+    __call__ = wrap_dunder_call_ctx_manager
+
+    def __enter__(self):
+        self.prev_fullgraph = _get_error_on_graph_break()
+        _set_error_on_graph_break(self.fullgraph)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _set_error_on_graph_break(self.prev_fullgraph)
+
+
+def set_fullgraph(fullgraph: bool) -> SetFullgraphDecoratorContextManager:
+    """
+    Context manager/decorator to toggle fullgraph setting.
+
+    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
+    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
+    """
+    return SetFullgraphDecoratorContextManager(fullgraph)

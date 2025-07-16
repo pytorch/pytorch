@@ -2,6 +2,7 @@
 import os
 import random
 import tempfile
+import unittest
 from unittest import mock
 
 import torch
@@ -12,8 +13,9 @@ from torch._inductor.runtime.static_cuda_launcher import StaticallyLaunchedCudaK
 from torch._inductor.runtime.triton_compat import CompiledKernel, tl, triton
 from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm
 from torch.testing._internal.triton_utils import requires_cuda
+from torch.torch_version import TorchVersion
 
 
 @requires_cuda
@@ -143,6 +145,7 @@ class TestStaticCudaLauncher(TestCase):
     # despite type annotations.
     # There's also not really a good way for me to make a float16 in python...
     @skipIfRocm
+    @unittest.skipIf(IS_FBCODE, "Not working in fbcode")
     def test_floats(self):
         @triton.jit
         def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
@@ -156,10 +159,13 @@ class TestStaticCudaLauncher(TestCase):
 
         compiled_kernel = floats[1,](*args)
         launcher = self._make_launcher(compiled_kernel)
-        # TODO: in Pytorch's pinned version of triton, arg3 is typed as regular float
-        # but in triton 3.3.0, this is fixed and it's 0ffd. We'll need to update later.
-        self.assertEqual(launcher.arg_tys, "Offf")
-        self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda"))
+        if TorchVersion(triton.__version__) >= TorchVersion("3.4.0"):
+            self.assertEqual(launcher.arg_tys, "Offd")
+        else:
+            self.assertEqual(launcher.arg_tys, "Offf")
+        # TODO this line fails on Triton 3.4.0 (https://github.com/triton-lang/triton/issues/6176)
+        # Add the check back when this is fixed in Triton
+        # self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda"))
         new_arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())

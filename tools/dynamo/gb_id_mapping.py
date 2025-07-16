@@ -50,22 +50,42 @@ def clean_string(s):
     return s
 
 
-def expand_hints(hints):
-    # Expands hint references to their actual values from graph_break_hints.
-    from torch._dynamo import graph_break_hints
+def expand_hints(hints, dynamo_dir=None):
+    """
+    Expands hint references to their actual values from graph_break_hints.
+    Uses exec() to avoid import dependencies.
+    """
+    if dynamo_dir is None:
+        script_dir = Path(__file__).resolve().parent
+        dynamo_dir = script_dir.parent.parent / "torch" / "_dynamo"
+    else:
+        dynamo_dir = Path(dynamo_dir)
+
+    graph_break_hints_path = dynamo_dir / "graph_break_hints.py"
+
+    with open(graph_break_hints_path) as f:
+        hints_source = f.read()
+
+    hints_namespace = {}
+    exec(hints_source, hints_namespace)
 
     hint_constants = {
         name: value
-        for name, value in graph_break_hints.__dict__.items()
-        if isinstance(value, list) and name.isupper()
+        for name, value in hints_namespace.items()
+        if isinstance(value, list) and name.isupper() and not name.startswith("_")
     }
 
     expanded_hints = []
     for hint in hints:
+        expanded = False
         for name, value in hint_constants.items():
             if f"*graph_break_hints.{name}" in hint:
                 expanded_hints.extend(value)
+                expanded = True
                 break
+        if not expanded:
+            expanded_hints.append(hint)
+
     return expanded_hints
 
 
@@ -95,7 +115,7 @@ def extract_info_from_keyword(source, kw):
         return clean_string(param_source)
 
 
-def find_unimplemented_v2_calls(path):
+def find_unimplemented_v2_calls(path, dynamo_dir=None):
     results = []
     path = Path(path)
 
@@ -145,7 +165,7 @@ def find_unimplemented_v2_calls(path):
                                 expanded_hints.extend(items)
 
                             if "*graph_break_hints." in hints:
-                                expanded_hints.extend(expand_hints([hints]))
+                                expanded_hints.extend(expand_hints([hints], dynamo_dir))
 
                             info["hints"] = expanded_hints
 
@@ -156,7 +176,7 @@ def find_unimplemented_v2_calls(path):
     return results
 
 
-def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None):
+def cmd_add_new_gb_type(gb_type, file_path, registry_path):
     """
     Add a new graph break type to the registry.
 
@@ -174,8 +194,8 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None)
             f"Error: gb_type '{gb_type}' already exists in registry. Please rename the gb_type so it can be unique."
         )
         return False
-
-    calls = find_unimplemented_v2_calls(Path(file_path))
+    dynamo_dir = Path(registry_path).parent
+    calls = find_unimplemented_v2_calls(Path(file_path), dynamo_dir)
     matching_call = next((call for call in calls if call["gb_type"] == gb_type), None)
 
     if not matching_call:
@@ -191,7 +211,6 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None)
             "Context": matching_call["context"],
             "Explanation": matching_call["explanation"],
             "Hints": matching_call["hints"] or [],
-            **({"Additional_Info": [additional_info]} if additional_info else {}),
         }
     ]
 
@@ -200,9 +219,7 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None)
     return True
 
 
-def cmd_update_gb_type(
-    old_gb_type, file_path, registry_path, new_gb_type=None, additional_info=None
-):
+def cmd_update_gb_type(old_gb_type, file_path, registry_path, new_gb_type=None):
     """
     Update an existing graph break type in the registry by adding a new version
     to the version history list.
@@ -224,7 +241,8 @@ def cmd_update_gb_type(
         return False
 
     search_gb_type = new_gb_type if new_gb_type else old_gb_type
-    calls = find_unimplemented_v2_calls(Path(file_path))
+    dynamo_dir = Path(registry_path).parent
+    calls = find_unimplemented_v2_calls(Path(file_path), dynamo_dir)
     matching_call = next(
         (call for call in calls if call["gb_type"] == search_gb_type), None
     )
@@ -250,16 +268,6 @@ def cmd_update_gb_type(
         "Explanation": matching_call["explanation"],
         "Hints": matching_call["hints"] or [],
     }
-
-    if additional_info:
-        additional_info_list = reg[gb_id][0].get("Additional_Info", [])
-        new_entry["Additional_Info"] = (
-            additional_info_list + [additional_info]
-            if additional_info_list
-            else [additional_info]
-        )
-    elif "Additional_Info" in reg[gb_id][0]:
-        new_entry["Additional_Info"] = reg[gb_id][0]["Additional_Info"]
 
     reg[gb_id].insert(0, new_entry)
 
@@ -287,7 +295,7 @@ def test_verify_gb_id_mapping(dynamo_dir, registry_path):
 
     mismatches = []
     for file_path in python_files:
-        calls = find_unimplemented_v2_calls(file_path)
+        calls = find_unimplemented_v2_calls(file_path, dynamo_dir)
         for call in calls:
             gb_type = call["gb_type"]
             if gb_type not in gb_type_to_entry:
@@ -441,18 +449,12 @@ def main():
     if args.command == "create":
         create_registry(args.dynamo_dir, args.registry_path)
     elif args.command == "add":
-        success = cmd_add_new_gb_type(
-            args.gb_type, args.file_path, args.registry_path, args.additional_info
-        )
+        success = cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
         if not success:
             sys.exit(1)
     elif args.command == "update":
         success = cmd_update_gb_type(
-            args.gb_type,
-            args.file_path,
-            args.registry_path,
-            args.new_gb_type,
-            args.additional_info,
+            args.gb_type, args.file_path, args.registry_path, args.new_gb_type
         )
         if not success:
             sys.exit(1)

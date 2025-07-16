@@ -340,7 +340,8 @@ void initPythonBindings(PyObject* module) {
               bool /* adjust_profiler_step */,
               bool /* disable_external_correlation*/,
               bool /* profile_all_threads */,
-              bool /* capture_overload_names */
+              bool /* capture_overload_names */,
+              std::string /* custom_profiler_config*/
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -355,10 +356,11 @@ void initPythonBindings(PyObject* module) {
           "       that expose CUDA device, stream and event synchronization activities. This feature is new\n"
           "       and currently disabled by default.\n"
           "    adjust_profiler_step (bool) : whether to adjust the profiler step to\n"
-          "       match the parent python event duration. This feature is new and currently disabled by default.\n",
-          "    disable_external_correlation (bool) : whether to disable external correlation\n",
-          "    profile_all_threads (bool) : whether to profile all threads\n",
-          "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n",
+          "       match the parent python event duration. This feature is new and currently disabled by default.\n"
+          "    disable_external_correlation (bool) : whether to disable external correlation\n"
+          "    profile_all_threads (bool) : whether to profile all threads\n"
+          "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n"
+          "    custom_profiler_config (string) : Used to pass some configurations to the custom profiler backend.\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
           py::arg("verbose") = false,
@@ -367,7 +369,8 @@ void initPythonBindings(PyObject* module) {
           py::arg("adjust_profiler_step") = false,
           py::arg("disable_external_correlation") = false,
           py::arg("profile_all_threads") = false,
-          py::arg("capture_overload_names") = false)
+          py::arg("capture_overload_names") = false,
+          py::arg("custom_profiler_config") = "")
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -390,6 +393,7 @@ void initPythonBindings(PyObject* module) {
                 p.disable_external_correlation,
                 p.profile_all_threads,
                 p.capture_overload_names,
+                p.custom_profiler_config,
                 p.performance_events);
           },
           [](const py::tuple& t) { // __setstate__

@@ -15,7 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   get-default-label-prefix:
