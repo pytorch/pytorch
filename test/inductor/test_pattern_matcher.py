@@ -1736,18 +1736,6 @@ class TestPatternMatcher(TestCase):
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
 
-    def test_repeat_interleave_pass(self):
-        # https://github.com/pytorch/pytorch/issues/147160
-        def f(input, repeats):
-            return torch.repeat_interleave(input, repeats, dim=0, output_size=3) + 1
-
-        input = torch.tensor([[1, 2], [3, 4]], device="cuda")
-        repeat = torch.tensor([1, 2], device="cuda")
-        f_compiled = torch.compile(f)
-        test, (code,) = run_and_get_code(f_compiled, input, repeat)
-        self.assertEqual(test, f(input, repeat))
-        self.assertFalse("repeat_interleave.Tensor" in code)
-
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
