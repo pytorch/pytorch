@@ -2039,7 +2039,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         out_dtype = opt_mod(mod)
         self.assertEqual(out_dtype, torch.float32)
 
-    def test_dir(self):
+    def test_dir_for_wrapper_compile(self):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -2056,6 +2056,32 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod_keys = dir(mod)
         opt_mod = torch.compile(mod, backend="eager")
         opt_mod_keys = dir(opt_mod)
+
+        # Check user-defined attributes, parameters and buffers
+        self.assertNotIn("linear", opt_mod_keys)
+        self.assertNotIn("buf0", opt_mod_keys)
+        self.assertNotIn("param0", opt_mod_keys)
+
+        # Check all attributes, parameters and buffers
+        self.assertFalse(len(set(mod_keys).difference(opt_mod_keys)) == 0)
+
+    def test_dir_for_inplace_compile(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.buf0 = torch.nn.Buffer(torch.nn.Buffer(torch.randn(10, 10)))
+                self.register_parameter(
+                    name="param0", param=torch.nn.Parameter(torch.randn(10, 10))
+                )
+
+            def forward(self, x):
+                return self.r(torch.sin(x)) + self.buf0
+
+        mod = MockModule()
+        mod_keys = dir(mod)
+        mod.compile(backend="eager")
+        opt_mod_keys = dir(mod)
 
         # Check user-defined attributes, parameters and buffers
         self.assertIn("linear", opt_mod_keys)
