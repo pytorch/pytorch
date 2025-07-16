@@ -22,7 +22,7 @@ from .optimizer import (
 )
 
 
-__all__ = ["Adadelta", "adadelta"]
+__all__: list[str] = []
 
 
 class Adadelta(Optimizer):
@@ -468,3 +468,7 @@ def adadelta(
         capturable=capturable,
         has_complex=has_complex,
     )
+
+# We prefer torch.optim.Adadelta over torch.optim.adadelta.Adadelta
+Adadelta.__module__ = "torch.optim"
+adadelta.__module__ = "torch.optim"

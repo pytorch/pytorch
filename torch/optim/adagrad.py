@@ -21,7 +21,7 @@ from .optimizer import (
 )
 
 
-__all__ = ["Adagrad", "adagrad"]
+__all__: list[str] = []
 
 
 class Adagrad(Optimizer):
@@ -117,6 +117,7 @@ class Adagrad(Optimizer):
                 )
 
     def share_memory(self):
+        """Calls tensor.share_memory_() on the state sum tensors."""
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
@@ -571,3 +572,7 @@ def _fused_adagrad(
             torch._foreach_sub_(
                 device_state_steps, [device_found_inf] * len(device_state_steps)
             )
+
+# We prefer torch.optim.Adagrad over torch.optim.adagrad.Adagrad
+Adagrad.__module__ = "torch.optim"
+adagrad.__module__ = "torch.optim"
