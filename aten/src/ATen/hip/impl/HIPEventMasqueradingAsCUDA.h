@@ -90,7 +90,7 @@ class HIPEventPoolMasqueradingAsCUDA {
       HIPEventMasqueradingAsCUDA,
       std::function<void(HIPEventMasqueradingAsCUDA*)>>;
   HIPEventPoolMasqueradingAsCUDA() = default;
-  
+
   Event get(DeviceIndex device) {
     TORCH_INTERNAL_ASSERT(0 <= device);
     TORCH_INTERNAL_ASSERT(device < static_cast<DeviceIndex>(pools_.size()));
@@ -99,7 +99,7 @@ class HIPEventPoolMasqueradingAsCUDA {
       std::lock_guard<std::mutex> g(pool.mutex_);
       pool.event_pool_.push_back(std::unique_ptr<HIPEventMasqueradingAsCUDA>(event));
     };
-  
+
     // Try to acquire an event from the per-device pool.
     {
       std::lock_guard<std::mutex> g(pool.mutex_);
@@ -114,14 +114,14 @@ class HIPEventPoolMasqueradingAsCUDA {
     return Event(
         std::make_unique<HIPEventMasqueradingAsCUDA>().release(), destructor);
   }
-  
+
   void empty_cache() {
     for (auto& pool : pools_) {
       std::lock_guard<std::mutex> g(pool.mutex_);
       pool.event_pool_.clear();
     }
   }
-  
+
  private:
   struct PerDevicePool {
     alignas(64) std::mutex mutex_;
