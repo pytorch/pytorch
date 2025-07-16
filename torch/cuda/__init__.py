@@ -18,7 +18,7 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C
@@ -1775,6 +1775,9 @@ def _compile_kernel(
 
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
+
+
+_POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 
 
 __all__ = [
