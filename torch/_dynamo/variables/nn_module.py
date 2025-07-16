@@ -110,7 +110,6 @@ def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
             )
 
 
-
 @contextmanager
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
     fully_qualified_name = source.name()
