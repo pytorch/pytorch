@@ -37,7 +37,8 @@ if sys.version_info < (3, 12):
     ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
     ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
 else:
-    type ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
+    from typing import TypeAliasType
+    ObserverOrFakeQuantize = TypeAliasType(Union[ObserverBase, FakeQuantizeBase])
 
 for _f in [
     compare_results,

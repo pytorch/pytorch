@@ -20,7 +20,8 @@ if sys.version_info < (3, 12):
     NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
     NodePattern.__module__ = "torch.ao.quantization.utils"
 else:
-    type NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
+    from typing import TypeAliasType
+    NodePattern = TypeAliasType(Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any])
 
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
@@ -40,9 +41,10 @@ if sys.version_info < (3, 12):
     ]
     Pattern.__module__ = "torch.ao.quantization.utils"
 else:
-    type Pattern = Union[
+    from typing import TypeAliasType
+    Pattern = TypeAliasType(Union[
         Callable, tuple[Callable, Callable], tuple[Callable, tuple[Callable, Callable]], Any
-    ]
+    ])
 
 
 # TODO: maybe rename this to MatchInputNode

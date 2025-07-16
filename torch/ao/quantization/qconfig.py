@@ -572,7 +572,8 @@ if sys.version_info < (3, 12):
     QConfigAny = Optional[QConfig]
     QConfigAny.__module__ = "torch.ao.quantization.qconfig"
 else:
-    type QConfigAny = Optional[QConfig]
+    from typing import TypeAliasType
+    QConfigAny = TypeAliasType(Optional[QConfig])
 
 
 def _add_module_to_qconfig_obs_ctr(
