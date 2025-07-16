@@ -456,12 +456,6 @@ class OptimizedModule(torch.nn.Module):
             self._orig_mod._infer_parameters(self._orig_mod, args, kwargs)
         return self._forward(*args, **kwargs)
 
-    def __dir__(self):
-        orig_mod_attrs = self._orig_mod.__dir__()
-        return orig_mod_attrs + [
-            attr for attr in super().__dir__() if attr not in orig_mod_attrs
-        ]
-
 
 def remove_from_cache(f):
     """
