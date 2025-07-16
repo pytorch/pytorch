@@ -1099,13 +1099,17 @@ def fresh_cache(
     """
     clear_caches()
 
-    inductor_cache_dir = tempfile.mkdtemp(dir=dir)
+    from torch._inductor.cpp_builder import normalize_path_separator
+
+    inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
-            triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
+            triton_cache_dir = normalize_path_separator(
+                os.path.join(inductor_cache_dir, "triton")
+            )
             with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
                 yield
                 if isinstance(cache_entries, dict):
