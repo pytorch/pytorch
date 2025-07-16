@@ -6698,6 +6698,7 @@ MPS_TEST_FAILURES = {
     "test_fp8": fail_mps(),
     "test_fp8_view_of_param": fail_mps(),
     # Compilation Error
+    "test_aot_inductor_consts_cpp_build": fail_mps(),
     "test_fallback_kernel_with_symexpr_output": fail_mps(),
     "test_while_loop_with_mixed_device": fail_mps(),
     "test_while_loop_nested": fail_mps(),
