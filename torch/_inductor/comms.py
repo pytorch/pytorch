@@ -663,7 +663,7 @@ def _sink_waits_iterative_internal(
                         data_dep = o.get_name()
                         break
                 # 1. If we have data_dep - we can not swap => trying to group
-                # 2. If swap candidate and current node boths contain collectives => trying to group
+                # 2. If swap candidate and current node both contain collectives => trying to group
                 if data_dep is not None or (
                     both_contain_comms := (
                         contains_collective(wait_gsnode)
