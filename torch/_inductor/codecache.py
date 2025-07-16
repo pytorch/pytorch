@@ -858,7 +858,7 @@ class FxGraphHashDetails:
             map(self._get_custom_pass_detail, custom_backend_passes.values())
         )
 
-        # Resgister the custom partition function
+        # Register the custom partitioner function
         self._custom_partitioner_fn = self._get_custom_partitioner_fn_detail(
             config.custom_partitioner_fn
         )
