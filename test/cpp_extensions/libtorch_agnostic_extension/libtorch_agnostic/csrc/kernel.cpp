@@ -267,7 +267,7 @@ void boxed_my_transpose(StableIValue* stack, uint64_t num_args, uint64_t num_out
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
-  m.def("my_transpose(Tensor t, SymInt dim0, SymInt dim1) -> Tensor");
+  m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
