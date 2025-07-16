@@ -4974,6 +4974,7 @@ def scaled_dot_product_flash_attention_for_cpu(
     *,
     attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
+    enable_gqa: bool = False,
 ) -> tuple[Tensor, Tensor]:
     torch._check(
         torch.is_floating_point(query),
@@ -5000,6 +5001,7 @@ def scaled_dot_product_flash_attention_for_cpu(
         is_causal=is_causal,
         dropout_mask=None,
         scale=scale,
+        enable_gqa=enable_gqa,
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
