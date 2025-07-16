@@ -1521,6 +1521,10 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    @unittest.skipIf(
+        TEST_MPS and MACOS_VERSION < 14.0,
+        "bfloat16 is only supported on MacOS 14+",
+    )
     def test_size_with_unbacked_add_expr(self):
         # Tests AOTI autotuning to make sure the correct input tensor sizes
         # are generated for sizes that include an expr such as s0 + u0.
