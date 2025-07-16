@@ -687,19 +687,21 @@ def lazy_init():
         extra_check=is_valid_addmm_activation_fusion,
     )
 
+
 def is_valid_addmm_activation_fusion(match):
     if config.max_autotune_gemm:
         return False
+
     input = match.kwargs["input"].meta["val"]
     mat1 = match.kwargs["mat1"].meta["val"]
     mat2 = match.kwargs["mat2"].meta["val"]
 
     if not (input.is_cuda and input.dim() == 1 and input.is_contiguous()):
         return False
-    
+
     if not (mat1.dim() == 2 and mat2.dim() == 2):
         return False
-    
+
     # bias size must match output width
     if input.size(0) != mat2.size(1):
         return False
@@ -1585,7 +1587,6 @@ def addmm(match, mat1, mat2, *, inp):
         return aten.addmm(inp, mat1, mat2)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
-
 
 
 def register_partial_reduction_pattern():
