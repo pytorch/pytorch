@@ -218,9 +218,10 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
 c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
     const c10::intrusive_ptr<Store>& store,
     const MergeOptions& opts,
-    const int& rank,
     const int& size) {
   c10::intrusive_ptr<ProcessGroup> newGroup;
+  // We assume rank number is within the range of int32_t, so it won't overflow.
+  int rank = static_cast<int>(store->add("mergeGroupRank", 1) - 1);
   // TODO: Do we need to check all groups have same deviceTypeToBackendType_?
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
@@ -228,7 +229,10 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
 
     auto parentBackend = getBackend(deviceType);
     auto backendOpts = parentBackend->getBackendOptions();
-    backendOpts->group_name = opts.group_name;
+    std::string groupName = opts.group_name.has_value()
+        ? opts.group_name.value()
+        : c10::str(getGroupName(), ":merge");
+    backendOpts->group_name = groupName;
     backendOpts->timeout = opts.timeout;
     auto mergedBackend = parentBackend->merge(store, backendOpts, rank, size);
 
@@ -237,10 +241,13 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
         : c10::str(getGroupDesc(), ":merge");
     mergedBackend->setGroupDesc(groupDesc);
 
+    // Historically, we have been using one process_group to map to all
+    // backends. but in our new design, we will have one process_group per
+    // backend. This logic is mostly for backward compatibility.
     if (!newGroup) {
-      newGroup = c10::make_intrusive<ProcessGroup>(store_->clone(), rank, size);
+      newGroup = c10::make_intrusive<ProcessGroup>(store, rank, size);
       newGroup->setDefaultBackend(backendType_);
-      newGroup->setGroupName(opts.group_name);
+      newGroup->setGroupName(groupName);
       newGroup->setGroupDesc(groupDesc);
     }
     newGroup->setBackend(deviceType, backendType, mergedBackend);

@@ -2064,7 +2064,6 @@ communication mechanism.
           .def("rank", &::c10d::ProcessGroup::getRank, R"(Get the rank of this process group.)")
           .def("size", &::c10d::ProcessGroup::getSize, R"(Get the size of this process group.)")
           .def("name", &::c10d::ProcessGroup::getBackendName, R"(Get the name of this process group.)")
-          .def("store", &::c10d::ProcessGroup::getStore, R"(Get the store of this process group.)")
           .def(
               "split_group",
               &::c10d::ProcessGroup::splitGroup,
@@ -2075,11 +2074,23 @@ communication mechanism.
               py::call_guard<py::gil_scoped_release>())
            .def(
               "merge_remote_group",
-              &::c10d::ProcessGroup::mergeRemoteGroup,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const c10::intrusive_ptr<::c10d::Store>& store,
+                 int size,
+                 std::chrono::milliseconds timeout,
+                 std::optional<std::string> groupName,
+                 std::optional<std::string> groupDesc) {
+                ::c10d::ProcessGroup::MergeOptions opts;
+                opts.timeout = timeout;
+                opts.group_name = groupName;
+                opts.group_desc = groupDesc;
+                return self->mergeRemoteGroup(store, opts, size);
+              },
               py::arg("store"),
-              py::arg("merge_options"),
-              py::arg("rank"),
               py::arg("size"),
+              py::arg("timeout") = kProcessGroupDefaultTimeout,
+              py::arg("group_name") = std::nullopt,
+              py::arg("group_desc") = std::nullopt,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "abort",
@@ -3075,28 +3086,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("timeout") = kProcessGroupDefaultTimeout)
           .def_readonly("backend", &::c10d::Backend::Options::backend)
           .def_readwrite("_timeout", &::c10d::Backend::Options::timeout);
-
-  intrusive_ptr_class_<::c10d::ProcessGroup::MergeOptions>(
-      module, "MergeOptions", R"(Class for ProcessGroup Merge Options)")
-      .def(
-          py::init([](const std::string& group_name,
-                      const std::chrono::milliseconds& timeout,
-                      const std::optional<std::string> group_desc) {
-            // gil_scoped_release is not safe as a call_guard in init.
-            // https://github.com/pybind/pybind11/issues/5473
-            py::gil_scoped_release nogil{};
-
-            return c10::make_intrusive<::c10d::ProcessGroup::MergeOptions>(
-                group_name, timeout);
-          }),
-          py::arg("group_name"),
-          py::arg("timeout") = kProcessGroupDefaultTimeout,
-          py::arg("group_desc") = std::nullopt)
-      .def_readonly(
-          "group_name", &::c10d::ProcessGroup::MergeOptions::group_name)
-      .def_readwrite("_timeout", &::c10d::ProcessGroup::MergeOptions::timeout)
-      .def_readonly(
-          "group_desc", &::c10d::ProcessGroup::MergeOptions::group_desc);
 
 #ifdef USE_C10D_GLOO
   static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";

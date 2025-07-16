@@ -169,7 +169,6 @@ class PyProcessGroup : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup> mergeRemoteGroup(
       const c10::intrusive_ptr<c10d::Store>& store,
       const MergeOptions& opts,
-      const int& rank,
       const int& size) override {
     PYBIND11_OVERRIDE(
         c10::intrusive_ptr<ProcessGroup>, /* Return type */
@@ -177,7 +176,6 @@ class PyProcessGroup : public ProcessGroup {
         mergeRemoteGroup, /* Name of function in C++ */
         store,
         opts,
-        rank,
         size);
   }
 

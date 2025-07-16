@@ -73,8 +73,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
  public:
   struct TORCH_API MergeOptions : torch::CustomClassHolder {
     explicit MergeOptions(
-        const std::string group_name,
         const std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
+        const std::optional<std::string> group_name = std::nullopt,
         const std::optional<std::string> group_desc = std::nullopt)
         : timeout(timeout), group_name(group_name), group_desc(group_desc) {}
     ~MergeOptions() override = default;
@@ -82,7 +82,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     MergeOptions& operator=(const MergeOptions&) = delete;
 
     std::chrono::milliseconds timeout;
-    std::string group_name;
+    std::optional<std::string> group_name;
     std::optional<std::string> group_desc;
   };
 
@@ -901,10 +901,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return backendTypeToBackend_.at(backendType);
   }
 
-  c10::intrusive_ptr<Store> getStore() {
-    return store_;
-  }
-
   // Return device types supported by this ProcessGroup.
   // Note: the return type is `Device` rather than `DeviceType` for the purpose
   // of easy comparison at Python level. The `Device` will have default index
@@ -991,7 +987,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual c10::intrusive_ptr<ProcessGroup> mergeRemoteGroup(
       const c10::intrusive_ptr<Store>& store,
       const MergeOptions& opts,
-      const int& rank,
       const int& size);
 
  protected:
