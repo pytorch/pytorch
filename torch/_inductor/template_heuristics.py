@@ -1185,3 +1185,10 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
     """
     Placeholder child class for XPU specific overrides.
     """
+    pass
+
+class MTIAConfigHeuristic(BaseConfigHeuristic):
+    """
+    Placeholder child class for MTIA specific overrides.
+    """
+    pass

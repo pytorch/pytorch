@@ -15,6 +15,7 @@ from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .template_heuristics import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
+    MTIAConfigHeuristic,
     CUDAConfigHeuristic,
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
@@ -65,6 +66,8 @@ class InductorChoices:
             return XPUConfigHeuristic()
         elif device_type == "cpu":
             return CPUConfigHeuristic()
+        elif device_type == "mtia":
+            return MTIAConfigHeuristic()
         else:
             return BaseConfigHeuristic()
 
