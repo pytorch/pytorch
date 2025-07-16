@@ -172,14 +172,14 @@ bool use_ragged_in_dense(
     return !has_bias;
   }
   bool all_bshd = q.dim() == 4 && q.transpose(1, 2).is_contiguous() &&
-      k.dim() == 4 && k.transpose(1, 2).is_contiguous() &&
-      v.dim() == 4 && v.transpose(1, 2).is_contiguous() &&
-      o.dim() == 4 && o.transpose(1, 2).is_contiguous();
+      k.dim() == 4 && k.transpose(1, 2).is_contiguous() && v.dim() == 4 &&
+      v.transpose(1, 2).is_contiguous() && o.dim() == 4 &&
+      o.transpose(1, 2).is_contiguous();
   if (!all_bshd) {
     TORCH_WARN_ONCE(
-         "TORCH_CUDNN_SDPA_AVOID_RECOMPILE=1 only works with Q, K, V, and output in BSHD memory layout,"
-         "e.g., Q, K, V must be allocated with torch.randn((B, S, H, D).transpose(1, 2)."
-         "Falling back to regualr dense case, which may trigger excessive recompilation.");
+        "TORCH_CUDNN_SDPA_AVOID_RECOMPILE=1 only works with Q, K, V, and output in BSHD memory layout,"
+        "e.g., Q, K, V must be allocated with torch.randn((B, S, H, D).transpose(1, 2)."
+        "Falling back to regualr dense case, which may trigger excessive recompilation.");
   }
   return all_bshd;
 }
@@ -353,11 +353,11 @@ struct MHAGraphCache {
         c10::utils::check_env("TORCH_CUDNN_SDPA_CACHE_DEBUG") == true;
     if (flag && count) {
       TORCH_WARN(
-           "SDPA Cache Called ",
-           count,
-           " times. Hit rate: ",
-           100*hits/count,
-           "%");
+          "SDPA Cache Called ",
+          count,
+          " times. Hit rate: ",
+          100 * hits / count,
+          "%");
     }
     count++;
     auto it = engine_cache.find(key);
@@ -542,8 +542,6 @@ auto build_graph(
   auto [O_, Stats] =
       mha_graph->sdpa(Q_, K_, V_, scaled_dot_product_flash_attention_options);
   O_->set_uid(O).set_output(true);
-
-
   if (Stats) {
     Stats->set_uid(LSE)
         .set_output(true)
@@ -602,13 +600,13 @@ auto build_graph(
     // if e.g., a ragged dim is smaller than a non-ragged one:
     // consider HBSD tensor where H is 1
     Q_->set_dim(qsizevec).set_stride(
-        {INT_MAX, qsizevec[3], qsizevec[1]*qsizevec[3], 1});
+        {INT_MAX, qsizevec[3], qsizevec[1] * qsizevec[3], 1});
     K_->set_dim(ksizevec).set_stride(
-        {INT_MAX, ksizevec[3], ksizevec[1]*ksizevec[3], 1});
+        {INT_MAX, ksizevec[3], ksizevec[1] * ksizevec[3], 1});
     V_->set_dim(vsizevec).set_stride(
-        {INT_MAX, vsizevec[3], vsizevec[1]*vsizevec[3], 1});
+        {INT_MAX, vsizevec[3], vsizevec[1] * vsizevec[3], 1});
     O_->set_dim(osizevec).set_stride(
-        {INT_MAX, osizevec[3], osizevec[1]*osizevec[3], 1});
+        {INT_MAX, osizevec[3], osizevec[1] * osizevec[3], 1});
     if (Stats) {
       Stats->set_ragged_offset(RAG_STATS_OFF_);
       auto statssizevec = softmaxstats.sizes().vec();
@@ -905,9 +903,9 @@ auto build_graph_backward(
                               .set_dim({b, 1, 1, 1})
                               .set_stride({1, 1, 1, 1})
                               .set_data_type(fe::DataType_t::INT32));
-   sdpa_backward_options.set_seq_len_q(SEQ_LEN_Q_)
-       .set_seq_len_kv(SEQ_LEN_KV_)
-       .set_padding_mask(true);
+    sdpa_backward_options.set_seq_len_q(SEQ_LEN_Q_)
+        .set_seq_len_kv(SEQ_LEN_KV_)
+        .set_padding_mask(true);
   }
 
   auto Q_ = mha_graph->tensor(
@@ -1016,22 +1014,22 @@ auto build_graph_backward(
     // see corresponding section in the forward about the hardcoding
     // of strides here
     Q_->set_dim(qsizevec).set_stride(
-        {INT_MAX, qsizevec[3], qsizevec[1]*qsizevec[3], 1});
+        {INT_MAX, qsizevec[3], qsizevec[1] * qsizevec[3], 1});
     K_->set_dim(ksizevec).set_stride(
-        {INT_MAX, ksizevec[3], ksizevec[1]*ksizevec[3], 1});
+        {INT_MAX, ksizevec[3], ksizevec[1] * ksizevec[3], 1});
     V_->set_dim(vsizevec).set_stride(
-        {INT_MAX, vsizevec[3], vsizevec[1]*vsizevec[3], 1});
+        {INT_MAX, vsizevec[3], vsizevec[1] * vsizevec[3], 1});
     O_->set_dim(osizevec).set_stride(
-        {INT_MAX, osizevec[3], osizevec[1]*osizevec[3], 1});
+        {INT_MAX, osizevec[3], osizevec[1] * osizevec[3], 1});
     // should be identical to their non-d counterparts
     Dq->set_dim(qsizevec).set_stride(
-        {INT_MAX, qsizevec[3], qsizevec[1]*qsizevec[3], 1});
+        {INT_MAX, qsizevec[3], qsizevec[1] * qsizevec[3], 1});
     Dk->set_dim(ksizevec).set_stride(
-        {INT_MAX, ksizevec[3], ksizevec[1]*ksizevec[3], 1});
+        {INT_MAX, ksizevec[3], ksizevec[1] * ksizevec[3], 1});
     Dv->set_dim(vsizevec).set_stride(
-        {INT_MAX, vsizevec[3], vsizevec[1]*vsizevec[3], 1});
+        {INT_MAX, vsizevec[3], vsizevec[1] * vsizevec[3], 1});
     Do->set_dim(osizevec).set_stride(
-        {INT_MAX, osizevec[3], osizevec[1]*osizevec[3], 1});
+        {INT_MAX, osizevec[3], osizevec[1] * osizevec[3], 1});
 
     Stats->set_ragged_offset(RAG_STATS_OFF_);
     auto statssizevec = softmaxstats.sizes().vec();
@@ -1615,8 +1613,8 @@ void run_cudnn_SDP_bprop(
                             .add_(-s_q);
     auto cum_seqlen_kv =
         at::full({b + 1, 1, 1, 1}, s_kv, q.options().dtype(kInt))
-        .cumsum(0, kInt)
-        .add_(-s_kv);
+            .cumsum(0, kInt)
+            .add_(-s_kv);
     rag_off_q = cum_seqlen_q.mul(q.stride(-2));
     rag_off_k = cum_seqlen_kv.mul(k.stride(-2));
     rag_off_v = cum_seqlen_kv.mul(v.stride(-2));
