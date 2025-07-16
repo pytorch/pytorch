@@ -73,7 +73,7 @@ class LayoutPlanner {
   }
 
   bool is_managed(ValueId id) {
-    TORCH_CHECK_LT(static_cast<size_t>(id), managed_values_.size());
+    TORCH_CHECK(static_cast<size_t>(id) < managed_values_.size());
     return managed_values_[id];
   }
 
