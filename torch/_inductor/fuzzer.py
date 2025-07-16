@@ -24,6 +24,7 @@ from typing import (
 
 import torch
 from torch._inductor.custom_graph_pass import CustomGraphPass
+from torch._inductor.custom_partitioner_fn import CustomPartitionerFn
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch.utils._config_module import _ConfigEntry, ConfigModule
 from torch.utils._ordered_set import OrderedSet
@@ -74,6 +75,20 @@ class DummyPass(CustomGraphPass):
         return None
 
 
+class DummyPartitionerFn(CustomPartitionerFn):
+    """
+    A Dummy partitioner function to be used by ConfigFuzzer
+    """
+
+    def __call__(
+        self, gm: torch.fx.GraphModule, joint_inputs: Sequence[object], **kwargs: object
+    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+        return gm, gm
+
+    def uuid(self) -> Optional[Any]:
+        return None
+
+
 T = TypeVar("T")
 
 
@@ -84,6 +99,7 @@ class TypeExemplars:
 
     TYPE_EXEMPLARS: dict[str, Any] = {
         CustomGraphPass.__name__: DummyPass(),
+        CustomPartitionerFn.__name__: DummyPartitionerFn(),
         torch.fx.graph.Graph.__name__: torch.fx.graph.Graph(),
         BaseSchedulerNode.__name__: BaseSchedulerNode(None),  # type: ignore[arg-type]
     }

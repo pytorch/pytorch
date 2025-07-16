@@ -63,6 +63,7 @@ from torch._inductor.cudagraph_utils import (
     log_cudagraph_skip_and_bump_counter,
     PlaceholderInfo,
 )
+from torch._inductor.custom_partitioner_fn import CustomPartitionerFn
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.output_code import (
     CompiledAOTI,
@@ -2348,16 +2349,30 @@ def compile_fx(
                 "static_lifetime_input_indices", None
             )
 
-            with dynamo_utils.dynamo_timed(
-                "min_cut_rematerialization_partition", log_pt2_compile_event=True
-            ):
-                return min_cut_rematerialization_partition(
-                    gm,
-                    joint_inputs,
-                    compiler="inductor",
-                    static_lifetime_input_indices=static_lifetime_input_indices,
-                    **kwargs,
-                )
+            if config.custom_partitioner_fn is None:
+                with dynamo_utils.dynamo_timed(
+                    "min_cut_rematerialization_partition", log_pt2_compile_event=True
+                ):
+                    return min_cut_rematerialization_partition(
+                        gm,
+                        joint_inputs,
+                        compiler="inductor",
+                        static_lifetime_input_indices=static_lifetime_input_indices,
+                        **kwargs,
+                    )
+            else:
+                assert isinstance(config.custom_partitioner_fn, CustomPartitionerFn)
+                with dynamo_utils.dynamo_timed(
+                    config.custom_partitioner_fn.__class__.__name__,
+                    log_pt2_compile_event=True,
+                ):
+                    return config.custom_partitioner_fn(
+                        gm,
+                        joint_inputs,
+                        compiler="inductor",
+                        static_lifetime_input_indices=static_lifetime_input_indices,
+                        **kwargs,
+                    )
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
