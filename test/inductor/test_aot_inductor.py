@@ -2745,9 +2745,16 @@ class AOTInductorTestsTemplate:
             torch.randn(87, 87, device=self.device),
         )
         model = Model()
+
+        if config.triton.enable_native_matmul:
+            atol, rtol = 2e-4, 2e-4
+        else :
+            # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
+            atol, rtol = 1e-4, 1e-4
+
         self.check_model(
-            model, example_inputs, atol=1e-4, rtol=1e-4
-        )  # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
+            model, example_inputs, atol=atol, rtol=rtol
+        )  
 
         if self.device == "mps":
             self.code_check_count(
@@ -5619,7 +5626,13 @@ class AOTInductorTestsTemplate:
         runner.update_constant_buffer(attach_weights, False, False)
         expected = model(test_inputs)
         output = runner_call(test_inputs)
-        self.assertEqual(expected, output)
+
+        if config.triton.enable_native_matmul:
+            atol, rtol = 2e-4, 2e-4
+        else :
+            atol, rtol = None, None 
+
+        self.assertEqual(expected, output, atol=atol, rtol=rtol)
 
     def test_weight_on_disk_legacy(self):
         class Model(torch.nn.Module):

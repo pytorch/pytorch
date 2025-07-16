@@ -6381,10 +6381,15 @@ class CommonTemplate:
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
+            atol, rtol = None, None
             if self.device == "cpu":
                 FileCheck().check_not("cpp_fused").run(source_codes[0])
-            else:
-                FileCheck().check_not("triton.jit").run(source_codes[0])
+            else :
+                if config.triton.enable_native_matmul: 
+                    FileCheck().check("triton.jit").run(source_codes[0])
+                    atol, rtol = 1e-2, 1e-2
+                else :
+                    FileCheck().check_not("triton.jit").run(source_codes[0])
 
         # test dtype conversion
         for lowp_dtype in [torch.float16, torch.bfloat16]:
@@ -6396,14 +6401,24 @@ class CommonTemplate:
             ]
             for fn in fns:
                 out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
-                self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+                self.assertEqual(
+                    out, 
+                    matmul_with_op(inps[0], inps[1], fn), 
+                    atol=atol, 
+                    rtol=rtol
+                )
 
             # test broadcasted shape bail
             fn = lambda x: x + torch.zeros(  # noqa: E731
                 [256, 256, 256], dtype=lowp_dtype, device=self.device
             )
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
-            self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+            self.assertEqual(
+                out, 
+                matmul_with_op(inps[0], inps[1], fn),
+                atol=atol,
+                rtol=rtol
+            )
 
     def test_remove_noop_copy(self):
         def fn(x, y):
@@ -6783,6 +6798,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(force_disable_caches=True)
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    @unittest.skipIf(
+        config.triton.enable_native_matmul, 
+        "matmul is now generated"
+    )
     def test_deterministic_codegen_with_suffix(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -8488,7 +8507,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch._inductor.metrics.generated_kernel_count = 0
         with torch.no_grad():
             self.common(kv_cache_module, (inp, 1), check_lowp=False)
-        assertGeneratedKernelCountEqual(self, 1)
+        count = 2 if config.triton.enable_native_matmul else 1 
+        assertGeneratedKernelCountEqual(self, count)
 
     @skip_if_gpu_halide  # compile error on gpu
     def test_scatter1(self):
@@ -9747,7 +9767,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
             check_lowp=False,
         )
-        expected_kernel = 0
+        expected_kernel = 1 if config.triton.enable_native_matmul else 0
         # codegen mm kernel from template
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel

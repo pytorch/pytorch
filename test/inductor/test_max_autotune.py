@@ -975,6 +975,10 @@ class TestMaxAutotune(TestCase):
             torch.compile(lambda a, b: a.matmul(b))(a, b)
         self.assertIn("NoValidChoicesError", str(context.exception))
 
+    @unittest.skipIf(
+        config.triton.enable_native_matmul,
+        "Only test when template is being called"
+    )
     @parametrize("multi_template", (True, False))
     @config.patch(
         max_autotune=True,
