@@ -3008,7 +3008,7 @@ def local_response_norm(
 
 
 def ctc_loss(
-    log_probs: Tensor,
+    inputs: Tensor,
     targets: Tensor,
     input_lengths: Tensor,
     target_lengths: Tensor,
@@ -3027,9 +3027,9 @@ def ctc_loss(
         {backward_reproducibility_note}
 
     Args:
-        log_probs: :math:`(T, N, C)` or :math:`(T, C)` where `C = number of characters in alphabet including blank`,
+        inputs: :math:`(T, N, C)` or :math:`(T, C)` where `C = number of characters in alphabet including blank`,
             `T = input length`, and `N = batch size`.
-            The logarithmized probabilities of the outputs
+            The unnormalized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
         targets: :math:`(N, S)` or `(sum(target_lengths))`.
                 May be an empty tensor if all entries in `target_lengths` are zero.
@@ -3053,20 +3053,20 @@ def ctc_loss(
 
     Example::
 
-        >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
+        >>> inputs = torch.randn(50, 16, 20).detach().requires_grad_()
         >>> targets = torch.randint(1, 20, (16, 30), dtype=torch.long)
         >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
         >>> target_lengths = torch.randint(10, 30, (16,), dtype=torch.long)
-        >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        >>> loss = F.ctc_loss(inputs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
 
-    if has_torch_function_variadic(log_probs, targets, input_lengths, target_lengths):
+    if has_torch_function_variadic(inputs, targets, input_lengths, target_lengths):
         raw_ctc = lambda x, *o: ctc_loss(log_softmax(x, -1), *o)
         return handle_torch_function(
             raw_ctc,
-            (log_probs, targets, input_lengths, target_lengths),
-            log_probs,
+            (inputs, targets, input_lengths, target_lengths),
+            inputs,
             targets,
             input_lengths,
             target_lengths,
@@ -3078,7 +3078,7 @@ def ctc_loss(
     raw_ctc = lambda x, *o: torch.ctc_loss(log_softmax(x, -1), *o)
 
     return raw_ctc(
-        log_probs,
+        inputs,
         targets,
         input_lengths,
         target_lengths,
