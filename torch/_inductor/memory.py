@@ -10,7 +10,7 @@ from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
 from .ir import MultiOutputLayout, NoneLayout
-from .utils import get_dtype_size, is_wait
+from .utils import get_dtype_size
 from .virtualized import V
 
 
@@ -78,19 +78,8 @@ def get_freeable_input_buf(
         A dictionary containing all freeble input buffers, keyed by their names.
     """
 
-    # this function is copied from torch/_inductor/scheduler.py
-    # TODO: would be nice to remove the try/except block for both places
     def _dep_size_hint(dep: Dep) -> int:
-        res = 0
-        try:
-            if not dep.has_unbacked_symbols():
-                res = dep.numbytes_hint()
-        except KeyError:
-            # In at least one test (test/inductor/test_torchbind.py) we
-            # create a StarDep that doesn't exist in the graph and calling
-            # `has_unbacked_symbols()` throws an error.
-            pass
-        return res
+        return V.graph.get_dep_size_hint(dep)
 
     # get freeable input buffers' successor nodes and their sizes
     # note that different deps can have the same name, so we use name as keys
@@ -147,23 +136,18 @@ def compute_size_for_scheduler_buffer(
         sched_buf: SchedulerBuffer, user_of_MultiOutputLayout: bool = False
     ) -> int:
         if isinstance(sched_buf.node.layout, NoneLayout):
-            _size = 0
-            # for a wait tensor op, its schedulerBuffer NoneLayout layout. However,
-            # the schedulerBuffer is treated as a mutation of the collective output
-            # so it needs to inherit the size of the collectives
-            if (
-                sched_buf.defining_op
-                and is_wait(sched_buf.defining_op.node)
-                and sched_buf.get_mutations()
-            ):
+            # mutations should inherit the size of the mutated buffer
+            if sched_buf.get_mutations():
                 mutated_buf_name = sched_buf.get_mutations()[0]
-                _size = (
-                    sched_buf_to_size[mutated_buf_name][1]
-                    if mutated_buf_name in sched_buf_to_size
-                    else 0
-                )
-            sched_buf_to_size[sched_buf.get_name()] = (_size, _size)
-            return _size
+                if mutated_buf_name in sched_buf_to_size:
+                    (_size_alloc, _size_free) = sched_buf_to_size[mutated_buf_name]
+                else:
+                    (_size_alloc, _size_free) = (0, 0)
+                sched_buf_to_size[sched_buf.get_name()] = (0, _size_free)
+                sched_buf_to_size[mutated_buf_name] = (_size_alloc, 0)
+            else:
+                sched_buf_to_size[sched_buf.get_name()] = (0, 0)
+            return 0
         elif isinstance(sched_buf.node.layout, MultiOutputLayout):
             size_alloc = 0
             for user in sched_buf.users:

@@ -195,7 +195,9 @@ class InductorChoices:
         if cooperative_reduction:
             # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
             try:
-                threshold *= 32 // min(V.graph.sizevars.size_hint(features.numel), 32)
+                threshold *= 32 // min(
+                    V.graph.sizevars.size_hint_or_throw(features.numel), 32
+                )
             except ValueError:
                 pass  # unbacked symint
 
@@ -361,6 +363,10 @@ class InductorChoices:
 
         if scheduler.can_fusion_increase_peak_memory(node1, node2):
             WhyNoFuse(node1, node2)("Fusion will increase peak memory")
+            return False
+
+        if scheduler.fusion_accumulate_large_reads(node1, node2):
+            WhyNoFuse(node1, node2)("Fusion accumulate large amount of reads")
             return False
 
         return True

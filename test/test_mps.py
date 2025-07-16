@@ -23,7 +23,7 @@ from torch.nn import Buffer, Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier, mps_ops_error_inputs_modifier
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
@@ -70,14 +70,6 @@ _ref_test_ops = tuple(
         op_db,
     )
 )
-
-def xfailIf(condition):
-    def wrapper(func):
-        if condition:
-            return unittest.expectedFailure(func)
-        else:
-            return func
-    return wrapper
 
 # Same logic as test_cuda.py
 if not torch.backends.mps.is_available():
@@ -640,7 +632,7 @@ class MPSLeakyReluTest(TestCaseMPS):
         mps_x = cpu_x.detach().clone().to('mps')
 
         if not contiguous and not (0 in shape or len(shape) < 2):
-            # Tranposing will make the tensor non-contiguous
+            # Transposing will make the tensor non-contiguous
             cpu_x = cpu_x.transpose(0, 1)
             mps_x = mps_x.transpose(0, 1)
             assert not mps_x.is_contiguous()
@@ -940,7 +932,7 @@ class TestMPS(TestCaseMPS):
             x.requires_grad = True
             d = torch.cdist(x, y)
             d.backward(dist_grad)
-            # Check that the backward passs does not contain invalid
+            # Check that the backward pass does not contain invalid
             # values such as nan or inf
             assert torch.isfinite(x.grad).all()
 
@@ -1195,7 +1187,7 @@ class TestMPS(TestCaseMPS):
             torch.nn.functional.linear(torch.rand(size, device='mps'),
                                        torch.randint(-10, 10, size, dtype=torch.int8, device='mps'))
 
-        # Weigths on wrong device
+        # Weights on wrong device
         with self.assertRaisesRegex(RuntimeError, "argument weight is on cpu but expected on mps"):
             torch.nn.functional.linear(torch.rand(size, device='mps'),
                                        torch.rand(size, device='cpu'))
@@ -1747,6 +1739,26 @@ class TestMPS(TestCaseMPS):
         res_mps = bn_mps(x_mps[5:])
 
         self.assertEqual(res_cpu, res_mps)
+
+    def test_batch_norm_backward_weight_bias_gradients(self):
+        # See issue: https://github.com/pytorch/pytorch/issues/156555
+        N, C, L = 4, 3, 5
+        x = torch.randn(N, C, L)
+        y = torch.randn(N, C, L)
+        bn_cpu = nn.BatchNorm1d(C, affine=True).cpu().train()
+        bn_mps = nn.BatchNorm1d(C, affine=True).to('mps').train()
+        bn_mps.load_state_dict(bn_cpu.state_dict())
+
+        out_cpu = bn_cpu(x)
+        out_mps = bn_mps(x.to('mps'))
+
+        loss_cpu = ((out_cpu - y) ** 2).mean()
+        loss_mps = ((out_mps - y.to('mps')) ** 2).mean()
+        loss_cpu.backward()
+        loss_mps.backward()
+
+        self.assertEqual(bn_cpu.weight.grad, bn_mps.weight.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(bn_cpu.bias.grad, bn_mps.bias.grad, atol=1e-5, rtol=1e-5)
 
     def test_layer_norm_backward(self):
         inputs = torch.rand(4, 4, device="mps", requires_grad=True)
@@ -3571,6 +3583,16 @@ class TestMPS(TestCaseMPS):
                 self.assertEqual(cpu_result, mps_result.to("cpu"))
                 # TODO: enable memory format test
                 # self.assertEqual(cpu_result.is_contiguous(), mps_result.is_contiguous())
+
+    # See https://github.com/pytorch/pytorch/issues/152701
+    def test_jacfwd_cat(self):
+        def fn(x, y):
+            return torch.cat((x, y))
+
+        x = torch.rand(2, device="mps")
+        y = torch.rand(3, device="mps")
+        rc = torch.func.jacfwd(fn)(x, y)
+        self.assertEqual(rc.shape, (5, 2))
 
     # See https://github.com/pytorch/pytorch/issues/85967
     def test_from_numpy_non_contiguous(self):
@@ -6255,7 +6277,7 @@ class TestMPS(TestCaseMPS):
             x = cpu_x.detach().clone().to('mps')
 
             if not contiguous and (0 not in shape and len(shape) >= 2):
-                # Tranposing will make the tensor non-contiguous
+                # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
                 assert not x.is_contiguous()
@@ -6411,7 +6433,7 @@ class TestMPS(TestCaseMPS):
             x = cpu_x.detach().clone().to('mps')
 
             if not contiguous and (0 not in shape and len(shape) >= 2):
-                # Tranposing will make the tensor non-contiguous
+                # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
                 assert not x.is_contiguous()
@@ -6451,7 +6473,7 @@ class TestMPS(TestCaseMPS):
             x = cpu_x.detach().clone().to('mps')
 
             if not contiguous and (0 not in shape and len(shape) >= 2):
-                # Tranposing will make the tensor non-contiguous
+                # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
                 assert not x.is_contiguous()
@@ -7146,6 +7168,11 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), diag=-1)
         helper((2, 8, 4, 5), diag=-2)
         helper((2, 8, 4, 5), diag=-3)
+        # Test inplace
+        x_mps = torch.arange(9.0, device='mps').reshape(3, 3).t().triu()
+        x_cpu = torch.arange(9.0, device='cpu').reshape(3, 3).t().triu()
+        self.assertEqual(x_cpu, x_mps)
+        self.assertEqual(x_cpu.stride(), x_mps.stride())
 
     # Test inverse
     def test_inverse(self):
@@ -7671,13 +7698,13 @@ class TestMPS(TestCaseMPS):
     # Test exponential
     @unittest.skip("This does not test anything")
     def test_exponential(self):
-        def helper(shape, lamda, dtype=torch.float32):
+        def helper(shape, lambda_, dtype=torch.float32):
 
             mps_out = torch.zeros(shape, device='mps', dtype=dtype)
-            mps_out.exponential_(lamda)
+            mps_out.exponential_(lambda_)
 
-            print(mps_out.to('cpu').float().mean(), 1 / lamda)
-            print(mps_out.to('cpu').float().std() ** 2, 1 / (lamda**2))
+            print(mps_out.to('cpu').float().mean(), 1 / lambda_)
+            print(mps_out.to('cpu').float().std() ** 2, 1 / (lambda_**2))
 
         for dtype in [torch.float32, torch.float16]:
             helper([100, 100], 2, dtype)
@@ -7957,6 +7984,7 @@ class TestMPS(TestCaseMPS):
 
 
 class TestLargeTensors(TestCaseMPS):
+    @serialTest()
     def test_64bit_binops(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
             raise unittest.SkipTest("Needs at least 16Gb of RAM")
@@ -7967,6 +7995,23 @@ class TestLargeTensors(TestCaseMPS):
         rc_slice = rc[slice_idx:]
         rc_slice_cpu = (a.cpu() + b.cpu()[slice_idx:]).sin()
         self.assertEqual(rc_slice, rc_slice_cpu)
+
+    @serialTest()
+    def test_64bit_index_select(self):
+        if torch.mps.recommended_max_memory() < 16_000_000_000:
+            raise unittest.SkipTest("Needs at least 16Gb of RAM")
+        B, N = 11, 20000
+        x = torch.empty(B, N, N, dtype=torch.float16, device='mps')
+        for i in range(B):
+            x[i] = 1.0 * i
+        batch_idx = torch.tensor([9], device='mps')
+        y = x[batch_idx]
+        self.assertEqual(y[0, 1, 2].item(), 9.0)
+        # Reclaim memory after running the tests
+        del y
+        del x
+        gc.collect()
+        torch.mps.empty_cache()
 
 
 class TestLogical(TestCaseMPS):
@@ -8143,7 +8188,7 @@ class TestLogical(TestCaseMPS):
             self.assertEqual(torch.isin(x, 2.0), torch.tensor([False, False, True, False], device="mps"))
             self.assertEqual(torch.isin(x, 1.0, invert=True), torch.tensor([True, False, True, True], device="mps"))
             self.assertEqual(torch.isin(x, 8.0), torch.tensor([False, False, False, False], device="mps"))
-            # Scalar.Tensor varaiant(alaises to Scalar.Scalar), not covered by OpInfo
+            # Scalar.Tensor variant(alaises to Scalar.Scalar), not covered by OpInfo
             self.assertEqual(torch.isin(2.0, x), torch.tensor(True, device="mps"))
 
     def test_isin_asserts(self):
@@ -9212,6 +9257,18 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_mask_fp16_L6_S17_NH23_HS121(self):
         self._test_sdpa_mask(torch.float16, 7, 17, 23, 121)
 
+    # Regression test from: https://github.com/pytorch/pytorch/issues/156707
+    @parametrize("dtype", [torch.float16, torch.float32])
+    def test_sdpa_full_mask(self, dtype):
+        q = torch.randn(1, 1, 2, 4, dtype=dtype)
+        k = torch.randn(1, 1, 2, 4, dtype=dtype)
+        v = torch.randn(1, 1, 2, 4, dtype=dtype)
+        mask = torch.tensor([[[[False, False], [True, True]]]], dtype=torch.bool)
+
+        out_cpu = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        out_mps = F.scaled_dot_product_attention(q.to('mps'), k.to('mps'), v.to('mps'), attn_mask=mask.to('mps'))
+        self._compare_tensors(out_mps.cpu(), out_cpu)
+
     @parametrize("dtype", [torch.float16, torch.float32])
     def test_sdpa_3d_input(self, dtype):
         head_num, seq_len, embed_dim = 16, 16, 80
@@ -9310,7 +9367,7 @@ class TestSDPA(TestCaseMPS):
             )
         self._compare_tensors(y.cpu(), y_ref)
 
-    @serialTest
+    @serialTest()
     def test_sdpa_fp32_no_memory_leak(self):
         def get_mps_memory_usage():
             return (torch.mps.current_allocated_memory() / (1024 * 1024),
@@ -10401,7 +10458,7 @@ class TestConvolutionMPS(TestCaseMPS):
         grad_in_cl = torch.empty(1, f, oc, device="mps").transpose(1, 2)
         grad_in_cl[:] = grad_in
 
-        # It does not matter whether grad_in contigous, or channels last, results should equal to each other
+        # It does not matter whether grad_in contiguous, or channels last, results should equal to each other
         grad_rc = torch.autograd.grad((out,), (inp, conv.weight, conv.bias), (grad_in,), retain_graph=True)
         grad_rc_cl = torch.autograd.grad((out,), (inp, conv.weight, conv.bias), (grad_in_cl,), retain_graph=True)
 
@@ -12216,6 +12273,13 @@ class TestConsistency(TestCaseMPS):
             # which leads to larger errors
             if op.name == "_unsafe_masked_index" and dtype == torch.float16:
                 atol, rtol = 3e-3, 3e-3
+            if op.name == "logcumsumexp":
+                atol, rtol = 4e-3, 1e-3
+            if op.name == "nn.functional.max_pool3d" and dtype == torch.float16:
+                # In a few cases where stride is smaller than kernel size,
+                # several output grad elements of similar magnitudes get summed
+                # together, introducing significant error for float16.
+                atol, rtol = 5e-3, 5e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
     def test_fmax_mixed_dtypes(self, device):
@@ -12520,6 +12584,58 @@ class TestMetalLibrary(TestCaseMPS):
         shutil.rmtree(capture_dirname)
         self.assertGreater(len(capture_listdir), 3,
                            f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
+
+
+
+class TestSparseMPS(TestCaseMPS):
+    def _get_basic_sparse_coo(self, device="mps"):
+        indices = torch.tensor([[0, 1], [2, 0]], dtype=torch.int64, device=device)
+        values = torch.tensor([1, 2], dtype=torch.float32, device=device)
+        size = (2, 3)
+        return torch.sparse_coo_tensor(indices, values, size, device=device)
+
+    def test_sparse_coo_tensor_with_dims(self):
+        indices = torch.zeros((2, 0), dtype=torch.int64, device="mps")
+        values = torch.tensor([], dtype=torch.float32, device="mps")
+        size = (2, 3)
+        t = torch.sparse_coo_tensor(indices, values, size, device="mps")
+        self.assertEqual(t.device.type, "mps")
+        self.assertEqual(t.layout, torch.sparse_coo)
+
+    def test_sparse_coo_tensor_with_dims_and_tensors(self):
+        indices = torch.tensor([[0, 1], [2, 0]], device="mps")
+        values = torch.tensor([1., 2.], device="mps")
+        size = (2, 3)
+        t = torch.sparse_coo_tensor(indices, values, size, device="mps")
+        self.assertEqual(t.device.type, "mps")
+        self.assertEqual(t.layout, torch.sparse_coo)
+        self.assertEqual(t._indices().cpu(), indices.cpu())
+        self.assertEqual(t._values().cpu(), values.cpu())
+
+    def test_nnz(self):
+        t = self._get_basic_sparse_coo()
+        self.assertEqual(t._nnz(), 2)
+
+    def test_sparse_dim(self):
+        t = self._get_basic_sparse_coo()
+        self.assertEqual(t.sparse_dim(), 2)
+
+    def test_to_sparse(self):
+        t = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]], device="mps")
+        x = t.to_sparse()
+        t_cpu = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]], device="mps")
+        x_cpu = t.to_sparse()
+        self.assertEqual(x.cpu(), x_cpu)
+
+    def test_resize(self):
+        indices = torch.tensor([[0, 1], [2, 0]])
+        values = torch.tensor([3.0, 4.0])
+        size = torch.Size([2, 3])
+        sparse = torch.sparse_coo_tensor(indices, values, size, device="mps")
+        sparse_cpu = torch.sparse_coo_tensor(indices, values, size, device="cpu")
+        sparse = sparse.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
+        sparse_cpu = sparse_cpu.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
+        self.assertEqual(sparse, sparse_cpu)
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.

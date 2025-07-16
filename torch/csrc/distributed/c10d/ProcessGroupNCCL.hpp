@@ -43,6 +43,11 @@ namespace c10d {
 static std::vector<std::string> TORCH_NCCL_BCAST_UNIQUEID = {
     "TORCH_NCCL_BCAST_UNIQUEID"};
 
+// Control EagerInit P2P serialization warning
+static std::vector<std::string>
+    TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING = {
+        "TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING"};
+
 // Control whether to always use high priority streams
 static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
     "TORCH_NCCL_HIGH_PRIORITY"};
@@ -344,6 +349,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // or timed out. If timeout, exception will be thrown.
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
+    void blockCurrentStream() override {
+      synchronize();
+    }
+
     void abort() override;
 
     // Let current stream wait on the completion of the NCCL work
@@ -438,8 +447,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Record collective sizes for debug. We only record the size on the first
     // device as multi-device per process is deprecated
-    size_t numelIn_ = -1;
-    size_t numelOut_ = -1;
+    size_t numelIn_ = 0;
+    size_t numelOut_ = 0;
 
     // Wrapper method for the static checkForNCCLErrors which can be overridden
     // for tests.
@@ -532,7 +541,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Optional "parent" backend and color to create communicators from
     // via `ncclCommSplit`
-    std::shared_ptr<ProcessGroupNCCL> split_from;
+    c10::intrusive_ptr<ProcessGroupNCCL> split_from;
     // Color to use for `ncclCommSplit`, values:
     // * Non-negative value: in group;
     // * NCCL_SPLIT_NOCOLOR (-1): not in group;
@@ -553,7 +562,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     int split_color{-2};
 #endif
     std::vector<uint64_t> global_ranks_in_group;
-    std::string group_name;
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -795,6 +803,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return options_;
   }
 
+  c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
+    return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+  }
+
   const std::string getBackendName() const override {
     return std::string(NCCL_BACKEND_NAME);
   }
@@ -813,6 +825,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 #else
     return false;
 #endif
+  }
+
+  void setTimeout(std::chrono::milliseconds timeout) override {
+    options_->timeout = timeout;
   }
 
   void startCoalescing() override;
@@ -959,6 +975,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void enableCollectivesTiming() override;
 
+  c10::intrusive_ptr<Backend> split(
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Backend::Options> opts) override;
+
+  c10::intrusive_ptr<Backend> merge(
+      const c10::intrusive_ptr<Store>& store,
+      const c10::intrusive_ptr<Backend::Options> opts,
+      const int& rank,
+      const int& size) override;
+
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
       std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,
@@ -1081,6 +1107,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
  protected:
   int globalRankStart_;
   int globalRankStride_;
+
+ private:
+  bool eagerInit_{false};
+  bool showSerializationWarning_{true};
 
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:

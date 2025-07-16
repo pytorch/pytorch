@@ -4,6 +4,7 @@ Utils shared by different modes of quantization (eager/graph)
 """
 
 import functools
+import sys
 import warnings
 from collections import OrderedDict
 from inspect import getfullargspec, signature
@@ -16,7 +17,8 @@ from torch.nn.utils.parametrize import is_parametrized
 
 
 NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
-NodePattern.__module__ = "torch.ao.quantization.utils"
+if sys.version_info < (3, 14):
+    NodePattern.__module__ = "torch.ao.quantization.utils"
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
 # Define separately to prevent circular imports.
@@ -31,7 +33,8 @@ QuantizerCls = Any
 Pattern = Union[
     Callable, tuple[Callable, Callable], tuple[Callable, tuple[Callable, Callable]], Any
 ]
-Pattern.__module__ = "torch.ao.quantization.utils"
+if sys.version_info < (3, 14):
+    Pattern.__module__ = "torch.ao.quantization.utils"
 
 
 # TODO: maybe rename this to MatchInputNode
@@ -616,7 +619,7 @@ def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
 
 # Functionally equivalent to '_calculate_qparams' in observer.py. Observers must be torchscriptable however and qscheme
 # as far as I can tell is not allowed to passed as a parameter in torchscript functions. This makes refactoring observer
-# to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikey to change
+# to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikely to change
 # (last update over 1 year ago) and when torchscript is fully deprecated we can refactor. TODO(jakeszwe, jerryzh168)
 def determine_qparams(
     min_val: torch.Tensor,

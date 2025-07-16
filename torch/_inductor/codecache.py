@@ -119,26 +119,6 @@ from .virtualized import V
 if config.is_fbcode():
     from triton.fb.build import build_paths
 
-    from torch._inductor.fb.utils import (
-        log_global_cache_errors,
-        log_global_cache_stats,
-        log_global_cache_vals,
-        use_global_cache,
-    )
-else:
-
-    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def use_global_cache() -> bool:
-        return False
-
 
 T = TypeVar("T")
 
@@ -188,26 +168,17 @@ def get_kernel_bin_format(device: str) -> str:
         return ""
 
 
-@functools.cache
-def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
-    return (
-        Path(os.path.join(global_cache_dir, CacheBase.get_system()["hash"]))
-        if global_cache_dir is not None
-        else None
-    )
-
-
 class CacheBase:
     @staticmethod
     @functools.cache
     def get_system() -> dict[str, Any]:
-        try:
-            from triton.compiler.compiler import triton_key
+        from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
 
+        if HAS_TRITON:
             # Use triton_key instead of triton.__version__ as the version
             # is not updated with each code change
             triton_version = triton_key()
-        except ModuleNotFoundError:
+        else:
             triton_version = None
 
         try:
@@ -241,10 +212,6 @@ class CacheBase:
     @functools.cache
     def get_local_cache_path() -> Path:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
-
-    @staticmethod
-    def get_global_cache_path() -> Optional[Path]:
-        return get_global_cache_path_impl(config.global_cache_dir)
 
     def __init__(self) -> None:
         self.system = CacheBase.get_system()
@@ -292,92 +259,56 @@ class LocalCache(CacheBase):
 
 
 class PersistentCache(CacheBase):
-    @functools.cache  # noqa: B019
-    def get_global_cache(self) -> dict[str, Any]:
-        global_cache_path = self.get_global_cache_path()
-        if global_cache_path is None or not global_cache_path.is_file():
-            return {}
-        with open(global_cache_path) as global_cache_fp:
-            global_cache = json.load(global_cache_fp)
-        return global_cache["cache"]
-
     def lookup(
         self,
         choices: list[ChoiceCaller],
         op: str,
         inputs: str,
         benchmark: Optional[Callable[[Any], dict[ChoiceCaller, float]]],
+        hint_override: Optional[int] = None,
     ) -> dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
         choice caller:
 
-            1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
-            2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
-            3. If benchmark is not None:
+            1. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
+            2. If benchmark is not None:
                 a. `max_autotune_gemm=True`: benchmark the choice, update
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
         precision = torch.get_float32_matmul_precision()
+        cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
-        log_stats = partial(log_global_cache_stats, self.system, op, inputs, precision)
-        log_vals = partial(log_global_cache_vals, self.system, op, inputs, precision)
-        log_errors = partial(
-            log_global_cache_errors, self.system, op, inputs, precision
-        )
         timings = {}
 
-        def check_cache(cache: dict[str, Any], callback: Any = None) -> bool:
+        def check_cache(cache: dict[str, Any]) -> bool:
             """Check if `cache` contains data for all the choices"""
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}):
+                if choice_hash in cache.get(op, {}).get(cache_key, {}).get(
+                    precision, {}
+                ):
                     # cache hit
-                    timings[choice] = cache[op][inputs][precision][choice_hash]
+                    timings[choice] = cache[op][cache_key][precision][choice_hash]
                 else:
                     # cache miss
                     hit = False
                     break
-            if callback:
-                callback(cached=hit)
             return hit
 
-        if config.max_autotune or config.max_autotune_gemm:
-            local_cache = self.get_local_cache() if config.autotune_local_cache else {}
-            # check local cache first since it is data specific to the current machine
-            if (
-                not check_cache(local_cache)
-                and not (
-                    use_global_cache()
-                    and check_cache(self.get_global_cache(), callback=log_stats)
-                )
-                and benchmark is not None
-            ):
-                try:
-                    # re-benchmark everything to try to get consistent numbers from the same machine
-                    timings = benchmark(choices)
-                    assert all(choice in timings for choice in choices)
-                    local_cache.setdefault(op, {})
-                    local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
-                    for choice, timing in timings.items():
-                        local_cache[op][inputs][precision][choice.hash_key()] = timing
-                except RuntimeError as e:
-                    # catch and log autotuning failures
-                    log_errors(e)
-                    raise e
+        local_cache = self.get_local_cache() if config.autotune_local_cache else {}
+        if (not check_cache(local_cache)) and (benchmark is not None):
+            # re-benchmark everything to try to get consistent numbers from the same machine
+            timings = benchmark(choices)
+            assert all(choice in timings for choice in choices)
+            local_cache.setdefault(op, {})
+            local_cache[op].setdefault(cache_key, {}).setdefault(precision, {})
+            for choice, timing in timings.items():
+                local_cache[op][cache_key][precision][choice.hash_key()] = timing
 
-                self.update_local_cache(local_cache)
-
-                timings_to_log = {
-                    choice.hash_key(): timings[choice] for choice in choices
-                }
-                log_vals(timings_to_log)
-        elif use_global_cache():
-            # only check global cache, not local one
-            check_cache(self.get_global_cache(), callback=log_stats)
-            # may have a partial cache hit, where not everything is benchmarked
+            self.update_local_cache(local_cache)
 
         return timings
 
@@ -899,8 +830,16 @@ class FxGraphHashDetails:
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
         )
+        # TODO: change to more holistic config rather than bundled_autograd_cache
+        self.precompile_enabled = torch._functorch.config.bundled_autograd_cache
         self.post_grad_custom_post_pass = self._get_custom_pass_detail(
             config.post_grad_custom_post_pass
+        )
+        self.joint_custom_pre_pass = self._get_custom_pass_detail(
+            config.joint_custom_pre_pass
+        )
+        self.joint_custom_post_pass = self._get_custom_pass_detail(
+            config.joint_custom_post_pass
         )
         self._pre_fusion_custom_pass = self._get_custom_pass_detail_unsafe(
             config._pre_fusion_custom_pass
@@ -1415,6 +1354,10 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
+        # Same with the joint custom passes
+        for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
+            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+                raise BypassFxGraphCache("Unsupported joint custom pass")
         # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
         # and ensure they are not passing us raw callables
         if config._pre_fusion_custom_pass is not None:
@@ -1731,6 +1674,12 @@ class AotCodeCompiler:
             wrapper_code = "\n".join((wrapper_code, kernel_code))
             kernel_code = ""
 
+        from .utils import aoti_model_name_from_config
+
+        model_class_name = ""
+        if config.aot_inductor.compile_standalone:
+            model_class_name = aoti_model_name_from_config()
+
         wrapper_key, wrapper_path = write(
             wrapper_code,
             "wrapper.cpp",
@@ -1750,6 +1699,36 @@ class AotCodeCompiler:
             key=config.aot_inductor.model_name_for_generated_files,
         )
 
+        header_code = ""
+        header_path = ""
+        if config.aot_inductor.compile_standalone:
+            # to link statically, we also need a header file
+            with open(
+                os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)),
+                    "csrc",
+                    "inductor",
+                    "aoti_runtime",
+                    "model.h",
+                )
+            ) as f:
+                class_name = f"AOTInductorModel{model_class_name}"
+                header_code = f.read()
+
+                # we replace like this to avoid replacing
+                # AOTInductorModelBase and AOTInductorModelKernelsBase
+                header_code = (
+                    header_code.replace("<AOTInductorModel>", f"<{class_name}>")
+                    .replace("AOTInductorModel(", f"{class_name}(")
+                    .replace("AOTInductorModel :", f"{class_name} :")
+                )
+                _, header_path = write(
+                    header_code,
+                    "h",
+                    specified_dir=specified_output_path,
+                    key=f"{model_class_name}",
+                )
+
         # Log the AOTInductor wrapper and kernel code, if needed.
         with tempfile.NamedTemporaryFile("w+") as t:
             t.writelines((wrapper_code, "\n", kernel_code, "\n"))
@@ -1760,6 +1739,8 @@ class AotCodeCompiler:
             generated_files.append(wrapper_path)
             if not config.aot_inductor.package_cpp_only:
                 generated_files.append(kernel_path)
+            if config.aot_inductor.compile_standalone:
+                generated_files.append(header_path)
 
         output_code_log.info("Wrapper code written to: %s", wrapper_path)
         output_code_log.info("Kernel code written to: %s", kernel_path)
@@ -1781,6 +1762,17 @@ class AotCodeCompiler:
             },
             payload_fn=lambda: kernel_code,
         )
+        if config.aot_inductor.compile_standalone:
+            output_code_log.info("Header code written to: %s", header_path)
+            trace_structured(
+                "graph_dump",
+                lambda: {
+                    "name": "inductor_aot_header_code",
+                    "type": "cpp",
+                    "filename": header_path,
+                },
+                payload_fn=lambda: header_code,
+            )
 
         # We use a file lock below to protect FS operations. The lock file
         # is scoped to the 'key', so make sure the consts_s is protected
@@ -1793,6 +1785,9 @@ class AotCodeCompiler:
         cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
 
         def _compile_consts(consts: bytes, platform: str) -> str:
+            # Load from aot_inductor, and update the value on demand.
+            use_asm_build: bool = config.aot_inductor.use_consts_asm_build
+
             if platform == "linux":
                 if graph.mutated_buffers & OrderedSet(graph.constants.keys()):
                     # .data section is between .text and .bss. When the size of .data is large,
@@ -1812,33 +1807,79 @@ class AotCodeCompiler:
             else:
                 raise RuntimeError(f"Unsupported platform: {platform}")
 
+            # Intel compiler failed to compile this manually constructed assembly file.
+            # Switch XPU to use consts cpp build.
+            if device_type == "xpu":
+                use_asm_build = False
+
             is_large_consts = len(consts) > 1024
-            consts_asm = f"\t.section\t{section_attr}\n"
-            consts_asm += f"\t.balign {ALIGN_BYTES}\n"
-            consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
-            consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
-            if not is_large_consts:
+
+            def format_consts_to_asm(
+                consts: bytes,
+                align_bytes: int,
+                symbol_prefix: str,
+                is_large_consts: bool,
+            ) -> tuple[str, str]:
+                consts_asm = f"\t.section\t{section_attr}\n"
+                consts_asm += f"\t.balign {align_bytes}\n"
+                consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
+                consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
+                if not is_large_consts:
+                    for c in consts:
+                        consts_asm += f"\t.byte {c}\n"
+                    # Add one element even if constants are empty
+                    # Otherwise assembler will not put them in data section
+                    if not consts:
+                        consts_asm += "\t.space 1\n"
+                else:
+                    consts_asm += "\t.quad 0x1234567899abcdef\n"
+                    consts_asm += f"\t.space {len(consts) - 8}\n"
+                consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
+                consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+                return consts_asm, "S"
+
+            # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
+            def format_consts_to_cpp(
+                consts: bytes, align_bytes: int, symbol_prefix: str
+            ) -> tuple[str, str]:
+                consts_size = len(consts)
+                asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))\t\n\
+#else\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n\
+#endif\t\n\
+\t\n\
+ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
+                const_cpp = asan_attr
+                const_cpp += f"alignas({align_bytes}) extern "
+                const_cpp += f"const unsigned char {symbol_prefix}_binary_constants_bin_start[{consts_size}] = {{\t\n"
+                count_bytes = 0
                 for c in consts:
-                    consts_asm += f"\t.byte {c}\n"
-                # Add one element even if constants are empty
-                # Otherwise assembler will not put them in data section
-                if not consts:
-                    consts_asm += "\t.space 1\n"
+                    const_cpp += f"{c}, "
+                    count_bytes = count_bytes + 1
+                    if count_bytes % 16 == 0:
+                        const_cpp += "\t\n"
+                const_cpp += "};\t\n"
+                const_cpp += f"alignas({align_bytes}) extern const unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
+                return const_cpp, "cpp"
+
+            if use_asm_build:
+                consts_code, code_ext = format_consts_to_asm(
+                    consts, ALIGN_BYTES, symbol_prefix, is_large_consts
+                )
             else:
-                consts_asm += "\t.quad 0x1234567899abcdef\n"
-                consts_asm += f"\t.space {len(consts) - 8}\n"
-            consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
-            consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+                consts_code, code_ext = format_consts_to_cpp(
+                    consts, ALIGN_BYTES, symbol_prefix
+                )
+
             _, consts_s = write(
-                consts_asm,
-                "S",
+                consts_code,
+                code_ext,
                 specified_dir=str(specified_sub_dir),
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
-                # Intel compiler failed to compile this manually constructed assembly file.
-                # it is ok to use gcc to compile the .S to a .o and linked with Intel compiler .
-                device_type=device_type if device_type != "xpu" else "cpu",
+                device_type=device_type,
                 aot_mode=graph.aot_mode,
                 compile_only=True,
                 use_relative_path=use_relative_path,
@@ -1852,7 +1893,7 @@ class AotCodeCompiler:
             consts_o = object_builder.get_target_file_path()
             object_builder.build()
 
-            if is_large_consts:
+            if is_large_consts and use_asm_build:
                 with open(consts_o, "r+b") as f:
                     f.seek(0)
                     hdr = f.read(1024)
@@ -2141,9 +2182,19 @@ class AotCodeCompiler:
                         # Include SASS for the current specific arch
                         f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                     )
-                    subprocess.run(
-                        cmd.split(), capture_output=True, text=True, check=True
-                    )
+                    try:
+                        subprocess.run(
+                            cmd.split(),
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
+                    except subprocess.CalledProcessError as e:
+                        print(
+                            f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                            file=sys.stderr,
+                        )
+                        raise
 
                 if config.aot_inductor.embed_kernel_binary:
                     # Embed cubin files into model.so using objcopy
@@ -2953,7 +3004,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
         return [
             f"halide_buffer_t {name};",
-            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};",
+            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
+            if len(dims) > 0
+            else f"halide_dimension_t * {name}_dims = nullptr;",
             f"{name}.device = {device};",
             f"{name}.device_interface = {device_interface};",
             f"{name}.host = {host};",
@@ -3380,7 +3433,7 @@ def _cutlass_path() -> str:
     if config.is_fbcode():
         from libfb.py import parutil
 
-        return parutil.get_dir_path("cutlass-3-headers")
+        return parutil.get_dir_path("cutlass-4-headers")
     else:
         return config.cuda.cutlass_dir
 
@@ -3421,7 +3474,9 @@ def cutlass_key() -> bytes:
     Note: OSS and fbcode will have different keys.
     """
     if config.is_fbcode():
-        with importlib.resources.path("cutlass", "src_hash.txt") as resource_path:
+        with importlib.resources.path(
+            "cutlass_library", "src_hash.txt"
+        ) as resource_path:
             with open(resource_path) as resource_file:
                 return resource_file.read().encode()
 
@@ -3706,6 +3761,7 @@ class CUDACodeCache:
             return None
 
     @classmethod
+    @lru_cache(None)
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
         """
         Writes source code into a file with dst_file_ext as the file extension.
@@ -3730,9 +3786,6 @@ class CUDACodeCache:
                     cutlass_key(),
                     # hack to deal with AOTI .o compilation
                 ]
-                + [dst_file_ext]
-                if dst_file_ext == "o"
-                else []
             )
         key, input_path = write(source_code, cls._SOURCE_CODE_SUFFIX, extra=extra)
         return key, input_path
@@ -3743,10 +3796,21 @@ class CUDACodeCache:
     ) -> tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
+        If dst_file_ext is "so", first compiles to ".o" and then links to ".so".
         Returns a tuple of dst_file_path, hash_key, source_code_path
         """
-        key, input_path = cls.write(source_code, dst_file_ext)
-        if key not in cls.cache:
+        if dst_file_ext == "so":
+            # Two-step compilation: first compile to .o, then link to .so
+            obj_path, _, _ = cls.compile(source_code, "o", extra_args)
+            key, input_path = cls.write(source_code, dst_file_ext)
+            src_files, operation_name = [obj_path], "Linking"
+        else:
+            # Regular compilation for non-.so files
+            key, input_path = cls.write(source_code, dst_file_ext)
+            src_files, operation_name = [input_path], "Compilation"
+
+        key_with_ext = key + dst_file_ext
+        if key_with_ext not in cls.cache:
             from torch.utils._filelock import FileLock
 
             lock_dir = get_lock_dir()
@@ -3778,19 +3842,19 @@ class CUDACodeCache:
                         binary_remote_cache.put(
                             error_path, config.cuda.binary_remote_cache_force_write
                         )
-                    cls.cache[key] = CUDACodeCache.CacheEntry(
+                    cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
                         input_path, output_path, error_json
                     )
                     raise exc.CUDACompileError(cmd_parts, error_output)
                 if not os.path.exists(output_path):
                     cmd = cuda_compile_command(
-                        [input_path], output_path, dst_file_ext, extra_args
+                        src_files, output_path, dst_file_ext, extra_args
                     )
                     with open(input_path, "a") as f:
                         f.write("\n")
-                        f.write(f"// CUDA Compile cmd\n// {cmd}\n")
+                        f.write(f"// CUDA {operation_name} cmd\n// {cmd}\n")
                     start_time = time()
-                    log.debug("CUDA Compilation: %s", cmd)
+                    log.debug("CUDA %s: %s", operation_name, cmd)
                     cmd_parts = cmd.split(" ")
                     try:
                         if use_re_build():
@@ -3808,7 +3872,7 @@ class CUDACodeCache:
                     except subprocess.CalledProcessError as error:
                         cls._record_cuda_compile_error(
                             error.output.decode("utf-8"),
-                            key,
+                            key_with_ext,
                             cmd_parts,
                             input_path,
                             output_path,
@@ -3819,7 +3883,7 @@ class CUDACodeCache:
                         if "COMPILE FAILED WITH" in str(error):
                             cls._record_cuda_compile_error(
                                 str(error),
-                                key,
+                                key_with_ext,
                                 cmd_parts,
                                 input_path,
                                 output_path,
@@ -3828,13 +3892,14 @@ class CUDACodeCache:
                             raise exc.CUDACompileError(cmd_parts, str(error)) from error
                         raise error
                     end_time = time()
-                    log_duration_msg = f"CUDA Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
+                    log_duration_msg = f"CUDA {operation_name} took {end_time - start_time} seconds. Command: {cmd}"
                     log.info(log_duration_msg)
 
                 else:
                     log.debug(
-                        "CUDA Compilation skipped: %s since output already exists",
-                        input_path,
+                        "CUDA %s skipped: %s since output already exists",
+                        operation_name,
+                        output_path,
                     )
                 # Upload to remote cache if enabled
                 if (
@@ -3845,13 +3910,16 @@ class CUDACodeCache:
                     binary_remote_cache.put(
                         output_path, config.cuda.binary_remote_cache_force_write
                     )
-                cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path, None)
-        cache_entry: CUDACodeCache.CacheEntry = cls.cache[key]
+                cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
+                    input_path, output_path, None
+                )
+
+        cache_entry: CUDACodeCache.CacheEntry = cls.cache[key_with_ext]
         if cache_entry.error_json is not None:
             # Restore cached Exception and raise it as if we had compiled
             cmd_parts, error_output = json.loads(cache_entry.error_json)
             raise exc.CUDACompileError(cmd_parts, error_output.encode("utf-8"))
-        return (cls.cache[key].output_path, key, input_path)
+        return (cls.cache[key_with_ext].output_path, key, input_path)
 
     @classmethod
     def load(cls, source_code: str, dst_file_ext: str) -> tuple[DLLWrapper, str, str]:
@@ -3874,7 +3942,7 @@ class CUDACodeCache:
     def _record_cuda_compile_error(
         cls,
         error_str: str,
-        key: str,
+        key_with_ext: str,
         cmd_parts: list[str],
         input_path: str,
         output_path: str,
@@ -3883,7 +3951,9 @@ class CUDACodeCache:
         binary_remote_cache: Any = None,
     ) -> None:
         error_json = json.dumps([cmd_parts, error_str])
-        cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path, error_json)
+        cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
+            input_path, output_path, error_json
+        )
         error_path = binary_error_path(output_path)
         with open(error_path, "w", encoding="utf-8") as fh:
             fh.write(error_json)
