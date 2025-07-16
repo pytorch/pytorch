@@ -4,6 +4,7 @@ import functools
 import itertools
 import operator
 from collections.abc import Iterable, Sequence
+from contextlib import contextmanager
 from typing import Callable, cast, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
@@ -360,3 +361,58 @@ def expand_to_full_mesh_op_strategy(
         )
         all_strategies.append(strategy)
     return OpStrategy(all_strategies)
+
+
+import dataclasses
+
+
+@dataclasses.dataclass
+class OpStrategyPack:
+    """
+    A dataclass to pack the op strategy and the schema info.
+    """
+
+    op_overload: torch._ops.OpOverload
+    strategy_function: Callable[[OpSchema], StrategyType]
+    schema_info: Optional[RuntimeSchemaInfo] = None
+
+
+@contextmanager
+def implicit_strategy_context(
+    op_strategy_pack_list: Optional[list[OpStrategyPack]] = None,
+):
+    """
+    Context manager for setting and clearing implicit strategy.
+
+    Args:
+        op_strategy_pack_list: A list of OpStrategyPack objects. If we specify
+        the OpStrategyPack for the operator, the specified strategy will be
+        registered. Otherwise, the default replication strategy will be
+        registered for all operators.
+    """
+    propagator = DTensor._op_dispatcher.sharding_propagator
+    propagator.enable_implicit_strategy = True
+    try:
+        if op_strategy_pack_list:
+            for op_strategy_pack in op_strategy_pack_list:
+                op_overload = op_strategy_pack.op_overload
+                schema_info = op_strategy_pack.schema_info
+                strategy_func = op_strategy_pack.strategy_function
+                # register the op strategy
+                register_op_strategy(op_overload, schema_info=schema_info)(
+                    strategy_func
+                )
+        yield
+    finally:
+        propagator.enable_implicit_strategy = False
+        # clear this op strategy cache
+        op_to_remove = propagator.implicit_strategy_op_tracker
+        if op_strategy_pack_list:
+            op_to_remove.extend([i.op_overload for i in op_strategy_pack_list])
+        for op_overload in op_to_remove:
+            if op_overload in propagator.op_strategy_funcs:
+                del propagator.op_strategy_funcs[op_overload]
+            if op_overload in propagator.op_to_schema_info:
+                del propagator.op_to_schema_info[op_overload]
+
+        propagator.propagate_op_sharding.cache.cache_clear()

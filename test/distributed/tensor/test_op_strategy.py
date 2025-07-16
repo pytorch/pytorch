@@ -36,6 +36,8 @@ from torch.distributed.tensor._ops._einsum_strategy import (
 )
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
+    implicit_strategy_context,
+    OpStrategyPack,
     register_op_strategy,
     replicate_op_strategy,
 )
@@ -657,6 +659,41 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
             output_dt = test_op(input_x_dt, input_y_dt, input_z_dt)
             self.assertEqual(output_dt.full_tensor(), output)
             self.assertEqual(output_dt.placements, [Replicate(), Replicate()])
+
+
+class ImplicitRegistrationTest(DTensorTestBase):
+    @with_comms
+    def test_implicit_registration(self):
+        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        test_op = torch.ops.mylib.numpy_sin
+        input_x = torch.randn([8, 16, 8], device=self.device_type)
+        input_y = torch.randn([8, 16, 8], device=self.device_type)
+        input_x_dt = distribute_tensor(input_x, mesh, [Shard(0), Shard(1)])
+        input_y_dt = distribute_tensor(input_y, mesh, [Shard(1), Shard(0)])
+        # 1. test_op strategy not registered test
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Operator mylib.numpy_sin.default does not have a sharding strategy registered",
+        ):
+            self._test_op_on_dtensor(test_op, input_x_dt, input_y_dt)
+
+        # 2. test_op strategy implicitly registered under context manager
+        with implicit_strategy_context():
+            self._test_op_on_dtensor(test_op, input_x_dt, input_y_dt)
+
+        # 3. remove registration after exiting the context manager
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Operator mylib.numpy_sin.default does not have a sharding strategy registered",
+        ):
+            self._test_op_on_dtensor(test_op, input_x_dt, input_y_dt)
+
+        # 4. runtime specify test_op strategy
+        # TODO(zpcore): try with a different universal strategy once we have
+        with implicit_strategy_context(
+            [OpStrategyPack(test_op.default, replicate_op_strategy, schema_info=None)]
+        ):
+            self._test_op_on_dtensor(test_op, input_x_dt, input_y_dt)
 
 
 if __name__ == "__main__":
