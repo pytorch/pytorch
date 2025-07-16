@@ -22,7 +22,7 @@ LINTRUNNER_TOML_PATH = REPO_ROOT / ".lintrunner.toml"
 
 # This is the path to the pre-commit-managed venv
 VENV_ROOT = Path(sys.executable).parent.parent
-# Stores the hash of .lintrunner.toml from the last time we ran `lintrunner init` 
+# Stores the hash of .lintrunner.toml from the last time we ran `lintrunner init`
 INITIALIZED_LINTRUNNER_TOML_HASH_PATH = VENV_ROOT / ".lintrunner_plugins_hash"
 
 
