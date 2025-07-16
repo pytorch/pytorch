@@ -2734,7 +2734,7 @@ class PythonPrivateUse1HooksInterface: public at::PrivateUse1HooksInterface {
  public:
   PythonPrivateUse1HooksInterface(py::object hook): underlying_python_hook_(hook) {}
 
-  bool hasPrimaryContext(c10::DeviceIndex device_index) const override { 
+  bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
     py::gil_scoped_acquire _;
     return underlying_python_hook_.attr("has_primary_context")().cast<bool>();
   }
@@ -2875,14 +2875,13 @@ bool registerPythonPrivateUse1DeviceGuard(py::object guard) {
     return false;
   }
   c10::impl::registerDeviceGuard(
-    c10::DeviceType::PrivateUse1, 
+    c10::DeviceType::PrivateUse1,
     new PythonPrivateUse1DeviceGuard(guard));
   return true;
 }
 
 at::Tensor createEmptyTensor(
-  const std::vector<int64_t>& shape,
-  c10::ScalarType dtype
+  const std::vector<int64_t>& shape, c10::ScalarType dtype
 ) {
   c10::Storage storage{
     c10::Storage::use_byte_size_t{},
@@ -2895,8 +2894,8 @@ at::Tensor createEmptyTensor(
   storage.set_data_ptr_noswap(at::DataPtr{nullptr, device});
   c10::DispatchKeySet key_set({c10::DispatchKey::PrivateUse1});
   at::Tensor tensor = at::detail::make_tensor<at::TensorImpl>(
-    std::move(storage), 
-    key_set, 
+    std::move(storage),
+    key_set,
     c10::scalarTypeToTypeMeta(dtype)
   );
 
@@ -2907,9 +2906,6 @@ at::Tensor createEmptyTensor(
     size *= shape[i];
   }
 
-  tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
-    shape, strides, 0
-  );
+  tensor.unsafeGetTensorImpl()->set_sizes_and_strides(shape, strides, 0);
   return tensor;
 }
-
