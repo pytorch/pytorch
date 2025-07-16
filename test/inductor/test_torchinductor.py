@@ -13626,13 +13626,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 FileCheck().check("cpp_fused_add_0").run(code)
             self.assertEqual(refe_out, test_out)
 
-    def test_repeat_interleave_pass(self):
+
+    @parametrize("dtype", [torch.int32, torch.int64])
+    def test_repeat_interleave_Tensor_decomp(self, dtype):
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            device = "cuda"
+
         # https://github.com/pytorch/pytorch/issues/147160
         def f(input, repeats):
             return torch.repeat_interleave(input, repeats, dim=0, output_size=3) + 1
 
-        input = torch.tensor([[1, 2], [3, 4]], device="cuda")
-        repeat = torch.tensor([1, 2], device="cuda")
+        input = torch.tensor([[1, 2], [3, 4]], dtype=dtype, device=device)
+        repeat = torch.tensor([1, 2], device=device)
         f_compiled = torch.compile(f)
         test, (code,) = run_and_get_code(f_compiled, input, repeat)
         self.assertEqual(test, f(input, repeat))
