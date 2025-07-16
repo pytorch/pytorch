@@ -43,7 +43,7 @@ PyObject* THPStorage_NewWithStorage(
       "Storage is not possible. Make sure your class inherits from Storage.");
 
   auto maybe_pyobj = _storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
-      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+      /*ignore_hermetic_tls=*/false);
   if (maybe_pyobj.has_value() && maybe_pyobj.value()) {
     TORCH_CHECK(
         allow_preexisting_pyobj,
@@ -78,8 +78,7 @@ PyObject* THPStorage_NewWithStorage(
   if (!c10::impl::HermeticPyObjectTLS::get_state()) {
     s->is_hermetic = false;
     const auto& storage = THPStorage_Unpack(s);
-    storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(
-        getPyInterpreter(), obj, status);
+    storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(obj, status);
   } else {
     s->is_hermetic = true;
   }
@@ -99,7 +98,7 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
   c10::impl::PyObjectSlot* pyobj_slot = storage_impl->pyobj_slot();
 
   std::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj(
-      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+      /*ignore_hermetic_tls=*/false);
   c10::impl::PyInterpreterStatus status =
       c10::impl::PyInterpreterStatus::TAGGED_BY_US;
   if (maybe_pyobj.has_value()) {
@@ -142,8 +141,7 @@ static bool THPStorage_isPreservable(THPStorage* self) {
   }
 
   if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter(), /*ignore_hermetic_tls=*/true) !=
-      (PyObject*)self) {
+          /*ignore_hermetic_tls=*/true) != (PyObject*)self) {
     return false;
   }
   if (storage.use_count() <= 1) {
@@ -161,7 +159,6 @@ static bool THPStorage_tryPreserve(THPStorage* self) {
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
 
   auto maybe_pyobj = storage_impl->pyobj_slot()->check_pyobj(
-      getPyInterpreter(),
       /*ignore_hermetic_tls=*/true);
   // NOTE: It is possible to just set the PyObjectSlot here, but the point is
   // that we should have already set PyObjectSlot when the storage PyObject was

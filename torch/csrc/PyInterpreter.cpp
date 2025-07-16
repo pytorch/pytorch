@@ -158,7 +158,10 @@ class PyInterpreterHolder {
             ConcretePyInterpreterVTable::instance())),
         is_main_interpreter_(
             at::impl::PythonOpRegistrationTrampoline::registerInterpreter(
-                impl_)) {}
+                impl_)) {
+    // Initialize the global function pointer for c10 PyObjectSlot
+    c10::impl::g_get_pyinterpreter_fn = &getPyInterpreter;
+  }
   PyInterpreterHolder(const PyInterpreterHolder&) = delete;
   PyInterpreterHolder(PyInterpreterHolder&&) = delete;
   PyInterpreterHolder& operator=(const PyInterpreterHolder&) = delete;
@@ -586,7 +589,7 @@ static void set_tensor_attr_with_capsule(
     py::capsule& capsule,
     const char* attr_name) {
   std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
-      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+      /*ignore_hermetic_tls=*/false);
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
   auto obj = mb_obj.value();
@@ -990,4 +993,9 @@ c10::impl::PyInterpreter* getPyInterpreter() {
 
 bool isMainPyInterpreter() {
   return torch::detail::self_interpreter.is_main_interpreter();
+}
+
+// Initialize the global function pointer for c10 PyObjectSlot
+void initializeGlobalPyInterpreter() {
+  c10::impl::g_get_pyinterpreter_fn = &getPyInterpreter;
 }
