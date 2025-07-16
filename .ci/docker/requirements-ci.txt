@@ -117,8 +117,10 @@ ninja==1.11.1.4
 #Pinned versions: 1.11.1.4
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
-numba==0.55.2 ; python_version == "3.10" and platform_machine != "s390x"
-numba==0.60.0 ; python_version == "3.12" and platform_machine != "s390x"
+numba==0.49.0 ; python_version < "3.9" and platform_machine != "s390x"
+numba==0.60.0 ; python_version == "3.9" and platform_machine != "s390x"
+numba==0.61.2 ; python_version > "3.9" and platform_machine != "s390x"
+
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.55.2, 0.60.0
 #test that import: test_numba_integration.py
@@ -136,14 +138,10 @@ numba==0.60.0 ; python_version == "3.12" and platform_machine != "s390x"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.22.4; python_version == "3.10"
-numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
-numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
-numpy==2.3.4; python_version >= "3.14"
+numpy==2.0.2 ; python_version == "3.9"
+numpy==2.1.2 ; python_version > "3.9"
 
-pandas==2.0.3; python_version < "3.13"
-pandas==2.2.3; python_version >= "3.13" and python_version < "3.14"
-pandas==2.3.3; python_version >= "3.14"
+pandas==2.2.3
 
 #onnxruntime
 #Description: scoring engine for Open Neural Network Exchange (ONNX) models
@@ -254,9 +252,10 @@ scikit-image==0.22.0
 #Pinned versions: 0.20.3
 #test that import:
 
-scipy==1.10.1 ; python_version <= "3.11"
-scipy==1.14.1 ; python_version > "3.11" and python_version < "3.14"
+scipy==1.13.1 ; python_version == "3.9"
+scipy==1.14.1 ; python_version > "3.9" and python_version < "3.14"
 scipy==1.16.2 ; python_version >= "3.14"
+
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.10.1
@@ -316,8 +315,7 @@ z3-solver==4.15.1.0 ; platform_machine != "s390x"
 #Pinned versions:
 #test that import:
 
-tensorboard==2.13.0 ; python_version < "3.13"
-tensorboard==2.18.0 ; python_version >= "3.13"
+tensorboard==2.18.0
 #Description: Also included in .ci/docker/requirements-docs.txt
 #Pinned versions:
 #test that import: test_tensorboard
