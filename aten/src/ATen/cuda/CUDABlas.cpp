@@ -1843,7 +1843,7 @@ template bool gemm_and_bias(
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
 
-int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype) {
+int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype, bool use_fast_accum) {
   switch (scaling_type) {
     case ScalingType::BlockWise1x32:
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
@@ -1868,14 +1868,14 @@ int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype) {
 #elif defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT)
       // Return the default, since in old hipblaslt this is activated via
       // the SCALE_POINTER_VEC_EXT attributed.
-      return CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+      return 0;
 #else
       TORCH_CHECK(false, "scaled_gemm with rowwise scaling is only supported for CUDA 12.9 and above");
 #endif // if CUDA_VERSION >= 12090
 
     case ScalingType::BlockWise1x128:
       TORCH_CHECK(scale_dtype == kFloat);
-      // TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with 1x128 blockwise scaling")
+      TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with 1x128 blockwise scaling")
 #if CUDA_VERSION >= 12090
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F;
 #else
@@ -1884,7 +1884,7 @@ int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype) {
 
     case ScalingType::BlockWise128x128:
       TORCH_CHECK(scale_dtype == kFloat);
-      // TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with 128x128 blockwise scaling")
+      TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with 128x128 blockwise scaling")
 #if CUDA_VERSION >= 12090
       return CUBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F;
 #else
@@ -1893,7 +1893,12 @@ int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype) {
 
 case ScalingType::TensorWise:
       TORCH_CHECK(scale_dtype == kFloat);
+#if CUDA_VERSION >= 12080
       return CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+#else
+      // The macro isn't defined, thus we inline its value.
+      return 0;
+#endif // if CUDA_VERSION >= 12080
 
     default:
       TORCH_CHECK(false);
@@ -1986,8 +1991,14 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
 
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, get_scale_mode(mat1_scaling_type, mat1_scale_dtype));
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, get_scale_mode(mat2_scaling_type, mat2_scale_dtype));
+  // The SCALE_MODE attrs only exist in cuBLAS 12.8+ or in recent hipblaslt,
+  // but we must invoke get_scale_mode anyways to trigger the version checks.
+  int a_scale_mode = get_scale_mode(mat1_scaling_type, mat1_scale_dtype, use_fast_accum);
+  int b_scale_mode = get_scale_mode(mat2_scaling_type, mat2_scale_dtype, use_fast_accum);
+#if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && defined(HIPBLASLT_OUTER_VEC))
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, a_scale_mode);
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, b_scale_mode);
+#endif
 
   CuBlasLtMatmulPreference preference;
   auto ltworkspace = CublasLtWorkspace();
