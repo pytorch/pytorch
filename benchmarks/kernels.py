@@ -341,7 +341,114 @@ class SoftmaxBackward(BenchmarkKernel):
             self.benchmark_single_shape((x, dy), setting=f"shape: [{M}, {N}]")
 
 
+class RMSNormForward(BenchmarkKernel):
+    def __init__(self):
+        super().__init__()
+        self.available_backends = ["eager", "compiled", "quack"]
+
+    def get_shapes(self) -> tuple[tuple[int, ...], ...]:
+        return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768), (32768,65536), (16384,131072), (8192,262144))
+
+    def get_memory_bytes(self, args, kwargs) -> int:
+        x, w = args
+        M, N = x.shape
+        return 2 * M * N * x.dtype.itemsize + N * w.dtype.itemsize
+
+    def get_flops(self, args, kwargs) -> int:
+        return 0
+
+    def rms_norm_ref(self, x, w):
+        x_f32 = x.float()
+        return (x_f32 *torch.rsqrt(torch.mean(x_f32.square(), dim=-1, keepdim=True) + 1e-6) * w).to(x.dtype)
+
+    def eager(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, w = args
+        fn = lambda: self.rms_norm_ref(x, w)
+        return fn
+
+    def compiled(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, w = args
+        compiled_rms_norm = torch.compile(self.rms_norm_ref, mode="max-autotune-no-cudagraphs")
+        fn = lambda: compiled_rms_norm(x, w)
+        return fn
+
+    def quack(self, args, kwargs=None) -> Any:
+        # Note: only supper weight with float32 dtype
+        from quack.rmsnorm import _rmsnorm_fwd
+
+        x, w = args
+        fn = lambda: _rmsnorm_fwd(x, w, eps=1e-6)
+        return fn
+
+    def benchmark(self):
+        for (M, N) in self.get_shapes():
+            print(f"Tensor dimensions: [{M}, {N}]")
+            torch_dtype = cutlass_torch.dtype(cutlass.BFloat16)
+            x = torch.randn(M, N, device="cuda", dtype=torch_dtype)
+            w = torch.randn(N, device="cuda", dtype=torch.float32)
+            self.benchmark_single_shape((x, w), setting=f"shape: [{M}, {N}]")
+
+
+class RMSNormBackward(BenchmarkKernel):
+    def __init__(self):
+        super().__init__()
+        self.available_backends = ["eager", "compiled", "quack"]
+
+    def get_shapes(self) -> tuple[tuple[int, ...], ...]:
+        return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768), (32768,65536), (16384,131072), (8192,262144))
+
+    def get_memory_bytes(self, args, kwargs) -> int:
+        x, w, dy = args
+        # x, dy: [M, N], w: [N]
+        M, N = x.shape
+        # Read x, w, dy, write dx, dw
+        return 3*M*N*x.dtype.itemsize + 2*N*w.dtype.itemsize
+
+    def get_flops(self, args, kwargs) -> int:
+        return 0
+
+    def rms_norm_ref(self, x, w):
+        x_f32 = x.float()
+        return (x_f32 *torch.rsqrt(torch.mean(x_f32.square(), dim=-1, keepdim=True) + 1e-6) * w).to(x.dtype)
+
+    def eager(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, w, dy = args
+        y = self.rms_norm_ref(x, w)
+        fn = lambda: torch.autograd.grad(y, [x, w], grad_outputs=dy, retain_graph=True)
+        return fn
+
+    def compiled(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, w, dy = args
+        y = torch.compile(self.rms_norm_ref, mode="max-autotune-no-cudagraphs")(x, w)
+        fn = lambda: torch.autograd.grad(y, [x, w], grad_outputs=dy, retain_graph=True)
+        return fn
+
+    def quack(self, args, kwargs=None) -> Any:
+        from quack.rmsnorm import _rmsnorm_backward
+
+        x, w, dy, = args
+        M, N = x.shape
+        rstd = torch.randn(M, device="cuda", dtype=torch.float32)
+        fn = lambda: _rmsnorm_backward(x, w, dy, rstd)
+        return fn
+
+    def benchmark(self):
+        for (M, N) in self.get_shapes():
+            print(f"Tensor dimensions: [{M}, {N}]")
+            torch_dtype = cutlass_torch.dtype(cutlass.BFloat16)
+            x = torch.randn(M, N, device="cuda", dtype=torch_dtype, requires_grad=True)
+            w = torch.randn(N, device="cuda", dtype=torch.float32, requires_grad=True)
+            dy = torch.randn(M, N, device="cuda", dtype=torch_dtype)
+            self.benchmark_single_shape((x, w, dy), setting=f"shape: [{M}, {N}]")
+
+
 CrossEntropyForward().benchmark()
 CrossEntropyBackward().benchmark()
 SoftmaxForward().benchmark()
 SoftmaxBackward().benchmark()
+RMSNormForward().benchmark()
+RMSNormBackward().benchmark()
