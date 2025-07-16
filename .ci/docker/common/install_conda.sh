@@ -54,9 +54,12 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     export SYSROOT_DEP="sysroot_linux-64=2.17"
   fi
 
+  if [[ $(uname -m) != "aarch64" ]] && [[ "$BUILD_ENVIRONMENT" != *xpu* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    as_jenkins conda tos accept --override-channels -c defaults
+  fi
+
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
-  as_jenkins conda tos accept --override-channels -c defaults
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
              python="$ANACONDA_PYTHON_VERSION" \
              ${SYSROOT_DEP}
