@@ -215,10 +215,12 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
           const auto& subgraph = std::get<std::unique_ptr<Graph>>(attr.value);
           auto executionKernels = initializeNodeKernels(
               *subgraph, weights, executorConfig, placement);
-          CHECK(executionKernels.delegateExecutors.empty())
-              << "HigherOrderKernel does not support delegates";
-          CHECK(executionKernels.constFoldingExecutions.empty())
-              << "HigherOrderKernel does not support const folding";
+          TORCH_CHECK(
+              executionKernels.delegateExecutors.empty(),
+              "HigherOrderKernel does not support delegates");
+          TORCH_CHECK(
+              executionKernels.constFoldingExecutions.empty(),
+              "HigherOrderKernel does not support const folding");
           if (executorConfig.maxParallelOps > 1) {
             graphExecutors.emplace_back(
                 std::unique_ptr<GraphExecutorBase>(new ParallelGraphExecutor(
