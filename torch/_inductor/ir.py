@@ -7829,6 +7829,10 @@ class TensorBox(MutableBox):
 
 
 class StorageBox(MutableBox):
+    """
+    StorageBox allow in-place mutation of Tensors
+    """
+
     def is_input_buffer(self) -> bool:
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
             return self.data.get_name() in V.graph.graph_inputs
@@ -7878,10 +7882,17 @@ class StorageBox(MutableBox):
         ):
             self.realize()
 
+    def has_accumulated_enough_reads_by_size(self) -> bool:
+        return (
+            sum(V.graph.get_dep_size_hint(dep) for dep in self.get_reads())
+            > config.realize_acc_reads_size_threshold
+        )
+
     def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
             or self.has_large_inner_fn()
+            or self.has_accumulated_enough_reads_by_size()
         )
 
     def should_realize_on_reuse(self, users: int) -> bool:
