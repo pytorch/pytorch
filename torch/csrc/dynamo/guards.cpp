@@ -3655,13 +3655,24 @@ class TENSOR_MATCH : public LeafGuard {
         dispatch_keys.cast<c10::DispatchKeySet>(),
         std::move(tensor_dims_size),
         std::move(tensor_dims_stride));
-    // Get the weakref of the original tensor
-    _weakref = PyWeakref_NewRef(item, nullptr); // New ref
-    auto version_counter = torch::autograd::impl::version_counter(tensor);
-    // Check if inference_mode etc is enabled, preventing version counting.
-    _is_orig_version_enabled = version_counter.enabled();
-    if (_is_orig_version_enabled) {
-      _orig_version = version_counter.current_version();
+
+    // tensor can change metadata like requires_grad etc, without updating
+    // version counter. `skip_tensor_guards_with_matching_dict_tags=True` config
+    // flag instructs guards to ignore that a tensor can change its metadata.
+    py::object config_module = py::module_::import("torch._dynamo.config");
+    bool is_tensor_immutable =
+        config_module.attr("skip_tensor_guards_with_matching_dict_tags")
+            .cast<bool>();
+
+    if (is_tensor_immutable) {
+      // Get the weakref of the original tensor
+      _weakref = PyWeakref_NewRef(item, nullptr); // New ref
+      auto version_counter = torch::autograd::impl::version_counter(tensor);
+      // Check if inference_mode etc is enabled, preventing version counting.
+      _is_version_counting_enabled = version_counter.enabled();
+      if (_is_version_counting_enabled) {
+        _orig_version = version_counter.current_version();
+      }
     }
   }
 
@@ -3670,9 +3681,29 @@ class TENSOR_MATCH : public LeafGuard {
       return false;
     }
     auto tensor = THPVariable_Unpack(value);
-    if (_is_orig_version_enabled) {
+#if IS_PYTHON_3_13_PLUS
+    if (_is_version_counting_enabled) {
       // Check if the weakref points to the same object as the input tensor
-      PyObject* x = PyWeakref_GetObject(_weakref);
+      PyObject* x;
+      int valid = PyWeakref_GetObject(_weakref, x); // New ref in x
+      if (valid == -1) {
+        PyErr_Clear();
+      }
+      if (x == value) {
+        // Its the same tensor. Check version counter.
+        auto version_counter = torch::autograd::impl::version_counter(tensor);
+        if (version_counter.enabled() &&
+            version_counter.current_version() == _orig_version) {
+          Py_XDECREF(x);
+          return true;
+        }
+      }
+      Py_XDECREF(x);
+    }
+#else
+    if (_is_version_counting_enabled) {
+      // Check if the weakref points to the same object as the input tensor
+      PyObject* x = PyWeakref_GetObject(_weakref); // Borrowed ref
       if (x == value) {
         // Its the same tensor. Check version counter.
         auto version_counter = torch::autograd::impl::version_counter(tensor);
@@ -3682,6 +3713,7 @@ class TENSOR_MATCH : public LeafGuard {
         }
       }
     }
+#endif
     return _tensor_check->check(_root_guard_manager->_local_state, tensor);
   }
 
@@ -3724,7 +3756,7 @@ class TENSOR_MATCH : public LeafGuard {
   // Points to the weakref of the original tensor
   PyObject* _weakref{nullptr};
   int64_t _orig_version;
-  bool _is_orig_version_enabled;
+  bool _is_version_counting_enabled{false};
 };
 
 /**
