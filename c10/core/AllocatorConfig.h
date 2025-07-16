@@ -224,16 +224,8 @@ class C10_API AcceleratorAllocatorConfig {
   // This set is used to validate the presence and correctness of keys in
   // device-specific configuration parsers.
   static const std::unordered_set<std::string>& getKeys() {
-    return instance().keys_;
+    return keys_;
   }
-
-  // Parses the environment variable `env` to update the allocator settings.
-  // If the environment variable is not set, it does nothing.
-  // The configuration string should be a comma-separated list of key-value
-  // pairs, where each key is a configuration option and the value is the
-  // corresponding setting. For example:
-  // "max_split_size_mb:100,max_non_split_rounding_mb:20,garbage_collection_threshold:0.5,roundup_power2_divisions:[64:8,256:4,1024:4,>:1],expandable_segments:true,pinned_use_background_threads:true"
-  void parseArgs(const std::string& env);
 
   // Registers a device-specific configuration parser hook and its key. This
   // allows backends to parse additional device-specific configuration options
@@ -242,7 +234,7 @@ class C10_API AcceleratorAllocatorConfig {
   // device-specific configuration options. The hook will be called when the
   // environment variable is parsed. If a hook is already registered, it will be
   // replaced with the new one.
-  void registerDeviceConfigParserHook(
+  static void registerDeviceConfigParserHook(
       std::function<void(const std::string&)>&& hook,
       const std::unordered_set<std::string>& keys) {
     device_config_parser_hook_ = std::move(hook);
@@ -259,11 +251,19 @@ class C10_API AcceleratorAllocatorConfig {
   // provided environment string. This allows backends to parse additional
   // device-specific configuration options from the environment variable.
   // If no hook is registered, this function does nothing.
-  void callDeviceConfigParserHook(const std::string& env) const {
+  static void callDeviceConfigParserHook(const std::string& env) const {
     if (device_config_parser_hook_) {
       device_config_parser_hook_(env);
     }
   }
+
+  // Parses the environment variable `env` to update the allocator settings.
+  // If the environment variable is not set, it does nothing.
+  // The configuration string should be a comma-separated list of key-value
+  // pairs, where each key is a configuration option and the value is the
+  // corresponding setting. For example:
+  // "max_split_size_mb:100,max_non_split_rounding_mb:20,garbage_collection_threshold:0.5,roundup_power2_divisions:[64:8,256:4,1024:4,>:1],expandable_segments:true,pinned_use_background_threads:true"
+  void parseArgs(const std::string& env);
 
  private:
   AcceleratorAllocatorConfig();
@@ -324,12 +324,13 @@ class C10_API AcceleratorAllocatorConfig {
   // Optional hook for parsing additional device-specific allocator settings.
   // This allows backends (e.g., CUDA, XPU) to register a custom parser for
   // their own environment configuration extensions.
-  std::function<void(const std::string&)> device_config_parser_hook_{nullptr};
+  inline static std::function<void(const std::string&)> 
+      device_config_parser_hook_{nullptr};
 
   // A set of valid configuration keys, including both common and
   // device-specific options. This set is used to validate the presence and
   // correctness of keys during parsing.
-  std::unordered_set<std::string> keys_{
+  inline static std::unordered_set<std::string> keys_{
       "max_split_size_mb",
       "max_non_split_rounding_mb",
       "garbage_collection_threshold",
@@ -340,7 +341,7 @@ class C10_API AcceleratorAllocatorConfig {
 
 C10_API inline void setAllocatorSettings(const std::string& env) {
   AcceleratorAllocatorConfig::instance().parseArgs(env);
-  AcceleratorAllocatorConfig::instance().callDeviceConfigParserHook(env);
+  AcceleratorAllocatorConfig::callDeviceConfigParserHook(env);
 }
 
 C10_API inline std::string getAllocatorSettings() {
@@ -351,7 +352,7 @@ struct DeviceConfigParserHookRegistry {
   explicit DeviceConfigParserHookRegistry(
       std::function<void(const std::string&)>&& hook,
       const std::unordered_set<std::string>& keys) {
-    AcceleratorAllocatorConfig::instance().registerDeviceConfigParserHook(
+    AcceleratorAllocatorConfig::registerDeviceConfigParserHook(
         std::move(hook), keys);
   }
 };
