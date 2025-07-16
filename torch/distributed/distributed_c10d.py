@@ -5013,8 +5013,8 @@ def split_group(
 
     """
     # check inputs
-    if split_ranks is None:
-        raise ValueError("split_ranks cannot be None")
+    if split_ranks is None or len(split_ranks) == 0:
+        raise ValueError("split_ranks cannot be None or empty")
 
     global _world
     default_pg = _get_default_group()
@@ -5073,7 +5073,9 @@ def split_group(
     _check_valid_timeout(timeout)
 
     # find my group of ranks and my group local rank in split_ranks
-    my_group = [0]
+    # for ranks which are not in any split PGs, we just pass in this the first split group
+    # and None will be returned.
+    my_group = split_ranks[0]
 
     for split_group in split_ranks:
         if len(split_group) == 0:
