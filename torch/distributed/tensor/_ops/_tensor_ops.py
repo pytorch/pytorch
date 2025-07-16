@@ -39,37 +39,40 @@ from torch.distributed.tensor.placement_types import (
 aten = torch.ops.aten
 
 
-def default_strategy(op_schema: OpSchema) -> StrategyType:
-    # Default strategy by default just propagate the first input strategy
-    select_strategy = op_schema.args_schema[0]
-    assert isinstance(select_strategy, OpStrategy)
-    # we create new DTensorSpecs even for default strategy to assure that
-    # the tensor metas are distinct between the arguments and outputs
-    input_specs = []
-    redistribute_cost = []
-    for i in op_schema.args_schema:
-        input_specs.append(
-            DTensorSpec(
-                mesh=select_strategy.mesh,
-                placements=select_strategy.strategies[0].output_spec.placements,
-                tensor_meta=select_strategy.strategies[0].output_spec.tensor_meta,
+def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
+    # For ops with a single tensor input, we perform a 1:1 mapping such that
+    # for each strategy that the input supports, we create a corresponding strategy.
+    # Note: this may be a complete waste of work, becuase it should be equivalent to
+    # `return first_input_strategy` (unless creating a deep copy is important for some reason)
+    assert len(op_schema.args_schema) == 1, (
+        "propagate_single_input_strategy only works for single-tensor ops"
+    )
+    first_input_strategy = op_schema.args_schema[0]
+    assert isinstance(first_input_strategy, OpStrategy)
+    return OpStrategy(
+        [
+            OpSpec(
+                output_specs=DTensorSpec(
+                    mesh=first_input_strategy.mesh,
+                    placements=strategy.output_spec.placements,
+                    tensor_meta=strategy.output_spec.tensor_meta,
+                ),
+                input_specs=[
+                    DTensorSpec(
+                        mesh=first_input_strategy.mesh,
+                        placements=strategy.output_spec.placements,
+                        tensor_meta=strategy.output_spec.tensor_meta,
+                    )
+                ],
+                redistribute_cost=[
+                    generate_redistribute_costs(
+                        first_input_strategy, strategy.output_spec
+                    )
+                ],
             )
-        )
-        redistribute_cost.append([0.0] * len(select_strategy.strategies))
-
-    default_strategy = [
-        OpSpec(
-            output_specs=DTensorSpec(
-                mesh=select_strategy.mesh,
-                placements=strategy.output_spec.placements,
-                tensor_meta=strategy.output_spec.tensor_meta,
-            ),
-            input_specs=input_specs,
-            redistribute_cost=redistribute_cost,
-        )
-        for strategy in select_strategy.strategies
-    ]
-    return OpStrategy(default_strategy)
+            for strategy in first_input_strategy.strategies
+        ]
+    )
 
 
 register_op_strategy(
@@ -82,12 +85,12 @@ register_op_strategy(
         aten.view.dtype,
         aten.zero_.default,
     ]
-)(default_strategy)
+)(propagate_single_input_strategy)
 
 
 register_op_strategy(
     aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
-)(default_strategy)
+)(propagate_single_input_strategy)
 
 
 @register_op_strategy(
