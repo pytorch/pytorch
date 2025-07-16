@@ -129,15 +129,20 @@ class ShardingPropagator:
         all the :class:`OpSpec`s generated in the above.
 
         The optional ``schema_info`` tells which non-DTensor args/kwargs could affect the
-        cache and whether `pytree` is needed to flatten the nested args. For example,
-        ``aten.cat.default`` op has a ``List[Tensor]`` argument ``tensors`` and an ``int``
-        argument ``dim``. Because ``dim`` affects the sharding propagation result, we want
-        to pass ``RuntimeSchemaInfo(static_argnum=1)`` because the argument index of ``dim``
-        is 1. Besides, we also want to set ``needs_pytree=True`` because ``tensors`` needs
-        be flattened in sharding propagation. Another example is ``aten.histc.default``.
-        ``histc`` has 4 arguments (self, bins, min, max) and the last two would affect
-        sharding propagation along with the :class:`DTensor` argument ``self``. Since the
-        argument index of ``min`` is 2, the `schema_info` should be
+        cache and whether ``pytree`` is needed to flatten the nested args. ``static_argnum``
+        marks the starting index of the non-DTensor args that should be hashed into the
+        sharding propagation hash key, and ``static_kwargkey`` marks the keys of the
+        non-DTensor kwargs that should be hashed. ``needs_pytree`` should be used when
+        the input arg has :class:`list` or :class:`dict` structure.
+
+        For example, ``aten.cat.default`` op has a ``List[Tensor]`` argument ``tensors``
+        and an ``int`` argument ``dim``. Because ``dim`` affects the sharding propagation
+        result, we want to pass ``RuntimeSchemaInfo(static_argnum=1)`` because the argument
+        index of ``dim`` is 1. Besides, we also want to set ``needs_pytree=True`` because
+        ``tensors`` needs be flattened in sharding propagation. Another example is
+        ``aten.histc.default``. ``histc`` has 4 arguments (self, bins, min, max) and the
+        last two would affect sharding propagation along with the :class:`DTensor` argument
+        ``self``. Since the argument index of ``min`` is 2, the `schema_info` should be
         `RuntimeSchemaInfo(static_argnum=2)`.
         """
         self.op_strategy_funcs[op_overload] = strategy_func
