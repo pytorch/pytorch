@@ -324,7 +324,7 @@ class C10_API AcceleratorAllocatorConfig {
   // Optional hook for parsing additional device-specific allocator settings.
   // This allows backends (e.g., CUDA, XPU) to register a custom parser for
   // their own environment configuration extensions.
-  inline static std::function<void(const std::string&)> 
+  inline static std::function<void(const std::string&)>
       device_config_parser_hook_{nullptr};
 
   // A set of valid configuration keys, including both common and
