@@ -25,7 +25,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     _cast_fp_tensor,
     compiled_autograd_enabled,
     detect_compiled_autograd,
-    FSDPMeshInfo,
     HSDPMeshInfo,
     TrainingState,
 )
@@ -54,7 +53,7 @@ from .contract import _get_registry, contract
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Sequence
 
     from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam
     from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
@@ -422,26 +421,24 @@ def _register_group_forward_hooks(
 
 def replicate_impl(
     module,
+    mesh: DeviceMesh,
     *,
-    ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
-    mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Optional[Union[bool, int]] = None,
     shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
     ignored_params: Optional[set[nn.Parameter]] = None,
-    **kwargs,
 ):
     torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
             f"replicate does not support containers that do not implement forward: {module}"
         )
+
     mesh = mesh or _init_default_fully_shard_mesh()
-    if mesh.ndim not in (1, 2):
-        raise ValueError(f"replicate expects a 1D or 2D DeviceMesh but got {mesh}")
-    elif mesh.ndim == 1:
-        mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
+    if mesh.ndim != 2:
+        raise ValueError(f"replicate expects a 2D DeviceMesh but got {mesh}")
+
     else:
         if mesh.mesh_dim_names is None:
             raise AssertionError(
@@ -495,7 +492,6 @@ def replicate_impl(
 @contract(state_cls=_ReplicateState)
 def replicate(
     module: nn.Module,
-    ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
     **kwargs,
 ) -> nn.Module:
     r"""Replicates a module
@@ -508,10 +504,7 @@ def replicate(
         >>> module = nn.Linear(3, 3)
         >>> replicate(module)
     """
-    torch._C._log_api_usage_once("torch.distributed.replicate")
 
-    # TODO(fegin): using kwargs is not a good idea if we would like to make
-    # replicate a formal API to replace DDP.
     if "device_id" in kwargs:
         if not isinstance(kwargs["device_id"], (int, torch.device)):
             raise RuntimeError(
@@ -519,19 +512,12 @@ def replicate(
                 f"but got {type(kwargs['device_id'])}"
             )
 
-    if _is_fully_sharded(module):
+    if not is_composable_with_replicate(module):
         raise RuntimeError(
             "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
         )
 
-    if ignored_modules is None:
-        ignored_modules = {}
-    else:
-        ignored_modules = set(ignored_modules)
-
-    # state = replicate.state(module)
-    # module.register_forward_pre_hook(state.forward_pre_hook, with_kwargs=True)
-    device_mesh = kwargs.get("device_mesh", None)
+    device_mesh = kwargs.pop("device_mesh", None)
     if device_mesh is not None:
         from torch.distributed.device_mesh import _mesh_resources
 
@@ -555,9 +541,7 @@ def replicate(
     else:
         device_mesh = replicate_mesh()
 
-    module = replicate_impl(
-        module, mesh=device_mesh, ignored_modules=ignored_modules, **kwargs
-    )
+    module = replicate_impl(module, mesh=device_mesh, **kwargs)
     return module
 
 
@@ -605,14 +589,6 @@ def is_composable_with_replicate(module: nn.Module) -> bool:
         return True
     # Registry keys by function name
     return "fully_shard" not in registry
-
-
-def _is_fully_sharded(module: nn.Module) -> bool:
-    r"""Check if module is marked with fully_shard."""
-    registry = _get_registry(module)
-    if registry is None:
-        return False
-    return "fully_shard" in registry
 
 
 def replicate_mesh():
