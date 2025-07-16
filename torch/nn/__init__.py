@@ -5,15 +5,6 @@ from torch.nn.parameter import (  # usort: skip
     UninitializedBuffer as UninitializedBuffer,
     UninitializedParameter as UninitializedParameter,
 )
-from torch.nn import (
-    attention as attention,
-    functional as functional,
-    init as init,
-    modules as modules,
-    parallel as parallel,
-    parameter as parameter,
-    utils as utils,
-)
 from torch.nn.modules import (
     AdaptiveAvgPool1d,
     AdaptiveAvgPool2d,
@@ -176,6 +167,15 @@ from torch.nn.modules import (
     ZeroPad1d,
     ZeroPad2d,
     ZeroPad3d,
+)
+from torch.nn import (
+    attention as attention,
+    functional as functional,
+    init as init,
+    modules as modules,
+    parallel as parallel,
+    parameter as parameter,
+    utils as utils,
 )
 from torch.nn.parallel import DataParallel as DataParallel
 
