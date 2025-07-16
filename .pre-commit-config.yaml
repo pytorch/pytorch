@@ -5,7 +5,6 @@ repos:
         name: Run Lintrunner in an isolated venv before every push. The first run may be slow...
         entry: python scripts/run_lintrunner.py   # wrapper below
         language: python                          # pre‑commit manages venv for the wrapper
-        skip_install: true                        # ← prevent “pip install .”
         additional_dependencies: []               # wrapper handles lintrunner install
         always_run: true
         stages: [pre-push]                        # fire only on pre‑push
