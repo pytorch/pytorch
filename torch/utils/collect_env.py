@@ -696,7 +696,7 @@ def get_env_info():
             cuda_version_str = 'N/A'
             hip_compiled_version = torch.version.hip
     else:
-        version_str = debug_mode_str = cuda_available_str = cuda_version_str = xpu_available_str = 'N/A'
+        version_str = debug_mode_str = cuda_available_str = cuda_version_str = xpu_available_str = 'N/A'  # type: ignore[assignment]
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
 
     sys_version = sys.version.replace("\n", " ")
