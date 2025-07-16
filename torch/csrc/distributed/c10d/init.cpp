@@ -48,7 +48,6 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
