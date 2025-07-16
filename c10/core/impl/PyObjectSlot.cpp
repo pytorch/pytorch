@@ -2,17 +2,17 @@
 
 namespace c10::impl {
 
-PyObjectSlot::PyObjectSlot() : pyobj_interpreter_(nullptr), pyobj_(nullptr) {}
+PyObjectSlot::PyObjectSlot() : pyobj_(nullptr) {}
 
 PyObjectSlot::~PyObjectSlot() {
   maybe_destroy_pyobj();
 }
 
 void PyObjectSlot::maybe_destroy_pyobj() {
-  if (owns_pyobj()) {
-    TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
-    TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
-    (*pyobj_interpreter_.load(std::memory_order_acquire))
+  if (owns_pyobj() && pyobj_ != nullptr) {
+    auto* interpreter = getGlobalPyInterpreter();
+    TORCH_INTERNAL_ASSERT(interpreter != nullptr);
+    (*interpreter)
         ->decref(_unchecked_untagged_pyobj(), /*has_pyobj_slot*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
@@ -25,7 +25,7 @@ void PyObjectSlot::maybe_destroy_pyobj() {
 }
 
 PyInterpreter* PyObjectSlot::pyobj_interpreter() {
-  return pyobj_interpreter_.load(std::memory_order_acquire);
+  return pyobj_ ? getGlobalPyInterpreter() : nullptr;
 }
 
 PyObject* PyObjectSlot::_unchecked_untagged_pyobj() const {
@@ -35,11 +35,11 @@ PyObject* PyObjectSlot::_unchecked_untagged_pyobj() const {
 }
 
 PyInterpreter& PyObjectSlot::load_pyobj_interpreter() const {
-  auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
-  if (interpreter) {
-    return *interpreter;
-  }
-  TORCH_CHECK(false, "cannot access PyObject for Tensor - no interpreter set");
+  auto* interpreter = getGlobalPyInterpreter();
+  TORCH_CHECK(
+      interpreter,
+      "cannot access PyObject for Tensor - no interpreter available");
+  return *interpreter;
 }
 
 bool PyObjectSlot::owns_pyobj() {
