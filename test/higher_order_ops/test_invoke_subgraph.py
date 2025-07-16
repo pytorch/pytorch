@@ -1067,6 +1067,36 @@ class GraphModule(torch.nn.Module):
             "Encountered input mutation during higher order op tracing" in str(cause)
         )
 
+    def test_input_mutation_mutiple_times(self):
+        @nested_compile_region
+        def gn(x, y):
+            x.add_(1)
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            z = gn(x, y)
+            for _ in range(16):
+                z += gn(x, y)
+            return z
+
+        x = torch.randn(8, requires_grad=False)
+        x_clone = x.clone()
+        y = torch.randn(8, requires_grad=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        with (
+            mock.patch(
+                "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+                True,
+            ),
+            torch.no_grad(),
+        ):
+            out = opt_fn(x, y)
+        exp_out = fn(x_clone, y)
+        self.assertEqual(exp_out, out)
+        self.assertEqual(x_clone, x)
+
     def test_input_mutation_inference_mode(self):
         @nested_compile_region
         def gn(x, y):
