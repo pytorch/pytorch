@@ -5831,7 +5831,7 @@ scaled_dot_product_attention = _add_docstr(
 
             if attn_mask is not None:
                 if attn_mask.dtype == torch.bool:
-                    attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+                    attn_bias.masked_fill_(attn_mask, float("-inf"))
                 else:
                     attn_bias = attn_mask + attn_bias
 
