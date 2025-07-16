@@ -761,7 +761,6 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = self.b200_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
-                print(default_config)
             elif capability >= (9, 0):
                 default_config = self.h100_default_flex_config.get(
                     (dtype, head_dim), default_config
