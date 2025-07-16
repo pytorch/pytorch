@@ -64,7 +64,7 @@ def ensure_pipx() -> None:
         )
 
 
-def ensure_tool_installed(tool: str, force_update: bool = False) -> bool:
+def ensure_tool_installed(tool: str, force_update: bool = False) -> None:
     """
     Checks to see if the tool is available and if not (or if force update requested) then
     it reinstalls it.
@@ -77,7 +77,7 @@ def ensure_tool_installed(tool: str, force_update: bool = False) -> bool:
         run(["pipx", "install", "--quiet", "--force", tool])
         if not which(tool):
             print(
-                f"\n⚠️  {tool} installation succeed, but it's not on PATH. Remember to a new terminal.\n"
+                f"\n⚠️  {tool} installation succeed, but it's not on PATH. Launch a new terminal if your git pushes don't work.\n"
             )
 
 
@@ -87,6 +87,8 @@ ensure_pipx()
 # Modifies the shell's configuration files (like ~/.bashrc, ~/.zshrc, etc.)
 #  to include the directory where pipx installs executables in your PATH
 #  variable.
+# Note that further down we run pre-commit through pipx because the path
+#  this command adds may not be in the current shell's PATH.  
 run(["pipx", "ensurepath"])
 
 # Ensure pre-commit is installed globally via pipx
@@ -98,6 +100,7 @@ ensure_tool_installed("lintrunner")
 # ───────────────────────────────────────────
 # 3. Activate (or refresh) the pre‑push hook
 # ───────────────────────────────────────────
+
 # ── Activate (or refresh) the repo’s pre‑push hook ──────────────────────────
 # Creates/overwrites .git/hooks/pre‑push with a tiny shim that will call
 # `pre-commit run --hook-stage pre-push` on every `git push`.
@@ -105,7 +108,7 @@ ensure_tool_installed("lintrunner")
 #
 # The --allow-missing-config flag lets pre-commit succeed if someone changes to
 # a branch that doesn't have pre-commit installed
-run(["pre-commit", "install", "--hook-type", "pre-push", "--allow-missing-config"])
+run(["pipx", "run", "pre-commit", "install", "--hook-type", "pre-push", "--allow-missing-config"])
 
 # ── Pin remote‑hook versions for reproducibility ────────────────────────────
 # (Note: we don't have remote hooks right now, but it future-proofs this script)
@@ -113,7 +116,7 @@ run(["pre-commit", "install", "--hook-type", "pre-push", "--allow-missing-config
 #    to the latest commit on its default branch.
 # 2. `--freeze` immediately rewrites each `rev:` to the exact commit SHA,
 #    ensuring all contributors and CI run identical hook code.
-run(["pre-commit", "autoupdate", "--freeze"])
+run(["pipx", "run", "pre-commit", "autoupdate", "--freeze"])
 
 
 print(
