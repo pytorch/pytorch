@@ -1235,7 +1235,7 @@ class CachingAutotuner(KernelInterface):
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(stream, launcher)
 
-        # PyTorch execution trace replay calls CachingAutotuner::run() instread of calls launcher
+        # PyTorch execution trace replay calls CachingAutotuner::run() instead of calls launcher
         # so _RecordFunctionFast need to capture the args into CachingAutotuner::run()
         # make a copy here to avoid mutating the original args
         args_without_constexprs = tuple(args)

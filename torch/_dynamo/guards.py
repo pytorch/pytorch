@@ -126,6 +126,7 @@ from .source import (
     ShapeEnvSource,
     SubclassAttrListSource,
     TorchFunctionModeStackSource,
+    TorchSource,
     TupleIteratorGetItemSource,
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
@@ -1058,6 +1059,13 @@ class GuardBuilder(GuardBuilderBase):
         ):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager
+        elif istype(source, TorchSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=lambda _: torch,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, TorchFunctionModeStackSource):
             out = root_guard_manager.lambda_manager(
                 python_lambda=lambda _: get_torch_function_mode_stack_at(
