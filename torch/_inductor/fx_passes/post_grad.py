@@ -1831,15 +1831,6 @@ class ConstructorMoverPass:
         return OrderedSet(constructors) - all_cannot_move_to_gpu
 
 
-def should_lower_repeat_interleave_Tensor(match):
-    output_size = match.kwargs["output_size"]
-    if output_size is None:
-        return False
-    if type(output_size) is not int:
-        return False
-    return True
-
-
 def move_constructors_to_gpu(graph: fx.Graph) -> None:
     """
     Moves intermediary tensors which are constructed on the cpu to gpu when safe
