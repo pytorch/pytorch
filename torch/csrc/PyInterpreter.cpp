@@ -991,10 +991,6 @@ c10::impl::PyInterpreter* getPyInterpreter() {
   return torch::detail::self_interpreter.get();
 }
 
-bool isMainPyInterpreter() {
-  return torch::detail::self_interpreter.is_main_interpreter();
-}
-
 // Initialize the global function pointer for c10 PyObjectSlot
 void initializeGlobalPyInterpreter() {
   c10::impl::g_get_pyinterpreter_fn = &getPyInterpreter;

@@ -210,11 +210,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
 };
 
 static torch::_RegisterOrVerify register_or_verify() {
-  if (isMainPyInterpreter()) {
-    return torch::_RegisterOrVerify::REGISTER;
-  } else {
-    return torch::_RegisterOrVerify::VERIFY;
-  }
+  return torch::_RegisterOrVerify::VERIFY;
 }
 
 static py::object ophandle_call_boxed(
@@ -287,7 +283,6 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "reset",
           [](const py::object& self) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().reset();
             return;
           },
@@ -297,7 +292,6 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "def_",
           [](py::object self, const char* schema, const char* alias) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(
                 torch::schema(schema, parseAliasAnalysisKind(alias)));
             return self;
@@ -311,7 +305,6 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "def_legacy",
           [](py::object self, const char* schema) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(torch::jit::parseSchema(schema));
             return self;
           },
@@ -331,7 +324,6 @@ void initDispatchBindings(PyObject* module) {
              const char* name,
              const char* dispatch,
              const char* debug) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(
                 name, dispatch_str(dispatch, [](const at::Tensor& a) {
                         return a;
@@ -349,7 +341,6 @@ void initDispatchBindings(PyObject* module) {
              const char* dispatch,
              const char* alias,
              const char* debug) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(
                 torch::schema(schema, parseAliasAnalysisKind(alias)),
                 dispatch_str(dispatch, [](const at::Tensor& a) {
@@ -370,7 +361,6 @@ void initDispatchBindings(PyObject* module) {
              const char* name,
              const char* dispatch,
              const char* debug) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().impl(
                 name, dispatch_str(dispatch, [](const at::Tensor& a) {
                         return a;
@@ -465,7 +455,6 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "fallback_fallthrough",
           [](py::object self, const char* dispatch) {
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().fallback(
                 dispatch_str(dispatch, CppFunction::makeFallthrough()));
             return self;
@@ -480,7 +469,6 @@ void initDispatchBindings(PyObject* module) {
              bool with_keyset) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             if (func.is(py::module::import("torch.library")
                             .attr("fallthrough_kernel"))) {
               lib.fallback(
@@ -913,8 +901,6 @@ void initDispatchBindings(PyObject* module) {
         handle.setReportErrorCallback_(std::move(callback_obj));
       });
 
-  m.def(
-      "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
   m.def("_dispatch_pystub", [](const char* name, const char* overload) {
     return c10::Dispatcher::singleton().getPyStub(
         c10::OperatorName(name, overload));

@@ -35,7 +35,6 @@ PyTypeObject* THPStorageClass = nullptr;
 PyObject* THPStorage_NewWithStorage(
     PyTypeObject* type,
     c10::Storage _storage,
-    c10::impl::PyInterpreterStatus status,
     bool allow_preexisting_pyobj) {
   TORCH_CHECK(
       PyType_IsSubtype(type, &THPStorageType),
@@ -78,7 +77,7 @@ PyObject* THPStorage_NewWithStorage(
   if (!c10::impl::HermeticPyObjectTLS::get_state()) {
     s->is_hermetic = false;
     const auto& storage = THPStorage_Unpack(s);
-    storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(obj, status);
+    storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(obj);
   } else {
     s->is_hermetic = true;
   }
@@ -90,17 +89,12 @@ PyObject* THPStorage_NewWithStorage(
 PyObject* THPStorage_Wrap(c10::Storage storage) {
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
   if (c10::impl::HermeticPyObjectTLS::get_state()) {
-    return THPStorage_NewWithStorage(
-        THPStorageClass,
-        std::move(storage),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+    return THPStorage_NewWithStorage(THPStorageClass, std::move(storage));
   }
   c10::impl::PyObjectSlot* pyobj_slot = storage_impl->pyobj_slot();
 
   std::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj(
       /*ignore_hermetic_tls=*/false);
-  c10::impl::PyInterpreterStatus status =
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US;
   if (maybe_pyobj.has_value()) {
     auto obj = *maybe_pyobj;
     if (obj) {
@@ -119,15 +113,8 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
         return obj;
       }
     }
-    status = c10::impl::PyInterpreterStatus::TAGGED_BY_US;
-  } else {
-    if (storage.use_count() <= 1) {
-      status = c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED;
-    } else {
-      status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
-    }
   }
-  return THPStorage_NewWithStorage(THPStorageClass, std::move(storage), status);
+  return THPStorage_NewWithStorage(THPStorageClass, std::move(storage));
 }
 
 static bool THPStorage_isPreservable(THPStorage* self) {
@@ -161,8 +148,8 @@ static bool THPStorage_tryPreserve(THPStorage* self) {
   auto maybe_pyobj = storage_impl->pyobj_slot()->check_pyobj(
       /*ignore_hermetic_tls=*/true);
   // NOTE: It is possible to just set the PyObjectSlot here, but the point is
-  // that we should have already set PyObjectSlot when the storage PyObject was
-  // created.
+  // that we should have already set PyObjectSlot when the storage PyObject
+  // was created.
   TORCH_INTERNAL_ASSERT(
       maybe_pyobj.has_value(),
       "Trying to preserve a Python storage whose PyObjectSlot does not have a PyObject");
@@ -370,8 +357,7 @@ static PyObject* THPStorage_pynew(
             at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            device_opt),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+            device_opt));
 
     // torch.Storage(size, *, ...)
   } else if (r.idx == 1) {
@@ -384,8 +370,7 @@ static PyObject* THPStorage_pynew(
             at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            device_opt),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+            device_opt));
 
     // torch.Storage(sequence, *, ...)
   } else if (r.idx == 2) {
@@ -409,8 +394,7 @@ static PyObject* THPStorage_pynew(
             at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            device_opt),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+            device_opt));
     THPObjectPtr item;
     try {
       const auto& storage = THPStorage_Unpack(self);
@@ -506,10 +490,8 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
         /* resizable */ false,
         device_opt);
 
-    PyObject* _ret = THPStorage_NewWithStorage(
-        Py_TYPE(self),
-        std::move(new_storage_impl),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+    PyObject* _ret =
+        THPStorage_NewWithStorage(Py_TYPE(self), std::move(new_storage_impl));
 
     return _ret;
   }

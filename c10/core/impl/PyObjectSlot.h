@@ -33,7 +33,7 @@ struct C10_API PyObjectSlot {
   //
   // NB: THIS FUNCTION CAN RAISE AN EXCEPTION.  Make sure to clean up after
   // PyObject if necessary!
-  void init_pyobj(PyObject* pyobj, PyInterpreterStatus status) {
+  void init_pyobj(PyObject* pyobj) {
     pyobj_interpreter_.store(
         getGlobalPyInterpreter(), std::memory_order_relaxed);
     pyobj_ = pyobj;
