@@ -908,6 +908,63 @@ class TestIndexing(TestCase):
         mask2 = torch.tensor([1, 1, 1], dtype=torch.bool, device=device)
         self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
 
+    def test_multi_dimensional_bool_mask(self, device):
+        x = torch.randn(2, 2, 3, device=device)
+        b = ((True, False), (False, False))
+        m = torch.tensor(b, dtype=torch.bool, device=device)
+        z = torch.tensor(0)
+        t = torch.tensor(True)
+        f = torch.tensor(False)
+
+        # Using boolean sequence
+        self.assertEqual(x[b,].shape, (1, 3))
+        self.assertEqual(x[b, ::2].shape, (1, 2))
+        self.assertEqual(x[b, None].shape, (1, 1, 3))
+        self.assertEqual(x[b, 0].shape, (1,))
+        self.assertEqual(x[b, z].shape, (1,))
+        self.assertEqual(x[b, True].shape, (1, 3))
+        self.assertEqual(x[b, True, True, True, True].shape, (1, 3))
+        self.assertEqual(x[b, False].shape, (0, 3))
+        self.assertEqual(x[b, True, True, False, True].shape, (0, 3))
+        self.assertEqual(x[b, t].shape, (1, 3))
+        self.assertEqual(x[b, f].shape, (0, 3))
+
+        # Using boolean tensor
+        self.assertEqual(x[m].shape, (1, 3))
+        self.assertEqual(x[m, ::2].shape, (1, 2))
+        self.assertEqual(x[m, None].shape, (1, 1, 3))
+        self.assertEqual(x[m, 0].shape, (1,))
+        self.assertEqual(x[m, z].shape, (1,))
+        self.assertEqual(x[m, True].shape, (1, 3))
+        self.assertEqual(x[m, True, True, True, True].shape, (1, 3))
+        self.assertEqual(x[m, False].shape, (0, 3))
+        self.assertEqual(x[m, True, True, False, True].shape, (0, 3))
+        self.assertEqual(x[m, t].shape, (1, 3))
+        self.assertEqual(x[m, f].shape, (0, 3))
+
+        # Boolean mask in the middle of indices array
+        x = torch.randn(3, 2, 2, 5, device=device)
+        self.assertEqual(x[:, m, :].shape, (3, 1, 5))
+        self.assertEqual(x[0, m, ::2].shape, (1, 3))
+        self.assertEqual(x[..., m, ::2].shape, (3, 1, 3))
+        self.assertEqual(x[None, ..., m, ::2].shape, (1, 3, 1, 3))
+
+    def test_bool_mask_assignment(self, device):
+        v = torch.tensor([[1, 2], [3, 4]], device=device)
+        mask = torch.tensor([1, 0], dtype=torch.bool, device=device)
+        v[mask, :] = 0
+        self.assertEqual(v, torch.tensor([[0, 0], [3, 4]], device=device))
+
+        v = torch.tensor([[1, 2], [3, 4]], device=device)
+        v[:, mask] = 0
+        self.assertEqual(v, torch.tensor([[0, 2], [0, 4]], device=device))
+
+    def test_multi_dimensional_bool_mask_assignment(self, device):
+        v = torch.tensor([[[[1], [2]], [[3], [4]]]], device=device)
+        mask = torch.tensor([[1, 0], [0, 1]], dtype=torch.bool, device=device)
+        v[:, mask, :] = 0
+        self.assertEqual(v, torch.tensor([[[[0], [2]], [[3], [0]]]], device=device))
+
     def test_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
         mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
