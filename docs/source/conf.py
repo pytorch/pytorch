@@ -2936,12 +2936,12 @@ coverage_ignore_classes = [
     # torch.nn.cpp
     "ModuleWrapper",
     "OrderedDictWrapper",
+    # torch.nn.modules.container
+    "Container",
     # torch.nn.modules.loss
     "NLLLoss2d",
     # torch.nn.modules.normalization
     "CrossMapLRN2d",
-    # torch.nn.modules.container
-    "Container",
     # torch.nn.parallel.data_parallel
     "DataParallel",
     # torch.nn.parallel.distributed
