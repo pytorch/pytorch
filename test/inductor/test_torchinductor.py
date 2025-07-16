@@ -8507,8 +8507,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch._inductor.metrics.generated_kernel_count = 0
         with torch.no_grad():
             self.common(kv_cache_module, (inp, 1), check_lowp=False)
-        count = 2 if config.triton.enable_native_matmul else 1 
-        assertGeneratedKernelCountEqual(self, count)
+
+        if (
+            config.triton.enable_native_matmul
+            and config.cuda_backend == "triton"
+            and self.device == "cuda"
+        ) :
+            assertGeneratedKernelCountEqual(self, 2)
+        else :
+            assertGeneratedKernelCountEqual(self, 1)
 
     @skip_if_gpu_halide  # compile error on gpu
     def test_scatter1(self):
@@ -9767,11 +9774,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
             check_lowp=False,
         )
-        expected_kernel = 1 if config.triton.enable_native_matmul else 0
-        # codegen mm kernel from template
-        self.assertEqual(
-            torch._inductor.metrics.generated_kernel_count, expected_kernel
-        )
+
+        if (
+            config.triton.enable_native_matmul
+            and config.cuda_backend == "triton"
+            and self.device == "cuda"
+        ) :
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count, 
+                1
+            )
+        else :
+            # codegen mm kernel from template
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count, 
+                0
+            )
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_dtype_sympy_expr(self):
