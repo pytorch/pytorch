@@ -1807,6 +1807,11 @@ class AotCodeCompiler:
             else:
                 raise RuntimeError(f"Unsupported platform: {platform}")
 
+            # Intel compiler failed to compile this manually constructed assembly file.
+            # it is ok to use cpp to compile the .S to a .o and linked with Intel compiler.
+            if device_type == "xpu":
+                use_asm_build = False
+
             is_large_consts = len(consts) > 1024
 
             def format_consts_to_asm(
@@ -1873,9 +1878,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
-                # Intel compiler failed to compile this manually constructed assembly file.
-                # it is ok to use gcc to compile the .S to a .o and linked with Intel compiler .
-                device_type=device_type if device_type != "xpu" else "cpu",
+                device_type=device_type,
                 aot_mode=graph.aot_mode,
                 compile_only=True,
                 use_relative_path=use_relative_path,
