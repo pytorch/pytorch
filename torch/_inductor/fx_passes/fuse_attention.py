@@ -688,6 +688,44 @@ def _sfdp_replacement_23(query, key, value):
     )
 
 
+def _sfdp_pattern_24(query, key, value, attn_mask, inv_scale):
+    # for speech_transformer
+    len_q = query.size(1)
+    len_k = key.size(1)
+    len_v = value.size(1)
+    d_k = query.size(-1)
+    d_v = value.size(-1)
+    n_head = query.size(2)
+    q = query.permute([2, 0, 1, 3]).contiguous().view(-1, len_q, d_k)
+    k = key.permute([2, 0, 1, 3]).contiguous().view(-1, len_k, d_k)
+    v = value.permute([2, 0, 1, 3]).contiguous().view(-1, len_v, d_v)
+    _attn_mask = attn_mask.repeat(n_head, 1, 1)
+
+    scores = torch.bmm(q, k.transpose(1, 2)).div(inv_scale)
+    fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
+    return torch.bmm(torch.softmax(scores.masked_fill(_attn_mask.bool(), fill_value), dim=-1), v)
+
+
+def _sfdp_replacement_24(query, key, value, attn_mask, inv_scale):
+    counters["inductor"]["fuse_attention"] += 1
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    mask = attn_mask.unsqueeze(1)
+    if hasattr(inv_scale, "item"):
+        scale = 1.0 / inv_scale.item()
+    else:
+        scale = 1.0 / inv_scale
+    return _scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=mask,
+            is_causal=False,
+            scale=scale,
+        )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -789,6 +827,7 @@ def _get_sfdp_patterns():
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
     # need 2d attn_mask to generate patterns with view op
     m_inp_2d = functools.partial(torch.empty, (2, 4), device=device)
+    m_inp_3d = functools.partial(torch.empty, (2, 4, 4), device=device)
     # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
@@ -819,6 +858,7 @@ def _get_sfdp_patterns():
         m_float = functools.partial(m_inp, dtype=torch.float)
         m_bool = functools.partial(m_inp, dtype=torch.bool)
         m_2d = functools.partial(m_inp_2d, dtype=dtype)
+        m_3d_bool = functools.partial(m_inp_3d, dtype=torch.bool)
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
         g_bs1 = functools.partial(g_bs1_inp, dtype=dtype)
@@ -1002,6 +1042,13 @@ def _get_sfdp_patterns():
                 [g(), g(), g()],
                 {},
                 _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_24,
+                _sfdp_replacement_24,
+                [g(), g(), g(), m_3d_bool(), c()],
+                {},
+                _sfdp_extra_check(aten.div.Tensor),
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
