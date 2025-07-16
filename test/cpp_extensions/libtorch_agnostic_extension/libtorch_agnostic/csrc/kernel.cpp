@@ -1,7 +1,6 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
-#include <torch/headeronly/util/Exception.h>
 
 #include <optional>
 
@@ -33,8 +32,6 @@ Tensor sgd_out_of_place(
     const float weight_decay,
     const double lr,
     const bool maximize) {
-  STD_TORCH_CHECK(param.dim() == 1, "param must be 1D");
-
   int64_t *param_sizes;
   int64_t *param_strides;
   aoti_torch_get_sizes(param.get(), &param_sizes);
