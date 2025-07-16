@@ -32,7 +32,7 @@ def ensure_lintrunner() -> None:
         print("✅ lintrunner is already installed")
         return
     sys.exit(
-        "❌ lintrunner is required but was not found on your PATH. Please install it via `pipx install lintrunner` before running this script."
+        "❌ lintrunner is required but was not found on your PATH. Please run the `python scripts/setup_hooks.py` to install to configure lintrunner before using this script."
     )
 
 

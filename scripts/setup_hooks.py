@@ -64,7 +64,7 @@ def ensure_pipx() -> None:
         )
 
 
-def ensure_tool_installed(tool: str, force_update: bool = True) -> None:
+def ensure_tool_installed(tool: str, force_update: bool = False) -> None:
     if force_update or not which(tool):
         print(f"Ensuring latest {tool} via pipx …")
         run(["pipx", "install", "--quiet", "--force", tool])
@@ -85,7 +85,7 @@ run(["pipx", "ensurepath"])
 
 # Ensure pre-commit is installed globally via pipx
 ensure_tool_installed("pre-commit", force_update=True)
-# Don't force a lintrunner update b/c it might break folks
+# Don't force a lintrunner update because it might break folks
 # who already have it installed in a different way
 ensure_tool_installed("lintrunner")
 

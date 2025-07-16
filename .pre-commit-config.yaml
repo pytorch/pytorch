@@ -10,4 +10,4 @@ repos:
         always_run: true
         stages: [pre-push]                        # fire only on pre‑push
         pass_filenames: false                     # Lintrunner gets no per‑file args
-        verbose: true                             # stream output as it is produced...doesn't seem to actually work though
+        verbose: true                             # stream output as it is produced...allegedly anyways
