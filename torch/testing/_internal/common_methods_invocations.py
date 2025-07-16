@@ -97,7 +97,6 @@ from torch.testing._internal.opinfo.core import (  # noqa: F401
     sample_inputs_foreach,
     ForeachFuncInfo,
     gradcheck_wrapper_hermitian_input,
-    gradcheck_wrapper_ctc_loss,
     gradcheck_wrapper_triangular_input,
     gradcheck_wrapper_triangular_input_real_positive_diagonal,
     gradcheck_wrapper_masked_operation,
@@ -21368,9 +21367,6 @@ op_db: list[OpInfo] = [
         dtypes=floating_types(),
         supports_out=False,
         sample_inputs_func=sample_inputs_ctc_loss,
-        # gradcheck_wrapper, see https://github.com/pytorch/pytorch/issues/52241
-        # (Update: should not need gradcheck wrapper if/since now using raw inputs)
-        #gradcheck_wrapper=gradcheck_wrapper_ctc_loss,
         skips=(
             # RuntimeError: derivative for aten::_ctc_loss_backward is not implemented
             DecorateInfo(
