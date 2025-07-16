@@ -1245,6 +1245,7 @@ if(USE_MIMALLOC AND USE_MIMALLOC_ON_MKL)
 endif()
 
 # ---[ Main build
+add_subdirectory(torch/headeronly)  # headeronly headers
 add_subdirectory(c10)
 add_subdirectory(caffe2)
 

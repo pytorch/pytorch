@@ -33,7 +33,7 @@ if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
-if sys.version_info >= (3, 12):
+if (3, 12) <= sys.version_info < (3, 14):
     TERMINAL_OPCODES.add(dis.opmap["RETURN_CONST"])
 if sys.version_info >= (3, 13):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD_NO_INTERRUPT"])
