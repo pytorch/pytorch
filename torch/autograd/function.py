@@ -4,8 +4,8 @@ import inspect
 import itertools
 import warnings
 from collections import OrderedDict
-from typing import Any, Optional
-from typing_extensions import deprecated
+from typing import Any, Callable, Optional, TypeVar
+from typing_extensions import Concatenate, deprecated, ParamSpec
 
 import torch
 import torch._C as _C
@@ -28,6 +28,10 @@ __all__ = [
 # Unique id provider for each class inheriting from Function
 # This is incremented in FunctionMeta during class definition
 AUTOGRAD_FUNCTION_COUNTER = itertools.count()
+
+_T = TypeVar("_T")
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
 
 
 # Formerly known as: _ContextMethodMixin
@@ -595,11 +599,13 @@ def _is_setup_context_defined(fn):
     return fn != _SingleLevelFunction.setup_context
 
 
-def once_differentiable(fn):
+def once_differentiable(
+    fn: Callable[Concatenate[_T, _P], _R],
+) -> Callable[Concatenate[_T, _P], _R]:
     @functools.wraps(fn)
-    def wrapper(ctx, *args):
+    def wrapper(ctx: _T, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         with torch.no_grad():
-            outputs = fn(ctx, *args)
+            outputs = fn(ctx, *args, **kwargs)
 
         if not torch.is_grad_enabled():
             return outputs
@@ -620,12 +626,14 @@ def once_differentiable(fn):
             return outputs
 
         if not isinstance(outputs, tuple):
-            outputs = (outputs,)
+            outputs_ = (outputs,)
+        else:
+            outputs_ = outputs
 
         err_fn = _functions.DelayedError(
             b"trying to differentiate twice a function that was marked "
             b"with @once_differentiable",
-            len(outputs),
+            len(outputs_),
         )
 
         # Create aliases of each output that has requires_grad=True. We need
@@ -637,7 +645,7 @@ def once_differentiable(fn):
                 var.requires_grad = True
             return var
 
-        return err_fn(*[fake_requires_grad(v) for v in outputs])
+        return err_fn(*[fake_requires_grad(v) for v in outputs_])  # type: ignore[return-value]
 
     return wrapper
 

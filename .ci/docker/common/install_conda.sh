@@ -70,10 +70,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   fi
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  if [[ $(uname -m) == "aarch64" ]]; then
-    conda_install "openblas==0.3.29=*openmp*"
-  else
-    conda_install "mkl=2021.4.0 mkl-include=2021.4.0"
+  if [[ $(uname -m) != "aarch64" ]]; then
+    pip_install mkl==2024.2.0
+    pip_install mkl-static==2024.2.0
+    pip_install mkl-include==2024.2.0
   fi
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
@@ -85,6 +85,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Magma is installed from a tarball in the ossci-linux bucket into the conda env
   if [ -n "$CUDA_VERSION" ]; then
     conda_run ${SCRIPT_FOLDER}/install_magma_conda.sh $(cut -f1-2 -d'.' <<< ${CUDA_VERSION})
+  fi
+
+  if [[ "$UBUNTU_VERSION" == "24.04"* ]] ; then
+    conda_install_through_forge libstdcxx-ng=14
   fi
 
   # Install some other packages, including those needed for Python test reporting
