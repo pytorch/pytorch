@@ -1,4 +1,4 @@
-(export-programming-model)=
+(export.programming_model)=
 
 # torch.export Programming Model
 
@@ -15,7 +15,9 @@ on different inputs as long as they satisfy the same conditions.
 
 The basic output of {func}`torch.export.export` is a single graph of PyTorch
 operations, with associated metadata. The exact format of this output is
-covered in the {ref}`export.ir_spec`.
+covered in the {ref}`export IR spec <export.ir_spec>`.
+
+(non-strict-export)=
 
 ### Strict vs. Non-Strict Tracing
 
@@ -120,6 +122,9 @@ Whether a value is static or dynamic depends on its type:
 
   - There are dynamic variants for some primitive types (`SymInt`,
     `SymFloat`, `SymBool`). Typically users do not have to deal with them.
+  - Users can specify integer inputs as dynamic by specifying
+    a [dynamic shape](https://pytorch.org/docs/main/export.html#expressing-dynamism)
+    for it.
 
 - For Python *standard containers* (`list`, `tuple`, `dict`, `namedtuple`):
 
@@ -150,7 +155,7 @@ By default, the types of inputs you can use for your program are:
 - Python primitives (`int`, `float`, `bool`, `str`, `None`)
 - Python standard containers (`list`, `tuple`, `dict`, `namedtuple`)
 
-### Custom Input Types
+### Custom Input Types (PyTree)
 
 In addition, you can also define your own (custom) class and use it as an
 input type, but you will need to register such a class as a PyTree.
@@ -164,7 +169,8 @@ class Input:
     f: torch.Tensor
     p: torch.Tensor
 
-torch.export.register_dataclass(Input)
+import torch.utils._pytree as pytree
+pytree.register_dataclass(Input)
 
 class M(torch.nn.Module):
     def forward(self, x: Input):

@@ -209,8 +209,10 @@ class PythonKernelHolder : public c10::OperatorKernel {
   }
 };
 
+// @todo sahanp: Afait only register is used in the codebase. This can be
+// removed / simplified
 static torch::_RegisterOrVerify register_or_verify() {
-  return torch::_RegisterOrVerify::VERIFY;
+  return torch::_RegisterOrVerify::REGISTER;
 }
 
 static py::object ophandle_call_boxed(
