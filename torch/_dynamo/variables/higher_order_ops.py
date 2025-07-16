@@ -708,7 +708,7 @@ def speculate_subgraph(
 
             if restore_side_effects:
                 new_side_effects = tx.output.side_effects.clone()
-                prev_side_effects.track_tensor_variables_from_runahead_side_effects(
+                prev_side_effects.track_runahead_tensor_and_symvar_side_effects(
                     new_side_effects
                 )
                 tx.output.side_effects = prev_side_effects
@@ -991,7 +991,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"{operands.python_type()}",
             )
         operands_seq = operands.unpack_var_sequence(tx)
-        if not only_consist_of(operands, (TensorVariable, ConstantVariable)):
+        if not only_consist_of(
+            operands, (TensorVariable, ConstantVariable, SymNodeVariable)
+        ):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )

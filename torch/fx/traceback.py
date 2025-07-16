@@ -80,6 +80,10 @@ class NodeSource:
             self.node_info = None
             self.from_node = []
 
+        # cache the action string and dict representation for performance.
+        self._action_string = None
+        self._dict = None
+
     @property
     def name(self) -> str:
         return self.node_info.name if self.node_info else ""
@@ -96,7 +100,9 @@ class NodeSource:
         return self.print_readable()
 
     def _get_action_string(self):
-        return "+".join([a.name.lower() for a in self.action])
+        if self._action_string is None:
+            self._action_string = "+".join([a.name.lower() for a in self.action])
+        return self._action_string
 
     def print_readable(self, indent=0):
         if indent > 9:
@@ -112,16 +118,19 @@ class NodeSource:
         return result
 
     def to_dict(self) -> dict:
-        # Convert the object to a dictionary
-        action_string = self._get_action_string()
-        return {
-            "name": self.name,
-            "target": self.target,
-            "graph_id": self.graph_id,
-            "pass_name": self.pass_name,
-            "action": action_string,
-            "from_node": [node.to_dict() for node in self.from_node],
-        }
+        if self._dict is None:
+            # Convert the object to a dictionary
+            action_string = self._get_action_string()
+            self._dict = {
+                "name": self.name,
+                "target": self.target,
+                "graph_id": self.graph_id,
+                "pass_name": self.pass_name,
+                "action": action_string,
+                "from_node": [node.to_dict() for node in self.from_node],
+            }
+
+        return self._dict
 
     def __eq__(self, other: object):
         if not isinstance(other, NodeSource):
