@@ -106,7 +106,7 @@ TensorMeta::TensorMeta(const torch::_export::TensorMeta& tensorMeta)
       torch::_export::SymInt::Tag::AS_INT) {
     storage_offset_ = tensorMeta.get_storage_offset().get_as_int();
   } else {
-    CHECK(false) << "SymInt not supported yet";
+    TORCH_CHECK(false, "SymInt not supported yet");
   }
 
   for (const auto& size : tensorMeta.get_sizes()) {

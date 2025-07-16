@@ -5876,6 +5876,31 @@ class AOTInductorTestsTemplate:
         )
         self.assertEqual(new_expected, new_output)
 
+        new_weights = {
+            "L__self___weight": torch.randn(N, K, device=self.device),
+            "L__self___bias": torch.randn(N, device=self.device),
+        }
+
+        runner.update_constant_buffer(new_weights, True, False, True)
+        runner.swap_constant_buffer()
+
+        model.weight = torch.nn.Parameter(new_weights["L__self___weight"])
+        model.bias = torch.nn.Parameter(new_weights["L__self___bias"])
+
+        updated_state_dict = {
+            "weight": torch.ones_like(model.weight),
+            "bias": torch.zeros_like(model.bias),
+        }
+
+        model.load_state_dict(updated_state_dict)
+
+        new_output = runner_call(test_inputs)
+        expected_output = model(test_inputs)
+        torch.testing.assert_close(new_output, expected_output)
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_close(new_expected, new_output)
+
     def test_cond_share_predicte(self):
         class Model(torch.nn.Module):
             def forward(self, predicate, x):
