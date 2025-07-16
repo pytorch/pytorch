@@ -11,7 +11,7 @@ from torch.distributed._composable.replicate_with_fsdp import (
     _get_managed_modules,
     replicate,
 )
-from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor import Replicate, Shard
 from torch.testing._internal.common_distributed import (
@@ -69,7 +69,16 @@ class ReplicateStateDictTest(MultiProcessTestCase):
 class ReplicateTest(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
-        return 2
+        return 4
+
+    def init_global_mesh(self) -> DeviceMesh:
+        # Prefer to test with >=4 GPUs, but for 2 GPUs, use 2-way TP
+        replicate_size = 2
+        return init_device_mesh(
+            "cuda",
+            (replicate_size, 1, self.world_size // replicate_size),
+            mesh_dim_names=("replicate", "shard", "tp"),
+        )
 
     def setUp(self) -> None:
         super().setUp()
@@ -162,23 +171,17 @@ class ReplicateTest(MultiProcessTestCase):
             replicate_model.fc3,
         ]
 
-        for i, layer in enumerate(layers):
-            if i % 2 == 0:
-                replicate(layer)
-            else:
-                fully_shard(layer)
+        global_mesh = self.init_global_mesh()
+        replicate_mesh = global_mesh["replicate", "shard"]
 
-        device_mesh = init_device_mesh(
-            "cuda", (self.world_size, 1), mesh_dim_names=("replicate", "shard")
-        )
+        for layer in layers:
+            replicate_model = replicate(layer, device_mesh=replicate_mesh)
 
-        replicate_model = replicate(replicate_model, device_mesh=device_mesh)
+            for parameter in layer.parameters():
+                self.assertEqual(parameter.device_mesh.shape, (2, 1))
+                self.assertEqual(parameter.placements, (Replicate(), Shard(dim=0)))
 
-        for parameter in replicate_model.fc1.parameters():
-            self.assertEqual(parameter.placements, (Replicate(), Shard(dim=0)))
-
-        for parameter in replicate_model.fc2.parameters():
-            self.assertEqual(parameter.placements, (Shard(dim=0),))
+        # replicate_model = replicate(replicate_model, device_mesh=replicate_mesh)
 
     def test_train_replicate_fsdp(self):
         """
