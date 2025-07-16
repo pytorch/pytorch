@@ -315,6 +315,7 @@ class CondTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_cond_unbacked_symint_closure(self, device, dynamic):
         self._run_test(
             model=CondModels.UnbackedSymIntClosure(),

@@ -7820,6 +7820,7 @@ class GraphModule(torch.nn.Module):
     @skipIfTorchDynamo("Skip because we're testing export")
     @parametrize("strict", [True, False])
     @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_op_constant_and_symint_output_export(self, strict, dynamic):
         m, args = WHILE_LOOP_TESTS["const_and_symint_output"]
         dynamic_shapes = {"t": {0: torch.export.Dim("dim_t")}} if dynamic else None
@@ -7892,6 +7893,7 @@ class GraphModule(torch.nn.Module):
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     @parametrize("dynamic", [True, False])
     @parametrize("backend", ["eager", "aot_eager"])
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_op_constant_and_symint_output_compile(self, dynamic, backend):
         m, args = WHILE_LOOP_TESTS["const_and_symint_output"]
         if backend == "eager":
