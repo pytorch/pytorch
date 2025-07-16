@@ -85,14 +85,13 @@ severities = {
 }
 
 
-def check_mypy_installed(code: str) -> list[LintMessage]:
-    cmd = [sys.executable, "-mmypy", "-V"]
+def try_pre_req(cmd: list[str], code: str) -> list[LintMessage]:
+    ret = []
     try:
         subprocess.run(cmd, check=True, capture_output=True)
-        return []
     except subprocess.CalledProcessError as e:
         msg = e.stderr.decode(errors="replace")
-        return [
+        ret.append(
             LintMessage(
                 path=None,
                 line=None,
@@ -104,7 +103,47 @@ def check_mypy_installed(code: str) -> list[LintMessage]:
                 replacement=None,
                 description=f"Could not run '{' '.join(cmd)}': {msg}",
             )
-        ]
+        )
+    return ret
+
+
+def check_mypy_installed(code: str) -> list[LintMessage]:
+    cmd = [sys.executable, "-mmypy", "-V"]
+    return try_pre_req(cmd, code)
+
+
+def generate_torch_version(code: str) -> list[LintMessage]:
+    cmd = [sys.executable, "-m", "tools.generate_torch_version", "--is_debug=false"]
+    return try_pre_req(cmd, code)
+
+
+def generate_native_functions_pyi(code: str) -> list[LintMessage]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "tools.pyi.gen_pyi",
+        "--native-functions-path",
+        "aten/src/ATen/native/native_functions.yaml",
+        "--tags-path",
+        "aten/src/ATen/native/tags.yaml",
+        "--deprecated-functions-path",
+        "tools/autograd/deprecated.yaml",
+    ]
+    return try_pre_req(cmd, code)
+
+
+def generate_datapipe_pyi(code: str) -> list[LintMessage]:
+    cmd = [sys.executable, "torch/utils/data/datapipes/gen_pyi.py"]
+    return try_pre_req(cmd, code)
+
+
+def do_pre_reqs(code: str) -> list[LintMessage]:
+    return [
+        *check_mypy_installed(code),
+        *generate_torch_version(code),
+        *generate_native_functions_pyi(code),
+        *generate_datapipe_pyi(code),
+    ]
 
 
 def in_github_actions() -> bool:
@@ -252,7 +291,7 @@ def main() -> None:
         else:
             filenames[filename] = True
 
-    lint_messages = check_mypy_installed(args.code) + check_files(
+    lint_messages = do_pre_reqs(args.code) + check_files(
         list(filenames), args.config, args.retries, args.code
     )
     for lint_message in lint_messages:
