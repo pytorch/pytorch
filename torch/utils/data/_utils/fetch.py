@@ -46,8 +46,8 @@ class _BaseDatasetFetcher:
         async def _run(indices):
             task_queue = asyncio.Queue()
             result_queue = asyncio.Queue()
-            for idx in indices:
-                await task_queue.put(idx)
+            for index in indices:
+                await task_queue.put(index)
 
             workers = [
                 asyncio.create_task(_worker(task_queue, result_queue))
@@ -57,9 +57,9 @@ class _BaseDatasetFetcher:
 
             results = {}
             while not result_queue.empty():
-                idx, value = await result_queue.get()
-                results[idx] = value
-            return [results[i] for i in indices]
+                index, value = await result_queue.get()
+                results[index] = value
+            return [results[index] for index in indices]
 
         return self._loop.run_until_complete(_run(indices))
 
@@ -101,8 +101,8 @@ class _IterableDatasetFetcher(_BaseDatasetFetcher):
 
 
 class _MapDatasetFetcher(_BaseDatasetFetcher):
-    def _fetch_one(self, idx):
-        return self.dataset[idx]
+    def _fetch_one(self, index):
+        return self.dataset[index]
 
     def fetch(self, possibly_batched_index):
         if self.auto_collation:
@@ -111,7 +111,7 @@ class _MapDatasetFetcher(_BaseDatasetFetcher):
             elif self.num_threads > 1:
                 data = self._run_async(possibly_batched_index, self._fetch_one)
             else:
-                data = [self.dataset[idx] for idx in possibly_batched_index]
+                data = [self.dataset[index] for index in possibly_batched_index]
         else:
             data = self.dataset[possibly_batched_index]
         return self.collate_fn(data)
