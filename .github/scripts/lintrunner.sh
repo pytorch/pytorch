@@ -28,31 +28,11 @@ python3 -m tools.pyi.gen_pyi \
     --deprecated-functions-path "tools/autograd/deprecated.yaml"
 python3 torch/utils/data/datapipes/gen_pyi.py
 
-profile_command() {
-    local start_time=$(date +%s.%N)
-
-    echo "🚀 Running: $*"
-    echo "Started at: $(date '+%Y-%m-%d %H:%M:%S')"
-
-    # Run the command
-    "$@"
-    local exit_code=$?
-
-    local end_time=$(date +%s.%N)
-    local duration=$(echo "$end_time - $start_time" | bc)
-
-    echo "✅ Completed in: ${duration}s"
-    echo "Exit code: $exit_code"
-    echo "----------------------------------------"
-
-    return $exit_code
-}
-
 # Also check generated pyi files
 find torch -name '*.pyi' -exec git add --force -- "{}" +
 for linter in $(lintrunner list 2>/dev/null| tail -n +2); do
   echo ""
-  profile_command lintrunner --force-color --tee-json=lint.json --take "${linter}" 2> /dev/null
+  time lintrunner --force-color --tee-json=lint.json --take "${linter}" 2> /dev/null
 done
 
 RC=0
