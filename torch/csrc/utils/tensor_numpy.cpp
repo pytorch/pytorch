@@ -29,7 +29,7 @@ bool is_numpy_scalar(PyObject* obj) {
 }
 at::Tensor tensor_from_cuda_array_interface(
     PyObject* obj,
-    std::optional<Device> device_opt = std::nullopt) {
+    std::optional<c10::Device> device_opt = std::nullopt) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 
