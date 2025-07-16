@@ -209,12 +209,6 @@ class PythonKernelHolder : public c10::OperatorKernel {
   }
 };
 
-// @todo sahanp: Afait only register is used in the codebase. This can be
-// removed / simplified
-static torch::_RegisterOrVerify register_or_verify() {
-  return torch::_RegisterOrVerify::REGISTER;
-}
-
 static py::object ophandle_call_boxed(
     const c10::OperatorHandle& handle,
     const py::args& args,
@@ -391,8 +385,7 @@ void initDispatchBindings(PyObject* module) {
                     CppFunction::makeFromBoxedFunctor(
                         std::make_unique<
                             torch::inductor::AOTIPythonKernelHolder>(
-                            dispatch, ns, op_name_with_overload))),
-                register_or_verify());
+                            dispatch, ns, op_name_with_overload))));
             END_HANDLE_TH_ERRORS_PYBIND
           },
           "",
@@ -413,8 +406,7 @@ void initDispatchBindings(PyObject* module) {
                             .attr("fallthrough_kernel"))) {
               lib.impl(
                   name,
-                  torch::dispatch(dispatch, CppFunction::makeFallthrough()),
-                  register_or_verify());
+                  torch::dispatch(dispatch, CppFunction::makeFallthrough()));
             } else {
               lib.impl(
                   name,
@@ -422,8 +414,7 @@ void initDispatchBindings(PyObject* module) {
                       dispatch,
                       CppFunction::makeFromBoxedFunctor(
                           std::make_unique<PythonKernelHolder>(
-                              func, dispatch, with_keyset))),
-                  register_or_verify());
+                              func, dispatch, with_keyset))));
               python_registrations_[lib._resolve(name)].insert_or_assign(
                   dispatch,
                   std::make_shared<c10::SafePyObject>(
@@ -444,8 +435,7 @@ void initDispatchBindings(PyObject* module) {
              const std::vector<at::Tag>& tags) {
             auto parsed_schema =
                 torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
-            self.cast<torch::Library&>().def(
-                std::move(parsed_schema), tags, register_or_verify());
+            self.cast<torch::Library&>().def(std::move(parsed_schema), tags);
             // TODO: this is dumb, had to make a second copy
             return torch::schema(schema, parseAliasAnalysisKind(alias_analysis))
                 .name();
