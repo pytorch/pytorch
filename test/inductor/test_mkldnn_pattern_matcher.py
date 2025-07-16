@@ -699,6 +699,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
+    @bf32_on_and_off()
     def test_linear_unary(self, device="cpu"):
         self.device = device
 
@@ -729,6 +730,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.bfloat16)
         if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
+        if torch.backends.mkldnn.matmul.fp32_precision == "bf16":
+            dtypes.append(torch.float32)
         options = itertools.product(unary_list, [True, False], dtypes)
         for unary_fn, bias, dtype in options:
             metrics.reset()
@@ -739,7 +742,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             def matcher_check_fn():
                 match_nodes = unary_list[unary_fn]
-                if self._check_unary_is_decomposed(unary_fn):
+                if dtype != torch.float32 and self._check_unary_is_decomposed(unary_fn):
                     # Has extra dtype conversion nodes for autocast.
                     match_nodes += 2
                 self.assertEqual(
@@ -751,9 +754,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
 
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
-            # only generated 1 kernel for "to"
-            self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
+            # only generated 1 kernel for "to_dtype"
+            expected_kernel_count = 2 if TEST_ACL else 1
+            if dtype == torch.float32:
+                # In BF32, input is float32, will not generate kernel for "to_dtype"
+                expected_kernel_count -= 1
+            self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
+    @bf32_on_and_off()
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     def test_linear_fp32(self, device="cpu"):
         self.device = device
@@ -901,6 +909,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1 kernel for "to_lowp", 2 kernels for unary ops
             self.assertEqual(metrics.generated_kernel_count, 3)
 
+    @bf32_on_and_off()
     def test_linear_binary(self, device="cpu"):
         self.device = device
 
@@ -922,6 +931,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.bfloat16)
         if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
+        if torch.backends.mkldnn.matmul.fp32_precision == "bf16":
+            dtypes.append(torch.float32)
         options = itertools.product(
             binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
         )
@@ -958,7 +969,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn,
                 check_autocast=dtype,
             )
-            self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
+            # only generated 1 kernel for "to_dtype"
+            expected_kernel_count = 2 if TEST_ACL else 1
+            if dtype == torch.float32:
+                # In BF32, input is float32, will not generate kernel for "to_dtype"
+                expected_kernel_count -= 1
+            self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     def test_linear_binary_broadcast_shapes(self, device="cpu"):
         self.device = device
@@ -2338,7 +2354,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_qlinear_cpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper((torch.randn((2, 4)),), bias=bias)
@@ -2348,7 +2364,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoXPU
     def test_qlinear_xpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2359,7 +2375,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_dynamic_qlinear_cpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2370,7 +2386,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_dynamic_qlinear_qat_cpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2381,7 +2397,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_dynamic_qlinear_input_dim_exceeds_2(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2393,7 +2409,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_qlinear_int8_mixed_bf16(self):
         r"""
-        This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2405,7 +2421,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoXPU
     def test_qlinear_int8_mixed_bf16_xpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2419,7 +2435,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_qlinear_input_dim_exceeds_2(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper((torch.randn((2, 3, 4)),), bias=bias)
@@ -2429,7 +2445,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoXPU
     def test_qlinear_input_dim_exceeds_2_xpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2441,7 +2457,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2(self):
         r"""
-        This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2454,7 +2470,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoXPU
     def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2_xpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2935,6 +2951,104 @@ class TestPatternMatcher(TestPatternMatcherBase):
             is_qat=is_qat,
             is_dynamic=is_dynamic,
         )
+
+    def _test_qlinear_fp8_inductor_cpu_helper(self, qlinear_op, post_op="none"):
+        dtype = torch.float8_e4m3fn
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        post_op_algo = "none"
+        unary_post_op_args = ()
+        batch_size = 1
+        output_dtype = torch.float8_e4m3fn
+        y_scale, y_zp = 0.07, 0
+        ic = 4
+        oc = 16
+
+        torch._dynamo.reset()
+        used_y_scale = y_scale
+        used_y_zp = y_zp
+        x = torch.rand(batch_size, ic)
+        w = torch.rand(oc, ic)
+        qx = x.to(dtype)
+        qw = w.to(dtype)
+        x_scale = 0.5
+        w_scales = torch.randn(oc)
+        b = torch.rand(oc)
+
+        x_zp = 0
+        w_zps = torch.zeros_like(w_scales, dtype=torch.int)
+
+        if post_op == "none":
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.qw_packed = qlinear_prepack(qw, x.shape)
+
+                def forward(self, qx):
+                    qy = qlinear_op(
+                        qx,
+                        x_scale,
+                        x_zp,
+                        self.qw_packed,
+                        w_scales,
+                        w_zps,
+                        b,
+                        used_y_scale,
+                        used_y_zp,
+                        output_dtype,
+                        post_op,
+                        unary_post_op_args,
+                        post_op_algo,
+                    )
+                    return qy
+
+        elif post_op == "add":
+            x2 = torch.rand(batch_size, oc)
+            binary_alpha = 1.0  # we only support alpha=1.0 now
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.qw_packed = qlinear_prepack(qw, x.shape)
+
+                def forward(self, qx):
+                    qy = qlinear_op(
+                        qx,
+                        x_scale,
+                        x_zp,
+                        self.qw_packed,
+                        w_scales,
+                        w_zps,
+                        x2,
+                        b,
+                        used_y_scale,
+                        used_y_zp,
+                        output_dtype,
+                        1.0,
+                        0,
+                        "add",
+                        binary_alpha,
+                        "none",
+                        unary_post_op_args,
+                        post_op_algo,
+                    )
+                    return qy
+
+        with torch.no_grad():
+            model = Mod()
+            y_refe = model(qx)
+            y_test = torch.compile(model)(qx)
+            self.assertEqual(y_refe.float(), y_test.float())
+
+    @skipIfNoONEDNN
+    def test_qlinear_fp8_inductor_cpu(self):
+        qlinear_op = torch.ops.onednn.qlinear_pointwise.default
+        self._test_qlinear_fp8_inductor_cpu_helper(qlinear_op, "none")
+
+    @skipIfNoONEDNN
+    def test_qlinear_add_fp8_inductor_cpu(self):
+        qlinear_op = torch.ops.onednn.qlinear_pointwise.binary
+        self._test_qlinear_fp8_inductor_cpu_helper(qlinear_op, "add")
 
     def _qlinear_dequant_promotion_test_helper(
         self,
