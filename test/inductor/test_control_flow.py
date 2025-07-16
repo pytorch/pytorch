@@ -315,7 +315,6 @@ class CondTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_cond_unbacked_symint_closure(self, device, dynamic):
         self._run_test(
             model=CondModels.UnbackedSymIntClosure(),
@@ -1203,7 +1202,6 @@ class WhileLoopTests(TestCase):
         with torch._dynamo.config.patch(
             {
                 "capture_dynamic_output_shape_ops": True,
-                "capture_scalar_outputs": True,
             }
         ):
             self._run_test(
@@ -1272,9 +1270,7 @@ class WhileLoopTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    @torch._dynamo.config.patch(
-        {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
-    )
+    @torch._dynamo.config.patch({"capture_dynamic_output_shape_ops": True})
     def test_while_loop_with_unbacked_symint_closure(self, device, dynamic):
         self._run_test(
             model=WhileLoopModels.UnbackedSymIntClosure(),
@@ -1318,9 +1314,7 @@ class WhileLoopTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    @torch._dynamo.config.patch(
-        {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
-    )
+    @torch._dynamo.config.patch({"capture_dynamic_output_shape_ops": True})
     def test_while_loop_with_sym_expr_cond(self, device, dynamic):
         self._run_test(
             model=WhileLoopModels.SymExprCond(),
@@ -1751,7 +1745,6 @@ class ScanTests(TestCase):
     @parametrize("dynamic", [True, False])
     @parametrize("reverse", [True, False])
     @parametrize("dim", [0, 1, 2])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_pytree_in_out(self, device, dynamic, reverse, dim):
         self._run_test(
             model=ScanModels.SimpleWithPytreeInOuts(reverse=reverse, dim=dim),
@@ -1770,7 +1763,6 @@ class ScanTests(TestCase):
     @parametrize("reverse", [True, False])
     @parametrize("dim", [0, 1, 3])
     @parametrize("scan_length", [1, 5])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_nn_modules(self, device, dynamic, reverse, dim, scan_length):
         init = torch.randn(20, 16, 4, 4)
         xs = torch.randn(scan_length, 20, 16, 4, 4)
@@ -1791,7 +1783,6 @@ class ScanTests(TestCase):
     @parametrize("reverse", [True, False])
     @parametrize("dim", [0, 1, 3])
     @parametrize("scan_length", [1, 5])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_conv(self, device, dynamic, reverse, dim, scan_length):
         init = torch.randn(2, 4, 4, 4, dtype=torch.float64)
         xs = torch.randn(scan_length, 2, 4, 4, 4, dtype=torch.float64)
@@ -1813,7 +1804,6 @@ class ScanTests(TestCase):
     @parametrize("dim", [0, 1, 3])
     @parametrize("pred", [True, False])
     @parametrize("scan_length", [1, 5])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_in_cond(self, device, dynamic, reverse, dim, pred, scan_length):
         init = torch.randn(4, 4, 4)
         xs = torch.randn(scan_length, 4, 4, 4)
@@ -1835,7 +1825,6 @@ class ScanTests(TestCase):
     @parametrize("reverse", [True, False])
     @parametrize("dim", [0, 1, 3])
     @parametrize("scan_length", [1, 5])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_cond_in_scan(self, device, dynamic, reverse, dim, scan_length):
         init = torch.randn(2, 4, 4, 4)
         xs = torch.randn(scan_length, 4, 4, 4)
@@ -1853,7 +1842,6 @@ class ScanTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_chunked_ce(self, device, dynamic):
         self._run_test(
             model=ScanModels.ChunkedCE(10),
@@ -1870,7 +1858,6 @@ class ScanTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_compare_chunked_ce_with_no_scan(self, device, dynamic):
         for trunk_size, B, T in zip([10, 20], [10, 100], [20, 40]):
             self._compare_result(
@@ -1888,7 +1875,6 @@ class ScanTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_with_clamp(self, device, dynamic):
         B = 4
         T = 8
@@ -1993,7 +1979,6 @@ class MapTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_map_simple(self, device, dynamic):
         self._run_test(
             model=MapModels.Simple(),
@@ -2005,7 +1990,6 @@ class MapTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_map_simple_linear_with_view(self, device, dynamic):
         self._run_test(
             model=MapModels.SimpleWithLinearWithView(),
@@ -2017,7 +2001,6 @@ class MapTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_map_pytree_in_out(self, device, dynamic):
         self._run_test(
             model=MapModels.PytreeInOut(),
@@ -2033,7 +2016,6 @@ class MapTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_map_nested_with_cond(self, device, dynamic):
         self._run_test(
             model=MapModels.NestedWithCond(),

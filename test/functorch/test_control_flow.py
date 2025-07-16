@@ -1409,7 +1409,6 @@ def forward(self, pred_1, x_1):
                 f, (torch.ones(3, 4, 5), torch.ones(4, 4, 5)), torch.ones(5)
             )
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_map_illegal_outputs(self):
         def f(x, y):
             return x.item()
@@ -7821,7 +7820,6 @@ class GraphModule(torch.nn.Module):
     @skipIfTorchDynamo("Skip because we're testing export")
     @parametrize("strict", [True, False])
     @parametrize("dynamic", [True, False])
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_op_constant_and_symint_output_export(self, strict, dynamic):
         m, args = WHILE_LOOP_TESTS["const_and_symint_output"]
         dynamic_shapes = {"t": {0: torch.export.Dim("dim_t")}} if dynamic else None
@@ -7894,7 +7892,6 @@ class GraphModule(torch.nn.Module):
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     @parametrize("dynamic", [True, False])
     @parametrize("backend", ["eager", "aot_eager"])
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_op_constant_and_symint_output_compile(self, dynamic, backend):
         m, args = WHILE_LOOP_TESTS["const_and_symint_output"]
         if backend == "eager":
@@ -8034,7 +8031,6 @@ class GraphModule(torch.nn.Module):
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     @parametrize("dynamic", [True, False])
     @parametrize("backend", ["eager", "aot_eager"])
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_op_pytree_int_carry_compile(self, dynamic, backend):
         m, args = WHILE_LOOP_TESTS["pytree_int_carry"]
         if backend == "eager":
@@ -8196,7 +8192,6 @@ class GraphModule(torch.nn.Module):
         return normalize_gm(non_strict_ep.module().print_readable(print_output=False))
 
     @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cond_eager_run_with_item(self):
         class M(torch.nn.Module):
             def forward(self, a, b1, b2, c):
