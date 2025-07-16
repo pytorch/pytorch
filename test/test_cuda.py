@@ -6490,6 +6490,9 @@ class TestCudaAutocast(TestAutocast):
         self.assertEqual(val, "LAZY")
 
 
+@unittest.skipIf(
+    os.environ.get("USE_LEGACY_DRIVER", None) == "1", "Doesn't work with older driver"
+)
 class TestCompileKernel(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
