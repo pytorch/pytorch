@@ -27,7 +27,9 @@ bool is_numpy_int(PyObject* obj) {
 bool is_numpy_scalar(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
-at::Tensor tensor_from_cuda_array_interface(PyObject* obj, std::optional<Device> device_opt=std::nullopt) {
+at::Tensor tensor_from_cuda_array_interface(
+    PyObject* obj,
+    std::optional<Device> device_opt = std::nullopt) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 
@@ -380,7 +382,9 @@ bool is_numpy_scalar(PyObject* obj) {
        PyArray_IsScalar(obj, ComplexFloating));
 }
 
-at::Tensor tensor_from_cuda_array_interface(PyObject* obj, std::optional<c10::Device> device_opt) {
+at::Tensor tensor_from_cuda_array_interface(
+    PyObject* obj,
+    std::optional<c10::Device> device_opt) {
   if (!is_numpy_available()) {
     throw std::runtime_error("Numpy is not available");
   }
