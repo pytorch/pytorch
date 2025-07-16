@@ -222,7 +222,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     with concurrent.futures.ProcessPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=(os.cpu_count() or 4) // 2,
     ) as executor:
         futures = {executor.submit(check_file, x): x for x in args.filenames}
         for future in concurrent.futures.as_completed(futures):

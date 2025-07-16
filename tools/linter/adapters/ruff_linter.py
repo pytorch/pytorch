@@ -436,7 +436,7 @@ def main() -> None:
 
     files_with_lints = {lint.path for lint in lint_messages if lint.path is not None}
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=(os.cpu_count() or 4) // 2,
         thread_name_prefix="Thread",
     ) as executor:
         futures = {

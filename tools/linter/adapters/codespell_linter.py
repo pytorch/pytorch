@@ -147,7 +147,7 @@ def main() -> None:
     )
 
     with concurrent.futures.ProcessPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=(os.cpu_count() or 4) // 2,
     ) as executor:
         futures = {executor.submit(check_file, x): x for x in args.filenames}
         futures[executor.submit(check_dictionary, str(DICTIONARY))] = str(DICTIONARY)
