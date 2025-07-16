@@ -1006,7 +1006,8 @@ If :attr:`data` is a NumPy array (an ndarray) with the same dtype and device the
 tensor is constructed using :func:`torch.from_numpy`.
 
 If :attr:`data` is a CuPy array, the returned tensor will be located on the same device as the CuPy array unless
-specifically overwritten by :attr:`device` or a default device.
+specifically overwritten by :attr:`device` or a default device. The device of the CuPy array is inferred from the
+pointer of the array using `cudaPointerGetAttributes` unless :attr:`device` is provided.
 
 .. seealso::
 
@@ -5128,7 +5129,7 @@ For each N-dimensional point in input:
 If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the N sequences
 of bin edges. Each 1D tensor should contain a strictly increasing sequence with at
 least one element. A sequence of K bin edges defines K-1 bins, explicitly specifying
-the left and right edges of all bins. Every bin is exclusive of its left edge. Only
+the left and right edges of all bins. Every bin is inclusive of its left edge. Only
 the rightmost bin is inclusive of its right edge.
 
 If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width bins
