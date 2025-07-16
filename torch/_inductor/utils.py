@@ -66,6 +66,7 @@ from torch.utils._pytree import tree_flatten, tree_map_only
 
 OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
+    "inductor_autotune_lookup_table",
 ]
 
 if TYPE_CHECKING:
@@ -2177,7 +2178,10 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
-    from torch.testing._internal.common_cuda import SM80OrLater
+    SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
+        8,
+        0,
+    )
 
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
 
@@ -3308,3 +3312,38 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
                 "Please set aot_inductor.package_cpp_only=True in your inductor config."
             )
     return config_patches
+
+
+def is_valid_aoti_model_name() -> bool:
+    """
+    Validates if a model name is suitable for use in code generation.
+
+    """
+    from torch._inductor import config
+
+    model_name = config.aot_inductor.model_name_for_generated_files
+
+    if model_name is None:
+        return True
+
+    if not isinstance(model_name, str):
+        raise ValueError("Invalid AOTI model name: Model name must be a string")
+
+    if model_name == "":
+        return True
+
+    # Can only contain alphanumeric characters and underscores
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", model_name):
+        raise ValueError(
+            "Invalid AOTI model name: Model name can only contain letters, numbers, and underscores"
+        )
+
+    return True
+
+
+def aoti_model_name_from_config() -> str:
+    from torch._inductor import config
+
+    model_name = config.aot_inductor.model_name_for_generated_files
+    model_name = "aoti_model" if model_name is None else model_name
+    return model_name

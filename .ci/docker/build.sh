@@ -91,6 +91,17 @@ tag=$(echo $image | awk -F':' '{print $2}')
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$tag" in
+  pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11)
+    CUDA_VERSION=12.4
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    TRITON=yes
+    ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11)
     CUDA_VERSION=12.8.1
     CUDNN_VERSION=9
@@ -328,6 +339,8 @@ case "$tag" in
     GCC_VERSION=11
     ACL=yes
     VISION=yes
+    CONDA_CMAKE=yes
+    OPENBLAS=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
@@ -337,6 +350,8 @@ case "$tag" in
     GCC_VERSION=11
     ACL=yes
     VISION=yes
+    CONDA_CMAKE=yes
+    OPENBLAS=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
@@ -423,6 +438,7 @@ docker build \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
+       --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
