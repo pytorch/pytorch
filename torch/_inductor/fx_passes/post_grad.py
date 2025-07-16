@@ -699,8 +699,13 @@ def is_valid_addmm_activation_fusion(match):
     
     if not (mat1.dim() == 2 and mat2.dim() == 2):
         return False
+    
+    # bias size must match output width
+    if input.size(0) != mat2.size(1):
+        return False
 
-    return True
+    output = match.output_node()
+    return all(is_pointwise_use(use) for use in output.users)
 
 
 def addmm_gelu_pattern(input, mat1, mat2):
