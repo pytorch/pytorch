@@ -26,6 +26,7 @@ from torch.testing._internal.inductor_utils import (
     requires_triton,
 )
 
+
 class TransformerSnippet(nn.Module):
     def __init__(self) -> None:
         super().__init__()
