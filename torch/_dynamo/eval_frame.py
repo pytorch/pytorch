@@ -328,15 +328,31 @@ class OptimizedModule(torch.nn.Module):
     get_compiler_config: Callable[[], Any]
 
     _opt_mod_attributes = {
+        # attributes set and used by OptimizedModule
         "_orig_mod",
         "dynamo_ctx",
         "_torchdynamo_orig_callable",
         "get_compiler_config",
         "forward",
         "_forward",
-        "__dict__",
-        "named_children_walk",
         "_super_module_initialized",
+        # attributes set and used by nn.Module
+        "_parameters",
+        "_buffers",
+        "_non_persistent_buffers_set",
+        "_backward_pre_hooks",
+        "_backward_hooks",
+        "_is_full_backward_hook",
+        "_forward_hooks",
+        "_forward_hooks_with_kwargs",
+        "_forward_hooks_always_called",
+        "_forward_pre_hooks",
+        "_forward_pre_hooks_with_kwargs",
+        "_state_dict_hooks",
+        "_state_dict_pre_hooks",
+        "_load_state_dict_pre_hooks",
+        "_load_state_dict_post_hooks",
+        "_modules",
     }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx) -> None:
