@@ -389,7 +389,7 @@ class Op:
     ):
         self.profiling_name = event["profiling_name"]
         nccl, name = self.profiling_name.split(":")
-        assert nccl == "nccl", f"name formatting error? {nccl} != 'nccl'"
+        assert nccl in ["nccl", "xccl"], f"name formatting error? {nccl} != 'nccl' or 'xccl'"
         parts = name.split(" ")
         type = parts[0]
         meta = parts[1] if len(parts) == 2 else None
