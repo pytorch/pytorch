@@ -128,11 +128,9 @@ def _clip_grads_with_norm_(
         grad = grad * \min(\frac{max\_norm}{total\_norm + 1e-6}, 1)
 
     Gradients are modified in-place.
-    
     Note: The scale coefficient is clamped to a maximum of 1.0 to prevent gradient amplification. 
     This ensures that gradients are only scaled down when the total norm exceeds max_norm.
     
-
     This function is equivalent to :func:`torch.nn.utils.clip_grad_norm_` with a pre-calculated
     total norm.
 
