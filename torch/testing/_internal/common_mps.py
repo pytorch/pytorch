@@ -465,6 +465,7 @@ if torch.backends.mps.is_available():
             "special.airy_ai": None,
             "special.erfcx": None,
             "special.laguerre_polynomial_l": None,
+            "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
             "special.ndtri": None,
             "svd_lowrank": None,
@@ -540,14 +541,6 @@ if torch.backends.mps.is_available():
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
-            # atomic operations not supported
-            "_unsafe_masked_index_put_accumulate": [
-                torch.bool,
-                torch.int8,
-                torch.uint8,
-                torch.int16,
-                torch.int64,
-            ],
         }
 
         if MACOS_VERSION < 14.0:
@@ -641,13 +634,6 @@ if torch.backends.mps.is_available():
                 torch.float32,
                 torch.float16,
                 torch.bfloat16,
-            ],
-            "index_put": [
-                torch.bool,
-                torch.uint8,
-                torch.int8,
-                torch.int16,
-                torch.int64,
             ],
             # zero to negative integer powers are undefined
             "__rpow__": [torch.int8, torch.int16, torch.int32, torch.int64],
@@ -848,7 +834,6 @@ if torch.backends.mps.is_available():
             "floor_divide": [torch.float16, torch.float32],
             # derivative for aten::narrow_copy is not implemented on CPU
             "narrow_copy": [torch.float16, torch.float32],
-            "nn.functional.max_pool3d": [torch.float16, torch.float32],
             # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
             "histogramdd": [torch.float16, torch.float32],
             # derivative for aten::histogram is not implemented

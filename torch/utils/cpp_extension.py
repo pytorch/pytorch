@@ -454,13 +454,12 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
     try:
         if IS_LINUX:
             minimum_required_version = MINIMUM_GCC_VERSION
-            versionstr = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
-            version = versionstr.decode(*SUBPROCESS_DECODE_ARGS).strip().split('.')
+            compiler_info = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
         else:
             minimum_required_version = MINIMUM_MSVC_VERSION
             compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
-            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode(*SUBPROCESS_DECODE_ARGS).strip())
-            version = ['0', '0', '0'] if match is None else list(match.groups())
+        match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode(*SUBPROCESS_DECODE_ARGS).strip())
+        version = ['0', '0', '0'] if match is None else list(match.groups())
     except Exception:
         _, error, _ = sys.exc_info()
         logger.warning('Error checking compiler version for %s: %s', compiler, error)
@@ -2420,11 +2419,12 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
     _arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
 
-    # If not given, determine what's best for the GPU / CUDA version that can be found
-    if not _arch_list:
-        logger.warning(
-            "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. \n"
-            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.")
+    # If not given or set as native, determine what's best for the GPU / CUDA version that can be found
+    if not _arch_list or _arch_list == "native":
+        if not _arch_list:
+            logger.warning(
+                "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. \n"
+                "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.")
         arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included

@@ -18,10 +18,9 @@ from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import ExitStack
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast, NamedTuple, Optional, Union
-
-import pkg_resources
 
 import torch
 import torch.distributed as dist
@@ -29,6 +28,7 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     retry_shell,
     set_cwd,
@@ -667,6 +667,7 @@ def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
         shutil.rmtree(cpp_extensions_test_build_dir)
 
     # Build the test cpp extensions modules
+    # FIXME: change setup.py command to pip command
     cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
     return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
     if return_code != 0:
@@ -913,8 +914,12 @@ def _test_autoload(test_directory, options, enable=True):
 
 
 def run_test_with_openreg(test_module, test_directory, options):
+    # TODO(FFFrog): Will remove this later when windows/macos are supported.
+    if not IS_LINUX:
+        return 0
+
     openreg_dir = os.path.join(
-        test_directory, "cpp_extensions", "open_registration_extension"
+        test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
     install_dir, return_code = install_cpp_extensions(openreg_dir)
     if return_code != 0:
@@ -1412,11 +1417,11 @@ def parse_args():
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not TEST_WITH_ROCM
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull"),
+        and os.environ.get("GITHUB_WORKFLOW", "slow")
+        in ("trunk", "pull", "rocm", "rocm-mi300"),
     )
     parser.add_argument(
         "--shard",
@@ -1474,6 +1479,7 @@ def parse_args():
     parser.add_argument(
         "--upload-artifacts-while-running",
         action="store_true",
+        default=IS_CI,
     )
 
     group = parser.add_mutually_exclusive_group()
@@ -1859,6 +1865,7 @@ def run_tests(
         "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
     )
 
+    pool = None
     try:
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
@@ -1921,8 +1928,9 @@ def run_tests(
         del os.environ["NUM_PARALLEL_PROCS"]
 
     finally:
-        pool.terminate()
-        pool.join()
+        if pool:
+            pool.terminate()
+            pool.join()
 
     return
 
@@ -1933,13 +1941,14 @@ def check_pip_packages() -> None:
         "pytest-flakefinder",
         "pytest-xdist",
     ]
-    installed_packages = [i.key for i in pkg_resources.working_set]
-    for package in packages:
-        if package not in installed_packages:
-            print_to_stderr(
-                f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
-            )
-            sys.exit(1)
+    try:
+        for pkg in packages:
+            version(pkg)
+    except PackageNotFoundError:
+        print_to_stderr(
+            f"Missing pip dependency: {pkg}, please run `pip install -r .ci/docker/requirements-ci.txt`"
+        )
+        sys.exit(1)
 
 
 def main():

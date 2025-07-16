@@ -14,6 +14,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
@@ -21,7 +22,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch.fx
 import torch.utils._pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
@@ -62,6 +63,7 @@ from torch._inductor.cudagraph_utils import (
     log_cudagraph_skip_and_bump_counter,
     PlaceholderInfo,
 )
+from torch._inductor.custom_partitioner_fn import CustomPartitionerFn
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.output_code import (
     CompiledAOTI,
@@ -164,21 +166,32 @@ class FxCompileMode(enum.Enum):
     SUBPROCESS = 2
 
 
-# Return compile mode and use_async flag
-def _fx_compile_mode_default() -> tuple[FxCompileMode, bool]:
+@dataclass
+class FxCompileConfig:
+    mode: FxCompileMode
+    use_async: bool
+    use_progressive: bool
+
+
+def _fx_compile_mode_default() -> FxCompileConfig:
     name = "TORCHINDUCTOR_FX_COMPILE_MODE"
     value = os.environ.get(name)
     if value is None:
-        return FxCompileMode.NORMAL, False
+        return FxCompileConfig(FxCompileMode.NORMAL, False, False)
 
     use_async = False
+    use_progressive = False
+
+    if value.lower().startswith("progressive+"):
+        use_progressive = True
+        value = value[12:]
     if value.lower().startswith("async+"):
         use_async = True
         value = value[6:]
 
     try:
         value = value.upper()
-        return FxCompileMode[value], use_async
+        return FxCompileConfig(FxCompileMode[value], use_async, use_progressive)
     except KeyError:
         import logging
 
@@ -191,10 +204,20 @@ def _fx_compile_mode_default() -> tuple[FxCompileMode, bool]:
         )
         # Remove from the environment so subprocesses don't ALSO complain.
         os.environ.pop(name)
-        return FxCompileMode.NORMAL, False
+        return FxCompileConfig(FxCompileMode.NORMAL, False, False)
 
 
-fx_compile_mode, fx_compile_async = _fx_compile_mode_default()
+def _get_progression_configs() -> list[dict[str, Any]]:
+    # TODO make this configurable
+    return [
+        {"max_autotune": True},
+    ]
+
+
+_fx_compile_config = _fx_compile_mode_default()
+fx_compile_mode = _fx_compile_config.mode
+fx_compile_async = _fx_compile_config.use_async
+fx_compile_progressive = _fx_compile_config.use_progressive
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -333,7 +356,13 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
                 continue
             gm_target = attrgetter(target_name)(gm)
             model_target = attrgetter(target_name)(mod)
-            if (
+            if isinstance(gm_target, FakeScriptObject):
+                if (
+                    isinstance(model_target, FakeScriptObject)
+                    and gm_target.real_obj is model_target.real_obj
+                ):
+                    continue
+            elif (
                 torch.equal(gm_target, model_target)
                 and gm_target.dtype == model_target.dtype
             ):
@@ -1576,6 +1605,21 @@ def fx_codegen_and_compile(
         )
         scheme = _AsyncFxCompile(scheme)
 
+    if fx_compile_progressive:
+        from .compile_fx_async import _ProgressiveFxCompile
+        from .compile_fx_ext import _OutOfProcessFxCompile
+
+        assert isinstance(scheme, _OutOfProcessFxCompile), (
+            "progressive is only valid with an out-of-process compile mode"
+        )
+
+        progression_configs = _get_progression_configs()
+
+        # Use in-process compile for the fast version
+        fast_scheme = _InProcessFxCompile()
+
+        scheme = _ProgressiveFxCompile(fast_scheme, scheme, progression_configs)
+
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 
 
@@ -1775,7 +1819,7 @@ def compile_fx_aot(
     model_: GraphModule,
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
-    config_patches: Optional[dict[str, str]] = None,
+    config_patches: Optional[dict[str, Any]] = None,
 ) -> Union[list[Union[str, Weights]], str]:
     assert isinstance(model_, GraphModule), model_
 
@@ -1804,6 +1848,10 @@ def compile_fx_aot(
             **config_patches,
             "aot_inductor.output_path": code_hash(model_.code),
         }
+
+    from .utils import maybe_aoti_standalone_config
+
+    config_patches = maybe_aoti_standalone_config(config_patches)
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     saved_compile_id = model_.meta.get("dynamo_compile_id", None)
@@ -1994,6 +2042,12 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
+    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
+    if any(
+        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
+        for e in example_inputs_
+    ):
+        torch._inductor.async_compile.AsyncCompile.wakeup()
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
@@ -2295,23 +2349,30 @@ def compile_fx(
                 "static_lifetime_input_indices", None
             )
 
-            # TODO(xuanzh): do I need to change the first argument of dynamo_timed below?
-            custom_partition_fn = (
-                config.custom_partition_fn
-                if config.custom_partition_fn is not None
-                else min_cut_rematerialization_partition
-            )
-
-            with dynamo_utils.dynamo_timed(
-                "min_cut_rematerialization_partition", log_pt2_compile_event=True
-            ):
-                return custom_partition_fn(
-                    gm,
-                    joint_inputs,
-                    compiler="inductor",
-                    static_lifetime_input_indices=static_lifetime_input_indices,
-                    **kwargs,
-                )
+            if config.custom_partitioner_fn is None:
+                with dynamo_utils.dynamo_timed(
+                    "min_cut_rematerialization_partition", log_pt2_compile_event=True
+                ):
+                    return min_cut_rematerialization_partition(
+                        gm,
+                        joint_inputs,
+                        compiler="inductor",
+                        static_lifetime_input_indices=static_lifetime_input_indices,
+                        **kwargs,
+                    )
+            else:
+                assert isinstance(config.custom_partitioner_fn, CustomPartitionerFn)
+                with dynamo_utils.dynamo_timed(
+                    config.custom_partitioner_fn.__class__.__name__,
+                    log_pt2_compile_event=True,
+                ):
+                    return config.custom_partitioner_fn(
+                        gm,
+                        joint_inputs,
+                        compiler="inductor",
+                        static_lifetime_input_indices=static_lifetime_input_indices,
+                        **kwargs,
+                    )
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
@@ -2361,6 +2422,10 @@ def compile_fx(
         )
 
         if V.aot_compilation:
+            from .utils import is_valid_aoti_model_name
+
+            is_valid_aoti_model_name()
+
             with functorch_config.patch(unlift_effect_tokens=True):
                 gm, graph_signature = aot_export_module(
                     model_,
