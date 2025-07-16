@@ -577,6 +577,10 @@ inline Tensor applySlicing(
 inline Tensor dispatch_index(
     const Tensor& self,
     std::vector<Tensor>&& indices) {
+  // Remove trailing null elements from indices
+  while (!indices.empty() && !indices.back().defined()) {
+    indices.pop_back();
+  }
   return self.index(impl::typeConvertIndices(self, std::move(indices)));
 }
 
@@ -584,6 +588,10 @@ inline Tensor dispatch_index_put_(
     Tensor& self,
     std::vector<Tensor>&& indices,
     const Tensor& value) {
+  // Remove trailing null elements from indices
+  while (!indices.empty() && !indices.back().defined()) {
+    indices.pop_back();
+  }
   return self.index_put_(
       impl::typeConvertIndices(self, std::move(indices)), value);
 }
