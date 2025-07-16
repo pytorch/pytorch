@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -ex
+set -x
 
 # Use uv to speed up lintrunner init
 python3 -m pip install uv==0.1.45 setuptools
