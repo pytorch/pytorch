@@ -37,21 +37,7 @@ namespace c10 {
 #ifdef STRIP_ERROR_MESSAGES
 #define STD_TORCH_CHECK_MSG(cond, type, ...) \
   (#cond #type " CHECK FAILED at " C10_STRINGIZE(__FILE__))
-#define STD_TORCH_CHECK(cond, ...)                \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {           \
-    throw std::runtime_error(STD_TORCH_CHECK_MSG( \
-        cond,                                     \
-        "",                                       \
-        __func__,                                 \
-        ", ",                                     \
-        __FILE__,                                 \
-        ":",                                      \
-        __LINE__,                                 \
-        ", ",                                     \
-        __VA_ARGS__));                            \
-  }
 #else // so STRIP_ERROR_MESSAGES is not defined
-
 namespace torch::headeronly::detail {
 template <typename... Args>
 std::string stdTorchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
@@ -80,6 +66,8 @@ inline const char* stdTorchCheckMsgImpl(const char* /*msg*/, const char* args) {
       "(Could this error message be improved?  If so, "    \
       "please report an enhancement request to PyTorch.)", \
       ##__VA_ARGS__))
+#endif // STRIP_ERROR_MESSAGES
+
 #define STD_TORCH_CHECK(cond, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {           \
     throw std::runtime_error(STD_TORCH_CHECK_MSG( \
@@ -93,4 +81,3 @@ inline const char* stdTorchCheckMsgImpl(const char* /*msg*/, const char* args) {
         ", ",                                     \
         ##__VA_ARGS__));                          \
   }
-#endif // STRIP_ERROR_MESSAGES
