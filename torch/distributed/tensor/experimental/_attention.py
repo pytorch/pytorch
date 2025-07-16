@@ -45,13 +45,16 @@ logger = logging.getLogger(__name__)
 
 _is_hip: bool = hasattr(torch.version, "hip") and torch.version.hip is not None
 if _is_hip:
-    gcn_arch_name = torch.cuda.get_device_properties("cuda").gcnArchName
-    _is_ck_supported = False
-    for arch in ["gfx942", "gfx950"]:
-        if arch in gcn_arch_name:
-            _is_ck_supported = True
-    _preferred_rocm_fa_library = torch.backends.cuda.preferred_rocm_fa_library
-    _CK_BACKEND = torch.backends.cuda._ROCmFABackends["ck"]
+    try:
+        gcn_arch_name = torch.cuda.get_device_properties("cuda").gcnArchName
+        _is_ck_supported = False
+        for arch in ["gfx942", "gfx950"]:
+            if arch in gcn_arch_name:
+                _is_ck_supported = True
+        _preferred_rocm_fa_library = torch.backends.cuda.preferred_rocm_fa_library
+        _CK_BACKEND = torch.backends.cuda._ROCmFABackends["ck"]
+    except Exception:
+        _is_hip = False  # HIP is unavailable at runtime even if compiled
 
 
 class _DispatchMode(Enum):
