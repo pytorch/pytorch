@@ -500,7 +500,7 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    'c10/macros/Macros.h',
+    'torch/headeronly/macros/Macros.h',
 ]
 command = [
     'python3',
@@ -523,7 +523,7 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    'c10/macros/Macros.h',
+    'torch/headeronly/macros/Macros.h',
 ]
 command = [
     'python3',
