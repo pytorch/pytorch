@@ -1372,6 +1372,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._xpu_getDeviceCount",
         "torch._C._xpu_getDevice",
         "torch._C._xpu_getMemoryInfo",
+        "torch._C._xpu_xpuCachingAllocator_set_allocator_settings",
         "torch._C._xpu_getStreamFromExternal",
         "torch._C._xpu_isInBadFork",
         "torch._C._xpu_init",
