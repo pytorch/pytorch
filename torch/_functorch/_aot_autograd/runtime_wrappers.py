@@ -41,6 +41,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 from .functional_utils import gen_alias_from_base
+from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
@@ -65,7 +66,6 @@ from .subclass_utils import (
     runtime_unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
 )
-from .traced_function_transforms import aot_dispatch_subclass
 from .utils import (
     call_func_at_runtime_with_args,
     make_boxed_func,
