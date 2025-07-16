@@ -367,6 +367,17 @@ class TestSparse(TestSparseBase):
             t, _, _ = self._gen_sparse(len(sparse_size), nnz, sparse_size + dense_size, dtype, device, coalesced)
             _test_coalesce(t)  # this tests correctness
 
+    @dtypes(torch.float)
+    def test_coalesce_accepts_large_tensor(self, device, dtype):
+        N = 22500000
+        NNZ = 272500000
+        rows = torch.randint(0, N, (NNZ,), dtype=torch.int64, device=device)
+        cols = torch.randint(0, N, (NNZ,), dtype=torch.int64, device=device)
+        indices = torch.stack([rows, cols], dim=0)
+        values = torch.randn(NNZ, dtype=dtype, device=device)
+        sparse_matrix = torch.sparse_coo_tensor(indices, values, size=(N, N), dtype=torch.float32, device=device)
+        sparse_matrix = sparse_matrix.coalesce()
+
     @dtypes(torch.double)
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
     def test_coalesce_reference_cycle(self, device, dtype):
