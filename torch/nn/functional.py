@@ -3062,9 +3062,8 @@ def ctc_loss(
     """
 
     if has_torch_function_variadic(inputs, targets, input_lengths, target_lengths):
-        raw_ctc = lambda x, *o: ctc_loss(log_softmax(x, -1), *o)  # noqa: E731
         return handle_torch_function(
-            raw_ctc,
+            ctc_loss,
             (inputs, targets, input_lengths, target_lengths),
             inputs,
             targets,
@@ -3075,7 +3074,8 @@ def ctc_loss(
             zero_infinity=zero_infinity,
         )
 
-    raw_ctc = lambda x, *o: torch.ctc_loss(log_softmax(x, -1), *o)  # noqa: E731
+    def raw_ctc(x, *o):
+        return torch.ctc_loss(log_softmax(x, -1), *o)
 
     return raw_ctc(
         inputs,
