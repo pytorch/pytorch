@@ -124,8 +124,10 @@ class ExecutionFrame {
   }
 
   c10::intrusive_ptr<c10d::Work> getWork(int64_t workId) const {
-    CHECK(work_.find(workId) != work_.end())
-        << "Couldn't find work with Id: " << workId;
+    TORCH_CHECK(
+        work_.find(workId) != work_.end(),
+        "Couldn't find work with Id: ",
+        workId);
     return work_.at(workId);
   }
 
@@ -151,7 +153,7 @@ class ExecutionFrame {
 
  private:
   bool isOutputMovable(size_t idx) const {
-    TORCH_CHECK_LT(idx, moveable_output_mask_.size());
+    TORCH_CHECK(idx < moveable_output_mask_.size());
     return moveable_output_mask_[idx];
   }
 
