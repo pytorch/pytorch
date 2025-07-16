@@ -1808,7 +1808,7 @@ class AotCodeCompiler:
                 raise RuntimeError(f"Unsupported platform: {platform}")
 
             # Intel compiler failed to compile this manually constructed assembly file.
-            # it is ok to use cpp to compile the .S to a .o and linked with Intel compiler.
+            # Switch XPU to use consts cpp build.
             if device_type == "xpu":
                 use_asm_build = False
 
