@@ -82,8 +82,10 @@ to trace through these functions anyway:
 A "pure function" is a function with the following properties:
 
 - Determinism. Given the same inputs, the pure function will always return the same output
-- No side effects. A pure function does not have any side effects such as modifying external state or performing I/O operations.
-  Note that that `torch.*` ops that mutate Tensor data are generally excepted.
+- No external side effects. A pure function does not have any externally-visible side effects,
+  such as modifying external state or performing I/O operations.
+  Side effects that remain internal to the function are allowed (e.g. mutating intermediate tensors).
+  One notable exception is that mutating `torch.*` ops on function input Tensors are generally allowed.
 - Explicit input/output. All the input data must be passed through the function parameters and all of the outputs are returned from the function.
 
 See Pure Functions for examples. <!-- TODO: link -->
@@ -96,7 +98,8 @@ If you have a graph break it may be possible to refactor the code around it into
 1. Use `torch._dynamo.nonstrict_trace` if you want the Tensor operations in the function to show up in the Dynamo output graph (and therefore be optimizable). `nonstrict_trace` tells Dynamo to use **non-strict tracing**.
 2. Use custom operators if you want the function to be opaque w.r.t. to `torch.compile` (both the frontend Dynamo and the backend).
 
-Note that these escape hatches DO have support for impure functions (e.g. mutating input tensors), but please read the fine print carefully.
+Note that there is nothing preventing these escape hatches from being applied to impure functions,
+but **we do not provide any soundness guarantees**.
 
 Example: If Dynamo doesn't support some Python feature or API that is non-strict traceable (e.g. it uses PyTorch operations), use `nonstrict_trace` to capture it instead. <!-- TODO: link -->
 
@@ -170,6 +173,9 @@ def _(pic, box):
 img = torch.randn(3, 64, 64)
 cropped_img = f(img)  # no graph-break
 ```
+
+For more information on `triton_op` for custom triton kernels, see the
+[user-defined triton kernel tutorial](https://docs.pytorch.org/tutorials/recipes/torch_compile_user_defined_triton_kernel_tutorial.html).
 
 
 ## Strategy 3: Don't compile the code

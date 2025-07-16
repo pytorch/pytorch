@@ -29,13 +29,12 @@ import header_code
 - Graph breaks may lead to slowness in torch.compile and prevent backend optimization opportunities.
   If you're not seeing the performance you expect, then check for graph breaks.
 
-![Summary diagram of Dynamo](_static/dynamo_summary_diagram.png)
-
-
 ## Dynamo Tracing
 `torch.compile`'s frontend (Dynamo) is a custom Python bytecode interpreter designed to allow graph compilation
 in PyTorch programs while retaining the full flexibility of Python. Given a function to be compiled, Dynamo
 interprets Python bytecode to extract sequences of PyTorch operations into 1 or more FX graphs that may be further optimized by a backend.
+
+![Summary diagram of Dynamo](_static/dynamo_summary_diagram.png)
 
 For example, for the function `f` in the above diagram, Dynamo produces:
 - a single **FX graph** that takes in the original input plus some additional inputs required by the function.
@@ -104,7 +103,7 @@ def h(x):
 
 ## Guards
 
-`torch.compile `makes some assumptions about runtime values as we trace through code. During tracing, we generate "guards",
+`torch.compile` makes some assumptions about runtime values as we trace through code. During tracing, we generate "guards",
 which are runtime checks for these assumptions. Guards are run in future calls to the compiled function to determine if we
 can reuse previously compiled code. Examples of runtime checks are constant values, types, and object IDs.
 
