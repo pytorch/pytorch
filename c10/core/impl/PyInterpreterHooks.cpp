@@ -3,13 +3,16 @@
 namespace c10::impl {
 
 // Define the registry
-C10_DEFINE_REGISTRY(PyInterpreterHooksRegistry, PyInterpreterHooksInterface, PyInterpreterHooksArgs)
+C10_DEFINE_REGISTRY(
+    PyInterpreterHooksRegistry,
+    PyInterpreterHooksInterface,
+    PyInterpreterHooksArgs)
 
-// Get PyInterpreter hooks instance (similar to getCUDAHooks)
 const PyInterpreterHooksInterface& getPyInterpreterHooks() {
   auto create_impl = [] {
 #if !defined C10_MOBILE
-    auto hooks = PyInterpreterHooksRegistry()->Create("PyInterpreterHooks", PyInterpreterHooksArgs{});
+    auto hooks = PyInterpreterHooksRegistry()->Create(
+        "PyInterpreterHooks", PyInterpreterHooksArgs{});
     if (hooks) {
       return hooks;
     }

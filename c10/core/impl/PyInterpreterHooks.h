@@ -7,21 +7,21 @@
 
 namespace c10::impl {
 
-// Minimal interface for PyInterpreter hooks, following CudaHooks pattern
+// Minimal interface for PyInterpreter hooks
 struct C10_API PyInterpreterHooksInterface {
   virtual ~PyInterpreterHooksInterface() = default;
 
   // Get the PyInterpreter instance
   // Stub implementation throws error when Python is not available
   virtual PyInterpreter* getPyInterpreter() const {
-    TORCH_CHECK(false, 
-      "PyTorch was compiled without Python support. "
-      "Cannot access Python interpreter from C++.");
+    TORCH_CHECK(
+        false,
+        "PyTorch was compiled without Python support. "
+        "Cannot access Python interpreter from C++.");
   }
 };
 
-// Registry arguments (empty like CudaHooksArgs)
-struct C10_API PyInterpreterHooksArgs {};
+struct C10_API PyInterpreterHooksArgs{};
 
 C10_DECLARE_REGISTRY(
     PyInterpreterHooksRegistry,
@@ -34,7 +34,6 @@ C10_DECLARE_REGISTRY(
 // Get the global PyInterpreter hooks instance
 C10_API const PyInterpreterHooksInterface& getPyInterpreterHooks();
 
-// Main function to get global PyInterpreter (replaces getGlobalPyInterpreter)
 C10_API PyInterpreter* getGlobalPyInterpreter();
 
 } // namespace c10::impl

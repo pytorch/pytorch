@@ -158,8 +158,7 @@ class PyInterpreterHolder {
             ConcretePyInterpreterVTable::instance())),
         is_main_interpreter_(
             at::impl::PythonOpRegistrationTrampoline::registerInterpreter(
-                impl_)) {
-  }
+                impl_)) {}
   PyInterpreterHolder(const PyInterpreterHolder&) = delete;
   PyInterpreterHolder(PyInterpreterHolder&&) = delete;
   PyInterpreterHolder& operator=(const PyInterpreterHolder&) = delete;
@@ -988,4 +987,3 @@ py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
 c10::impl::PyInterpreter* getPyInterpreter() {
   return torch::detail::self_interpreter.get();
 }
-

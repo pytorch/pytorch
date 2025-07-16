@@ -1,5 +1,5 @@
-#include <torch/csrc/PyInterpreterHooks.h>
 #include <torch/csrc/PyInterpreter.h>
+#include <torch/csrc/PyInterpreterHooks.h>
 
 namespace torch::detail {
 
