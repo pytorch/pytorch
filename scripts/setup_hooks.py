@@ -64,14 +64,20 @@ def ensure_pipx() -> None:
         )
 
 
-def ensure_tool_installed(tool: str, force_update: bool = False) -> None:
+def ensure_tool_installed(tool: str, force_update: bool = False) -> bool:
+    """
+    Checks to see if the tool is available and if not (or if force update requested) then
+    it reinstalls it.
+
+    Returns: Whether or not the tool is available on PATH.  If it's not, a new terminal 
+    needs to be opened before git pushes work as expected.
+    """
     if force_update or not which(tool):
         print(f"Ensuring latest {tool} via pipx …")
         run(["pipx", "install", "--quiet", "--force", tool])
         if not which(tool):
-            sys.exit(
-                f"\n❌  {tool} installation appeared to succeed, but it's still not on PATH.\n"
-                "    Restart your terminal or add pipx's bin directory to PATH and retry.\n"
+            print(
+                f"\n⚠️  {tool} installation succeed, but it's not on PATH. Remember to a new terminal.\n"
             )
 
 
@@ -102,10 +108,9 @@ ensure_tool_installed("lintrunner")
 run(["pre-commit", "install", "--hook-type", "pre-push", "--allow-missing-config"])
 
 # ── Pin remote‑hook versions for reproducibility ────────────────────────────
+# (Note: we don't have remote hooks right now, but it future-proofs this script)
 # 1. `autoupdate` bumps every remote hook’s `rev:` in .pre-commit-config.yaml
 #    to the latest commit on its default branch.
-#    (Note: we don't have remote hooks right now, but this future-proofs
-#    this script)
 # 2. `--freeze` immediately rewrites each `rev:` to the exact commit SHA,
 #    ensuring all contributors and CI run identical hook code.
 run(["pre-commit", "autoupdate", "--freeze"])
