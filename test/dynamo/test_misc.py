@@ -6823,7 +6823,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             # assign fstring to a variable causes the fstring to be used,
             # which realizes the variable tracker.
             f_str = f"{x.shape[0]}"
-            return x.sin()
+            return x.sin(), f_str
 
         guard_failure = None
 
