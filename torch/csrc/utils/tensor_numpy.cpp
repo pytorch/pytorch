@@ -27,9 +27,7 @@ bool is_numpy_int(PyObject* obj) {
 bool is_numpy_scalar(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
-at::Tensor tensor_from_cuda_array_interface(
-    PyObject* obj,
-    std::optional<c10::Device> device_opt) {
+at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 
@@ -382,9 +380,7 @@ bool is_numpy_scalar(PyObject* obj) {
        PyArray_IsScalar(obj, ComplexFloating));
 }
 
-at::Tensor tensor_from_cuda_array_interface(
-    PyObject* obj,
-    std::optional<c10::Device> device_opt) {
+at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   if (!is_numpy_available()) {
     throw std::runtime_error("Numpy is not available");
   }
@@ -493,9 +489,7 @@ at::Tensor tensor_from_cuda_array_interface(
     // ref:
     // https://numba.readthedocs.io/en/stable/cuda/cuda_array_interface.html#cuda-array-interface-version-3
     if (data_ptr != nullptr) {
-      // if device_opt is provided and not nullopt, use it, otherwise infer from
-      // cudaPointerGetAttributes later in from_blob
-      return device_opt;
+      return {};
     } else {
       const auto current_device = at::detail::getCUDAHooks().getCurrentDevice();
       return Device(
