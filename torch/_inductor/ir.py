@@ -66,7 +66,6 @@ from torch.fx.experimental.symbolic_shapes import (
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
-    statically_known_true,
     SymTypes,
 )
 from torch.fx.node import Node
@@ -2703,8 +2702,8 @@ def is_unaligned(node: IRNode) -> bool:
 
     if isinstance(node, ReinterpretView):
         layout = node.layout
-        has_unaligned_layout = not statically_known_true(
-            layout.offset * get_dtype_size(layout.dtype) % GPU_ALIGN_BYTES == 0
+        has_unaligned_layout = not V.graph.sizevars.statically_known_multiple_of(
+            layout.offset * get_dtype_size(layout.dtype), GPU_ALIGN_BYTES
         )
         return is_unaligned(node.data) or has_unaligned_layout
 
