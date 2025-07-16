@@ -35,7 +35,6 @@ from torch.distributed.tensor._ops._einsum_strategy import (
     gen_einsum_strategies,
 )
 from torch.distributed.tensor._ops.utils import (
-    flatten_strategy_args,
     generate_redistribute_costs,
     register_op_strategy,
     replicate_op_strategy,
@@ -49,9 +48,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 try:
-    from torch.utils import _cxx_pytree as pytree
+    from torch.utils._cxx_pytree import tree_leaves
 except ImportError:
-    from torch.utils import _pytree as pytree  # type: ignore[no-redef]
+    from torch.utils._pytree import tree_leaves  # type: ignore[no-redef]
 
 
 def extract_tensor_meta(t) -> TensorMeta:
@@ -509,7 +508,7 @@ def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
     OpStrategy.
 
     """
-    tree_args, args_spec = pytree.tree_flatten(args)
+    tree_args = tree_leaves(args)
     # metadata for each argument
     arg_tensor_metadata = [extract_tensor_meta(i) for i in args]
     # possible combination of placements for each arg
@@ -545,9 +544,7 @@ def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
         output_strategy = strategy_function(op_schema)
         # OpSpec doesn't have hashing, convert to str to compare
         output_strategy_str_list = [
-            str(j)
-            for i in flatten_strategy_args([output_strategy])
-            for j in i.strategies
+            str(j) for i in tree_leaves(output_strategy) for j in i.strategies
         ]
         return len(output_strategy_str_list) == len(set(output_strategy_str_list))
 
