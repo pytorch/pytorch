@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 from __future__ import annotations
 
 import argparse
@@ -10,13 +11,7 @@ from typing import Any, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from dynamo.gb_id_mapping import (  # type: ignore[import-not-found]
-    cmd_add_new_gb_type,
-    cmd_update_gb_type,
-    find_unimplemented_v2_calls,
-    load_registry,
-    test_verify_gb_id_mapping,
-)
+from dynamo.gb_id_mapping import find_unimplemented_v2_calls, load_registry
 
 
 LINTER_CODE = "GB_REGISTRY"
@@ -79,6 +74,66 @@ def _detect_duplicate_gb_types_in_source(dynamo_dir: Path) -> list[dict[str, Any
     return duplicates
 
 
+def _update_registry_with_changes(
+    registry: dict, calls: dict[str, tuple[dict[str, Any], Path]]
+) -> dict:
+    """Calculate what the updated registry should look like."""
+    updated_registry = dict(registry)
+
+    latest_entry: dict[str, Any] = {
+        entries[0]["Gb_type"]: entries[0] for entries in registry.values()
+    }
+
+    for gb_type, (call, file_path) in calls.items():
+        if gb_type in latest_entry:
+            existing_entry = latest_entry[gb_type]
+
+            if not (
+                call["context"] == existing_entry["Context"]
+                and call["explanation"] == existing_entry["Explanation"]
+                and sorted(call["hints"]) == sorted(existing_entry["Hints"])
+            ):
+                for key, entries in updated_registry.items():
+                    if entries[0]["Gb_type"] == gb_type:
+                        new_entry = {
+                            "Gb_type": gb_type,
+                            "Context": call["context"],
+                            "Explanation": call["explanation"],
+                            "Hints": call["hints"],
+                        }
+                        updated_registry[key] = [new_entry] + entries
+                        break
+        else:
+            gb_keys = []
+            numeric_keys = []
+
+            for k in updated_registry.keys():
+                if k.startswith("GB") and k[2:].isdigit():
+                    gb_keys.append(int(k[2:]))
+                elif k.isdigit():
+                    numeric_keys.append(int(k))
+
+            if gb_keys:
+                new_key_num = max(gb_keys) + 1
+                new_key = f"GB{new_key_num:04d}"
+            elif numeric_keys:
+                new_key_num = max(numeric_keys) + 1
+                new_key = str(new_key_num)
+            else:
+                new_key = "GB0000"
+
+            updated_registry[new_key] = [
+                {
+                    "Gb_type": gb_type,
+                    "Context": call["context"],
+                    "Explanation": call["explanation"],
+                    "Hints": call["hints"],
+                }
+            ]
+
+    return updated_registry
+
+
 def check_registry_sync() -> list[LintMessage]:
     """Check registry sync and return lint messages."""
     lint_messages = []
@@ -88,7 +143,6 @@ def check_registry_sync() -> list[LintMessage]:
     dynamo_dir = repo_root / "torch" / "_dynamo"
     registry_path = dynamo_dir / "graph_break_registry.json"
 
-    # Check for duplicate gb_types in source code
     source_duplicates = _detect_duplicate_gb_types_in_source(dynamo_dir)
     for dup in source_duplicates:
         gb_type = dup["gb_type"]
@@ -120,7 +174,6 @@ def check_registry_sync() -> list[LintMessage]:
         entries[0]["Gb_type"]: entries[0] for entries in registry.values()
     }
 
-    # Check for rename detection
     gb_type_changes = []
     for gb_type, (call, file_path) in calls.items():
         if gb_type not in latest_entry:
@@ -134,8 +187,12 @@ def check_registry_sync() -> list[LintMessage]:
                     break
 
     for old_gb_type, new_gb_type, file_path in gb_type_changes:
-        description = f"Detected gb_type rename: '{old_gb_type}' -> '{new_gb_type}'. "
-        description += f'Please manually update: python tools/dynamo/gb_id_mapping.py update "{old_gb_type}" {file_path} --new_gb_type "{new_gb_type}"'
+        description = f"Detected gb_type rename: '{old_gb_type}' -> '{new_gb_type}'. Please manually update:\n"
+        command = (
+            f"'python tools/dynamo/gb_id_mapping.py update "
+            f"{json.dumps(old_gb_type)} {file_path} --new_gb_type {json.dumps(new_gb_type)}'"
+        )
+        description += command
 
         lint_messages.append(
             LintMessage(
@@ -154,55 +211,41 @@ def check_registry_sync() -> list[LintMessage]:
     if gb_type_changes:
         return lint_messages
 
-    # Auto-fix: add new gb_types and update existing ones
-    changes_made = []
-
+    needs_update = False
     for gb_type, (call, file_path) in calls.items():
         if gb_type in latest_entry:
             existing_entry = latest_entry[gb_type]
-
             if not (
                 call["context"] == existing_entry["Context"]
                 and call["explanation"] == existing_entry["Explanation"]
                 and sorted(call["hints"]) == sorted(existing_entry["Hints"])
             ):
-                if cmd_update_gb_type(gb_type, str(file_path), str(registry_path)):
-                    changes_made.append(f"Updated gb_type '{gb_type}' in registry")
+                needs_update = True
+                break
         else:
-            if cmd_add_new_gb_type(gb_type, str(file_path), str(registry_path)):
-                changes_made.append(f"Added gb_type '{gb_type}' to registry")
+            needs_update = True
+            break
 
-    # Add informational messages about changes made
-    for change in changes_made:
-        lint_messages.append(
-            LintMessage(
-                path=None,
-                line=None,
-                char=None,
-                code=LINTER_CODE,
-                severity=LintSeverity.ADVICE,
-                name="Registry updated",
-                original=None,
-                replacement=None,
-                description=change,
-            )
+    if needs_update:
+        updated_registry = _update_registry_with_changes(registry, calls)
+
+        original_content = registry_path.read_text(encoding="utf-8")
+
+        replacement_content = (
+            json.dumps(updated_registry, indent=2, ensure_ascii=False) + "\n"
         )
 
-    # Verify after changes
-    if changes_made and not test_verify_gb_id_mapping(
-        str(dynamo_dir), str(registry_path)
-    ):
         lint_messages.append(
             LintMessage(
-                path=None,
+                path=str(registry_path),
                 line=None,
                 char=None,
                 code=LINTER_CODE,
-                severity=LintSeverity.ERROR,
-                name="Verification failed",
-                original=None,
-                replacement=None,
-                description="Registry verification failed after auto-sync",
+                severity=LintSeverity.WARNING,
+                name="Registry sync needed",
+                original=original_content,
+                replacement=replacement_content,
+                description="Registry is out of sync with source code. Run `lintrunner -a` to apply changes.",
             )
         )
 
@@ -216,13 +259,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "filenames",
-        nargs="*",  # Changed back to * so it works with no files
+        nargs="*",
         help="paths to lint",
     )
 
     args = parser.parse_args()
 
-    # Process registry sync (always check entire directory regardless of files passed)
     lint_messages = check_registry_sync()
 
     for lint_message in lint_messages:

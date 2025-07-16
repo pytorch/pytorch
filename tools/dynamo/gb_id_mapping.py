@@ -176,9 +176,7 @@ def find_unimplemented_v2_calls(path, dynamo_dir=None):
     return results
 
 
-def cmd_add_new_gb_type(
-    gb_type, file_path, registry_path, additional_info=None, quiet=False
-):
+def cmd_add_new_gb_type(gb_type, file_path, registry_path):
     """
     Add a new graph break type to the registry.
 
@@ -213,24 +211,15 @@ def cmd_add_new_gb_type(
             "Context": matching_call["context"],
             "Explanation": matching_call["explanation"],
             "Hints": matching_call["hints"] or [],
-            **({"Additional_Info": [additional_info]} if additional_info else {}),
         }
     ]
 
     save_registry(reg, registry_path)
-    if not quiet:
-        print(f"Added {gb_type} to registry with ID {gb_id}")
+    print(f"Added {gb_type} to registry with ID {gb_id}")
     return True
 
 
-def cmd_update_gb_type(
-    old_gb_type,
-    file_path,
-    registry_path,
-    new_gb_type=None,
-    additional_info=None,
-    quiet=False,
-):
+def cmd_update_gb_type(old_gb_type, file_path, registry_path, new_gb_type=None):
     """
     Update an existing graph break type in the registry by adding a new version
     to the version history list.
@@ -280,23 +269,12 @@ def cmd_update_gb_type(
         "Hints": matching_call["hints"] or [],
     }
 
-    if additional_info:
-        additional_info_list = reg[gb_id][0].get("Additional_Info", [])
-        new_entry["Additional_Info"] = (
-            additional_info_list + [additional_info]
-            if additional_info_list
-            else [additional_info]
-        )
-    elif "Additional_Info" in reg[gb_id][0]:
-        new_entry["Additional_Info"] = reg[gb_id][0]["Additional_Info"]
-
     reg[gb_id].insert(0, new_entry)
 
     save_registry(reg, registry_path)
-    if not quiet:
-        print(
-            f"Updated {old_gb_type} to {matching_call['gb_type']} in registry with ID {gb_id}"
-        )
+    print(
+        f"Updated {old_gb_type} to {matching_call['gb_type']} in registry with ID {gb_id}"
+    )
     return True
 
 
@@ -471,18 +449,12 @@ def main():
     if args.command == "create":
         create_registry(args.dynamo_dir, args.registry_path)
     elif args.command == "add":
-        success = cmd_add_new_gb_type(
-            args.gb_type, args.file_path, args.registry_path, args.additional_info
-        )
+        success = cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
         if not success:
             sys.exit(1)
     elif args.command == "update":
         success = cmd_update_gb_type(
-            args.gb_type,
-            args.file_path,
-            args.registry_path,
-            args.new_gb_type,
-            args.additional_info,
+            args.gb_type, args.file_path, args.registry_path, args.new_gb_type
         )
         if not success:
             sys.exit(1)
