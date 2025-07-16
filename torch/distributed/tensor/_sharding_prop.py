@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import threading
+import warnings
 from collections.abc import Sequence
 from functools import lru_cache
 from itertools import chain
@@ -80,6 +81,10 @@ class ShardingPropagator:
             aten.select_backward.default: 1,
             aten.slice_backward.default: 1,
         }
+
+        self.enable_implicit_strategy = False
+        # track which ops have been implicit registered
+        self.implicit_strategy_op_tracker: list[OpOverload] = []
 
     def register_sharding_prop_rule(
         self,
@@ -254,6 +259,32 @@ class ShardingPropagator:
             kwargs_schema=kwargs_op_strategy,
         )
 
+    def try_propagate_implicit_strategy(
+        self, op: torch._ops.OpOverload, op_schema: OpSchema
+    ):
+        """
+        Try propagate the implicit replication sharding strategy for an operator given the op_schema.
+        """
+        if op not in self.op_strategy_funcs:
+            if not self.enable_implicit_strategy:
+                raise NotImplementedError(
+                    f"Operator {op_schema.op} does not have a sharding strategy registered."
+                )
+            else:
+                # lazy import to avoid circular dependency
+                from torch.distributed.tensor._ops.utils import replicate_op_strategy
+
+                schema_info = op_schema.schema_info if op_schema else None
+                self.implicit_strategy_op_tracker.append(op)
+                self.register_op_strategy(op, replicate_op_strategy, schema_info)
+                # TODO: point warning message to instructions on how to write a
+                # strategy once we have
+                warnings.warn(
+                    f"implicitly register sharding strategy op {op.name()} using {replicate_op_strategy}"
+                )
+        op_strategy = self.op_strategy_funcs[op](op_schema)
+        return op_strategy
+
     def propagate(self, op_info: OpInfo) -> None:
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
@@ -278,10 +309,56 @@ class ShardingPropagator:
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
 
-        if op_schema.op in self.op_strategy_funcs:
+        if op_schema.op in self.op_to_rules:
+            # propagate the sharding with rule
+            sharding_prop_func = self.op_to_rules[op_schema.op]
+
+            # step 1. there's sharding propagation rule, run
+            # sharding propagation to get the output sharding
+            try:
+                output_sharding = sharding_prop_func(op_schema)
+            except NotImplementedError as e:
+                raise e
+            except Exception as e:
+                raise RuntimeError(
+                    f"Sharding propagation failed on op {op_schema}.\nError: {e}"
+                ) from e
+
+            # step 2. if can't get output_spec from sharding
+            # propagation (i.e. no rules apply for input
+            # placements), we return the output sharding
+            # with schema suggestions, which can be used to
+            # decide how to do redistribute on inputs
+            if output_sharding.output_spec is None:
+                if output_sharding.redistribute_schema is None:
+                    raise RuntimeError(
+                        f"Sharding propagation failed on op {op_schema}!"
+                    )
+                else:
+                    # we do auto redistribute on inputs if necessary
+                    # run sharding propagation again with suggested schema
+                    propagation_res = sharding_prop_func(
+                        output_sharding.redistribute_schema
+                    )
+                    # we set the output sharding with the new propagation result
+                    # so that dispatching know both output_spec and redistribute_schema
+                    # exist, which indicates a reshard is needed
+                    output_sharding.output_spec = propagation_res.output_spec
+                    output_sharding.needs_redistribute = True
+
+            # associate the output sharding with the output tensor metadata
+            self._wrap_output_spec_tensor_meta(
+                op_schema.op, output_sharding.output_spec, out_tensor_meta
+            )
+
+            return output_sharding
+        else:
             # wrap the op_schema with op strategy for sharding strategy propagation
             strategy_schema = self._wrap_with_op_strategy(op_schema)
             strategy_schema.schema_info = op_schema.schema_info
+
+            # assign implicit strategy if enabled
+            self.try_propagate_implicit_strategy(op_schema.op, strategy_schema)
 
             # run sharding strategy propagation/generation
             op_strategy = self.op_strategy_funcs[op_schema.op](strategy_schema)
@@ -443,53 +520,6 @@ class ShardingPropagator:
                 op_schema.op, output_sharding.output_spec, out_tensor_meta
             )
             return output_sharding
-        elif op_schema.op in self.op_to_rules:
-            # propagate the sharding with rule
-            sharding_prop_func = self.op_to_rules[op_schema.op]
-
-            # step 1. there's sharding propagation rule, run
-            # sharding propagation to get the output sharding
-            try:
-                output_sharding = sharding_prop_func(op_schema)
-            except NotImplementedError as e:
-                raise e
-            except Exception as e:
-                raise RuntimeError(
-                    f"Sharding propagation failed on op {op_schema}.\nError: {e}"
-                ) from e
-
-            # step 2. if can't get output_spec from sharding
-            # propagation (i.e. no rules apply for input
-            # placements), we return the output sharding
-            # with schema suggestions, which can be used to
-            # decide how to do redistribute on inputs
-            if output_sharding.output_spec is None:
-                if output_sharding.redistribute_schema is None:
-                    raise RuntimeError(
-                        f"Sharding propagation failed on op {op_schema}!"
-                    )
-                else:
-                    # we do auto redistribute on inputs if necessary
-                    # run sharding propagation again with suggested schema
-                    propagation_res = sharding_prop_func(
-                        output_sharding.redistribute_schema
-                    )
-                    # we set the output sharding with the new propagation result
-                    # so that dispatching know both output_spec and redistribute_schema
-                    # exist, which indicates a reshard is needed
-                    output_sharding.output_spec = propagation_res.output_spec
-                    output_sharding.needs_redistribute = True
-
-            # associate the output sharding with the output tensor metadata
-            self._wrap_output_spec_tensor_meta(
-                op_schema.op, output_sharding.output_spec, out_tensor_meta
-            )
-
-            return output_sharding
-        else:
-            raise NotImplementedError(
-                f"Operator {op_schema.op} does not have a sharding strategy registered."
-            )
 
     def _select_strategy(self, strategy: OpStrategy) -> OpSpec:
         if len(strategy.strategies) == 1:
