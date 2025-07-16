@@ -1,9 +1,8 @@
 #!/usr/bin/python3
 # mypy: allow-untyped-defs
-import importlib
+import importlib.abc
 import importlib.util
 import sys
-from typing import Optional
 
 import torch
 from torch.distributed.nn.jit.templates.remote_module_template import (
@@ -52,16 +51,16 @@ def get_arg_return_types_from_interface(module_interface):
     return args_str, arg_types_str, return_type_str
 
 
-class StringLoader(importlib.abc.SourceLoader):
+class _StringLoader(importlib.abc.SourceLoader):
     def __init__(self, data):
         self.data = data
 
     def get_source(self, fullname):
         return self.data
-    
+
     def get_data(self, path):
         return self.data.encode("utf-8")
-    
+
     def get_filename(self, fullname):
         return fullname
 
@@ -72,14 +71,12 @@ def _do_instantiate_remote_module_template(
     if generated_module_name in sys.modules:
         return sys.modules[generated_module_name]
 
-    spec = importlib.util.spec_from_loader(
-        generated_module_name,
-        StringLoader(get_remote_module_template(enable_moving_cpu_tensors_to_cuda).format(**str_dict)),
-        origin='torch-jit',
-    )
+    loader = _StringLoader(get_remote_module_template(enable_moving_cpu_tensors_to_cuda).format(**str_dict))
+    spec = importlib.util.spec_from_loader(generated_module_name, loader, origin='torch-git')
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[generated_module_name] = module
-    spec.loader.exec_module(module)
+    loader.exec_module(module)
     return module
 
 
