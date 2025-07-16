@@ -3,8 +3,10 @@ import importlib
 import os
 import sys
 
+import numpy as np
+
 import torch
-from torch.testing import make_tensor
+from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -34,45 +36,11 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 # This tests basic MPS compile functionality
 
 
+@instantiate_parametrized_tests
 class MPSBasicTests(TestCase):
+    is_dtype_supported = CommonTemplate.is_dtype_supported
     common = check_model_gpu
     device = "mps"
-
-    test_add_const_int = CommonTemplate.test_add_const_int
-    test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
-    test_addmm = CommonTemplate.test_addmm
-    test_argmax_min_int32 = CommonTemplate.test_argmax_min_int32
-    test_avg_pool2d5 = CommonTemplate.test_avg_pool2d5
-    test_avg_pool2d8 = CommonTemplate.test_avg_pool2d8
-    test_div1 = CommonTemplate.test_div1
-    test_div3 = CommonTemplate.test_div3
-    test_cat_empty = CommonTemplate.test_cat_empty
-    test_cat_unbacked_empty_1d = CommonTemplate.test_cat_unbacked_empty_1d
-    test_floordiv = CommonTemplate.test_floordiv
-    test_fmod = CommonTemplate.test_fmod
-    test_fmod_zero_dim = CommonTemplate.test_fmod_zero_dim
-    test_index_dynamic_shapes = CommonTemplate.test_index_dynamic_shapes
-    test_inf = CommonTemplate.test_inf
-    test_isinf = CommonTemplate.test_isinf
-    test_isinf2 = CommonTemplate.test_isinf2
-    test_low_memory_max_pool = CommonTemplate.test_low_memory_max_pool
-    test_max_min = CommonTemplate.test_max_min
-    test_max_pool2d2 = CommonTemplate.test_max_pool2d2
-    test_nan_to_num = CommonTemplate.test_nan_to_num
-    test_remainder = CommonTemplate.test_remainder
-    test_remove_no_ops = CommonTemplate.test_remove_no_ops
-    test_reflection_pad2d = CommonTemplate.test_reflection_pad2d
-    test_rsqrt = CommonTemplate.test_rsqrt
-    test_signbit = CommonTemplate.test_signbit
-    test_silu = CommonTemplate.test_silu
-    test_slice_scatter4 = CommonTemplate.test_slice_scatter4
-    test_tanh = CommonTemplate.test_tanh
-    test_view_as_complex = CommonTemplate.test_view_as_complex
-    test_view_on_aliased = CommonTemplate.test_view_on_aliased
-    test_views3 = CommonTemplate.test_views3
-    test_views6 = CommonTemplate.test_views6
-    test_views7 = CommonTemplate.test_views7
-    test_zero_dim_reductions = CommonTemplate.test_zero_dim_reductions
 
     @parametrize("dtype", MPS_DTYPES)
     def test_add(self, dtype):
@@ -127,8 +95,167 @@ class MPSBasicTests(TestCase):
 
         self.common(inc_, (torch.rand(1024),))
 
+    def test_rms_norm_nograd(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/150629
+        def fn(x, w):
+            with torch.no_grad():
+                return torch.nn.functional.rms_norm(x, x.shape, w)
 
-instantiate_parametrized_tests(MPSBasicTests)
+        self.common(fn, (torch.rand(10), torch.ones(10)))
+
+    def test_compile_numpy_scalar(self):
+        def fn(x, y):
+            return x / y
+
+        self.common(fn, (torch.rand(10), np.exp(0.3)))
+
+    def test_conv_transpose_channels_last(self):
+        def fn(x, y):
+            return torch.nn.functional.conv_transpose2d(x, y, stride=1, padding=1)
+
+        self.common(
+            fn,
+            (
+                torch.rand(1, 1, 16, 16).to(memory_format=torch.channels_last),
+                torch.rand(1, 4, 8, 8),
+            ),
+        )
+
+    def test_cholesky(self):
+        def fn(x):
+            return (
+                torch.linalg.cholesky(x, upper=False),
+                torch.linalg.cholesky(x, upper=True),
+            )
+
+        self.common(fn, (torch.eye(64),), check_lowp=False)
+
+
+class MPSBasicTestsAOTI(TestCase):
+    def check_model(self, m, inp, dynamic_shapes=None):
+        res2 = m(*inp)
+        ep = torch.export.export(m, inp, dynamic_shapes=dynamic_shapes)
+        path = torch._inductor.aoti_compile_and_package(ep)
+        m = torch._inductor.aoti_load_package(path)
+        res = m(*inp)
+        assert torch.allclose(res, res2)
+
+    def test_add_mps(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
+        m = M().to("mps")
+        self.check_model(m, inp)
+
+    def test_fallback_mps(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.nn.functional.linear(x, y)
+
+        inp = (
+            torch.randn(10, 10, device="mps"),
+            torch.randn(10, 10, device="mps"),
+        )
+        m = M().to("mps")
+        self.check_model(m, inp)
+
+    def test_c10(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return torch.cat(tensors=torch.split(x, 4, dim=1), dim=-2)
+
+        inp = (torch.randn(2, 8, device="mps"),)
+        m = M().to("mps")
+        self.check_model(m, inp)
+
+    def test_two_const(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.y = torch.ones(3, 3, device="mps")
+                self.z = torch.full((3, 3), 2, device="mps")
+
+            def forward(self, x):
+                return x + self.y + self.z
+
+        inp = (torch.ones(3, 3, device="mps"),)
+        m = Model().to(device="mps")
+        self.check_model(m, inp)
+
+    def test_simple_dynamic(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                add_0 = x + y
+                return torch.nn.functional.relu(input=add_0, inplace=False)
+
+        x = torch.randn(128, 2048, device="mps")
+        y = torch.randn(128, 2048, device="mps")
+        inp = (x, y)
+
+        m = Model().to(device="mps")
+        dim0_x = torch.export.Dim("dim0_x", min=1, max=2048)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_x}}
+
+        self.check_model(m, inp, dynamic_shapes)
+
+    def test_dynamic_cat(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, a, b):
+                return torch.cat([a, b], dim=0)
+
+        a = torch.randn(2, 4, device="mps")
+        b = torch.randn(3, 4, device="mps")
+        inp = (a, b)
+        m = Model().to(device="mps")
+
+        dim0_a = torch.export.Dim("dim0_a", min=1, max=10)
+        dim0_b = torch.export.Dim("dim0_b", min=1, max=20)
+        dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_b}}
+        self.check_model(m, inp, dynamic_shapes)
+
+    def test_reuse_kernel(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                a = torch.sin(x)
+                b = torch.mm(a, y)
+                c = torch.sin(b)
+                d = torch.mm(b, c)
+                return d
+
+        example_inputs = (
+            torch.randn(87, 87, device="mps"),
+            torch.randn(87, 87, device="mps"),
+        )
+        model = Model()
+
+        ep = torch.export.export(model, example_inputs)
+        package_path = torch._export.aot_compile(ep.module(), example_inputs)
+
+        target_str = 'mps_lib_0.getKernelFunction("generated_kernel")'
+        target_count = 1
+
+        with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:
+            src_code = cpp.read()
+            FileCheck().check_count(
+                target_str,
+                target_count,
+                exactly=True,
+            ).run(src_code)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

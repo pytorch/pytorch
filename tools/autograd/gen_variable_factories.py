@@ -108,9 +108,9 @@ def process_function(f: NativeFunction) -> str | None:
                 exprs.append(arg.name)
 
         r += f"""\
-inline at::Tensor {sig.name()}({', '.join(formals)}) {{
+inline at::Tensor {sig.name()}({", ".join(formals)}) {{
   at::AutoDispatchBelowADInplaceOrView guard;
-  return autograd::make_variable(at::{sig.name()}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
+  return autograd::make_variable(at::{sig.name()}({", ".join(exprs)}), /*requires_grad=*/{requires_grad});
 }}
 """
     return r

@@ -10,7 +10,7 @@
 
 namespace torch::jit::tensorexpr {
 
-RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
+static RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
 
 int64_t InterpValue::intValue() const {
 #define TYPE_CASE(Type, Name)        \
@@ -24,43 +24,42 @@ int64_t InterpValue::intValue() const {
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_integral_v<T>, T> mod_value(T lhs, T rhs) {
+static inline std::enable_if_t<std::is_integral_v<T>, T> mod_value(
+    T lhs,
+    T rhs) {
   return lhs % rhs;
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_floating_point_v<T>, T> mod_value(
+static inline std::enable_if_t<std::is_floating_point_v<T>, T> mod_value(
     T lhs,
     T rhs) {
   return std::fmod(lhs, rhs);
 }
 
-inline bool mod_value(bool lhs, bool rhs) {
+static inline bool mod_value(bool lhs, bool rhs) {
   throw std::runtime_error("Attempted modulus of bool");
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_integral_v<T>, T> div_value(T lhs, T rhs) {
+static inline std::enable_if_t<std::is_integral_v<T>, T> div_value(
+    T lhs,
+    T rhs) {
   TORCH_CHECK(rhs != 0, "Division by zero");
   return lhs / rhs;
 }
 
 template <typename T>
-inline std::enable_if_t<std::is_floating_point_v<T>, T>
+static inline std::enable_if_t<std::is_floating_point_v<T>, T>
     __ubsan_ignore_float_divide_by_zero__ div_value(T lhs, T rhs) {
   return lhs / rhs;
 }
 
-inline bool div_value(bool lhs, bool rhs) {
-  LOG(FATAL) << "Attempted division of bool";
-  return false;
-}
-
-inline c10::Half div_value(c10::Half lhs, c10::Half rhs) {
+static inline c10::Half div_value(c10::Half lhs, c10::Half rhs) {
   return lhs / rhs;
 }
 
-inline c10::BFloat16 div_value(c10::BFloat16 lhs, c10::BFloat16 rhs) {
+static inline c10::BFloat16 div_value(c10::BFloat16 lhs, c10::BFloat16 rhs) {
   return lhs / rhs;
 }
 

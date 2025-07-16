@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 from torch.sparse._semi_structured_conversions import (
@@ -37,7 +37,7 @@ _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
 
 class SparseSemiStructuredTensor(torch.Tensor):
     """
-    This class implementes semi-structured sparsity as a Tensor subclass.
+    This class implements semi-structured sparsity as a Tensor subclass.
 
     Semi-structured sparsity describes a sparsity pattern where n in every 2n elements are sparse,
     depending on the datatype. It is also referred to as 2:4 sparsity or fine-grained
@@ -46,21 +46,21 @@ class SparseSemiStructuredTensor(torch.Tensor):
     There are two backends available for semi_structred sparsity, either cuSPARSELt or CUTLASS.
     This class is meant to serve as a base class for both implementations. SparseSemiStructuredCUTLASS
     and SparseSemiStructuredCUSPARSELT both inherit from this class and define three backend-specific items.
-    Note that as such, this class cannot be insantiated directly.
+    Note that as such, this class cannot be instantiated directly.
 
     -`_DTYPE_SHAPE_CONSTRAINTS` - A dictionary holding backend specific dense/sparse min shape constraints
     - `def from_dense()` - backend specific compression routines
-    - `def _mm()` - backend specifc mm op (either torch._cslt_sparse_mm or torch._sparse_semi_structured_(mm|addmm))
+    - `def _mm()` - backend specific mm op (either torch._cslt_sparse_mm or torch._sparse_semi_structured_(mm|addmm))
     """
 
     _DEFAULT_ALG_ID: int = 0
-    _DTYPE_SHAPE_CONSTRAINTS: Dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
+    _DTYPE_SHAPE_CONSTRAINTS: dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
     _FORCE_CUTLASS: bool = False
     _FUSE_TRANSPOSE: bool = False
     _PROTOTYPE_WARNING_SHOWN: bool = False
 
     BACKEND: str
-    SPARSE_DISPATCH: Dict[Callable, Callable]
+    SPARSE_DISPATCH: dict[Callable, Callable]
 
     packed: Optional[torch.Tensor]
     meta: Optional[torch.Tensor]
@@ -123,7 +123,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             )
             cls._PROTOTYPE_WARNING_SHOWN = True
 
-            # Because this only runs onces, we also load the dispatch table here as well.
+            # Because this only runs once, we also load the dispatch table here as well.
             # We can't define the dispatch table explicitly because of torch.ops import errors, so we do this instead
             # But this is useful since it allows users to overload the dispatch table for debugging / testing.
             cls._load_dispatch_table()
@@ -138,13 +138,14 @@ class SparseSemiStructuredTensor(torch.Tensor):
         else:
             raise ValueError("At least one of packed or packed_t must be provided")
 
-        kwargs = {
-            "device": previous_tensor.device,
-            "dtype": previous_tensor.dtype,
-            "layout": previous_tensor.layout,
-            "requires_grad": requires_grad,
-        }
-        tensor = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)  # type: ignore[attr-defined]
+        tensor = torch.Tensor._make_wrapper_subclass(
+            cls,
+            shape,
+            device=previous_tensor.device,
+            dtype=previous_tensor.dtype,
+            layout=previous_tensor.layout,
+            requires_grad=requires_grad,
+        )
 
         tensor.packed = packed
         tensor.meta = meta
@@ -161,7 +162,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     def __tensor_flatten__(
         self,
-    ) -> Tuple[List[str], Tuple[torch.Size, bool, int, bool]]:
+    ) -> tuple[list[str], tuple[torch.Size, bool, int, bool]]:
         inner_tensors = list(
             filter(lambda x: getattr(self, x) is not None, self.__slots__)
         )
@@ -177,7 +178,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     def __tensor_unflatten__(
         cls,
         inner_tensors,
-        tensor_meta: Tuple[torch.Size, bool, int, bool],
+        tensor_meta: tuple[torch.Size, bool, int, bool],
         outer_size,
         outer_stride,
     ) -> torch.Tensor:
@@ -196,10 +197,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
             requires_grad=requires_grad,
         )
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
+    __torch_function__ = torch._C._disabled_torch_function_impl  # type: ignore[assignment]
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:
+    def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:  # type: ignore[override]
         if func._overloadpacket not in cls.SPARSE_DISPATCH:
             raise NotImplementedError(
                 f"{cls.__name__} only supports a specific set of operations, "
@@ -324,7 +325,7 @@ def to_sparse_semi_structured(
 
     This function will check to ensure the dense tensor has the right dtype, size, dims, and device.
     We currently only support semi-structured sparse tensors for 2d CUDA tensors.
-    Additionally, your tensor must be a positive multiple of the mininum sparse block size, given in
+    Additionally, your tensor must be a positive multiple of the minimum sparse block size, given in
     `_DTYPE_TO_SHAPE_CONSTRAINTS` for each dtype (float32, float16, bfloat16, int8).
 
     Args:
@@ -387,7 +388,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
     This class implements semi-structured sparsity for the CUTLASS backend.
 
 
-    In this implementation, the specified elements and metadata are stored seprately,
+    In this implementation, the specified elements and metadata are stored separately,
     in packed and meta respectively.
 
     When _FORCE_CUTLASS is set, or when cuSPARSELt is not available, this subclass calls into _sparse_semi_structured_(mm|addmm) and

@@ -185,6 +185,113 @@ void testAllgather(int iter = 10000) {
   }
 }
 
+void testAllgatherBase(int iter = 10000) {
+  auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
+  std::vector<c10::intrusive_ptr<::c10d::Work>> works;
+
+  // Get the world size
+  auto worldSize = pg->getSize();
+  auto rank = pg->getRank();
+
+  // Generate inputs
+  for (const auto i : c10::irange(iter)) {
+    auto tensor = at::ones({16, 16}) * i * rank;
+    auto output = at::zeros({worldSize, 16, 16});
+
+    // Queue the work.
+    c10::intrusive_ptr<::c10d::Work> work = pg->_allgather_base(output, tensor);
+    works.push_back(std::move(work));
+  }
+
+  auto outputTensors = waitFuture(pg, works);
+
+  // Verify outputs
+  for (const auto i : c10::irange(iter)) {
+    for (const auto j : c10::irange(worldSize)) {
+      const auto expected = i * j;
+      auto data = outputTensors[i][0][j].data_ptr<float>();
+      for (auto k = 0; k < outputTensors[i][0][j].numel(); ++k) {
+        if (data[k] != static_cast<float>(expected)) {
+          TORCH_CHECK(false, "BOOM!");
+        }
+      }
+    }
+  }
+}
+
+void testReduceScatter(int iter = 10000) {
+  auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
+  std::vector<c10::intrusive_ptr<::c10d::Work>> works;
+
+  // Get the world size
+  auto worldSize = pg->getSize();
+  auto rank = pg->getRank();
+
+  // Generate inputs
+  int count = 2;
+  for (const auto i : c10::irange(iter)) {
+    auto tensors = std::vector<std::vector<at::Tensor>>(1);
+    tensors[0].resize(worldSize);
+    for (const auto j : c10::irange(worldSize)) {
+      tensors[0][j] = at::ones({count, count}) * i * rank;
+    }
+    auto output = at::zeros({count, count});
+    auto outputs = std::vector<at::Tensor>({output});
+
+    // Queue the work.
+    c10::intrusive_ptr<::c10d::Work> work =
+        pg->reduce_scatter(outputs, tensors);
+    works.push_back(std::move(work));
+  }
+
+  auto outputTensors = waitFuture(pg, works);
+
+  // Verify outputs
+  for (const auto i : c10::irange(iter)) {
+    const auto expected = i * (worldSize * (worldSize - 1)) / 2.0;
+    auto data = outputTensors[i][0].data_ptr<float>();
+    for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
+      if (data[j] != static_cast<float>(expected)) {
+        TORCH_CHECK(false, "BOOM!");
+      }
+    }
+  }
+}
+
+void testReduceScatterBase(int iter = 10000) {
+  auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
+  std::vector<c10::intrusive_ptr<::c10d::Work>> works;
+
+  // Get the world size
+  auto worldSize = pg->getSize();
+  auto rank = pg->getRank();
+
+  // Generate inputs
+  for (const auto i : c10::irange(iter)) {
+    auto tensor = at::ones({worldSize, 16, 16}) * i * rank;
+    auto output = at::zeros({16, 16});
+    auto outputs = std::vector<at::Tensor>({output});
+
+    // Queue the work.
+    c10::intrusive_ptr<::c10d::Work> work =
+        pg->_reduce_scatter_base(output, tensor);
+    works.push_back(std::move(work));
+  }
+
+  auto outputTensors = waitFuture(pg, works);
+
+  // Verify outputs
+  for (const auto i : c10::irange(iter)) {
+    const auto expected = i * (worldSize * (worldSize - 1)) / 2.0;
+    auto data = outputTensors[i][0].data_ptr<float>();
+    for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
+      if (data[j] != static_cast<float>(expected)) {
+        TORCH_CHECK(false, "BOOM!");
+      }
+    }
+  }
+}
+
 void testGather(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   std::vector<c10::intrusive_ptr<::c10d::Work>> works;
@@ -355,6 +462,9 @@ int main(int argc, char** argv) {
   testBroadcast();
   testReduce();
   testAllgather();
+  testAllgatherBase();
+  testReduceScatter();
+  testReduceScatterBase();
   testGather();
   testScatter();
   testSendRecv(false);

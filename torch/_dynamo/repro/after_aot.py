@@ -1,5 +1,24 @@
 # mypy: allow-untyped-defs
 
+"""
+Utilities for reproducing and debugging issues in PyTorch's Dynamo AOT compilation.
+
+This module provides tools and infrastructure for:
+1. Generating minimal reproducible test cases ("repros") from failing compilations
+2. Analyzing accuracy issues between eager and compiled execution
+3. Minifying large models/inputs to isolate problematic patterns
+4. Debugging compiler errors and accuracy divergences
+
+The main components include:
+- Repro generation: Creates standalone Python files that reproduce compiler issues
+- Minification: Reduces large graphs to minimal failing examples
+- Accuracy analysis: Compares compiled vs eager execution, with fp64 reference
+- Debug tools: Dumps graph state, tracks intermediates, analyzes divergences
+
+This is primarily used by PyTorch developers and researchers to debug issues in
+the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
+"""
+
 import argparse
 import copy
 import functools
@@ -11,9 +30,10 @@ import subprocess
 import sys
 import textwrap
 import uuid
+from collections.abc import Sequence
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, Dict, Sequence, TYPE_CHECKING, Union
+from typing import Any, Callable, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
 import torch
@@ -38,9 +58,11 @@ from torch._dynamo.debug_utils import (
     NopInputReader,
     same_two_models,
 )
-from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
+from torch._environment import is_fbcode
 from torch._inductor.output_code import OutputCode
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     fx_placeholder_targets,
@@ -60,7 +82,7 @@ log = logging.getLogger(__name__)
 
 
 inductor_config = import_module("torch._inductor.config")
-use_buck = inductor_config.is_fbcode()
+use_buck = is_fbcode()
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #                           MAIN ENTRY POINT
@@ -229,7 +251,7 @@ def wrap_compiler_debug(
 
 
 def maybe_fbcode_instructions():
-    if is_fbcode:
+    if is_fbcode():
         extra_deps_formatted = "\n".join([f'        "{dep}",' for dep in extra_deps])
         if len(extra_deps_formatted) > 0:
             extra_deps_formatted = "\n" + extra_deps_formatted
@@ -261,8 +283,24 @@ python_binary(
 
 
 def generate_compiler_repro_string(
-    gm, args, *, stable_output=False, save_dir=None, stable_hash=False
+    gm,
+    args,
+    *,
+    stable_output=False,
+    save_dir=None,
+    stable_hash=False,
+    has_distributed_ops=False,
 ):
+    # Add distributed imports if needed
+    distributed_imports = ""
+    if has_distributed_ops:
+        distributed_imports = textwrap.dedent(
+            """
+import torch.distributed as dist
+from torch.testing._internal.distributed.fake_pg import FakeStore
+        """
+        ).strip()
+
     model_str = textwrap.dedent(
         f"""
 {generate_env_vars_string(stable_output=stable_output)}
@@ -272,6 +310,7 @@ import torch.fx as fx
 from torch._dynamo.testing import rand_strided
 from math import inf
 import torch._inductor.inductor_prims
+{distributed_imports}
 
 {generate_config_string(stable_output=stable_output)}
 
@@ -280,7 +319,7 @@ isolate_fails_code_str = None
 {extra_imports}
 
 {maybe_fbcode_instructions()}
-        """
+     """
     )
     if not stable_output:
         model_str += f"# torch version: {torch.version.__version__}\n"
@@ -292,12 +331,12 @@ isolate_fails_code_str = None
 
     model_str += NNModuleToString.convert(gm)
 
-    # get hint shape/stride when dynamic shape enabled
-    def hint_if_symint(x):
-        return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
-
     writer = InputWriter(save_dir, stable_hash=stable_hash)
-    for placeholder, arg in zip(fx_placeholder_targets(gm), args):
+    used_syms = {}
+
+    # Extract from graph placeholders and their corresponding arguments
+    placeholder_targets = fx_placeholder_targets(gm)
+    for placeholder, arg in zip(placeholder_targets, args):
         if isinstance(arg, (int, torch.SymInt)):
             writer.symint(placeholder, arg)
         elif isinstance(arg, torch.Tensor):
@@ -306,11 +345,32 @@ isolate_fails_code_str = None
         elif arg is None:
             writer.const(placeholder)
         else:
-            # It's better to produce a slightly wrong repro string than none
-            # at all
             writer.unsupported(placeholder, arg)
 
-    model_str += "\n".join(writer.lines()) + "\n"
+        # Extract symbolic variables from the same arguments
+        if isinstance(arg, torch.SymInt):
+            sym_name = str(arg.node)
+            if arg.node.hint is not None:
+                used_syms[sym_name] = arg.node.hint
+        elif isinstance(arg, torch.Tensor):
+            # Extract symbolic variables from tensor shapes and strides
+            for dim in arg.shape:
+                if isinstance(dim, torch.SymInt) and dim.node.hint is not None:
+                    used_syms[str(dim.node)] = dim.node.hint
+            for stride in arg.stride():
+                if isinstance(stride, torch.SymInt) and stride.node.hint is not None:
+                    used_syms[str(stride.node)] = stride.node.hint
+
+    # Add symbolic variable definitions to the top of the generated code
+    if used_syms:
+        hint_lines = "\n".join(
+            f"{name} = {hint}" for name, hint in sorted(used_syms.items())
+        )
+        model_str = f"{hint_lines}\n\n{model_str}"
+
+    load_args_lines = writer.lines()
+    load_args_code = "\n".join(load_args_lines)
+    model_str += load_args_code + "\n"
 
     model_str += "mod = Repro()\n"
     return model_str
@@ -339,6 +399,14 @@ def save_graph_repro(
         )
         return
 
+    # Check if the graph contains distributed operations
+    has_distributed_ops = any(
+        node.op == "call_function"
+        and isinstance(node.target, OpOverload)
+        and node.target.namespace in {"_c10d_functional", "c10d_functional"}
+        for node in gm.graph.nodes
+    )
+
     fd.write(
         generate_compiler_repro_string(
             gm,
@@ -346,16 +414,33 @@ def save_graph_repro(
             stable_output=stable_output,
             save_dir=save_dir,
             stable_hash=stable_hash,
+            has_distributed_ops=has_distributed_ops,
         )
     )
     if accuracy is None:
         accuracy = "_accuracy" in compiler_name
     if tracing_mode is None:
         tracing_mode = "real"
-        if any(has_free_symbols(a) for a in args):
+        if any(
+            has_free_symbols(a) for a in args if not isinstance(a, FakeScriptObject)
+        ):
             tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
+
+    # Add distributed initialization before run_repro if needed
+    if has_distributed_ops:
+        fd.write(
+            "    # Initialize FakeProcessGroup for distributed operations\n"
+            "    store = FakeStore()\n"
+            "    dist.init_process_group(\n"
+            '        backend="fake",\n'
+            "        rank=0,\n"
+            "        world_size=2,\n"
+            "        store=store\n"
+            "    )\n"
+        )
+
     fd.write(
         f"    with torch.no_grad():\n"
         f"        run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
@@ -365,6 +450,10 @@ def save_graph_repro(
         f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
         f"        # mod(*args)"
     )
+
+    # Add distributed cleanup after run_repro
+    if has_distributed_ops:
+        fd.write("\n    dist.destroy_process_group()\n")
 
 
 def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
@@ -442,7 +531,7 @@ def isolate_fails(
     if use_buck:
         cmd = BuckTargetWriter(file_name).write(print_msg=False)
     else:
-        cmd = ["python", file_name]
+        cmd = [sys.executable, file_name]
 
     p = subprocess.Popen(
         cmd,
@@ -571,7 +660,7 @@ def repro_common(options, mod, load_args):
     return mod, args
 
 
-ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
+ACCURACY_FAILS: dict[str, Callable[[nn.Module, Any], bool]] = {
     "": inductor_fails,
     # This might look inverted but it's not.  strict_accuracy means "we will
     # minify any time we see anything that diverges", whereas accuracy is more
@@ -587,7 +676,8 @@ ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
 def repro_minifier_query(options, mod, load_args):
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
-        ACCURACY_FAILS[options.accuracy], check_str=options.check_str  # type: ignore[call-arg]
+        ACCURACY_FAILS[options.accuracy],
+        check_str=options.check_str,  # type: ignore[call-arg]
     )
     if fail_fn(mod, args):
         sys.exit(1)
@@ -662,9 +752,10 @@ def repro_analyze(options, mod, load_args):
     reader = torch.utils._content_store.ContentStoreReader(options.save_dir)
 
     new_args = clone_inputs(args)
-    with intermediate_hook(save_hook), tqdm(
-        desc="Saving inductor intermediates", total=total
-    ) as pbar:
+    with (
+        intermediate_hook(save_hook),
+        tqdm(desc="Saving inductor intermediates", total=total) as pbar,
+    ):
         assert not isinstance(compiled, str)
         compiled(new_args)
         assert not new_args
@@ -688,9 +779,10 @@ def repro_analyze(options, mod, load_args):
 
     if not options.skip_check_deterministic:
         new_args = clone_inputs(args)
-        with intermediate_hook(check_hook), tqdm(
-            desc="Checking inductor determinism", total=total
-        ) as pbar:
+        with (
+            intermediate_hook(check_hook),
+            tqdm(desc="Checking inductor determinism", total=total) as pbar,
+        ):
             compiled(new_args)
             assert not new_args
 

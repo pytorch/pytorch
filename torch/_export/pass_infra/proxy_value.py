@@ -1,10 +1,12 @@
 # pyre-strict
-from typing import Union, Iterator, Iterable, Generic
+from collections.abc import Iterable, Iterator
+from typing import Generic, TypeVar, Union
+
 import torch
 
-from typing import TypeVar
 
 _T = TypeVar("_T")
+
 
 class ProxyValue(Generic[_T]):
     # pyre-ignore

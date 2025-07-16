@@ -115,7 +115,7 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
   static Conv2dPackedContext pack(c10::impl::GenericList);
 
   const c10::impl::GenericList unpack() const override {
-    TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
+    TORCH_CHECK(!unpacked_.empty(), "unpacked_ does not have any elements!");
 
     return unpacked_;
   }
@@ -275,7 +275,7 @@ class Conv1dPackedContext final : virtual public VulkanPackedContext,
   static Conv1dPackedContext pack(c10::impl::GenericList);
 
   const c10::impl::GenericList unpack() const override {
-    TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
+    TORCH_CHECK(!unpacked_.empty(), "unpacked_ does not have any elements!");
 
     return unpacked_;
   }

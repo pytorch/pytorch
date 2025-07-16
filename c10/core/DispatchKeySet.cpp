@@ -53,7 +53,7 @@ constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
     // explicit kernels therefore we manually add the key to the
     // math_dispatch_keyset
     DispatchKeySet{DispatchKey::NestedTensor} |
-    // Functionalize should always re-use CompositeImplicit decomps.
+    // Functionalize should always reuse CompositeImplicit decomps.
     DispatchKeySet{DispatchKey::Functionalize};
 
 constexpr DispatchKeySet nested_dispatch_keyset =
@@ -131,6 +131,8 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::IPU);
     case DispatchKey::AutogradXPU:
       return DispatchKeySet(DispatchKey::XPU);
+    case DispatchKey::AutogradMAIA:
+      return DispatchKeySet(DispatchKey::MAIA);
     case DispatchKey::AutogradPrivateUse1:
       return DispatchKeySet(DispatchKey::PrivateUse1);
     case DispatchKey::AutogradPrivateUse2:

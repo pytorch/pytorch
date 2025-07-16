@@ -6,14 +6,12 @@ import contextlib
 import dataclasses
 import difflib
 import io
-import logging
 import sys
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 import torch.fx
 from torch._subclasses.fake_tensor import unset_fake_temporarily
-from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher
 
 
 if TYPE_CHECKING:
@@ -179,19 +177,9 @@ class Transform(abc.ABC):
     are needed to reconcile :attr:`ONNXProgram.model_proto`.
     That is, the model signature and the model representation must match.
 
-    As an additional feature, this class provides builtin support for transformation recording using the diagnostics.
-    The granularity of overriding is up to the user. And it affects the granularity of
-    the diagnostics information. For example, if `_run()` is overridden, the
-    diagnostics information will only contain graph level transformation. Instead,
-    if `call_function()` is overridden, the diagnostics information will additionally
-    contain the node level information of `call_function()`.
-
     TODO(bowbao): Add more overridable methods in call hierarchy
     TODO(bowbao): Create an example once more overridable methods are added.
     """
-
-    diagnostic_context: diagnostics.DiagnosticContext
-    """The diagnostic context for recording diagnostics."""
 
     module: torch.fx.GraphModule
     """The module to be transformed."""
@@ -201,16 +189,13 @@ class Transform(abc.ABC):
 
     def __init__(
         self,
-        diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
     ):
         """Initialize the transform.
 
         Args:
-            diagnostic_context: The diagnostic context for recording diagnostics.
             module: The module to be transformed.
         """
-        self.diagnostic_context = diagnostic_context
         self.module = module
         self.fake_mode = self._detect_fake_mode()
 
@@ -237,10 +222,6 @@ class Transform(abc.ABC):
     @abc.abstractmethod
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule: ...
 
-    @diagnostics.diagnose_call(
-        diagnostics.rules.fx_pass,
-        diagnostic_message_formatter=_transform_diagnose_call_message_formatter,
-    )
     def run(self, *args, **kwargs) -> torch.fx.GraphModule:
         """Run the transform on `self.module`.
 
@@ -251,73 +232,4 @@ class Transform(abc.ABC):
             *args: Positional arguments for `self.module` to run.
             **kwargs: Keyword arguments for `self.module` to run.
         """
-        diagnostic = self.diagnostic_context.inflight_diagnostic(
-            rule=diagnostics.rules.fx_pass
-        )
-        diagnostic.info(
-            "For detailed logging of graph modifications by this pass, either set "
-            "`DiagnosticOptions.verbosity_level` to `logging.DEBUG` or use the environment variable "
-            "`TORCH_LOGS='onnx_diagnostics'`."
-        )
-
-        # Gather graph information before transform.
-        graph_diff_log_level = logging.DEBUG
-        if diagnostic.logger.isEnabledFor(graph_diff_log_level):
-            # Cannot use LazyString because the graph may have been mutated at evaluation time.
-            old_readable_graph = self.module.print_readable(print_output=False)
-            old_tabular = maybe_fx_graph_tabular(self.module.graph)
-        else:
-            # Set to empty string to avoid unbound warning. This value should never be
-            # used since the log level is not enabled.
-            old_readable_graph = ""
-            old_tabular = ""
-
-        module = self._run(*args, **kwargs)
-
-        # Gather graph information after transform.
-        if diagnostic.logger.isEnabledFor(graph_diff_log_level):
-            new_readable_graph = module.print_readable(print_output=False)
-            new_tabular = maybe_fx_graph_tabular(module.graph)
-
-            with diagnostic.log_section(graph_diff_log_level, "Graph diff:"):
-                diagnostic.log(
-                    graph_diff_log_level,
-                    "```\n%s\n```",
-                    diagnostics.LazyString(
-                        _unified_diff, old_readable_graph, new_readable_graph
-                    ),
-                )
-
-            with diagnostic.log_section(graph_diff_log_level, "Tabular diff:"):
-                if old_tabular is None or new_tabular is None:
-                    diagnostic.log(
-                        graph_diff_log_level,
-                        "Tabular diff is not available because `tabulate` is not installed.",
-                    )
-                else:
-                    diagnostic.log(
-                        graph_diff_log_level,
-                        "```\n%s\n```",
-                        diagnostics.LazyString(_unified_diff, old_tabular, new_tabular),
-                    )
-
-        return module
-
-
-class AnalysisResult(abc.ABC):  # noqa: B024
-    ...
-
-
-class Analysis(abc.ABC):
-    def __init__(
-        self,
-        diagnostic_context: diagnostics.DiagnosticContext,
-        module: torch.fx.GraphModule,
-        onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
-    ):
-        self.diagnostic_context = diagnostic_context
-        self.module = module
-        self.onnxfunction_dispatcher = onnxfunction_dispatcher
-
-    @abc.abstractmethod
-    def analyze(self, diagnostic_level: diagnostics.infra.Level) -> AnalysisResult: ...
+        return self._run(*args, **kwargs)

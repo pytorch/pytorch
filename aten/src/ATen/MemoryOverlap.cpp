@@ -12,12 +12,22 @@ MemOverlap has_internal_overlap(const TensorBase& tensor) {
 MemOverlap has_internal_overlap(TensorImpl* t) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t->layout() == kStrided);
 
-  if (t->is_non_overlapping_and_dense()) {
+  auto sizes = t->sym_sizes();
+  auto strides = t->sym_strides();
+
+  // When we have unbacked symint strides, is_non_overlapping_and_dense
+  // often results in guard on data dependent errors. For now
+  // let us bail early if there are unbacked symint strides.
+  for (const auto i : c10::irange(strides.size())) {
+    if (!strides[i].has_hint()) {
+      return MemOverlap::TooHard;
+    }
+  }
+
+  if (t->is_non_overlapping_and_dense_or_false()) {
     return MemOverlap::No;
   }
 
-  auto strides = t->sym_strides();
-  auto sizes = t->sym_sizes();
   for (const auto i : c10::irange(strides.size())) {
     // NB: The size oblivious test is written very carefully here.  When
     // unbacked SymInts are involved, we should try to conservatively report
@@ -25,7 +35,7 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
     // SymInts.  Thus, if I have u0 size, we should assume that this has > 1
     // elements (first expression), but if I have a u0 stride, I should NOT
     // assume that it is not zero (second expression)
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[i].sym_gt(1)) && strides[i] == 0) {
+    if (TORCH_GUARD_OR_FALSE(sizes[i].sym_gt(1)) && strides[i] == 0) {
       return MemOverlap::Yes;
     }
   }
@@ -53,7 +63,7 @@ MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
   if (a->numel() == 0 || b->numel() == 0) {
     return MemOverlapStatus::No;
   }
-  if (!a->is_non_overlapping_and_dense() || !b->is_non_overlapping_and_dense()) {
+  if (!a->is_non_overlapping_and_dense_or_false() || !b->is_non_overlapping_and_dense_or_false()) {
     return MemOverlapStatus::TooHard;
   }
   // Test for storage equality, rather than pointer equality.

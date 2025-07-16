@@ -6,7 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Any, cast, Dict, SupportsInt
+from typing import Any, cast, SupportsInt
 from unittest import TestCase
 
 from torch.distributed.elastic.rendezvous import (
@@ -24,7 +24,7 @@ class RendezvousParametersTest(TestCase):
         self._run_id = "dummy_run_id"
         self._min_nodes = 3
         self._max_nodes = 6
-        self._kwargs: Dict[str, Any] = {}
+        self._kwargs: dict[str, Any] = {}
 
     def _create_params(self) -> RendezvousParameters:
         return RendezvousParameters(
@@ -140,7 +140,17 @@ class RendezvousParametersTest(TestCase):
                 self.assertFalse(params.get_as_bool("dummy_param"))
 
     def test_get_as_bool_raises_error_if_value_is_invalid(self) -> None:
-        for value in ["01", "Flse", "Ture", "g", "4", "_", "truefalse", 2, -1]:
+        for value in [
+            "01",
+            "Flse",  # codespell:ignore
+            "Ture",  # codespell:ignore
+            "g",
+            "4",
+            "_",
+            "truefalse",
+            2,
+            -1,
+        ]:
             with self.subTest(value=value):
                 self._kwargs["dummy_param"] = value
 

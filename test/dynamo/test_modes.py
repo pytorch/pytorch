@@ -12,9 +12,14 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class TestMode(BaseTorchFunctionMode):
@@ -207,6 +212,18 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(_len_torch_function_stack(), 0)
 
+    def test_is_torch_function_all_disabled(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return (
+                torch._C._is_torch_function_all_disabled(),
+                torch.add(x, 1.0),
+            )
+
+        input = torch.ones(2, 2)
+        res, _ = fn(input)
+        self.assertFalse(res)
+
     def test_error_empty_stack_pop_torch_function_mode(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -215,7 +232,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Popping from an empty torch function mode stack",
+            "Attempted to pop from empty torch function mode stack",
             lambda: fn(torch.ones(2, 2)),
         )
 
@@ -361,9 +378,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
 
         fn_opt = torch.compile(fn, fullgraph=True)
-        with TestMode(), torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {TestSubclass}
-        ):
+        with TestMode():
             with torch._C.DisableTorchFunctionSubclass():
                 expected = fn(inp)
                 actual = fn_opt(inp)
@@ -392,9 +407,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
 
         fn_opt = torch.compile(fn, fullgraph=True)
-        with TestMode(), torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {TestSubclass}
-        ):
+        with TestMode():
             expected = fn(inp)
             actual = fn_opt(inp)
 
@@ -605,12 +618,12 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
             func(torch.randn(3))
 
-    @requires_cuda
+    @requires_gpu
     def test_flex_attention(self):
         import torch
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
-        torch.set_default_device("cuda")
+        torch.set_default_device(device_type)
 
         flex_attention = torch.compile(flex_attention, dynamic=False)
 
@@ -620,7 +633,9 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return prefix_lengths[b] >= kv
 
         # This runs in fullgraph already
-        create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
+        create_block_mask(
+            prefix_lm, 8, None, 512, 512, _compile=True, device=device_type
+        )
 
     def test_register_hook(self):
         import functools

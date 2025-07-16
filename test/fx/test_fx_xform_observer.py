@@ -11,14 +11,6 @@ from torch.fx.traceback import NodeSourceAction
 from torch.testing._internal.common_utils import TestCase
 
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_fx.py TESTNAME\n\n"
-        "instead."
-    )
-
-
 class TestGraphTransformObserver(TestCase):
     def test_graph_transform_observer(self):
         class M(torch.nn.Module):
@@ -144,7 +136,7 @@ class TestGraphTransformObserver(TestCase):
                 return torch.neg(x)
 
         model = SimpleLinearModel()
-        gm = torch.export.export(model, (torch.rand(10),)).module()
+        gm = torch.export.export(model, (torch.rand(10),), strict=True).module()
 
         with GraphTransformObserver(gm, "test"):
             add_node = gm.graph.call_function(torch.ops.aten.add.default, (1, 1))
@@ -171,7 +163,7 @@ class TestGraphTransformObserver(TestCase):
                 return torch.neg(x)
 
         model = SimpleLinearModel()
-        gm = torch.export.export(model, (torch.rand(10),)).module()
+        gm = torch.export.export(model, (torch.rand(10),), strict=True).module()
 
         with GraphTransformObserver(gm, "test"):
             gm2 = copy.deepcopy(gm)
@@ -186,3 +178,10 @@ class TestGraphTransformObserver(TestCase):
         self.assertEqual(len(gm2._create_node_hooks), 0)
         self.assertEqual(len(gm2._erase_node_hooks), 0)
         self.assertEqual(len(gm2._deepcopy_hooks), 0)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

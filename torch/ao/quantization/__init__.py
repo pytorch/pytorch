@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
-from typing import Callable, List, Optional, Tuple, Union
+import sys
+from typing import Callable, Optional, Union
 
 import torch
 from torch import Tensor
@@ -33,7 +34,9 @@ from .stubs import *  # noqa: F403
 
 # ensure __module__ is set correctly for public APIs
 ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
-ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
+if sys.version_info < (3, 14):
+    ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
+
 for _f in [
     compare_results,
     extract_results_from_loggers,
@@ -203,9 +206,9 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
     def __init__(
         self,
         dtype: torch.dtype,
-        obs_or_fqs: List[ObserverOrFakeQuantize],
+        obs_or_fqs: list[ObserverOrFakeQuantize],
         derive_qparams_fn: Callable[
-            [List[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]
+            [list[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]
         ],
         quant_min: Optional[int] = None,
         quant_max: Optional[int] = None,
@@ -223,9 +226,9 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
         from .utils import is_per_channel
 
         if is_per_channel(self.qscheme):
-            assert (
-                self.ch_axis is not None
-            ), "Must provide a valid ch_axis if qscheme is per channel"
+            assert self.ch_axis is not None, (
+                "Must provide a valid ch_axis if qscheme is per channel"
+            )
 
     def forward(self, x: Tensor) -> Tensor:
         return x

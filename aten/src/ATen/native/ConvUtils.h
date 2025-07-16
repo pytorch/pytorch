@@ -425,25 +425,31 @@ inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor
   if (!input.is_xpu() || !weight.is_xpu()) {
     return false;
   }
-
-  // disable NHWC for float64 input.
-  if (input.scalar_type() == at::kDouble ||
-      weight.scalar_type() == at::kDouble) {
+  if (!input.defined() || input.is_sparse()) {
+    // suggest channels_first
     return false;
   }
 
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
+  auto is_channel_last = [](const at::Tensor& t) {
+    auto fmt = t.suggest_memory_format();
+    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+  };
+  return is_channel_last(input) || is_channel_last(weight);
+}
 
-  bool can_use_xpu_channels_last_2d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast);
+inline bool mps_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
-  bool can_use_xpu_channels_last_3d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast3d);
+  // check layout only for mps tensor.
+  if (!input.is_mps() || !weight.is_mps()) {
+    return false;
+  }
+  if (!input.defined() || input.is_sparse()) {
+    // suggest channels_first
+    return false;
+  }
 
-  return can_use_xpu_channels_last_2d || can_use_xpu_channels_last_3d;
+  auto fmt = input.suggest_memory_format();
+  return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
 }
 
 } // namespace at::native

@@ -4,6 +4,7 @@
 From https://docs.google.com/spreadsheets/d/12R3nCOLskxPYjjiNkdqy4OdQ65eQp_htebXGODsjSeA/edit#gid=0
 Try to keep this list in sync with that.
 """
+
 import operator
 
 
@@ -625,8 +626,5 @@ def get_nn_functional_top_list():
     return top_nn_functional_
 
 
-usage_count = {}
-for k, v in get_nn_functional_top_list():
-    usage_count[k] = v
-for k, v in top_torch:
-    usage_count[k] = v
+usage_count = dict(get_nn_functional_top_list())
+usage_count.update(top_torch)

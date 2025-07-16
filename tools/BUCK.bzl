@@ -1,5 +1,5 @@
 # @lint-ignore-every FBCODEBZLADDLOADS
-load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
+load("@fbsource//tools/build_defs:glob_defs.bzl", "subdir_glob")
 
 # shared by internal and OSS BUCK
 def define_tools_targets(
@@ -285,20 +285,5 @@ def define_tools_targets(
         deps = [
             torchgen_deps,
             ":autograd",
-        ],
-    )
-
-    python_test(
-        name = "test_torchgen_executorch",
-        srcs = [
-            "test/test_executorch_gen.py",
-            "test/test_executorch_signatures.py",
-            "test/test_executorch_types.py",
-            "test/test_executorch_unboxing.py",
-        ],
-        contacts = contacts,
-        visibility = ["PUBLIC"],
-        deps = [
-            torchgen_deps,
         ],
     )

@@ -1,3 +1,5 @@
+:orphan:
+
 PyTorch Governance | Maintainers
 =========================================
 
@@ -155,6 +157,7 @@ Linear Algebra (torch.linalg)
 -  (emeritus) Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
 -  (emeritus) Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
 -  (emeritus) Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
+-  (emeritus) Nikita Vedeneev (`nikitaved <https://github.com/nikitaved>`__)
 
 Sparse (torch.sparse)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -346,9 +349,9 @@ XLA
 TorchServe
 ~~~~~~~~~~
 
--  Li Ning (`lxning <https://github.com/lxning>`__)
--  Ankith Gunapal (`agunapal <https://github.com/agunapal>`__)
--  Hamid Shojanazeri (`HamidShojanazeri <https://github.com/HamidShojanazeri>`__)
+-  (emeritus) Li Ning (`lxning <https://github.com/lxning>`__)
+-  (emeritus) Ankith Gunapal (`agunapal <https://github.com/agunapal>`__)
+-  (emeritus) Hamid Shojanazeri (`HamidShojanazeri <https://github.com/HamidShojanazeri>`__)
 -  (emeritus) Mark Saroufim (`msaroufIm <https://github.com/msaroufIm>`__)
 -  (emeritus) Manoj Rao (`mycpuorg <https://github.com/mycpuorg>`__)
 -  (emeritus) Vamshi Dantu (`vdantu <https://github.com/vdantu>`__)

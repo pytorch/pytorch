@@ -1214,6 +1214,28 @@ Tensor randint_like(
 
 Tensor randint_like(
     const Tensor& self,
+    const Tensor& high,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      high.numel() == 1 && high.ndimension() == 0 && high.device().is_cpu(),
+      "high must be a scalar tensor and on CPU");
+  int64_t high_scalar = high.item<int64_t>();
+  return at::native::randint_like(
+      self,
+      high_scalar,
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      optional_memory_format);
+}
+
+Tensor randint_like(
+    const Tensor& self,
     int64_t low,
     int64_t high,
     std::optional<ScalarType> dtype,
@@ -2072,22 +2094,24 @@ Tensor vander(const Tensor& x, std::optional<int64_t> N, bool increasing) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename T>
-Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   return at::detail::tensor_cpu(values, options);
 }
 
 template <typename T>
-Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
   return at::detail::tensor_backend(values, options);
 }
 
 template <typename T>
-Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_complex_cpu(
+    ArrayRef<T> values,
+    const TensorOptions& options) {
   return at::detail::tensor_complex_cpu(values, options);
 }
 
 template <typename T>
-Tensor tensor_complex_backend(
+static Tensor tensor_complex_backend(
     ArrayRef<T> values,
     const TensorOptions& options) {
   return at::detail::tensor_complex_backend(values, options);

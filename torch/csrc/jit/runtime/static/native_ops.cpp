@@ -529,7 +529,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
       const auto in1_i = p_node->Input(1).toOptional<at::ScalarType>();
       const auto in2_i = p_node->Input(2).toBool();
       const auto in3_i = p_node->Input(3).toBool();
-      // To mimick the behavior of the JIT interpreter, if both dtype
+      // To mimic the behavior of the JIT interpreter, if both dtype
       // and copy are not set, we return self. Otherwise, we assume
       // that dtype is set.
       if (!in1_i && !in3_i) {
@@ -1054,7 +1054,7 @@ namespace {
   execution is completed, future is marked as complete to
   indicate aten::wait() to proceed
 */
-class TORCH_API ForkedSubgraphSRLauncher {
+class ForkedSubgraphSRLauncher {
  public:
   ForkedSubgraphSRLauncher(
       std::shared_ptr<StaticModule> smodule,

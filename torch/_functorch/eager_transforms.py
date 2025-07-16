@@ -8,7 +8,7 @@
 
 import contextlib
 from functools import partial, wraps
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.autograd.forward_ad as fwAD
@@ -26,6 +26,8 @@ from torch._C._functorch import (
     _wrap_for_grad,
     _wrap_functional_tensor,
     get_inplace_requires_grad_allowed,
+    get_unwrapped,
+    is_functorch_wrapped_tensor,
     set_inplace_requires_grad_allowed,
 )
 from torch._functorch.utils import argnums_t, exposed_in
@@ -73,9 +75,7 @@ def _create_differentiable(inps, level=None):
         if isinstance(x, torch.Tensor):
             with enable_inplace_requires_grad(True):
                 return _set_tensor_requires_grad(x)
-        raise ValueError(
-            f"Thing passed to transform API must be Tensor, " f"got {type(x)}"
-        )
+        raise ValueError(f"Thing passed to transform API must be Tensor, got {type(x)}")
 
     return tree_map(create_differentiable, inps)
 
@@ -138,14 +138,15 @@ def _autograd_grad(
             diff_outputs, grad_outputs = zip(*result)
     if len(diff_outputs) == 0:
         return tuple(torch.zeros_like(inp) for inp in inputs)
-    grad_inputs = torch.autograd.grad(
-        diff_outputs,
-        inputs,
-        grad_outputs,
-        retain_graph=retain_graph,
-        create_graph=create_graph,
-        allow_unused=True,
-    )
+    with torch._dynamo.compiled_autograd._disable():
+        grad_inputs = torch.autograd.grad(
+            diff_outputs,
+            inputs,
+            grad_outputs,
+            retain_graph=retain_graph,
+            create_graph=create_graph,
+            allow_unused=True,
+        )
     grad_inputs = tuple(
         torch.zeros_like(inp) if gi is None else gi
         for gi, inp in zip(grad_inputs, inputs)
@@ -232,7 +233,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
         >>> x = torch.randn([5])
         >>> f = lambda x: x.sin().sum()
         >>> (_, vjpfunc) = torch.func.vjp(f, x)
-        >>> grad = vjpfunc(torch.tensor(1.))[0]
+        >>> grad = vjpfunc(torch.tensor(1.0))[0]
         >>> assert torch.allclose(grad, torch.func.grad(f)(x))
 
     However, :func:`vjp` can support functions with multiple outputs by
@@ -247,9 +248,9 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
     :func:`vjp` can even support outputs being Python structs
 
         >>> x = torch.randn([5])
-        >>> f = lambda x: {'first': x.sin(), 'second': x.cos()}
+        >>> f = lambda x: {"first": x.sin(), "second": x.cos()}
         >>> (_, vjpfunc) = torch.func.vjp(f, x)
-        >>> cotangents = {'first': torch.ones([5]), 'second': torch.ones([5])}
+        >>> cotangents = {"first": torch.ones([5]), "second": torch.ones([5])}
         >>> vjps = vjpfunc(cotangents)
         >>> assert torch.allclose(vjps[0], x.cos() + -x.sin())
 
@@ -273,7 +274,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
         >>>
         >>> (_, vjpfunc) = torch.func.vjp(f, x)
         >>> vjps = vjpfunc(torch.ones_like(x))
-        >>> assert torch.allclose(vjps[0], torch.full(x.shape, 4.))
+        >>> assert torch.allclose(vjps[0], torch.full(x.shape, 4.0))
 
     .. note::
         Using PyTorch ``torch.no_grad`` together with ``vjp``.
@@ -428,7 +429,7 @@ def error_if_complex(func_name, args, is_input):
 @exposed_in("torch.func")
 def jacrev(
     func: Callable,
-    argnums: Union[int, Tuple[int]] = 0,
+    argnums: Union[int, tuple[int]] = 0,
     *,
     has_aux=False,
     chunk_size: Optional[int] = None,
@@ -911,7 +912,7 @@ def assert_flat_tuple_of_tensors(elts: Any, api: str, argname: str) -> None:
         )
 
 
-def assert_non_empty_tensor_output(output: List[Any], api: str) -> None:
+def assert_non_empty_tensor_output(output: list[Any], api: str) -> None:
     if (len(output) == 1 and output[0] is None) or len(output) < 1:
         raise RuntimeError(
             f"{api}: Expected f to be a function that has non-empty output (got output = {output})"
@@ -929,8 +930,7 @@ def assert_output_is_tensor_or_tensors(output: Any, api: str) -> None:
         return
     if not isinstance(output, tuple):
         raise RuntimeError(
-            f"{api}: Expected output of f to be a Tensor or Tensors, got "
-            f"{type(output)}"
+            f"{api}: Expected output of f to be a Tensor or Tensors, got {type(output)}"
         )
     if len(output) == 0:
         raise RuntimeError(
@@ -946,7 +946,7 @@ def assert_output_is_tensor_or_tensors(output: Any, api: str) -> None:
 
 
 def assert_non_empty_list_of_tensors(
-    output: List[torch.Tensor], api: str, argname: str
+    output: list[torch.Tensor], api: str, argname: str
 ) -> None:
     if len(output) == 0:
         raise RuntimeError(f"{api}: Expected {argname} to contain at least one Tensor.")
@@ -954,7 +954,7 @@ def assert_non_empty_list_of_tensors(
         if isinstance(out, torch.Tensor):
             continue
         raise RuntimeError(
-            f"{api}: Expected {argname} to only contain Tensors, got " f"{type(out)}"
+            f"{api}: Expected {argname} to only contain Tensors, got {type(out)}"
         )
 
 
@@ -1022,10 +1022,10 @@ def jvp(
 
         >>> from torch.func import jvp
         >>> x = torch.randn([])
-        >>> f = lambda x: x * torch.tensor([1., 2., 3])
-        >>> value, grad = jvp(f, (x,), (torch.tensor(1.),))
+        >>> f = lambda x: x * torch.tensor([1.0, 2.0, 3])
+        >>> value, grad = jvp(f, (x,), (torch.tensor(1.0),))
         >>> assert torch.allclose(value, f(x))
-        >>> assert torch.allclose(grad, torch.tensor([1., 2, 3]))
+        >>> assert torch.allclose(grad, torch.tensor([1.0, 2, 3]))
 
     :func:`jvp` can support functions with multiple inputs by passing in the
     tangents for each of the inputs
@@ -1676,7 +1676,7 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
 
 
 @exposed_in("torch.func")
-def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
+def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
     """
     Returns the value of ``func`` at ``primals`` and linear approximation
     at ``primals``.
@@ -1701,6 +1701,7 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
         with a single evaluation.
 
     Example::
+
         >>> import torch
         >>> from torch.func import linearize
         >>> def fn(x):
@@ -1797,3 +1798,19 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
         return tree_unflatten(flat_output, output_spec)
 
     return output, jvp_fn
+
+
+@exposed_in("torch.func")
+def debug_unwrap(tensor: torch.Tensor, *, recurse=True) -> torch.Tensor:
+    """Unwraps a functorch tensor (e.g. BatchedTensor, GradTrackingTensor) to its underlying tensor.
+
+    This function should only be used in a debug setting (e.g. trying to print the
+    value of a Tensor in a debugger). Otherwise, using the result of function
+    inside of a function being transformed will lead to undefined behavior.
+    """
+    if not is_functorch_wrapped_tensor(tensor):
+        return tensor
+    result = get_unwrapped(tensor)
+    if recurse:
+        return debug_unwrap(result)
+    return result

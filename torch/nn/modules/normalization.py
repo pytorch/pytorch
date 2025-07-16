@@ -313,7 +313,7 @@ class GroupNorm(Module):
         return F.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
 
     def extra_repr(self) -> str:
-        return "{num_groups}, {num_channels}, eps={eps}, " "affine={affine}".format(
+        return "{num_groups}, {num_channels}, eps={eps}, affine={affine}".format(
             **self.__dict__
         )
 
@@ -343,7 +343,7 @@ class RMSNorm(Module):
 
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
-        eps: a value added to the denominator for numerical stability. Default: :func:`torch.finfo(x.dtype).eps`
+        eps: a value added to the denominator for numerical stability. Default: ``torch.finfo(x.dtype).eps``
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
 
@@ -358,6 +358,7 @@ class RMSNorm(Module):
         >>> rms_norm(input)
 
     """
+
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: tuple[int, ...]
     eps: Optional[float]

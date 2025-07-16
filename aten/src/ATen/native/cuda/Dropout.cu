@@ -217,8 +217,11 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
     // make sure we don't break assumption that we can't have > 16 elements / thread
     TORCH_INTERNAL_ASSERT(vec_size <= 16, "Value of VEC must be in [2, 4, 8, 16]");
 #else
+    const int optimal_vec_size = 16 / static_cast<int>(sizeof(scalar_t));
+    vec_size = std::min<int>(optimal_vec_size, vec_size);
+
     // make sure we don't break assumption that we can't have > 4 elements / thread
-    TORCH_INTERNAL_ASSERT(vec_size <= 4, "Value of VEC must be in [2, 4]");
+    TORCH_INTERNAL_ASSERT(vec_size <= 8, "Value of VEC must be in [2, 4, 8]");
 #endif
   }
 

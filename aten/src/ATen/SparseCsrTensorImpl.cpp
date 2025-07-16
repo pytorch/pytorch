@@ -56,9 +56,11 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
 
   TORCH_INTERNAL_ASSERT(((key_set.has(DispatchKey::SparseCsrCPU) && device().type() == kCPU)
                          || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kCUDA)
+                         || (key_set.has(DispatchKey::SparseCsrXPU) && device().type() == kXPU)
                          || (key_set.has(DispatchKey::SparseCsrMeta) && device().type() == kMeta)
                          || (key_set.has(DispatchKey::SparseCsrCPU) && device().type() == kMeta)   // fake tensor
                          || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kMeta)  // fake tensor
+                         || (key_set.has(DispatchKey::SparseCsrXPU) && device().type() == kMeta)   // fake tensor
                          || (key_set.has(DispatchKey::SparseCsrPrivateUse1) && device().type() == kPrivateUse1)),
                         "Inconsistent key_set (=", key_set, ") and device (=", device(), ")");
 
@@ -250,8 +252,7 @@ void SparseCsrTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
 void SparseCsrTensorImpl::set_storage_offset(int64_t storage_offset) {
   TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_storage_offset.");
 }
-bool SparseCsrTensorImpl::is_contiguous_custom(MemoryFormat) const {
+c10::SymBool SparseCsrTensorImpl::sym_is_contiguous_custom(MemoryFormat) const {
   TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have is_contiguous");
 }
-
 } // namespace at

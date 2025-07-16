@@ -2,26 +2,16 @@
 """
 This file includes private common utilities for FSDP.
 """
+
 import logging
 import traceback
 import warnings
 import weakref
+from collections.abc import Generator, Iterable
 from enum import auto, Enum
 from functools import partial
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Generator,
-    Iterable,
-    List,
-    no_type_check,
-    Optional,
-    Set,
-    Type,
-    TYPE_CHECKING,
-)
+from itertools import chain
+from typing import Any, Callable, cast, no_type_check, Optional, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -118,10 +108,10 @@ class _FSDPState(_State):
     def __init__(self) -> None:
         # TODO: Move all the attributes to this class to enable typing for
         # FSDP/fully_shard.
-        self._ignored_modules: Set[nn.Module] = set()
-        self._ignored_params: Set[nn.Parameter] = set()
+        self._ignored_modules: set[nn.Module] = set()
+        self._ignored_params: set[nn.Parameter] = set()
         # Buffer names are cleaned (without wrapper prefixes)
-        self._ignored_buffer_names: Set[str] = set()
+        self._ignored_buffer_names: set[str] = set()
         self.process_group: Optional[dist.ProcessGroup] = None
         self.rank: int = -1
         self.world_size: int = -1
@@ -129,13 +119,13 @@ class _FSDPState(_State):
         self.sharding_strategy = ShardingStrategy.FULL_SHARD
         self._use_orig_params: bool = False
         self.training_state = TrainingState.IDLE
-        self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
+        self._unshard_params_ctx: dict[nn.Module, Generator] = {}
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._optim_state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
         self._is_root: Optional[bool] = None
         self._handle: Optional[flat_param_file.FlatParamHandle] = None
-        self._fully_sharded_module_to_handle: Dict[
+        self._fully_sharded_module_to_handle: dict[
             nn.Module, Optional[flat_param_file.FlatParamHandle]
         ] = {}
         self.compute_device: Optional[torch.device] = None
@@ -149,8 +139,8 @@ class _FSDPState(_State):
         self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
-        self._all_fsdp_states: List[_FSDPState] = []
-        self._all_handles: List[flat_param_file.FlatParamHandle] = []
+        self._all_fsdp_states: list[_FSDPState] = []
+        self._all_handles: list[flat_param_file.FlatParamHandle] = []
         self._fsdp_extension: Optional[FSDPExtensions] = None
 
 
@@ -212,9 +202,9 @@ def _module_handle(state: _FSDPState, module: nn.Module) -> Optional["FlatParamH
         # handles, meaning no entry in `_fully_sharded_module_to_handles`
         if state._handle is None:
             return None
-        assert (
-            module in state._fully_sharded_module_to_handle
-        ), f"Expects a fully sharded module but got {module} on rank {state.rank}"
+        assert module in state._fully_sharded_module_to_handle, (
+            f"Expects a fully sharded module but got {module} on rank {state.rank}"
+        )
         return state._fully_sharded_module_to_handle[module]
     else:
         # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
@@ -262,14 +252,14 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
 
 def _named_parameters_with_duplicates(
     module: nn.Module, **kwargs: Any
-) -> List[tuple[str, nn.Parameter]]:
+) -> list[tuple[str, nn.Parameter]]:
     """
     This API is required as some modules overwrite `named_parameters()` but do not support
     `remove_duplicate`.
     """
-    assert (
-        "remove_duplicate" not in kwargs
-    ), "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
+    assert "remove_duplicate" not in kwargs, (
+        "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
+    )
     kwargs["remove_duplicate"] = False
     try:
         ret = list(module.named_parameters(**kwargs))
@@ -282,7 +272,7 @@ def _named_parameters_with_duplicates(
 def _get_param_to_fqns(
     model: torch.nn.Module,
     dedup_shared_params: bool = True,
-) -> Dict[nn.Parameter, List[str]]:
+) -> dict[nn.Parameter, list[str]]:
     """
     Constructs a mapping from parameter to a list of its \"canonical\" FQNs. Here,
     we use canonical to mean the fully-qualified name assigned to the parameter
@@ -352,7 +342,7 @@ def _get_param_to_fqns(
     def return_fn(param_to_fqns):
         return param_to_fqns
 
-    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
+    param_to_unflat_param_names: dict[torch.nn.Parameter, list[str]] = {}
     return _apply_to_modules(
         model,
         module_fn,
@@ -377,14 +367,12 @@ def _log_post_backward_hook(
 @no_type_check
 def _get_handle_fqns_from_root(
     state: _FSDPState, handle: "FlatParamHandle"
-) -> Optional[List[str]]:
+) -> Optional[list[str]]:
     if handle is None:
         return None
     param_to_fqn = state._exec_order_data.param_to_fqn
     handle_params = handle.flat_param._params  # only populated for use_orig_params
-    param_fqns = [
-        fqn for fqn_list in [param_to_fqn[p] for p in handle_params] for fqn in fqn_list
-    ]
+    param_fqns = [*chain.from_iterable(param_to_fqn[p] for p in handle_params)]
     return param_fqns
 
 
@@ -392,7 +380,7 @@ def _apply_to_modules(
     root_module: torch.nn.Module,
     module_fn: Callable,
     return_fn: Callable,
-    filter_fqns: Optional[List[str]] = None,
+    filter_fqns: Optional[list[str]] = None,
     *args,
     **kwargs,
 ):
@@ -443,7 +431,7 @@ def _apply_to_modules(
 @no_type_check
 def _assert_in_training_states(
     state: _FSDPState,
-    training_states: List[TrainingState],
+    training_states: list[TrainingState],
 ) -> None:
     """Asserts that FSDP is in the states ``_training_states``."""
     # Raise a `ValueError` instead of using `assert` to ensure that these
@@ -462,7 +450,7 @@ def _assert_in_training_states(
         raise ValueError(msg)
 
 
-def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
+def _get_root_modules(modules: set[nn.Module]) -> set[nn.Module]:
     """
     Returns:
         Set[nn.Module]: The subset of ``modules`` that are root modules (i.e.
@@ -470,7 +458,7 @@ def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
         words, these are the modules in ``modules`` that are not the child of
         any other module in ``modules``.
     """
-    root_modules: Set[nn.Module] = set()
+    root_modules: set[nn.Module] = set()
     module_to_submodules = {module: set(module.modules()) for module in modules}
     for candidate_module in modules:
         is_root_module = True
@@ -488,12 +476,12 @@ def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
 
 def _override_module_mixed_precision(
     root: torch.nn.Module,
-    module_classes_to_override: Iterable[Type[nn.Module]],
-    wrap_override_dict: Dict[str, Any] = {"mixed_precision": None},  # noqa: B006
-) -> Set[Type[nn.Module]]:
+    module_classes_to_override: Iterable[type[nn.Module]],
+    wrap_override_dict: dict[str, Any] = {"mixed_precision": None},  # noqa: B006
+) -> set[type[nn.Module]]:
     module_classes_to_override = tuple(set(module_classes_to_override))
     # Return a set of the actually overridden module classes
-    overridden_module_classes: Set[Type[nn.Module]] = set()
+    overridden_module_classes: set[type[nn.Module]] = set()
     for mod in root.modules():
         if isinstance(mod, module_classes_to_override):
             overridden_module_classes.add(type(mod))

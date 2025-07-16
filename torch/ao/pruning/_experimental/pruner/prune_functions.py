@@ -3,7 +3,8 @@
 Collection of conversion functions for linear / conv2d structured pruning
 Also contains utilities for bias propagation
 """
-from typing import Callable, cast, List, Optional
+
+from typing import Callable, cast, Optional
 
 import torch
 from torch import nn, Tensor
@@ -16,7 +17,7 @@ from .parametrization import BiasHook, FakeStructuredSparsity
 # BIAS PROPAGATION
 def _remove_bias_handles(module: nn.Module) -> None:
     if hasattr(module, "_forward_hooks"):
-        bias_hooks: List[int] = []
+        bias_hooks: list[int] = []
         for key, hook in module._forward_hooks.items():
             if isinstance(hook, BiasHook):
                 bias_hooks.append(key)
@@ -326,9 +327,9 @@ def prune_conv2d_pool_flatten_linear(
         linear_ic = linear.weight.shape[1]
 
     conv2d_oc = len(mask)
-    assert (
-        linear_ic % conv2d_oc == 0
-    ), f"Flattening from dimensions {conv2d_oc} to {linear_ic} not supported"
+    assert linear_ic % conv2d_oc == 0, (
+        f"Flattening from dimensions {conv2d_oc} to {linear_ic} not supported"
+    )
 
     flatten_scale = linear_ic // conv2d_oc
     flattened_mask = torch.tensor(

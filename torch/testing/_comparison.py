@@ -3,18 +3,8 @@ import abc
 import cmath
 import collections.abc
 import contextlib
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Dict,
-    List,
-    NoReturn,
-    Optional,
-    Sequence,
-    Type,
-    Union,
-)
+from collections.abc import Collection, Sequence
+from typing import Any, Callable, NoReturn, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -33,7 +23,7 @@ class ErrorMeta(Exception):
     """Internal testing exception that makes that carries error metadata."""
 
     def __init__(
-        self, type: Type[Exception], msg: str, *, id: tuple[Any, ...] = ()
+        self, type: type[Exception], msg: str, *, id: tuple[Any, ...] = ()
     ) -> None:
         super().__init__(
             "If you are a user and see this message during normal operation "
@@ -82,7 +72,7 @@ _DTYPE_PRECISIONS.update(
 
 def default_tolerances(
     *inputs: Union[torch.Tensor, torch.dtype],
-    dtype_precisions: Optional[Dict[torch.dtype, tuple[float, float]]] = None,
+    dtype_precisions: Optional[dict[torch.dtype, tuple[float, float]]] = None,
 ) -> tuple[float, float]:
     """Returns the default absolute and relative testing tolerances for a set of inputs based on the dtype.
 
@@ -136,6 +126,37 @@ def get_tolerances(
         return rtol, atol
     else:
         return default_tolerances(*inputs)
+
+
+def _make_bitwise_mismatch_msg(
+    *,
+    default_identifier: str,
+    identifier: Optional[Union[str, Callable[[str], str]]] = None,
+    extra: Optional[str] = None,
+    first_mismatch_idx: Optional[tuple[int]] = None,
+):
+    """Makes a mismatch error message for bitwise values.
+
+    Args:
+        default_identifier (str): Default description of the compared values, e.g. "Tensor-likes".
+        identifier (Optional[Union[str, Callable[[str], str]]]): Optional identifier that overrides
+            ``default_identifier``. Can be passed as callable in which case it will be called with
+            ``default_identifier`` to create the description at runtime.
+        extra (Optional[str]): Extra information to be placed after the message header and the mismatch statistics.
+        first_mismatch_idx (Optional[tuple[int]]): the index of the first mismatch, for each dimension.
+    """
+    if identifier is None:
+        identifier = default_identifier
+    elif callable(identifier):
+        identifier = identifier(default_identifier)
+
+    msg = f"{identifier} are not 'equal'!\n\n"
+
+    if extra:
+        msg += f"{extra.strip()}\n"
+    if first_mismatch_idx is not None:
+        msg += f"The first mismatched element is at index {first_mismatch_idx}.\n"
+    return msg.strip()
 
 
 def _make_mismatch_msg(
@@ -273,6 +294,15 @@ def make_tensor_mismatch_msg(
         f"Mismatched elements: {total_mismatches} / {number_of_elements} "
         f"({total_mismatches / number_of_elements:.1%})"
     )
+    if actual.dtype.is_floating_point and actual.dtype.itemsize == 1:
+        # skip checking for max_abs_diff and max_rel_diff for float8-like values
+        first_mismatch_idx = tuple(torch.nonzero(~matches, as_tuple=False)[0].tolist())
+        return _make_bitwise_mismatch_msg(
+            default_identifier="Tensor-likes",
+            identifier=identifier,
+            extra=extra,
+            first_mismatch_idx=first_mismatch_idx,
+        )
 
     actual_flat = actual.flatten()
     expected_flat = expected.flatten()
@@ -341,13 +371,13 @@ class Pair(abc.ABC):
         raise UnsupportedInputs
 
     @staticmethod
-    def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, tuple[Type, ...]]):
+    def _check_inputs_isinstance(*inputs: Any, cls: Union[type, tuple[type, ...]]):
         """Checks if all inputs are instances of a given class and raise :class:`UnsupportedInputs` otherwise."""
         if not all(isinstance(input, cls) for input in inputs):
             Pair._inputs_not_supported()
 
     def _fail(
-        self, type: Type[Exception], msg: str, *, id: tuple[Any, ...] = ()
+        self, type: type[Exception], msg: str, *, id: tuple[Any, ...] = ()
     ) -> NoReturn:
         """Raises an :class:`ErrorMeta` from a given exception type and message and the stored id.
 
@@ -451,8 +481,8 @@ class BooleanPair(Pair):
         super().__init__(actual, expected, **other_parameters)
 
     @property
-    def _supported_types(self) -> tuple[Type, ...]:
-        cls: List[Type] = [bool]
+    def _supported_types(self) -> tuple[type, ...]:
+        cls: list[type] = [bool]
         if HAS_NUMPY:
             cls.append(np.bool_)
         return tuple(cls)
@@ -545,7 +575,7 @@ class NumberPair(Pair):
         self.check_dtype = check_dtype
 
     @property
-    def _supported_types(self) -> tuple[Type, ...]:
+    def _supported_types(self) -> tuple[type, ...]:
         cls = list(self._NUMBER_TYPES)
         if HAS_NUMPY:
             cls.append(np.number)
@@ -834,6 +864,34 @@ class TensorLikePair(Pair):
         elif actual.layout == torch.jagged:
             actual, expected = actual.values(), expected.values()
             compare_fn = self._compare_regular_values_close
+        elif actual.dtype.is_floating_point and actual.dtype.itemsize == 1:
+
+            def bitwise_comp(
+                actual: torch.Tensor,
+                expected: torch.Tensor,
+                *,
+                rtol: float,
+                atol: float,
+                equal_nan: bool,
+                identifier: Optional[Union[str, Callable[[str], str]]] = None,
+            ) -> None:
+                if rtol != 0.0 or atol != 0.0:
+                    raise ErrorMeta(
+                        AssertionError,
+                        f"Rtol={rtol} and atol={atol} are not supported for bitwise comparison of low"
+                        " dimensional floats. Please use rtol=0.0 and atol=0.0.",
+                    )
+
+                return self._compare_regular_values_close(
+                    actual,
+                    expected,
+                    rtol=rtol,
+                    atol=atol,
+                    equal_nan=equal_nan,
+                    identifier=identifier,
+                )
+
+            compare_fn = bitwise_comp
         else:
             compare_fn = self._compare_regular_values_close
 
@@ -963,7 +1021,7 @@ class TensorLikePair(Pair):
                 ),
             )
 
-        # Compressed and plain indices in the CSR / CSC / BSR / BSC sparse formates can be `torch.int32` _or_
+        # Compressed and plain indices in the CSR / CSC / BSR / BSC sparse formats can be `torch.int32` _or_
         # `torch.int64`. While the same dtype is enforced for the compressed and plain indices of a single tensor, it
         # can be different between two tensors. Thus, we need to convert them to the same dtype, or the comparison will
         # fail.
@@ -1052,12 +1110,12 @@ def originate_pairs(
     actual: Any,
     expected: Any,
     *,
-    pair_types: Sequence[Type[Pair]],
-    sequence_types: tuple[Type, ...] = (collections.abc.Sequence,),
-    mapping_types: tuple[Type, ...] = (collections.abc.Mapping,),
+    pair_types: Sequence[type[Pair]],
+    sequence_types: tuple[type, ...] = (collections.abc.Sequence,),
+    mapping_types: tuple[type, ...] = (collections.abc.Mapping,),
     id: tuple[Any, ...] = (),
     **options: Any,
-) -> List[Pair]:
+) -> list[Pair]:
     """Originates pairs from the individual inputs.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -1092,8 +1150,8 @@ def originate_pairs(
         and isinstance(expected, sequence_types)
         and not isinstance(expected, str)
     ):
-        actual_len = len(actual)
-        expected_len = len(expected)
+        actual_len = len(actual)  # type: ignore[arg-type]
+        expected_len = len(expected)  # type: ignore[arg-type]
         if actual_len != expected_len:
             raise ErrorMeta(
                 AssertionError,
@@ -1105,8 +1163,8 @@ def originate_pairs(
         for idx in range(actual_len):
             pairs.extend(
                 originate_pairs(
-                    actual[idx],
-                    expected[idx],
+                    actual[idx],  # type: ignore[index]
+                    expected[idx],  # type: ignore[index]
                     pair_types=pair_types,
                     sequence_types=sequence_types,
                     mapping_types=mapping_types,
@@ -1117,8 +1175,8 @@ def originate_pairs(
         return pairs
 
     elif isinstance(actual, mapping_types) and isinstance(expected, mapping_types):
-        actual_keys = set(actual.keys())
-        expected_keys = set(expected.keys())
+        actual_keys = set(actual.keys())  # type: ignore[attr-defined]
+        expected_keys = set(expected.keys())  # type: ignore[attr-defined]
         if actual_keys != expected_keys:
             missing_keys = expected_keys - actual_keys
             additional_keys = actual_keys - expected_keys
@@ -1141,8 +1199,8 @@ def originate_pairs(
         for key in keys:
             pairs.extend(
                 originate_pairs(
-                    actual[key],
-                    expected[key],
+                    actual[key],  # type: ignore[index]
+                    expected[key],  # type: ignore[index]
                     pair_types=pair_types,
                     sequence_types=sequence_types,
                     mapping_types=mapping_types,
@@ -1190,11 +1248,11 @@ def not_close_error_metas(
     actual: Any,
     expected: Any,
     *,
-    pair_types: Sequence[Type[Pair]] = (ObjectPair,),
-    sequence_types: tuple[Type, ...] = (collections.abc.Sequence,),
-    mapping_types: tuple[Type, ...] = (collections.abc.Mapping,),
+    pair_types: Sequence[type[Pair]] = (ObjectPair,),
+    sequence_types: tuple[type, ...] = (collections.abc.Sequence,),
+    mapping_types: tuple[type, ...] = (collections.abc.Mapping,),
     **options: Any,
-) -> List[ErrorMeta]:
+) -> list[ErrorMeta]:
     """Asserts that inputs are equal.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -1225,7 +1283,7 @@ def not_close_error_metas(
         # Explicitly raising from None to hide the internal traceback
         raise error_meta.to_error() from None  # noqa: RSE102
 
-    error_metas: List[ErrorMeta] = []
+    error_metas: list[ErrorMeta] = []
     for pair in pairs:
         try:
             pair.compare()

@@ -159,7 +159,7 @@ def main():
             print(
                 f"WIN: benchmark {key} failed, actual result {result} is {ratio:+.2f}% lower than "
                 f"expected {entry.expected_value} ±{entry.noise_margin * 100:.2f}% "
-                f"please update the expected results. \n"
+                f"please OPEN THE TEST RESULTS update ALL BENCHMARKS RESULT with the new printed expected results. ALL ALL ALL\n"
             )
             print(
                 "please update all results that changed significantly, and not only the failed ones"
@@ -210,14 +210,31 @@ def main():
             writer.writerow([])
             writer.writerow([])
 
-    print("new expected results file content if needed:")
+    print("=" * 80)
+    print("=" * 80)
+    print("=" * 80)
+    print("To update expected results, run the following command:")
+    print()
+    print("cat > benchmarks/dynamo/pr_time_benchmarks/expected_results.csv << EOF")
     with open(reference_expected_results_path) as f:
-        print(f.read())
+        print(f.read().rstrip())
+    print("EOF")
+    print()
+    print("=" * 80)
+    print("=" * 80)
+    print("=" * 80)
 
     if fail:
         print(
             f"There was some failures you can use the new reference expected result stored at path:"
             f"{reference_expected_results_path} and printed above\n"
+        )
+        print(
+            "To reproduce locally follow the following instructions, note that absolute instructions count are going "
+            "to be different than on the CI, hence you might want to run locally with and without your change:\n"
+            "cd benchmarks/dynamo/pr_time_benchmarks/ \n"
+            "python benchmarks/BENCHMARK.py result.csv \n"
+            "note that BENCHMARK.py is the name of the file containing the failing benchmark."
         )
         sys.exit(1)
     else:

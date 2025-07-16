@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.dataframe.structures import DataChunkDF
@@ -51,7 +51,7 @@ class DataFrameTracedOps(DFIterDataPipe):
             yield self.output_var.apply_ops(item)
 
 
-#  TODO(VitalyFedyunin): Extract this list from the DFIterDataPipe registred functions
+#  TODO(VitalyFedyunin): Extract this list from the DFIterDataPipe registered functions
 DATAPIPES_OPS = [
     "_dataframes_as_tuples",
     "groupby",
@@ -201,7 +201,7 @@ class CaptureLikeMock:
     def __init__(self, name):
         import unittest.mock as mock
 
-        # TODO(VitalyFedyunin): Do not use provate function here, copy own implementation instead.
+        # TODO(VitalyFedyunin): Do not use private function here, copy own implementation instead.
         get_target, attribute = mock._get_target(name)  # type: ignore[attr-defined]
         self.get_target = get_target
         self.attribute = attribute
@@ -373,7 +373,7 @@ def get_val(capture):
 
 class CaptureInitial(CaptureVariable):
     def __init__(self, schema_df=None):
-        new_ctx: Dict[str, List[Any]] = {
+        new_ctx: dict[str, list[Any]] = {
             "operations": [],
             "variables": [],
             "schema_df": schema_df,
