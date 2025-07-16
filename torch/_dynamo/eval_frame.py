@@ -277,9 +277,7 @@ def _get_or_add_example_inputs(frame: DynamoFrameType) -> list[Any]:
 def _create_delayed_compile_callback(
     callback: DynamoCallback, stance: str
 ) -> Callable[..., Any]:
-    def callback_fn(
-        *args: Any, **kwargs: Any
-    ) -> Union[convert_frame.CatchErrorsWrapper, convert_frame.ConvertFrameReturn]:
+    def callback_fn(*args: Any, **kwargs: Any) -> convert_frame.ConvertFrameReturn:
         frame = args[0]
         example_inputs = _get_or_add_example_inputs(frame)
 
