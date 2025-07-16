@@ -2875,6 +2875,7 @@ def same(
         assert set(ref.keys()) == set(res.keys()), (
             f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
         )
+        is_same = True
         for k in sorted(ref.keys()):
             if not (
                 same(
@@ -2893,8 +2894,8 @@ def same(
                 )
             ):
                 log_error("Accuracy failed for key name %s", k)
-                return False
-        return True
+                is_same = False
+        return is_same
     elif isinstance(ref, set):
         assert isinstance(res, set)
         assert set(ref) == set(res), f"elements mismatch {set(ref)} == {set(res)}"
@@ -3033,7 +3034,7 @@ def same(
                 if not passes_test:
                     log_error(
                         "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f"
-                        ", use_larger_multiplier_for_smaller_tensor: %d",
+                        ", use_larger_multiplier_for_smaller_tensor: %d, res sum: %f, ref sum: %f",
                         res_error,
                         ref_error,
                         res.size(),
@@ -3041,6 +3042,8 @@ def same(
                         multiplier,
                         tol,
                         use_larger_multiplier_for_smaller_tensor,
+                        torch.sum(res),
+                        torch.sum(ref),
                     )
                     # import ipdb; ipdb.set_trace()
                 return passes_test

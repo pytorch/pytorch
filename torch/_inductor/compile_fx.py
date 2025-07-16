@@ -233,12 +233,15 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
     # If we are inlining NNModules, we treat all torch.nn.Parameters as static for the purposes
     # of cudagraphs. Rather than copying these into cudagraph-owned memory
     # like we do for normal inputs on each run, we will re-record a cudagraph if these
-    # parameter locations change.
+    # parameter locations change. How do we know whether the parameter locations have changed? Not clear to me...
     context = torch._guards.TracingContext.try_get()
     fixed = list(range(num_fixed))
     if not context or not context.fw_metadata:
+        print("GALVEZ: returning fixed")
         return fixed
 
+    # Why is this happenning only once?
+    print("GALVEZ: returning context.fw_metadata.static_input_indices")
     return context.fw_metadata.static_input_indices
 
 
@@ -1714,6 +1717,7 @@ def cudagraphify(
 
     compiled_fn = None
 
+    # how is new_inputs?
     def run(new_inputs: Sequence[InputType]) -> Any:
         nonlocal compiled_fn
         if compiled_fn is None:
@@ -1881,6 +1885,7 @@ def cudagraphify_impl(
     static_input_idxs: Sequence[int] = (),
 ) -> Callable[[list[InputType]], Any]:
     """
+    I suppose this assumption is made for the backward pass
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
 
@@ -2569,10 +2574,16 @@ def compile_fx(
                 # original strides
                 _recursive_record_user_visible_output_idxs(gm)
 
+                if config.triton.cudagraphs_elide_input_output_copies:
+                    static_input_idxs = []
+                else:
+                    static_input_idxs = get_static_input_idxs(fixed)
+
                 return inner_compile(
                     gm,
                     example_inputs,
-                    static_input_idxs=get_static_input_idxs(fixed),
+                    # TODO: Understand get_static_input_idxs
+                    static_input_idxs=static_input_idxs,
                     cudagraphs=cudagraphs,
                     graph_id=graph_id,
                     is_inference=is_inference,
@@ -2648,7 +2659,10 @@ def compile_fx(
                 else:
                     model_outputs_node.meta["user_visible_output_idxs"] = []
 
-                fixed = count_tangents(gm)
+                if config.triton.cudagraphs_elide_input_output_copies:
+                    fixed = 0
+                else:
+                    fixed = count_tangents(gm)
                 with (
                     config.patch(get_cpp_wrapper_config())
                     if config.cpp_wrapper
@@ -2657,6 +2671,7 @@ def compile_fx(
                     return inner_compile(
                         gm,
                         example_inputs,
+                        # What in the world?
                         static_input_idxs=list(range(fixed)),
                         cudagraphs=cudagraphs,
                         is_backward=True,

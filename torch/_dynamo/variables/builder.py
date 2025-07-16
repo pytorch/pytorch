@@ -1719,8 +1719,10 @@ class VariableBuilder:
     def mark_static_input(self, value: torch.Tensor, guard: bool):
         from ..decorators import mark_static_address
 
+        # import ipdb; ipdb.set_trace()
+
         static_inputs_log.debug(
-            "Marking static input %s, id: %s)", self.source.name(), id(value)
+            "Marking static input %s, id: %s, type: %s)", self.source.name(), id(value), type(value)
         )
         mark_static_address(value, guard=guard)
 
@@ -1728,6 +1730,7 @@ class VariableBuilder:
         # As long as this runs before AOT this is sound
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
+            # _dynamo_static
             var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
                 value._dynamo_static_input_type
             )

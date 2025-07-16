@@ -973,8 +973,8 @@ def get_first_incompatible_cudagraph_node(
             (
                 "aten._unsafe_index_put.default",
                 "aten._unsafe_masked_index_put_accumulate.default",
-                "aten.index_put.default",
-                "aten.index_put_.default",
+                # "aten.index_put.default",
+                # "aten.index_put_.default",
                 "aten.scatter.src",
                 "aten.scatter.reduce",
                 "aten.scatter.value_reduce",
@@ -2485,6 +2485,9 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
     Infers which inputs are static for a backwards graph
     """
 
+    # So why aren't parameters static for a backwards graph? I suppose
+    # that backwards graphs don't actually apply their changes. That's
+    # the responsibility of the optimizer.
     def is_saved_tensor(x: Node) -> bool:
         return (
             "tangents" not in x.name
@@ -2497,6 +2500,7 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
     static_arg_idxs = []
     for n in fx_g.graph.nodes:
         if n.op == "placeholder":
+            # It must be a saved tensor...
             if is_saved_tensor(n):
                 static_arg_idxs.append(arg_count)
             arg_count += 1
@@ -2659,6 +2663,9 @@ def should_assume_input_aligned(example_input: torch.Tensor) -> bool:
     # See Note: [Input Alignment handling in Inductor]
 
     # right now, we only care about alignment for cuda tensors.
+    
+    # Doesn't triton also have alignment constraints for cpu code as
+    # well? Wait,d oes triton even generate cpu code?
     if not is_gpu(example_input.device.type):
         return False
     return config.assume_aligned_inputs or tensor_is_aligned(example_input)
@@ -2784,6 +2791,7 @@ def copy_misaligned_inputs(
             f"Expected tensors only, but got: {type(_inp)}"
         )
         if _inp.data_ptr() % ALIGNMENT:
+            assert False, "GALVEZ: Input is not appropriately aligned! We cannot handle input mutations in this case :("
             new_inputs[i] = clone_preserve_strides(_inp)
 
             if ret_pair_defined and i in return_pair_idxs:  # type: ignore[operator]
@@ -2798,7 +2806,7 @@ def remove_unaligned_input_idxs(
     static_input_idxs: Sequence[int],
 ) -> Sequence[int]:
     """
-    We require all inputs to be aligned, so introduce a copy for any
+    We require all inputs to be aligned for the sake of triton, so introduce a copy for any
     that aren't.
     """
     aligned_static_input_idxs = []

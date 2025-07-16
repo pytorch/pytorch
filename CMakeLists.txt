@@ -893,7 +893,7 @@ endif()
 # Uncoditionally generate debug info
 # string(APPEND CMAKE_CUDA_FLAGS "-v -keep --no-lineinfo-inlined-at --cicc-options '-g'")
 
-string(APPEND CMAKE_CUDA_FLAGS " -G")
+# string(APPEND CMAKE_CUDA_FLAGS " -G")
 
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -G")

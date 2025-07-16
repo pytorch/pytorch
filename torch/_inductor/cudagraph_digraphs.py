@@ -85,10 +85,15 @@ log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 from . import config
 
 def nbytes_underlying_storage(tensor: torch.Tensor):
-    max_index = tensor.storage_offset() + sum((s-1)*st for s,st in zip(tensor.shape, tensor.stride()))
+    # tensor.storage_offset() + 
+    max_index = sum((s-1)*st for s,st in zip(tensor.shape, tensor.stride()))
     covered_bytes = (max_index + 1) * tensor.element_size()
     if tensor.is_contiguous():
-        assert tensor.nbytes == covered_bytes
+        try:
+            assert tensor.nbytes == covered_bytes
+        except AssertionError:
+            # import ipdb; ipdb.set_trace()
+            raise
     return covered_bytes
 
 def cudagraphify_impl(
@@ -99,6 +104,9 @@ def cudagraphify_impl(
     *args: Any,
     **kwargs: Any,
 ) -> ModelType:
+
+
+    print(f"GALVEZ:{torch._dynamo.config.compiled_autograd=}")
     fn_cache: dict[tuple[int, ...], Callable[..., Any]] = {}
 
     # Detect int inputs: we need to index on these
@@ -132,7 +140,10 @@ def cudagraphify_impl(
         # first get indices we need to check to align, then update our static inputs,
         # and finally copy
         check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)
+        print(f"GALVEZ: {check_input_idxs=}")
         new_static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
+        print(f"GALVEZ: {new_static_input_idxs=}")
+        print(f"GALVEZ: {static_input_idxs=}")
         copy_misaligned_inputs(inputs, check_input_idxs)
 
         # here is the real cudagraphify. If I understand correctly, it
@@ -185,10 +196,26 @@ def cudagraphify(
 
     print("GALVEZ:cudagraph_digraphs.py cudagraphify")
 
+    for i, input in enumerate(inputs):
+        if isinstance(input, torch.Tensor):
+            print("GALVEZ:", i, " input.requires_grad=", input.requires_grad, "input.shape=", input.shape)
+
+    print("GALVEZ:", len(static_input_idxs))
+    print("GALVEZ:", len(mutated_input_idxs))
+
+    print("GALVEZ:static_input_idxs")
+    for idx in static_input_idxs:
+        print(f"GALVEZ: {idx=}")
+    print("GALVEZ:mutated_input_idxs")
+    for idx in mutated_input_idxs:
+        print(f"GALVEZ: {idx=}")
+
     # print("GALVEZ:total_memory_snapshot")
     # total_memory_snapshot = torch.cuda.memory_snapshot()
     # import pprint
     # pprint.pprint(total_memory_snapshot)
+
+    graphs = []
 
     graph = torch.cuda.CUDAGraph(keep_graph=True)
     dynamic_graph_arguments = True
@@ -196,6 +223,8 @@ def cudagraphify(
     input_pool = torch.cuda.MemPool(mem_allocator)
 
     # torch.cuda.memory._record_memory_history(True)
+
+    assert len(static_input_idxs) == 0
 
     with torch.cuda.use_mem_pool(input_pool):
         old_value = torch.utils.deterministic.fill_uninitialized_memory
@@ -205,8 +234,6 @@ def cudagraphify(
                 x
                 if not isinstance(x, torch.Tensor)
                 else static_input(x)
-                if idx not in static_input_idxs
-                else x.detach() # Interesting to detatch these...
             )
             for idx, x in enumerate(inputs)
         ]
@@ -260,15 +287,22 @@ def cudagraphify(
     static_inputs_only_dynamic_tensors = [(input.data_ptr(), nbytes_underlying_storage(input)) for idx, input in enumerate(static_inputs) if idx not in static_input_idxs and isinstance(input, torch.Tensor) and input.is_cuda]
 
     non_tensor_output_idxs = set()
+    empty_tensor_idxs_to_devices = {}
 
-    for static_output in static_outputs:
-        print("GALVEZ: output data_ptr=", static_output.data_ptr(), " nbytes=", nbytes_underlying_storage(static_output))
+    for i, static_output in enumerate(static_outputs):
+        if isinstance(static_output, torch.Tensor):
+            print("GALVEZ: output ", i, " data_ptr=", static_output.data_ptr(), " nbytes=", nbytes_underlying_storage(static_output))
 
     # I need to map each segment index to all output tensors, I think.
     for static_output_idx, static_output in enumerate(static_outputs):
         if not isinstance(static_output, torch.Tensor):
-            assert isinstance(static_output, int)
+            assert static_output is None or isinstance(static_output, int)
             non_tensor_output_idxs.add(static_output_idx)
+            segment_idx_containing_this_output_tensor.append(None)
+            continue
+        if static_output.data_ptr() == 0:
+            assert static_output.nbytes == 0
+            empty_tensor_idxs_to_devices[static_output_idx] = static_output.device
             segment_idx_containing_this_output_tensor.append(None)
             continue
         assert static_output.is_cuda, "I suppose non cuda outputs are allowed, but I would like to catch them explicitly for now"
@@ -322,13 +356,17 @@ def cudagraphify(
         dynamic_tensors = []
 
         for idx in dynamic_input_idxs:
+            print(f"{idx=} {new_inputs[idx].data_ptr()=} {new_inputs[idx].shape=}")
             dynamic_tensors.append(new_inputs[idx])
+
+        for idx in range(len(new_inputs_only_tensors)):
+            print(f"{idx=} {new_inputs_only_tensors[idx].data_ptr()=} {new_inputs_only_tensors[idx].shape=}")
 
         for segment_size, segment_device in zip(segment_sizes, segment_devices):
             storage_tensor = torch.empty(segment_size, dtype=torch.int8, device=segment_device)
-            # print("GALVEZ: storage_tensor=", storage_tensor.data_ptr())
+            print("GALVEZ: storage_tensor=", storage_tensor.data_ptr())
             # debug only
-            # storage_tensor[:] = 0
+            storage_tensor[:] = 0
             dynamic_tensors.append(storage_tensor)
 
         graph.replay_dynamic(dynamic_tensors)
@@ -338,6 +376,9 @@ def cudagraphify(
         for i, static_output in enumerate(static_outputs):
             if i in non_tensor_output_idxs:
                 outputs.append(static_output)
+                continue
+            if i in empty_tensor_idxs_to_devices:
+                outputs.append(torch.empty(0, device=empty_tensor_idxs_to_devices[i]))
                 continue
             containing_segment_idx = segment_idx_containing_this_output_tensor[i]
             if containing_segment_idx == -1:
