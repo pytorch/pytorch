@@ -1840,25 +1840,6 @@ def should_lower_repeat_interleave_Tensor(match):
     return True
 
 
-@register_graph_pattern(
-    CallFunction(
-        aten.repeat_interleave.Tensor,
-        KeywordArg("repeat"),
-        output_size=KeywordArg("output_size"),
-    ),
-    pass_dict=pass_patterns[1],
-    extra_check=should_lower_repeat_interleave_Tensor,
-)
-def lower_repeat_interleave_Tensor(match: Match, repeat, output_size):
-    def repl(repeat, output_size):
-        cumsum = repeat.cumsum(0)
-        pos = torch.arange(output_size, device=repeat.device)
-        return torch.searchsorted(cumsum, pos, right=True)
-
-    with V.fake_mode:
-        match.replace_by_example(repl, [repeat, output_size])
-
-
 def move_constructors_to_gpu(graph: fx.Graph) -> None:
     """
     Moves intermediary tensors which are constructed on the cpu to gpu when safe
