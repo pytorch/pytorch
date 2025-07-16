@@ -31,18 +31,35 @@ python3 -m tools.pyi.gen_pyi \
     --deprecated-functions-path "tools/autograd/deprecated.yaml"
 python3 torch/utils/data/datapipes/gen_pyi.py
 
+profile_command() {
+    local start_time=$(date +%s.%N)
+
+    echo "🚀 Running: $*"
+    echo "Started at: $(date '+%Y-%m-%d %H:%M:%S')"
+
+    # Run the command
+    "$@"
+    local exit_code=$?
+
+    local end_time=$(date +%s.%N)
+    local duration=$(echo "$end_time - $start_time" | bc)
+
+    echo "✅ Completed in: ${duration}s"
+    echo "Exit code: $exit_code"
+    echo "----------------------------------------"
+
+    return $exit_code
+}
+
 # Also check generated pyi files
 find torch -name '*.pyi' -exec git add --force -- "{}" +
+for linter in $(lintrunner list 2>/dev/null| tail -n +2); do
+  echo ""
+  profile_command lintrunner --force-color --tee-json=lint.json --take "${linter}" 2> /dev/null; then
+done
 
 RC=0
 # Run lintrunner on all files
-if ! lintrunner --force-color --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARGS} 2> /dev/null; then
-    echo ""
-    echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner -m origin/main\`. (If you don't get the same results, run \'lintrunner init\' to update your local linter)\e[0m"
-    echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions. To apply suggested patches automatically, use the -a flag. Before pushing another commit,\e[0m"
-    echo -e "\e[1m\e[36mplease verify locally and ensure everything passes.\e[0m"
-    RC=1
-fi
 
 # Unstage temporally added pyi files
 find torch -name '*.pyi' -exec git restore --staged -- "{}" +
