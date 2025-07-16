@@ -1106,7 +1106,7 @@ struct IValuePacker {
   // That's what the TypePtr is for: it contains the information to do the
   // parsing. See torch::jit::toIValue for more information.
   static at::TypePtr packed_type() {
-#ifdef _WIN32
+#ifdef (_WIN32 and USE_CUDA)
     // NB: the if-constexpr usage triggers compilation errors on Windows
     // with certain compiler settings
     // (see https://github.com/pytorch/pytorch/pull/144707 for examples).
