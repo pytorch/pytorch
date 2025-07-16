@@ -18,7 +18,11 @@ from torch._inductor import comms
 from torch._inductor.virtualized import ops
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import (
+    statically_known_true, 
+    sym_eq, 
+    has_free_unbacked_symbols,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher
@@ -754,14 +758,19 @@ def is_valid_mm_plus_mm(match: Match):
 
     if m1 != m2 or n1 != n2:
         return False
+    
+    if config.triton.enable_native_matmul:
+        shapes = [m1, m2, k1, k2, k3, k4, n1, n2]
+        # if shape is unbacked symint, skip
+        if any([has_free_unbacked_symbols(var) for var in shapes]) :
+            return False
 
-    if (
-        match.kwargs["mat1"].meta["val"].device.type == "cuda"
-        and config.cuda_backend == "triton"
-        and (m1 >= 16 and k1 >= 16 and n1 >= 16 and k3 >= 16)
-        and config.triton.enable_native_matmul
-    ):
-       return False
+        if (
+            match.kwargs["mat1"].meta["val"].device.type == "cuda"
+            and config.cuda_backend == "triton"
+            and (m1 >= 16 and k1 >= 16 and n1 >= 16 and k3 >= 16)
+        ):
+           return False
 
     return True
 
@@ -1507,25 +1516,34 @@ def native_matmul_pass(graph: torch.fx.Graph):
         )
     
     def native_matmul_extra_check(match):
-        """
-        Currently only enable native matmul for triton on Nvidia GPU.
-        """
+        if not config.triton.enable_native_matmul:
+            return False
+        
+        # Currently only enable native matmul for triton on Nvidia GPU.
+        if not (
+            match.kwargs["mat1"].meta["val"].device.type == "cuda" 
+            and config.cuda_backend == "triton"
+        ) :
+            return False
+
         # (..., M, K) @ (..., K, N)
         mat1_shape = match.kwargs["mat1"].meta["val"].shape
         mat2_shape = match.kwargs["mat2"].meta["val"].shape
         M, K = mat1_shape[-2], mat1_shape[-1]
         K, N = mat2_shape[-2], mat2_shape[-1]
-        
+ 
+        # if shape is unbacked symint, skip
+        if any([has_free_unbacked_symbols(var) for var in [M,K,N]]) :
+            return False
+
         # Triton currently supports tl.dot when shapes >= 16
-        triton_dot_threshold = M >= 16 and K >= 16 and N >= 16  
+        # This can be handled with masking during codegen but skip for now.
+        # triton_dot_threshold = M >= 16 and K >= 16 and N >= 16 
+        unroll_reduction = K < config.unroll_reductions_threshold
         
-        return (
-            match.kwargs["mat1"].meta["val"].device.type == "cuda"
-            and config.cuda_backend == "triton"
-            and triton_dot_threshold
-            and config.triton.enable_native_matmul
-        )
-   
+        return not unroll_reduction 
+
+  
     @register_graph_pattern(
         CallFunction(
           aten.addmm, 
@@ -1580,7 +1598,6 @@ def native_matmul_pass(graph: torch.fx.Graph):
         mul_pointwise = make_pointwise(ops.dot)(*args)
         dot_reduction = make_reduction("dot")(mul_pointwise, 2,)
         return dot_reduction
-
 
     graph_pass[0].apply(graph)
     graph_pass[1].apply(graph)
