@@ -294,14 +294,12 @@ Install PyTorch
 
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-python -m pip install -r requirements-build.txt
 python -m pip install --no-build-isolation -v -e .
 ```
 
 **On macOS**
 
 ```bash
-python -m pip install -r requirements-build.txt
 python -m pip install --no-build-isolation -v -e .
 ```
 
