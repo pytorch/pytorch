@@ -120,7 +120,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=(os.cpu_count() or 4) // 2,
         thread_name_prefix="Thread",
     ) as executor:
         futures = {

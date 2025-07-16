@@ -264,7 +264,7 @@ def main() -> None:
     binary_path = os.path.abspath(args.binary)
 
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=(os.cpu_count() or 4) // 2,
         thread_name_prefix="Thread",
     ) as executor:
         futures = {
