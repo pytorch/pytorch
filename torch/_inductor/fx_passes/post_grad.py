@@ -705,8 +705,8 @@ def is_valid_addmm_activation_fusion(match):
 
 def addmm_gelu_pattern(input, mat1, mat2):
     output = aten.mm(mat1, mat2)
-    output = aten.add()
-    return aten.gelu(output)
+    output = aten.add(output, input)
+    return aten.gelu(output, approximate="tanh")
 
 
 def addmm_gelu_replacement(input, mat1, mat2):
