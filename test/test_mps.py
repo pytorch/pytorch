@@ -9257,6 +9257,18 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_mask_fp16_L6_S17_NH23_HS121(self):
         self._test_sdpa_mask(torch.float16, 7, 17, 23, 121)
 
+    # Regression test from: https://github.com/pytorch/pytorch/issues/156707
+    @parametrize("dtype", [torch.float16, torch.float32])
+    def test_sdpa_full_mask(self, dtype):
+        q = torch.randn(1, 1, 2, 4, dtype=dtype)
+        k = torch.randn(1, 1, 2, 4, dtype=dtype)
+        v = torch.randn(1, 1, 2, 4, dtype=dtype)
+        mask = torch.tensor([[[[False, False], [True, True]]]], dtype=torch.bool)
+
+        out_cpu = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        out_mps = F.scaled_dot_product_attention(q.to('mps'), k.to('mps'), v.to('mps'), attn_mask=mask.to('mps'))
+        self._compare_tensors(out_mps.cpu(), out_cpu)
+
     @parametrize("dtype", [torch.float16, torch.float32])
     def test_sdpa_3d_input(self, dtype):
         head_num, seq_len, embed_dim = 16, 16, 80
