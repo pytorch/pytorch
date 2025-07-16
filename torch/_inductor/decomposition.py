@@ -1155,7 +1155,7 @@ def rrelu_with_noise_functional(
 @register_decomposition(aten.repeat_interleave.Tensor)
 def repeast_interleave_Tensor(
     repeat: torch.Tensor,
-    output_size: int = None,
+    output_size: Optional[int] = None,
 ) -> torch.Tensor:
     if output_size is None or type(output_size) is not int:
         return NotImplemented
