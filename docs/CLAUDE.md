@@ -7,7 +7,7 @@ Sphinx-based documentation system for generating PyTorch's official documentatio
 ### Core Documentation (`source/`)
 - **`index.md`** - Main documentation homepage
 - **`pytorch-api.md`** - Core PyTorch API documentation
-- **`torch.rst`** - Main torch module documentation  
+- **`torch.rst`** - Main torch module documentation
 - **`nn.rst`** - Neural network module documentation
 - **`autograd.md`** - Automatic differentiation documentation
 
@@ -89,15 +89,15 @@ python -m http.server 8000
 # Python docstring format for API docs
 def my_function(x: Tensor) -> Tensor:
     """Brief description.
-    
+
     Longer description with examples.
-    
+
     Args:
         x: Input tensor description
-        
+
     Returns:
         Output tensor description
-        
+
     Example::
         >>> import torch
         >>> result = my_function(torch.randn(2, 3))
@@ -139,7 +139,7 @@ make linkcheck
 - `source/community/` - Community and contribution docs
 - `source/_templates/` - Custom Sphinx templates
 
-### Build Scripts  
+### Build Scripts
 - `Makefile` - Primary build automation
 - `make.bat` - Windows build script
 - `source/scripts/` - Documentation generation scripts

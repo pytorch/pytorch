@@ -70,7 +70,7 @@ Reusable CMake utilities for external projects:
 ```cmake
 # CUDA configuration
 find_package(CUDAToolkit REQUIRED)
-# ROCm/HIP configuration  
+# ROCm/HIP configuration
 find_package(HIP REQUIRED)
 # Metal configuration (macOS)
 find_package(Metal REQUIRED)
@@ -107,7 +107,7 @@ cmake .. --dry-run
 ```bash
 # Common build variables
 -DUSE_CUDA=ON/OFF
--DUSE_DISTRIBUTED=ON/OFF  
+-DUSE_DISTRIBUTED=ON/OFF
 -DUSE_MKL=ON/OFF
 -DBUILD_SHARED_LIBS=ON/OFF
 -DCMAKE_BUILD_TYPE=Debug/Release
@@ -131,7 +131,7 @@ cmake .. -DTORCH_CUDA_ARCH_LIST="7.0;8.0;8.6"
 - `Modules/FindCUDAToolkit.cmake` - CUDA toolkit discovery
 - `Modules/FindOpenMP.cmake` - Modified OpenMP finder with Apple Clang fixes
 
-### Platform Files  
+### Platform Files
 - `iOS.cmake` - iOS cross-compilation toolchain
 - `Metal.cmake` - Apple Metal GPU backend
 - `public/cuda.cmake` - CUDA utilities for external use
