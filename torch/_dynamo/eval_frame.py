@@ -365,10 +365,14 @@ class OptimizedModule(torch.nn.Module):
         object.__setattr__(self, "_orig_mod", mod)
         super().__init__()
 
-        # Installs the params/buffer
+        # Initializes `OptimizedModule`-specific attributes.
         self._orig_mod = mod  # `super().__setattr__` will register this module
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
+
+        # Immediately sync some state attributes for BC and ergonomics, see
+        # https://github.com/pytorch/pytorch/issues/122414
+        self.training = self._orig_mod.training
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
@@ -457,6 +461,7 @@ class OptimizedModule(torch.nn.Module):
         return self._forward(*args, **kwargs)
 
     def __dir__(self):
+        # Pull in attributes from `_orig_mod` because we mirror them.
         orig_mod_attrs = self._orig_mod.__dir__()
         return orig_mod_attrs + [
             attr for attr in super().__dir__() if attr not in orig_mod_attrs
