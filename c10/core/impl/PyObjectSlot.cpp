@@ -2,16 +2,6 @@
 
 namespace c10::impl {
 
-// Global function pointer for getting the PyInterpreter (set by csrc)
-GetPyInterpreterFn g_get_pyinterpreter_fn = nullptr;
-
-PyInterpreter* getGlobalPyInterpreter() {
-  TORCH_CHECK(
-      g_get_pyinterpreter_fn != nullptr,
-      "PyInterpreter not initialized - global function pointer is null");
-  return g_get_pyinterpreter_fn();
-}
-
 PyObjectSlot::PyObjectSlot() : pyobj_interpreter_(nullptr), pyobj_(nullptr) {}
 
 PyObjectSlot::~PyObjectSlot() {

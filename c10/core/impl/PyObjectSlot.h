@@ -2,21 +2,13 @@
 
 #include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/core/impl/PyInterpreterHooks.h>
 #include <c10/util/python_stub.h>
 #include <optional>
 
 #include <atomic>
 
 namespace c10::impl {
-
-// Function pointer type for getting the global interpreter
-using GetPyInterpreterFn = PyInterpreter* (*)();
-
-// Global function pointer (set by csrc initialization)
-C10_API extern GetPyInterpreterFn g_get_pyinterpreter_fn;
-
-// Helper function to get the global interpreter
-C10_API PyInterpreter* getGlobalPyInterpreter();
 
 struct C10_API PyObjectSlot {
  public:

@@ -159,8 +159,6 @@ class PyInterpreterHolder {
         is_main_interpreter_(
             at::impl::PythonOpRegistrationTrampoline::registerInterpreter(
                 impl_)) {
-    // Initialize the global function pointer for c10 PyObjectSlot
-    c10::impl::g_get_pyinterpreter_fn = &getPyInterpreter;
   }
   PyInterpreterHolder(const PyInterpreterHolder&) = delete;
   PyInterpreterHolder(PyInterpreterHolder&&) = delete;
@@ -991,7 +989,3 @@ c10::impl::PyInterpreter* getPyInterpreter() {
   return torch::detail::self_interpreter.get();
 }
 
-// Initialize the global function pointer for c10 PyObjectSlot
-void initializeGlobalPyInterpreter() {
-  c10::impl::g_get_pyinterpreter_fn = &getPyInterpreter;
-}
