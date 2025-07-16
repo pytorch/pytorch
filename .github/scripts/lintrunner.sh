@@ -52,7 +52,7 @@ profile_command() {
 find torch -name '*.pyi' -exec git add --force -- "{}" +
 for linter in $(lintrunner list 2>/dev/null| tail -n +2); do
   echo ""
-  profile_command lintrunner --force-color --tee-json=lint.json --take "${linter}" 2> /dev/null; then
+  profile_command lintrunner --force-color --tee-json=lint.json --take "${linter}" 2> /dev/null
 done
 
 RC=0
