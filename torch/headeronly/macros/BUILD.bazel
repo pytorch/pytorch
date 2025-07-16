@@ -1,4 +1,3 @@
-load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//:tools/bazel.bzl", "rules")
 load(":build.bzl", "define_targets")
 

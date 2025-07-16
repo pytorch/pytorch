@@ -281,7 +281,7 @@ jobs:
         continue-on-error: true
         run: |
           if [[ -n "$REINSTALL_BREW_MINICONDA" ]]; then
-              brew install miniconda
+              brew install --cask miniconda
           fi
 
       - name: Clean up disk space
