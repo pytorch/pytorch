@@ -95,8 +95,11 @@ ensure_tool_installed("lintrunner")
 # ── Activate (or refresh) the repo’s pre‑push hook ──────────────────────────
 # Creates/overwrites .git/hooks/pre‑push with a tiny shim that will call
 # `pre-commit run --hook-stage pre-push` on every `git push`.
-# This is why we need to install pre-commit globally
-run(["pre-commit", "install", "--hook-type", "pre-push"])
+# This is why we need to install pre-commit globally.
+#
+# The --allow-missing-config flag lets pre-commit succeed if someone changes to 
+# a branch that doesn't have pre-commit installed
+run(["pre-commit", "install", "--hook-type", "pre-push", "--allow-missing-config"])
 
 # ── Pin remote‑hook versions for reproducibility ────────────────────────────
 # 1. `autoupdate` bumps every remote hook’s `rev:` in .pre-commit-config.yaml
