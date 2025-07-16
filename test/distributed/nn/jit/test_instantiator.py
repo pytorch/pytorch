@@ -2,7 +2,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from pathlib import Path
 
 import torch
 import torch.distributed as dist
