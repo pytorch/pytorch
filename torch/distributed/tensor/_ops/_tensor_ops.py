@@ -44,8 +44,8 @@ def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
     # for each strategy that the input supports, we create a corresponding strategy.
     # Note: this may be a complete waste of work, becuase it should be equivalent to
     # `return first_input_strategy` (unless creating a deep copy is important for some reason)
-    assert len(op_schema.args_schema) == 1, (
-        "propagate_single_input_strategy only works for single-tensor ops"
+    assert len([s for s in op_schema.args_schema if isinstance(s, OpStrategy)]) == 1, (
+        "propagate_single_input_strategy only works for single-tensor-input ops"
     )
     first_input_strategy = op_schema.args_schema[0]
     assert isinstance(first_input_strategy, OpStrategy)
