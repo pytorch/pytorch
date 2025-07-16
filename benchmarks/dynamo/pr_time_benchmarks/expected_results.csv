@@ -78,7 +78,7 @@ mm_loop_inductor_gpu,compile_time_instruction_count,4406000000,0.015
 
 
 
-mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,8274000000,0.015
+mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,8410000000,0.015
 
 
 
