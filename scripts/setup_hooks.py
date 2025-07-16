@@ -69,7 +69,7 @@ def ensure_tool_installed(tool: str, force_update: bool = False) -> None:
     Checks to see if the tool is available and if not (or if force update requested) then
     it reinstalls it.
 
-    Returns: Whether or not the tool is available on PATH.  If it's not, a new terminal 
+    Returns: Whether or not the tool is available on PATH.  If it's not, a new terminal
     needs to be opened before git pushes work as expected.
     """
     if force_update or not which(tool):
@@ -88,7 +88,7 @@ ensure_pipx()
 #  to include the directory where pipx installs executables in your PATH
 #  variable.
 # Note that further down we run pre-commit through pipx because the path
-#  this command adds may not be in the current shell's PATH.  
+#  this command adds may not be in the current shell's PATH.
 run(["pipx", "ensurepath"])
 
 # Ensure pre-commit is installed globally via pipx
@@ -108,7 +108,17 @@ ensure_tool_installed("lintrunner")
 #
 # The --allow-missing-config flag lets pre-commit succeed if someone changes to
 # a branch that doesn't have pre-commit installed
-run(["pipx", "run", "pre-commit", "install", "--hook-type", "pre-push", "--allow-missing-config"])
+run(
+    [
+        "pipx",
+        "run",
+        "pre-commit",
+        "install",
+        "--hook-type",
+        "pre-push",
+        "--allow-missing-config",
+    ]
+)
 
 # ── Pin remote‑hook versions for reproducibility ────────────────────────────
 # (Note: we don't have remote hooks right now, but it future-proofs this script)
