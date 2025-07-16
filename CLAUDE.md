@@ -18,8 +18,10 @@ PyTorch is organized into several key components:
 
 ### Build PyTorch from Source
 ```bash
-# Default fast CPU build configuration
+# Always ask the user to define a BUILD_CONFIG for the particular task at hand.
+# Standard build config for CPU is
 BUILD_CONFIG="CFLAGS='-DPYBIND11_DETAILED_ERROR_MESSAGES -DHAS_TORCH_SHOW_DISPATCH_TRACE' USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 USE_COLORIZE_OUTPUT=0"
+# Flag need updating there for cuda or specific backend to use based on the user input
 
 # Install dependencies
 pip install -r requirements.txt
@@ -33,12 +35,6 @@ python setup.py clean
 
 ### Other Environment Variables for Building
 ```bash
-# Debug build with symbols, very expensive, should almost never be used
-export DEBUG=1
-
-# Release with debug info
-export REL_WITH_DEB_INFO=1
-
 # Enable specific features
 export USE_CUDA=1         # Enable CUDA support
 export USE_DISTRIBUTED=1  # Enable distributed training
@@ -51,9 +47,6 @@ export USE_CUSTOM_DEBINFO='/path/to/file;path/to/other/file' # Build debug symbo
 You will generally never run all tests, only the relevant files and use github CI for broader testing. Part of development work is figuring out which tests are relevant for your changes and running just those.
 
 ```bash
-# Run all tests (rarely used)
-python test/run_test.py
-
 # Run core test
 python test/run_test.py --core
 
@@ -66,14 +59,11 @@ Located in `test/cpp/` - built as part of the main build process.
 
 ### Linting and Type Checking
 ```bash
-# Install linter tool
-pip install lintrunner
-
-# Initialize linter
+# Initialize linter again to make sure it's up to date
 lintrunner init
 
 # Run lint for all changes compared to main
-lintrunner -m main
+lintrunner -a
 ```
 
 ## 🔧 Common Development Tasks
@@ -82,21 +72,12 @@ lintrunner -m main
 Use `ccache` to speed up C++ compilation - install with your package manager and it will be automatically detected.
 
 ### After Modifying Python Files
-No rebuild needed with `-e` install - changes are immediately available.
+No rebuild needed with develop build
 
 ### After Modifying C++/CUDA Files
 ```bash
 # Reinstall to rebuild C++ extensions
 eval $BUILD_CONFIG python setup.py develop
-```
-
-### Debugging
-```bash
-# Enable dispatch tracing at runtime (already enabled in build config)
-TORCH_SHOW_DISPATCH_TRACE=1 python your_script.py
-
-# Enable C++ stacktraces
-TORCH_SHOW_CPP_STACKTRACES=1 python your_script.py
 ```
 
 ## 📁 Key Files & Directories

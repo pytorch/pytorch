@@ -59,9 +59,6 @@ make html
 
 # Clean previous builds
 make clean
-
-# Build with specific target
-make html SPHINXOPTS="-W"  # Treat warnings as errors
 ```
 
 ### C++ Documentation
@@ -69,16 +66,12 @@ make html SPHINXOPTS="-W"  # Treat warnings as errors
 # Build C++ API documentation
 cd docs/cpp
 make html
-
-# Requires Doxygen installation
-sudo apt-get install doxygen  # Ubuntu/Debian
-brew install doxygen         # macOS
 ```
 
 ### Development Server
 ```bash
 # Serve docs locally for development
-cd docs/_build/html
+cd docs/build/html
 python -m http.server 8000
 # Visit http://localhost:8000
 ```
@@ -123,21 +116,14 @@ def my_function(x: Tensor) -> Tensor:
 
 ### Documentation Testing
 ```bash
-# Test documentation builds without warnings
-make html SPHINXOPTS="-W"
+# Test documentation builds
+make html
 
-# Test specific files
-sphinx-build -b html source _build/html filename.rst
+# Check for coverage
+make coverage
 
 # Check for broken links
 make linkcheck
-```
-
-### Local Development
-```bash
-# Live reload during development
-pip install sphinx-autobuild
-sphinx-autobuild source _build/html --port 8000
 ```
 
 ## 📁 Key Files
