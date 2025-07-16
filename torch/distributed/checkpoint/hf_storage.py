@@ -23,6 +23,7 @@ from torch.distributed.checkpoint._hf_utils import (
     DTYPE_KEY,
     SAVED_OFFSETS_KEY,
     SHAPE_KEY,
+    SHARDED_DIR_NAME,
     SUFFIX,
 )
 from torch.distributed.checkpoint.filesystem import SerializationFormat
@@ -66,7 +67,6 @@ class HuggingFaceStorageWriter(FsspecWriter):
         token: Optional[str] = None,
         save_distributed: bool = False,
         enable_consolidation: bool = False,
-        consolidated_output_path: Optional[str] = None,
         thread_count_consolidation: int = 1,
     ) -> None:
         """
@@ -85,10 +85,8 @@ class HuggingFaceStorageWriter(FsspecWriter):
             token: The token to use to authenticate with huggingface hub.
             save_distributed: If True, save the checkpoint using distributed APIs where every rank saves its own shard.
                         Default is False which assumes rank-0 checkpointing of the full state_dict.
-            enable_consolidation: If True, consolidate the sharded checkpoint after saving. Default to False.
-            consolidated_output_path: If provided, the output path where the consolidated files will be written in the finish step.
-                                If enable_consolidation is True and this is not provided the consolidated files
-                                will be written to `path`.
+            enable_consolidation: If True, consolidate the sharded checkpoint after saving. The sharded tensors will be
+                                saved to path/sharded and the full tensors will be saved to path. Default to False.
             thread_count_consolidation: Number of threads to use for parallel processing of saving data
                                 to consolidated output files. Default to 1.
         """
@@ -109,9 +107,10 @@ class HuggingFaceStorageWriter(FsspecWriter):
         self.fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
         self.save_distributed: bool = save_distributed
         self.enable_consolidation: bool = enable_consolidation
-        self.consolidated_output_path: str = (
-            consolidated_output_path if consolidated_output_path is not None else path
-        )
+        self.consolidated_output_path: Optional[str] = None
+        if self.enable_consolidation:
+            self.consolidated_output_path = str(self.path)
+            self.path = self.fs.concat_path(self.path, SHARDED_DIR_NAME)
         self.thread_count_consolidation = thread_count_consolidation
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:

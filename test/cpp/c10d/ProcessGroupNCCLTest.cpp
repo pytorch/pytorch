@@ -28,7 +28,7 @@ class NCCLTestBase {
 
   NCCLTestBase(NCCLTestBase&& other) noexcept = default;
 
-  std::shared_ptr<::c10d::ProcessGroupNCCL> getProcessGroup() {
+  ::c10::intrusive_ptr<::c10d::ProcessGroupNCCL> getProcessGroup() {
     return pg_;
   }
 
@@ -39,7 +39,7 @@ class NCCLTestBase {
   void initialize(
       int rank,
       size_t size,
-      std::optional<::std::shared_ptr<::c10d::ProcessGroupNCCL>> split_from =
+      std::optional<::c10::intrusive_ptr<::c10d::ProcessGroupNCCL>> split_from =
           std::nullopt) {
     store_ = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
@@ -52,13 +52,13 @@ class NCCLTestBase {
       opts->split_color = ++color_;
     }
 #endif
-    pg_ = std::make_unique<::c10d::ProcessGroupNCCL>(
+    pg_ = c10::make_intrusive<::c10d::ProcessGroupNCCL>(
         store_, rank, size, std::move(opts));
   }
 
  protected:
   std::string path_;
-  std::shared_ptr<::c10d::ProcessGroupNCCL> pg_;
+  ::c10::intrusive_ptr<::c10d::ProcessGroupNCCL> pg_;
   std::chrono::milliseconds pgTimeout_;
   ::c10::intrusive_ptr<::c10d::Store> store_;
   int color_{1};
