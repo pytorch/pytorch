@@ -949,6 +949,22 @@ class TestIndexing(TestCase):
         self.assertEqual(x[..., m, ::2].shape, (3, 1, 3))
         self.assertEqual(x[None, ..., m, ::2].shape, (1, 3, 1, 3))
 
+    def test_bool_mask_assignment(self, device):
+        v = torch.tensor([[1, 2], [3, 4]], device=device)
+        mask = torch.tensor([1, 0], dtype=torch.bool, device=device)
+        v[mask, :] = 0
+        self.assertEqual(v, torch.tensor([[0, 0], [3, 4]], device=device))
+
+        v = torch.tensor([[1, 2], [3, 4]], device=device)
+        v[:, mask] = 0
+        self.assertEqual(v, torch.tensor([[0, 2], [0, 4]], device=device))
+
+    def test_multi_dimensional_bool_mask_assignment(self, device):
+        v = torch.tensor([[[[1], [2]], [[3], [4]]]], device=device)
+        mask = torch.tensor([[1, 0], [0, 1]], dtype=torch.bool, device=device)
+        v[:, mask, :] = 0
+        self.assertEqual(v, torch.tensor([[[[0], [2]], [[3], [0]]]], device=device))
+
     def test_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
         mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
