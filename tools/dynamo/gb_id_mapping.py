@@ -176,7 +176,9 @@ def find_unimplemented_v2_calls(path, dynamo_dir=None):
     return results
 
 
-def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None):
+def cmd_add_new_gb_type(
+    gb_type, file_path, registry_path, additional_info=None, quiet=False
+):
     """
     Add a new graph break type to the registry.
 
@@ -216,7 +218,8 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None)
     ]
 
     save_registry(reg, registry_path)
-    print(f"Added {gb_type} to registry with ID {gb_id}")
+    if not quiet:
+        print(f"Added {gb_type} to registry with ID {gb_id}")
     return True
 
 
@@ -226,6 +229,7 @@ def cmd_update_gb_type(
     registry_path,
     new_gb_type=None,
     additional_info=None,
+    quiet=False,
 ):
     """
     Update an existing graph break type in the registry by adding a new version
@@ -289,9 +293,10 @@ def cmd_update_gb_type(
     reg[gb_id].insert(0, new_entry)
 
     save_registry(reg, registry_path)
-    print(
-        f"Updated {old_gb_type} to {matching_call['gb_type']} in registry with ID {gb_id}"
-    )
+    if not quiet:
+        print(
+            f"Updated {old_gb_type} to {matching_call['gb_type']} in registry with ID {gb_id}"
+        )
     return True
 
 
