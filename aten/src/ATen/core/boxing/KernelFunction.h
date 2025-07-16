@@ -97,6 +97,10 @@ class TORCH_API KernelFunction final {
   KernelFunction();
   ~KernelFunction();
 
+
+  KernelFunction(const KernelFunction&) = default;
+  KernelFunction& operator=(const KernelFunction&) = default;
+
   // Fast path for dispatch to allow not touching the boxed kernel in
   // the common case where unboxed is available.
   bool isValidUnboxed() const;
