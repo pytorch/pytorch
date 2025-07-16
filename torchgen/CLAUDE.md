@@ -64,47 +64,7 @@ This is a standalone subset of the tools codegen that is shipped with the PyTorc
 
 ## 🚀 Running Code Generation
 
-### Build Integration
-```bash
-# Code generation runs automatically during build
-eval $BUILD_CONFIG python setup.py develop
-
-# Force regeneration
-python setup.py clean
-eval $BUILD_CONFIG python setup.py develop
-```
-
-### Manual Generation
-```bash
-# Generate all code (typically done during build)
-python -m torchgen.gen \
-  --source-path aten/src/ATen \
-  --install-dir build/aten/src/ATen
-
-# Generate specific components
-python -m torchgen.gen_backend_stubs
-python -m torchgen.gen_lazy_tensor
-```
-
-## 🔄 Development Workflow
-
-### Adding New Operators
-1. **Define** operator in `packaged/ATen/native/native_functions.yaml`
-2. **Implement** kernels in `aten/src/ATen/native/`
-3. **Add derivatives** in `packaged/autograd/derivatives.yaml` (if differentiable)
-4. **Regenerate** code using build system
-5. **Test** new operator functionality
-
-### Modifying Generation Logic
-1. **Update** generation scripts in `api/` or core files
-2. **Test** generation with sample operators
-3. **Verify** generated code compiles and runs correctly
-4. **Run** full test suite to ensure no regressions
-
-### Template Changes
-1. **Modify** templates in `packaged/ATen/templates/` or `packaged/autograd/templates/`
-2. **Test** with representative operators
-3. **Verify** generated code quality and correctness
+Code Generation runs as part of the normal build.
 
 ## 🧪 Testing Code Generation
 
@@ -135,23 +95,6 @@ python -c "import torch; torch.add(torch.tensor([1]), torch.tensor([2]))"
 - Converts in-place operations to out-of-place equivalents
 - Supports functional programming paradigms
 - Enables optimizations and graph transformations
-
-## 🐛 Common Issues
-
-### Generation Errors
-- **YAML syntax errors**: Check `native_functions.yaml` for syntax issues
-- **Template errors**: Verify Jinja2 template syntax and variable names
-- **Missing derivatives**: Add entries to `derivatives.yaml` for differentiable ops
-
-### Build Integration
-- **Stale generated code**: Run `python setup.py clean` before rebuilding
-- **Template path issues**: Ensure template files are in correct locations
-- **Import errors**: Check Python path and module structure
-
-### Performance
-- **Slow generation**: Large operator sets can take time to generate
-- **Memory usage**: Complex templates may use significant memory
-- **Incremental builds**: May not always detect template changes
 
 ## 📝 Notes for Claude
 

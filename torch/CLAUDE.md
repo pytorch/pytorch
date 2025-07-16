@@ -37,10 +37,7 @@ This is the main PyTorch Python package containing the primary user-facing API, 
 ## 🔧 Common Development Tasks
 
 ### After Modifying Python Files in torch/
-```bash
-# No rebuild needed - changes available immediately with development install
-python -c "import torch; print(torch.__version__)"
-```
+No rebuild needed when using develop mode
 
 ### After Modifying C++ Extensions (csrc/)
 ```bash
@@ -50,13 +47,15 @@ eval $BUILD_CONFIG python setup.py develop
 
 ### Testing Changes
 ```bash
-# Test specific torch functionality
-python test/run_test.py -i test_torch
-python test/run_test.py -i test_nn
-python test/run_test.py -i test_autograd
+# Ask user for which test to run.
+# Test specific file
+python test/test_torch.py
 
-# Test CUDA functionality
-python test/run_test.py -i test_cuda
+# Test specific normal test
+python test/test_torch.py -k TestTorch.test_dir
+
+# Test specific device-generic test
+python test/test_torch.py -k TestTorchDeviceTypeCPU.test_cauchy_kstest_cpu
 ```
 
 ## 📁 Key Implementation Files
@@ -80,20 +79,6 @@ python test/run_test.py -i test_cuda
 - `torch/cuda/__init__.py` - CUDA device management
 - `torch/cuda/memory.py` - GPU memory management
 - `torch/csrc/cuda/` - C++ CUDA bindings
-
-## 🐛 Common Issues
-
-### Import Errors
-- Check if C++ extensions need rebuilding after updates
-- Verify CUDA availability: `torch.cuda.is_available()`
-
-### Memory Issues
-- Use `torch.cuda.empty_cache()` to clear GPU memory
-- Check memory usage: `torch.cuda.memory_summary()`
-
-### Performance Issues
-- Profile with: `torch.profiler.profile()`
-- Use TorchScript: `torch.jit.script()` or `torch.jit.trace()`
 
 ## 📝 Notes for Claude
 

@@ -45,8 +45,7 @@ Comprehensive test suite for PyTorch covering all components from Python API to 
 
 ### Basic Test Execution
 ```bash
-# Run all tests (rarely used - very slow)
-python test/run_test.py
+# Ask the user for which test should run
 
 # Run specific test file
 python test/run_test.py -i test_torch
@@ -55,32 +54,8 @@ python test/run_test.py -i test_autograd
 
 # Run tests with specific patterns
 python test/run_test.py -k "test_add"
-python test/run_test.py test_torch.py::TestTorch::test_add_cuda
 python test/run_test.py -k "TestNN"
-```
-
-### Device-Specific Testing
-```bash
-# CUDA tests (requires CUDA)
-python test/run_test.py -i test_cuda
-
-# CPU-only tests
-python test/run_test.py -i test_torch --cpu-only
-
-# MPS tests (requires macOS with Metal)
-python test/run_test.py -i test_mps
-```
-
-### Performance and Debugging
-```bash
-# Run with profiling
-python test/run_test.py -i test_torch --profile
-
-# Verbose output
-python test/run_test.py -i test_torch -v
-
-# Run single test method
-python -m pytest test/test_torch.py::TestTorch::test_add_cpu -v
+python test/run_test.py test_torch.py::TestTorch::test_add_cuda
 ```
 
 ## 🔧 Test Development Patterns
@@ -100,19 +75,6 @@ Test organization principles:
 - Add new test class only for major new features
 - Add new test methods for unit tests within existing classes
 - For new operators, add OpInfo entries rather than individual test methods
-```python
-# Standard test pattern
-class TestMyFeature(TestCase):
-    def test_basic_functionality(self):
-        # Test basic functionality
-        pass
-    
-    @skipIfNoLapack
-    @deviceCountAtLeast(2)
-    def test_advanced_case(self):
-        # Test with decorators for requirements
-        pass
-```
 
 ### Common Test Utilities
 - **`torch.testing.assert_close()`** - Tensor comparison with tolerances
@@ -124,23 +86,6 @@ class TestMyFeature(TestCase):
 - `instantiate_device_type_tests()` - Generates device-specific test variants (CPU, CUDA, etc.)
 - `instantiate_parametrized_tests()` - Creates parameterized test combinations
 - Test methods with extra args (device, dtype) are automatically called from these instantiated new tests
-
-## 🐛 Common Testing Issues
-
-### Test Failures
-- **Numerical precision**: Changing tolerance should be last resort. Refactor the test to be numerically stable.
-- **Device availability**: Check CUDA/MPS availability before device-specific tests
-- **Random seed**: Set seeds for reproducible tests
-- **Resource cleanup**: Ensure proper cleanup of GPU memory, files, etc.
-
-### Test Environment
-- **Dependencies**: Some tests require optional dependencies (CUDA, MKL, etc.)
-- **Hardware**: Device-specific tests need appropriate hardware
-
-### CI Integration
-- **Sharding**: Tests are automatically sharded in CI
-- **Skip files**: Some tests may be temporarily skipped in CI
-- **Timeouts**: Long-running tests may hit CI timeouts
 
 ## 📝 Notes for Claude
 

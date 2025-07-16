@@ -57,17 +57,6 @@ python test/run_test.py -i test_torch
 eval $BUILD_CONFIG python setup.py develop
 ```
 
-### Adding New Operators
-1. Add definition to `src/ATen/native/native_functions.yaml`
-2. Implement kernel in `src/ATen/native/` (CPU) and `src/ATen/native/cuda/` (CUDA)
-3. Rebuild PyTorch
-4. Add OpInfo entry in `torch/testing/_internal/common_methods_invocations.py` for comprehensive testing
-
-## 🐛 Common Issues
-
-### Build Issues
-- Just `python setup.py clean` and full rebuild
-
 ## 📝 Notes for Claude
 
 - ATen implements the core tensor operations that torch/ Python API calls
