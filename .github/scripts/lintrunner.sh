@@ -32,7 +32,7 @@ python3 torch/utils/data/datapipes/gen_pyi.py
 find torch -name '*.pyi' -exec git add --force -- "{}" +
 for linter in $(lintrunner list 2>/dev/null| tail -n +2); do
   echo ""
-  time lintrunner --force-color --tee-json=lint.json --take "${linter}" 2> /dev/null
+  time lintrunner --force-color --tee-json=lint.json --take "${linter}" --all-files 2> /dev/null
 done
 
 RC=0
