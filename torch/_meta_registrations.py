@@ -7502,18 +7502,20 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
             out_size = [offs.size(0), mat1.size(0), mat2.size(1)]
         else:
             torch._check(
-                offs.size(0) == mat2.size(0), "matrix batch sizes have to match"
+                offs.size(0) == mat2.size(0), lambda: "matrix batch sizes have to match"
             )
             out_size = [mat1.size(0), mat2.size(-1)]
     else:
         if mat2_is_2d:
             torch._check(
-                offs.size(0) == mat1.size(0), "matrix batch sizes have to match"
+                offs.size(0) == mat1.size(0), lambda: "matrix batch sizes have to match"
             )
             out_size = [mat1.size(1), mat2.size(1)]
         else:
             # regular bmm
-            torch._check(mat1.size(0) == mat2.size(0), "batched dimension has to match")
+            torch._check(
+                mat1.size(0) == mat2.size(0), lambda: "batched dimension has to match"
+            )
             out_size = [mat1.size(0), mat1.size(1), mat2.size(-1)]
 
     out_dtype = out_dtype or mat1.dtype

@@ -76,7 +76,9 @@ void check_fp32_prec_backend_and_op(
 
   C10_ALWAYS_INLINE void warn_deprecated_fp32_precision_api(){
     TORCH_WARN_ONCE(
-      "This API is going to be deprecated, please see "
+      "Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' "
+      "or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, "
+      "torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see "
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices"
     );
   }
