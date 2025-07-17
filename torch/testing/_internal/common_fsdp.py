@@ -1122,6 +1122,7 @@ def check_sharded_parity(
         assert isinstance(sharded_param.grad, DTensor)  # mypy
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
+
 @unittest.skipIf(TEST_XPU, "not-support-multithread")
 class FSDPTestMultiThread(MultiThreadedTestCase):
     @property

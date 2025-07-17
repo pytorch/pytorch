@@ -62,6 +62,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 device_type = torch.accelerator.current_accelerator().type
 
+
 class MyModel(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -144,7 +145,8 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                 fsdp_kwargs={"device_id": torch.device(device_type)},
             )
         _check_device_matches(
-            nested_wrapped_module, torch.device(device_type, torch.accelerator.current_device_index())
+            nested_wrapped_module,
+            torch.device(device_type, torch.accelerator.current_device_index()),
         )
 
     @skip_if_lt_x_gpu(2)
@@ -744,7 +746,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         # TODO: override FSDP MT Thread _run to set this instead of here for
         # every test.
         torch.accelerator.set_device_index(self.rank)
-        
+
         if device_type == "xpu":
             context = (
                 self.assertRaisesRegex(ValueError, f"xpu:{self.rank} vs xpu:0")
@@ -784,7 +786,9 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         cpu_gpu = CPUGPUModule()
         fsdp = FSDP(cpu_gpu, device_id=torch.accelerator.current_device_index())
         for param in fsdp.parameters():
-            self.assertEqual(param.device, torch.device(torch.accelerator.current_device_index()))
+            self.assertEqual(
+                param.device, torch.device(torch.accelerator.current_device_index())
+            )
 
         # without device_id, we hit an error
         with self.assertRaisesRegex(RuntimeError, "please pass in device_id"):
@@ -922,7 +926,11 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             m, process_group=self.process_group, assert_fn=self.assertNotEqual
         )
         # Passing sync_module_states into FSDP makes model the same during init.
-        fsdp = FSDP(m, device_id=torch.accelerator.current_device_index(), sync_module_states=True)
+        fsdp = FSDP(
+            m,
+            device_id=torch.accelerator.current_device_index(),
+            sync_module_states=True,
+        )
         with fsdp.summon_full_params(fsdp):
             _assert_module_states(
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
@@ -1009,7 +1017,10 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         # warning
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")  # trigger all warnings
-            FSDP(nn.Linear(3, 3).to(device=device_type), sharding_strategy=ShardingStrategy.NO_SHARD)
+            FSDP(
+                nn.Linear(3, 3).to(device=device_type),
+                sharding_strategy=ShardingStrategy.NO_SHARD,
+            )
             for warning in w:
                 self.assertTrue(
                     warning.category != UserWarning
@@ -1023,7 +1034,10 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
             warning_prefix + " " + str(ShardingStrategy.FULL_SHARD) + warning_suffix
         )
         with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
-            FSDP(nn.Linear(3, 3).to(device=device_type), sharding_strategy=ShardingStrategy.FULL_SHARD)
+            FSDP(
+                nn.Linear(3, 3).to(device=device_type),
+                sharding_strategy=ShardingStrategy.FULL_SHARD,
+            )
         with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
             FSDP(nn.Linear(3, 3).to(device=device_type))
         # - Pass `SHARD_GRAD_OP`
@@ -1032,7 +1046,8 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         )
         with self.assertWarnsRegex(UserWarning, expected_regex_shard_grad_op):
             FSDP(
-                nn.Linear(3, 3).to(device=device_type), sharding_strategy=ShardingStrategy.SHARD_GRAD_OP
+                nn.Linear(3, 3).to(device=device_type),
+                sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             )
 
     @skip_if_lt_x_gpu(1)
