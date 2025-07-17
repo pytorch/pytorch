@@ -2273,7 +2273,7 @@ class TorchPatcher:
         fn: Callable[..., Any],
     ) -> Callable[..., Any]:
         def inner_fn(*args: Any, **kwargs: Any) -> Any:
-            with torch._logging.filter_warnings(
+            with torch._logging.hide_warnings(
                 torch._logging._internal.user_warning_filter
             ):
                 return fn(*args, **kwargs)

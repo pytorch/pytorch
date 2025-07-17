@@ -1169,7 +1169,7 @@ def user_warning_filter(
 
 
 @contextlib.contextmanager
-def filter_warnings(filter_fn=lambda *args, **kwargs: True):
+def hide_warnings(filter_fn=lambda *args, **kwargs: True):
     """
     A context manager that temporarily suppresses warnings,
     using public API: https://docs.python.org/3/library/warnings.html#warnings.showwarning.
