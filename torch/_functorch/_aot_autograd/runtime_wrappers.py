@@ -41,6 +41,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 from .functional_utils import gen_alias_from_base
+from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
@@ -49,6 +50,7 @@ from .input_output_analysis import (
 from .logging_utils import describe_input, format_guard_bug_msg, track_graph_compiling
 from .schemas import (
     AOTConfig,
+    CompilerWrapper,
     InputAliasInfo,
     MemoryFormatMeta,
     MutationType,
@@ -64,7 +66,6 @@ from .subclass_utils import (
     runtime_unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
 )
-from .traced_function_transforms import aot_dispatch_subclass
 from .utils import (
     call_func_at_runtime_with_args,
     make_boxed_func,
@@ -78,54 +79,6 @@ if TYPE_CHECKING:
 
 
 zip = strict_zip
-
-
-class CompilerWrapper:
-    """
-    A wrapper around the inputs and outputs to the compiler_fn. We separate these into two parts:
-
-    1. The prologue, which edits the input to the compiler_fn(flat_fn, flat_args, etc)
-    2. The epilogue, which edits the outputs of the compiler_fn (compiled_fn, real arguments)
-
-    Each wrapper below should be implemented as a CompilerWrapper, so that we can facilitate
-    caching on the compiled output, and re-wrapping the output via epilogues.
-    Extra metadata that is needed to compute pre or post compile can be passed in via attributes.
-    """
-
-    def pre_compile(
-        self,
-        flat_fn,
-        flat_args: list[Tensor],
-        aot_config: AOTConfig,
-        *,
-        fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
-        """
-        Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
-        Args:
-        flat_fn: The function to compile
-        flat_args: Metadata from example inputs of the function to compile
-        aot_config: AOTConfig passed in at compile time
-        fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
-        """
-        return flat_fn, flat_args, fw_metadata
-
-    def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
-        """
-        Given an output of the compiler, wrap it with information received from prologue.
-        Args:
-        compiled_fn: Callable after calling compiler_fn
-        aot_config: AOTConfig after calling prologue
-        runtime_metadata: ViewAndMutationMeta after calling all wrappers's pre_compile steps.
-        Example:
-
-        def wrapped_compiled_fn(args):
-            # do something with args, aot_config, fw_metadata
-            return compiled_fn(args)
-
-        return wrapped_compiled_fn
-        """
-        return compiled_fn
 
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
