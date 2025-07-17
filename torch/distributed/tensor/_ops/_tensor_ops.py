@@ -35,6 +35,8 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 
+from ._pointwise_ops import pointwise_strategy
+
 
 aten = torch.ops.aten
 
@@ -91,61 +93,20 @@ register_op_strategy(
     aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
 )(propagate_single_input_strategy)
 
-
-@register_op_strategy(aten.copy_.default)
-def copy_inplace_strategy(op_schema: OpSchema) -> StrategyType:
-    assert isinstance(op_schema.args_schema[0], OpStrategy)
-    assert isinstance(op_schema.args_schema[1], OpStrategy)
-    self_strategy: OpStrategy = op_schema.args_schema[0]
-    mesh = self_strategy.mesh
-    src_strategy: OpStrategy = op_schema.args_schema[1]
-    # meta should be the same for all strategies
-    src_meta = src_strategy.strategies[0].output_spec.tensor_meta
-
-    # Following torch broadcasting semantics (https://docs.pytorch.org/docs/stable/notes/broadcasting.html)
-    # - self can not change shape as a result of broadcasting since this is an inplace op
-    # - src can broadcast, but when it does it always does so from the trailing end
-    # e.g. the last dim of 'src' must match up with the last dim of 'self'
-    #
-    # DTensor semantics for inplace ops also dictates that we may NOT redistribute our 'self' input.
-    # In practice, what this means is
-    # - our output strategies should map 1:1 to our 'self' input strategies
-    # - our 'src' input may be redistributed to match up with the 'self' input, with the caveat of adjusting for
-    #   broadcasting dim
-    op_specs: list[OpSpec] = []
-    for self_opspec in self_strategy.strategies:
-        # for each 'self input' spec, we create the corresponding 'src' spec
-        # and then build a strategy around it
-        mapped_src_placements = list(self_opspec.output_spec.placements)
-        for i, p in enumerate(mapped_src_placements):
-            if p.is_shard():
-                reverse_index = self_strategy.ndim - 1 - cast(Shard, p).dim
-                src_dim = src_strategy.ndim - 1 - reverse_index
-                if src_dim >= 0:
-                    mapped_src_placements[i] = Shard(src_dim)
-                else:
-                    mapped_src_placements[i] = Replicate()
-        self_spec = self_opspec.output_spec
-        src_spec = DTensorSpec(
-            mesh=mesh,
-            placements=tuple(mapped_src_placements),
-            tensor_meta=src_meta,
-        )
-        op_specs.append(
-            OpSpec(
-                output_specs=self_spec,
-                input_specs=[
-                    self_spec,
-                    src_spec,
-                ],
-                redistribute_cost=[
-                    generate_redistribute_costs(self_strategy, self_spec),
-                    generate_redistribute_costs(src_strategy, src_spec),
-                ],
-            )
-        )
-
-    return OpStrategy(op_specs)
+# copy_ is actually a pointwise op with broadcasting, so reuse the pointwise strategy, which takes care of these
+# requirements.
+#
+# Following torch broadcasting semantics (https://docs.pytorch.org/docs/stable/notes/broadcasting.html)
+# - self can not change shape as a result of broadcasting since this is an inplace op
+# - src can broadcast, but when it does it always does so from the trailing end
+# e.g. the last dim of 'src' must match up with the last dim of 'self'
+#
+# DTensor semantics for inplace ops also dictates that we may NOT redistribute our 'self' input.
+# In practice, what this means is
+# - our output strategies should map 1:1 to our 'self' input strategies
+# - our 'src' input may be redistributed to match up with the 'self' input, with the caveat of adjusting for
+#   broadcasting dim
+register_op_strategy(aten.copy_.default)(pointwise_strategy)
 
 
 @register_op_strategy(
