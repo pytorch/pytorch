@@ -7588,7 +7588,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
 
-    def test_warnings(self):
+    def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
 
         def call_foobar(x):

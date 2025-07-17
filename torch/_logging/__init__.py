@@ -9,8 +9,8 @@ import torch._logging._registrations
 from ._internal import (
     _init_logs,
     DEFAULT_LOGGING,
-    dont_show_warnings,
     dtrace_structured,
+    filter_warnings,
     get_structured_logging_overhead,
     getArtifactLogger,
     LazyString,

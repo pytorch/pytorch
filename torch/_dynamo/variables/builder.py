@@ -303,7 +303,7 @@ DimList = list
 
 
 def safe_has_grad(t):
-    with torch._logging.dont_show_warnings():
+    with torch._logging.filter_warnings(torch._logging._internal.safe_grad_filter):
         return hasattr(t, "grad")
 
 

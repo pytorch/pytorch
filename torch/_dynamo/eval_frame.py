@@ -2272,8 +2272,18 @@ class TorchPatcher:
     def suppress_torch_distributed_warnings(
         fn: Callable[..., Any],
     ) -> Callable[..., Any]:
+        def _filter(
+            message: Any,
+            category: Any,
+            filename: Any,
+            lineno: Any,
+            file: Any = None,
+            line: Any = None,
+        ) -> bool:
+            return not category == UserWarning
+
         def inner_fn(*args: Any, **kwargs: Any) -> Any:
-            with torch._logging.dont_show_warnings():
+            with torch._logging.filter_warnings(_filter):
                 return fn(*args, **kwargs)
 
         return inner_fn

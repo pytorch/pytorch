@@ -80,7 +80,7 @@ def safe_is_leaf(t: Union[MetaTensorDesc, torch.Tensor]) -> bool:
 
 
 def safe_grad(t: _TensorLikeT) -> Optional[_TensorLikeT]:
-    with torch._logging.dont_show_warnings():
+    with torch._logging.filter_warnings(torch._logging._internal.safe_grad_filter):
         return t.grad
 
 
