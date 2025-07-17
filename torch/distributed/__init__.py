@@ -4,9 +4,10 @@ import pdb
 import sys
 import traceback
 import typing
+from datetime import timedelta
 
 import torch
-from datetime import timedelta
+
 
 log = logging.getLogger(__name__)
 
@@ -102,7 +103,9 @@ if is_available():
         # avoid having the default timeout (if short) interrupt your debug session
         if timeout_s is not None:
             for group in torch.distributed.distributed_c10d._pg_map:
-                torch.distributed.distributed_c10d._set_pg_timeout(timedelta(seconds=timeout_s), group)
+                torch.distributed.distributed_c10d._set_pg_timeout(
+                    timedelta(seconds=timeout_s), group
+                )
 
         if get_rank() == rank:
             pdb = _DistributedPdb()
