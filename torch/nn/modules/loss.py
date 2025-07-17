@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 from typing import Callable, Optional, Union
+from typing_extensions import deprecated
 
 from torch import Tensor
 from torch.nn import _reduction as _Reduction, functional as F
-from typing_extensions import deprecated
 
 from .distance import PairwiseDistance
 from .module import Module
