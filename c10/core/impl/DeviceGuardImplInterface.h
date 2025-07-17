@@ -301,7 +301,6 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
   }
   bool queryEvent(void* /*event*/) const override {
     TORCH_CHECK(false, D, " backend doesn't support events.")
-    return true;
   }
   void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
       const noexcept override {}
