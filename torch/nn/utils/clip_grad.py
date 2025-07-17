@@ -96,11 +96,11 @@ def _get_total_norm(
             )
         else:
             norms.extend(
-                [torch.linalg.vector_norm(g, norm_type) for g in device_tensors]
+                [torch.linalg.vector_norm(g, norm_type, dtype=torch.float64) for g in device_tensors]
             )
 
     total_norm = torch.linalg.vector_norm(
-        torch.stack([norm.to(first_device) for norm in norms]), norm_type
+        torch.stack([norm.to(first_device) for norm in norms]), norm_type, dtype=torch.float64
     )
 
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
