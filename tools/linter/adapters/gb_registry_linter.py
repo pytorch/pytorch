@@ -80,6 +80,11 @@ def _update_registry_with_changes(
         entries[0]["Gb_type"]: key for key, entries in registry.items()
     }
 
+    # Method for determining add vs. update:
+    # - If gb_type exists in registry but content differs: UPDATE (append new entry to preserve history)
+    # - If gb_type is new but content matches existing entry: RENAME (append new entry with new gb_type)
+    # - If gb_type is completely new: ADD (create new registry entry with a new GBID)
+
     for old_gb_type, new_gb_type in renames.items():
         registry_key = gb_type_to_key[old_gb_type]
         old_entry = updated_registry[registry_key][0]
