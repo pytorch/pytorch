@@ -249,6 +249,10 @@ def is_training_ir_test(test_name):
     )
 
 
+def is_training_ir_strict_test(test_name):
+    return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX)
+
+
 def is_cpp_runtime_test(test_name):
     return test_name.endswith(CPP_RUNTIME_STRICT_SUFFIX) or test_name.endswith(
         CPP_RUNTIME_NONSTRICT_SUFFIX
@@ -1581,6 +1585,42 @@ class GraphModule(torch.nn.Module):
             return (1,)
 """,  # noqa: B950
             )
+        self.assertEqual(m(*args), ep.module()(*args))
+
+    @testing.expectedFailureCppSerDes  #  AssertionError: 0 not in VR[2, int_oo]
+    @testing.expectedFailureSerDer  #  AssertionError: 0 not in VR[2, int_oo]
+    @testing.expectedFailureSerDerNonStrict  #  AssertionError: 0 not in VR[2, int_oo]
+    def test_cond_access_identical_symint_closure(self):
+        class Example2(torch.nn.Module):
+            def forward(self, x, trigger, target):
+                return torch.cond(
+                    trigger == 1,
+                    lambda: x + target,
+                    lambda: x * target,
+                    (),
+                )
+
+        m = Example2()
+        x = torch.randn(2)
+        trigger = 0
+        target = 2
+        args = (x, trigger, target)
+        ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
+        if is_training_ir_strict_test(self._testMethodName):
+            # In strict mode export's result capturing compiler, we create
+            # 2 new symints when re-fakifying the symint inputs.
+            # Then in run_decompositions, ep.range_constraints was updated
+            # where it checks the var_to_range and put the two newly added ones into the range_constraints.
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo], VR[-int_oo, int_oo], VR[-int_oo, int_oo])""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo])""",
+            )
+
         self.assertEqual(m(*args), ep.module()(*args))
 
     def test_cond_branches_return_same_int(self):
@@ -15739,6 +15779,28 @@ def forward(self, x, mask):
     view = torch.ops.aten.view.default(masked_select, [-1, 1548]);  masked_select = None
     add = torch.ops.aten.add.Tensor(view, 1);  view = None
     return (add,)""",
+            ignore_empty_lines=True,
+        )
+
+    def test_unbacked_select_index(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                u0 = y.item()
+                return x.select(0, u0)
+
+        example_inputs = (
+            torch.randn((3, 3), dtype=torch.bfloat16),
+            torch.tensor([0]),
+        )
+
+        traced = export(MyModel(), example_inputs).run_decompositions({})
+        self.assertExpectedInline(
+            traced.graph_module.code,
+            """\
+def forward(self, x, y):
+    item = torch.ops.aten.item.default(y);  y = None
+    select = torch.ops.aten.select.int(x, 0, item);  x = item = None
+    return (select,)""",
             ignore_empty_lines=True,
         )
 
