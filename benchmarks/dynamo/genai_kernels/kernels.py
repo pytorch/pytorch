@@ -1,166 +1,16 @@
-from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 import cutlass
 import cutlass.torch as cutlass_torch
 
+
 import torch
 import torch.nn.functional as F
-from torch._inductor.runtime.benchmarking import benchmarker
-from torch.testing._comparison import default_tolerances
-
-
-torch._dynamo.config.automatic_dynamic_shapes = False
-# Needed since changing args to function causes recompiles
-torch._dynamo.config.recompile_limit = 1000
-
-torch._inductor.config.force_disable_caches = True
+from utils import BenchmarkKernel
 
 # TODO1: visualization
 # TODO2: roof line analysis
 # TODO: Record peak memory
-
-
-def benchmark_kernel_in_milliseconds(func: Callable, *args, **kwargs) -> float:
-    # warmup
-    for _ in range(5):
-        func(*args, **kwargs)
-    return benchmarker.benchmark_gpu(lambda: func(*args, **kwargs))
-
-
-@dataclass
-class Performance:
-    # Benchmark setting usually the shape of the input tensor
-    setting: str
-
-    # Latency in milliseconds
-    latency: float
-
-    # Number of  memory access in bytes
-    memory_bytes: float
-
-    # Number of flops computation
-    flops: float
-
-    # Memory bandwidth in GB/s
-    memory_bandwidth: float = 0.0
-
-    # Compute intensity in FLOPs/byte
-    compute_intensity: float = 0.0
-
-    # Computationi per second
-    tflops_per_seconds: float = 0.0
-
-    def __post_init__(self):
-        self.memory_bandwidth = self.memory_bytes / (self.latency / 1000) / 1e9
-        self.compute_intensity = self.flops / self.memory_bytes
-        self.flops_per_seconds = self.flops / (self.latency / 1000) / 1e12
-
-    def __str__(self):
-        return f"setting: {self.setting}, latency: {self.latency} ms, memory bandwidth: {self.memory_bandwidth} GB/s"
-
-
-class BenchmarkKernel:
-    def __init__(self):
-        self.name = self.__class__.__name__
-        self.available_backends = []
-
-    def get_memory_bytes(self, args, kwargs) -> int:
-        # Get the necessary memory access in bytes for the kernelßß
-        raise NotImplementedError
-
-    def get_flops(self, args, kwargs) -> int:
-        # Get the number of flops for the kernel
-        raise NotImplementedError
-
-    def get_shapes(self) -> tuple[tuple[int, ...], ...]:
-        # Get a list of input shapes to benchmark the kernel
-        raise NotImplementedError
-
-    def eager(self, args, kwargs) -> Any:
-        raise NotImplementedError
-
-    def compiled(self, args, kwargs) -> Any:
-        raise NotImplementedError
-
-    def helion(self, args, kwargs) -> Any:
-        raise NotImplementedError
-
-    def quack(self, args, kwargs) -> Any:
-        raise NotImplementedError
-
-    def liger(self, args, kwargs) -> Any:
-        raise NotImplementedError
-
-    def triton(self, args, kwargs) -> Any:
-        raise NotImplementedError
-
-    def benchmark(self):
-        raise NotImplementedError
-
-    def clone_inputs(self, args, kwargs) -> Any:
-        args_ref = [
-            arg.clone().detach().requires_grad_(arg.requires_grad) for arg in args
-        ]
-
-        kwargs_ref = (
-            {
-                k: (
-                    v.clone().detach().requires_grad_(v.requires_grad)
-                    if isinstance(v, torch.Tensor)
-                    else v
-                )
-                for k, v in kwargs.items()
-            }
-            if kwargs
-            else kwargs
-        )
-
-        return args_ref, kwargs_ref
-
-    def check_accuracy(self, args, kwargs) -> None:
-        res = {}
-        for backend in self.available_backends:
-            args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
-            res[backend] = getattr(self, backend)(args_ref, kwargs_ref)()
-        gold = res["eager"]
-        for backend in self.available_backends:
-            if backend == "eager":
-                continue
-            tol = default_tolerances(*res[backend])
-            is_match = torch.allclose(res[backend], gold, rtol=tol[0], atol=tol[1])
-            if is_match:
-                print(
-                    f"Accuracy check \033[92m✓ succeed\033[0m for {backend} backend on {self.name} kernel"
-                )
-            else:
-                print(
-                    f"Accuracy check \033[91m✗ failed\033[0m for {backend} backend on {self.name} kernel"
-                )
-
-    def benchmark_single_shape(
-        self, args, kwargs=None, should_check_accuracy=True, setting: str = ""
-    ):
-        for backend in self.available_backends:
-            args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
-            try:
-                avg_time = benchmark_kernel_in_milliseconds(
-                    getattr(self, backend)(args, kwargs)
-                )
-            except Exception as e:
-                print(
-                    f"Failed to run {backend} backend on {self.name} kernel for {setting} due to {e}"
-                )
-                self.available_backends.remove(backend)
-                continue
-            mem_bytes = self.get_memory_bytes(args_ref, kwargs_ref)
-            flops = self.get_flops(args_ref, kwargs_ref)
-            perf = Performance(setting, avg_time, mem_bytes, flops)
-            print(f"{self.name} kernel on {backend} backend. {perf}")
-
-        if should_check_accuracy:
-            self.check_accuracy(args, kwargs)
-
 
 class CrossEntropyForward(BenchmarkKernel):
     def __init__(self):
@@ -624,9 +474,10 @@ class RMSNormBackward(BenchmarkKernel):
 class LayerNormForward(BenchmarkKernel):
     def __init__(self):
         super().__init__()
-        self.available_backends = ["eager", "compiled", "quack"]
+        self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
+        # OOM for (16384, 131072) on h100
         return (
             (32768, 256),
             (32768, 512),
@@ -637,8 +488,6 @@ class LayerNormForward(BenchmarkKernel):
             (32768, 16384),
             (32768, 32768),
             (32768, 65536),
-            (16384, 131072),
-            (8192, 262144),
         )
 
     def get_memory_bytes(self, args, kwargs) -> int:
@@ -668,10 +517,23 @@ class LayerNormForward(BenchmarkKernel):
         return lambda: compiled_layernorm(x, w, eps=1e-6)
 
     def quack(self, args, kwargs) -> Any:
+        # Note: quack layernorm does not support bias
         from quack.layernorm import layernorm
 
         x, w = args
         return lambda: layernorm(x, w, eps=1e-6)
+
+    def liger(self, args, kwargs) -> Any:
+        from liger_kernel.transformers.layer_norm import LigerLayerNorm
+
+        x, w = args
+        M, N = x.shape
+        liger_layernorm = LigerLayerNorm(hidden_size=N, eps=1e-6).cuda()
+        liger_layernorm.weight.data.copy_(w)
+        liger_layernorm.bias.data.copy_(
+            torch.zeros(N, device="cuda", dtype=torch.float32)
+        )
+        return lambda: liger_layernorm(x)
 
     def benchmark(self):
         for M, N in self.get_shapes():
@@ -682,10 +544,82 @@ class LayerNormForward(BenchmarkKernel):
             self.benchmark_single_shape((x, w), setting=f"shape: [{M}, {N}]")
 
 
-CrossEntropyForward().benchmark()
-CrossEntropyBackward().benchmark()
-SoftmaxForward().benchmark()
-SoftmaxBackward().benchmark()
-RMSNormForward().benchmark()
-RMSNormBackward().benchmark()
-LayerNormForward().benchmark()
+class LayerNormBackward(BenchmarkKernel):
+    def __init__(self):
+        super().__init__()
+        self.available_backends = ["eager", "compiled", "liger"]
+
+    def get_shapes(self) -> tuple[tuple[int, ...], ...]:
+        return (
+            (32768, 256),
+            (32768, 512),
+            (32768, 1024),
+            (32768, 2048),
+            (32768, 4096),
+            (32768, 8192),
+            (32768, 16384),
+            (32768, 32768),
+            (32768, 65536),
+            (16384, 131072),
+            (8192, 262144),
+        )
+
+    def get_memory_bytes(self, args, kwargs) -> int:
+        x, w, dy = args
+        M, N = x.shape
+        # Read x ([M, N]), w ([N]), dy ([M, N]), write dx ([M, N]), dw ([N])
+        return (
+            2 * M * N * x.dtype.itemsize
+            + 2 * N * w.dtype.itemsize
+            + M * N * dy.dtype.itemsize
+        )
+
+    def get_flops(self, args, kwargs) -> int:
+        return 0
+
+    def layernorm_ref(self, x: torch.Tensor, w: torch.Tensor, eps: float = 1e-6):
+        x_f32 = x.float()
+        return F.layer_norm(x_f32, w.shape, w, None, eps).to(x.dtype)
+
+    def eager(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, w, dy = args
+        y = self.layernorm_ref(x, w)
+        return lambda: torch.autograd.grad(
+            y, [x, w], grad_outputs=dy, retain_graph=True
+        )
+
+    def compiled(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        x, w, dy = args
+        compiled_layernorm = torch.compile(
+            self.layernorm_ref, mode="max-autotune-no-cudagraphs"
+        )
+        y = compiled_layernorm(x, w)
+        return lambda: torch.autograd.grad(
+            y, [x, w], grad_outputs=dy, retain_graph=True
+        )
+
+    def liger(self, args, kwargs) -> Any:
+        from liger_kernel.transformers.layer_norm import LigerLayerNorm
+
+        x, w, dy = args
+        M, N = x.shape
+        liger_layernorm = LigerLayerNorm(hidden_size=N, eps=1e-6).cuda()
+        liger_layernorm.weight.data.copy_(w)
+        liger_layernorm.bias.data.copy_(
+            torch.zeros(N, device="cuda", dtype=torch.float32)
+        )
+        y = liger_layernorm(x)
+        return lambda: torch.autograd.grad(
+            y, [x, liger_layernorm.weight], grad_outputs=dy, retain_graph=True
+        )
+
+    def benchmark(self):
+        for M, N in self.get_shapes():
+            print(f"Tensor dimensions: [{M}, {N}]")
+            torch_dtype = cutlass_torch.dtype(cutlass.BFloat16)
+            x = torch.randn(M, N, device="cuda", dtype=torch_dtype, requires_grad=True)
+            w = torch.randn(N, device="cuda", dtype=torch.float32, requires_grad=True)
+            dy = torch.randn(M, N, device="cuda", dtype=torch_dtype)
+            self.benchmark_single_shape((x, w, dy), setting=f"shape: [{M}, {N}]")

@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""
+Benchmark runner for various kernel implementations.
+
+This script provides a command-line interface to run benchmarks for different
+kernel implementations including CrossEntropy, Softmax, RMSNorm, and LayerNorm
+kernels in both forward and backward directions.
+"""
+
+import argparse
+import sys
+from typing import Dict, Type
+
+from kernels import (
+    BenchmarkKernel,
+    CrossEntropyForward,
+    CrossEntropyBackward,
+    SoftmaxForward,
+    SoftmaxBackward,
+    RMSNormForward,
+    RMSNormBackward,
+    LayerNormForward,
+    LayerNormBackward,
+)
+
+
+# Registry of all available benchmarks
+BENCHMARK_REGISTRY: Dict[str, Type[BenchmarkKernel]] = {
+    "cross_entropy_forward": CrossEntropyForward,
+    "cross_entropy_backward": CrossEntropyBackward,
+    "softmax_forward": SoftmaxForward,
+    "softmax_backward": SoftmaxBackward,
+    "rmsnorm_forward": RMSNormForward,
+    "rmsnorm_backward": RMSNormBackward,
+    "layernorm_forward": LayerNormForward,
+    "layernorm_backward": LayerNormBackward,
+}
+
+
+def list_benchmarks():
+    """List all available benchmarks."""
+    print(f"Available benchmarks: {list(BENCHMARK_REGISTRY.keys())}")
+
+
+def run_benchmark(benchmark_name: str):
+    """Run a specific benchmark."""
+    if benchmark_name not in BENCHMARK_REGISTRY:
+        print(f"Error: Unknown benchmark '{benchmark_name}'")
+        print("Use --list to see available benchmarks")
+        return False
+    
+    print(f"Running benchmark: {benchmark_name}")
+    print("=" * 60)
+    
+    benchmark_class = BENCHMARK_REGISTRY[benchmark_name]
+    benchmark = benchmark_class()
+    benchmark.benchmark()
+    
+    return True
+
+
+def run_all_benchmarks():
+    """Run all available benchmarks."""
+    print("Running all benchmarks...")
+    print("=" * 60)
+    
+    for name, cls in BENCHMARK_REGISTRY.items():
+        print(f"\n{'='*20} {name.upper()} {'='*20}")
+        benchmark = cls()
+        benchmark.benchmark()
+        print()
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Benchmark runner for kernel implementations",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python benchmark.py --list                    # List all available benchmarks
+  python benchmark.py --all                     # Run all benchmarks
+  python benchmark.py cross_entropy_forward     # Run specific benchmark
+  python benchmark.py softmax_forward softmax_backward  # Run multiple benchmarks
+        """
+    )
+    
+    parser.add_argument(
+        "benchmarks",
+        nargs="*",
+        help="Names of benchmarks to run (use --list to see available options)"
+    )
+    
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List all available benchmarks"
+    )
+    
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Run all available benchmarks"
+    )
+    
+    args = parser.parse_args()
+    
+    # Handle list option
+    if args.list:
+        list_benchmarks()
+        return
+    
+    # Handle all option
+    if args.all:
+        run_all_benchmarks()
+        return
+    
+    # Handle specific benchmarks
+    if not args.benchmarks:
+        print("Error: No benchmarks specified")
+        print("Use --list to see available benchmarks or --all to run all benchmarks")
+        parser.print_help()
+        sys.exit(1)
+    
+    success = True
+    for benchmark_name in args.benchmarks:
+        if not run_benchmark(benchmark_name):
+            success = False
+        print()  # Add spacing between benchmarks
+    
+    if not success:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
