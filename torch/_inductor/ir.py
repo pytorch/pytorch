@@ -49,7 +49,6 @@ from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
-from torch._inductor.utils import get_free_symbols
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -63,6 +62,7 @@ from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     free_symbols,
     free_unbacked_symbols,
+    IterateExprs,
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
@@ -302,6 +302,13 @@ def fuse_reindexing(
         return reindex1(reindex2(index))
 
     return reindex
+
+
+def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.Symbol]:
+    if unbacked_only:
+        return free_unbacked_symbols(x)
+    else:
+        return free_symbols(x)
 
 
 NHWC_STRIDE_ORDER = [3, 0, 2, 1]
@@ -4322,13 +4329,6 @@ class ComputedBuffer(OperationBuffer):
         return self.data.get_read_names()
 
     def get_read_writes(self) -> dependencies.ReadWrites:
-        if not isinstance(self.data, (Reduction, Scan, Sort, Pointwise)):
-            return dependencies.ReadWrites(
-                reads=OrderedSet(),
-                writes=OrderedSet(),
-                index_exprs=OrderedSet(),
-            )
-
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
                 return extract_read_writes(
@@ -4367,7 +4367,6 @@ class ComputedBuffer(OperationBuffer):
             | get_free_symbols(self.get_stride(), unbacked_only)
             | get_free_symbols(self.get_offset(), unbacked_only)
             | self.data.get_free_symbol_uses(unbacked_only)
-            | self.get_read_writes().get_free_symbol_uses(unbacked_only)
         )
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
@@ -6974,50 +6973,6 @@ class DeviceCopy(ExternKernelOut):
             )
         else:
             wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
-
-
-class DynamicSelectStorageOffset(ExternKernel):
-    """
-    The result of computing a dynamic selection index is determined as follows: when the index in the
-    select operation is unbacked, the actual index calculation is ambiguous for negative indices
-    (index + size) versus non-negative indices (just index). To resolve this, we allocate an unbacked
-    SymInt to represent the storage offset and decompose the select operation into a call to as_strided,
-    computing the storage offset at runtime with this node.
-    """
-
-    def get_reads(self) -> OrderedSet[Dep]:
-        return OrderedSet()
-
-    def should_allocate(self) -> bool:
-        return False
-
-    def __init__(
-        self,
-        unbacked_offset_symbol: sympy.Symbol,
-        index: sympy.Symbol,
-        base_offset: Union[sympy.Symbol, int],
-        base_dim_stride: Union[sympy.Symbol, int],
-        size: Union[sympy.Symbol, int],
-    ) -> None:
-        super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
-        # This node codegen the following:
-        # unbacked_offset_symbol = base_offset + base_dim_stride * (index if index >=0 else index + size)
-        self.unbacked_offset_symbol = unbacked_offset_symbol
-        self.index = index
-        self.base_offset = base_offset
-        self.base_dim_stride = base_dim_stride
-        self.size = size
-
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet([self.unbacked_offset_symbol])
-
-    def get_free_symbol_uses(
-        self, unbacked_only: bool = False
-    ) -> OrderedSet[sympy.Symbol]:
-        return get_free_symbols(self.index, unbacked_only)
-
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        wrapper.codegen_dynamic_select_index(self)
 
 
 class DynamicScalar(ExternKernel):
