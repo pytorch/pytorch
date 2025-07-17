@@ -201,7 +201,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
-  pip_install --user "ninja==1.10.2"
+  pip_install "ninja==1.10.2"
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
@@ -287,6 +287,12 @@ if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
+fi
+
+if [[ "${TEST_CONFIG}" == "legacy_nvidia_driver" ]]; then
+  # Make sure that CUDA can be initialized
+  (cd test && python -c "import torch; torch.rand(2, 2, device='cuda')")
+  export USE_LEGACY_DRIVER=1
 fi
 
 test_python_legacy_jit() {
@@ -382,9 +388,10 @@ test_einops() {
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
   echo "Testing multi_gpu tests in test_torchinductor"
-  python test/run_test.py -i inductor/test_torchinductor.py -k test_multi_gpu --verbose
-  python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_cuda_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_on_gpu_device1 --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_gpu_device --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_load_package_multiple_gpus --verbose
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
@@ -495,7 +502,7 @@ DYNAMO_BENCHMARK_FLAGS=()
 
 pr_time_benchmarks() {
 
-  pip_install --user "fbscribelogger"
+  pip_install "fbscribelogger"
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -1470,8 +1477,8 @@ test_bazel() {
 
 test_benchmarks() {
   if [[ "$BUILD_ENVIRONMENT" == *cuda* && $TEST_CONFIG != *nogpu* ]]; then
-    pip_install --user "pytest-benchmark==3.2.3"
-    pip_install --user "requests"
+    pip_install "pytest-benchmark==3.2.3"
+    pip_install "requests"
     BENCHMARK_DATA="benchmarks/.data"
     mkdir -p ${BENCHMARK_DATA}
     pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_default.json --fuser=default --executor=default
