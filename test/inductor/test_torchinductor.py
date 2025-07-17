@@ -536,8 +536,19 @@ def check_model(
         correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
+    # Allow assert_equal to be a custom function, instead of True or False, for
+    # cases where differences may not indicate incorrectness.
     if assert_equal:
-        self.assertEqual(
+        if callable(assert_equal):
+
+            def custom_assert_with_self(*args, **kwargs):
+                assert_equal(self, *args, **kwargs)
+
+            assert_equal_fn = custom_assert_with_self
+        else:
+            assert_equal_fn = self.assertEqual
+
+        assert_equal_fn(
             actual,
             correct,
             atol=atol,
@@ -546,6 +557,7 @@ def check_model(
             exact_dtype=exact_dtype,
         )
         # In case of input mutations, check that inputs are the same
+        # (This never uses a custom assert_equal fn.)
         self.assertEqual(
             ref_inputs,
             example_inputs,
