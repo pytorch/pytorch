@@ -5,8 +5,8 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch.hub import tqdm
 from torch._logging import trace_structured
+from torch.hub import tqdm
 
 from . import config
 from ._compatibility import compatibility
@@ -188,10 +188,14 @@ class Interpreter:
                                 "name": "fx_interpreter_error",
                                 "encoding": "string",
                             },
-                            payload_fn=lambda: f"{msg}\nGraphModule: {self.module.print_readable(print_output=False, include_stride=True)}",
+                            payload_fn=lambda: (
+                                f"{msg}\nGraphModule: "
+                                f"{self.module.print_readable(print_output=False, include_stride=True)}"  # type: ignore[operator]
+                            ),
                         )
 
-                    msg += "\nUse TORCH_TRACE / tlparse to see full graph."
+                    msg += "\nUse tlparse to see full graph. "
+                    msg += "(https://github.com/pytorch/tlparse?tab=readme-ov-file#tlparse-parse-structured-pt2-logs)"
                     e.args = (msg,) + e.args[1:]
                     if isinstance(e, KeyError):
                         raise RuntimeError(*e.args) from e
