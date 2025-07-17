@@ -1662,13 +1662,13 @@ class VariableBuilder:
             # <==> variable tracker" 1-to-1 mapping, which is mainly handled via
             # `side_effects`. Note that constructing `tensor_variable` above
             # already adds it to graph arg, but we never registered it with
-            # `side_effects`. The pre-emptive `realize` calls here basically
+            # `side_effects`. The preemptive `realize` calls here basically
             # does that registration (at the end of `self.__call__`).
             #
             # A slightly cleaner alternative is to register the
             # `tensor_variable`s above with `side_effects` directly, and just
             # return the `list_variable`, but that breaks some tensor-subclass
-            # releated tests like `test_inputs_aliasing_bytecode_stack_restore`,
+            # related tests like `test_inputs_aliasing_bytecode_stack_restore`,
             # because `tensor_variable` is constructed via
             # `handle_traced_output`, which doesn't really expect/handle tensor
             # subclass.
