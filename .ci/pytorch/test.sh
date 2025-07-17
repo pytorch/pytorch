@@ -1670,11 +1670,7 @@ elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
   checkout_install_torchbench nanogpt
   PYTHONPATH=$(pwd)/torchbench test_verify_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
-  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    install_torchaudio
-  else
-    install_torchaudio
-  fi
+  install_torchaudio
   install_torchvision
   install_torchao
   id=$((SHARD_NUMBER-1))
