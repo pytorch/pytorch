@@ -19,7 +19,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-import pytest
+
 
 class DistTensorOpsTest(DTensorTestBase):
     @with_comms
