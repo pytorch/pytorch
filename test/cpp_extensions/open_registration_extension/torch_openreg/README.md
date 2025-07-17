@@ -123,6 +123,25 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
   - Register for fallback
     - Per-operator Fallback: See `sub.Tensor`
     - Global Fallback: See `wrapper_cpu_fallback`
+    - Per-operator Fallback: (TODO)
+
+  - AMP (TODO)
+
+### Memory Management
+
+- Device Memory Management (TODO)
+- Host Memory Management (TODO)
+
+### Custom Storage
+
+- Adding custom device descriptions (TODO)
+- Serialization support (TODO)
+
+### Autoload
+
+- Device Autoload Mechanism
+
+...
 
 ## Installation and Usage
 
@@ -139,7 +158,6 @@ After installation, you can use the `openreg` device in Python just like any oth
 
 ```python
 import torch
-import torch_openreg
 
 if not torch.openreg.is_available():
     print("OpenReg backend is not available in this build.")

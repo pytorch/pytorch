@@ -138,6 +138,11 @@ def main():
             "clean": BuildClean,  # type: ignore[misc]
         },
         include_package_data=False,
+        entry_points={
+            "torch.backends": [
+                "device_backend = torch_openreg:_autoload",
+            ],
+        },
     )
 
 
