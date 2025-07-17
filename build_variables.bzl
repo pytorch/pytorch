@@ -625,6 +625,10 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/memory/AliasAnalyzer.cpp",
     "torch/nativert/executor/memory/LayoutPlanner.cpp",
     "torch/nativert/executor/memory/LayoutManager.cpp",
+    "torch/nativert/kernels/KernelRegistry.cpp",
+    "torch/nativert/kernels/NativeKernels.cpp",
+    "torch/nativert/kernels/GeneratedStaticDispatchKernels.cpp",
+    "torch/nativert/kernels/GeneratedNativeStaticDispatchKernels.cpp",
 ]
 
 torch_mobile_tracer_sources = [
