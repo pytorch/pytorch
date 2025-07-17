@@ -113,12 +113,42 @@ class C10_API Scalar {
 #define DEFINE_ACCESSOR(type, name)                                   \
   type to##name() const {                                             \
     if (Tag::HAS_d == tag) {                                          \
-      return checked_convert<type, double>(v.d, #type);               \
+      /* Handle Half and BFloat16 overflow by returning infinity */   \
+      if (std::is_same_v<type, c10::Half> || std::is_same_v<type, c10::BFloat16> || 
+          std::is_same_v<type, c10::Float8_e5m2> || std::is_same_v<type, c10::Float8_e4m3fn> ||
+          std::is_same_v<type, c10::Float8_e5m2fnuz> || std::is_same_v<type, c10::Float8_e4m3fnuz> ||
+          std::is_same_v<type, c10::Float8_e8m0fnu>) { \
+        double val = v.d;                                             \
+        if (val > std::numeric_limits<type>::max()) {                 \
+          return std::numeric_limits<type>::infinity();               \
+        } else if (val < std::numeric_limits<type>::lowest()) {       \
+          return -std::numeric_limits<type>::infinity();              \
+        } else {                                                      \
+          return convert<type, double>(val);                          \
+        }                                                             \
+      } else {                                                        \
+        return checked_convert<type, double>(v.d, #type);             \
+      }                                                               \
     } else if (Tag::HAS_z == tag) {                                   \
       return checked_convert<type, c10::complex<double>>(v.z, #type); \
     } else if (Tag::HAS_sd == tag) {                                  \
-      return checked_convert<type, double>(                           \
-          toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
+      /* Handle Half and BFloat16 overflow by returning infinity */   \
+      if (std::is_same_v<type, c10::Half> || std::is_same_v<type, c10::BFloat16> || 
+          std::is_same_v<type, c10::Float8_e5m2> || std::is_same_v<type, c10::Float8_e4m3fn> ||
+          std::is_same_v<type, c10::Float8_e5m2fnuz> || std::is_same_v<type, c10::Float8_e4m3fnuz> ||
+          std::is_same_v<type, c10::Float8_e8m0fnu>) { \
+        double val = toSymFloat().guard_float(__FILE__, __LINE__);    \
+        if (val > std::numeric_limits<type>::max()) {                 \
+          return std::numeric_limits<type>::infinity();               \
+        } else if (val < std::numeric_limits<type>::lowest()) {       \
+          return -std::numeric_limits<type>::infinity();              \
+        } else {                                                      \
+          return convert<type, double>(val);                          \
+        }                                                             \
+      } else {                                                        \
+        return checked_convert<type, double>(                         \
+            toSymFloat().guard_float(__FILE__, __LINE__), #type);     \
+      }                                                               \
     }                                                                 \
     if (Tag::HAS_b == tag) {                                          \
       return checked_convert<type, bool>(v.i, #type);                 \
@@ -135,6 +165,7 @@ class C10_API Scalar {
     }                                                                 \
     TORCH_CHECK(false)                                                \
   }
+
 
   // TODO: Support ComplexHalf accessor
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ACCESSOR)
