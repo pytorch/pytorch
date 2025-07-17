@@ -192,6 +192,47 @@ class TestNN(NNTestCase):
         MyModuleWithMixinBefore.call_super_init = False
         MyModuleWithMixinAfter.call_super_init = False
 
+    def test_module_device_dtype_properties(self):
+        """Test that modules have device and dtype properties that return correct types.
+        
+        This test addresses the issue where module.device and module.dtype were
+        returning Union[Tensor, Module] instead of torch.device and torch.dtype,
+        causing mypy type errors when used with torch.autocast.
+        """
+        # Test module with parameters
+        linear = nn.Linear(3, 5)
+        self.assertIsInstance(linear.device, torch.device)
+        self.assertIsInstance(linear.dtype, torch.dtype)
+        
+        # Test that device and dtype match the first parameter
+        first_param = next(linear.parameters())
+        self.assertEqual(linear.device, first_param.device)
+        self.assertEqual(linear.dtype, first_param.dtype)
+        
+        # Test module with only buffers
+        class BufferOnlyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer('buf', torch.randn(3, 4))
+        
+        buffer_module = BufferOnlyModule()
+        self.assertIsInstance(buffer_module.device, torch.device)
+        self.assertIsInstance(buffer_module.dtype, torch.dtype)
+        self.assertEqual(buffer_module.device, buffer_module.buf.device)
+        self.assertEqual(buffer_module.dtype, buffer_module.buf.dtype)
+        
+        # Test empty module (should raise RuntimeError)
+        empty_module = nn.Module()
+        with self.assertRaises(RuntimeError):
+            _ = empty_module.device
+        with self.assertRaises(RuntimeError):
+            _ = empty_module.dtype
+        
+        # Test the original issue: using module.device.type and module.dtype with autocast
+        # This should work without type errors after our fix
+        with torch.autocast(device_type=linear.device.type, dtype=linear.dtype):
+            pass  # Should not raise any errors
+
     def test_share_memory(self):
         class Net(nn.Module):
             def __init__(self) -> None:
