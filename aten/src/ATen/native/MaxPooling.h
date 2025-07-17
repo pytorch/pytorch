@@ -40,6 +40,8 @@ inline void check_max_pool1d(
     stride = kernel_size;
   }
 
+  int effective_kernel_size = (kernel_size[0] - 1) * dilation[0] + 1;
+
   TORCH_CHECK(
       kernel_size[0] > 0,
       "max_pool1d() kernel_size must be greater than zero, but got ",
@@ -49,11 +51,11 @@ inline void check_max_pool1d(
   TORCH_CHECK(
       padding[0] >= 0, "max_pool1d() padding must be non-negative, but got ", padding[0]);
   TORCH_CHECK(
-      padding[0] <= kernel_size[0] / 2,
-      "max_pool1d() padding should be at most half of kernel size, but got padding=",
+      padding[0] <= effective_kernel_size / 2,
+      "max_pool1d() padding should be at most half of effective kernel size, but got padding=",
       padding[0],
-      " and kernel_size=",
-      kernel_size[0]);
+      " and effective_kernel_size=",
+      effective_kernel_size);
   TORCH_CHECK(
       dilation[0] > 0, "max_pool1d() dilation must be greater than zero, but got ", dilation[0]);
 
