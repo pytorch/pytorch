@@ -79,11 +79,7 @@ template <typename Limit, typename T>
 inline constexpr bool greater_than_max(const T& x) {
   constexpr bool can_overflow =
       std::numeric_limits<T>::digits > std::numeric_limits<Limit>::digits;
-#ifdef _WIN32
-  return can_overflow && x > std::numeric_limits<Limit>::max;
-#else
-  return can_overflow && x > std::numeric_limits<Limit>::max();
-#endif
+  return can_overflow && x > (std::numeric_limits<Limit>::max)();
 }
 
 #ifdef __GNUC__
