@@ -1300,8 +1300,13 @@ class Reduction(Loops):
             )
             and config.split_reductions
         )
+
         if not (_is_static(reduction_numel_hint) and _is_static(numel_hint)):
             # We don't support unbacked symints
+            return ReductionHint.DEFAULT, 1
+
+        if reduction_type == "dot" :
+            # Don't split when doing native matmul
             return ReductionHint.DEFAULT, 1
 
         props = DeviceProperties.create(device)
@@ -1556,7 +1561,9 @@ class Reduction(Loops):
             and V.graph.sizevars.size_hint_or_throw(reduction_numel)
             < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
+            and not (reduction_type == "dot")
         ):
+            # When native matmul, don't unroll the dot reduction
             # NB: This works around https://github.com/pytorch/pytorch/issues/140457
             # since turning reductions into pointwise ops can exacerbate this problem
             return Pointwise.create(
@@ -1591,7 +1598,7 @@ class Reduction(Loops):
                 return split
 
         split = _maybe_increase_split(split)
-
+        
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available

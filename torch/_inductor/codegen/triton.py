@@ -978,7 +978,7 @@ class TritonOverrides(OpOverrides):
             # do not apply conversion to the intermediate type.
             return f"{x}.to(tl.int16).to(tl.uint8)"
 
-        if V.kernel.is_native_matmul():
+        if V.kernel.is_native_matmul:
             # do not promote float16 / bfloat16 to float32 during native matmul codegen
             out_dtype = triton_store_type(dtype)
         elif use_compute_types:
@@ -1967,13 +1967,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.features
         )
 
-    def is_native_matmul(self) -> bool:
-        if isinstance(self.current_node, SchedulerNode):
-            return (self.current_node.node.get_reduction_type() == "dot"
-                and torch._inductor.config.triton.enable_native_matmul)
-        else :
-            return False
-
     def init_cooperative_reduction(self):
         """One time setup code for cooperative reductions."""
         assert self.cooperative_reduction
@@ -2373,7 +2366,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if isinstance(index, sympy.Integer):
             if (
                 self.inside_reduction
-                and self.is_native_matmul()
+                and self.is_native_matmul
             ):
                 # Consider the following code:
                 #
@@ -2706,7 +2699,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if (
                 dtype in (torch.float16, torch.bfloat16)
                 and config.triton.codegen_upcast_to_fp32
-                and not self.is_native_matmul()
+                and not self.is_native_matmul
             ):
                 line += ".to(tl.float32)"
                 dtype = torch.float32
@@ -2961,7 +2954,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # When we do native matmtul codegen,
         # we don't want to keep the R0_BLOCK/R1_BLOCK in the accumulator.
         # so instead of naively calling dense_size_str(), we filter out
-        # reduction block from accumulator.
+        # reduction block from accumulator and only keep (Y,X).
         # In bmm (Z,Y,R)x(Z,R,X) case, we also remove z dimension from accumulator
         # because 3d (Z,Y,X) tl.dot is somehow slower than 2d tl.dot.
         # Instead, we force ZBLOCK to be always 1 during autotune.
@@ -4435,6 +4428,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     val = f"triton_helpers.constexpr_next_power_of_2(({numel} + RSPLIT - 1) // RSPLIT)"
                 else:
                     val = self._get_persistent_RBLOCK(tree.numel)
+                    if self.is_native_matmul:
+                        # tl.dot only supports shapes >= 16
+                        val = max(val, 16)
+
                 code.writeline(f"{tree.prefix.upper()}BLOCK: tl.constexpr = {val}")
 
             if tree.prefix == "x" and self.no_x_dim:
@@ -4563,6 +4560,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return TRITON_MAX_BLOCK[prefix.upper()]
 
     def _has_constant_mask(self, tree: IterationRangesRoot) -> bool:
+        if self.is_native_matmul:
+            # tl.dot requires the shape to be >= 16,
+            # so when matmul shape is smaller than 16, we always keep the mask.
+            if V.graph.sizevars.statically_known_lt(tree.numel, 16) :
+                return False 
+
         if not self.optimize_mask:
             return False
 
@@ -4707,7 +4710,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"{entry.name} = {line}",
                 ]
             )
-
         if self._has_constant_mask(entry):
             sizes = self.dense_size_str()
             code.writeline(f"{x}mask = tl.full({sizes}, True, tl.int1)")
