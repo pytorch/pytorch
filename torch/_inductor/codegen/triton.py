@@ -96,7 +96,6 @@ from .triton_utils import (
 )
 from .wrapper import SymbolicCallArg
 
-import traceback
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -1594,6 +1593,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
+    current_reductions = []
 
     def __init__(
         self,
@@ -2430,7 +2430,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         reduction_type: ReductionType,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
-        print("111111111".asdd)
         def maybe_upcast(value: CSEVariable) -> CSEVariable:
             # Math reductions in FP16/BF16 are less accurate because the Triton compiler does not
             # automatically promote to FP32 for accumulation. Additionally, max/min reductions
@@ -2527,21 +2526,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 """
             )
         
-        #if reduction_type in ('max') and reduction_type in ('argmax'):
-        #    reduction_type = "max_argmax"
+
         TritonKernel.current_reductions.append((src_dtype, reduction_type, value))
-        print("reduction_analog_map",reduction_analog_map)
+
 
         reduction_type_search = reduction_type
         reduction_analog_map = {
-            "argmax":"max"
+    
+            "max":"argmax"
         }
         if reduction_type_search in list(reduction_analog_map.keys()):
               reduction_type =   reduction_analog_map[reduction_type_search]
 
 
 
-        cache_key = (src_dtype, reduction_type_search, value)
+        cache_key = (src_dtype, reduction_type, value)
+
         if cache_key in self.cse.reduction_cache:
 
             return self.cse.reduction_cache[cache_key]
@@ -2553,7 +2553,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             var for var in masks if not prefix_is_reduction(var[0])
         )
         cond = " & ".join(masks)
-
         def where_cond(tval, fval):
             if not cond:
                 return tval
@@ -2730,7 +2729,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     final_reduction_define(
                         self.post_loop_combine, str(result_var), str(accumulator), None
                     )
-
+        print("self.cooperative_reduction",self.cooperative_reduction)
         if self.cooperative_reduction:
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
             exit_stack = contextlib.ExitStack()
@@ -2801,7 +2800,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             exit_stack.close()
 
         self.cse.reduction_cache[cache_key] = result_var
-
+        print("isinstance(result_var, tuple)",isinstance(result_var, tuple))
         if isinstance(result_var, tuple):
             assert all(isinstance(x, TritonCSEVariable) for x in result_var)
             self.outside_loop_vars.update(result_var)
@@ -2822,13 +2821,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             assert isinstance(result_var, TritonCSEVariable)
             self.outside_loop_vars.add(result_var)
 
-            # Match output dtype with input dtype
+            # Match output dtype with result_varinput dtype
             if result_var.dtype != original_dtypes[0]:
                 assert original_dtypes[0] is not None
                 self.post_loop_combine.writeline(
                     f"{result_var} = {result_var}.to({triton_compute_type(original_dtypes[0])})"
                 )
-
+        print('result_var',result_var)
         return result_var
 
     def _online_softmax_reduce(
