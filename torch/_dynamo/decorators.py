@@ -116,7 +116,7 @@ def skip(fn=None):
     fn = innermost_fn(fn)
     assert callable(fn)
     skip_code(fn.__code__)
-    fn._torchdynamo_disable = True
+    fn._torchdynamo_disable = True  # type: ignore[attr-defined]
     return fn
 
 
