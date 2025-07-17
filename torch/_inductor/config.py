@@ -457,6 +457,12 @@ force_same_precision: bool = Config(
     default=False,
 )
 
+# Size hints for multi-kernel dispatch.
+# A reasonable default value of this config would be [64, 256, 4096]
+# TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
+# as expected before turning it on for everyone.
+multi_kernel_hints: list[int] = []
+
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
 # ATen: default Pytorch ATen kernels.
@@ -580,6 +586,7 @@ realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8
+realize_acc_reads_size_threshold = 3 * (1024**3)
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
@@ -1310,7 +1317,7 @@ class triton:
     # - For Nvidia GPUs, the compute capability should be >= 9.0
     # - The innermost stride of a descriptor should be 1
     # - The size of the block shape in the innermost dimension should load / store
-    # atleast 16 bytes.
+    #   at least 16 bytes.
     # - Tensors are 16 byte aligned. Enabling this option therefore requires
     #   assume_aligned_inputs to also be enabled
     # TMA descriptors are only going to be generated if the above conditions
