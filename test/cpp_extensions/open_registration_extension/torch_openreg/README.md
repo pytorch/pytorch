@@ -125,7 +125,7 @@ graph LR
 
 ### Autoload
 
-- (TODO)
+- Device Autoload Mechanism
 
 ...
 
@@ -145,7 +145,6 @@ After installation, you can use the `openreg` device in Python just like any oth
 
 ```python
 import torch
-import torch_openreg
 
 if not torch.openreg.is_available():
     print("OpenReg backend is not available in this build.")
