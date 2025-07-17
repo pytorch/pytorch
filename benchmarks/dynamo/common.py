@@ -1100,15 +1100,16 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
             # interleave the runs to handle frequency scaling and load changes
             with maybe_mark_profile(p=p, mark="expected"):
-                timings[rep, 0], expected_output = timed(
-                    model,
-                    model_iter_fn,
-                    inputs,
-                    return_result=True,
-                    times=times,
-                    collect_outputs=args.collect_outputs,
-                    batch_size=kwargs.get("batch_size"),
-                )
+                with torch.compiler.set_stance("force_eager"):
+                    timings[rep, 0], expected_output = timed(
+                        model,
+                        model_iter_fn,
+                        inputs,
+                        return_result=True,
+                        times=times,
+                        collect_outputs=args.collect_outputs,
+                        batch_size=kwargs.get("batch_size"),
+                    )
 
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
@@ -2134,11 +2135,12 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_parallelize(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
-                correct_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
-                )
+                with torch.compiler.set_stance("force_eager"):
+                    model_copy = self.deepcopy_and_maybe_parallelize(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    correct_result = self.run_n_iterations(
+                        model_copy, clone_inputs(example_inputs), self.model_iter_fn
+                    )
             except Exception as e:
                 accuracy_status = (
                     "eager_1st_run_OOM"
@@ -2155,11 +2157,12 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_parallelize(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
-                correct_rerun_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
-                )
+                with torch.compiler.set_stance("force_eager"):
+                    model_copy = self.deepcopy_and_maybe_parallelize(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    correct_rerun_result = self.run_n_iterations(
+                        model_copy, clone_inputs(example_inputs), self.model_iter_fn
+                    )
             except Exception as e:
                 accuracy_status = (
                     "eager_2nd_run_OOM"
@@ -2434,9 +2437,10 @@ class BenchmarkRunner:
                         self.model_iter_fn, model, example_inputs, "eager", niters=1
                     )
 
-            baseline_timings = experiment(
-                model, example_inputs, mark="expected", **experiment_kwargs
-            )
+            with torch.compiler.set_stance("force_eager"):
+                baseline_timings = experiment(
+                    model, example_inputs, mark="expected", **experiment_kwargs
+                )
 
             if self.args.export_aot_inductor:
                 optimized_model_iter_fn = optimize_ctx
@@ -2587,17 +2591,18 @@ class BenchmarkRunner:
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"eager_{self.args.only}"
             ):
-                eager_latency, eager_peak_mem, _ = warmup(
-                    self.model_iter_fn, copy.deepcopy(model), example_inputs, "eager"
-                )
-                if self.args.use_warm_peak_memory:
-                    _, eager_peak_mem, _ = warmup(
-                        self.model_iter_fn,
-                        copy.deepcopy(model),
-                        example_inputs,
-                        "eager",
-                        niters=1,
+                with torch.compiler.set_stance("force_eager"):
+                    eager_latency, eager_peak_mem, _ = warmup(
+                        self.model_iter_fn, copy.deepcopy(model), example_inputs, "eager"
                     )
+                    if self.args.use_warm_peak_memory:
+                        _, eager_peak_mem, _ = warmup(
+                            self.model_iter_fn,
+                            copy.deepcopy(model),
+                            example_inputs,
+                            "eager",
+                            niters=1,
+                        )
 
             if self.args.export_aot_inductor:
                 optimized_model_iter_fn = optimize_ctx
@@ -3548,7 +3553,7 @@ def run(runner, args, original_dir=None):
         # batch_norm type of operators that work on batch dims.
         # TODO - Go through the failures for batch size = 2
         if args.batch_size is None:
-            if runner.suite_name == "huggingface":
+            if runner.suite_name in ("huggingface", "huggingface_llm"):
                 args.batch_size = 1
             elif runner.suite_name == "torchbench":
                 args.batch_size = 4
@@ -3558,7 +3563,7 @@ def run(runner, args, original_dir=None):
                 args.batch_size = 8
 
         # Remove sources of randomness
-        if runner.suite_name not in ("timm_models", "huggingface"):
+        if runner.suite_name not in ("timm_models", "huggingface", "huggingface_llm"):
             # TODO - Using train mode for timm_models and HF models. Move to train mode for Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
