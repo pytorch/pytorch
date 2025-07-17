@@ -133,7 +133,7 @@ LayoutPlanner::LayoutPlanner(
     }
   }
 
-  TORCH_CHECK_NOTNULL(algorithm_);
+  TORCH_CHECK(algorithm_ != nullptr, "algorithm can't be null");
 
   initialize_vectors(value_to_allocation_spec);
 
@@ -159,7 +159,9 @@ void LayoutPlanner::initialize_vectors(
 
   size_t i = 0;
   for (auto& [v, spec] : value_to_allocation_spec) {
-    TORCH_CHECK_LE(spec.lifetime.start, spec.lifetime.end);
+    TORCH_CHECK(
+        spec.lifetime.start <= spec.lifetime.end,
+        "lifetime start must be before lifetime end");
 
     planned_values_[i] = v->id();
     planned_values_historical_max_nbytes_[i] = spec.size;
