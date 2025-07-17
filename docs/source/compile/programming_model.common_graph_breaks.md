@@ -24,7 +24,7 @@ torch._logging.set_logs(graph_breaks=True)
 Below are some common graph breaks and some workarounds.
 
 ## Incorrect Code
-Your code may be wrong (that is, it doesn't run even without `torch.compile`!). In the code below, we made a typo in the `torch.sin` call by providing an extra argument. **Always try to turn off `torch.compile` and see if the code runs.**
+Your code might contain errors (meaning it doesn't execute even without `torch.compile`). In the example below, there's a typo in the `torch.sin` call due to an extra argument. **Always disable `torch.compile` to check if the code runs correctly.**
 
 
 ```{code-cell}
