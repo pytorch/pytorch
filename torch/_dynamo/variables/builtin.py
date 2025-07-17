@@ -21,6 +21,7 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
+import builtins
 import contextlib
 import functools
 import inspect
@@ -1337,6 +1338,29 @@ class BuiltinVariable(VariableTracker):
 
     call_int = _call_int_float
     call_float = _call_int_float
+
+    def call___build_class__(self, tx, *args, **kwargs):
+        def fail(args, kwargs):
+            unimplemented_v2(
+                gb_type="invalid call to __build_class__",
+                context=f"invalid args to __build_class__: {args} {kwargs}",
+                explanation="Encountered TypeError when trying to handle op __build_class__",
+                hints=[*graph_break_hints.DYNAMO_BUG],
+            )
+
+        try:
+            fn = args[0].get_function()
+        except NotImplementedError:
+            fail(args, kwargs)
+
+        if check_constant_args(args[1:], kwargs):
+            r = builtins.__build_class__(
+                fn,  # type: ignore[possibly-undefined]
+                *[a.as_python_constant() for a in args[1:]],
+            )
+            return VariableTracker.build(tx, r)
+        else:
+            fail(args, kwargs)
 
     def call_bool(self, tx: "InstructionTranslator", arg):
         # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.

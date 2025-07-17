@@ -2499,5 +2499,15 @@
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
       ]
     }
+  ],
+  "GB0251": [
+    {
+      "Gb_type": "invalid call to __build_class__",
+      "Context": "invalid args to __build_class__: {args} {kwargs}",
+      "Explanation": "Encountered TypeError when trying to handle op __build_class__",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
   ]
 }
