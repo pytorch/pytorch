@@ -69,6 +69,22 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
 
     @with_comms
+    def test_copy_broadcast_redistribute(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        # The src specs in this case are designed to not be compatible with the dst_specs, redistribute should happen
+        src_specs = [[Shard(1)], [Shard(1)], [Shard(1)]]
+        src_tensor = torch.randn((64, 1))
+
+        dst_tensor = torch.zeros(16, 32, 64, 128)
+        dst_specs = [[Replicate()], [Shard(1)], [Shard(2)]]
+        for dst_spec, src_spec in zip(dst_specs, src_specs):
+            src_dtensor = distribute_tensor(src_tensor, device_mesh, src_spec)
+            dst_dtensor = distribute_tensor(dst_tensor, device_mesh, dst_spec)
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
+
+    @with_comms
     def test_copy_broadcast(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         src_specs = [[Replicate()], [Shard(0)]]
