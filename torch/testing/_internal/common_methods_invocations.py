@@ -8848,22 +8848,14 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
 
 def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     def to_fp8_saturated(x: torch.Tensor, fp8_dtype: torch.dtype):
-        if fp8_dtype == e4m3_type:
-            x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
-        elif fp8_dtype == e5m2_type:
-            x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
-        else:
-            raise ValueError(f"Unsupported fp8_dtype: {fp8_dtype}")
+        max_val = E4M3_MAX_POS if fp8_dtype == e4m3_type else E5M2_MAX_POS
+        x = x.clamp(min=-1 * max_val, max=max_val)
         return x.to(fp8_dtype)
 
     def amax_to_scale(amax: torch.Tensor, float8_dtype: torch.dtype):
         EPS = 1e-12
-        if float8_dtype == e4m3_type:
-            scale_val = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
-        elif float8_dtype == e5m2_type:
-            scale_val = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
-        else:
-            raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
+        max_pos = E4M3_MAX_POS if float8_dtype == e4m3_type else E5M2_MAX_POS
+        scale_val = max_pos / torch.clamp(amax, min=EPS)
         return scale_val.to(dtype=torch.float32, device=device)
 
     def make_scale(x: float, float8_dtype: torch.dtype, dim=None):
