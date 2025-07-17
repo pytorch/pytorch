@@ -177,6 +177,8 @@ class Executor {
   // Helper method to get current timestamp in seconds
   int64_t getCurrentTimestampSeconds() const;
 
+  void initWeights(const std::shared_ptr<Weights>& weights);
+
   std::unique_ptr<GraphExecutorBase> graphExecutor_;
 
   const Placement placement_;

@@ -1871,7 +1871,7 @@ class GraphModule(torch.nn.Module):
         for problem in [Problem1, Problem2]:
             m = problem()
             m(torch.rand(64, 64))
-            # simpified torch.distributed.pipeline code
+            # simplified torch.distributed.pipeline code
             annotate_split_points(m, {"blocks.1": 1, "blocks.3": 1})
             gm = export(m, (torch.rand(64, 64),))
             torch.export.unflatten(gm)
@@ -8096,7 +8096,7 @@ def forward(self, x):
             str(schema),
             """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1]""",
         )
-        # serdes deserailizes tuple as list
+        # serdes deserializes tuple as list
         if need_serdes_test(self._testMethodName):
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
@@ -9232,7 +9232,7 @@ graph():
             x = torch.rand(5, 2, 2)
             model = Model()
 
-        # Manualy set the fake_device of fake tensors.
+        # Manually set the fake_device of fake tensors.
         x.fake_device = torch.device("cuda:0")
         for n, p in model.named_parameters():
             p.fake_device = torch.device("cuda:0")
@@ -13562,7 +13562,7 @@ graph():
         self.assertTrue(torch.allclose(m(x2), ep.module()(x2)))
         self.assertTrue(torch.allclose(m(x1), ep.module()(x1)))
 
-    @testing.expectedFailureSerDerNonStrict  # construtor is not serialized today
+    @testing.expectedFailureSerDerNonStrict  # constructor is not serialized today
     @testing.expectedFailureSerDer  # constructor is not serialized today
     @testing.expectedFailureRetraceability  # dynamo doesn't work with FlatApply op
     def test_capture_subclass_constructor(self):
