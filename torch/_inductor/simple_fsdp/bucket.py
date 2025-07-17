@@ -206,8 +206,8 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                         group_name,
                         ag_input_ir_nodes,
                         orig_ag_snodes,
-                        orig_wait_snodes,
                         name_to_buf,
+                        orig_wait_snodes,
                         schedule_snode,
                     )
                     # Swap out the original wait output buffer with the new buffer,

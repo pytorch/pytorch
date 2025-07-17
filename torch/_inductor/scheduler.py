@@ -52,7 +52,14 @@ from .ir import (
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
-from .simple_fsdp import bucket, bucket_utils, estimator, manual_bucket_plan, reorder
+from .simple_fsdp import (
+    auto_bucket_plan,
+    bucket,
+    bucket_utils,
+    estimator,
+    manual_bucket_plan,
+    reorder,
+)
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -2045,6 +2052,10 @@ class NodeUser:
 
 
 _post_grad_graph_counter = itertools.count()
+comm_cache, comp_cache = (
+    estimator.CommPerfCache(),
+    estimator.CompPerfCache(),
+)
 
 
 class Scheduler:
@@ -2155,15 +2166,11 @@ class Scheduler:
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
 
-        if config.simplefsdp.estimate_ir:
-            estimator.estimate_runtime(
-                self, self.nodes, config.simplefsdp.estimate_verbose
-            )
         if config.simplefsdp.enable_bucket_ir:
+            has_reduce_scatter = bucket_utils.has_reduce_scatter_in_nodes(self.nodes)
             assert not config.allow_buffer_reuse, (
                 "bucketing algorithm requires torch._inductor.config.allow_buffer_reuse to be False"
             )
-            has_reduce_scatter = bucket_utils.has_reduce_scatter_in_nodes(self.nodes)
             if config.simplefsdp.bucketing_type == "manual":
                 bucketing_plan = config.simplefsdp.bucketing_plan
                 if has_reduce_scatter:
@@ -2171,12 +2178,39 @@ class Scheduler:
                 all_gather_plan = manual_bucket_plan.get_all_gather_plan(
                     self, self.nodes, bucketing_plan
                 )
-                reduce_scatter_plan = manual_bucket_plan.get_reduce_scatter_plan(
-                    self, self.nodes, bucketing_plan
+                if has_reduce_scatter:
+                    reduce_scatter_plan = manual_bucket_plan.get_reduce_scatter_plan(
+                        self, self.nodes, bucketing_plan
+                    )
+            elif config.simplefsdp.bucketing_type == "auto":
+                print("start auto")
+                plans = auto_bucket_plan.get_bucketing_plan(
+                    self,
+                    self.nodes,
+                    self.name_to_buf,
+                    self.name_to_fused_node,
+                    has_reduce_scatter,
+                    comm_cache,
+                    comp_cache,
                 )
-            else:
+                if has_reduce_scatter:
+                    all_gather_plan, reduce_scatter_plan = plans
+                    print("all_gather_plan", all_gather_plan, len(all_gather_plan))
+                    print(
+                        "reduce_scatter_plan",
+                        reduce_scatter_plan,
+                        len(reduce_scatter_plan),
+                    )
+                else:
+                    all_gather_plan = plans
+                    print("all_gather_plan", all_gather_plan, len(all_gather_plan))
+            elif config.simplefsdp.bucketing_type == "dummy":
                 all_gather_plan = [[]]
                 reduce_scatter_plan = [[]]
+            else:
+                raise TypeError(
+                    f"Unsupported bucketing_type: {config.simplefsdp.bucketing_type}"
+                )
 
             self.nodes = bucket.bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 self,
