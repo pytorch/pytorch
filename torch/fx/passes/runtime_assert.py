@@ -461,6 +461,7 @@ def insert_deferred_runtime_asserts(
                                     ),
                                     keypath[2:],
                                 )
+
                             return go(
                                 graph.call_method(
                                     keypath[0].name, (node, keypath[1].idx)
@@ -468,6 +469,15 @@ def insert_deferred_runtime_asserts(
                                 keypath[2:],
                             )
                         elif isinstance(keypath[0], CallMethodKey):
+                            if keypath[0].name == "storage_offset":
+                                return go(
+                                    graph.call_function(
+                                        torch.ops.aten.sym_storage_offset.default,
+                                        (node,),
+                                    ),
+                                    keypath[1:],
+                                )
+
                             return go(
                                 graph.call_method(keypath[0].name, (node,)), keypath[1:]
                             )
