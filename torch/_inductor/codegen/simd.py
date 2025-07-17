@@ -41,6 +41,7 @@ from ..dependencies import MemoryDep, StarDep, WeakDep
 if TYPE_CHECKING:
     from ..ir import IRNode
 
+from ..debug import set_kernel_post_grad_provenance_tracing
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -51,7 +52,6 @@ from ..utils import (
     IndentedBuffer,
     Placeholder,
     prefix_is_reduction,
-    set_kernel_post_grad_provenance_tracing,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -1453,7 +1453,7 @@ class SIMDScheduling(BaseScheduling):
             with V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-            if config.trace.enabled:
+            if config.trace.provenance_tracking:
                 set_kernel_post_grad_provenance_tracing(
                     node_schedule,  # type: ignore[arg-type]
                     kernel_name,
@@ -1659,7 +1659,7 @@ class SIMDScheduling(BaseScheduling):
 
             kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
-            if config.trace.enabled:
+            if config.trace.provenance_tracking:
                 set_kernel_post_grad_provenance_tracing(
                     node_schedule, kernel.kernel_name
                 )
@@ -1844,7 +1844,7 @@ class SIMDScheduling(BaseScheduling):
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             # dump provenance node info for ComboKernelNode/ForeachKernel type
-            if config.trace.enabled:
+            if config.trace.provenance_tracking:
                 set_kernel_post_grad_provenance_tracing(
                     combo_kernel_node.snodes, kernel_name
                 )

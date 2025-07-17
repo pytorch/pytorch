@@ -13,7 +13,7 @@ import pickle
 import pstats
 import shutil
 import traceback
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any, Callable, IO, Optional, Union
 from unittest.mock import patch
 
@@ -31,6 +31,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
+from .ir import ExternKernelOut
 from .scheduler import (
     BaseSchedulerNode,
     FusedSchedulerNode,
@@ -313,14 +314,43 @@ def enable_aot_logging() -> Iterator[None]:
 # They are not stored in DebugContext because they are not set in
 # _inductor_triton_kernel_to_post_grad_node_info's Debug Context
 _inductor_post_to_pre_grad_nodes: dict[str, Any] = {}
+_inductor_triton_kernel_to_post_grad_node_info: dict[str, Any] = {}
 _pre_grad_graph_id: Optional[int] = None
+
+
+@contextlib.contextmanager
+def reset_provenance_globals() -> Iterator[None]:
+    """Context manager that resets provenance tracking globals upon entering
+    and restores their original values when exiting."""
+    global _pre_grad_graph_id
+    global _inductor_post_to_pre_grad_nodes
+    global _inductor_triton_kernel_to_post_grad_node_info
+
+    # Store original values
+    original_pre_grad_graph_id = _pre_grad_graph_id
+    original_post_to_pre_grad_nodes = _inductor_post_to_pre_grad_nodes.copy()
+    original_triton_kernel_to_post_grad_node_info = (
+        _inductor_triton_kernel_to_post_grad_node_info.copy()
+    )
+
+    # Reset to default values
+    _pre_grad_graph_id = -1
+    _inductor_post_to_pre_grad_nodes = {}
+    _inductor_triton_kernel_to_post_grad_node_info = {}
+
+    try:
+        yield
+    finally:
+        # Restore original values
+        _pre_grad_graph_id = original_pre_grad_graph_id
+        _inductor_post_to_pre_grad_nodes = original_post_to_pre_grad_nodes
+        _inductor_triton_kernel_to_post_grad_node_info = (
+            original_triton_kernel_to_post_grad_node_info
+        )
 
 
 class DebugContext:
     _counter = itertools.count()
-
-    # Used for provenance tracking
-    _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
@@ -557,25 +587,6 @@ class DebugFormatter:
     def output_code(self, filename: str, extension: str = "py") -> None:
         shutil.copy(filename, self.filename(f"output_code.{extension}"))
 
-    def log_inductor_triton_kernel_to_post_grad_node_info(
-        self, filename: str = "inductor_generated_kernel_to_post_grad_nodes.json"
-    ) -> tuple[dict[str, list[str]], dict[str, Any]]:
-        debug_info = {}
-        with self.fopen(filename, "w") as fd:
-            log.info("Writing provenance tracing debugging info to %s", fd.name)
-            debug_info = DebugContext._inductor_triton_kernel_to_post_grad_node_info
-            json.dump(debug_info, fd)
-        node_mapping = {}
-        if _pre_grad_graph_id:
-            with self.fopen(
-                "inductor_provenance_tracking_node_mappings.json", "w"
-            ) as fd:
-                node_mapping = create_node_mapping(
-                    _pre_grad_graph_id, _inductor_post_to_pre_grad_nodes, debug_info
-                )
-                json.dump(node_mapping, fd)
-        return debug_info, node_mapping
-
     def log_autotuning_results(
         self,
         name: str,
@@ -806,6 +817,73 @@ def create_node_mapping(
         log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)
         log.error(traceback.format_exc())
         return empty_return
+
+
+def dump_inductor_provenance_info(
+    filename: str = "inductor_generated_kernel_to_post_grad_nodes.json",
+) -> tuple[dict[str, list[str]], dict[str, Any]]:
+    global _pre_grad_graph_id
+    global _inductor_post_to_pre_grad_nodes
+    global _inductor_triton_kernel_to_post_grad_node_info
+    debug_info = _inductor_triton_kernel_to_post_grad_node_info.copy()
+    if config.trace.enabled:
+        with V.debug.fopen(filename, "w") as fd:
+            log.info("Writing provenance tracing debugging info to %s", fd.name)
+            json.dump(debug_info, fd)
+    node_mapping = {}
+    if _pre_grad_graph_id:
+        node_mapping = create_node_mapping(
+            _pre_grad_graph_id, _inductor_post_to_pre_grad_nodes, debug_info
+        )
+        if config.trace.enabled:
+            with V.debug.fopen(
+                "inductor_provenance_tracking_node_mappings.json", "w"
+            ) as fd:
+                json.dump(node_mapping, fd)
+    return debug_info, node_mapping
+
+
+def set_kernel_post_grad_provenance_tracing(
+    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
+    kernel_name: str,
+    is_extern: bool = False,
+) -> None:
+    from .codegen.simd_kernel_features import DisableReduction, EnableReduction
+
+    global _inductor_triton_kernel_to_post_grad_node_info
+    if is_extern:
+        assert isinstance(node_schedule, ExternKernelOut)
+        curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
+            kernel_name, []
+        )
+        # 'origins' on IR nodes gives what FX IR nodes contributed to any given fused kernel.
+        # "origin_node" is more precise and says that the contents of this node corresponds
+        # EXACTLY to the output of a particular FX node, but it's not always available
+        if node_schedule.origin_node:
+            origin_node_name = node_schedule.origin_node.name
+            if origin_node_name not in curr_node_info:
+                curr_node_info.append(origin_node_name)
+        else:
+            curr_node_info.extend(
+                origin.name
+                for origin in node_schedule.origins
+                if origin.name not in curr_node_info
+            )
+    else:
+        assert isinstance(node_schedule, list)
+        for snode in node_schedule:
+            if snode not in (EnableReduction, DisableReduction):
+                if snode.node is not None:
+                    curr_node_info = (
+                        _inductor_triton_kernel_to_post_grad_node_info.setdefault(
+                            kernel_name, []
+                        )
+                    )
+                    curr_node_info.extend(
+                        origin.name
+                        for origin in snode.node.origins
+                        if origin.name not in curr_node_info
+                    )
 
 
 def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
