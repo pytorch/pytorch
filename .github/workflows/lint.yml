@@ -28,6 +28,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
   get-changed-files:
+    if: github.repository_owner == 'pytorch'
     name: Get changed files
     uses: ./.github/workflows/_get-changed-files.yml
   lintrunner-clang:

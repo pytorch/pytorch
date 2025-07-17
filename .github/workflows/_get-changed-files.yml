@@ -12,13 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       changed-files: ${{ steps.get-files.outputs.changed-files }}
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Get changed files
         id: get-files
         env:
@@ -27,22 +27,22 @@ jobs:
           # Check if we're in a pull request context
           if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "pull_request_target" ]; then
             echo "Running in PR context"
-            
+
             # Get the PR number from the github context
             PR_NUMBER="${{ github.event.number }}"
-            
-            # Use gh CLI to get changed files in the PR
-            CHANGED_FILES=$(gh pr view $PR_NUMBER --json files --jq '.files[].path' | tr '\n' ' ' | sed 's/ $//')
-            
+
+                        # Use gh CLI to get changed files in the PR
+            CHANGED_FILES=$(gh pr view "$PR_NUMBER" --json files --jq '.files[].path' | tr '\n' ' ' | sed 's/ $//')
+
             if [ -z "$CHANGED_FILES" ]; then
               echo "No changed files found, setting to '*'"
               CHANGED_FILES="*"
             fi
-            
+
             echo "Changed files: $CHANGED_FILES"
-            echo "changed-files=$CHANGED_FILES" >> $GITHUB_OUTPUT
-            
+            echo "changed-files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
+
           else
             echo "Not in PR context, setting changed files to '*'"
-            echo "changed-files=*" >> $GITHUB_OUTPUT
-          fi 
+            echo "changed-files=*" >> "$GITHUB_OUTPUT"
+          fi
