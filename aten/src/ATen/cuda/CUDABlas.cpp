@@ -1847,8 +1847,12 @@ int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype, bool use_fa
   switch (scaling_type) {
     case ScalingType::BlockWise1x32:
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
-#if CUDA_VERSION >= 12080
+#if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 70000)
+#ifdef USE_ROCM
+      return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+#else
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+#endif // USE_ROCM
 #else
       TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales of 1x32 blocks is only supported for CUDA 12.8 and above");
 #endif // if CUDA_VERSION >= 12080
