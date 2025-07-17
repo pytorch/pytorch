@@ -3,11 +3,7 @@
 #endif
 
 #ifndef ROCM_ON_WINDOWS
-#ifdef TORCH_CUDA_USE_NVTX3
 #include <nvtx3/nvtx3.hpp>
-#else // TORCH_CUDA_USE_NVTX3
-#include <nvToolsExt.h>
-#endif // TORCH_CUDA_USE_NVTX3
 #else // ROCM_ON_WINDOWS
 #include <c10/util/Exception.h>
 #endif // ROCM_ON_WINDOWS
@@ -54,11 +50,7 @@ static void* device_nvtxRangeStart(const char* msg, std::intptr_t stream) {
 void initNvtxBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
-#ifdef TORCH_CUDA_USE_NVTX3
   auto nvtx = m.def_submodule("_nvtx", "nvtx3 bindings");
-#else
-  auto nvtx = m.def_submodule("_nvtx", "libNvToolsExt.so bindings");
-#endif
   nvtx.def("rangePushA", nvtxRangePushA);
   nvtx.def("rangePop", nvtxRangePop);
   nvtx.def("rangeStartA", nvtxRangeStartA);
