@@ -1115,7 +1115,7 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
 
 
-TOutputCode = TypeVar("TOutputCode", bound=OutputCode)
+TOutputCode = TypeVar("TOutputCode", bound="OutputCode")
 
 
 class AOTDispatchCompiler(Protocol):
