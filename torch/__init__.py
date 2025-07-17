@@ -34,10 +34,6 @@ from typing import (
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
-
-if TYPE_CHECKING:
-    from .types import Device, IntLikeType
-
 from torch._utils import (
     _functionalize_sync as _sync,
     _import_dotted_name,
@@ -51,6 +47,10 @@ from torch._utils_internal import (
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
 from torch.torch_version import __version__ as __version__
+
+
+if TYPE_CHECKING:
+    from torch.types import Device, IntLikeType
 
 
 __all__ = [
@@ -2210,6 +2210,7 @@ from torch import (
     testing as testing,
     types as types,
     utils as utils,
+    version as version,
     xpu as xpu,
 )
 from torch.signal import windows as windows
