@@ -356,10 +356,10 @@ void initPythonBindings(PyObject* module) {
           "       that expose CUDA device, stream and event synchronization activities. This feature is new\n"
           "       and currently disabled by default.\n"
           "    adjust_profiler_step (bool) : whether to adjust the profiler step to\n"
-          "       match the parent python event duration. This feature is new and currently disabled by default.\n",
-          "    disable_external_correlation (bool) : whether to disable external correlation\n",
-          "    profile_all_threads (bool) : whether to profile all threads\n",
-          "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n",
+          "       match the parent python event duration. This feature is new and currently disabled by default.\n"
+          "    disable_external_correlation (bool) : whether to disable external correlation\n"
+          "    profile_all_threads (bool) : whether to profile all threads\n"
+          "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n"
           "    custom_profiler_config (string) : Used to pass some configurations to the custom profiler backend.\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,

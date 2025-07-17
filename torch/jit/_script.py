@@ -704,10 +704,7 @@ if _enabled:
 
         @property
         def graph(self):
-            r"""Return a string representation of the internal graph for the ``forward`` method.
-
-            See :ref:`interpreting-graphs` for details.
-            """
+            r"""Return a string representation of the internal graph for the ``forward`` method."""
             return self._c._get_method("forward").graph
 
         @property
@@ -716,7 +713,6 @@ if _enabled:
             Return a string representation of the internal graph for the ``forward`` method.
 
             This graph will be preprocessed to inline all function and method calls.
-            See :ref:`interpreting-graphs` for details.
             """
             return self.forward.inlined_graph  # type: ignore[attr-defined]
 
@@ -725,7 +721,6 @@ if _enabled:
             r"""
             Return a pretty-printed representation (as valid Python syntax) of the internal graph for the ``forward`` method.
 
-            See :ref:`inspecting-code` for details.
             """
             return self.forward.code  # type: ignore[attr-defined]
 
@@ -740,7 +735,6 @@ if _enabled:
             [1] a ConstMap following the CONSTANT.cN format of the output in [0].
             The indices in the [0] output are keys to the underlying constant's values.
 
-            See :ref:`inspecting-code` for details.
             """
             r = self.forward.code_with_constants  # type: ignore[attr-defined]
             return (r[0], ConstMap(r[1]))
@@ -1246,7 +1240,7 @@ def script(
     subsequently passed by reference between Python and TorchScript with zero copy overhead.
 
     ``torch.jit.script`` can be used as a function for modules, functions, dictionaries and lists
-     and as a decorator ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
+     and as a decorator ``@torch.jit.script`` for torchscript-classes and functions.
 
     Args:
         obj (Callable, class, or nn.Module):  The ``nn.Module``, function, class type,
