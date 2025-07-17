@@ -640,13 +640,17 @@ class TestPatternMatcher(TestCase):
             return torch.nn.functional.relu(torch.addmm(input, mat1, mat2))
 
         def fn_addmm_gelu(input, mat1, mat2):
-            return torch.nn.functional.gelu(torch.addmm(input, mat1, mat2), approximate="tanh")
-        
+            return torch.nn.functional.gelu(
+                torch.addmm(input, mat1, mat2), approximate="tanh"
+            )
+
         def fn_add_mm_relu(input, mat1, mat2):
             return torch.nn.functional.relu(torch.add(input, torch.mm(mat1, mat2)))
 
         def fn_add_mm_gelu(input, mat1, mat2):
-            return torch.nn.functional.gelu(torch.add(input, torch.mm(mat1, mat2)), approximate="tanh")
+            return torch.nn.functional.gelu(
+                torch.add(input, torch.mm(mat1, mat2)), approximate="tanh"
+            )
 
         args = [
             torch.randn(20, device="cuda"),
@@ -666,7 +670,9 @@ class TestPatternMatcher(TestCase):
             self.assertTrue("_addmm_activation" in code)
 
         for fn in (fn_addmm_relu, fn_addmm_gelu):
-            actual, (code,) = run_and_get_code(torch.compile(fn, options={"max_autotune_gemm": True}), *args)
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, options={"max_autotune_gemm": True}), *args
+            )
             self.assertFalse("_addmm_activation" in code)
 
         args_not_replaced = [
@@ -678,7 +684,12 @@ class TestPatternMatcher(TestCase):
         ]
 
         for fn in (fn_addmm_relu, fn_addmm_gelu):
-            actual, (code,) = run_and_get_code(torch.compile(fn,), *args_not_replaced)
+            actual, (code,) = run_and_get_code(
+                torch.compile(
+                    fn,
+                ),
+                *args_not_replaced,
+            )
             self.assertFalse("_addmm_activation" in code)
 
     @inductor_config.patch(
