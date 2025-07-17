@@ -192,6 +192,9 @@ class LazyModuleMixin:
                     buf = buf.detach()
                 destination[prefix + name] = buf
 
+    def _lazy_load_pre_materialize_hook(self: _LazyProtocol):
+        pass
+
     def _lazy_load_hook(
         self: _LazyProtocol,
         state_dict,
@@ -223,6 +226,17 @@ class LazyModuleMixin:
                     if not is_lazy(input_param):
                         with torch.no_grad():
                             param.materialize(input_param.shape)
+        self._lazy_load_pre_materialize_hook()
+        if not self.has_uninitialized_params():
+            self._materialize()
+
+    def _materialize(self):
+        self._initialize_hook.remove()
+        self._load_hook.remove()
+        delattr(self, "_initialize_hook")
+        delattr(self, "_load_hook")
+        if self.cls_to_become is not None:
+            self.__class__ = self.cls_to_become
 
     def initialize_parameters(self: _LazyProtocol, *args, **kwargs):
         r"""Initialize parameters according to the input batch properties.
@@ -261,12 +275,7 @@ class LazyModuleMixin:
         module.initialize_parameters(*args, **kwargs)
         if module.has_uninitialized_params():
             raise RuntimeError(f'module {self._get_name()} has not been fully initialized')
-        module._initialize_hook.remove()
-        module._load_hook.remove()
-        delattr(module, '_initialize_hook')
-        delattr(module, '_load_hook')
-        if module.cls_to_become is not None:
-            module.__class__ = module.cls_to_become
+        self._materialize()
     # fmt: on
 
     def _replicate_for_data_parallel(self: _LazyProtocol):
