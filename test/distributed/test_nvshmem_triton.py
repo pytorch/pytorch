@@ -198,7 +198,7 @@ def sync_test_kernel(
         # Put to all other ranks
         i = 1
         while i < n_pes:
-            nvshmem.putmem_block(dst_ptr, src_ptr, numel, i)  # 4 bytes for int32
+            nvshmem.putmem_block(dst_ptr, src_ptr, numel, i)
             i += 1
     # Synchronize all PEs (only local stores visibility, no remote guarantee)
     nvshmem.sync_all()
