@@ -16,11 +16,6 @@ on:
         type: boolean
         default: true
         description: If set, upload generated build artifacts.
-      build-with-debug:
-        required: false
-        type: boolean
-        default: false
-        description: If set, build in debug mode.
       sync-tag:
         required: false
         type: string
@@ -87,7 +82,6 @@ on:
         required: false
         type: number
         default: 1
-
       allow-reuse-old-whl:
         description: |
           If set, the build try to pull an old wheel from s3 that was built on a
@@ -105,7 +99,6 @@ on:
         required: false
         description: |
           FB app token to write to scribe endpoint
-
 
     outputs:
       docker-image:
@@ -247,8 +240,6 @@ jobs:
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          # TODO duplicated
-          AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           # Do not set SCCACHE_S3_KEY_PREFIX to share the cache between all build jobs
@@ -260,7 +251,6 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           DOCKER_IMAGE_S390X: ${{ inputs.docker-image-name }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
-          DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
@@ -295,7 +285,6 @@ jobs:
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e AWS_DEFAULT_REGION \
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
