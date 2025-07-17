@@ -11,7 +11,12 @@ from .lazy import LazyModuleMixin
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = [
+    "Bilinear",
+    "Identity",
+    "LazyLinear",
+    "Linear",
+]
 
 
 class Identity(Module):
@@ -320,11 +325,5 @@ class LazyLinear(LazyModuleMixin, Linear):
             )
             self.in_features = input.shape[-1]
 
-
-Bilinear.__module__ = "torch.nn"
-Identity.__module__ = "torch.nn"
-LazyLinear.__module__ = "torch.nn"
-Linear.__module__ = "torch.nn"
-NonDynamicallyQuantizableLinear.__module__ = "torch.nn"
 
 # TODO: PartialLinear - maybe in sparse?

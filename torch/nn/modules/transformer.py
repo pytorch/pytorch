@@ -16,7 +16,13 @@ from .module import Module
 from .normalization import LayerNorm
 
 
-__all__: list[str] = []
+__all__ = [
+    "Transformer",
+    "TransformerEncoder",
+    "TransformerDecoder",
+    "TransformerEncoderLayer",
+    "TransformerDecoderLayer",
+]
 
 
 def _generate_square_subsequent_mask(
@@ -1226,10 +1232,3 @@ def _detect_is_causal_mask(
             make_causal = False
 
     return make_causal
-
-
-Transformer.__module__ = "torch.nn"
-TransformerEncoder.__module__ = "torch.nn"
-TransformerDecoder.__module__ = "torch.nn"
-TransformerEncoderLayer.__module__ = "torch.nn"
-TransformerDecoderLayer.__module__ = "torch.nn"

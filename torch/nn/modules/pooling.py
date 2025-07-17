@@ -18,7 +18,28 @@ from .module import Module
 from .utils import _pair, _single, _triple
 
 
-__all__: list[str] = []
+__all__ = [
+    "MaxPool1d",
+    "MaxPool2d",
+    "MaxPool3d",
+    "MaxUnpool1d",
+    "MaxUnpool2d",
+    "MaxUnpool3d",
+    "AvgPool1d",
+    "AvgPool2d",
+    "AvgPool3d",
+    "FractionalMaxPool2d",
+    "FractionalMaxPool3d",
+    "LPPool1d",
+    "LPPool2d",
+    "LPPool3d",
+    "AdaptiveMaxPool1d",
+    "AdaptiveMaxPool2d",
+    "AdaptiveMaxPool3d",
+    "AdaptiveAvgPool1d",
+    "AdaptiveAvgPool2d",
+    "AdaptiveAvgPool3d",
+]
 
 
 class _MaxPoolNd(Module):
@@ -1517,25 +1538,3 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
     def forward(self, input: Tensor) -> Tensor:
         """Runs the forward pass."""
         return F.adaptive_avg_pool3d(input, self.output_size)
-
-
-AdaptiveAvgPool1d.__module__ = "torch.nn"
-AdaptiveAvgPool2d.__module__ = "torch.nn"
-AdaptiveAvgPool3d.__module__ = "torch.nn"
-AdaptiveMaxPool1d.__module__ = "torch.nn"
-AdaptiveMaxPool2d.__module__ = "torch.nn"
-AdaptiveMaxPool3d.__module__ = "torch.nn"
-AvgPool1d.__module__ = "torch.nn"
-AvgPool2d.__module__ = "torch.nn"
-AvgPool3d.__module__ = "torch.nn"
-FractionalMaxPool2d.__module__ = "torch.nn"
-FractionalMaxPool3d.__module__ = "torch.nn"
-LPPool1d.__module__ = "torch.nn"
-LPPool2d.__module__ = "torch.nn"
-LPPool3d.__module__ = "torch.nn"
-MaxPool1d.__module__ = "torch.nn"
-MaxPool2d.__module__ = "torch.nn"
-MaxPool3d.__module__ = "torch.nn"
-MaxUnpool1d.__module__ = "torch.nn"
-MaxUnpool2d.__module__ = "torch.nn"
-MaxUnpool3d.__module__ = "torch.nn"

@@ -27,6 +27,7 @@ __all__ = [
     "register_module_buffer_registration_hook",
     "register_module_module_registration_hook",
     "register_module_parameter_registration_hook",
+    "Module",
 ]
 
 _grad_t = Union[tuple[Tensor, ...], Tensor]
@@ -3031,6 +3032,3 @@ class Module:
         See :func:`torch.compile` for details on the arguments for this function.
         """
         self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
-
-
-Module.__module__ = "torch.nn"

@@ -16,7 +16,16 @@ from torch.nn.utils.rnn import PackedSequence
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = [
+    "RNNBase",
+    "RNN",
+    "LSTM",
+    "GRU",
+    "RNNCellBase",
+    "RNNCell",
+    "LSTMCell",
+    "GRUCell",
+]
 
 _rnn_impls = {
     "RNN_TANH": _VF.rnn_tanh,
@@ -1815,13 +1824,3 @@ class GRUCell(RNNCellBase):
             ret = ret.squeeze(0)
 
         return ret
-
-
-GRU.__module__ = "torch.nn"
-GRUCell.__module__ = "torch.nn"
-LSTM.__module__ = "torch.nn"
-LSTMCell.__module__ = "torch.nn"
-RNN.__module__ = "torch.nn"
-RNNBase.__module__ = "torch.nn"
-RNNCell.__module__ = "torch.nn"
-RNNCellBase.__module__ = "torch.nn"

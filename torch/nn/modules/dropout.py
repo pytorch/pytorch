@@ -4,7 +4,14 @@ from torch import Tensor
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = [
+    "Dropout",
+    "Dropout1d",
+    "Dropout2d",
+    "Dropout3d",
+    "AlphaDropout",
+    "FeatureAlphaDropout",
+]
 
 
 class _DropoutNd(Module):
@@ -314,11 +321,3 @@ class FeatureAlphaDropout(_DropoutNd):
         Runs the forward pass.
         """
         return F.feature_alpha_dropout(input, self.p, self.training)
-
-
-AlphaDropout.__module__ = "torch.nn"
-Dropout.__module__ = "torch.nn"
-Dropout1d.__module__ = "torch.nn"
-Dropout2d.__module__ = "torch.nn"
-Dropout3d.__module__ = "torch.nn"
-FeatureAlphaDropout.__module__ = "torch.nn"

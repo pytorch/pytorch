@@ -4,7 +4,7 @@ from torch import Tensor
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = ["PairwiseDistance", "CosineSimilarity"]
 
 
 class PairwiseDistance(Module):
@@ -98,7 +98,3 @@ class CosineSimilarity(Module):
         Runs the forward pass.
         """
         return F.cosine_similarity(x1, x2, self.dim, self.eps)
-
-
-CosineSimilarity.__module__ = "torch.nn"
-PairwiseDistance.__module__ = "torch.nn"

@@ -7,7 +7,7 @@ from torch.types import _size
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = ["Flatten", "Unflatten"]
 
 
 class Flatten(Module):
@@ -168,7 +168,3 @@ class Unflatten(Module):
         Returns the extra representation of the module.
         """
         return f"dim={self.dim}, unflattened_size={self.unflattened_size}"
-
-
-Flatten.__module__ = "torch.nn"
-Unflatten.__module__ = "torch.nn"

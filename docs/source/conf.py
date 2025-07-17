@@ -2938,6 +2938,8 @@ coverage_ignore_classes = [
     "OrderedDictWrapper",
     # torch.nn.modules.container
     "Container",
+    # torch.nn.modules.linear
+    "NonDynamicallyQuantizableLinear",
     # torch.nn.modules.loss
     "NLLLoss2d",
     # torch.nn.modules.normalization

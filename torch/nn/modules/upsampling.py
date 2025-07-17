@@ -8,7 +8,7 @@ from torch.nn.common_types import _ratio_2_t, _ratio_any_t, _size_2_t, _size_any
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = ["Upsample", "UpsamplingNearest2d", "UpsamplingBilinear2d"]
 
 
 class Upsample(Module):
@@ -297,8 +297,3 @@ class UpsamplingBilinear2d(Upsample):
         scale_factor: Optional[_ratio_2_t] = None,
     ) -> None:
         super().__init__(size, scale_factor, mode="bilinear", align_corners=True)
-
-
-Upsample.__module__ = "torch.nn"
-UpsamplingBilinear2d.__module__ = "torch.nn"
-UpsamplingNearest2d.__module__ = "torch.nn"

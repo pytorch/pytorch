@@ -15,7 +15,20 @@ from .module import Module
 from .utils import _pair, _reverse_repeat_tuple, _single, _triple
 
 
-__all__: list[str] = []
+__all__ = [
+    "Conv1d",
+    "Conv2d",
+    "Conv3d",
+    "ConvTranspose1d",
+    "ConvTranspose2d",
+    "ConvTranspose3d",
+    "LazyConv1d",
+    "LazyConv2d",
+    "LazyConv3d",
+    "LazyConvTranspose1d",
+    "LazyConvTranspose2d",
+    "LazyConvTranspose3d",
+]
 
 convolution_notes = {
     "groups_note": r"""* :attr:`groups` controls the connections between inputs and outputs.
@@ -1848,17 +1861,3 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
 
     def _get_num_spatial_dims(self) -> int:
         return 3
-
-
-Conv1d.__module__ = "torch.nn"
-Conv2d.__module__ = "torch.nn"
-Conv3d.__module__ = "torch.nn"
-ConvTranspose1d.__module__ = "torch.nn"
-ConvTranspose2d.__module__ = "torch.nn"
-ConvTranspose3d.__module__ = "torch.nn"
-LazyConv1d.__module__ = "torch.nn"
-LazyConv2d.__module__ = "torch.nn"
-LazyConv3d.__module__ = "torch.nn"
-LazyConvTranspose1d.__module__ = "torch.nn"
-LazyConvTranspose2d.__module__ = "torch.nn"
-LazyConvTranspose3d.__module__ = "torch.nn"

@@ -5,7 +5,7 @@ from torch.nn.common_types import _size_any_t
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = ["Fold", "Unfold"]
 
 
 class Fold(Module):
@@ -333,7 +333,3 @@ class Unfold(Module):
             "kernel_size={kernel_size}, dilation={dilation}, padding={padding},"
             " stride={stride}".format(**self.__dict__)
         )
-
-
-Fold.__module__ = "torch.nn"
-Unfold.__module__ = "torch.nn"

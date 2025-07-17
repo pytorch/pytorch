@@ -12,7 +12,37 @@ from .linear import NonDynamicallyQuantizableLinear
 from .module import Module
 
 
-__all__: list[str] = []
+__all__: list[str] = [
+    "Threshold",
+    "ReLU",
+    "RReLU",
+    "Hardtanh",
+    "ReLU6",
+    "Sigmoid",
+    "Hardsigmoid",
+    "Tanh",
+    "SiLU",
+    "Mish",
+    "Hardswish",
+    "ELU",
+    "CELU",
+    "SELU",
+    "GLU",
+    "GELU",
+    "Hardshrink",
+    "LeakyReLU",
+    "LogSigmoid",
+    "Softplus",
+    "Softshrink",
+    "MultiheadAttention",
+    "PReLU",
+    "Softsign",
+    "Tanhshrink",
+    "Softmin",
+    "Softmax",
+    "Softmax2d",
+    "LogSoftmax",
+]
 
 
 class Threshold(Module):
@@ -59,7 +89,9 @@ class Threshold(Module):
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
     def forward(self, input: Tensor) -> Tensor:
-        """Runs the forward pass."""
+        """
+        Runs the forward pass.
+        """
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
     def extra_repr(self) -> str:
@@ -1868,34 +1900,3 @@ class LogSoftmax(Module):
         Return the extra representation of the module.
         """
         return f"dim={self.dim}"
-
-
-CELU.__module__ = "torch.nn"
-ELU.__module__ = "torch.nn"
-GELU.__module__ = "torch.nn"
-GLU.__module__ = "torch.nn"
-Hardswish.__module__ = "torch.nn"
-Hardshrink.__module__ = "torch.nn"
-Hardsigmoid.__module__ = "torch.nn"
-Hardtanh.__module__ = "torch.nn"
-LeakyReLU.__module__ = "torch.nn"
-LogSigmoid.__module__ = "torch.nn"
-LogSoftmax.__module__ = "torch.nn"
-Mish.__module__ = "torch.nn"
-MultiheadAttention.__module__ = "torch.nn"
-PReLU.__module__ = "torch.nn"
-ReLU.__module__ = "torch.nn"
-ReLU6.__module__ = "torch.nn"
-RReLU.__module__ = "torch.nn"
-SELU.__module__ = "torch.nn"
-SiLU.__module__ = "torch.nn"
-Sigmoid.__module__ = "torch.nn"
-Softmax.__module__ = "torch.nn"
-Softmax2d.__module__ = "torch.nn"
-Softmin.__module__ = "torch.nn"
-Softplus.__module__ = "torch.nn"
-Softshrink.__module__ = "torch.nn"
-Softsign.__module__ = "torch.nn"
-Tanh.__module__ = "torch.nn"
-Tanhshrink.__module__ = "torch.nn"
-Threshold.__module__ = "torch.nn"

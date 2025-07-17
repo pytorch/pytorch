@@ -11,7 +11,7 @@ from ._functions import CrossMapLRN2d as _cross_map_lrn2d
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = ["LocalResponseNorm", "CrossMapLRN2d", "LayerNorm", "GroupNorm", "RMSNorm"]
 
 
 class LocalResponseNorm(Module):
@@ -426,9 +426,3 @@ class RMSNorm(Module):
 # TODO: ContrastiveNorm2d
 # TODO: DivisiveNorm2d
 # TODO: SubtractiveNorm2d
-
-CrossMapLRN2d.__module__ = "torch.nn"
-GroupNorm.__module__ = "torch.nn"
-LayerNorm.__module__ = "torch.nn"
-LocalResponseNorm.__module__ = "torch.nn"
-RMSNorm.__module__ = "torch.nn"

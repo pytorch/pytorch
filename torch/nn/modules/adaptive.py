@@ -12,7 +12,7 @@ from .linear import Linear
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = ["AdaptiveLogSoftmaxWithLoss"]
 
 _ASMoutput = namedtuple("_ASMoutput", ["output", "loss"])
 
@@ -336,6 +336,3 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             )
             output[not_in_shortlist] = torch.argmax(log_prob, dim=1)
             return output
-
-
-AdaptiveLogSoftmaxWithLoss.__module__ = "torch.nn"

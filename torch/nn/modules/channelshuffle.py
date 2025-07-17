@@ -4,7 +4,7 @@ from torch import Tensor
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = ["ChannelShuffle"]
 
 
 class ChannelShuffle(Module):
@@ -60,6 +60,3 @@ class ChannelShuffle(Module):
         Return the extra representation of the module.
         """
         return f"groups={self.groups}"
-
-
-ChannelShuffle.__module__ = "torch.nn"

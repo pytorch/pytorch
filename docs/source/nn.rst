@@ -35,12 +35,12 @@ Containers
     :nosignatures:
     :template: classtemplate.rst
 
-    Module
-    Sequential
-    ModuleList
-    ModuleDict
-    ParameterList
-    ParameterDict
+    modules.module.Module
+    modules.container.Sequential
+    modules.container.ModuleList
+    modules.container.ModuleDict
+    modules.container.ParameterList
+    modules.container.ParameterDict
 
 Global Hooks For Module
 
@@ -68,20 +68,20 @@ Convolution Layers
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.Conv1d
-    nn.Conv2d
-    nn.Conv3d
-    nn.ConvTranspose1d
-    nn.ConvTranspose2d
-    nn.ConvTranspose3d
-    nn.LazyConv1d
-    nn.LazyConv2d
-    nn.LazyConv3d
-    nn.LazyConvTranspose1d
-    nn.LazyConvTranspose2d
-    nn.LazyConvTranspose3d
-    nn.Unfold
-    nn.Fold
+    nn.modules.conv.Conv1d
+    nn.modules.conv.Conv2d
+    nn.modules.conv.Conv3d
+    nn.modules.conv.ConvTranspose1d
+    nn.modules.conv.ConvTranspose2d
+    nn.modules.conv.ConvTranspose3d
+    nn.modules.conv.LazyConv1d
+    nn.modules.conv.LazyConv2d
+    nn.modules.conv.LazyConv3d
+    nn.modules.conv.LazyConvTranspose1d
+    nn.modules.conv.LazyConvTranspose2d
+    nn.modules.conv.LazyConvTranspose3d
+    nn.modules.fold.Unfold
+    nn.modules.fold.Fold
 
 Pooling layers
 ----------------------------------
@@ -91,26 +91,26 @@ Pooling layers
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.MaxPool1d
-    nn.MaxPool2d
-    nn.MaxPool3d
-    nn.MaxUnpool1d
-    nn.MaxUnpool2d
-    nn.MaxUnpool3d
-    nn.AvgPool1d
-    nn.AvgPool2d
-    nn.AvgPool3d
-    nn.FractionalMaxPool2d
-    nn.FractionalMaxPool3d
-    nn.LPPool1d
-    nn.LPPool2d
-    nn.LPPool3d
-    nn.AdaptiveMaxPool1d
-    nn.AdaptiveMaxPool2d
-    nn.AdaptiveMaxPool3d
-    nn.AdaptiveAvgPool1d
-    nn.AdaptiveAvgPool2d
-    nn.AdaptiveAvgPool3d
+    nn.modules.pooling.MaxPool1d
+    nn.modules.pooling.MaxPool2d
+    nn.modules.pooling.MaxPool3d
+    nn.modules.pooling.MaxUnpool1d
+    nn.modules.pooling.MaxUnpool2d
+    nn.modules.pooling.MaxUnpool3d
+    nn.modules.pooling.AvgPool1d
+    nn.modules.pooling.AvgPool2d
+    nn.modules.pooling.AvgPool3d
+    nn.modules.pooling.FractionalMaxPool2d
+    nn.modules.pooling.FractionalMaxPool3d
+    nn.modules.pooling.LPPool1d
+    nn.modules.pooling.LPPool2d
+    nn.modules.pooling.LPPool3d
+    nn.modules.pooling.AdaptiveMaxPool1d
+    nn.modules.pooling.AdaptiveMaxPool2d
+    nn.modules.pooling.AdaptiveMaxPool3d
+    nn.modules.pooling.AdaptiveAvgPool1d
+    nn.modules.pooling.AdaptiveAvgPool2d
+    nn.modules.pooling.AdaptiveAvgPool3d
 
 Padding Layers
 --------------
@@ -120,21 +120,21 @@ Padding Layers
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.ReflectionPad1d
-    nn.ReflectionPad2d
-    nn.ReflectionPad3d
-    nn.ReplicationPad1d
-    nn.ReplicationPad2d
-    nn.ReplicationPad3d
-    nn.ZeroPad1d
-    nn.ZeroPad2d
-    nn.ZeroPad3d
-    nn.ConstantPad1d
-    nn.ConstantPad2d
-    nn.ConstantPad3d
-    nn.CircularPad1d
-    nn.CircularPad2d
-    nn.CircularPad3d
+    nn.modules.padding.ReflectionPad1d
+    nn.modules.padding.ReflectionPad2d
+    nn.modules.padding.ReflectionPad3d
+    nn.modules.padding.ReplicationPad1d
+    nn.modules.padding.ReplicationPad2d
+    nn.modules.padding.ReplicationPad3d
+    nn.modules.padding.ZeroPad1d
+    nn.modules.padding.ZeroPad2d
+    nn.modules.padding.ZeroPad3d
+    nn.modules.padding.ConstantPad1d
+    nn.modules.padding.ConstantPad2d
+    nn.modules.padding.ConstantPad3d
+    nn.modules.padding.CircularPad1d
+    nn.modules.padding.CircularPad2d
+    nn.modules.padding.CircularPad3d
 
 Non-linear Activations (weighted sum, nonlinearity)
 ---------------------------------------------------
@@ -144,31 +144,31 @@ Non-linear Activations (weighted sum, nonlinearity)
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.ELU
-    nn.Hardshrink
-    nn.Hardsigmoid
-    nn.Hardtanh
-    nn.Hardswish
-    nn.LeakyReLU
-    nn.LogSigmoid
-    nn.MultiheadAttention
-    nn.PReLU
-    nn.ReLU
-    nn.ReLU6
-    nn.RReLU
-    nn.SELU
-    nn.CELU
-    nn.GELU
-    nn.Sigmoid
-    nn.SiLU
-    nn.Mish
-    nn.Softplus
-    nn.Softshrink
-    nn.Softsign
-    nn.Tanh
-    nn.Tanhshrink
-    nn.Threshold
-    nn.GLU
+    nn.modules.activation.ELU
+    nn.modules.activation.Hardshrink
+    nn.modules.activation.Hardsigmoid
+    nn.modules.activation.Hardtanh
+    nn.modules.activation.Hardswish
+    nn.modules.activation.LeakyReLU
+    nn.modules.activation.LogSigmoid
+    nn.modules.activation.MultiheadAttention
+    nn.modules.activation.PReLU
+    nn.modules.activation.ReLU
+    nn.modules.activation.ReLU6
+    nn.modules.activation.RReLU
+    nn.modules.activation.SELU
+    nn.modules.activation.CELU
+    nn.modules.activation.GELU
+    nn.modules.activation.Sigmoid
+    nn.modules.activation.SiLU
+    nn.modules.activation.Mish
+    nn.modules.activation.Softplus
+    nn.modules.activation.Softshrink
+    nn.modules.activation.Softsign
+    nn.modules.activation.Tanh
+    nn.modules.activation.Tanhshrink
+    nn.modules.activation.Threshold
+    nn.modules.activation.GLU
 
 Non-linear Activations (other)
 ------------------------------
@@ -178,11 +178,11 @@ Non-linear Activations (other)
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.Softmin
-    nn.Softmax
-    nn.Softmax2d
-    nn.LogSoftmax
-    nn.AdaptiveLogSoftmaxWithLoss
+    nn.modules.activation.Softmin
+    nn.modules.activation.Softmax
+    nn.modules.activation.Softmax2d
+    nn.modules.activation.LogSoftmax
+    nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
 
 Normalization Layers
 ----------------------------------
@@ -192,23 +192,23 @@ Normalization Layers
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.BatchNorm1d
-    nn.BatchNorm2d
-    nn.BatchNorm3d
-    nn.LazyBatchNorm1d
-    nn.LazyBatchNorm2d
-    nn.LazyBatchNorm3d
-    nn.GroupNorm
-    nn.SyncBatchNorm
-    nn.InstanceNorm1d
-    nn.InstanceNorm2d
-    nn.InstanceNorm3d
-    nn.LazyInstanceNorm1d
-    nn.LazyInstanceNorm2d
-    nn.LazyInstanceNorm3d
-    nn.LayerNorm
-    nn.LocalResponseNorm
-    nn.RMSNorm
+    nn.modules.batchnorm.BatchNorm1d
+    nn.modules.batchnorm.BatchNorm2d
+    nn.modules.batchnorm.BatchNorm3d
+    nn.modules.batchnorm.LazyBatchNorm1d
+    nn.modules.batchnorm.LazyBatchNorm2d
+    nn.modules.batchnorm.LazyBatchNorm3d
+    nn.modules.normalization.GroupNorm
+    nn.modules.batchnorm.SyncBatchNorm
+    nn.modules.instancenorm.InstanceNorm1d
+    nn.modules.instancenorm.InstanceNorm2d
+    nn.modules.instancenorm.InstanceNorm3d
+    nn.modules.instancenorm.LazyInstanceNorm1d
+    nn.modules.instancenorm.LazyInstanceNorm2d
+    nn.modules.instancenorm.LazyInstanceNorm3d
+    nn.modules.normalization.LayerNorm
+    nn.modules.normalization.LocalResponseNorm
+    nn.modules.normalization.RMSNorm
 
 Recurrent Layers
 ----------------
@@ -218,13 +218,13 @@ Recurrent Layers
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.RNNBase
-    nn.RNN
-    nn.LSTM
-    nn.GRU
-    nn.RNNCell
-    nn.LSTMCell
-    nn.GRUCell
+    nn.modules.rnn.RNNBase
+    nn.modules.rnn.RNN
+    nn.modules.rnn.LSTM
+    nn.modules.rnn.GRU
+    nn.modules.rnn.RNNCell
+    nn.modules.rnn.LSTMCell
+    nn.modules.rnn.GRUCell
 
 Transformer Layers
 ----------------------------------
@@ -234,11 +234,11 @@ Transformer Layers
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.Transformer
-    nn.TransformerEncoder
-    nn.TransformerDecoder
-    nn.TransformerEncoderLayer
-    nn.TransformerDecoderLayer
+    nn.modules.transformer.Transformer
+    nn.modules.transformer.TransformerEncoder
+    nn.modules.transformer.TransformerDecoder
+    nn.modules.transformer.TransformerEncoderLayer
+    nn.modules.transformer.TransformerDecoderLayer
 
 Linear Layers
 ----------------------------------
@@ -248,10 +248,10 @@ Linear Layers
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.Identity
-    nn.Linear
-    nn.Bilinear
-    nn.LazyLinear
+    nn.modules.linear.Identity
+    nn.modules.linear.Linear
+    nn.modules.linear.Bilinear
+    nn.modules.linear.LazyLinear
 
 Dropout Layers
 --------------
@@ -261,12 +261,12 @@ Dropout Layers
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.Dropout
-    nn.Dropout1d
-    nn.Dropout2d
-    nn.Dropout3d
-    nn.AlphaDropout
-    nn.FeatureAlphaDropout
+    nn.modules.dropout.Dropout
+    nn.modules.dropout.Dropout1d
+    nn.modules.dropout.Dropout2d
+    nn.modules.dropout.Dropout3d
+    nn.modules.dropout.AlphaDropout
+    nn.modules.dropout.FeatureAlphaDropout
 
 Sparse Layers
 -------------
@@ -276,8 +276,8 @@ Sparse Layers
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.Embedding
-    nn.EmbeddingBag
+    nn.modules.sparse.Embedding
+    nn.modules.sparse.EmbeddingBag
 
 Distance Functions
 ------------------
@@ -287,8 +287,8 @@ Distance Functions
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.CosineSimilarity
-    nn.PairwiseDistance
+    nn.modules.distance.CosineSimilarity
+    nn.modules.distance.PairwiseDistance
 
 Loss Functions
 --------------
@@ -298,27 +298,27 @@ Loss Functions
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.L1Loss
-    nn.MSELoss
-    nn.CrossEntropyLoss
-    nn.CTCLoss
-    nn.NLLLoss
-    nn.PoissonNLLLoss
-    nn.GaussianNLLLoss
-    nn.KLDivLoss
-    nn.BCELoss
-    nn.BCEWithLogitsLoss
-    nn.MarginRankingLoss
-    nn.HingeEmbeddingLoss
-    nn.MultiLabelMarginLoss
-    nn.HuberLoss
-    nn.SmoothL1Loss
-    nn.SoftMarginLoss
-    nn.MultiLabelSoftMarginLoss
-    nn.CosineEmbeddingLoss
-    nn.MultiMarginLoss
-    nn.TripletMarginLoss
-    nn.TripletMarginWithDistanceLoss
+    nn.modules.loss.L1Loss
+    nn.modules.loss.MSELoss
+    nn.modules.loss.CrossEntropyLoss
+    nn.modules.loss.CTCLoss
+    nn.modules.loss.NLLLoss
+    nn.modules.loss.PoissonNLLLoss
+    nn.modules.loss.GaussianNLLLoss
+    nn.modules.loss.KLDivLoss
+    nn.modules.loss.BCELoss
+    nn.modules.loss.BCEWithLogitsLoss
+    nn.modules.loss.MarginRankingLoss
+    nn.modules.loss.HingeEmbeddingLoss
+    nn.modules.loss.MultiLabelMarginLoss
+    nn.modules.loss.HuberLoss
+    nn.modules.loss.SmoothL1Loss
+    nn.modules.loss.SoftMarginLoss
+    nn.modules.loss.MultiLabelSoftMarginLoss
+    nn.modules.loss.CosineEmbeddingLoss
+    nn.modules.loss.MultiMarginLoss
+    nn.modules.loss.TripletMarginLoss
+    nn.modules.loss.TripletMarginWithDistanceLoss
 
 Vision Layers
 ----------------
@@ -328,11 +328,11 @@ Vision Layers
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.PixelShuffle
-    nn.PixelUnshuffle
-    nn.Upsample
-    nn.UpsamplingNearest2d
-    nn.UpsamplingBilinear2d
+    nn.modules.pixelshuffle.PixelShuffle
+    nn.modules.pixelshuffle.PixelUnshuffle
+    nn.modules.upsampling.Upsample
+    nn.modules.upsampling.UpsamplingNearest2d
+    nn.modules.upsampling.UpsamplingBilinear2d
 
 Shuffle Layers
 ----------------
@@ -342,7 +342,7 @@ Shuffle Layers
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.ChannelShuffle
+    nn.modules.channelshuffle.ChannelShuffle
 
 DataParallel Layers (multi-GPU, distributed)
 --------------------------------------------
@@ -511,8 +511,8 @@ Utility functions in other modules
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.Flatten
-    nn.Unflatten
+    nn.modules.flatten.Flatten
+    nn.modules.flatten.Unflatten
 
 Quantized Functions
 --------------------

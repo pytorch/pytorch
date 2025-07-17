@@ -9,7 +9,30 @@ from .distance import PairwiseDistance
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = [
+    "L1Loss",
+    "NLLLoss",
+    "NLLLoss2d",
+    "PoissonNLLLoss",
+    "GaussianNLLLoss",
+    "KLDivLoss",
+    "MSELoss",
+    "BCELoss",
+    "BCEWithLogitsLoss",
+    "HingeEmbeddingLoss",
+    "MultiLabelMarginLoss",
+    "SmoothL1Loss",
+    "HuberLoss",
+    "SoftMarginLoss",
+    "CrossEntropyLoss",
+    "MultiLabelSoftMarginLoss",
+    "CosineEmbeddingLoss",
+    "MarginRankingLoss",
+    "MultiMarginLoss",
+    "TripletMarginLoss",
+    "TripletMarginWithDistanceLoss",
+    "CTCLoss",
+]
 
 
 class _Loss(Module):
@@ -2038,29 +2061,6 @@ class CTCLoss(_Loss):
             self.zero_infinity,
         )
 
-
-BCELoss.__module__ = "torch.nn"
-BCEWithLogitsLoss.__module__ = "torch.nn"
-CTCLoss.__module__ = "torch.nn"
-CosineEmbeddingLoss.__module__ = "torch.nn"
-CrossEntropyLoss.__module__ = "torch.nn"
-GaussianNLLLoss.__module__ = "torch.nn"
-HingeEmbeddingLoss.__module__ = "torch.nn"
-HuberLoss.__module__ = "torch.nn"
-KLDivLoss.__module__ = "torch.nn"
-L1Loss.__module__ = "torch.nn"
-MSELoss.__module__ = "torch.nn"
-MarginRankingLoss.__module__ = "torch.nn"
-MultiLabelMarginLoss.__module__ = "torch.nn"
-MultiLabelSoftMarginLoss.__module__ = "torch.nn"
-MultiMarginLoss.__module__ = "torch.nn"
-NLLLoss.__module__ = "torch.nn"
-NLLLoss2d.__module__ = "torch.nn"
-PoissonNLLLoss.__module__ = "torch.nn"
-SmoothL1Loss.__module__ = "torch.nn"
-SoftMarginLoss.__module__ = "torch.nn"
-TripletMarginLoss.__module__ = "torch.nn"
-TripletMarginWithDistanceLoss.__module__ = "torch.nn"
 
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight

@@ -18,7 +18,14 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping
 
 
-__all__: list[str] = []
+__all__ = [
+    "Container",
+    "Sequential",
+    "ModuleList",
+    "ModuleDict",
+    "ParameterList",
+    "ParameterDict",
+]
 
 T = TypeVar("T", bound=Module)
 _V = TypeVar("_V")
@@ -1019,11 +1026,3 @@ class ParameterDict(Module):
     def __ior__(self, other: ParameterDict) -> Self:
         self.update(other)
         return self
-
-
-Container.__module__ = "torch.nn"
-Sequential.__module__ = "torch.nn"
-ModuleDict.__module__ = "torch.nn"
-ModuleList.__module__ = "torch.nn"
-ParameterDict.__module__ = "torch.nn"
-ParameterList.__module__ = "torch.nn"

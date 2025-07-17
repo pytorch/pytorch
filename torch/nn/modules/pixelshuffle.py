@@ -4,7 +4,7 @@ from torch import Tensor
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = ["PixelShuffle", "PixelUnshuffle"]
 
 
 class PixelShuffle(Module):
@@ -125,7 +125,3 @@ class PixelUnshuffle(Module):
         Return the extra representation of the module.
         """
         return f"downscale_factor={self.downscale_factor}"
-
-
-PixelShuffle.__module__ = "torch.nn"
-PixelUnshuffle.__module__ = "torch.nn"

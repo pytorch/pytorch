@@ -11,7 +11,15 @@ from .lazy import LazyModuleMixin
 from .module import Module
 
 
-__all__: list[str] = []
+__all__ = [
+    "BatchNorm1d",
+    "LazyBatchNorm1d",
+    "BatchNorm2d",
+    "LazyBatchNorm2d",
+    "BatchNorm3d",
+    "LazyBatchNorm3d",
+    "SyncBatchNorm",
+]
 
 
 class _NormBase(Module):
@@ -879,12 +887,3 @@ class SyncBatchNorm(_BatchNorm):
             )
         del module
         return module_output
-
-
-BatchNorm1d.__module__ = "torch.nn"
-LazyBatchNorm1d.__module__ = "torch.nn"
-BatchNorm2d.__module__ = "torch.nn"
-LazyBatchNorm2d.__module__ = "torch.nn"
-BatchNorm3d.__module__ = "torch.nn"
-LazyBatchNorm3d.__module__ = "torch.nn"
-SyncBatchNorm.__module__ = "torch.nn"

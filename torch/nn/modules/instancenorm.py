@@ -8,7 +8,14 @@ from torch import Tensor
 from .batchnorm import _LazyNormBase, _NormBase
 
 
-__all__: list[str] = []
+__all__ = [
+    "InstanceNorm1d",
+    "InstanceNorm2d",
+    "InstanceNorm3d",
+    "LazyInstanceNorm1d",
+    "LazyInstanceNorm2d",
+    "LazyInstanceNorm3d",
+]
 
 
 class _InstanceNorm(_NormBase):
@@ -462,11 +469,3 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
     def _check_input_dim(self, input) -> None:
         if input.dim() not in (4, 5):
             raise ValueError(f"expected 4D or 5D input (got {input.dim()}D input)")
-
-
-InstanceNorm1d.__module__ = "torch.nn"
-InstanceNorm2d.__module__ = "torch.nn"
-InstanceNorm3d.__module__ = "torch.nn"
-LazyInstanceNorm1d.__module__ = "torch.nn"
-LazyInstanceNorm2d.__module__ = "torch.nn"
-LazyInstanceNorm3d.__module__ = "torch.nn"
