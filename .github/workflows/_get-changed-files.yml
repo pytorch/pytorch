@@ -14,11 +14,6 @@ jobs:
       changed-files: ${{ steps.get-files.outputs.changed-files }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Get changed files
         id: get-files
         env:
@@ -31,7 +26,7 @@ jobs:
             # Get the PR number from the github context
             PR_NUMBER="${{ github.event.number }}"
 
-                        # Use gh CLI to get changed files in the PR
+            # Use gh CLI to get changed files in the PR
             CHANGED_FILES=$(gh pr view "$PR_NUMBER" --json files --jq '.files[].path' | tr '\n' ' ' | sed 's/ $//')
 
             if [ -z "$CHANGED_FILES" ]; then
