@@ -1,17 +1,17 @@
 (programming_model.graph_breaks_index)=
 # Working with Graph Breaks
 
-Recall from (Dynamo Core Concepts)[programming_model.dynamo_core_concepts] that Dynamo graph breaks when
-encountering code that can't be traced. In the default `torch.compile` settings, Dynamo compiles the FX graph
-that has been determined so far, runs the unsupported code in regular Python, then resumes tracing after the unsupported code.
+As you might remember from (Dynamo Core Concepts)[programming_model.dynamo_core_concepts] that Dynamo performs a graph break when
+it encounters code that can't be traced. In the default `torch.compile` settings, Dynamo compiles the FX graph
+that has been determined up to that point, executes the unsupported code in regular Python, and then resumes tracing.
 
-Graph breaks are a feature that allows Dynamo to run over arbitrary Python code and carve out functional
+Graph breaks enable Dynamo to trace through arbitrary Python code and carve out functional
 subgraphs that can each be individually optimized.
 
-However, it is possible for graph breaks to lead to unexpected slowness in `torch.compile`.
-If you're not getting the speedups you expect, we recommend checking for graph breaks and removing them.
+However, graph breaks may cause unexpected slowness in `torch.compile`.
+If you're not seeing the expected speedups, we recommend checking for graph breaks and removing them.
 
-The following sections describe some approaches to dealing with graph breaks.
+The following sections outline strategies for addressing graph breaks.
 
 ```{toctree}
 programming_model.fullgraph_true
