@@ -1,128 +1,131 @@
+```{eval-rst}
 .. currentmodule:: torch
+```
 
-.. _tensor-doc:
+(tensor-doc)=
 
-torch.Tensor
-===================================
+# torch.Tensor
 
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type. Please see :ref:`dtype-doc` for more details about dtype support.
 
-Initializing and basic operations
----------------------------------
+## Initializing and basic operations
 
-A tensor can be constructed from a Python :class:`list` or sequence using the
-:func:`torch.tensor` constructor:
+A tensor can be constructed from a Python {class}`list` or sequence using the
+{func}`torch.tensor` constructor:
 
-::
+```
+>>> torch.tensor([[1., -1.], [1., -1.]])
+tensor([[ 1.0000, -1.0000],
+        [ 1.0000, -1.0000]])
+>>> torch.tensor(np.array([[1, 2, 3], [4, 5, 6]]))
+tensor([[ 1,  2,  3],
+        [ 4,  5,  6]])
+```
 
-    >>> torch.tensor([[1., -1.], [1., -1.]])
-    tensor([[ 1.0000, -1.0000],
-            [ 1.0000, -1.0000]])
-    >>> torch.tensor(np.array([[1, 2, 3], [4, 5, 6]]))
-    tensor([[ 1,  2,  3],
-            [ 4,  5,  6]])
-
-.. warning::
-
-    :func:`torch.tensor` always copies :attr:`data`. If you have a Tensor
-    :attr:`data` and just want to change its ``requires_grad`` flag, use
-    :meth:`~torch.Tensor.requires_grad_` or
-    :meth:`~torch.Tensor.detach` to avoid a copy.
-    If you have a numpy array and want to avoid a copy, use
-    :func:`torch.as_tensor`.
+:::{warning}
+{func}`torch.tensor` always copies {attr}`data`. If you have a Tensor
+{attr}`data` and just want to change its `requires_grad` flag, use
+{meth}`~torch.Tensor.requires_grad_` or
+{meth}`~torch.Tensor.detach` to avoid a copy.
+If you have a numpy array and want to avoid a copy, use
+{func}`torch.as_tensor`.
+:::
 
 A tensor of specific data type can be constructed by passing a
-:class:`torch.dtype` and/or a :class:`torch.device` to a
+{class}`torch.dtype` and/or a {class}`torch.device` to a
 constructor or tensor creation op:
 
-::
+```
+>>> torch.zeros([2, 4], dtype=torch.int32)
+tensor([[ 0,  0,  0,  0],
+        [ 0,  0,  0,  0]], dtype=torch.int32)
+>>> cuda0 = torch.device('cuda:0')
+>>> torch.ones([2, 4], dtype=torch.float64, device=cuda0)
+tensor([[ 1.0000,  1.0000,  1.0000,  1.0000],
+        [ 1.0000,  1.0000,  1.0000,  1.0000]], dtype=torch.float64, device='cuda:0')
+```
 
-    >>> torch.zeros([2, 4], dtype=torch.int32)
-    tensor([[ 0,  0,  0,  0],
-            [ 0,  0,  0,  0]], dtype=torch.int32)
-    >>> cuda0 = torch.device('cuda:0')
-    >>> torch.ones([2, 4], dtype=torch.float64, device=cuda0)
-    tensor([[ 1.0000,  1.0000,  1.0000,  1.0000],
-            [ 1.0000,  1.0000,  1.0000,  1.0000]], dtype=torch.float64, device='cuda:0')
-
-For more information about building Tensors, see :ref:`tensor-creation-ops`
-
+For more information about building Tensors, see {ref}`tensor-creation-ops`
 
 The contents of a tensor can be accessed and modified using Python's indexing
 and slicing notation:
 
-::
+```
+>>> x = torch.tensor([[1, 2, 3], [4, 5, 6]])
+>>> print(x[1][2])
+tensor(6)
+>>> x[0][1] = 8
+>>> print(x)
+tensor([[ 1,  8,  3],
+        [ 4,  5,  6]])
+```
 
-    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6]])
-    >>> print(x[1][2])
-    tensor(6)
-    >>> x[0][1] = 8
-    >>> print(x)
-    tensor([[ 1,  8,  3],
-            [ 4,  5,  6]])
-
-Use :meth:`torch.Tensor.item` to get a Python number from a tensor containing a
+Use {meth}`torch.Tensor.item` to get a Python number from a tensor containing a
 single value:
 
-::
+```
+>>> x = torch.tensor([[1]])
+>>> x
+tensor([[ 1]])
+>>> x.item()
+1
+>>> x = torch.tensor(2.5)
+>>> x
+tensor(2.5000)
+>>> x.item()
+2.5
+```
 
-    >>> x = torch.tensor([[1]])
-    >>> x
-    tensor([[ 1]])
-    >>> x.item()
-    1
-    >>> x = torch.tensor(2.5)
-    >>> x
-    tensor(2.5000)
-    >>> x.item()
-    2.5
+For more information about indexing, see {ref}`indexing-slicing-joining`
 
-For more information about indexing, see :ref:`indexing-slicing-joining`
+A tensor can be created with {attr}`requires_grad=True` so that
+{mod}`torch.autograd` records operations on them for automatic differentiation.
 
-A tensor can be created with :attr:`requires_grad=True` so that
-:mod:`torch.autograd` records operations on them for automatic differentiation.
+```
+>>> x = torch.tensor([[1., -1.], [1., 1.]], requires_grad=True)
+>>> out = x.pow(2).sum()
+>>> out.backward()
+>>> x.grad
+tensor([[ 2.0000, -2.0000],
+        [ 2.0000,  2.0000]])
+```
 
-::
-
-    >>> x = torch.tensor([[1., -1.], [1., 1.]], requires_grad=True)
-    >>> out = x.pow(2).sum()
-    >>> out.backward()
-    >>> x.grad
-    tensor([[ 2.0000, -2.0000],
-            [ 2.0000,  2.0000]])
-
-Each tensor has an associated :class:`torch.Storage`, which holds its data.
-The tensor class also provides multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
+Each tensor has an associated {class}`torch.Storage`, which holds its data.
+The tensor class also provides multi-dimensional, [strided](https://en.wikipedia.org/wiki/Stride_of_an_array)
 view of a storage and defines numeric operations on it.
 
-.. note::
-   For more information on tensor views, see :ref:`tensor-view-doc`.
+:::{note}
+For more information on tensor views, see {ref}`tensor-view-doc`.
+:::
 
-.. note::
-   For more information on the :class:`torch.dtype`, :class:`torch.device`, and
-   :class:`torch.layout` attributes of a :class:`torch.Tensor`, see
-   :ref:`tensor-attributes-doc`.
+:::{note}
+For more information on the {class}`torch.dtype`, {class}`torch.device`, and
+{class}`torch.layout` attributes of a {class}`torch.Tensor`, see
+{ref}`tensor-attributes-doc`.
+:::
 
-.. note::
-   Methods which mutate a tensor are marked with an underscore suffix.
-   For example, :func:`torch.FloatTensor.abs_` computes the absolute value
-   in-place and returns the modified tensor, while :func:`torch.FloatTensor.abs`
-   computes the result in a new tensor.
+:::{note}
+Methods which mutate a tensor are marked with an underscore suffix.
+For example, {func}`torch.FloatTensor.abs_` computes the absolute value
+in-place and returns the modified tensor, while {func}`torch.FloatTensor.abs`
+computes the result in a new tensor.
+:::
 
-.. note::
-    To change an existing tensor's :class:`torch.device` and/or :class:`torch.dtype`, consider using
-    :meth:`~torch.Tensor.to` method on the tensor.
+:::{note}
+To change an existing tensor's {class}`torch.device` and/or {class}`torch.dtype`, consider using
+{meth}`~torch.Tensor.to` method on the tensor.
+:::
 
-.. warning::
-   Current implementation of :class:`torch.Tensor` introduces memory overhead,
-   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors.
-   If this is your case, consider using one large structure.
+:::{warning}
+Current implementation of {class}`torch.Tensor` introduces memory overhead,
+thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors.
+If this is your case, consider using one large structure.
+:::
 
+## Tensor class reference
 
-Tensor class reference
-----------------------
-
+```{eval-rst}
 .. class:: Tensor()
 
    There are a few main ways to create a tensor, depending on your use case.
@@ -137,7 +140,9 @@ Tensor class reference
      use ``tensor.new_*`` creation ops.
    - There is a legacy constructor ``torch.Tensor`` whose use is discouraged.
      Use :func:`torch.tensor` instead.
+```
 
+```{eval-rst}
 .. method:: Tensor.__init__(self, data)
 
    This constructor is deprecated, we recommend using :func:`torch.tensor` instead.
@@ -166,12 +171,25 @@ Tensor class reference
        device (:class:`torch.device`, optional): the desired device of returned tensor.
            Default: if None, same :class:`torch.device` as this tensor.
 
+```
 
+```{eval-rst}
 .. autoattribute:: Tensor.T
-.. autoattribute:: Tensor.H
-.. autoattribute:: Tensor.mT
-.. autoattribute:: Tensor.mH
+```
 
+```{eval-rst}
+.. autoattribute:: Tensor.H
+```
+
+```{eval-rst}
+.. autoattribute:: Tensor.mT
+```
+
+```{eval-rst}
+.. autoattribute:: Tensor.mH
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -704,3 +722,4 @@ Tensor class reference
     Tensor.xlogy_
     Tensor.xpu
     Tensor.zero_
+```
