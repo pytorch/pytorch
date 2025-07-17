@@ -166,6 +166,19 @@ class PyProcessGroup : public ProcessGroup {
         group_desc);
   }
 
+  c10::intrusive_ptr<ProcessGroup> mergeRemoteGroup(
+      const c10::intrusive_ptr<c10d::Store>& store,
+      const MergeOptions& opts,
+      const int& size) override {
+    PYBIND11_OVERRIDE(
+        c10::intrusive_ptr<ProcessGroup>, /* Return type */
+        ProcessGroup, /* Parent class */
+        mergeRemoteGroup, /* Name of function in C++ */
+        store,
+        opts,
+        size);
+  }
+
   c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
