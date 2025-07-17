@@ -56,6 +56,7 @@ class Model3(torch.nn.Module):
 
 
 @config.patch("trace.enabled", True)
+@config.patch("trace.provenance_tracking", True)
 class TestProvenanceTracingArtifact(TestCase):
     """
     This test checks that generated provenance tracing artifact from "post_grad" to
@@ -121,6 +122,10 @@ class TestProvenanceTracingArtifact(TestCase):
                                 "mul_2",
                             ],
                         }
+                        if backend == "aot_inductor":
+                            expected_data["aoti_torch_cuda_mm_out"] = ["mm_default"]
+                        else:
+                            expected_data["extern_kernels.mm"] = ["mm_default"]
                         self._check_provenance_tracing_artifact(filepath, expected_data)
                         expected_mapping = [
                             (
@@ -171,6 +176,16 @@ class TestProvenanceTracingArtifact(TestCase):
                                 },
                             ),
                         ]
+                        if backend == "aot_inductor":
+                            expected_mapping[0][1]["aoti_torch_cuda_mm_out"] = [
+                                "mm_default"
+                            ]
+                            expected_mapping[1][1]["mm_default"] = [
+                                "aoti_torch_cuda_mm_out"
+                            ]
+                        else:
+                            expected_mapping[0][1]["extern_kernels.mm"] = ["mm_default"]
+                            expected_mapping[1][1]["mm_default"] = ["extern_kernels.mm"]
                         self._check_provenance_tracking_node_mappings(
                             filepath, expected_mapping
                         )
@@ -180,7 +195,7 @@ class TestProvenanceTracingArtifact(TestCase):
                         if backend == "aot_inductor":
                             expected_data = {
                                 "cpp_fused_mul_0": ["mul"],
-                                "aoti_torch_cpu_addmm_out": ["addmm", "mul"],
+                                "aoti_torch_cpu_addmm_out": ["addmm"],
                                 "cpp_fused_gelu_1": [
                                     "mul_3",
                                     "mul_1",
@@ -193,7 +208,6 @@ class TestProvenanceTracingArtifact(TestCase):
                             # backend == "inductor"
                             expected_data = {
                                 "cpp_fused_mul_0": ["mul"],
-                                "aoti_torch_cpu_addmm_out": ["addmm", "mul"],
                                 "cpp_fused_gelu_1": [
                                     "mul_3",
                                     "mul_1",
@@ -201,7 +215,7 @@ class TestProvenanceTracingArtifact(TestCase):
                                     "erf",
                                     "mul_2",
                                 ],
-                                "extern_kernels.addmm": ["addmm", "mul"],
+                                "extern_kernels.addmm": ["addmm"],
                             }
                         self._check_provenance_tracing_artifact(filepath, expected_data)
 
@@ -252,14 +266,12 @@ class TestProvenanceTracingArtifact(TestCase):
                     filepath = Path(m.group(1))
                     if backend == "inductor":
                         expected_data = {
-                            "aoti_torch_cuda_addmm_out": ["addmm", "_tensor_constant1"],
-                            "triton_poi_fused_0": ["_tensor_constant1"],
                             "extern_kernels.addmm": ["addmm"],
                         }
                     else:
                         # backend = aot_inductor
                         expected_data = {
-                            "aoti_torch_cuda_addmm_out": ["addmm", "_tensor_constant1"],
+                            "aoti_torch_cuda_addmm_out": ["addmm"],
                             "triton_poi_fused_0": ["_tensor_constant1"],
                         }
                     self._check_provenance_tracing_artifact(filepath, expected_data)
