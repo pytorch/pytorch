@@ -18,6 +18,7 @@ import sympy
 
 import torch
 import torch._logging
+from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.tiling_utils import analyze_memory_coalescing
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
@@ -40,6 +41,7 @@ from ..dependencies import MemoryDep, StarDep, WeakDep
 if TYPE_CHECKING:
     from ..ir import IRNode
 
+from ..debug import set_kernel_post_grad_provenance_tracing
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -50,7 +52,6 @@ from ..utils import (
     IndentedBuffer,
     Placeholder,
     prefix_is_reduction,
-    set_kernel_post_grad_provenance_tracing,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -970,6 +971,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return tuple(map(fn, value))
         return fn(value)
 
+    def estimate_flops(self) -> Optional[int]:
+        flops = [
+            node.estimate_flops()
+            for node in NodeScheduleMarker.only_nodes(self.features.node_schedule)
+        ]
+        return sum(filter(None, flops))
+
     def estimate_kernel_num_bytes(self):
         """
         Try the best to estimate the total size (in bytes) of the
@@ -1445,7 +1453,7 @@ class SIMDScheduling(BaseScheduling):
             with V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-            if config.trace.enabled:
+            if config.trace.provenance_tracking:
                 set_kernel_post_grad_provenance_tracing(
                     node_schedule,  # type: ignore[arg-type]
                     kernel_name,
@@ -1541,18 +1549,19 @@ class SIMDScheduling(BaseScheduling):
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 
-    def codegen_template(
-        self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
-    ) -> Optional[str]:
+    def _codegen_single_template(
+        self,
+        kernel,
+        render,
+        template_node,
+        epilogue_nodes,
+        prologue_nodes,
+        *,
+        only_gen_src_code=False,
+    ):
         """
-        Codegen a triton template
-
-        If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
+        Helper method to codegen a single template kernel variant
         """
-        _, (_numel, rnumel) = template_node.group
-        assert rnumel == 1
-        kernel, render = template_node.node.make_kernel_render(template_node.node)
-
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
         prologue_group = []
@@ -1616,7 +1625,9 @@ class SIMDScheduling(BaseScheduling):
                             kernel.cse.invalidate(OrderedSet())
 
         if not isinstance(partial_code, str):
-            partial_code.finalize_hook("<DEF_KERNEL>")
+            # This is used to calculate flops in TritonTemplateKernels
+            with ir.IRNode.current_origins(template_node.node.origins):
+                partial_code.finalize_hook("<DEF_KERNEL>")
             partial_code.finalize_hook("<ARGDEFS>", strict=False)
         # finalize must be called after adding epilogue above
 
@@ -1646,18 +1657,113 @@ class SIMDScheduling(BaseScheduling):
             if only_gen_src_code:
                 return src_code
 
-            kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+            kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
-            if config.trace.enabled:
-                set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
+            if config.trace.provenance_tracking:
+                set_kernel_post_grad_provenance_tracing(
+                    node_schedule, kernel.kernel_name
+                )
 
-        self.codegen_comment(node_schedule)
-        kernel.call_kernel(kernel_name, template_node.node)
+            return kernel
 
-        V.graph.removed_buffers |= kernel.removed_buffers
-        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
-        self.free_buffers_in_scheduler()
-        return None
+    def codegen_template(
+        self,
+        template_node,
+        epilogue_nodes,
+        prologue_nodes,
+        *,
+        only_gen_src_code=False,
+        hint_override: Optional[int] = None,
+    ) -> Optional[str]:
+        """
+        Codegen a triton template with multi-kernel dispatch support
+
+        If `only_gen_src_code=True` the src code will be returned instead of being
+        codegenned into the wrapper
+        """
+
+        _, (_numel, rnumel) = template_node.group
+        assert rnumel == 1
+
+        if (
+            isinstance(template_node.node, MultiTemplateBuffer)
+            and template_node.node._make_kernel_renders
+        ):
+            kernels = []
+            src_codes = []
+
+            for make_kernel_render in template_node.node._make_kernel_renders.values():
+                kernel, render = make_kernel_render(
+                    template_node.node, hint_override=hint_override
+                )
+
+                if only_gen_src_code:
+                    src_code = self._codegen_single_template(
+                        kernel,
+                        render,
+                        template_node,
+                        epilogue_nodes,
+                        prologue_nodes,
+                        only_gen_src_code=True,
+                    )
+                    assert isinstance(src_code, str)
+                    src_codes.append(src_code)
+                else:
+                    kernel = self._codegen_single_template(
+                        kernel,
+                        render,
+                        template_node,
+                        epilogue_nodes,
+                        prologue_nodes,
+                        only_gen_src_code=False,
+                    )
+                    kernels.append(kernel)
+
+            if only_gen_src_code:
+                return "\n\n".join(src_codes)
+
+            MultiKernel.merge_workspaces_inplace(kernels)
+            multi_kernel = MultiKernel(kernels)
+            node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
+            self.codegen_comment(node_schedule)
+
+            multi_kernel.call_kernel(multi_kernel.kernel_name)
+            V.graph.removed_buffers |= multi_kernel.removed_buffers
+            V.graph.inplaced_to_remove |= multi_kernel.inplaced_to_remove
+            self.free_buffers_in_scheduler()
+            return None
+        else:
+            kernel, render = template_node.node.make_kernel_render(
+                template_node.node, hint_override=hint_override
+            )
+
+            if only_gen_src_code:
+                return self._codegen_single_template(
+                    kernel,
+                    render,
+                    template_node,
+                    epilogue_nodes,
+                    prologue_nodes,
+                    only_gen_src_code=True,
+                )
+            else:
+                kernel = self._codegen_single_template(
+                    kernel,
+                    render,
+                    template_node,
+                    epilogue_nodes,
+                    prologue_nodes,
+                    only_gen_src_code=False,
+                )
+
+                node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
+                self.codegen_comment(node_schedule)
+                kernel.call_kernel(kernel.kernel_name, template_node.node)
+
+                V.graph.removed_buffers |= kernel.removed_buffers
+                V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+                self.free_buffers_in_scheduler()
+                return None
 
     def codegen_sync(self):
         V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
@@ -1738,7 +1844,7 @@ class SIMDScheduling(BaseScheduling):
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             # dump provenance node info for ComboKernelNode/ForeachKernel type
-            if config.trace.enabled:
+            if config.trace.provenance_tracking:
                 set_kernel_post_grad_provenance_tracing(
                     combo_kernel_node.snodes, kernel_name
                 )
@@ -2430,7 +2536,9 @@ class SIMDScheduling(BaseScheduling):
     def ready_to_flush(self) -> bool:
         return False
 
-    def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
+    def generate_kernel_code_from_nodes(
+        self, nodes, benchmark_kernel=False, hint_override: Optional[int] = None
+    ):
         if not any(n.is_template() for n in nodes):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
@@ -2455,6 +2563,7 @@ class SIMDScheduling(BaseScheduling):
                     epilogue,
                     prologue,
                     only_gen_src_code=True,
+                    hint_override=hint_override,
                 )
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")

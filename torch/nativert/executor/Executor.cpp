@@ -19,30 +19,31 @@ namespace torch::nativert {
 Executor::Executor(
     torch::nativert::ExecutorConfig executorConfig,
     std::shared_ptr<Graph> graph,
-    std::shared_ptr<Weights> weights,
-    const Placement& placement,
-    std::shared_ptr<caffe2::serialize::PyTorchStreamReader> pytorchStreamReader,
-    const MakeProxyExecutorFn& makeProxyExecutorFunc)
+    const std::shared_ptr<Weights>& weights,
+    Placement placement,
+    const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
+        pytorchStreamReader,
+    MakeProxyExecutorFn makeProxyExecutorFunc)
     : executorConfig_(std::move(executorConfig)),
       graph_(std::move(graph)),
-      placement_(placement),
+      placement_(std::move(placement)),
       constantFolder_(
           executorConfig_.runConstFolding
               ? std::optional<ConstantFolder>(*graph_)
               : std::nullopt),
-      makeProxyExecutorFunc_(makeProxyExecutorFunc),
+      makeProxyExecutorFunc_(std::move(makeProxyExecutorFunc)),
       executionFrames_(executorConfig_.maxNumConcurrentThreads),
       clearedExecutionFrames_(executorConfig_.maxNumConcurrentThreads),
       numExecutionFrames_(0),
       lastClearedTimestamp_(getCurrentTimestampSeconds()) {
   if (weights) {
-    initialize(std::move(weights), std::move(pytorchStreamReader));
+    initialize(weights, pytorchStreamReader);
   }
 }
 
 void Executor::initialize(
-    std::shared_ptr<Weights> weights,
-    std::shared_ptr<caffe2::serialize::PyTorchStreamReader>
+    const std::shared_ptr<Weights>& weights,
+    const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
         pytorchStreamReader) {
   auto start = std::chrono::high_resolution_clock::now();
 
@@ -51,7 +52,7 @@ void Executor::initialize(
       weights,
       executorConfig_,
       placement_,
-      std::move(pytorchStreamReader),
+      pytorchStreamReader,
       makeProxyExecutorFunc_);
 
   if (constantFolder_.has_value()) {
@@ -71,9 +72,7 @@ void Executor::initialize(
   delegateExecutors_ = std::move(executionKernels.delegateExecutors);
   constFoldingExecutions_ = std::move(executionKernels.constFoldingExecutions);
 
-  // initialize weights_
-  processWeights(weights);
-  atomicSwapWeights(weights);
+  initWeights(weights);
 
   if (executorConfig_.layoutPlannerSettings.enabled()) {
     layoutPlanner_ = std::make_unique<LayoutPlanner>(
@@ -113,13 +112,14 @@ void Executor::atomicSwapWeights(std::shared_ptr<Weights> weights) {
   }
 }
 
-void Executor::maybeRunConstantFolding(std::shared_ptr<Weights> weights) {
+void Executor::maybeRunConstantFolding(
+    const std::shared_ptr<Weights>& weights) {
   for (auto& execution : constFoldingExecutions_) {
     ExecutionFrame constFoldingFrame(execution.executor->graph());
     std::vector<c10::IValue> inputs;
     inputs.reserve(graph_->signature().inputsToWeights().size());
     for (const auto& [_, name] : graph_->signature().inputsToWeights()) {
-      inputs.push_back(weights->at(name));
+      inputs.emplace_back(weights->at(name));
     }
 
     auto outputs = execution.executor->execute(constFoldingFrame, inputs);
@@ -130,7 +130,7 @@ void Executor::maybeRunConstantFolding(std::shared_ptr<Weights> weights) {
   }
 }
 
-void Executor::processWeights(std::shared_ptr<Weights> weights) {
+void Executor::processWeights(const std::shared_ptr<Weights>& weights) {
   maybeRunConstantFolding(weights);
   if (constantFolder_.has_value()) {
     constantFolder_->evaluate(*weights);
@@ -140,20 +140,41 @@ void Executor::processWeights(std::shared_ptr<Weights> weights) {
   }
 }
 
+void Executor::initWeights(const std::shared_ptr<Weights>& weights) {
+  maybeRunConstantFolding(weights);
+  if (constantFolder_.has_value()) {
+    constantFolder_->evaluate(*weights);
+  }
+
+  weights_.withLock([&](auto& w) { w = std::move(weights); });
+
+  for (auto& delegateExecutor : delegateExecutors_) {
+    delegateExecutor->initWeights(weights);
+  }
+}
+
 namespace {
 void validateInput(
     const std::string& inputName,
     const at::Tensor& inputTensor,
     const torch::nativert::TensorMeta& tensorValueMeta) {
-  CHECK(inputTensor.dtype() == tensorValueMeta.dtype())
-      << "Input tensor dtype mismatch for " << inputName << ", expecting "
-      << c10::toString(tensorValueMeta.dtype()) << " but got "
-      << inputTensor.dtype().name();
+  TORCH_CHECK(
+      inputTensor.dtype() == tensorValueMeta.dtype(),
+      "Input tensor dtype mismatch for ",
+      inputName,
+      ", expecting ",
+      c10::toString(tensorValueMeta.dtype()),
+      " but got ",
+      inputTensor.dtype().name());
 
-  CHECK(inputTensor.device() == tensorValueMeta.device())
-      << "Input tensor device mismatch for " << inputName << ", expecting "
-      << tensorValueMeta.device().str() << " but got "
-      << inputTensor.device().str();
+  TORCH_CHECK(
+      inputTensor.device() == tensorValueMeta.device(),
+      "Input tensor device mismatch for ",
+      inputName,
+      ", expecting ",
+      tensorValueMeta.device().str(),
+      " but got ",
+      inputTensor.device().str());
 }
 
 } // namespace
@@ -167,8 +188,11 @@ void Executor::validateInputs(const std::vector<c10::IValue>& inputs) const {
     if (actualInput.isTensor()) {
       const auto& inputName = std::string(inputValues[i]->name());
       auto it = tensorValuesMeta.find(inputName);
-      CHECK(it != tensorValuesMeta.end())
-          << "Couldn't find " << inputName << " in tensorValuesMeta";
+      TORCH_CHECK(
+          it != tensorValuesMeta.end(),
+          "Couldn't find ",
+          inputName,
+          " in tensorValuesMeta");
       validateInput(inputName, actualInput.toTensor(), it->second);
     }
   }
@@ -289,15 +313,17 @@ void Executor::returnExecutorFrameToPool(
 
     // Create an entry with used=true
     if (C10_UNLIKELY(!clearingInProgress_)) {
-      CHECK(executionFrames_.writeIfNotFull(std::move(frame)))
-          << "ExecutionFrame pool full";
+      TORCH_CHECK(
+          executionFrames_.writeIfNotFull(std::move(frame)),
+          "ExecutionFrame pool full");
     } else {
       ExecutionFrameEntry frameEntry;
       frameEntry.used = true;
       frameEntry.frame = std::move(frame);
 
-      CHECK(clearedExecutionFrames_.writeIfNotFull(std::move(frameEntry)))
-          << "Cleared ExecutionFrame pool full";
+      TORCH_CHECK(
+          clearedExecutionFrames_.writeIfNotFull(std::move(frameEntry)),
+          "Cleared ExecutionFrame pool full");
     }
   } catch (...) {
     sem_.release();
@@ -324,7 +350,7 @@ std::vector<c10::IValue> Executor::execute(
   std::optional<std::vector<c10::IValue>> outputs;
   const auto userInputs = graph_->userInputs();
   const auto& tensorValuesMeta = graph_->tensorValuesMeta();
-  TORCH_CHECK_EQ(userInputs.size(), inputTreeSpec.numIValues());
+  TORCH_CHECK(userInputs.size() == inputTreeSpec.numIValues());
 
   auto executionFrameFillUserInputs = [&](const c10::IValue& leaf,
                                           const Value* value) {
@@ -332,8 +358,11 @@ std::vector<c10::IValue> Executor::execute(
     if (executorConfig_.validateInputs && leaf.isTensor()) {
       const auto& inputName = std::string(value->name());
       auto it = tensorValuesMeta.find(inputName);
-      CHECK(it != tensorValuesMeta.end())
-          << "Couldn't find " << inputName << " in tensorValuesMeta";
+      TORCH_CHECK(
+          it != tensorValuesMeta.end(),
+          "Couldn't find ",
+          inputName,
+          " in tensorValuesMeta");
       validateInput(inputName, leaf.toTensor(), it->second);
     }
     executionFrame->setBorrowedIValue(
@@ -352,11 +381,11 @@ std::vector<c10::IValue> Executor::execute(
 }
 
 ProfileMetrics Executor::benchmarkIndividualNodes(
-    std::vector<std::vector<c10::IValue>> inputsList,
+    const std::vector<std::vector<c10::IValue>>& inputsList,
     const uint32_t warmupRuns,
     const uint32_t mainRuns) {
-  CHECK(inputsList.size() > 0) << "Need at least one input to benchmark";
-  CHECK(warmupRuns >= 1 && mainRuns >= 1) << "Need at least one run";
+  TORCH_CHECK(!inputsList.empty(), "Need at least one input to benchmark");
+  TORCH_CHECK(warmupRuns >= 1 && mainRuns >= 1, "Need at least one run");
 
   for (const auto& inputs : inputsList) {
     if (executorConfig_.validateInputs) {
@@ -378,8 +407,9 @@ int64_t Executor::getCurrentTimestampSeconds() const {
 
 std::vector<DelegateExecutor*> Executor::getDelegates() {
   std::vector<DelegateExecutor*> delegates;
+  delegates.reserve(delegateExecutors_.size());
   for (const auto& delegateExecutor : delegateExecutors_) {
-    delegates.push_back(delegateExecutor.get());
+    delegates.emplace_back(delegateExecutor.get());
   }
   return delegates;
 }
