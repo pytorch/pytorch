@@ -25,6 +25,7 @@ from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 def _assertEqualSkipScriptObject(test_case, exp, actual):
@@ -812,8 +813,8 @@ def forward(self, token, safe_obj):
             self.assertFalse(op._has_torchbind_op_overload)
 
     def test_torchbind_op_register_fallthrough(self):
-        TEST_DISPATCH_KEY = torch._C.DispatchKey.AutocastCPU
-        TEST_DISPATCH_KEY_STR = "AutocastCPU"
+        TEST_DISPATCH_KEY = torch._C.DispatchKey.AutogradCPU
+        TEST_DISPATCH_KEY_STR = "AutogradCPU"
 
         for op_packet in self.torch_bind_ops:
             op = op_packet.default
@@ -944,19 +945,19 @@ def forward(self, token, safe_obj):
             with torch.library._scoped_library(ns, "FRAGMENT") as lib:
                 for op in ops:
                     lib.impl(
-                        op.__name__, torch.library.fallthrough_kernel, "AutocastCUDA"
+                        op.__name__, torch.library.fallthrough_kernel, "AutogradCPU"
                     )
 
                 gm = make_fx(mod, tracing_mode="fake")(tq1, x)
         else:
             for op in ops:
-                op.default.py_impl(torch._C.DispatchKey.AutocastCUDA)(
+                op.default.py_impl(torch._C.DispatchKey.AutogradCPU)(
                     torch.library.fallthrough_kernel
                 )
             gm = make_fx(mod, tracing_mode="fake")(tq1, x)
             for op in ops:
                 op.default._dispatch_cache.clear()
-                del op.default.py_kernels[torch._C.DispatchKey.AutocastCUDA]
+                del op.default.py_kernels[torch._C.DispatchKey.AutogradCPU]
 
         self.assertExpectedInline(
             gm.code.strip(),
@@ -1136,7 +1137,7 @@ class TestCompileTorchbind(TestCase):
     def tearDown(self):
         torch._dynamo.reset()
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_script_object_input(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1529,6 +1530,44 @@ def forward(self, token, obj, x):
         x = torch.randn(2)
         _assertEqualScriptObject(
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_obj_torchbind_op_with_autocast(self, backend, device):
+        def f(tq, x):
+            with torch.autocast(device_type=device):
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos() + 1)
+                torch.ops._TorchScriptTesting.queue_pop(tq)
+                torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+            return tq.pop(), tq.pop() + tq.size(), tq
+
+        opt_f = torch.compile(f, backend=backend)
+        x = torch.randn(2, device=device)
+        _assertEqualScriptObject(
+            self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", "cuda"])
+    def test_export_obj_torchbind_op_with_autocast(self, device):
+        class Mod(torch.nn.Module):
+            def forward(self, x, tq):
+                with torch.autocast(device_type=device):
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.cos() + 1)
+                    torch.ops._TorchScriptTesting.queue_pop(tq)
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                return tq.pop(), tq.pop() + tq.size(), tq
+
+        x = torch.randn(2, device=device)
+        args = (x,)
+        mod = Mod()
+        ep = torch.export.export(mod, (x, _empty_tensor_queue()))
+        _assertEqualScriptObject(
+            self, ep.module()(x, _empty_tensor_queue()), mod(x, _empty_tensor_queue())
         )
 
 
