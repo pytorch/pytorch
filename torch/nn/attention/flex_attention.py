@@ -36,6 +36,26 @@ from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
+# Private debug flag to disable internal compilation wrapping for debugging purposes.
+# WARNING: This is intended ONLY for debugging score_mod and mask_mod functions.
+# When enabled, this bypasses the required internal compilation that ensures correctness
+# and performance. Only use this temporarily when you need to set breakpoints
+# in your score_mod/mask_mod functions during development.
+#
+# This flag only affects the internal compilation when flex_attention is called directly.
+# If you have already wrapped flex_attention in torch.compile(), this flag has no effect
+# and the user's compilation will still occur.
+#
+# Usage:
+#   import torch.nn.attention.flex_attention as fa
+#   fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
+#   # Now you can set breakpoints in your score_mod/mask_mod
+#   output = fa.flex_attention(q, k, v, score_mod=my_score_mod)
+#
+# Remember to set this back to False for production use.
+_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
+
+
 __all__ = [
     "BlockMask",
     "flex_attention",
@@ -1570,9 +1590,22 @@ def flex_attention(
                         )
                     else:
                         backend = "eager"
-                    out, lse = torch.compile(
-                        _flex_attention_hop_wrapper, backend=backend, fullgraph=True
-                    )(
+
+                    if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+                        warnings.warn(
+                            "_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG is enabled. This bypasses required "
+                            "compilation and should ONLY be used for debugging. Performance and "
+                            "correctness are not guaranteed. Set this flag to False for production use.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
+                        compiled_fn = _flex_attention_hop_wrapper
+                    else:
+                        compiled_fn = torch.compile(
+                            _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+                        )
+
+                    out, lse = compiled_fn(
                         query,
                         key,
                         value,
@@ -1581,7 +1614,7 @@ def flex_attention(
                         scale,
                         kernel_options,
                     )
-                    if return_lse:
-                        return out, lse * math.log(2)
-                    else:
-                        return out
+    if return_lse:
+        return out, lse * math.log(2)
+    else:
+        return out

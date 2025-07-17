@@ -5,6 +5,7 @@ import functools
 import random
 import string
 import unittest
+import warnings
 from collections import namedtuple
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -4234,6 +4235,58 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(query.grad.shape, query.shape)
         self.assertEqual(key.grad.shape, key.shape)
         self.assertEqual(value.grad.shape, value.shape)
+
+    @supported_platform
+    def test_debug_flag_disables_internal_compilation(self, device):
+        """Test that _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG flag bypasses internal compilation."""
+        import torch.nn.attention.flex_attention as fa
+
+        original_flag = fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG
+
+        try:
+            B, H, S, D = 1, 1, 128, 64
+            query = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+            key = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+            value = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+
+            def simple_score_mod(score, b, h, q_idx, kv_idx):
+                return score
+
+            fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                out_compiled = fa.flex_attention(
+                    query, key, value, score_mod=simple_score_mod
+                )
+                # Should not produce debug warning
+                debug_warnings = [
+                    warn
+                    for warn in w
+                    if "_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG" in str(warn.message)
+                ]
+                self.assertEqual(len(debug_warnings), 0)
+
+            fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                out_debug = fa.flex_attention(
+                    query, key, value, score_mod=simple_score_mod
+                )
+                # Should produce debug warning
+                debug_warnings = [
+                    warn
+                    for warn in w
+                    if "_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG" in str(warn.message)
+                ]
+                self.assertEqual(len(debug_warnings), 1)
+                self.assertIn("bypasses required", str(debug_warnings[0].message))
+
+            # Results should be functionally equivalent
+            torch.testing.assert_close(out_compiled, out_debug, rtol=1e-4, atol=1e-4)
+
+        finally:
+            # Restore original flag value
+            fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
 
 
 class TestBlockMask(InductorTestCase):
