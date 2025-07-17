@@ -220,41 +220,43 @@ Tensor amaxamin_jvp(
 
 Tensor aminmax_backward(
     const Tensor& self,
-    std::optional<int64_t> dim,
+    std::optional<int64_t> dim,  
     bool keepdim,
-    const Tensor& grad_min,
-    const Tensor& grad_max,
-    const Tensor& min,
-    const Tensor& max) {
-      
-  auto dims = dim.has_value() ? IntArrayRef{*dim} : IntArrayRef{};
-  Tensor result;
-  Tensor max_mask;
-  if (grad_max.defined()) {
-    auto max_reduced = restore_reduced_dims(max, dims, keepdim);
-    max_mask = (self == max_reduced);
-  }
-  if (grad_min.defined()) {
-    auto min_reduced = restore_reduced_dims(min, dims, keepdim);
-    auto min_mask = (self == min_reduced);
-    result = scale_grad_by_count(grad_min, min_mask, dims);
+    const Tensor& grad_min,      
+    const Tensor& grad_max,      
+    const Tensor& min_val,       
+    const Tensor& max_val) {     
 
-    if (grad_max.defined()) {
-      auto grad_max_result = scale_grad_by_count(grad_max, max_mask, dims);
-      if (!areAnyTensorSubclassLike({result, grad_max_result})) {
-        result.add_(grad_max_result);
-      } else {
-        result = result + grad_max_result;
-      }
-    }
-  } else if (grad_max.defined()) {
-    result = scale_grad_by_count(grad_max, max_mask, dims);
-  } else {
-    result = Tensor();
+  auto dims = dim ? IntArrayRef{*dim} : IntArrayRef{};
+  auto min_reduced = restore_reduced_dims(min_val, dims, keepdim);
+  auto max_reduced = restore_reduced_dims(max_val, dims, keepdim);
+
+  Tensor min_mask = (self == min_reduced);
+  Tensor max_mask = (self == max_reduced);
+
+  Tensor result;  
+
+  if (grad_min.defined()) {
+    auto grad_min_full =
+        restore_reduced_dims(grad_min, dims, keepdim)
+            .expand_as(min_mask)          
+            .contiguous();
+    result = scale_grad_by_count(grad_min_full, min_mask, dims);
+  }
+
+  if (grad_max.defined()) {
+    auto grad_max_full =
+        restore_reduced_dims(grad_max, dims, keepdim)
+            .expand_as(max_mask)
+            .contiguous();
+    auto grad_max_res = scale_grad_by_count(grad_max_full, max_mask, dims);
+    result = result.defined() ? result + grad_max_res
+                              : grad_max_res;
   }
 
   return result;
 }
+
 
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& grad,
