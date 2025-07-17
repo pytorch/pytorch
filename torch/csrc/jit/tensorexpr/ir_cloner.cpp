@@ -14,7 +14,7 @@ template <
         decltype(detail::bin_op_deducer(std::declval<Op>())),
         void>>* = nullptr>
 static ExprPtr mutate_binary_op(
-    NodePtr<Op> v,
+    const NodePtr<Op>& v,
     IRCloner* cloner,
     bool option = false) {
   ExprPtr lhs_new = v->lhs()->accept_mutator(cloner);
