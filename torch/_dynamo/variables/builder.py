@@ -3576,6 +3576,9 @@ class SourcelessBuilder:
             value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
         ):
             return EnumVariable(value)
+        elif isinstance(value, type) and issubclass(value, BaseException):
+            # match user defined exceptions
+            return UserDefinedExceptionClassVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
