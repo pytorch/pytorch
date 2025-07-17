@@ -65,6 +65,12 @@ class OpSpec:
     note: when the op return value is a single DTensor object, output_specs is
     DTensorSpec; when the return value is a tuple of Optional[DTensor],
     output_specs is a tuple of Optional[DTensorSpec].
+
+    note: we MUST produce an DTensorSpec for every output that is a Tensor.  None
+    entries only occur for non-Tensor outputs (e.g., operators that return Optional[Tensor],
+    or non-Tensor outputs.)
+
+    invariant: the DeviceMesh on all DTensorSpec must be the same
     """
 
     output_specs: Union[DTensorSpec, tuple[Optional[DTensorSpec], ...]]
@@ -129,6 +135,8 @@ class OpStrategy(StrategyType):
     """
     OpStrategy that consists of a list of sharding strategies associated with the op,
     where each strategy is an OpSpec that describes the acceptable input/output sharding.
+
+    invariant: the DeviceMesh on all OpSpec must be the same
     """
 
     def __init__(self, strategies: list[OpSpec]) -> None:
@@ -165,14 +173,18 @@ class OpStrategy(StrategyType):
 
 class TupleStrategy(StrategyType):
     """
-    TupleStrategy represents the output strategy of this op is a tuple of OpStrategies,
-    i.e. If the output of this op is a tuple of tensors or list of tensors with possibly
-    different OpStrategies, we should return a TupleStrategy that contains a tuple of
-    OpStrategy, where each child represents the sharding strategy of "each element" of
-    the tuple/list of tensors the op returns.
+    TupleStrategy is a special case for operators that are fundamentally compound or batched such that some subset
+    of the inputs and outputs are completely unrelated to some other subset.
 
-    NOTE: if the output of the op is a List[Tensor] and they share the same OpStrategy,
-    then we should return a single OpStrategy instead of a TupleStrategy
+    Generally, foreach_* ops are the most common use-case for TupleStrategy, because they accept lists of inputs,
+    but operate independently on each input or tuple of zipped inputs.
+
+    For example, [out_a, out_b] = torch.foreach_add([a,  b], scalar): input a's sharding only affects out_a's sharding,
+    independent of b and out_b.
+
+    An example of an operator that should NOT use TupleStrategy is torch.split.  It produces a List[Tensor]
+    as its output, but the sharding decision of one output is bound together with the decision
+    of each other output and the common input.
     """
 
     def __init__(
@@ -305,15 +317,6 @@ class OpSchema:
                 args_schema.append(str(arg))
         return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
 
-    def __post_init__(self) -> None:
-        has_symints = False
-        for a in self.args_schema:
-            if isinstance(a, DTensorSpec) and a.tensor_meta is not None:
-                if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
-                    has_symints = True
-                    break
-        self.has_symints = has_symints
-
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
         arg = self.args_schema[arg_idx]
         is_tensor = isinstance(arg, DTensorSpec)
@@ -331,6 +334,13 @@ class OpSchema:
         return_types = self.op._schema.returns
         return len(return_types) > 1 and isinstance(
             return_types[0].type, torch.TensorType
+        )
+
+    def return_type_list_tensor_like(self) -> bool:
+        # returns True if the return type is a List
+        return_types = self.op._schema.returns
+        return len(return_types) == 1 and isinstance(
+            return_types[0].type, torch.ListType
         )
 
     def return_type_tensor(self) -> bool:
