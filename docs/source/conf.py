@@ -62,7 +62,7 @@ extensions = [
     "sphinxcontrib.katex",
     "sphinx_copybutton",
     "sphinx_design",
-    "myst_parser",
+    "myst_nb",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
