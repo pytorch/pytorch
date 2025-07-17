@@ -129,7 +129,7 @@ def f_rewritten(x):
 f_rewritten(x)  # works
 ```
 
-Example: use custom operators to create opaque functions w.r.t. to `torch.compile` <!-- TODO: link -->
+Example: use [custom operators](programming_model.custom_ops) to create opaque functions w.r.t. to `torch.compile`
 
 ```{code-cell}
 from torchvision.transforms.functional import to_pil_image, pil_to_tensor
