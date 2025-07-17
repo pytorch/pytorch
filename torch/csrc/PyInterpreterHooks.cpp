@@ -12,5 +12,9 @@ c10::impl::PyInterpreter* PyInterpreterHooks::getPyInterpreter() const {
 
 } // namespace torch::detail
 
+// Sigh, the registry doesn't support namespaces :(
+using c10::impl::PyInterpreterHooksRegistry;
+using c10::impl::RegistererPyInterpreterHooksRegistry;
+using PyInterpreterHooks = torch::detail::PyInterpreterHooks;
 // Register the implementation
-REGISTER_PYTHON_HOOKS(torch::detail::PyInterpreterHooks);
+REGISTER_PYTHON_HOOKS(PyInterpreterHooks);
