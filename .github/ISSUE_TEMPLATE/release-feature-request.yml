@@ -58,10 +58,10 @@ body:
     description: |
       Select One of the following options
     options:
-      - Tutorial exists
-      - Will submit a PR to pytorch/tutorials
-      - Will submit a PR to a repo
-      - Tutorial is not needed
+      - [ ] Tutorial exists (add a link)
+      - [ ] Will submit a PR to pytorch/tutorials
+      - [ ] Will submit a PR to a different repo (add link to repo)
+      - [ ] Tutorial is not needed
   validations:
     required: true
 - type: textarea
