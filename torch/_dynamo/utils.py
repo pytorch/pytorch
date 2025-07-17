@@ -102,6 +102,7 @@ if typing.TYPE_CHECKING:
         Iterable,
         Iterator,
         KeysView,
+        Sequence,
         ValuesView,
     )
 
@@ -2137,8 +2138,18 @@ def clone_input(x, *, dtype=None):
         return result
 
 
+@overload
+def clone_inputs(
+    example_inputs: dict[str, Union[T, tuple[T, ...]]],
+) -> dict[str, list[T]]: ...
+
+
+@overload
+def clone_inputs(example_inputs: Sequence[T]) -> list[T]: ...
+
+
 def clone_inputs(example_inputs):
-    res: Union[dict[Any, Any], list[Any]]
+    res: Union[dict[str, Any], list[Any]]
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():

@@ -16,12 +16,16 @@ from parameterized import parameterized_class
 
 import torch
 from torch._inductor.codecache import get_kernel_bin_format
-from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
+from torch._inductor.package import load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_cache
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
-from torch.export.pt2_archive._package import load_pt2, load_weights_to_pt2_contents
+from torch.export.pt2_archive._package import (
+    AOTICompiledModel,
+    load_pt2,
+    load_weights_to_pt2_contents,
+)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_utils import (
     IS_FBCODE,

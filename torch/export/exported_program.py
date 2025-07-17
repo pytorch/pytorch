@@ -7,10 +7,10 @@ import functools
 import operator
 import types
 import warnings
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, final, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, final, NamedTuple, Optional, TYPE_CHECKING, Union
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -325,7 +325,7 @@ def default_decompositions() -> "CustomDecompTable":
 
 
 def _decompose_and_get_gm_with_new_signature_constants(
-    ep,
+    ep: "ExportedProgram",
     *,
     cia_to_decomp: dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: dict[torch._ops.OperatorBase, Callable],
@@ -384,9 +384,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
+        assert isinstance(mod.graph._codegen, _PyTreeCodeGen)
         orig_arg_names = mod.graph._codegen.pytree_info.orig_args
 
         # aot_export expect the return type to always be a tuple.
+        assert out_spec is not None
         if out_spec.type not in (list, tuple):
             out_spec = pytree.TreeSpec(tuple, None, [out_spec])
 
@@ -610,7 +612,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
 
     new_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    new_outputs = list(gm.graph.nodes)[-1].args[0]
+    new_outputs: tuple[torch.fx.Node, ...] = tuple(gm.graph.output_node().args[0])  # type: ignore[arg-type]
 
     # rename the placeholders
     assert len(new_placeholders) == len(old_placeholders)
@@ -654,9 +656,9 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     # update output specs
     gm.recompile()
-    for i, name in enumerate(_graph_output_names(gm)):
-        if isinstance(new_outputs[i], torch.fx.Node):
-            new_outputs[i].name = name
+    for output, name in zip(new_outputs, _graph_output_names(gm)):
+        if name is not None:
+            output.name = name
 
     # To match the output target with correct input for input mutations
     # need to find the old to new placeholder map
@@ -727,7 +729,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             for i, spec in enumerate(ep.graph_signature.input_specs)
             if isinstance(spec.arg, TensorArgument)
         }
-        for i, node in enumerate(new_outputs[len(output_specs) :]):
+        for node in new_outputs[len(output_specs) :]:
             source = gradients[node.name]
             spec = specs[source]  # type: ignore[index]
             if spec.kind == InputKind.PARAMETER:
@@ -1208,7 +1210,9 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def call_spec(self):
-        CallSpec = namedtuple("CallSpec", ["in_spec", "out_spec"])
+        class CallSpec(NamedTuple):
+            in_spec: Optional[pytree.TreeSpec]
+            out_spec: Optional[pytree.TreeSpec]
 
         if len(self.module_call_graph) == 0:
             return CallSpec(in_spec=None, out_spec=None)
@@ -1364,7 +1368,7 @@ class ExportedProgram:
         )
         return string
 
-    def module(self) -> torch.nn.Module:
+    def module(self) -> torch.fx.GraphModule:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """

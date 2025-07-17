@@ -22,7 +22,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -54,6 +54,7 @@ try:
     from torch._inductor.utils import fresh_cache
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _inductor.utils import fresh_cache
 
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
@@ -75,7 +76,10 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Sequence
+
+_D = TypeVar("_D", bound=dict[str, Any])
+_T = TypeVar("_T")
 
 
 log = logging.getLogger(__name__)
@@ -766,7 +770,17 @@ def timed(
     return (time_total, result) if return_result else time_total
 
 
-def _normalize_bench_inputs(example_inputs) -> tuple[tuple[Any], Mapping[str, Any]]:
+@overload
+def _normalize_bench_inputs(example_inputs: _D) -> tuple[tuple[()], _D]: ...
+
+
+@overload
+def _normalize_bench_inputs(
+    example_inputs: Sequence[_T],
+) -> tuple[tuple[_T, ...], dict[str, Any]]: ...
+
+
+def _normalize_bench_inputs(example_inputs):
     # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
     # and consumed like `model(**example_inputs)`.
     # For other benchmarks, example_inputs are formatted as tuple and consumed
@@ -1671,7 +1685,7 @@ class BenchmarkRunner:
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
         self.autocast_arg = {}
-        self.optimizer = None
+        self.optimizer: Optional[torch.optim.Optimizer] = None
         self._args = None
 
     def setup_amp(self, current_device=None):

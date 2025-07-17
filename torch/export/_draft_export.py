@@ -4,13 +4,13 @@ import logging
 import os
 import re
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._logging._internal
-import torch._logging.structured
 import torch.utils._pytree as pytree
 from torch._export.passes.insert_custom_op_guards import (
     get_op_profiles,
@@ -362,7 +362,7 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
 def draft_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: Optional[Mapping[str, Any]] = None,
     *,
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     preserve_module_call_signature: tuple[str, ...] = (),
