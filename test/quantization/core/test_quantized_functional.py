@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import numpy as np
 
 # Testing utils
-from hypothesis import assume, given, HealthCheck, settings
+from hypothesis import assume, given
 from hypothesis import strategies as st
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
@@ -111,7 +111,6 @@ class TestQuantizedFunctionalOps(QuantizationTestCase):
                 W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias,
                 use_channelwise)
 
-    @settings(suppress_health_check=[HealthCheck.differing_executors])
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
