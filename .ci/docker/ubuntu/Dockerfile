@@ -119,9 +119,10 @@ RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/trito
 RUN rm -rf /opt/triton
 
 ARG VLLM
+# set up env for vllm with pinned commit, we d
 COPY ./common/setup_vllm_env.sh  setup_vllm_env.sh
 COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/vllm.txt vllm_pinned_base_commit.txt
+COPY ci_commit_pins/vllm.txt ci_commit_pins/vllm.txt
 RUN if [ -n "${VLLM}" ]; then bash ./setup_vllm_env.sh; fi
 RUN rm setup_vllm_env.sh common_utils.sh
 
