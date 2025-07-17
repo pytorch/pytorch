@@ -1169,7 +1169,6 @@ exclude_patterns = [
     'aten/src/ATen/[a-mA-M]*/**',
     'test/**',
     'test/[a-hA-h]*/**',
-    'torch/distributed/tensor/**',
 ]
 init_command = [
     'python3',
