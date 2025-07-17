@@ -365,6 +365,10 @@ class InductorChoices:
             WhyNoFuse(node1, node2)("Fusion will increase peak memory")
             return False
 
+        if scheduler.fusion_accumulate_large_reads(node1, node2):
+            WhyNoFuse(node1, node2)("Fusion accumulate large amount of reads")
+            return False
+
         return True
 
     @staticmethod
