@@ -112,6 +112,18 @@ case "$tag" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm)
+    CUDA_VERSION=12.8.1
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    TRITON=yes
+    VLLM=yes
+    ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.8.1
     CUDNN_VERSION=9
@@ -412,6 +424,7 @@ docker build \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
+       --build-arg "VLLM=${VLLM}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "HALIDE=${HALIDE}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
