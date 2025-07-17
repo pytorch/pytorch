@@ -38,6 +38,12 @@ from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 if TYPE_CHECKING:
     from .types import Device, IntLikeType
 
+
+# multipy/deploy is no longer being used internally so we should be able to delete this  # codespell:ignore multipy
+def _running_with_deploy() -> builtins.bool:
+    False
+
+
 from torch._utils import (
     _functionalize_sync as _sync,
     _import_dotted_name,
