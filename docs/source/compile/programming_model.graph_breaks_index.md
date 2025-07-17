@@ -16,4 +16,5 @@ The following sections describe some approaches to dealing with graph breaks.
 ```{toctree}
 programming_model.fullgraph_true
 programming_model.common_graph_breaks
+programming_model.dynamo_nonstrict_trace
 ```
