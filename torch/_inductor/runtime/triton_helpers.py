@@ -43,6 +43,7 @@ def set_driver_to_gpu():
                 isinstance(driver.active, backend.driver)
                 or hasattr(driver.active, "_obj")
                 and isinstance(driver.active._obj, backend.driver)
+                or name == "mtia"
             ):
                 # Don't re-initialize backend if it is already active
                 return

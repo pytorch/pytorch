@@ -891,6 +891,7 @@ def check_cpu_supported():
     supported = (
         requires_avx2_on_cpu
         and not torch.xpu.is_available()
+        and not torch.mtia.is_available()
         and not sys.platform == "darwin"
     )
     return supported
