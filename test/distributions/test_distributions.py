@@ -3262,41 +3262,24 @@ class TestDistributions(DistributionsTestCase):
         x = dist1.sample((1000,))
         expected = ref_dist.logpdf(x.transpose(0, 2).numpy())
 
-        # Filter out infinite values that occur when singular samples are drawn
-        # This can happen when df is close to ndim - 1
-        logprob1 = dist1.log_prob(x).detach().numpy()
-        logprob2 = dist2.log_prob(x).detach().numpy()
-        logprob3 = dist3.log_prob(x).detach().numpy()
-
-        # Only compare finite values - check each distribution separately
-        finite_mask1 = np.isfinite(logprob1) & np.isfinite(expected)
-        finite_mask2 = np.isfinite(logprob2) & np.isfinite(expected)
-        finite_mask3 = np.isfinite(logprob3) & np.isfinite(expected)
-
-        # Test each distribution that has finite values
-        if finite_mask1.sum() > 0:
-            self.assertEqual(
-                0.0,
-                np.mean((logprob1[finite_mask1] - expected[finite_mask1]) ** 2),
-                atol=1e-3,
-                rtol=0,
-            )
-
-        if finite_mask2.sum() > 0:
-            self.assertEqual(
-                0.0,
-                np.mean((logprob2[finite_mask2] - expected[finite_mask2]) ** 2),
-                atol=1e-3,
-                rtol=0,
-            )
-
-        if finite_mask3.sum() > 0:
-            self.assertEqual(
-                0.0,
-                np.mean((logprob3[finite_mask3] - expected[finite_mask3]) ** 2),
-                atol=1e-3,
-                rtol=0,
-            )
+        self.assertEqual(
+            0.0,
+            np.mean((dist1.log_prob(x).detach().numpy() - expected) ** 2),
+            atol=1e-3,
+            rtol=0,
+        )
+        self.assertEqual(
+            0.0,
+            np.mean((dist2.log_prob(x).detach().numpy() - expected) ** 2),
+            atol=1e-3,
+            rtol=0,
+        )
+        self.assertEqual(
+            0.0,
+            np.mean((dist3.log_prob(x).detach().numpy() - expected) ** 2),
+            atol=1e-3,
+            rtol=0,
+        )
 
         # Double-check that batched versions behave the same as unbatched
         df = torch.rand(5, requires_grad=True) + ndim - 1

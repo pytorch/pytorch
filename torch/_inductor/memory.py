@@ -78,19 +78,8 @@ def get_freeable_input_buf(
         A dictionary containing all freeble input buffers, keyed by their names.
     """
 
-    # this function is copied from torch/_inductor/scheduler.py
-    # TODO: would be nice to remove the try/except block for both places
     def _dep_size_hint(dep: Dep) -> int:
-        res = 0
-        try:
-            if not dep.has_unbacked_symbols():
-                res = dep.numbytes_hint()
-        except KeyError:
-            # In at least one test (test/inductor/test_torchbind.py) we
-            # create a StarDep that doesn't exist in the graph and calling
-            # `has_unbacked_symbols()` throws an error.
-            pass
-        return res
+        return V.graph.get_dep_size_hint(dep)
 
     # get freeable input buffers' successor nodes and their sizes
     # note that different deps can have the same name, so we use name as keys
