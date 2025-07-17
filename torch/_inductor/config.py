@@ -354,6 +354,18 @@ fx_passes_numeric_check: dict[str, Any] = {
     "requires_optimizer": True,
 }
 
+
+# simplefsdp configs
+class simplefsdp:
+    estimate_ir = False
+    estimate_verbose = False
+    enable_bucket_ir = False
+    enable_reorder_ir = False
+    simplefsdp_only = False
+    bucketing_type = "manual"
+    bucketing_plan = []
+
+
 # DEPRECATED. This setting is ignored.
 mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
 
