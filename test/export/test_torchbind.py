@@ -944,19 +944,19 @@ def forward(self, token, safe_obj):
             with torch.library._scoped_library(ns, "FRAGMENT") as lib:
                 for op in ops:
                     lib.impl(
-                        op.__name__, torch.library.fallthrough_kernel, "AutocastCUDA"
+                        op.__name__, torch.library.fallthrough_kernel, "AutogradCPU"
                     )
 
                 gm = make_fx(mod, tracing_mode="fake")(tq1, x)
         else:
             for op in ops:
-                op.default.py_impl(torch._C.DispatchKey.AutocastCUDA)(
+                op.default.py_impl(torch._C.DispatchKey.AutogradCPU)(
                     torch.library.fallthrough_kernel
                 )
             gm = make_fx(mod, tracing_mode="fake")(tq1, x)
             for op in ops:
                 op.default._dispatch_cache.clear()
-                del op.default.py_kernels[torch._C.DispatchKey.AutocastCUDA]
+                del op.default.py_kernels[torch._C.DispatchKey.AutogradCPU]
 
         self.assertExpectedInline(
             gm.code.strip(),
