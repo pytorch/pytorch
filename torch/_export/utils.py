@@ -11,8 +11,9 @@ import re
 from collections.abc import Iterable
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
-from sortedcontainers import SortedDict, SortedList
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+
+from sortedcontainers import SortedDict, SortedList
 
 import torch
 from torch._guards import detect_fake_mode
@@ -265,6 +266,8 @@ def _rename_without_collisions(
     """
     Renames nodes to avoid name collisions, with suffixing.
     name_map: map from original name to new name
+    find_available: map prefix to available suffix
+    used_names: cache of used names
     orig_name: mapping key
     name: candidate name (potentially suffixed, e.g. mul_2)
     is_placeholder: if the node is a placeholder, avoid detecting suffix
@@ -283,7 +286,7 @@ def _rename_without_collisions(
         key = name
     else:
         key = prefix
-    
+
     new_name = name
     if new_name in used_names:
         new_name = f"{key}_{find_available[key][0] + 1}"
@@ -294,8 +297,9 @@ def _rename_without_collisions(
         find_available[prefix].add(int(n))
 
         while len(find_available[prefix]) >= 2 and (
-            find_available[prefix][0]+1 == find_available[prefix][1] or 
-            find_available[prefix][0] == find_available[prefix][1]):
+            find_available[prefix][0] + 1 == find_available[prefix][1]
+            or find_available[prefix][0] == find_available[prefix][1]
+        ):
             find_available[prefix].pop(0)
 
     name_map[orig_name] = new_name
@@ -896,6 +900,7 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     Different HOO subgraph types have different input schemas, so we first enumerate them
     and gather the top-level named placeholder nodes.
     """
+
     def build_cache(name, find_available, used_names):
         used_names.add(name)
         match = re.match(r"(.*)_(\d+)", name)
@@ -906,10 +911,13 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
 
         if match and prefix not in find_available:
             find_available[prefix] = SortedList([0])
-        
+
         if match:
             find_available[prefix].add(int(n))
-            while len(find_available[prefix]) >= 2 and find_available[prefix][0]+1 == find_available[prefix][1]:
+            while (
+                len(find_available[prefix]) >= 2
+                and find_available[prefix][0] + 1 == find_available[prefix][1]
+            ):
                 find_available[prefix].pop(0)
 
     # gather all HOO subgraphs and their top-level named placeholder nodes
@@ -943,7 +951,9 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
                 node.name = node.target = hoo_phs[i].name
                 build_cache(node.name, find_available, used_names)
             else:  # non-placeholder, check for collisions
-                node.name = _rename_without_collisions(name_map, find_available, used_names, node.name, node.name)
+                node.name = _rename_without_collisions(
+                    name_map, find_available, used_names, node.name, node.name
+                )
 
         # recurse and recompile
         _name_hoo_subgraph_placeholders(subgraph)
@@ -1062,8 +1072,9 @@ def placeholder_naming_pass(
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             continue
-        _rename_without_collisions(name_map, find_available,
-                used_names, node.name, node.name)
+        _rename_without_collisions(
+            name_map, find_available, used_names, node.name, node.name
+        )
 
     # assign new node names
     for node in gm.graph.nodes:
