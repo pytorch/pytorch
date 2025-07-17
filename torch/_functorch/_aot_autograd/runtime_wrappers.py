@@ -51,6 +51,7 @@ from .logging_utils import describe_input, format_guard_bug_msg, track_graph_com
 from .schemas import (
     AOTConfig,
     CompilerWrapper,
+    InductorWrapper,
     InputAliasInfo,
     MemoryFormatMeta,
     MutationType,
@@ -458,7 +459,7 @@ def _create_runtime_wrapper(
 
 
 @dataclass
-class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
+class FunctionalizedRngRuntimeWrapper(InductorWrapper):
     # TODO: I would love to get rid of this argument, but it's
     # Wrapped pretty tightly around our aot_dispatch_autograd logic.
     # Specifically, tensors_saved_for_backwards_slice's value is both used for calculating indices
@@ -470,12 +471,12 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
 
     def pre_compile(
         self,
-        flat_fn,
+        flat_fn: torch.fx.GraphModule,
         flat_args,
         aot_config,
         *,
         fw_metadata,
-    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
+    ) -> None:
         if config.functionalize_rng_ops:
             # Update example inputs for the fw_compiler
             fake_mode = detect_fake_mode()
@@ -484,7 +485,6 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
             # We are not clearing flat_args here because
             # 1) There is a check in the debug compiler at the end
             # 2) It does not matter as these are fake tensors
-        return flat_fn, flat_args, fw_metadata
 
     def post_compile(
         self,
@@ -533,7 +533,7 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
 
 
 @dataclass
-class FakifiedOutWrapper(CompilerWrapper):
+class FakifiedOutWrapper(InductorWrapper):
     out_metas: list[torch.Tensor] = field(default_factory=list)
     # TracingContext.fwd_output_strides
     # Generated from actually doing compile
@@ -548,7 +548,7 @@ class FakifiedOutWrapper(CompilerWrapper):
         aot_config,
         *,
         fw_metadata,
-    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
+    ) -> None:
         tracing_context = torch._guards.TracingContext.try_get()
         if tracing_context and tracing_context.fakify_first_call:
             self.out_metas = [
@@ -556,7 +556,6 @@ class FakifiedOutWrapper(CompilerWrapper):
             ]
         else:
             self.needs_post_compile = False
-        return fw_module, flat_args, fw_metadata
 
     def _compute_output_meta_with_inductor_strides(self):
         out = self.out_metas
