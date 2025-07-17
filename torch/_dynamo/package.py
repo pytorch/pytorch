@@ -219,7 +219,7 @@ class CompilePackage:
 
         assert not self._initialized
         self._inlined_sources = set()
-        self._innermost_fn = innermost_fn(fn)
+        self._innermost_fn = innermost_fn(fn)  # type: ignore[assignment]
         assert self._innermost_fn is not None
         if dynamo is not None:
             assert isinstance(dynamo, _DynamoCacheEntry)
