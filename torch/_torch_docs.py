@@ -1006,8 +1006,7 @@ If :attr:`data` is a NumPy array (an ndarray) with the same dtype and device the
 tensor is constructed using :func:`torch.from_numpy`.
 
 If :attr:`data` is a CuPy array, the returned tensor will be located on the same device as the CuPy array unless
-specifically overwritten by :attr:`device` or a default device. The device of the CuPy array is inferred from the
-pointer of the array using `cudaPointerGetAttributes` unless :attr:`device` is provided.
+specifically overwritten by :attr:`device` or a default device.
 
 .. seealso::
 

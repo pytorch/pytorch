@@ -98,14 +98,14 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   std::optional<at::Tensor> dk{std::nullopt};
   std::optional<at::Tensor> dv{std::nullopt};
 
-  //  The kernel computes irregardless we will drop for this functions return
+  //  The kernel computes regardless we will drop for this functions return
   Tensor grad_softmax;
 
   // Currently unused args:
   std::optional<at::Tensor> alibi_slopes{std::nullopt};
   const float softcap = 0.0;
 
-  bool determinisitic{false};
+  bool deterministic{false};
   auto& ctx = at::globalContext();
   if (ctx.deterministicAlgorithms()) {
     if (ctx.deterministicAlgorithmsWarnOnly()) {
@@ -113,7 +113,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
           "Flash Attention defaults to a non-deterministic algorithm. ",
           "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
     } else {
-      determinisitic = true;
+      deterministic = true;
     }
   }
 
@@ -148,7 +148,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         non_null_window_right,
 #endif
         softcap,
-        determinisitic,
+        deterministic,
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
@@ -176,7 +176,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         non_null_window_right,
 #endif
         softcap,
-        determinisitic,
+        deterministic,
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));

@@ -69,27 +69,26 @@ OPTIMUS_EXCLUDE_POST_GRAD = [
     "inductor_autotune_lookup_table",
 ]
 
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    free_unbacked_symbols,
+    IterateExprs,
+    ShapeEnv,
+)
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
 
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.fx.node import Node
 
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .ir import (
-        Buffer,
-        ExternKernel,
-        ExternKernelOut,
-        IRNode,
-        Layout,
-        Operation,
-        ReinterpretView,
-    )
+    from .ir import Buffer, ExternKernel, IRNode, Layout, Operation, ReinterpretView
     from .output_code import CompiledFxGraph
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
@@ -3131,42 +3130,6 @@ def get_donated_idxs() -> Optional[list[int]]:
     return None
 
 
-def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
-    kernel_name: str,
-    is_extern: bool = False,
-) -> None:
-    from .codegen.simd_kernel_features import DisableReduction, EnableReduction
-    from .ir import ExternKernelOut
-    from .virtualized import V
-
-    if is_extern:
-        assert isinstance(node_schedule, ExternKernelOut)
-        curr_node_info = (
-            V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
-                kernel_name, []
-            )
-        )
-        curr_node_info.extend(
-            origin.name
-            for origin in node_schedule.origins
-            if origin.name not in curr_node_info
-        )
-    else:
-        assert isinstance(node_schedule, list)
-        for snode in node_schedule:
-            if snode not in (EnableReduction, DisableReduction):
-                if snode.node is not None:
-                    curr_node_info = V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
-                        kernel_name, []
-                    )
-                    curr_node_info.extend(
-                        origin.name
-                        for origin in snode.node.origins
-                        if origin.name not in curr_node_info
-                    )
-
-
 class TritonAttrsDescriptorVersion(enum.Enum):
     V0_NO_TRITON = 0
     V1_COMPILER = 1  # triton.compiler.compiler.AttrsDescriptor
@@ -3403,3 +3366,10 @@ def aoti_model_name_from_config() -> str:
     model_name = config.aot_inductor.model_name_for_generated_files
     model_name = "aoti_model" if model_name is None else model_name
     return model_name
+
+
+def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.Symbol]:
+    if unbacked_only:
+        return free_unbacked_symbols(x)
+    else:
+        return free_symbols(x)

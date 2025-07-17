@@ -95,7 +95,7 @@ namespace at {
     m.impl("clone", torch::CppFunction::makeFallthrough());
     m.impl("dot", torch::CppFunction::makeFallthrough());
     m.impl("vdot", torch::CppFunction::makeFallthrough());
-    // The functions in the list below have a specific registeration in native_functions.yaml and
+    // The functions in the list below have a specific registration in native_functions.yaml and
     // do not use the fallback.
     // m.impl("mul.Tensor", torch::CppFunction::makeFallthrough());
     // m.impl("add.Tensor", torch::CppFunction::makeFallthrough());
