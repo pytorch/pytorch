@@ -509,10 +509,12 @@ HAS_TRITON=$(drun python -c "import triton" > /dev/null 2>&1 && echo "yes" || ec
 if [[ -n "$TRITON" || -n "$TRITON_CPU" ]]; then
   if [ "$HAS_TRITON" = "no" ]; then
     echo "expecting triton to be installed, but it is not"
+    drun python -c "import triton"
     exit 1
   fi
 elif [ "$HAS_TRITON" = "yes" ]; then
   echo "expecting triton to not be installed, but it is"
+  drun python -c "import triton"
   exit 1
 fi
 
