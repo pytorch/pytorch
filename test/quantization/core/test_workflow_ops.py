@@ -25,7 +25,7 @@ import unittest
 import numpy as np
 
 # Testing utils
-from hypothesis import given, settings
+from hypothesis import given, HealthCheck, settings
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
@@ -803,6 +803,7 @@ class TestFakeQuantizeOps(TestCase):
                     torch.allclose(Y, Y_prime, rtol=tolerance, atol=tolerance),
                     "Expected kernel forward function to have results match the reference forward function")
 
+    @settings(suppress_health_check=[HealthCheck.differing_executors])
     @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
     def test_learnable_forward_per_channel_cpu(self, X):
