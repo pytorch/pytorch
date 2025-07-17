@@ -4699,6 +4699,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError, r'Using a target size \('):
             bceloss(a, b)
 
+    def test_bce_label_smoothing_errors(self):
+        N, C = 3, 4
+        inputs = torch.randn((N, C))
+        target = torch.randn((N, C))
+        for loss_fn in (nn.BCELoss, nn.BCEWithLogitsLoss):
+            loss = loss_fn(label_smoothing=1.2)
+            with self.assertRaisesRegex(AssertionError,
+                                        r"label_smoothing must be between 0\.0"):
+                loss(inputs, target)
+
+    def test_bce_label_smoothing(self):
+        N, C = 3, 4
+        inputs = torch.rand((N, C))
+        target = torch.rand((N, C))
+        label_smoothings = [0.05, 0.15]
+
+        for loss_fn, label_smoothing in product([nn.BCELoss, nn.BCEWithLogitsLoss], label_smoothings):
+            loss = loss_fn(label_smoothing=label_smoothing)
+            output_with_smoothing = loss(inputs, target)
+            target_with_smoothing = target * (1 - label_smoothing) + (1 - target) * label_smoothing
+            loss = loss_fn()
+            output_with_manual_smoothing = loss(inputs, target_with_smoothing)
+            self.assertEqual(output_with_smoothing, output_with_manual_smoothing)
+
     def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss_large_tensors_with_grad(self):
         x_size = 1024
         y_size = 256
