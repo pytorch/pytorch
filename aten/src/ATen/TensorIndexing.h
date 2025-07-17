@@ -315,10 +315,17 @@ inline void recordTensorIndex(
     const Tensor& tensor,
     std::vector<Tensor>& outIndices,
     int64_t* dim_ptr) {
-  // TODO: check scalarType
-  outIndices.resize(*dim_ptr + 1);
-  outIndices[*dim_ptr] = tensor;
-  (*dim_ptr)++;
+  if (outIndices.empty()) {
+    outIndices.resize(*dim_ptr + 1);
+    outIndices[*dim_ptr] = tensor;
+  } else {
+    outIndices.push_back(tensor);
+  }
+  if (tensor.scalar_type() == kByte || tensor.scalar_type() == kBool) {
+    *dim_ptr += tensor.dim();
+  } else {
+    *dim_ptr += 1;
+  }
 }
 
 inline c10::List<::std::optional<Tensor>> typeConvertIndices(
@@ -458,13 +465,23 @@ inline Tensor handleDimInMultiDimIndexing(
         original_tensor_device,
         prev_dim_result_sizes);
     (*dim_ptr)++;
+    if (!outIndices.empty()) {
+      outIndices.resize(outIndices.size() + 1);
+    }
     return result;
   } else if (index.is_ellipsis()) {
-    (*dim_ptr) += original_tensor.dim() - (*specified_dims_ptr);
+    auto ellipsis_ndims = original_tensor.dim() - *specified_dims_ptr;
+    (*dim_ptr) += ellipsis_ndims;
+    if (!outIndices.empty()) {
+      outIndices.resize(outIndices.size() + ellipsis_ndims);
+    }
     return prev_dim_result;
   } else if (index.is_none()) {
     Tensor result = prev_dim_result.unsqueeze(*dim_ptr);
     (*dim_ptr)++;
+    if (!outIndices.empty()) {
+      outIndices.resize(outIndices.size() + 1);
+    }
     return result;
   } else if (index.is_boolean()) {
     Tensor result = prev_dim_result.unsqueeze(*dim_ptr);
@@ -560,6 +577,10 @@ inline Tensor applySlicing(
 inline Tensor dispatch_index(
     const Tensor& self,
     std::vector<Tensor>&& indices) {
+  // Remove trailing null elements from indices
+  while (!indices.empty() && !indices.back().defined()) {
+    indices.pop_back();
+  }
   return self.index(impl::typeConvertIndices(self, std::move(indices)));
 }
 
@@ -567,6 +588,10 @@ inline Tensor dispatch_index_put_(
     Tensor& self,
     std::vector<Tensor>&& indices,
     const Tensor& value) {
+  // Remove trailing null elements from indices
+  while (!indices.empty() && !indices.back().defined()) {
+    indices.pop_back();
+  }
   return self.index_put_(
       impl::typeConvertIndices(self, std::move(indices)), value);
 }
