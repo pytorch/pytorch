@@ -200,13 +200,16 @@ class LRScheduler:
                 )
 
         self._step_count += 1
+        if epoch is not None:
+            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+        self._update_lr(epoch)
 
+    def _update_lr(self, epoch: Optional[int] = None):
         with _enable_get_lr_call(self):
             if epoch is None:
                 self.last_epoch += 1
                 values = self.get_lr()
             else:
-                warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
                     values = cast(list[float], self._get_closed_form_lr())
@@ -913,7 +916,7 @@ class SequentialLR(LRScheduler):
         idx = bisect_right(self._milestones, self.last_epoch)
         scheduler = self._schedulers[idx]
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
-            scheduler.step(0)
+            scheduler._update_lr(0)
         else:
             scheduler.step()
 
