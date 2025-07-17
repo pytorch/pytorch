@@ -8,7 +8,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import ir, scheduler
 from ..dependencies import StarDep, WeakDep
-from ..utils import buf_name_to_fused_snode
+from ..utils import buf_name_to_fused_snode, is_collective
 from ..virtualized import V
 from .estimator import OpType
 
@@ -29,6 +29,16 @@ def get_fx_node(
     origins_with_expected_op = [o for o in origins if o.target == expected_op]
     assert len(origins_with_expected_op) == 1
     return origins_with_expected_op[0]
+
+
+def has_reduce_scatter_in_nodes(snodes: list["scheduler.BaseSchedulerNode"]) -> bool:
+    for snode in snodes:
+        if is_collective(
+            snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
+        ):
+            return True
+
+    return False
 
 
 def _schedule_snode(
@@ -147,8 +157,6 @@ def _schedule_fallback_operation(
     schedule_snode_fn: Callable[[Any], None],
     new_operation_name_to_snode: Dict[str, "scheduler.BaseSchedulerNode"],
     dep_operations: Union[ir.Operation, list[ir.Operation], None] = None,
-    as_group_snode: bool = False,
-    new_group_snode: bool = False,
 ) -> Union[ir.Operation, list[ir.Operation]]:
     # NOTE: `dep_operations` enforces strong ordering between ops, helpful if the dependency chain is not clear from direct input-output relationship
     # (i.e. if OP1 mutates a view of buffer X and then OP2 reads from X, and OP1 is expected to run before OP2 -> OP2 must have `dep_operations` pointing to OP1 to ensure reordering pass would not mess up the order).
@@ -232,9 +240,6 @@ def bucket_all_gathers(
     return_ag_only set to True: only return the bucketed all_gather node
     return_ag_only set to False: return the bucketed all_gather node and the bucketed wait node (in GroupedSchedulerNode)
     """
-    grouped_ag_num = 0
-    grouped_wait_num = 0
-
     orig_ag_fx_nodes = [
         get_fx_node(
             sn, expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default
@@ -250,21 +255,24 @@ def bucket_all_gathers(
     # must schedule all the all_gather input nodes first, before the bucketed all_gather node
     param_all_gather_inputs_orig: list[Union[ir.IRNode, scheduler.SchedulerBuffer]] = []
     for ag_input_ir_node in ag_input_ir_nodes:
-        if ag_input_sched_buf := name_to_buf.get(ag_input_ir_node.get_name()):
+        if ag_input_ir_node.is_input_buffer() or isinstance(
+            ag_input_ir_node, ir.ReinterpretView
+        ):
+            param_all_gather_inputs_orig.append(ag_input_ir_node)
+        elif ag_input_sched_buf := name_to_buf.get(ag_input_ir_node.get_name()):
             if not return_ag_only:
                 schedule_snode_fn(ag_input_sched_buf.defining_op)
-                grouped_ag_num += 1
             param_all_gather_inputs_orig.append(ag_input_sched_buf.node)
         else:
-            assert ag_input_ir_node.is_input_buffer()
-            param_all_gather_inputs_orig.append(ag_input_ir_node)
+            raise ValueError("Unexpected node type")
+            # assert ag_input_ir_node.is_input_buffer()
+            # param_all_gather_inputs_orig.append(ag_input_ir_node)
 
     # schedule the bucketed all_gather node
     param_all_gather_inputs_flattened = [
         schedule_fallback_operation(torch.ops.aten.reshape.default, (n, [-1]), {})
         for n in param_all_gather_inputs_orig
     ]
-    grouped_ag_num += len(param_all_gather_inputs_orig)
 
     inp_split_sizes = [n.meta["val"].numel() for n in ag_input_fx_nodes]
     param_all_gather_outputs = [
@@ -275,13 +283,10 @@ def bucket_all_gathers(
                 "dtype": n.meta["val"].dtype,
                 "device": n.meta["val"].device,
                 "pin_memory": False,
-            },
-            as_group_snode=True,
-            new_group_snode=False,
+            }
         )
         for n in ag_input_fx_nodes
     ]
-    grouped_ag_num += len(ag_input_fx_nodes)
     # TODO(yf225): This assumes dim-0 sharding.
     # If we need to support sharding on another dim, we should look at how FSDP2 does it (e.g. search for `shard_dim` in FSDP2 codebase)
     param_all_gather_outputs_shape_orig = [
@@ -317,7 +322,7 @@ def bucket_all_gathers(
         {"out": all_gather_output},
     )
     if return_ag_only:
-        assert len(all_gather_into_tensor_out) == 1
+        assert len(all_gather_into_tensor_out.inputs) == 1
         return all_gather_into_tensor_out.inputs[0]
 
     wait_tensor = schedule_fallback_operation(
@@ -379,11 +384,14 @@ def bucket_reduce_scatters(
     unsharded_grads = []
     unsharded_grads_fx_nodes = [n.args[0] for n in orig_rs_fx_nodes]
     for rs_input_ir_node in rs_input_ir_nodes:
-        if rs_input_sched_buf := name_to_buf.get(rs_input_ir_node.get_name()):
+        if rs_input_ir_node.is_input_buffer() or isinstance(
+            rs_input_ir_node, ir.ReinterpretView
+        ):
+            unsharded_grads.append(rs_input_ir_node)
+        elif rs_input_sched_buf := name_to_buf.get(rs_input_ir_node.get_name()):
             unsharded_grads.append(rs_input_sched_buf.node)
         else:
-            assert rs_input_ir_node.is_input_buffer()
-            unsharded_grads.append(rs_input_ir_node)
+            raise ValueError("Unexpected node type")
     reduce_dtype = unsharded_grads_fx_nodes[0].meta["val"].dtype
     # Only float32 and bfloat16 are supported for now.
     # To support fp16, please see FSDP2 `_get_gradient_divide_factors`.
@@ -399,14 +407,6 @@ def bucket_reduce_scatters(
     def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Size:
         padded_dim0 = math.ceil(tensor_size[0] / dim0_factor) * dim0_factor
         return cast(torch.Size, torch.Size([padded_dim0]) + tensor_size[1:])
-
-    def _get_dim_chunked_size(
-        chunk: torch.Tensor, unchunked_size: torch.Size, dim: int
-    ) -> torch.Size:
-        if chunk.numel() > 0:
-            return chunk.size()
-        # For 0 numel, we need to preserve nonzero-sized dims for DTensor APIs
-        return unchunked_size[:dim] + torch.Size([0]) + unchunked_size[dim + 1 :]
 
     padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(n.meta["val"].size(), group_size)
@@ -439,17 +439,6 @@ def bucket_reduce_scatters(
             "out": reduce_scatter_input_reshaped,
         },
     )
-
-    # chunk_cat, reduce_scatter_input = schedule_fallback_operation(
-    #     torch.ops.fsdp.chunk_cat_with_output.default,
-    #     (unsharded_grads,),
-    #     {
-    #         "dim": 0,
-    #         "num_chunks": group_size,
-    #        # "out": reduce_scatter_input_reshaped,
-    #     },
-    #     return_outputs = True,
-    # )
 
     reduce_scatter_tensor = schedule_fallback_operation(
         torch.ops._c10d_functional.reduce_scatter_tensor.default,
@@ -492,15 +481,11 @@ def bucket_reduce_scatters(
         )
         sharded_param = chunks[rank]
         sharded_size = sharded_param.size()
-        # sharded_size = _get_dim_chunked_size(
-        #     sharded_param, sharded_size, dim=shard_dim
-        # )
         contiguous_sharded_stride = torch._prims_common.make_contiguous_strides_for(
             sharded_size
         )
         # Assume even sharding for Shard(i), i > 0; otherwise would require
         # copy-out for contiguous strides
-        # print("sharded_size", sharded_size, "contiguous_sharded_stride", contiguous_sharded_stride)
         new_sharded_grad = schedule_fallback_operation(
             torch.ops.aten.as_strided.default,
             (reduce_output,),
