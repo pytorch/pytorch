@@ -30,8 +30,9 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-
-device_type = torch.accelerator.current_accelerator().type
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 # bfloat16 is only supported by CUDA 11+ or XPU
 BFLOAT16_AVAILABLE = (torch.cuda.is_available() or torch.xpu.is_available()) and (
