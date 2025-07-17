@@ -91,13 +91,13 @@ register_op_strategy(
     aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
 )(propagate_single_input_strategy)
 
+
 @register_op_strategy(aten.copy_.default)
 def copy_strategy(op_schema: OpSchema) -> StrategyType:
-
-    # TODO: this strategy is incorrect for copy_ in the case that src tensor 
+    # TODO: this strategy is incorrect for copy_ in the case that src tensor
     # is smaller rank than self tensor.  It is possible to select a strategy from self tensor
     # that is invalid for dst tensor.
-    # It is also problematic to assume that shard(0) on src maps to shard(0) on self, since we 
+    # It is also problematic to assume that shard(0) on src maps to shard(0) on self, since we
     # may broadcast a new dim to the left or right of 0 when copying.
     #
     # For now, I just keep copy working essentially the way it was before this PR,
@@ -131,6 +131,7 @@ def copy_strategy(op_schema: OpSchema) -> StrategyType:
             for strategy in first_input_strategy.strategies
         ]
     )
+
 
 @register_op_strategy(
     [
