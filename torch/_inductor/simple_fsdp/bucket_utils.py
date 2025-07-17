@@ -154,8 +154,8 @@ def _schedule_fallback_operation(
     scheduler: "scheduler.Scheduler",
     name_to_buf: Dict[str, "scheduler.SchedulerBuffer"],
     name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"],
-    schedule_snode_fn: Callable[[Any], None],
-    new_operation_name_to_snode: Dict[str, "scheduler.BaseSchedulerNode"],
+    schedule_snode_fn: Union[Callable[..., Any], Any] = None,
+    new_operation_name_to_snode: Dict[str, "scheduler.BaseSchedulerNode"] = {},
     dep_operations: Union[ir.Operation, list[ir.Operation], None] = None,
 ) -> Union[ir.Operation, list[ir.Operation]]:
     # NOTE: `dep_operations` enforces strong ordering between ops, helpful if the dependency chain is not clear from direct input-output relationship
@@ -200,8 +200,8 @@ def _schedule_fallback_operation(
                             StarDep(name=buf_name, mode=None)
                         )
                     )
-
-        schedule_snode_fn(new_snode)
+        if schedule_snode_fn is not None:
+            schedule_snode_fn(new_snode)
         new_snodes.append(new_snode)
         new_operation_name_to_snode[new_operation.get_operation_name()] = new_snode
         for o in new_snode.get_outputs():
@@ -230,8 +230,8 @@ def bucket_all_gathers(
     group_name: str,
     ag_input_ir_nodes: list["ir.IRNode"],
     orig_ag_snodes: list["scheduler.BaseSchedulerNode"],
-    orig_wait_snodes: list["scheduler.BaseSchedulerNode"],
     name_to_buf: Dict[str, "scheduler.SchedulerBuffer"],
+    orig_wait_snodes: list["scheduler.BaseSchedulerNode"] = None,
     schedule_snode_fn: Union[Callable[..., Any], Any] = None,
     return_ag_only: bool = False,
 ):
@@ -283,7 +283,7 @@ def bucket_all_gathers(
                 "dtype": n.meta["val"].dtype,
                 "device": n.meta["val"].device,
                 "pin_memory": False,
-            }
+            },
         )
         for n in ag_input_fx_nodes
     ]
@@ -323,7 +323,7 @@ def bucket_all_gathers(
     )
     if return_ag_only:
         assert len(all_gather_into_tensor_out.inputs) == 1
-        return all_gather_into_tensor_out.inputs[0]
+        return all_gather_into_tensor_out, all_gather_input, all_gather_output
 
     wait_tensor = schedule_fallback_operation(
         torch.ops._c10d_functional.wait_tensor.default,
