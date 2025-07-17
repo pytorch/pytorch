@@ -178,9 +178,10 @@ file(GLOB native_flash_attn_api_cpp "native/transformers/cuda/flash_attn/flash_a
 file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
 # if USE_FLASH_ATTENTION is set, ensure CK instances get generated
 if(USE_FLASH_ATTENTION)
-  if(DEFINED ENV{USE_CK_FLASH_ATTENTION})
+  if(DEFINED ENV{USE_ROCM_CK_SDPA} OR DEFINED ENV{USE_CK_FLASH_ATTENTION})
+    set(USE_ROCM_CK_SDPA $ENV{USE_ROCM_CK_SDPA})
     set(USE_CK_FLASH_ATTENTION $ENV{USE_CK_FLASH_ATTENTION})
-      if(USE_CK_FLASH_ATTENTION STREQUAL "1")
+    if(USE_ROCM_CK_SDPA STREQUAL "1" OR USE_CK_FLASH_ATTENTION STREQUAL "1")
         if(DEFINED ENV{PYTORCH_ROCM_ARCH})
           list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
           if(NUM_ARCHS GREATER 1)
@@ -188,7 +189,10 @@ if(USE_FLASH_ATTENTION)
             Consider setting PYTORCH_ROCM_ARCH env var value as the gfx arch you need to build for")
           endif()
         endif()
-        message(STATUS "USE_CK_FLASH_ATTENTION is set; building PyTorch with CK Flash Attention enabled")
+        if(USE_CK_FLASH_ATTENTION STREQUAL "1")
+          message(STATUS "USE_CK_FLASH_ATTENTION is being deprecated. Please use USE_ROCM_CK_SDPA instead")
+        endif()
+        message(STATUS "USE_ROCM_CK_SDPA is set; building PyTorch with CK SDPA enabled")
         message(STATUS "Generating CK kernel instances...")
         add_subdirectory(native/transformers/hip/flash_attn/ck)
         file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
@@ -414,12 +418,17 @@ endif()
     ${native_quantized_hip_hip}
     ${native_transformers_hip_hip} ${native_transformers_src_hip_hip}
   )
-  if(WIN32) # Windows doesn't support Composable Kernels
+  if(NOT USE_ROCM_CK_GEMM) # Windows doesn't support Composable Kernels and Triton
     file(GLOB native_hip_bgemm "native/hip/bgemm_kernels/*.hip")
     file(GLOB native_hip_ck "native/hip/ck*.hip")
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
   endif()
+  if(WIN32) # Windows doesn't support Composable Kernels and Triton
+    exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
+      ${native_transformers_hip_hip} ${native_transformers_hip_cpp})
+  endif()
+
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
   list(APPEND all_hip_cpp
     ${native_nested_hip_cpp}
