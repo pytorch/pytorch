@@ -249,6 +249,10 @@ def is_training_ir_test(test_name):
     )
 
 
+def is_training_ir_strict_test(test_name):
+    return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX)
+
+
 def is_cpp_runtime_test(test_name):
     return test_name.endswith(CPP_RUNTIME_STRICT_SUFFIX) or test_name.endswith(
         CPP_RUNTIME_NONSTRICT_SUFFIX
@@ -487,7 +491,7 @@ class TestExport(TestCase):
             eps = [ep]
             if test_serdes:
                 # test dynamic shapes serialization
-                # test that behavior remains the same when exporting with ser/des specs:
+                # test that behavior remains the same when exporting with Ser/Des specs:
                 # serialize + deserialize original specs, and export.
                 ep_serdes = export(
                     model,
@@ -927,7 +931,7 @@ graph():
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
-    @testing.expectedFailureCppSerDes  # Cpp serder seems to fail parsing complicated guards
+    @testing.expectedFailureCppSerDes  # Cpp Ser/Der seems to fail parsing complicated guards
     def test_export_statically_known_true(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -1581,6 +1585,42 @@ class GraphModule(torch.nn.Module):
             return (1,)
 """,  # noqa: B950
             )
+        self.assertEqual(m(*args), ep.module()(*args))
+
+    @testing.expectedFailureCppSerDes  #  AssertionError: 0 not in VR[2, int_oo]
+    @testing.expectedFailureSerDer  #  AssertionError: 0 not in VR[2, int_oo]
+    @testing.expectedFailureSerDerNonStrict  #  AssertionError: 0 not in VR[2, int_oo]
+    def test_cond_access_identical_symint_closure(self):
+        class Example2(torch.nn.Module):
+            def forward(self, x, trigger, target):
+                return torch.cond(
+                    trigger == 1,
+                    lambda: x + target,
+                    lambda: x * target,
+                    (),
+                )
+
+        m = Example2()
+        x = torch.randn(2)
+        trigger = 0
+        target = 2
+        args = (x, trigger, target)
+        ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
+        if is_training_ir_strict_test(self._testMethodName):
+            # In strict mode export's result capturing compiler, we create
+            # 2 new symints when re-fakifying the symint inputs.
+            # Then in run_decompositions, ep.range_constraints was updated
+            # where it checks the var_to_range and put the two newly added ones into the range_constraints.
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo], VR[-int_oo, int_oo], VR[-int_oo, int_oo])""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo])""",
+            )
+
         self.assertEqual(m(*args), ep.module()(*args))
 
     def test_cond_branches_return_same_int(self):
@@ -5011,7 +5051,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    @testing.expectedFailureCppSerDes  # cpp ser/der not handling complicated symbols
+    @testing.expectedFailureCppSerDes  # cpp Ser/Der not handling complicated symbols
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 
