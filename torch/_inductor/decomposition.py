@@ -1159,8 +1159,8 @@ def repeast_interleave_Tensor(
 ) -> torch.Tensor:
     if output_size is None or type(output_size) is not int:
         return NotImplemented
-    if repeat.dtype not in [torch.int32, torch.int64]:
-        return NotImplemented
+    assert repeat.dtype in [torch.int32, torch.int64]
+    assert repeat.ndim == 1
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
     return torch.searchsorted(
