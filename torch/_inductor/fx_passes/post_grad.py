@@ -1536,13 +1536,7 @@ def native_matmul_pass(graph: torch.fx.Graph):
         if any([has_free_unbacked_symbols(var) for var in [M,K,N]]) :
             return False
 
-        # Triton currently supports tl.dot when shapes >= 16
-        # This can be handled with masking during codegen but skip for now.
-        # triton_dot_threshold = M >= 16 and K >= 16 and N >= 16 
-        unroll_reduction = K < config.unroll_reductions_threshold
-        
-        return not unroll_reduction 
-
+        return True
   
     @register_graph_pattern(
         CallFunction(
