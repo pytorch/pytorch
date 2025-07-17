@@ -796,6 +796,31 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             rs_tensor.sum().backward()
             self.assertEqual(input_tensor.grad, torch.full(output_size, fill_value=1.0))
 
+    @parametrize("compile", [True, False])
+    def test_all_reduce_autograd(self, compile: bool = True) -> None:
+        group = dist.group.WORLD.group_name
+
+        t = torch.ones([4], requires_grad=True)
+
+        def my_func(t: torch.Tensor) -> torch.Tensor:
+            assert t.requires_grad
+            out = ft_c.all_reduce_autograd(t * 1.0, "sum", group)
+            out = out + 0
+            return out
+
+        if compile:
+            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
+        else:
+            compiled = my_func
+
+        out = compiled(t)
+        self.assertEqual(out, torch.ones([4]) * self.world_size)
+        self.assertIsNotNone(out.grad_fn)
+        self.assertTrue(out.requires_grad)
+        loss = out.sum()
+        loss.backward()
+        self.assertEqual(t.grad, torch.ones([4]) * self.world_size)
+
 
 class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
     @with_comms()

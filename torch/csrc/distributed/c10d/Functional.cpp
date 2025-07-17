@@ -98,6 +98,60 @@ at::Tensor all_reduce(
   return input.is_complex() ? at::view_as_complex(output_ret) : output_ret;
 }
 
+class AllReduce
+    : public torch::autograd::Function<AllReduce> {
+ public:
+  static torch::autograd::Variable forward(
+      torch::autograd::AutogradContext* ctx,
+      const at::Tensor& input,
+      const std::string& reduce_op,
+      const std::string& group_name) {
+    ctx->saved_data["reduce_op"] = reduce_op;
+    ctx->saved_data["group_name"] = group_name;
+
+    return c10::Dispatcher::singleton()
+        .findSchemaOrThrow("_c10d_functional::all_reduce", "")
+        .typed<decltype(all_reduce)>()
+        .call(input, reduce_op, group_name);
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::autograd::variable_list& grad_out_list) {
+    const std::string& reduce_op = ctx->saved_data["reduce_op"].toStringRef();
+    const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
+
+    DCHECK(grad_out_list.size() == 1);
+    const auto& grad_out = grad_out_list[0];
+
+    auto out =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("_c10d_functional::all_reduce", "")
+            .typed<decltype(all_gather_into_tensor)>()
+            .call(grad_out, reduce_op, group_name);
+
+    // do an explicit wait to avoid cuda stream issues
+    // TODO: track active cuda stream in wait
+    out = c10::Dispatcher::singleton()
+              .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
+              .typed<decltype(c10d::wait_tensor)>()
+              .call(out);
+
+    return {
+        out,
+        at::Tensor(),
+        at::Tensor(),
+    };
+  }
+};
+
+at::Tensor all_reduce_autograd(
+    const at::Tensor& input,
+    const std::string reduce_op,
+    const std::string group_name) {
+  return AllReduce::apply(input, reduce_op, group_name);
+}
+
 std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
@@ -565,6 +619,14 @@ TORCH_LIBRARY(_c10d_functional_autograd, m) {
       "str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::Autograd, ::all_gather_into_tensor_autograd),
+      {at::Tag::pt2_compliant_tag});
+  m.def(
+      "all_reduce("
+      "Tensor input, "
+      "str reduce_op, "
+      "str group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::Autograd, ::all_reduce_autograd),
       {at::Tag::pt2_compliant_tag});
 }
 
