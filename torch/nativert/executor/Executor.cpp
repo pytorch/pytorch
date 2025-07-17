@@ -72,9 +72,7 @@ void Executor::initialize(
   delegateExecutors_ = std::move(executionKernels.delegateExecutors);
   constFoldingExecutions_ = std::move(executionKernels.constFoldingExecutions);
 
-  // initialize weights_
-  processWeights(weights);
-  atomicSwapWeights(weights);
+  initWeights(weights);
 
   if (executorConfig_.layoutPlannerSettings.enabled()) {
     layoutPlanner_ = std::make_unique<LayoutPlanner>(
@@ -139,6 +137,19 @@ void Executor::processWeights(const std::shared_ptr<Weights>& weights) {
   }
   for (auto& delegateExecutor : delegateExecutors_) {
     delegateExecutor->processWeights(weights);
+  }
+}
+
+void Executor::initWeights(const std::shared_ptr<Weights>& weights) {
+  maybeRunConstantFolding(weights);
+  if (constantFolder_.has_value()) {
+    constantFolder_->evaluate(*weights);
+  }
+
+  weights_.withLock([&](auto& w) { w = std::move(weights); });
+
+  for (auto& delegateExecutor : delegateExecutors_) {
+    delegateExecutor->initWeights(weights);
   }
 }
 
