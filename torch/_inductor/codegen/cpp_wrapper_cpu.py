@@ -59,7 +59,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # must be initialized prior to calling super().__init__()
         self.included_devices: OrderedSet[str] = OrderedSet()
         self.model_class_name_suffix = (
-            config.aot_inductor.model_name_for_generated_files or ""
+            config.aot_inductor.model_name_for_generated_files
+            if config.aot_inductor.compile_standalone
+            else ""
         )
         self.aoti_model_class_name = f"AOTInductorModel{self.model_class_name_suffix}"
 
@@ -1442,6 +1444,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.sym))
+
+    def codegen_dynamic_select_index(self, node):
+        index_cpp_str = self.val_to_arg_str_for_prim_type(node.index, int)
+
+        index_compute_str = (
+            f"{index_cpp_str} < 0 ? {index_cpp_str} + "
+            f"{self.val_to_arg_str_for_prim_type(node.size, int)}:  {index_cpp_str}"
+        )
+        self.writeline(
+            f"auto {node.unbacked_offset_symbol} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
+            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * ({index_compute_str});"
+        )
+        # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
+        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
 
     def make_buffer_free(self, buffer):
         return (
