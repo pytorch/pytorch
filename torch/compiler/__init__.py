@@ -355,7 +355,7 @@ def set_enable_guard_collectives(enabled: bool):
     from torch._dynamo.eval_frame import guard_collectives_hook
 
     if enabled:
-        return set_guard_complete_hook(guard_collectives_hook) is not None
+        return set_guard_complete_hook(guard_collectives_hook) is not None  # type: ignore[arg-type]
     else:
         return set_guard_complete_hook(None) is not None
 
