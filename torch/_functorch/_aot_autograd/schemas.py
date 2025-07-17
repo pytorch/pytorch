@@ -7,11 +7,9 @@ input/output types, metadata, config, function signatures etc.
 from __future__ import annotations
 
 import collections
-import contextlib
 import dataclasses
 import functools
 import itertools
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -28,8 +26,6 @@ from typing import (
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._guards import Source
-from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -43,6 +39,11 @@ from .utils import strict_zip
 
 
 if TYPE_CHECKING:
+    import contextlib
+    from collections.abc import Iterable, Sequence
+    from torch._guards import Source
+    from torch._ops import OpOverload
+
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
 
