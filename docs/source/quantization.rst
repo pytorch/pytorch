@@ -156,6 +156,7 @@ and supported quantized modules and functions.
 .. py:module:: torch.ao.quantization.quantizer.quantizer
 .. py:module:: torch.ao.quantization.quantizer.utils
 .. py:module:: torch.ao.quantization.quantizer.x86_inductor_quantizer
+.. py:module:: torch.ao.quantization.quantizer.arm_inductor_quantizer
 .. py:module:: torch.ao.quantization.quantizer.xpu_inductor_quantizer
 .. py:module:: torch.ao.quantization.quantizer.xnnpack_quantizer
 .. py:module:: torch.ao.quantization.quantizer.xnnpack_quantizer_utils

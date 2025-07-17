@@ -416,6 +416,8 @@
   - test/quantization/core/test_quantized_op.py
   - torch/ao/quantization/quantizer/x86_inductor_quantizer.py
   - test/quantization/pt2e/test_x86inductor_quantizer.py
+  - torch/ao/quantization/quantizer/arm_inductor_quantizer.py
+  - test/quantization/pt2e/test_arminductor_quantizer.py
   approved_by:
   - leslie-fang-intel
   - jgong5
