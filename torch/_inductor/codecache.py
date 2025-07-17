@@ -1804,6 +1804,10 @@ class AotCodeCompiler:
             elif platform == "darwin":
                 section_attr = "__DATA,__data"
                 symbol_prefix = "_"
+            elif platform == "win32":
+                symbol_prefix = ""
+                # ASM build is not supported on Windows, force use CPP build.
+                use_asm_build = False
             else:
                 raise RuntimeError(f"Unsupported platform: {platform}")
 
