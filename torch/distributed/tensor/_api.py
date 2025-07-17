@@ -269,6 +269,13 @@ class DTensor(torch.Tensor):
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
         assert spec.tensor_meta is not None, "TensorMeta should not be None!"
+        extra_dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(0)
+        if torch._C._dispatch_keys(local_tensor).has(torch._C.DispatchKey.Conjugate):
+            extra_dispatch_keys = extra_dispatch_keys.add(
+                torch._C.DispatchKey.Conjugate
+            )
+        if torch._C._dispatch_keys(local_tensor).has(torch._C.DispatchKey.Negative):
+            extra_dispatch_keys = extra_dispatch_keys.add(torch._C.DispatchKey.Negative)
         r = torch.Tensor._make_wrapper_subclass(
             cls,
             spec.tensor_meta.shape,
@@ -277,6 +284,7 @@ class DTensor(torch.Tensor):
             device=local_tensor.device,
             layout=local_tensor.layout,
             requires_grad=requires_grad,
+            _extra_dispatch_keys=extra_dispatch_keys,
         )
 
         r._spec = spec
@@ -346,7 +354,7 @@ class DTensor(torch.Tensor):
     @torch._disable_dynamo
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         return DTensor._op_dispatcher.dispatch(
             func,
             args,
@@ -486,7 +494,7 @@ class DTensor(torch.Tensor):
     ) -> "DTensor":
         """
         ``redistribute`` performs necessary collective operations that redistribute the current
-        DTensor from its current placements to a new placements, or from is current DeviceMesh
+        DTensor from its current placements to a new placements, or from its current DeviceMesh
         to a new DeviceMesh. i.e. we can turn a Sharded DTensor to a Replicated DTensor by
         specifying a Replicate placement for each dimension of the DeviceMesh.
 

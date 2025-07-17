@@ -8,9 +8,11 @@ ver() {
 
 install_ubuntu() {
     apt-get update
-    if [[ $UBUNTU_VERSION == 20.04 ]]; then
-      # gpg-agent is not available by default on 20.04
-      apt-get install -y --no-install-recommends gpg-agent
+    # gpg-agent is not available by default
+    apt-get install -y --no-install-recommends gpg-agent
+    if [[ $(ver $UBUNTU_VERSION) -ge $(ver 22.04) ]]; then
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' \
+            | sudo tee /etc/apt/preferences.d/rocm-pin-600
     fi
     apt-get install -y kmod
     apt-get install -y wget
@@ -26,13 +28,27 @@ Pin: release o=repo.radeon.com
 Pin-Priority: 600
 EOF
 
+    # we want the patch version of 6.4 instead
+    if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
+        ROCM_VERSION="${ROCM_VERSION}.1"
+    fi
+
+    # Default url values
+    rocm_baseurl="http://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
+    amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/ubuntu"
+
+    # Special case for ROCM_VERSION == 7.0
+    if [[ $(ver "$ROCM_VERSION") -eq $(ver 7.0) ]]; then
+        rocm_baseurl="https://repo.radeon.com/rocm/apt/7.0_alpha2"
+        amdgpu_baseurl="https://repo.radeon.com/amdgpu/30.10_alpha2/ubuntu"
+    fi
+
     # Add amdgpu repository
     UBUNTU_VERSION_NAME=`cat /etc/os-release | grep UBUNTU_CODENAME | awk -F= '{print $2}'`
-    echo "deb [arch=amd64] https://repo.radeon.com/amdgpu/${ROCM_VERSION}/ubuntu ${UBUNTU_VERSION_NAME} main" > /etc/apt/sources.list.d/amdgpu.list
+    echo "deb [arch=amd64] ${amdgpu_baseurl} ${UBUNTU_VERSION_NAME} main" > /etc/apt/sources.list.d/amdgpu.list
 
     # Add rocm repository
     wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
-    local rocm_baseurl="http://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
     echo "deb [arch=amd64] ${rocm_baseurl} ${UBUNTU_VERSION_NAME} main" > /etc/apt/sources.list.d/rocm.list
     apt-get update --allow-insecure-repositories
 
@@ -67,22 +83,27 @@ EOF
 
     # ROCm 6.3 had a regression where initializing static code objects had significant overhead
     # ROCm 6.4 did not yet fix the regression, also HIP branch names are different
-    if [[ $(ver $ROCM_VERSION) -eq $(ver 6.3) ]] || [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
-        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.3) ]]; then
-            HIP_BRANCH=rocm-6.3.x
-            VER_STR=6.3
+    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.3) ]] && [[ $(ver $ROCM_VERSION) -lt $(ver 7.0) ]]; then
+        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
+            HIP_BRANCH=release/rocm-rel-6.4
+            VER_STR=6.4
+            VER_PATCH=.1
         elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
             HIP_BRANCH=release/rocm-rel-6.4
             VER_STR=6.4
+        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.3) ]]; then
+            HIP_BRANCH=rocm-6.3.x
+            VER_STR=6.3
         fi
         # clr build needs CppHeaderParser but can only find it using conda's python
-        /opt/conda/bin/python -m pip install CppHeaderParser
+        python -m pip install CppHeaderParser
         git clone https://github.com/ROCm/HIP -b $HIP_BRANCH
         HIP_COMMON_DIR=$(readlink -f HIP)
-        git clone https://github.com/jeffdaily/clr -b release/rocm-rel-${VER_STR}-statco-hotfix
+        git clone https://github.com/jeffdaily/clr -b release/rocm-rel-${VER_STR}${VER_PATCH}-statco-hotfix
         mkdir -p clr/build
         pushd clr/build
-        cmake .. -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
+        # Need to point CMake to the correct python installation to find CppHeaderParser
+        cmake .. -DPython3_EXECUTABLE=/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/bin/python3 -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
         make -j
         cp hipamd/lib/libamdhip64.so.${VER_STR}.* /opt/rocm/lib/libamdhip64.so.${VER_STR}.*
         popd

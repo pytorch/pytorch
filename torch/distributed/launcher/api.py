@@ -267,7 +267,7 @@ def launch_agent(
 
         result = agent.run()
         # records that agent.run() has succeeded NOT that workers have succeeded
-        events.record(agent.get_event_succeeded())
+        events.record(agent.get_event_succeeded(), config.event_log_handler)
 
         if result.is_failed():
             # ChildFailedError is treated specially by @record
@@ -287,10 +287,10 @@ def launch_agent(
         # since this closes the rendezvous on this rdzv_id permanently and
         # prevents any additional scaling events
         shutdown_rdzv = False
-        events.record(agent.get_event_failed())
+        events.record(agent.get_event_failed(), config.event_log_handler)
         raise
     except Exception:
-        events.record(agent.get_event_failed())
+        events.record(agent.get_event_failed(), config.event_log_handler)
         raise
     finally:
         if shutdown_rdzv:

@@ -18,7 +18,7 @@ namespace torch::aot_inductor {
 // when model_container is created and no constants are being loaded or updated.
 // (2) INITIALIZED state: This state get set whenever we load the constants into
 // the buffer. This could be done by load_constants or update_constants_buffer.
-// (3) FOLDED state: This state should transition from INITIALILZED after
+// (3) FOLDED state: This state should transition from INITIALIZED after
 // const_fold is being invoked.
 enum class ConstantState : uint8_t { NONE, INITIALIZED, FOLDED, UNKNOWN };
 
@@ -476,7 +476,7 @@ class AOTInductorModelContainer {
           ->memcpy(internal_constants_ptr, user_constant_ptr, constant_size)
           .wait();
 #elif USE_CUDA
-      AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
+      AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
           internal_constants_ptr,
           user_constant_ptr,
           constant_size,
@@ -666,7 +666,7 @@ class AOTInductorModelContainer {
   std::shared_mutex model_exec_mutex_;
 
   RAIIDataPtr allocate_constant_blob() {
-#if defined(USE_CUDA) || defined(USE_XPU)
+#if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
     return RAII_gpuMalloc(blob_size_);
 #else
     return RAII_cpuMalloc(blob_size_);

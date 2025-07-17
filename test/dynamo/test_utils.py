@@ -421,6 +421,7 @@ class TestDynamoTimed(TestCase):
  'pre_grad_pass_time_us': 0,
  'python_version': None,
  'recompile_reason': None,
+ 'recompile_user_contexts': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
@@ -467,8 +468,8 @@ class TestDynamoTimed(TestCase):
  'compile_id': '1/0',
  'compile_time_autotune_time_us': None,
  'compliant_custom_ops': None,
- 'config_inline_inbuilt_nn_modules': None,
- 'config_suppress_errors': None,
+ 'config_inline_inbuilt_nn_modules': False,
+ 'config_suppress_errors': False,
  'cuda_version': None,
  'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
@@ -512,6 +513,7 @@ class TestDynamoTimed(TestCase):
  'pre_grad_pass_time_us': None,
  'python_version': None,
  'recompile_reason': None,
+ 'recompile_user_contexts': None,
  'remote_cache_time_saved_s': None,
  'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
@@ -593,9 +595,10 @@ class TestDynamoTimed(TestCase):
         )
 
         compilation_events = []
-        with dynamo_config.patch({"automatic_dynamic_shapes": False}), mock.patch(
-            "torch._dynamo.utils.log_compilation_event"
-        ) as log_event:
+        with (
+            dynamo_config.patch({"automatic_dynamic_shapes": False}),
+            mock.patch("torch._dynamo.utils.log_compilation_event") as log_event,
+        ):
 
             @torch.compile()
             def f(x):
