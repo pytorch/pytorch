@@ -20,7 +20,7 @@ class TestFakeQuantize(unittest.TestCase):
         apot_fake.activation_post_process.min_val = torch.tensor([0.0])
         apot_fake.activation_post_process.max_val = torch.tensor([1.0])
 
-        alpha, gamma, quantization_levels, level_indices = apot_fake.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = apot_fake.calculate_qparams(signed=False)
 
         observer = APoTObserver(b=4, k=2)
         observer.min_val = torch.tensor([0.0])
@@ -32,6 +32,7 @@ class TestFakeQuantize(unittest.TestCase):
         self.assertTrue(torch.equal(gamma, qparams_expected[1]))
         self.assertTrue(torch.equal(quantization_levels, qparams_expected[2]))
         self.assertTrue(torch.equal(level_indices, qparams_expected[3]))
+        self.assertTrue(torch.equal(quantization_partitions, qparams_expected[4]))
 
     r""" Tests fake quantize forward() method
          by comparing result with expected
@@ -46,16 +47,16 @@ class TestFakeQuantize(unittest.TestCase):
 
         observer = APoTObserver(b=4, k=2)
         observer.forward(X)
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = observer.calculate_qparams(signed=False)
 
         apot_fake = APoTFakeQuantize(b=4, k=2)
         apot_fake.enable_observer()
         apot_fake.enable_fake_quant()
 
-        X_reduced_precision_fp = apot_fake.forward(torch.clone(X), False)
+        X_reduced_precision_fp = apot_fake.forward(torch.clone(X))
 
         # get X_expected by converting fp -> apot -> fp to simulate quantize -> dequantize
-        X_to_apot = quantize_APoT(X, alpha, gamma, quantization_levels, level_indices)
+        X_to_apot = quantize_APoT(X, alpha, gamma, quantization_levels, level_indices, quantization_partitions)
         X_expected = dequantize_APoT(X_to_apot)
 
         self.assertTrue(torch.equal(X_reduced_precision_fp, X_expected))
@@ -84,9 +85,9 @@ class TestFakeQuantize(unittest.TestCase):
 
         observer = APoTObserver(b=4, k=2)
         observer(input)
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = observer.calculate_qparams(signed=False)
 
-        gradcheck(fake_quantize_function.apply, (input, alpha, gamma, quantization_levels, level_indices), atol=1e-4)
+        gradcheck(fake_quantize_function.apply, (input, alpha, gamma, quantization_levels, level_indices, quantization_partitions), atol=1e-4)
 
 if __name__ == '__main__':
     unittest.main()
