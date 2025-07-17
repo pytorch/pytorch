@@ -81,6 +81,12 @@ def ensure_tool_installed(tool: str, force_update: bool = False) -> None:
             )
 
 
+if sys.platform.startswith("win"):
+    print(
+        "\n⚠️  Lintrunner is not supported on Windows, so there are no pre-push hooks to add. Exiting setup.\n"
+    )
+    sys.exit(0)
+
 ensure_pipx()
 
 # Ensure the path pipx installs binaries to is part of the system path.
