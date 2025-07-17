@@ -10997,6 +10997,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             self.assertEqual(len(w), 0)
 
+    def test_zerotensor_errors(self):
+        a = torch._efficientzerotensor(3)
+        b = torch._efficientzerotensor(3)
+        a.requires_grad = True
+        with self.assertRaisesRegex(RuntimeError, "ZeroTensor `requires_grad` must be False"):
+            a.mul(b)
+
+        a.requires_grad = False
+        b.requires_grad = True
+        with self.assertRaisesRegex(RuntimeError, "ZeroTensor `requires_grad` must be False"):
+            a.mul(b)
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
