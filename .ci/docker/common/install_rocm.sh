@@ -100,6 +100,17 @@ EOF
         git clone https://github.com/ROCm/HIP -b $HIP_BRANCH
         HIP_COMMON_DIR=$(readlink -f HIP)
         git clone https://github.com/jeffdaily/clr -b release/rocm-rel-${VER_STR}${VER_PATCH}-statco-hotfix
+        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
+            pushd clr
+            echo "checking out last known good HIP commit"
+            git checkout ca18eb3f77fa09292fcda62bc60c3e565d752ada
+            popd
+        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
+            pushd clr
+            echo "checking out last known good HIP commit"
+            git checkout ca18eb3f77fa09292fcda62bc60c3e565d752ada
+            popd
+        fi
         mkdir -p clr/build
         pushd clr/build
         # Need to point CMake to the correct python installation to find CppHeaderParser
