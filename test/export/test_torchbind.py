@@ -812,8 +812,8 @@ def forward(self, token, safe_obj):
             self.assertFalse(op._has_torchbind_op_overload)
 
     def test_torchbind_op_register_fallthrough(self):
-        TEST_DISPATCH_KEY = torch._C.DispatchKey.AutocastCPU
-        TEST_DISPATCH_KEY_STR = "AutocastCPU"
+        TEST_DISPATCH_KEY = torch._C.DispatchKey.AutogradCPU
+        TEST_DISPATCH_KEY_STR = "AutogradCPU"
 
         for op_packet in self.torch_bind_ops:
             op = op_packet.default
@@ -1136,7 +1136,7 @@ class TestCompileTorchbind(TestCase):
     def tearDown(self):
         torch._dynamo.reset()
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_script_object_input(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1529,6 +1529,43 @@ def forward(self, token, obj, x):
         x = torch.randn(2)
         _assertEqualScriptObject(
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
+        )
+
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_obj_torchbind_op_with_autocast(self, backend, device):
+        def f(tq, x):
+            with torch.autocast(device_type=device):
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos() + 1)
+                torch.ops._TorchScriptTesting.queue_pop(tq)
+                torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+            return tq.pop(), tq.pop() + tq.size(), tq
+
+        opt_f = torch.compile(f, backend=backend)
+        x = torch.randn(2, device=device)
+        _assertEqualScriptObject(
+            self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
+        )
+
+    @parametrize("device", ["cpu", "cuda"])
+    def test_export_obj_torchbind_op_with_autocast(self, device):
+        class Mod(torch.nn.Module):
+            def forward(self, x, tq):
+                with torch.autocast(device_type=device):
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.cos() + 1)
+                    torch.ops._TorchScriptTesting.queue_pop(tq)
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                return tq.pop(), tq.pop() + tq.size(), tq
+
+        x = torch.randn(2, device=device)
+        args = (x,)
+        mod = Mod()
+        ep = torch.export.export(mod, (x, _empty_tensor_queue()))
+        ep.module().print_readable()
+        _assertEqualScriptObject(
+            self, ep.module()(x, _empty_tensor_queue()), mod(x, _empty_tensor_queue())
         )
 
 
