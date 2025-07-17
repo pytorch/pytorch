@@ -224,7 +224,7 @@ class SubclassCreationMeta:
     # arg_count is inclusive of the arg_counts of any
     # inner tensor subclasses: If I have a TwoTensor and
     # both of its inner elements are TwoTensors, then the
-    # arg_count of the outer-most sublass will be 4
+    # arg_count of the outer-most subclass will be 4
     arg_count: int
     # Mark where or not symints were included. This flag is only used in one assertion
     # in "wrap_tensor_subclasses"
@@ -384,7 +384,7 @@ class ViewAndMutationMeta:
     # metadata pass of the user's forward function.
     # Their only use today is to pass them as a best-guess for tangents when tracing the joint.
     # Stashing them as part of our "metadata" makes it simpler if we want to run our analysis
-    # pass once, and re-use the output throughout AOTAutograd
+    # pass once, and reuse the output throughout AOTAutograd
     traced_tangents: list[Any]
 
     # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
