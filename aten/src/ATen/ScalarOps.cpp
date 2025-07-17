@@ -20,11 +20,11 @@ inline void fill_inplace(Tensor& self, const Scalar& value_scalar) {
                        std::is_same_v<scalar_t, at::Float8_e8m0fnu>) {
     // relaxed float cast: allow inf similar to the torch.tensor constructor
     //
-    // Without this, we had the following divergence:
-    // torch.tensor(1123581321.0, dtype=torch.float16)
-    //   => tensor(inf, dtype=torch.float16)
-    // torch.ops.aten.scalar_tensor.default(1123581321, dtype=torch.float16)
-    //   => RuntimeError: value cannot be converted to type at::Half without overflow
+    // without this, we had the following divergence:
+    //   torch.tensor(1123581321.0, dtype=torch.float16)
+    //     => tensor(inf, dtype=torch.float16)
+    //   torch.ops.aten.scalar_tensor.default(1123581321, dtype=torch.float16)
+    //     => RuntimeError: value cannot be converted to type at::Half without overflow
 
     value = static_cast<scalar_t>(value_scalar.to<double>());
   } else {
