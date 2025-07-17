@@ -216,6 +216,7 @@ class profile:
         experimental_config=None,
         acc_events=False,
         custom_trace_id_callback=None,
+        activities=None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -303,6 +304,8 @@ class profile:
                 "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
             )
             self.kineto_activities.add(ProfilerActivity.MTIA)
+            if ProfilerActivity.MTIA_INSIGHT in activities:
+                self.kineto_activities.add(ProfilerActivity.MTIA_INSIGHT)
         elif self.use_device == "hpu":
             assert use_kineto and ProfilerActivity.HPU in _supported_activities(), (
                 "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
