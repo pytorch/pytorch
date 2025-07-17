@@ -78,7 +78,7 @@ def _bytecode_from_template_with_split(template, stack_index, varname_map=None):
         ),
         (None, None),
     )
-    assert dummy_idx is not None
+    assert dummy_idx is not None and dummy_inst is not None
 
     # replace LOAD_FAST dummy with first NOP marking exception area
     overwrite_instruction(dummy_inst, [create_instruction("NOP")])
