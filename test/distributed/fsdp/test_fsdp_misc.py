@@ -60,7 +60,9 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = torch.accelerator.current_accelerator().type
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class MyModel(nn.Module):
@@ -686,7 +688,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             auto_wrap_policy = ModuleWrapPolicy(module_classes)
         fsdp_kwargs = {
             "auto_wrap_policy": auto_wrap_policy,
-            "device_id": torch.accelerator.current_device(),
+            "device_id": torch.accelerator.current_device_index(),
         }
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
