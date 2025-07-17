@@ -1618,11 +1618,15 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Efficient Attention was not built for this system")
-    @parametrize("kernel", [SDPBackend.EFFICIENT_ATTENTION])
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+        or not PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+        "Efficient or cuDNN Attention was not built for this system",
+    )
+    @parametrize("kernel", [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.CUDNN_ATTENTION])
     def test_mask_invalid_last_dim_stride(self, device, kernel):
-        with sdpa_kernel(backends=kernel):
-            dtype = torch.float
+        with sdpa_kernel(backends=[kernel]):
+            dtype = torch.float16
             make_tensor = partial(torch.rand, device=device, dtype=dtype)
             size = SdpaShape(2, 2, 8, 8)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
