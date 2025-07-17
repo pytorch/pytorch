@@ -68,7 +68,7 @@ def generate_aten_impl(ctx):
         executable = ctx.executable.generator,
         arguments = [
             "--source-path",
-            "aten/src/ATen",
+            ctx.file._sigil.dirname,
             "--per-operator-headers",
             "--install_dir",
             install_dir,
@@ -89,5 +89,6 @@ generate_aten = rule(
         ),
         "outs": attr.output_list(),
         "srcs": attr.label_list(allow_files = True),
+        "_sigil": attr.label(allow_single_file = True, default = "@pytorch//:aten/src/ATen/CMakeLists.txt"),
     },
 )
