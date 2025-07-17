@@ -453,41 +453,24 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
-    if torch.xpu.is_available():
-        kernel_options.setdefault(
-            "BLOCK_M",
-            (
-                max(
-                    next_power_of_2(
-                        V.graph.sizevars.size_hint(
-                            seq_len_q,
-                            fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                        )
-                        * gqa_shared_heads
-                    ),
-                    8,
-                )
-            ),
-        )
-    else:
-        kernel_options.setdefault(
-            "BLOCK_M",
-            (
-                # m
-                # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
-                # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
-                max(
-                    next_power_of_2(
-                        V.graph.sizevars.size_hint(
-                            seq_len_q,
-                            fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                        )
-                        * gqa_shared_heads
-                    ),
-                    16,
-                )
-            ),
-        )
+    kernel_options.setdefault(
+        "BLOCK_M",
+        (
+            # m
+            # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
+            # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
+            max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        seq_len_q,
+                        fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
+                    )
+                    * gqa_shared_heads
+                ),
+                8 if torch.xpu.is_available() else 16,
+            )
+        ),
+    )
 
     query = ir.ExternKernel.realize_input(query)
     stride_b, stride_hq, stride_seq_len_q, stride_qk_head_dim = query.get_stride()
