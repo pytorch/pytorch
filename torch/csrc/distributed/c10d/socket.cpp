@@ -499,7 +499,7 @@ using addrinfo_ptr = std::unique_ptr<::addrinfo, addrinfo_delete>;
 
 class SocketListenOp {
  public:
-  SocketListenOp(std::uint16_t port, const SocketOptions& opts);
+  SocketListenOp(const std::string& host, std::uint16_t port, const SocketOptions& opts);
 
   std::unique_ptr<SocketImpl> run();
 
@@ -518,14 +518,15 @@ class SocketListenOp {
     errors_.emplace_back(std::move(msg));
   }
 
+  const char* host_;
   std::string port_;
   const SocketOptions* opts_;
   std::vector<std::string> errors_{};
   std::unique_ptr<SocketImpl> socket_{};
 };
 
-SocketListenOp::SocketListenOp(std::uint16_t port, const SocketOptions& opts)
-    : port_{fmt::to_string(port)}, opts_{&opts} {}
+SocketListenOp::SocketListenOp(const std::string& host, std::uint16_t port, const SocketOptions& opts)
+    : host_{host.c_str()}, port_{fmt::to_string(port)}, opts_{&opts} {}
 
 std::unique_ptr<SocketImpl> SocketListenOp::run() {
   if (opts_->prefer_ipv6()) {
@@ -562,17 +563,18 @@ bool SocketListenOp::tryListen(int family) {
   hints.ai_family = family;
   hints.ai_socktype = SOCK_STREAM;
 
-  int r = ::getaddrinfo(nullptr, port_.c_str(), &hints, &naked_result);
+  int r = ::getaddrinfo(host_, port_.c_str(), &hints, &naked_result);
   if (r != 0) {
     const char* gai_err = ::gai_strerror(r);
 
     recordError(
-        "The local {}network addresses cannot be retrieved (gai error: {} - {}).",
+        "The local {}network addresses cannot be retrieved (gai error: {} - {}). host: {}",
         family == AF_INET        ? "IPv4 "
             : family == AF_INET6 ? "IPv6 "
                                  : "",
         r,
-        gai_err);
+        gai_err,
+        host_);
 
     return false;
   }
@@ -1038,8 +1040,8 @@ void Socket::initialize() {
 #endif
 }
 
-Socket Socket::listen(std::uint16_t port, const SocketOptions& opts) {
-  SocketListenOp op{port, opts};
+Socket Socket::listen(const std::string& host, std::uint16_t port, const SocketOptions& opts) {
+  SocketListenOp op{host, port, opts};
 
   return Socket{op.run()};
 }
