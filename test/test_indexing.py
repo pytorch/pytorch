@@ -964,6 +964,9 @@ class TestIndexing(TestCase):
         mask = torch.tensor([[1, 0], [0, 1]], dtype=torch.bool, device=device)
         v[:, mask, :] = 0
         self.assertEqual(v, torch.tensor([[[[0], [2]], [[3], [0]]]], device=device))
+        v = torch.tensor([[[[1], [2]], [[3], [4]]]], device=device)
+        torch.ops.aten.index_put_(v, [None, mask, None], torch.tensor(0))
+        self.assertEqual(v, torch.tensor([[[[0], [2]], [[3], [0]]]], device=device))
 
     def test_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
