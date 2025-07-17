@@ -26,8 +26,8 @@ jobs:
             # Get the PR number from the github context
             PR_NUMBER="${{ github.event.number }}"
 
-            # Use gh CLI to get changed files in the PR
-            CHANGED_FILES=$(gh pr view "$PR_NUMBER" --json files --jq '.files[].path' | tr '\n' ' ' | sed 's/ $//')
+            # Use gh CLI to get changed files in the PR with explicit repo
+            CHANGED_FILES=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json files --jq '.files[].path' | tr '\n' ' ' | sed 's/ $//')
 
             if [ -z "$CHANGED_FILES" ]; then
               echo "No changed files found, setting to '*'"
