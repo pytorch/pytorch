@@ -274,7 +274,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   // when computing the actual output dtype and the flags.
   if (is_out_defined) {
     // Check for type promotion, if the output tensor is defined.
-    TORCH_CHECK_VALUE(
+    TORCH_CHECK(
         canCast(out_dtype, result.scalar_type()),
         "torch.cat(): input types can't be cast to the desired output type ",
         result.scalar_type());
