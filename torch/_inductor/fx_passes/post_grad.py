@@ -717,11 +717,6 @@ def register_addmm_activation_fusion():
 
 def is_valid_addmm_activation_fusion(match):
     if config.max_autotune_gemm:
-        print("(╯°□°)╯︵ ┻━┻")
-        print("(╯°□°)╯︵ ┻━┻")
-        print("(╯°□°)╯︵ ┻━┻")
-        print("(╯°□°)╯︵ ┻━┻")
-        print("(╯°□°)╯︵ ┻━┻")
         return False
     input = match.kwargs["input"].meta["val"]
     mat1 = match.kwargs["mat1"].meta["val"]
