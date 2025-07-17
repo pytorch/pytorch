@@ -124,6 +124,14 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
     - Per-operator Fallback: See `sub.Tensor`
     - Global Fallback: See `wrapper_cpu_fallback`
 
+### Autoload
+
+- Autoload Backend Machanism
+
+  - Registering the backend with Python entry points: See `setup`
+  - Adding an invoked function for the backend initialization: See `_autoload`
+  - Dynamically loading the backend without explicit imports: See [Usage Example](#usage-example)
+
 ## Installation and Usage
 
 ### Installation
@@ -139,7 +147,7 @@ After installation, you can use the `openreg` device in Python just like any oth
 
 ```python
 import torch
-import torch_openreg
+# import torch_openreg <- No need to import this because it is automatically loaded
 
 if not torch.openreg.is_available():
     print("OpenReg backend is not available in this build.")
