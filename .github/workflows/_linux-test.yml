@@ -192,18 +192,6 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Echo NVIDIA driver and compatible nvidia-ml-py version
-        run: |
-          if command -v nvidia-smi &> /dev/null && nvidia-smi -L | grep -q "GPU"; then
-            DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n1)
-            DRIVER_MAJOR=$(echo "$DRIVER_VERSION" | cut -d. -f1)
-            echo "✅ NVIDIA GPU detected"
-            echo "Driver version: $DRIVER_VERSION"
-            echo "Recommended pip install: nvidia-ml-py3==11.${DRIVER_MAJOR}.*"
-          else
-            echo "❌ No NVIDIA GPU detected or nvidia-smi not available"
-          fi
-
       - name: Start monitoring script
         id: monitor-script
         if: ${{ !inputs.disable-monitor }}
