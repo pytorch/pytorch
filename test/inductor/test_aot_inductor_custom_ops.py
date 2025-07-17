@@ -416,6 +416,7 @@ class AOTInductorTestsTemplate:
 
     @skipIfXpu
     @skipIfRocm
+    @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
     def test_custom_op_square(self) -> None:
         class Model(torch.nn.Module):
             def forward(self, x):

@@ -5,6 +5,7 @@ import unittest
 from datetime import timedelta
 
 import torch
+import torch.distributed as dist
 import torch.distributed._dist2 as dist2
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -215,6 +216,39 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
             self.assertEqual(backend.options._timeout, timedelta(seconds=30))
         else:
             self.assertEqual(subgroup, None)
+
+    def test_remote_group_merge(self) -> None:
+        group = self.new_group()
+        subgroup_1 = group.split_group([0], timeout=timedelta(seconds=30))
+        subgroup_2 = group.split_group([1], timeout=timedelta(seconds=30))
+        if self.rank == 0:
+            assert subgroup_1 is not None
+            tcp_store = dist.TCPStore(
+                host_name=os.environ["MASTER_ADDR"],
+                port=29781,
+                world_size=2,
+                is_master=True,
+            )
+            merged_pg = subgroup_1.merge_remote_group(
+                tcp_store, 2, timedelta(seconds=40), "merged_pg"
+            )
+            self.assertEqual(merged_pg.size(), 2)
+            backend = merged_pg._get_backend(self.device)
+            self.assertEqual(backend.options._timeout, timedelta(seconds=40))
+        else:
+            assert subgroup_2 is not None
+            tcp_store = dist.TCPStore(
+                host_name=os.environ["MASTER_ADDR"],
+                port=29781,
+                world_size=2,
+                is_master=False,
+            )
+            merged_pg = subgroup_2.merge_remote_group(
+                tcp_store, 2, timedelta(seconds=40), "merged_pg"
+            )
+            self.assertEqual(merged_pg.size(), 2)
+            backend = merged_pg._get_backend(self.device)
+            self.assertEqual(backend.options._timeout, timedelta(seconds=40))
 
 
 class ProcessGroupGlooTest(Dist2MultiProcessTestCase):
