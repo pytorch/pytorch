@@ -2166,8 +2166,8 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 )
 
             cubins_o = []
+            asm_files = []
             if not _IS_WINDOWS:
-                asm_files = []
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
                 for kernel_name, value in CudaKernelParamCache.cache.items():
                     if asm_file := value["asm"]:
