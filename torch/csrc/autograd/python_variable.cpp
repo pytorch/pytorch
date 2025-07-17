@@ -349,7 +349,11 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
       !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj());
 
   c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-  auto maybe_pyobj = tensor_impl->pyobj_slot()->get_pyobj();
+  auto pyobj = tensor_impl->pyobj_slot()->get_pyobj();
+
+  TORCH_INTERNAL_ASSERT(
+      pyobj,
+      "Trying to preserve a Python tensor whose PyObjectSlot does not have a PyObject");
 
   tensor_impl->pyobj_slot()->set_owns_pyobj(true);
 
@@ -2022,7 +2026,7 @@ static PyObject* THPVariable_NewWithVar(
 
   // This function overwrite the Tensor's pyobj field without extra checks
   // Make sure it is not set otherwise we would leak memory
-  auto obj = _var.unsafeGetTensorImpl()->pyobj_slot()->get_pyobj();
+  auto pyobj = _var.unsafeGetTensorImpl()->pyobj_slot()->get_pyobj();
 
   // Under some circumstances, we may attempt to create a new Python
   // object for a variable that already has a Python object.  The most common
@@ -2053,33 +2057,63 @@ static PyObject* THPVariable_NewWithVar(
   // it's valid for us to return it in place of a Tensor.  So this is what we
   // do.
 
-  TORCH_CHECK(
-      allow_preexisting_pyobj,
-      "Creating a new Tensor subclass ",
-      type->tp_name,
-      " but the raw Tensor object is already associated to a python object ",
-      "of type ",
-      obj->ob_type->tp_name);
-  // Even if we allow pre-existing PyObject, we don't allow completely
-  // ignoring the requested type.  Check that we fulfilled a subtype
-  // relation here.  In the common case the requested type is Tensor and
-  // this always succeeds.
+  if (pyobj) {
+    TORCH_CHECK(
+        allow_preexisting_pyobj,
+        "Creating a new Tensor subclass ",
+        type->tp_name,
+        " but the raw Tensor object is already associated to a python object ",
+        "of type ",
+        pyobj->ob_type->tp_name);
+    // Even if we allow pre-existing PyObject, we don't allow completely
+    // ignoring the requested type.  Check that we fulfilled a subtype
+    // relation here.  In the common case the requested type is Tensor and
+    // this always succeeds.
+    // Check if it's OK to just directly return the Python object without
+    // allocating a new variable.  We just check that the existing Python
+    // object is a subclass of the requested type.
+    PyTypeObject* obj_type = Py_TYPE(pyobj);
+    TORCH_CHECK(
+        obj_type == type || PyType_IsSubtype(obj_type, type),
+        "Creating a new Tensor subclass ",
+        type->tp_name,
+        " but the raw Tensor object is already associated to a python object ",
+        "of type ",
+        pyobj->ob_type->tp_name,
+        " which is not a subclass of the "
+        "requested type");
+    // We may (in fact, we typically will) need to resurrect this
+    return THPVariable_Wrap(_var);
+  }
 
-  // Check if it's OK to just directly return the Python object without
-  // allocating a new variable.  We just check that the existing Python
-  // object is a subclass of the requested type.
-  PyTypeObject* obj_type = Py_TYPE(obj);
-  TORCH_CHECK(
-      obj_type == type || PyType_IsSubtype(obj_type, type),
-      "Creating a new Tensor subclass ",
-      type->tp_name,
-      " but the raw Tensor object is already associated to a python object ",
-      "of type ",
-      obj->ob_type->tp_name,
-      " which is not a subclass of the "
-      "requested type");
-  // We may (in fact, we typically will) need to resurrect this
-  return THPVariable_Wrap(_var);
+  PyObject* obj = type->tp_alloc(type, 0);
+  if (obj) {
+    auto v = (THPVariable*)obj;
+    // TODO: named constructor to avoid default initialization
+    new (&v->cdata) MaybeOwned<Variable>();
+    if (c10::impl::HermeticPyObjectTLS::get_state()) {
+      // Do NOT initialize pyobj field on the tensor, you own the C++
+      v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
+      TORCH_INTERNAL_ASSERT(
+          !check_has_torch_dispatch(obj),
+          "While HermeticPyObject was enabled, we attempted to create a tensor "
+          "subclass with __torch_dispatch__.  This violates the invariant that "
+          "operations in HermeticPyObject have equivalent C++ implementations. "
+          "If your operator registered from Python operator registration isn't "
+          "doing anything strange, there may be an internal PyTorch bug involving "
+          "not appropriately disabling TorchDispatchMode before executing "
+          "Python op registration.");
+    } else {
+      // Normal codepath
+      v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
+      const auto& var = THPVariable_Unpack(v);
+      var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(obj);
+      if (check_has_torch_dispatch(obj)) {
+        var.unsafeGetTensorImpl()->set_python_dispatch(true);
+      }
+    }
+  }
+  return obj;
 }
 
 /// NOTE [ PyObject Traversal ]

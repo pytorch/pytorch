@@ -38,6 +38,8 @@ struct C10_API PyObjectSlot {
   PyObject* _unchecked_untagged_pyobj() const;
 
   PyObject* get_pyobj() const {
+    // Note that PyObject* can be a nullptr, so please check before
+    // using it.
     return _unchecked_untagged_pyobj();
   }
 
