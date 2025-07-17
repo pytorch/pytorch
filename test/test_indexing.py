@@ -140,7 +140,8 @@ class TestIndexing(TestCase):
         )
 
         lst = [list(range(i, i + 10)) for i in range(0, 100, 10)]
-        tensor = torch.DoubleTensor(lst).to(device)
+        _make_tensor = torch.DoubleTensor if not device.startswith("mps") else torch.FloatTensor
+        tensor = _make_tensor(lst).to(device)
         for _i in range(100):
             idx1_start = random.randrange(10)
             idx1_end = idx1_start + random.randrange(1, 10 - idx1_start + 1)
@@ -156,7 +157,7 @@ class TestIndexing(TestCase):
             else:
                 lst_indexed = lst[idx1]
                 tensor_indexed = tensor[idx1]
-            self.assertEqual(torch.DoubleTensor(lst_indexed), tensor_indexed)
+            self.assertEqual(_make_tensor(lst_indexed), tensor_indexed)
 
         self.assertRaises(ValueError, lambda: reference[1:9:0])
         self.assertRaises(ValueError, lambda: reference[1:9:-1])
@@ -934,6 +935,8 @@ class TestIndexing(TestCase):
     )
     @serialTest(TEST_CUDA)
     def test_index_put_accumulate_large_tensor(self, device):
+        if device.strartswith("mps"):
+            raise unittest.SkipTest("Crash with max number of dimentions")
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
         dt = torch.int8
@@ -1989,7 +1992,7 @@ class NumpyTests(TestCase):
         self.assertEqual(kernel, kernel2)
 
 
-instantiate_device_type_tests(TestIndexing, globals(), except_for="meta")
+instantiate_device_type_tests(TestIndexing, globals(), except_for="meta", allow_mps=True)
 instantiate_device_type_tests(NumpyTests, globals(), except_for="meta")
 
 if __name__ == "__main__":
