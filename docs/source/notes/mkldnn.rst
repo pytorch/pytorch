@@ -26,7 +26,7 @@ Users can disable MKLDNN backend by:
 Bfloat16 (BF16) on MKLDNN backend
 ---------------------------------------------------
 
-Starting in PyTorch 2.4, there is a set of APIs to control the internal computation precision
+Starting in PyTorch 2.9, there is a set of APIs to control the internal computation precision
 for `float32` operators.
 
 .. code:: python

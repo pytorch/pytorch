@@ -36,7 +36,7 @@ def max_memory_allocated(device: Optional[_device_t] = None) -> int:
     return memory_stats(device).get("dram", 0).get("peak_bytes", 0)
 
 
-def memory_allocated(device: _device_t = None) -> int:
+def memory_allocated(device: Optional[_device_t] = None) -> int:
     r"""Return the current GPU memory occupied by tensors in bytes for a given device.
 
     Args:

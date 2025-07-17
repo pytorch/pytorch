@@ -247,8 +247,8 @@ class CudaInterface(DeviceInterface):
     synchronize = staticmethod(torch.cuda.synchronize)
     get_device_properties = staticmethod(torch.cuda.get_device_properties)  # type: ignore[assignment]
     get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[assignment, arg-type]
-    exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type]
-    maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type]
+    exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type, has-type]
+    maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.cuda.memory_allocated)
     is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)  # type: ignore[arg-type]
 
@@ -297,9 +297,9 @@ else:
 
 
 class MtiaInterface(DeviceInterface):
-    device = torch.mtia.device
-    Event = torch.mtia.Event
-    Stream = torch.mtia.Stream
+    device = torch.mtia.device  # type: ignore[assignment]
+    Event = torch.mtia.Event  # type: ignore[assignment]
+    Stream = torch.mtia.Stream  # type: ignore[assignment]
 
     class Worker:
         @staticmethod
@@ -333,7 +333,7 @@ class MtiaInterface(DeviceInterface):
             return caching_worker_device_properties["mtia"][device]
 
     current_device = staticmethod(torch.mtia.current_device)
-    set_device = staticmethod(torch.mtia.set_device)
+    set_device = staticmethod(torch.mtia.set_device)  # type: ignore[assignment]
     device_count = staticmethod(torch.mtia.device_count)
     stream = staticmethod(torch.mtia.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.mtia.current_stream)
@@ -344,7 +344,7 @@ class MtiaInterface(DeviceInterface):
     get_raw_stream = staticmethod(get_mtia_stream)  # type: ignore[assignment, arg-type]
     exchange_device = staticmethod(torch.mtia._exchange_device)  # type: ignore[arg-type]
     maybe_exchange_device = staticmethod(torch.mtia._maybe_exchange_device)  # type: ignore[arg-type]
-    memory_allocated = staticmethod(torch.mtia.memory_allocated)
+    memory_allocated = staticmethod(torch.mtia.memory_allocated)  # type: ignore[assignment]
     is_bf16_supported = staticmethod(torch.mtia.is_bf16_supported)  # type: ignore[arg-type]
 
     # Can be mock patched by @patch decorator.

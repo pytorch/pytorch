@@ -64,7 +64,7 @@ void initModule(PyObject* module) {
   });
 
   m.def(
-      "_mtia_setStreamById",
+      "_mtia_setStream",
       [](int64_t stream_id,
          c10::DeviceIndex device_index,
          int64_t device_type) {

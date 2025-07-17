@@ -347,11 +347,7 @@ def _set_stream_by_id(stream_id, device_index, device_type):
           device_index (int): device index in topo
           device_type (int): enum device type
     """
-    torch._C._mtia_setStreamById(
-        stream_id=stream_id,
-        device_index=device_index,
-        device_type=device_type,
-    )
+    torch._C._mtia_setStream(stream_id, device_index, device_type)
 
 
 def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
