@@ -7607,6 +7607,43 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             self.assertEqual(len(w), 1)
             self.assertEqual(str(w[0].message), "foobar")
 
+    def test_filter_safe_grad_warning(self):
+        x = torch.ones(2, 2, requires_grad=True)
+        y = x * 5  # non-leaf, .grad should warn
+        torch._subclasses.meta_utils.safe_grad(y)  # filters out warning
+
+        def unsafe_grad(y):
+            return y.grad
+
+        with warnings.catch_warnings(record=True) as w:
+            unsafe_grad(y)  # should still warn, different callsite
+            self.assertEqual(len(w), 1)
+            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
+
+            unsafe_grad(y)  # should not warn
+            self.assertEqual(len(w), 1)
+
+    def test_filter_user_warnings(self):
+        x = torch.ones(2, 2, requires_grad=True)
+        y = x * 5  # non-leaf, .grad should warn
+
+        @torch._dynamo.eval_frame.TorchPatcher.suppress_torch_distributed_warnings
+        def mute_warn(y):
+            return y.grad
+
+        mute_warn(y)  # filters out warning
+
+        def unsafe_grad(y):
+            return y.grad
+
+        with warnings.catch_warnings(record=True) as w:
+            unsafe_grad(y)  # should still warn, different callsite
+            self.assertEqual(len(w), 1)
+            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
+
+            unsafe_grad(y)  # should not warn
+            self.assertEqual(len(w), 1)
+
 
 instantiate_parametrized_tests(ReproTests)
 

@@ -1159,7 +1159,13 @@ def warning_once(logger_obj, *args, **kwargs) -> None:
 
 
 def safe_grad_filter(message, category, filename, lineno, file=None, line=None) -> bool:
-    return "The .grad attribute of a Tensor" not in message
+    return "The .grad attribute of a Tensor" not in str(message)
+
+
+def user_warning_filter(
+    message, category, filename, lineno, file=None, line=None
+) -> bool:
+    return not category == UserWarning
 
 
 @contextlib.contextmanager
