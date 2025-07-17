@@ -4,6 +4,8 @@ The various dataclasses, Enums, namedtuples etc used in AOTAutograd. This includ
 input/output types, metadata, config, function signatures etc.
 """
 
+from __future__ import annotations
+
 import collections
 import contextlib
 import dataclasses
@@ -182,7 +184,7 @@ class MemoryFormatMeta:
     memory_format: Optional[torch.memory_format] = None
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> Optional["MemoryFormatMeta"]:
+    def from_tensor(t: torch.Tensor) -> Optional[MemoryFormatMeta]:
         # We only memorize expected memory format for
         # 1. Traceable wrapper subclasses
         # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
@@ -248,7 +250,7 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: dict[str, Union["SubclassCreationMeta", PlainTensorMeta]]
+    attrs: dict[str, Union[SubclassCreationMeta, PlainTensorMeta]]
     outer_size: Iterable[Union[None, int, torch.SymInt]]
     outer_stride: Iterable[Union[None, int, torch.SymInt]]
     meta: Any
@@ -844,7 +846,7 @@ class GraphSignature:
         num_user_outputs: int,
         loss_index: Optional[int],
         backward_signature: Optional[BackwardSignature],
-    ) -> "GraphSignature":
+    ) -> GraphSignature:
         graph_inputs = graph_input_names
         graph_outputs = graph_output_names
         parameters = list(named_parameters)
