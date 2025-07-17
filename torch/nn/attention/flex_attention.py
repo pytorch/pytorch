@@ -9,10 +9,22 @@ import math
 import operator
 import warnings
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 from torch import Tensor
+
+
+try:
+    from typing import TypedDict
+except ImportError:
+    from typing_extensions import TypedDict
+
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
+
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch._prims_common import DeviceLikeType
@@ -27,6 +39,7 @@ from torch.utils._pytree import tree_map_only
 __all__ = [
     "BlockMask",
     "flex_attention",
+    "FlexKernelOptions",
     "create_block_mask",
     "create_mask",
     "create_nested_block_mask",
@@ -37,6 +50,123 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
+
+
+class FlexKernelOptions(TypedDict, total=False):
+    """Options for controlling the behavior of FlexAttention kernels.
+
+    These options are passed to the underlying Triton kernels to control performance
+    and numerical behavior. Most users will not need to specify these options as the
+    default autotuning provides good performance.
+
+    The options can be prefixed with 'fwd_' or 'bwd_' to apply only to forward or
+    backward pass respectively. For example: 'fwd_BLOCK_M' and 'bwd_BLOCK_M1'.
+
+    Note:
+      We currently do not provide any backward compatibility guarantees for these options.
+      That being said most of these have remained pretty stable since their introduction. But
+      We do not consider this part of the public API just yet. We think that some documentation
+      Is better than secret hidden flags, but we may change these options in the future.
+
+    Example Usage:
+        .. code-block:: python
+
+            # Using dictionary (backward compatible)
+            kernel_opts = {"BLOCK_M": 64, "BLOCK_N": 64, "PRESCALE_QK": True}
+            output = flex_attention(q, k, v, kernel_options=kernel_opts)
+
+            # Using TypedDict (recommended for type safety)
+            from torch.nn.attention.flex_attention import FlexKernelOptions
+
+            kernel_opts: FlexKernelOptions = {
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "PRESCALE_QK": True,
+            }
+            output = flex_attention(q, k, v, kernel_options=kernel_opts)
+
+            # Forward/backward specific options
+            kernel_opts: FlexKernelOptions = {
+                "fwd_BLOCK_M": 64,
+                "bwd_BLOCK_M1": 32,
+                "PRESCALE_QK": False,
+            }
+            output = flex_attention(q, k, v, kernel_options=kernel_opts)
+    """
+
+    # Performance tuning options
+    num_warps: NotRequired[int]
+    """Number of warps to use in the CUDA kernel. Higher values may improve performance
+    but increase register pressure. Default is determined by autotuning."""
+
+    num_stages: NotRequired[int]
+    """Number of pipeline stages in the CUDA kernel. Higher values may improve performance
+    but increase shared memory usage. Default is determined by autotuning."""
+
+    BLOCK_M: NotRequired[int]
+    """Thread block size for the sequence length dimension of Q in forward pass.
+    Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
+
+    BLOCK_N: NotRequired[int]
+    """Thread block size for the sequence length dimension of K/V in forward pass.
+    Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
+
+    # Backward-specific block sizes (when prefixed with 'bwd_')
+    BLOCK_M1: NotRequired[int]
+    """Thread block size for Q dimension in backward pass. Use as 'bwd_BLOCK_M1'.
+    Default is determined by autotuning."""
+
+    BLOCK_N1: NotRequired[int]
+    """Thread block size for K/V dimension in backward pass. Use as 'bwd_BLOCK_N1'.
+    Default is determined by autotuning."""
+
+    BLOCK_M2: NotRequired[int]
+    """Thread block size for second Q dimension in backward pass. Use as 'bwd_BLOCK_M2'.
+    Default is determined by autotuning."""
+
+    BLOCK_N2: NotRequired[int]
+    """Thread block size for second K/V dimension in backward pass. Use as 'bwd_BLOCK_N2'.
+    Default is determined by autotuning."""
+
+    PRESCALE_QK: NotRequired[bool]
+    """Whether to pre-scale QK by 1/sqrt(d) and change of base. This is slightly faster but
+    may have more numerical error. Default: False."""
+
+    ROWS_GUARANTEED_SAFE: NotRequired[bool]
+    """If True, guarantees that at least one value in each row is not masked out.
+    Allows skipping safety checks for better performance. Only set this if you are certain
+    your mask guarantees this property. For example, causal attention is guaranteed safe
+    because each query has at least 1 key-value to attend to. Default: False."""
+
+    BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
+    """If True, guarantees that all blocks in the mask are contiguous.
+    Allows optimizing block traversal. For example, causal masks would satisfy this,
+    but prefix_lm + sliding window would not. Default: False."""
+
+    WRITE_DQ: NotRequired[bool]
+    """Controls whether gradient scatters are done in the DQ iteration loop of the backward pass.
+    Setting this to False will force this to happen in the DK loop which depending on your
+    specific score_mod and mask_mod might be faster. Default: True."""
+
+    FORCE_USE_FLEX_ATTENTION: NotRequired[bool]
+    """If True, forces the use of the flex attention kernel instead of potentially using
+    the more optimized flex-decoding kernel for short sequences. This can be a helpful
+    option for debugging. Default: False."""
+
+    USE_TMA: NotRequired[bool]
+    """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
+    This is experimental and may not work on all hardware, currently specific
+    to NVIDIA GPUs Hopper+. Default: False."""
+
+    # ROCm-specific options
+    kpack: NotRequired[int]
+    """ROCm-specific kernel packing parameter."""
+
+    matrix_instr_nonkdim: NotRequired[int]
+    """ROCm-specific matrix instruction non-K dimension."""
+
+    waves_per_eu: NotRequired[int]
+    """ROCm-specific waves per execution unit."""
 
 
 class _ModificationType(Enum):
@@ -1244,7 +1374,7 @@ def flex_attention(
     scale: Optional[float] = None,
     enable_gqa: bool = False,
     return_lse: bool = False,
-    kernel_options: Optional[dict[str, Any]] = None,
+    kernel_options: Optional[FlexKernelOptions] = None,
 ) -> Union[Tensor, tuple[Tensor, Tensor]]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -1280,7 +1410,9 @@ def flex_attention(
         scale (Optional[float]): Scaling factor applied prior to softmax. If none, the default value is set to :math:`\frac{1}{\sqrt{E}}`.
         enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA) and broadcasts key/value heads to query heads.
         return_lse (bool): Whether to return the logsumexp of the attention scores. Default is False.
-        kernel_options (Optional[Dict[str, Any]]): Options to pass into the Triton kernels.
+        kernel_options (Optional[FlexKernelOptions]):
+            Options to control the behavior of the underlying Triton kernels.
+            See :class:`FlexKernelOptions` for available options and usage examples.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.

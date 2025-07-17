@@ -44,19 +44,7 @@ PyInterpreter& PyObjectSlot::load_pyobj_interpreter() const {
   if (interpreter) {
     return *interpreter;
   }
-  TORCH_CHECK(
-      false,
-      "cannot access PyObject for Tensor on interpreter ",
-      (*pyobj_interpreter_.load())->name());
-}
-
-bool PyObjectSlot::check_interpreter(PyInterpreter* interpreter) {
-  return interpreter == pyobj_interpreter();
-}
-
-bool PyObjectSlot::has_pyobj_nonhermetic() {
-  return check_pyobj(pyobj_interpreter(), /*ignore_hermetic_tls=*/true)
-      .has_value();
+  TORCH_CHECK(false, "cannot access PyObject for Tensor - no interpreter set");
 }
 
 bool PyObjectSlot::owns_pyobj() {
