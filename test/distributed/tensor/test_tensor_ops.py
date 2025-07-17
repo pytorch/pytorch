@@ -46,11 +46,10 @@ class DistTensorOpsTest(DTensorTestBase):
     def test_clone(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         specs = [[Replicate()], [Shard(0)]]
-        tensor_to_clone = torch.randn(12, 8, requires_grad=False)
+        tensor_to_clone = torch.randn(12, 8, requires_grad=True)
         for spec in specs:
             mat = distribute_tensor(tensor_to_clone, device_mesh, spec)
             cloned_mat = mat.clone()
-            mat.copy_(cloned_mat)
             self.assertFalse(cloned_mat is mat)
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
 
