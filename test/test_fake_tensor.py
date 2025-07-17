@@ -222,7 +222,9 @@ class FakeTensorTest(TestCase):
         fake_x = mode.from_tensor(x)
         fake_y = mode.from_tensor(y)
 
-        with self.assertRaisesRegex(RuntimeError, "Unhandled FakeTensor Device Propagation for.*") as exc:
+        with self.assertRaisesRegex(
+            RuntimeError, "Unhandled FakeTensor Device Propagation for.*"
+        ) as exc:
             torch.nextafter(fake_x, fake_y)
 
     def test_nan_to_num(self):
