@@ -288,7 +288,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
         #        decomp_table = decomp_table_to_core_aten()
         #        del decomp_table[aten.linear]
         #     In this case, user says decompose everything except for aten.linear
-        #  2. Has been marked with custom decomp behavour. Example:
+        #  2. Has been marked with custom decomp behaviour. Example:
         #        decomp_table = {aten.linear: some_op}
         # For (1), we want to remove all the CIA ops that weren't handled by user as
         # it suggests they are safe to decompose, so we should remove from preservable_list.
@@ -364,7 +364,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         # [NOTE] Unwrapping subclasses AOT
         # In torch.compile, the subclass unwrapping/wrapping happen at runtime
-        # but at export, this is impossible as it is intented to be run on
+        # but at export, this is impossible as it is intended to be run on
         # C++ environment. As a result, we unwrap subclass parameters AOT. After this,
         # ExportedProgram state_dict won't be same as eager model because eager model
         # could have subclass weights while ExportedProgram will have desugared versions.
@@ -422,7 +422,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         # TODO (tmanlaibaatar) Ideally run_decomp should just call _non_strict_export
         # but due to special handling of constants as non-persistent buffers make it little
-        # diffucult. But we should unify this code path together. T206837815
+        # difficult. But we should unify this code path together. T206837815
         from torch._export.non_strict_utils import (
             _enable_graph_inputs_of_type_nn_module,
             _fakify_script_objects,
@@ -1285,7 +1285,7 @@ class ExportedProgram:
 
         Returns:
             A tuple of (flat_args, received_spec)
-            flat_args is flattend args / kwargs
+            flat_args is flattened args / kwargs
             received_spec is the pytree spec produced while flattening the
             tuple (args, kwargs)
         """
@@ -1350,61 +1350,6 @@ class ExportedProgram:
             "Unable to call ExportedProgram directly. "
             "You should use `exported_program.module()` instead."
         )
-
-    def _postprocess_graph_module_outputs(self, res, orig_args, orig_kwargs):
-        """Process potential mutations to the input.
-
-        Because self.graph_module is functional, so mutations has to be written
-        back after execution of graph_module.
-        """
-        import torch._export.error as error
-
-        flat_args, _ = self._get_flat_args_with_check(orig_args, orig_kwargs)
-        if self.call_spec.out_spec is not None:
-            buffer_mutation = self.graph_signature.buffers_to_mutate
-            user_input_mutation = self.graph_signature.user_inputs_to_mutate
-            num_mutated = len(buffer_mutation) + len(user_input_mutation)
-            mutated_values = res[:num_mutated]
-
-            # Exclude dependency token from final result.
-            assertion_dep_token = self.graph_signature.assertion_dep_token
-            if assertion_dep_token is not None:
-                assertion_dep_token_index = next(iter(assertion_dep_token.keys()))
-                res = res[:assertion_dep_token_index]
-
-            res = res[num_mutated:]
-            try:
-                res = pytree.tree_unflatten(res, self.call_spec.out_spec)
-            except Exception:
-                _, received_spec = pytree.tree_flatten(res)
-                raise error.InternalError(  # noqa: B904
-                    "Trying to flatten user outputs with exported output tree spec: \n"
-                    f"{self.call_spec.out_spec}\n"
-                    "but actually got outputs with tree spec of: \n"
-                    f"{received_spec}"
-                )
-            finally:
-                user_inputs = [
-                    spec
-                    for spec in self.graph_signature.input_specs
-                    if spec.kind == InputKind.USER_INPUT
-                ]
-                for i, value in enumerate(mutated_values):
-                    output_spec = self.graph_signature.output_specs[i]
-                    if output_spec.kind == OutputKind.BUFFER_MUTATION:
-                        assert output_spec.target is not None
-                        self.state_dict[output_spec.target] = value
-                    elif output_spec.kind == OutputKind.USER_INPUT_MUTATION:
-                        assert output_spec.target is not None
-                        index = next(
-                            i
-                            for i, spec in enumerate(user_inputs)
-                            if spec.arg.name == output_spec.target
-                        )
-                        flat_args[index].copy_(value)
-                    else:
-                        raise AssertionError(f"Unexpected kind: {output_spec.kind}")
-        return res
 
     def __str__(self) -> str:
         graph_module = self.graph_module.print_readable(
@@ -1493,7 +1438,7 @@ class ExportedProgram:
         if isinstance(_decomp_table, CustomDecompTable):
             _decomp_table = _decomp_table.materialize()
 
-        # Note [Seperating decomp_table into CIA decomps and non-CIA decomps]
+        # Note [Separating decomp_table into CIA decomps and non-CIA decomps]
         # At this point, we have a decomp_table that contains decomp behaviour for
         # both CIA and post-autograd ops.
         # We need to separate the op into two categories:
