@@ -87,10 +87,6 @@ TORCH_IMPL_FUNC(topk_out_mps)
     return;
   }
 
-  // issue #154890, raising error to prevent crash within MPSGraph until
-  // workaround is implemented.
-  TORCH_CHECK(self.dim() - dim <= 4, "On-going issue on MPSGraph topk when ndims() - axis > 4, see issue #154890");
-
   MPSStream* stream = getCurrentMPSStream();
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -109,26 +105,50 @@ TORCH_IMPL_FUNC(topk_out_mps)
 
       MPSGraphTensor* castInputTensor = newCachedGraph->selfTensor;
       MPSDataType dataType = getMPSDataType(self);
-      // #issue 104398441 sortWithTensor and argsortWithTensor
-      if (dataType != MPSDataTypeInt32 && dataType != MPSDataTypeFloat32 && dataType != MPSDataTypeFloat16) {
-        dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
-        castInputTensor = [mpsGraph castTensor:newCachedGraph->selfTensor toType:dataType name:@"castInputTensor"];
+      bool is_macos_14_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
+      if (is_macos_14_0_or_newer) {
+        MPSGraphTensor* constMinusOne;
+        if (!largest) {
+          constMinusOne = [mpsGraph constantWithScalar:-1.0 dataType:dataType];
+          // Get bottom k computation through multiplication with -1.0
+          castInputTensor = [mpsGraph multiplicationWithPrimaryTensor:castInputTensor
+                                                      secondaryTensor:constMinusOne
+                                                                 name:nil];
+        }
+        auto topk = [mpsGraph topKWithSourceTensor:castInputTensor axis:(NSUInteger)dim k:k name:nil];
+        auto outputValues = topk[0];
+        if (!largest) {
+          // invert the multiplication with -1.0
+          outputValues = [mpsGraph multiplicationWithPrimaryTensor:outputValues secondaryTensor:constMinusOne name:nil];
+        }
+        newCachedGraph->valuesTensor = outputValues;
+        newCachedGraph->indicesTensor = topk[1];
+      } else {
+        // issue #154890, raising error to prevent crash within MPSGraph
+        TORCH_CHECK(self.dim() - dim <= 4,
+                    "Issue on MPSGraph topk when ndims() - axis > 4. Upgrade to MacOS14.0+ to enable the op.");
+
+        // #issue 104398441 sortWithTensor and argsortWithTensor
+        if (dataType != MPSDataTypeInt32 && dataType != MPSDataTypeFloat32 && dataType != MPSDataTypeFloat16) {
+          dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
+          castInputTensor = [mpsGraph castTensor:newCachedGraph->selfTensor toType:dataType name:@"castInputTensor"];
+        }
+        MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:castInputTensor
+                                                           axis:(NSUInteger)dim
+                                                     descending:largest
+                                                           name:nil];
+        sortedTensor = [mpsGraph sliceTensor:sortedTensor
+                                   dimension:(NSUInteger)dim
+                                       start:((NSUInteger)0)length:k
+                                        name:nil];
+        MPSGraphTensor* argSortedTensor = [mpsGraph argSortWithTensor:castInputTensor
+                                                                 axis:(NSInteger)dim
+                                                           descending:largest
+                                                                 name:@"argmax_out"];
+        argSortedTensor = [mpsGraph sliceTensor:argSortedTensor dimension:dim start:((NSUInteger)0)length:k name:nil];
+        newCachedGraph->valuesTensor = sortedTensor;
+        newCachedGraph->indicesTensor = argSortedTensor;
       }
-      MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:castInputTensor
-                                                         axis:(NSUInteger)dim
-                                                   descending:largest
-                                                         name:nil];
-      sortedTensor = [mpsGraph sliceTensor:sortedTensor
-                                 dimension:(NSUInteger)dim
-                                     start:((NSUInteger)0)length:k
-                                      name:nil];
-      MPSGraphTensor* argSortedTensor = [mpsGraph argSortWithTensor:castInputTensor
-                                                               axis:(NSInteger)dim
-                                                         descending:largest
-                                                               name:@"argmax_out"];
-      argSortedTensor = [mpsGraph sliceTensor:argSortedTensor dimension:dim start:((NSUInteger)0)length:k name:nil];
-      newCachedGraph->valuesTensor = sortedTensor;
-      newCachedGraph->indicesTensor = argSortedTensor;
     });
     Placeholder inputPlaceholder = Placeholder(cachedGraph->selfTensor, self);
     // Outputs as placeholders
