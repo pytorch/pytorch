@@ -12,7 +12,7 @@ from .linear import NonDynamicallyQuantizableLinear
 from .module import Module
 
 
-__all__: list[str] = [
+__all__ = [
     "Threshold",
     "ReLU",
     "RReLU",

@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 from typing import Callable, Optional, Union
-from typing_extensions import deprecated
 
 from torch import Tensor
 from torch.nn import _reduction as _Reduction, functional as F
+from typing_extensions import deprecated
 
 from .distance import PairwiseDistance
 from .module import Module
@@ -722,7 +722,7 @@ class BCELoss(_WeightedLoss):
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
-        Runs forward pass
+        Runs the forward pass.
         """
         return F.binary_cross_entropy(
             input, target, weight=self.weight, reduction=self.reduction
