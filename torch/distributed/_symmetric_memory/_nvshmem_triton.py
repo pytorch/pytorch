@@ -19,9 +19,8 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
         dict[str, str]: A dictionary containing the NVSHMEM device library name
         and path.
     """
-    from triton.runtime.jit import JITFunction
-
     from torch._C._distributed_c10d import _nvshmemx_cumodule_init
+    from triton.runtime.jit import JITFunction
 
     # Detect NVSHMEM device library path from python library path
     if lib_dir is None:
@@ -238,6 +237,25 @@ if has_triton():
             "",
             [],
             {(): ("nvshmem_sync_all", core.dtype("int32"))},
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def alltoall(team, dest, source, nelems, _builder=None):  # type: ignore[no-untyped-def]
+        """Perform alltoall operation on NVSHMEM symmetric memory"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [team, dest, source, nelems],
+            {
+                (
+                    core.dtype("int64"),  # team handle
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int64"),  # nelems
+                ): ("nvshmem_longlong_alltoall", core.dtype("int32"))
+            },
             is_pure=False,
             _builder=_builder,
         )
