@@ -41,11 +41,11 @@ from .utils import strict_zip
 if TYPE_CHECKING:
     import contextlib
     from collections.abc import Iterable, Sequence
-    from torch._guards import Source
-    from torch._ops import OpOverload
 
+    from torch._guards import Source
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
+    from torch._ops import OpOverload
 
 
 zip = strict_zip
