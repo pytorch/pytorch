@@ -265,6 +265,7 @@ class PersistentCache(CacheBase):
         op: str,
         inputs: str,
         benchmark: Optional[Callable[[Any], dict[ChoiceCaller, float]]],
+        hint_override: Optional[int] = None,
     ) -> dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -277,6 +278,7 @@ class PersistentCache(CacheBase):
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
         precision = torch.get_float32_matmul_precision()
+        cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}
 
@@ -285,9 +287,11 @@ class PersistentCache(CacheBase):
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}):
+                if choice_hash in cache.get(op, {}).get(cache_key, {}).get(
+                    precision, {}
+                ):
                     # cache hit
-                    timings[choice] = cache[op][inputs][precision][choice_hash]
+                    timings[choice] = cache[op][cache_key][precision][choice_hash]
                 else:
                     # cache miss
                     hit = False
@@ -300,9 +304,9 @@ class PersistentCache(CacheBase):
             timings = benchmark(choices)
             assert all(choice in timings for choice in choices)
             local_cache.setdefault(op, {})
-            local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
+            local_cache[op].setdefault(cache_key, {}).setdefault(precision, {})
             for choice, timing in timings.items():
-                local_cache[op][inputs][precision][choice.hash_key()] = timing
+                local_cache[op][cache_key][precision][choice.hash_key()] = timing
 
             self.update_local_cache(local_cache)
 
@@ -1829,11 +1833,19 @@ class AotCodeCompiler:
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
                 return consts_asm, "S"
 
-            # Use c++ to comvert consts to object file can support more compilers, such as msvc and icx.
+            # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
                 consts: bytes, align_bytes: int, symbol_prefix: str
             ) -> tuple[str, str]:
-                const_cpp = f"alignas({align_bytes}) extern "
+                asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))\t\n\
+#else\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n\
+#endif\t\n\
+\t\n\
+ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
+                const_cpp = asan_attr
+                const_cpp += f"alignas({align_bytes}) extern "
                 const_cpp += f"const unsigned char {symbol_prefix}_binary_constants_bin_start[] = {{\t\n"
                 count_bytes = 0
                 for c in consts:
@@ -3745,6 +3757,7 @@ class CUDACodeCache:
             return None
 
     @classmethod
+    @lru_cache(None)
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
         """
         Writes source code into a file with dst_file_ext as the file extension.
