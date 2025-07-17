@@ -12,14 +12,21 @@ import itertools
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, NewType, Optional, Protocol, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    NewType,
+    Optional,
+    Protocol,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import Source
-from torch._inductor.output_code import OutputCode
-from torch._inductor.utils import InputType
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
@@ -31,6 +38,11 @@ from .functional_utils import (
     FunctionalTensorMetadataEq,
 )
 from .utils import strict_zip
+
+
+if TYPE_CHECKING:
+    from torch._inductor.output_code import OutputCode
+    from torch._inductor.utils import InputType
 
 
 zip = strict_zip
