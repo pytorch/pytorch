@@ -289,7 +289,7 @@ static bool isSupportedHipLtROCmArch(int index) {
 #endif
 
 template <typename scalar_t>
-static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const Scalar& beta, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation, bool bias2d) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
   bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
   at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
@@ -299,6 +299,7 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
   params.n = args.n;
   params.k = args.k;
   params.alpha = alpha.to<at::opmath_type<scalar_t>>();
+  params.beta = beta.to<at::opmath_type<scalar_t>>();
   params.a = args.mata->const_data_ptr<scalar_t>();
   params.lda = args.lda;
   params.b = args.matb->const_data_ptr<scalar_t>();
@@ -307,6 +308,7 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
   params.ldc = args.result_ld;
   params.bias = bias;
   params.activation = activation;
+  params.bias2d = bias2d;
   if (transa_ && transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
     gemm(&params);
@@ -378,9 +380,18 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // leading dim >> rows when they are sliced from a large tensor
     // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
     if (!disable_addmm_cuda_lt_final) {
+#ifndef USE_ROCM
+      useLtInterface = ((self.dim() == 1 && // row broadcast case
+          result.dim() == 2 && self.size(0) == mat2_sizes[1]) /* ||
+          (self.dim() == 2 && self.size(0) == mat1_sizes[0] &&  // 2d case
+           self.size(1) == mat2_sizes[1])*/) &&
+          self.is_contiguous() && result.is_contiguous() &&
+          self.scalar_type() == result.scalar_type() &&
+#else
       useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
           self.is_contiguous() && result.is_contiguous() &&
+#endif
 #ifdef USE_ROCM
           (scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
@@ -435,6 +446,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   }
 
   cublasCommonArgs args(mat1, mat2, result);
+  bool bias2d = self.dim() == 2;
 
   if (mat1.numel() == 0) {
     // By definition, when beta==0, values in self should be ignored. nans and infs
@@ -474,8 +486,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           launchTunableGemmAndBias<scalar_t>(
               args,
               alpha,
+              beta,
               (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
-              activation_to_gemm_and_blas_arg(activation));
+              activation_to_gemm_and_blas_arg(activation),
+              bias2d);
         } else {
           okay = at::cuda::blas::gemm_and_bias<scalar_t>(
             args.transa == 't',
@@ -484,6 +498,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             args.n,
             args.k,
             alpha.to<at::opmath_type<scalar_t>>(),
+            beta.to<at::opmath_type<scalar_t>>(),
             args.mata->const_data_ptr<scalar_t>(),
             args.lda,
             args.matb->const_data_ptr<scalar_t>(),
@@ -493,7 +508,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
             args.result->data_ptr<scalar_t>(),
             args.result_ld,
-            activation_to_gemm_and_blas_arg(activation)
+            activation_to_gemm_and_blas_arg(activation),
+            bias2d
           );
         }
       });
@@ -522,6 +538,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.n,
               args.k,
               alpha.to<at::opmath_type<scalar_t>>(),
+              beta.to<at::opmath_type<scalar_t>>(),
               args.mata->const_data_ptr<scalar_t>(),
               args.lda,
               args.matb->const_data_ptr<scalar_t>(),
@@ -529,7 +546,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               self.const_data_ptr<scalar_t>(),
               args.result->data_ptr<float>(),
               args.result_ld,
-              activation_epilogue
+              activation_epilogue,
+              bias2d
           );
         }});
     } else {
@@ -544,8 +562,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           launchTunableGemmAndBias<scalar_t>(
               args,
               alpha,
+              beta,
               self.const_data_ptr<scalar_t>(),
-              activation_epilogue);
+              activation_epilogue,
+              bias2d);
         }
         else {
           okay = at::cuda::blas::gemm_and_bias<scalar_t>(
@@ -555,6 +575,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.n,
               args.k,
               alpha.to<at::opmath_type<scalar_t>>(),
+              beta.to<at::opmath_type<scalar_t>>(),
               args.mata->const_data_ptr<scalar_t>(),
               args.lda,
               args.matb->const_data_ptr<scalar_t>(),
@@ -562,7 +583,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               self.const_data_ptr<scalar_t>(),
               args.result->data_ptr<scalar_t>(),
               args.result_ld,
-              activation_epilogue
+              activation_epilogue,
+              bias2d
           );
       }});
     }
