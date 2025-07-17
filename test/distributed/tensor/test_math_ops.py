@@ -811,6 +811,42 @@ class DistMathOpsTest(DTensorTestBase):
 
         self.assertEqual(dtensor_grad, xq.grad)
 
+    @with_comms
+    def test_histc(self):
+        # TODO - nicer to use parametrize here so its easy to run one sub-test by name,
+        # but its too slow (10sec per process-group init) -> switch to MultiProcessContinuousTest
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        tensor = torch.randn(12, 8, 8, requires_grad=True)
+        for min_max_specified in (True, False):
+            for placement in [Shard(0), Shard(1), Shard(2), Replicate()]:
+                min_ = tensor.min().item()
+                max_ = tensor.max().item()
+                global_bins = (
+                    tensor.histc(min=min_, max=max_)
+                    if min_max_specified
+                    else tensor.histc()
+                )
+
+                dtensor = distribute_tensor(tensor, device_mesh, (placement,))
+                with comm_mode:
+                    out_dt = (
+                        dtensor.histc(min=min_, max=max_)
+                        if min_max_specified
+                        else dtensor.histc()
+                    )
+
+                if placement.is_shard() and not min_max_specified:
+                    self.assertEqual(comm_mode.get_total_counts(), 1)
+                    self.assertEqual(
+                        comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
+                    )
+                else:
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+
+                out_full = out_dt.full_tensor()
+                self.assertEqual(global_bins, out_full)
+
 
 if __name__ == "__main__":
     run_tests()

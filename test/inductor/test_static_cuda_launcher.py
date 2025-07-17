@@ -2,6 +2,7 @@
 import os
 import random
 import tempfile
+import unittest
 from unittest import mock
 
 import torch
@@ -12,7 +13,7 @@ from torch._inductor.runtime.static_cuda_launcher import StaticallyLaunchedCudaK
 from torch._inductor.runtime.triton_compat import CompiledKernel, tl, triton
 from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm
 from torch.testing._internal.triton_utils import requires_cuda
 from torch.torch_version import TorchVersion
 
@@ -144,6 +145,7 @@ class TestStaticCudaLauncher(TestCase):
     # despite type annotations.
     # There's also not really a good way for me to make a float16 in python...
     @skipIfRocm
+    @unittest.skipIf(IS_FBCODE, "Not working in fbcode")
     def test_floats(self):
         @triton.jit
         def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
