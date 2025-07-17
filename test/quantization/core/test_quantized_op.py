@@ -5044,6 +5044,7 @@ class TestQuantizedEmbeddingOps(TestCase):
                         include_last_offset=include_last_offset)
             torch.testing.assert_close(reference_result, result, atol=atol, rtol=rtol)
 
+    """ Tests the correctness of the embedding_bag_8bit quantized operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
@@ -5061,7 +5062,6 @@ class TestQuantizedEmbeddingOps(TestCase):
                                 include_last_offset,
                                 fallback_to_no_sparse,
                                 sparsity):
-        """Tests the correctness of the embedding_bag_8bit quantized operator"""
         self.embedding_bag_rowwise_offsets_run(
             8, num_embeddings, embedding_dim, num_offsets,
             use_32bit_indices, use_32bit_offsets,
@@ -5069,6 +5069,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             fallback_to_no_sparse,
             sparsity=sparsity, atol=0.005, rtol=1e-3)
 
+    """ Tests the correctness of the embedding_bag_4bit quantized operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
@@ -5086,7 +5087,6 @@ class TestQuantizedEmbeddingOps(TestCase):
                                 include_last_offset,
                                 fallback_to_no_sparse,
                                 sparsity):
-        """Tests the correctness of the embedding_bag_4bit quantized operator"""
         self.embedding_bag_rowwise_offsets_run(4, num_embeddings,
                                                embedding_dim, num_offsets,
                                                use_32bit_indices, use_32bit_offsets,
@@ -5096,7 +5096,7 @@ class TestQuantizedEmbeddingOps(TestCase):
                                                sparsity=sparsity,
                                                atol=0.1, rtol=1e-2)
 
-    @settings(suppress_health_check=[HealthCheck.differing_executors])
+    """ Tests the correctness of the embedding_bag_2bit quantized operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 8 == 0),
            num_offsets=st.integers(1, 20),
@@ -5114,7 +5114,6 @@ class TestQuantizedEmbeddingOps(TestCase):
                                 include_last_offset,
                                 fallback_to_no_sparse,
                                 sparsity):
-        """Tests the correctness of the embedding_bag_2bit quantized operator"""
         self.embedding_bag_rowwise_offsets_run(2, num_embeddings,
                                                embedding_dim, num_offsets,
                                                use_32bit_indices, use_32bit_offsets,

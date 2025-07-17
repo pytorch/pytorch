@@ -47,10 +47,10 @@ flatbuffers==24.12.23
 #Pinned versions: 24.12.23
 #test that import:
 
-hypothesis==6.135.32
+hypothesis==5.49.0
 # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 #Description: advanced library for generating parametrized tests
-#Pinned versions: 6.135.32
+#Pinned versions: 5.49.0
 #test that import: test_xnnpack_integration.py, test_pruning_op.py, test_nn.py
 
 junitparser==2.1.1
