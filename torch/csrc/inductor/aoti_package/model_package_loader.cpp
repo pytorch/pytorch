@@ -47,7 +47,16 @@ bool file_exists(const std::string& path) {
 
 std::string create_temp_dir() {
 #ifdef _WIN32
-  throw std::runtime_error("Not implemented");
+  try {
+    fs::path temp_dir = fs::temp_directory_path();
+    return temp_dir.string();
+  } catch (const fs::filesystem_error& e) {
+    throw std::runtime_error(
+        "Failed to get temporary directory: " + std::string(e.what()));
+  } catch (...) {
+    throw std::runtime_error(
+        "Unknown error occurred while getting temporary directory");
+  }
 #else
   std::string temp_dir = "/tmp/XXXXXX";
   if (mkdtemp(temp_dir.data()) == nullptr) {
