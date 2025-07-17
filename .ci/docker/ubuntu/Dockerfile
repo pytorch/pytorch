@@ -121,9 +121,9 @@ RUN rm -rf /opt/triton
 ARG VLLM
 COPY ./common/setup_vllm_env.sh  setup_vllm_env.sh
 COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/vllm.txt vllm.txt
+COPY ci_commit_pins/vllm.txt vllm_pinned_base_commit.txt
 RUN if [ -n "${VLLM}" ]; then bash ./setup_vllm_env.sh; fi
-RUN rm setup_vllm_env.sh common_utils.sh vllm.txt
+RUN rm setup_vllm_env.sh common_utils.sh
 
 ARG EXECUTORCH
 # Build and install executorch
