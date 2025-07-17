@@ -4,6 +4,7 @@ def define_targets(rules):
         srcs = [":cmake_macros_h"],
         hdrs = [
             # Following the example from c10
+            "Macros.h",
             "Export.h",
         ],
         linkstatic = True,
