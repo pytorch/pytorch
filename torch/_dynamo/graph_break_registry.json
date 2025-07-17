@@ -2502,12 +2502,12 @@
   ],
   "GB0251": [
     {
-      "Gb_type": "unsupported polyfill call",
-      "Context": "Cannot trace polyfill function `{name}` due to non-constant arguments.",
-      "Explanation": "The function `{name}` was marked as only traceable when all arguments are constant. This restriction is set by the Dynamo compiler to ensure correct graph generation.",
+      "Gb_type": "constant fold exception in polyfill",
+      "Context": "attempted to run function {self.fn} with arguments {args}, {kwargs}",
+      "Explanation": "Encountered exception when attempting to constant fold.",
       "Hints": [
-        "Refactor or avoid using the function `{name}` in traced code.",
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+        "Refactor or avoid using the function `{self.fn}` in traced code.",
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
     }
   ]

@@ -1951,17 +1951,13 @@ class PolyfilledFunctionVariable(VariableTracker):
                 return VariableTracker.build(tx, result)
 
             if self.graph_break_if_cannot_constant_fold():
-                name = getattr(self.fn, "__name__", str(self.fn))
                 unimplemented_v2(
-                    gb_type="unsupported polyfill call",
-                    context=f"Cannot trace polyfill function `{name}` due to non-constant arguments.",
-                    explanation=(
-                        f"The function `{name}` was marked as only traceable when all arguments are constant. "
-                        "This restriction is set by the Dynamo compiler to ensure correct graph generation."
-                    ),
+                    gb_type="constant fold exception in polyfill",
+                    context=f"attempted to run function {self.fn} with arguments {args}, {kwargs}",
+                    explanation="Encountered exception when attempting to constant fold.",
                     hints=[
-                        f"Refactor or avoid using the function `{name}` in traced code.",
-                        *graph_break_hints.SUPPORTABLE,
+                        f"Refactor or avoid using the function `{self.fn}` in traced code.",
+                        *graph_break_hints.DYNAMO_BUG,
                     ],
                 )
 
