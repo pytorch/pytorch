@@ -1896,6 +1896,33 @@ class TestBinaryUfuncs(TestCase):
         _scalar_helper(lambda a, b: math.floor(a / b), operator.floordiv)
         _scalar_helper(lambda a, b: math.floor(a / b), torch.floor_divide)
 
+    @onlyCUDA
+    @dtypes(torch.float64, torch.float32, torch.float16)
+    def test_absolute_extreme(self, device, dtype):
+        def ulp_size(x):
+            next_val = torch.nextafter(x, torch.tensor(float('inf'), dtype=x.dtype))
+            return next_val - x
+        atol = ulp_size(torch.ones((), dtype=dtype)).item()
+        for _ in range(20):
+            real = torch.randn((10, 10), dtype=dtype, device="cpu")
+            imag = torch.randn((10, 10), dtype=dtype, device="cpu")
+            input = torch.complex(real, imag)
+            input_gpu = input.cuda()
+            self.assertTrue(torch.allclose(torch.absolute(input), torch.absolute(input_gpu.to('cpu')), atol=atol, rtol=0))
+
+        max_value = torch.finfo(dtype).max
+        real = torch.ones((10, 10), dtype=dtype, device="cpu")
+        imag = torch.full((10, 10), max_value, dtype=dtype, device="cpu")
+        input = torch.complex(real, imag)
+        input_gpu = input.cuda()
+        self.assertTrue(torch.allclose(torch.absolute(input), torch.absolute(input_gpu.to('cpu')), atol=atol, rtol=0))
+
+        real = torch.full((10, 10), max_value / 2.0, dtype=dtype, device="cpu")
+        imag = torch.full((10, 10), max_value / 2.0, dtype=dtype, device="cpu")
+        input = torch.complex(real, imag)
+        input_gpu = input.cuda()
+        self.assertTrue(torch.allclose(torch.absolute(input), torch.absolute(input_gpu.to('cpu')), atol=atol, rtol=0))
+
     @onlyNativeDeviceTypes
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_div_and_floordiv_script_vs_python(self, device):
