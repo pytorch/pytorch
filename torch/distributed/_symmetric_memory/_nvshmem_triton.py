@@ -19,9 +19,8 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
         dict[str, str]: A dictionary containing the NVSHMEM device library name
         and path.
     """
-    from triton.runtime.jit import JITFunction
-
     from torch._C._distributed_c10d import _nvshmemx_cumodule_init
+    from triton.runtime.jit import JITFunction
 
     # Detect NVSHMEM device library path from python library path
     if lib_dir is None:
@@ -276,6 +275,63 @@ if has_triton():
                     core.dtype("int64"),  # nelems
                     core.dtype("int64"),  # pe_root
                 ): ("nvshmem_longlong_broadcast", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def sum_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
+        """Sum reduction for int64"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [team, dest, source, nreduce],
+            {
+                (
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                ): ("nvshmem_int64_sum_reduce", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def max_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
+        """Max reduction for int64"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [team, dest, source, nreduce],
+            {
+                (
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                ): ("nvshmem_int64_max_reduce", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def min_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
+        """Min reduction for int64"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [team, dest, source, nreduce],
+            {
+                (
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                ): ("nvshmem_int64_min_reduce", core.dtype("int32"))
             },
             is_pure=False,
             _builder=_builder,
