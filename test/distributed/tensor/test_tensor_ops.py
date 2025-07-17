@@ -69,22 +69,21 @@ class DistTensorOpsTest(DTensorTestBase):
             dst_tensor.copy_(src_tensor)
             self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
 
-    # @pytest.mark.xfail
-    # @with_comms
-    # def test_copy_broadcast(self):
-    #     device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-    #     src_specs = [[Replicate()], [Shard(0)]]
-    #     src_tensor = torch.randn((12,))
+    @with_comms
+    def test_copy_broadcast(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        src_specs = [[Replicate()], [Shard(0)]]
+        src_tensor = torch.randn((128,))
 
-    #     dst_tensor = torch.zeros(12, 12)
-    #     dst_specs = [[Replicate()], [Shard(1)]]
-    #     for dst_spec, src_spec in zip(dst_specs, src_specs):
-    #         src_dtensor = distribute_tensor(src_tensor, device_mesh, dst_spec)
-    #         dst_dtensor = distribute_tensor(dst_tensor, device_mesh, src_spec)
-    #         # perform a broadcasted copy from Shard(0) to Shard(1) for the worst case
-    #         dst_dtensor.copy_(src_dtensor)
-    #         dst_tensor.copy_(src_tensor)
-    #         self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
+        dst_tensor = torch.zeros(128, 128)
+        dst_specs = [[Replicate()], [Shard(1)]]
+        for dst_spec, src_spec in zip(dst_specs, src_specs):
+            src_dtensor = distribute_tensor(src_tensor, device_mesh, src_spec)
+            dst_dtensor = distribute_tensor(dst_tensor, device_mesh, dst_spec)
+            # perform a broadcasted copy from Shard(0) to Shard(1) for the worst case
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
 
     @with_comms
     def test_contiguous(self):
