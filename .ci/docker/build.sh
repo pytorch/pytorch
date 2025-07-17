@@ -100,6 +100,18 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     ;;
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm)
+  CUDA_VERSION=12.8.1
+  CUDNN_VERSION=9
+  ANACONDA_PYTHON_VERSION=3.12
+  GCC_VERSION=11
+  VISION=yes
+  KATEX=yes
+  UCX_COMMIT=${_UCX_COMMIT}
+  UCC_COMMIT=${_UCC_COMMIT}
+  TRITON=yes
+  VLLM=yes
+  ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.8.1
     CUDNN_VERSION=9
@@ -407,6 +419,7 @@ docker build \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
+       --build-arg "VLLM=${VLLM}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
