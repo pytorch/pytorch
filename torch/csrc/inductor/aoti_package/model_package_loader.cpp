@@ -59,19 +59,19 @@ std::string create_temp_dir() {
 #endif
 }
 
-const char* object_file_ext(){
+const char* object_file_ext() {
 #ifdef _WIN32
-    return ".obj";
+  return ".obj";
 #else
-    return ".o";
+  return ".o";
 #endif
 }
 
-const char* extension_file_ext(){
+const char* extension_file_ext() {
 #ifdef _WIN32
-    return ".pyd";
+  return ".pyd";
 #else
-    return ".so";
+  return ".so";
 #endif
 }
 
