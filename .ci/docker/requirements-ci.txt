@@ -162,10 +162,11 @@ pillow==11.0.0
 #Pinned versions: 10.3.0
 #test that import:
 
-protobuf==5.29.4
-#Description:  Google's data interchange format
-#Pinned versions: 5.29.4
-#test that import: test_tensorboard.py, test/onnx/*
+protobuf==3.20.2 ; python_version <= "3.12"
+protobuf==4.25.1 ; python_version == "3.13"
+#Description:  Google’s data interchange format
+#Pinned versions: 3.20.1
+#test that import: test_tensorboard.py
 
 psutil
 #Description: information on running processes and system utilization
@@ -320,7 +321,8 @@ pywavelets==1.7.0 ; python_version >= "3.12"
 #Pinned versions: 1.4.1
 #test that import:
 
-lxml==5.3.0
+lxml==5.3.0 ; python_version <= "3.12"
+lxml==6.0.0 ; python_version == "3.13"
 #Description: This is a requirement of unittest-xml-reporting
 
 # Python-3.9 binaries
@@ -332,8 +334,9 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.18.0
-#Description: Required by onnx tests, and mypy and test_public_bindings.py when checking torch.onnx._internal
+onnx==1.16.1 ; python_version <= "3.12"
+onnx==1.18.0 ; python_version == "3.13"
+#Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
 
