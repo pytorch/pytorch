@@ -21,7 +21,7 @@ struct C10_API PyInterpreterHooksInterface {
   }
 };
 
-struct C10_API PyInterpreterHooksArgs {};
+struct C10_API PyInterpreterHooksArgs{};
 
 C10_DECLARE_REGISTRY(
     PyInterpreterHooksRegistry,
