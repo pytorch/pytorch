@@ -1089,19 +1089,6 @@ class BuiltinVariable(VariableTracker):
                 # scenario is to de-sugar eagerly.
                 fn, args = IN_PLACE_DESUGARING_MAP[fn], [args[0], args[1]]
 
-            if fn is operator.getitem and isinstance(args[1], SymNodeVariable):
-                # Standard indexing will force specialization due to
-                # __index__.  Rewrite as a regular torch op which will
-                # trace fine
-                fn, args = (
-                    torch.select,
-                    [
-                        args[0],
-                        variables.ConstantVariable.create(0),
-                        args[1],
-                    ],
-                )
-
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
             if check_numpy_ndarray_args(args, kwargs) and not any(
@@ -1124,6 +1111,10 @@ class BuiltinVariable(VariableTracker):
                 # TODO - supporting all comparison operators could also work but
                 # it fails lots of tests because graph str changes.
                 return args[0].call_method(tx, "__eq__", args[1:], kwargs)
+
+            if fn is operator.getitem and isinstance(args[0], variables.TensorVariable):
+                return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
+
             proxy = tx.output.create_proxy(
                 "call_function",
                 fn,
