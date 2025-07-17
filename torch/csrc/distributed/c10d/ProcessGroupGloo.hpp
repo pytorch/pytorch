@@ -308,9 +308,15 @@ class TORCH_API ProcessGroupGloo : public Backend {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
   }
 
-  c10::intrusive_ptr<Backend> splitBackend(
+  c10::intrusive_ptr<Backend> split(
       const std::vector<int>& ranks,
       const c10::intrusive_ptr<Backend::Options> opts) override;
+
+  c10::intrusive_ptr<Backend> merge(
+      const c10::intrusive_ptr<Store>& store,
+      const c10::intrusive_ptr<Backend::Options> opts,
+      const int& rank,
+      const int& size) override;
 
   const std::vector<uint64_t>& groupRanks() const;
 
