@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from re import M
 from typing import Any, Callable
 import cutlass
 import cutlass.torch as cutlass_torch
@@ -16,6 +15,8 @@ torch._inductor.config.force_disable_caches = True
 
 # TODO1: visualization
 # TODO2: roof line analysis
+# TODO: Record peak memory
+
 
 def benchmark_kernel_in_milliseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
@@ -105,22 +106,26 @@ class BenchmarkKernel:
         res = {}
         for backend in self.available_backends:
             args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
-            res[backend] = getattr(self, backend)(args_ref, kwargs_ref)
-        
+            res[backend] = getattr(self, backend)(args_ref, kwargs_ref)()
         gold = res["eager"]
         for backend in self.available_backends:
             if backend == "eager":
                 continue
             try:
-                torch.testing.assert_close(res[backend], gold, atol=1e-2, rtol=1e-2) # TODO: decide the atol and rtol
-                print(f"Accuracy check passed for {backend} backend on {self.name} kernel")
+                torch.testing.assert_close(res[backend], gold)
+                print(f"Accuracy check \033[92m✓ succeed\033[0m for {backend} backend on {self.name} kernel")
             except:
-                print(f"Accuracy check failed for {backend} backend on {self.name} kernel")
+                print(f"Accuracy check \033[91m✗ failed\033[0m for {backend} backend on {self.name} kernel")
 
     def benchmark_single_shape(self, args, kwargs=None, should_check_accuracy=True, setting: str = ""):
         for backend in self.available_backends:
             args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
-            avg_time = benchmark_kernel_in_milliseconds(getattr(self, backend)(args, kwargs))
+            try:
+                avg_time = benchmark_kernel_in_milliseconds(getattr(self, backend)(args, kwargs))
+            except:
+                print(f"Failed to run {backend} backend on {self.name} kernel for {setting}")
+                self.available_backends.remove(backend)
+                continue
             mem_bytes = self.get_memory_bytes(args_ref, kwargs_ref)
             flops = self.get_flops(args_ref, kwargs_ref)
             perf = Performance(setting, avg_time, mem_bytes, flops)
@@ -147,7 +152,7 @@ class BenchmarkKernel:
 class CrossEntropyForward(BenchmarkKernel):
     def __init__(self):
         super().__init__()
-        self.available_backends = ["eager", "compiled", "quack"]
+        self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
         return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768), (32768,65536), (16384,131072), (8192,262144))
@@ -183,6 +188,15 @@ class CrossEntropyForward(BenchmarkKernel):
         from quack.cross_entropy import _cross_entropy
         return lambda: _cross_entropy(x, target)
 
+    def liger(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        from liger_kernel.transformers.cross_entropy import LigerCrossEntropyLoss
+
+        x, target = args
+        cross_entropy = LigerCrossEntropyLoss(reduction='none')
+        fn = lambda: cross_entropy(x, target)
+        return fn
+
     def benchmark(self):
         for (M, N) in self.get_shapes():
             print(f"Tensor dimensions: [{M}, {N}]")
@@ -195,7 +209,7 @@ class CrossEntropyForward(BenchmarkKernel):
 class CrossEntropyBackward(BenchmarkKernel):
     def __init__(self):
         super().__init__()
-        self.available_backends = ["eager", "compiled", "quack"]
+        self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
         return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768), (32768,65536), (16384,131072), (8192,262144))
@@ -236,6 +250,16 @@ class CrossEntropyBackward(BenchmarkKernel):
         fn = lambda: torch.autograd.grad(loss, x, grad_outputs=dloss, retain_graph=True)
         return fn
 
+    def liger(self, args, kwargs=None) -> Any:
+        assert kwargs is None
+        from liger_kernel.transformers.cross_entropy import LigerCrossEntropyLoss
+
+        x, target, dloss = args
+        cross_entropy = LigerCrossEntropyLoss(reduction='none')
+        loss = cross_entropy(x, target)
+        fn = lambda: torch.autograd.grad(loss, x, grad_outputs=dloss, retain_graph=True)
+        return fn
+
     def benchmark(self):
         for (M, N) in self.get_shapes():
             print(f"Tensor dimensions: [{M}, {N}]")
@@ -249,7 +273,7 @@ class CrossEntropyBackward(BenchmarkKernel):
 class SoftmaxForward(BenchmarkKernel):
     def __init__(self):
         super().__init__()
-        self.available_backends = ["eager", "compiled", "quack"]
+        self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
         return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768), (32768,65536), (16384,131072), (8192,262144))
@@ -282,6 +306,14 @@ class SoftmaxForward(BenchmarkKernel):
         fn = lambda: softmax(x)
         return fn
 
+    def liger(self, args, kwargs=None) -> Any:
+        from liger_kernel.transformers.softmax import LigerSoftmax
+        assert kwargs is None
+        x, = args
+        softmax = LigerSoftmax().to("cuda")
+        fn = lambda: softmax(x)
+        return fn
+
     def benchmark(self):
         for (M, N) in self.get_shapes():
             print(f"Tensor dimensions: [{M}, {N}]")
@@ -293,7 +325,7 @@ class SoftmaxForward(BenchmarkKernel):
 class SoftmaxBackward(BenchmarkKernel):
     def __init__(self):
         super().__init__()
-        self.available_backends = ["eager", "compiled", "quack"]
+        self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
         return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768), (32768,65536), (16384,131072), (8192,262144))
@@ -332,6 +364,15 @@ class SoftmaxBackward(BenchmarkKernel):
         fn = lambda: torch.autograd.grad(y, x, grad_outputs=dy, retain_graph=True)
         return fn
 
+    def liger(self, args, kwargs=None) -> Any:
+        from liger_kernel.transformers.softmax import LigerSoftmax
+        assert kwargs is None
+        x, dy = args
+        softmax = LigerSoftmax().to("cuda")
+        y = softmax(x)
+        fn = lambda: torch.autograd.grad(y, x, grad_outputs=dy, retain_graph=True)
+        return fn
+
     def benchmark(self):
         for (M, N) in self.get_shapes():
             print(f"Tensor dimensions: [{M}, {N}]")
@@ -344,7 +385,7 @@ class SoftmaxBackward(BenchmarkKernel):
 class RMSNormForward(BenchmarkKernel):
     def __init__(self):
         super().__init__()
-        self.available_backends = ["eager", "compiled", "quack"]
+        self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
         return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768), (32768,65536), (16384,131072), (8192,262144))
@@ -382,6 +423,16 @@ class RMSNormForward(BenchmarkKernel):
         fn = lambda: _rmsnorm_fwd(x, w, eps=1e-6)
         return fn
 
+    def liger(self, args, kwargs) -> Any:
+        from liger_kernel.transformers.rms_norm import LigerRMSNorm
+
+        x, w = args
+        M, N = x.shape
+        liger_rmsnorm = LigerRMSNorm(hidden_size=N, eps=1e-6).cuda()
+        liger_rmsnorm.weight.data.copy_(w)
+        fn = lambda: liger_rmsnorm(x)
+        return fn
+
     def benchmark(self):
         for (M, N) in self.get_shapes():
             print(f"Tensor dimensions: [{M}, {N}]")
@@ -394,10 +445,11 @@ class RMSNormForward(BenchmarkKernel):
 class RMSNormBackward(BenchmarkKernel):
     def __init__(self):
         super().__init__()
-        self.available_backends = ["eager", "compiled", "quack"]
+        self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
-        return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768), (32768,65536), (16384,131072), (8192,262144))
+        # TODO: OOM for (32768, 65536) on h100 
+        return ((32768,256), (32768,512), (32768,1024), (32768,2048), (32768,4096), (32768,8192), (32768,16384), (32768,32768))
 
     def get_memory_bytes(self, args, kwargs) -> int:
         x, w, dy = args
@@ -434,6 +486,17 @@ class RMSNormBackward(BenchmarkKernel):
         M, N = x.shape
         rstd = torch.randn(M, device="cuda", dtype=torch.float32)
         fn = lambda: _rmsnorm_backward(x, w, dy, rstd)
+        return fn
+
+    def liger(self, args, kwargs=None) -> Any:
+        from liger_kernel.transformers.rms_norm import LigerRMSNorm
+
+        x, w, dy = args
+        M, N = x.shape
+        liger_rmsnorm = LigerRMSNorm(hidden_size=N, eps=1e-6).cuda()
+        liger_rmsnorm.weight.data.copy_(w)
+        y = liger_rmsnorm(x)
+        fn = lambda: torch.autograd.grad(y, [x,liger_rmsnorm.weight], grad_outputs=dy, retain_graph=True)
         return fn
 
     def benchmark(self):
