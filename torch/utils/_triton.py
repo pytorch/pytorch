@@ -6,12 +6,10 @@ from typing import Any
 @functools.cache
 def has_triton_package() -> bool:
     try:
-        from triton.compiler.compiler import triton_key
+        import triton  # noqa: F401
 
-        return triton_key is not None
+        return True
     except ImportError:
-        return False
-    except RuntimeError:
         return False
 
 
@@ -74,6 +72,7 @@ def has_triton_tma_device() -> bool:
             and torch.cuda.get_device_capability() >= (9, 0)
             and not torch.version.hip
         ):
+            # old API
             try:
                 from triton.language.extra.cuda import (  # noqa: F401
                     experimental_device_tensormap_create1d,
@@ -84,6 +83,33 @@ def has_triton_tma_device() -> bool:
             except ImportError:
                 pass
 
+            # new API
+            try:
+                from triton.language import make_tensor_descriptor  # noqa: F401
+
+                return True
+            except ImportError:
+                pass
+
+    return False
+
+
+@functools.lru_cache(None)
+def has_triton_stable_tma_api() -> bool:
+    if has_triton_package():
+        import torch
+
+        if (
+            torch.cuda.is_available()
+            and torch.cuda.get_device_capability() >= (9, 0)
+            and not torch.version.hip
+        ):
+            try:
+                from triton.language import make_tensor_descriptor  # noqa: F401
+
+                return True
+            except ImportError:
+                pass
     return False
 
 
@@ -132,7 +158,7 @@ def triton_backend() -> Any:
 
 @functools.cache
 def triton_hash_with_backend() -> str:
-    from triton.compiler.compiler import triton_key
+    from torch._inductor.runtime.triton_compat import triton_key
 
     backend = triton_backend()
     key = f"{triton_key()}-{backend.hash()}"

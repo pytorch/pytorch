@@ -39,6 +39,7 @@ from torch._C._functorch import (
     maybe_get_level,
     peek_interpreter_stack,
 )
+from torch._dispatch.python import enable_python_dispatcher
 from torch._logging import trace_structured
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -356,7 +357,9 @@ class MetaTensorDescriber:
 
         maybe_functorch_stack = None
         if is_functorch_wrapped:
-            with torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack() as maybe_functorch_stack:
+            with (
+                torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack()
+            ) as maybe_functorch_stack:
                 pass
 
         attrs = None
@@ -385,7 +388,7 @@ class MetaTensorDescriber:
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
             # NB: ndim should be OK too but there is a disaster at
-            # python test/dynamo/test_subclasses.py -k test_user_overidden_property_unsupported
+            # python test/dynamo/test_subclasses.py -k test_user_overridden_property_unsupported
             # Actually, this means that we have a little bit of a problem
             # here, which is that there is some sensitivity to how exactly an
             # access is done if you have a __torch_function__ subclass.  Maybe
@@ -516,8 +519,7 @@ class ViewFunc(Generic[_TensorT]):
         new_base: _TensorT,
         symint_visitor_fn: Optional[Callable[[int], int]] = None,
         tensor_visitor_fn: Optional[Callable[[torch.Tensor], _TensorT]] = None,
-    ) -> _TensorT:
-        ...
+    ) -> _TensorT: ...
 
     @staticmethod
     def from_tensor(t: torch.Tensor) -> ViewFunc:
@@ -573,8 +575,7 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
 class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
     def __call__(
         self, arg: Callable[[], torch.Tensor], /, *, device: Union[torch.device, str]
-    ) -> _TensorT_cov:
-        ...
+    ) -> _TensorT_cov: ...
 
 
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
@@ -591,8 +592,7 @@ class _MetaTensorCallbackOptDevice(Protocol, Generic[_TensorT_cov]):
         arg: Callable[[], torch.Tensor],
         /,
         **kwargs: Unpack[_MetaTensorCallbackKwargs],
-    ) -> _TensorT_cov:
-        ...
+    ) -> _TensorT_cov: ...
 
 
 @dataclass(frozen=True)
@@ -784,9 +784,9 @@ class MetaConverter(Generic[_TensorT]):
         ] = weakref.WeakValueDictionary()
         # Maps MetaTensorId to torch.Tensor (typically a meta tensor or
         # FakeTensor)
-        self.tensor_memo: weakref.WeakValueDictionary[
-            MetaTensorId, _TensorT
-        ] = weakref.WeakValueDictionary()
+        self.tensor_memo: weakref.WeakValueDictionary[MetaTensorId, _TensorT] = (
+            weakref.WeakValueDictionary()
+        )
         self.hit = 0
         self.miss = 0
         self.del_hook = None
@@ -1178,134 +1178,140 @@ class MetaConverter(Generic[_TensorT]):
                 torch.fx.experimental.symbolic_shapes.ShapeEnv
             ] = shape_env,
         ) -> _TensorT:
-            # fake-ify t's metadata according to the outer symbolic context
-            (sizes, strides, storage_offset) = sym_sizes_strides_storage_offset(
-                t, source
-            )
-            if (
-                not t.is_traceable_wrapper_subclass
-                and not is_traceable_wrapper_subclass(base)
-            ):
-                # Dense -> Dense view case uses as_strided() to construct view relationship.
-                # TODO: Change this logic to use view replay for consistency?
-                # It's likely there is no view func available.
-                with maybe_suppress():
-                    return self._checked_cast_tensor_t(
-                        base.as_strided(sizes, strides, storage_offset)
+            with enable_python_dispatcher():
+                # fake-ify t's metadata according to the outer symbolic context
+                (sizes, strides, storage_offset) = sym_sizes_strides_storage_offset(
+                    t, source
+                )
+                if (
+                    not t.is_traceable_wrapper_subclass
+                    and not is_traceable_wrapper_subclass(base)
+                ):
+                    # Dense -> Dense view case uses as_strided() to construct view relationship.
+                    # TODO: Change this logic to use view replay for consistency?
+                    # It's likely there is no view func available.
+                    with maybe_suppress():
+                        return self._checked_cast_tensor_t(
+                            base.as_strided(sizes, strides, storage_offset)
+                        )
+
+                from torch._dynamo.source import EphemeralSource
+                from torch.fx.experimental.symbolic_shapes import (
+                    StatelessSymbolicContext,
+                    sym_eq,
+                )
+
+                def symint_visitor_fn(s: int) -> int:
+                    nonlocal symbolic_context
+                    from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+                    all_static_sizes = (
+                        symbolic_context is not None
+                        and isinstance(symbolic_context, StatelessSymbolicContext)
+                        and all(
+                            x is DimDynamic.STATIC
+                            for x in symbolic_context.dynamic_sizes
+                        )
+                    )
+                    # Can't just rely on shape env being None - dynamo always initializes it
+                    if all_static_sizes or shape_env is None:
+                        return s
+
+                    # NB: The symbol here is expected to be simplified out because we a priori
+                    # allocate inner and outer symbols according to the appropriate symbolic
+                    # contexts and prefer those over this symbol during symbol simplification
+                    # (via usage of EphemeralSource below). This -shouldn't- happen, but if
+                    # this symbol somehow leaks out beyond the view tensor's shape metadata, our
+                    # assumption of it being simplified out will fail and it may be guarded on,
+                    # which will hard error.
+                    sym_source = EphemeralSource("symint_visitor_fn")
+
+                    symbol = shape_env.create_symbol(s, sym_source, positive=None)
+                    return shape_env.create_symintnode(
+                        symbol, hint=s, source=sym_source
                     )
 
-            from torch._dynamo.source import EphemeralSource
-            from torch.fx.experimental.symbolic_shapes import (
-                StatelessSymbolicContext,
-                sym_eq,
-            )
+                real_to_fake_mapping = {}
+                if t.is_traceable_wrapper_subclass:
+                    assert t.attrs is not None
+                    # NB: t.ctx could be None if the subclass in question has no
+                    # meaningful context
+                    assert t.type is not None
 
-            def symint_visitor_fn(s: int) -> int:
-                nonlocal symbolic_context
-                from torch.fx.experimental.symbolic_shapes import DimDynamic
-
-                all_static_sizes = (
-                    symbolic_context is not None
-                    and isinstance(symbolic_context, StatelessSymbolicContext)
-                    and all(
-                        x is DimDynamic.STATIC for x in symbolic_context.dynamic_sizes
+                    # Fake-ify t naively here; this is only done so we can get fake-ified inner
+                    # tensors with the correct relationships to the outer sizes / strides for use
+                    # in view replay. It's done beforehand here because it's not easy to do when
+                    # visiting tensors one-by-one during view replay.
+                    #
+                    # Example:
+                    #   Consider a Dense -> NJT view. NJT has (values, offsets) components and we
+                    #   want a view of values with the offsets closed over. As the offsets component
+                    #   is needed to describe the output view, it's important that it's fakeified
+                    #   correctly.
+                    fake_t: _TensorT = empty_create_subclass(
+                        t, outer_size=sizes, outer_stride=strides
                     )
-                )
-                # Can't just rely on shape env being None - dynamo always initializes it
-                if all_static_sizes or shape_env is None:
-                    return s
+                    attrs, _ = fake_t.__tensor_flatten__()  # type: ignore[attr-defined]
+                    for attr in attrs:
+                        real_to_fake_mapping[t.attrs[attr].id] = getattr(fake_t, attr)
 
-                # NB: The symbol here is expected to be simplified out because we a priori
-                # allocate inner and outer symbols according to the appropriate symbolic
-                # contexts and prefer those over this symbol during symbol simplification
-                # (via usage of EphemeralSource below). This -shouldn't- happen, but if
-                # this symbol somehow leaks out beyond the view tensor's shape metadata, our
-                # assumption of it being simplified out will fail and it may be guarded on,
-                # which will hard error.
-                sym_source = EphemeralSource("symint_visitor_fn")
+                def tensor_visitor_fn(
+                    visited_t: torch.Tensor,
+                    # These arguments are never passed, we just use them to close
+                    # over these relevant values
+                    shape_env: Optional[
+                        torch.fx.experimental.symbolic_shapes.ShapeEnv
+                    ] = shape_env,
+                    callback: _MetaTensorCallbackOptDevice[_TensorT] = callback,
+                ) -> torch.Tensor:
+                    # It's possible to close over an undefined tensor (e.g. NJT's lengths).
+                    if visited_t is None:
+                        return None
 
-                symbol = shape_env.create_symbol(s, sym_source, positive=None)
-                return shape_env.create_symintnode(symbol, hint=s, source=sym_source)
+                    # NB: visited_t being a Tensor here is very naughty!  Should
+                    # have already been described
 
-            real_to_fake_mapping = {}
-            if t.is_traceable_wrapper_subclass:
-                assert t.attrs is not None
-                # NB: t.ctx could be None if the subclass in question has no
-                # meaningful context
-                assert t.type is not None
+                    # Fake inner tensors of view subclasses will come from the mapping built above.
+                    visited_id = self.describer.get_tensor_id(visited_t)
+                    fake_visited_t = real_to_fake_mapping.get(visited_id, None)
+                    if fake_visited_t is not None:
+                        return fake_visited_t
 
-                # Fake-ify t naively here; this is only done so we can get fake-ified inner
-                # tensors with the correct relationships to the outer sizes / strides for use
-                # in view replay. It's done beforehand here because it's not easy to do when
-                # visiting tensors one-by-one during view replay.
-                #
-                # Example:
-                #   Consider a Dense -> NJT view. NJT has (values, offsets) components and we
-                #   want a view of values with the offsets closed over. As the offsets component
-                #   is needed to describe the output view, it's important that it's fakeified
-                #   correctly.
-                fake_t: _TensorT = empty_create_subclass(
-                    t, outer_size=sizes, outer_stride=strides
-                )
-                attrs, _ = fake_t.__tensor_flatten__()  # type: ignore[attr-defined]
-                for attr in attrs:
-                    real_to_fake_mapping[t.attrs[attr].id] = getattr(fake_t, attr)
+                    visited_desc = self.describer.describe_tensor(visited_t)
 
-            def tensor_visitor_fn(
-                visited_t: torch.Tensor,
-                # These arguments are never passed, we just use them to close
-                # over these relevant values
-                shape_env: Optional[
-                    torch.fx.experimental.symbolic_shapes.ShapeEnv
-                ] = shape_env,
-                callback: _MetaTensorCallbackOptDevice[_TensorT] = callback,
-            ) -> torch.Tensor:
-                # It's possible to close over an undefined tensor (e.g. NJT's lengths).
-                if visited_t is None:
-                    return None
+                    # For other closed-over tensor state, fake-ify it as all dynamic with an
+                    # ephemeral source. This avoids invalid specialization during view replay.
+                    # If we find that in practice the usage of ephemeral sources isn't enough
+                    # to guarantee that we don't have guards on these symbols, we may need to
+                    # explicitly suppress guards (as is done for _base in the dense -> dense
+                    # view case).
+                    temp_source = EphemeralSource("tensor_visitor_fn")
+                    return self.meta_tensor(
+                        visited_desc,
+                        shape_env,
+                        callback,
+                        temp_source,
+                        all_dynamic_symbolic_context(
+                            visited_desc, temp_source, shape_env, callback
+                        ),
+                    )
 
-                # NB: visited_t being a Tensor here is very naughty!  Should
-                # have already been described
-
-                # Fake inner tensors of view subclasses will come from the mapping built above.
-                visited_id = self.describer.get_tensor_id(visited_t)
-                fake_visited_t = real_to_fake_mapping.get(visited_id, None)
-                if fake_visited_t is not None:
-                    return fake_visited_t
-
-                visited_desc = self.describer.describe_tensor(visited_t)
-
-                # For other closed-over tensor state, fake-ify it as all dynamic with an
-                # ephemeral source. This avoids invalid specialization during view replay.
-                # If we find that in practice the usage of ephemeral sources isn't enough
-                # to guarantee that we don't have guards on these symbols, we may need to
-                # explicitly suppress guards (as is done for _base in the dense -> dense
-                # view case).
-                temp_source = EphemeralSource("tensor_visitor_fn")
-                return self.meta_tensor(
-                    visited_desc,
-                    shape_env,
-                    callback,
-                    temp_source,
-                    all_dynamic_symbolic_context(
-                        visited_desc, temp_source, shape_env, callback
-                    ),
+                # Replay the view, swapping out any non-symbolic SymInts or real tensors
+                # for symbolic SymInts or fake tensors.
+                assert t.view_func is not None
+                # NB: we do NOT suppress guards here, we need to remove ephemeral
+                # sources
+                fake_t = t.view_func.apply(
+                    t, base, symint_visitor_fn, tensor_visitor_fn
                 )
 
-            # Replay the view, swapping out any non-symbolic SymInts or real tensors
-            # for symbolic SymInts or fake tensors.
-            assert t.view_func is not None
-            # NB: we do NOT suppress guards here, we need to remove ephemeral
-            # sources
-            fake_t = t.view_func.apply(t, base, symint_visitor_fn, tensor_visitor_fn)
-
-            # Ensure the output has symbolic shapes according to the outer symbolic context.
-            # These checks should simplify out any symbols created for closed-over view func
-            # SymInts.
-            torch._check(sym_eq(fake_t.size(), sizes))
-            torch._check(sym_eq(fake_t.stride(), strides))
-            torch._check(sym_eq(fake_t.storage_offset(), storage_offset))
-            return fake_t
+                # Ensure the output has symbolic shapes according to the outer symbolic context.
+                # These checks should simplify out any symbols created for closed-over view func
+                # SymInts.
+                torch._check(sym_eq(fake_t.size(), sizes))
+                torch._check(sym_eq(fake_t.stride(), strides))
+                torch._check(sym_eq(fake_t.storage_offset(), storage_offset))
+                return fake_t
 
         if self.get_tensor_memo(t) is None:
             GRAD_TENSOR_SENTINEL_VALUE = -2
@@ -1637,7 +1643,7 @@ class MetaConverter(Generic[_TensorT]):
                                 with torch.enable_grad():
                                     r = view_from_base(base, t)
 
-                                # NB: We don't actaully faithfully replicate
+                                # NB: We don't actually faithfully replicate
                                 # autograd connectivity, but that doesn't matter
                                 # today. See following for more info:
                                 # https://gist.github.com/soulitzer/e03f015b314c3f5fcf80888c69390913
@@ -1646,7 +1652,7 @@ class MetaConverter(Generic[_TensorT]):
                                 # correct requires_grad, then do the final view.
                                 # NB: Can't have a non-leaf without requiring grad!
                                 assert t.requires_grad
-                                with torch.no_grad():
+                                with torch.no_grad(), enable_python_dispatcher():
                                     mid = self._checked_cast_tensor_t(
                                         base.view(base.shape)
                                     )
@@ -1662,6 +1668,8 @@ class MetaConverter(Generic[_TensorT]):
                         torch._C._dispatch_tls_set_dispatch_key_excluded(
                             torch._C.DispatchKey.ADInplaceOrView, old_exclude
                         )
+
+                    r.fake_device = t.device  # type: ignore[attr-defined]
 
                 else:
                     is_leaf = t.is_leaf
@@ -1765,9 +1773,9 @@ class MetaConverter(Generic[_TensorT]):
                         # subclasses.  Relevant test is
                         # DynamicShapesFunctionTests::test_add_dynamic_shapes in
                         # test/dynamo/test_dynamic_shapes.py
-                        maybe_fake_mgr: AbstractContextManager[
-                            None
-                        ] = contextlib.nullcontext()
+                        maybe_fake_mgr: AbstractContextManager[None] = (
+                            contextlib.nullcontext()
+                        )
                         from torch._subclasses.fake_tensor import (
                             in_kernel_invocation_manager,
                             maybe_get_fake_mode,

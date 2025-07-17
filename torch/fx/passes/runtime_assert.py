@@ -397,7 +397,9 @@ def insert_deferred_runtime_asserts(
                                 nn_module_stack=node.meta.get("nn_module_stack"),
                             ),
                         ):
-                            expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)  # type: ignore[arg-type]
+                            expr_to_proxy[sym_expr] = _sympy_interp(
+                                expr_to_proxy, sym_expr
+                            )  # type: ignore[arg-type]
                         # won't try DCE-ing tensor compute here
                     hash_node = expr_to_proxy[sym_expr].node  # type: ignore[arg-type]
                     node.replace_all_uses_with(hash_node)
@@ -459,6 +461,7 @@ def insert_deferred_runtime_asserts(
                                     ),
                                     keypath[2:],
                                 )
+
                             return go(
                                 graph.call_method(
                                     keypath[0].name, (node, keypath[1].idx)
@@ -466,6 +469,15 @@ def insert_deferred_runtime_asserts(
                                 keypath[2:],
                             )
                         elif isinstance(keypath[0], CallMethodKey):
+                            if keypath[0].name == "storage_offset":
+                                return go(
+                                    graph.call_function(
+                                        torch.ops.aten.sym_storage_offset.default,
+                                        (node,),
+                                    ),
+                                    keypath[1:],
+                                )
+
                             return go(
                                 graph.call_method(keypath[0].name, (node,)), keypath[1:]
                             )

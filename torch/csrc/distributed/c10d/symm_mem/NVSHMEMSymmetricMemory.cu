@@ -10,6 +10,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
 
+#include <nvshmem_host.h>
+
 namespace c10d {
 namespace symmetric_memory {
 
@@ -24,6 +26,15 @@ struct NVSHMEMAllocation {
 
   NVSHMEMAllocation(void* ptr, size_t buffer_size, int device_idx)
       : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
+
+  ~NVSHMEMAllocation() {
+    // Avoid calling CUDA functions after driver shutting down
+    if (is_finalizing()) {
+      return;
+    }
+    c10::cuda::CUDAGuard guard(device_idx);
+    nvshmem_free(ptr);  // nvshmem_free has no return value
+  }
 };
 
 class NVSHMEMSymmetricMemory : public SymmetricMemory {
@@ -35,29 +46,41 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
         buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name) {
+    // For logging only
+    static int exchanged_n_times = 0;
     c10::cuda::CUDAGuard guard(device_idx_);
 
     auto global_rank = get_group_info("0").rank;
-    auto group_info = get_group_info(group_name_);
+    GroupInfo& group_info = get_group_info(group_name_);
     auto store = group_info.store;
     rank_ = group_info.rank;
     world_size_ = group_info.world_size;
-    rank_to_global_rank_ =
-        storeExchange.all_gather(store, rank_, world_size_, global_rank);
-    LOG(INFO) << "[rank " << rank_ << "]"
-              << "rank_to_global_rank: " << rank_to_global_rank_;
-
+    // Exchange rank to global rank mapping for this group.
+    // If it is already available, skip the exchange.
+    if (group_info.rank_to_global_rank.empty()) {
+      group_info.rank_to_global_rank =
+          storeExchange.all_gather(store, rank_, world_size_, global_rank);
+      exchanged_n_times++;
+      if (rank_ == 0) {
+        LOG(INFO) << "[rank " << rank_ << "]"
+                  << " rank_to_global_rank: " << group_info.rank_to_global_rank
+                  << ", group_name: " << group_name_
+                  << ", exchanged_n_times: " << exchanged_n_times;
+      }
+    }
+    TORCH_INTERNAL_ASSERT(!group_info.rank_to_global_rank.empty());
+    rank_to_global_rank_ = group_info.rank_to_global_rank;
     for (int r = 0; r < world_size_; ++r) {
-      buffers_.push_back(nvshmem_extension::nvshmem_ptr(
+      buffers_.push_back(nvshmem_ptr(
           allocation->ptr, rank_to_global_rank_[r]));
     }
 
     // TODO: use the same allocation for signal pad
-    void* signal_pad_ptr = nvshmem_extension::nvshmem_malloc(signal_pad_size);
+    void* signal_pad_ptr = nvshmem_malloc(signal_pad_size);
     AT_CUDA_CHECK(cudaMemset(signal_pad_ptr, 0, signal_pad_size));
 
     for (int r = 0; r < world_size_; ++r) {
-      signal_pads_.push_back(nvshmem_extension::nvshmem_ptr(
+      signal_pads_.push_back(nvshmem_ptr(
           signal_pad_ptr, rank_to_global_rank_[r]));
     }
 
@@ -216,7 +239,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return world_size_;
   }
 
-  virtual std::vector<int> get_rank_to_global_rank() override {
+  virtual const std::vector<int>& get_rank_to_global_rank() override {
     return rank_to_global_rank_;
   };
 
@@ -240,6 +263,64 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   int* rank_to_global_rank_dev_;
 };
 
+// Bootstrap based on user's setting for NCCL
+// Long term, this may be a bit unclean; short term, it improves UX
+void maybe_initialize_env_vars() {
+  auto nccl_socket_if_name = c10::utils::get_env("NCCL_SOCKET_IFNAME");
+  auto nccl_hca_list = c10::utils::get_env("NCCL_IB_HCA");
+  auto nccl_ib_gid_index = c10::utils::get_env("NCCL_IB_GID_INDEX");
+  auto nvshmem_socket_if_name =
+      c10::utils::get_env("NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME");
+  auto nvshmem_hca_list = c10::utils::get_env("NCCL_IB_HCA");
+  auto nvshmem_ib_gid_index = c10::utils::get_env("NVSHMEM_IB_GID_INDEX");
+
+  if (!nvshmem_socket_if_name.has_value() && nccl_socket_if_name.has_value()) {
+    c10::utils::set_env(
+        "NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME", nccl_socket_if_name->c_str());
+  }
+  if (!nvshmem_hca_list.has_value() && nccl_hca_list.has_value()) {
+    c10::utils::set_env("NVSHMEM_ENABLE_NIC_PE_MAPPING", "1");
+    c10::utils::set_env("NVSHMEM_HCA_LIST", nccl_hca_list->c_str());
+  }
+  if (!nvshmem_ib_gid_index.has_value() && nccl_ib_gid_index.has_value()) {
+    c10::utils::set_env("NVSHMEM_IB_GID_INDEX", nccl_ib_gid_index->c_str());
+  }
+}
+
+void initialize_nvshmem_with_store(
+    c10::intrusive_ptr<c10d::Store> store,
+    int rank,
+    int world_size) {
+  static bool is_initialized = false;
+  if (is_initialized) {
+    return;
+  }
+
+  maybe_initialize_env_vars();
+
+  nvshmemx_uniqueid_t unique_id;
+  NVSHMEM_CHECK(
+      nvshmemx_get_uniqueid(&unique_id), "nvshmemx_get_uniqueid failed");
+
+  // Using an existing store_all_gather due to laziness.
+  // TODO(yifu): should use broadcast
+  auto unique_ids = storeExchange.all_gather(store, rank, world_size, unique_id);
+
+  nvshmemx_init_attr_t attr;
+  nvshmemx_set_attr_uniqueid_args(rank, world_size, &unique_ids[0], &attr);
+
+  NVSHMEM_CHECK(
+      nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr),
+      "nvshmemx_init_attr failed");
+
+  is_initialized = true;
+
+  // Print version
+  int major, minor;
+  ::nvshmem_info_get_version(&major, &minor);
+  LOG(INFO) << "NVSHMEM is available, version: " << major << '.' << minor;
+}
+
 class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
   void* alloc(
@@ -256,27 +337,27 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     int rank = group_info.rank;
     int world_size = group_info.world_size;
 
-    nvshmem_extension::initialize_nvshmem_with_store(store, rank, world_size);
-    auto ptr = nvshmem_extension::nvshmem_malloc(size);
+    initialize_nvshmem_with_store(store, rank, world_size);
+    auto ptr = nvshmem_malloc(size);
     auto allocation =
         std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
     // TODO: thread safety
-    allocations_.emplace(ptr, allocation);
+    allocations_.try_emplace(ptr, std::move(allocation));
     return ptr;
   }
 
   void free(void* ptr) override {
     // TODO: thread safety
-    ptr_to_symm_mem_.erase(ptr);
+    allocations_.erase(ptr);
   };
 
   size_t get_alloc_size(void* ptr) override {
-    auto it = ptr_to_symm_mem_.find(ptr);
-    if (it == ptr_to_symm_mem_.end()) {
+    auto it = allocations_.find(ptr);
+    if (it == allocations_.end()) {
       TORCH_CHECK(
           false, ptr, " is not allocated with NVSHMEMSymmetricMemoryAllocator");
     }
-    return it->second->get_buffer_size();
+    return it->second->buffer_size;
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
@@ -303,10 +384,15 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     return false;
   };
 
- private:
-  std::unordered_map<void*, c10::intrusive_ptr<SymmetricMemory>>
-      ptr_to_symm_mem_;
+  c10::DeviceType supported_device_type() override {
+    return c10::DeviceType::CUDA;
+  }
 
+  std::string name() override {
+    return "NVSHMEM";
+  }
+
+ private:
   std::unordered_map<void*, std::shared_ptr<NVSHMEMAllocation>> allocations_;
   std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
       symm_mems_;
@@ -314,11 +400,16 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
 struct RegisterNVSHMEMSymmetricMemoryAllocator {
   RegisterNVSHMEMSymmetricMemoryAllocator() {
+    auto allocator = c10::make_intrusive<NVSHMEMSymmetricMemoryAllocator>();
     // Query backend used for CUDA tensor
     if (getSymmMemBackendCUDA() == "NVSHMEM") {
+      // Direct set (static registration)
       register_allocator(
           c10::DeviceType::CUDA,
-          c10::make_intrusive<NVSHMEMSymmetricMemoryAllocator>());
+          allocator);
+    } else {
+      // Register availability in case `set_backend` is called dynamically
+      register_availability("NVSHMEM", allocator);
     }
   }
 };

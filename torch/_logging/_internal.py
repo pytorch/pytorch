@@ -252,6 +252,7 @@ def set_logs(
     graph_region_expansion: bool = False,
     inductor_metrics: bool = False,
     hierarchical_compile: bool = False,
+    compute_dependencies: bool = False,
 ) -> None:
     """
     Sets the log level for individual components and toggles individual log
@@ -565,6 +566,7 @@ def set_logs(
         graph_region_expansion=graph_region_expansion,
         inductor_metrics=inductor_metrics,
         hierarchical_compile=hierarchical_compile,
+        compute_dependencies=compute_dependencies,
     )
 
 
@@ -1235,19 +1237,23 @@ def trace_structured(
     payload is an arbitrary string, which can be arbitrarily long (but expected to have
     newlines so no lines are too long)
     """
-    assert "name" not in [
+    assert name not in [
         "rank",
         "compiled_autograd_id",
         "frame_id",
         "frame_compile_id",
         "attempt",
+        "severity",
+        "timestamp",
+        "pathname",
+        "thread",
     ]
-    assert callable(
-        metadata_fn
-    ), f"metadata_fn should be callable, but got {type(metadata_fn)}"
-    assert callable(
-        payload_fn
-    ), f"payload_fn should be callable, but got {type(payload_fn)}"
+    assert callable(metadata_fn), (
+        f"metadata_fn should be callable, but got {type(metadata_fn)}"
+    )
+    assert callable(payload_fn), (
+        f"payload_fn should be callable, but got {type(payload_fn)}"
+    )
     # trace_log never propagates and is ALWAYS DEBUG, so also check that there
     # are handlers instead of checking the log level
     if trace_log.handlers:

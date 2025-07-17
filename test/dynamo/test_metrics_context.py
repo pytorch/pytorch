@@ -64,7 +64,7 @@ class TestMetricsContext(TestCase):
 
     def test_update_disallow_overwrite(self):
         """
-        Validate update won't overwite.
+        Validate update won't overwrite.
         """
         with MetricsContext(self._on_exit) as context:
             context.update({"m1": 1, "m2": 2})
@@ -73,7 +73,7 @@ class TestMetricsContext(TestCase):
 
     def test_update_allow_overwrite(self):
         """
-        Validate update will overwite when given param.
+        Validate update will overwrite when given param.
         """
         with MetricsContext(self._on_exit) as context:
             context.update({"m1": 1, "m2": 2})
