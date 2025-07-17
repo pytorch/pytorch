@@ -22,6 +22,7 @@ froms
 Halfs
 hsa
 indexT
+inH
 inp
 inps
 inpt
@@ -57,5 +58,6 @@ strat
 supercede
 supercedes
 te
+THW
 tne
 WONT
