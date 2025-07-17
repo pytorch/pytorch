@@ -18,7 +18,7 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C
@@ -244,21 +244,25 @@ def _extract_arch_version(arch_string: str) -> int:
 
 
 def _check_capability():
-    incorrect_binary_warn = """
-    Found GPU%d %s which requires CUDA_VERSION >= %d to
-     work properly, but your PyTorch was compiled
-     with CUDA_VERSION %d. Please install the correct PyTorch binary
-     using instructions from https://pytorch.org
-    """  # noqa: F841
-
-    old_gpu_warn = """
+    incompatible_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
-    PyTorch no longer supports this GPU because it is too old.
-    The minimum cuda capability supported by this library is %d.%d.
+    Minimum and Maximum cuda capability supported by this version of PyTorch is
+    (%d.%d) - (%d.%d)
+    """
+    matched_cuda_warn = """
+    Please install PyTorch with a following CUDA
+    configurations: {} following instructions at
+    https://pytorch.org/get-started/locally/
     """
 
+    # Binary CUDA_ARCHES SUPPORTED by PyTorch
+    CUDA_ARCHES_SUPPORTED = {
+        "12.6": {"min": 50, "max": 90},
+        "12.8": {"min": 70, "max": 120},
+        "12.9": {"min": 70, "max": 120},
+    }
+
     if torch.version.cuda is not None:  # on ROCm we don't want this check
-        CUDA_VERSION = torch._C._cuda_getCompiledVersion()  # noqa: F841
         for d in range(device_count()):
             capability = get_device_capability(d)
             major = capability[0]
@@ -267,13 +271,35 @@ def _check_capability():
             current_arch = major * 10 + minor
             min_arch = min(
                 (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
-                default=35,
+                default=50,
             )
-            if current_arch < min_arch:
+            max_arch = max(
+                (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
+                default=50,
+            )
+            if current_arch < min_arch or current_arch > max_arch:
                 warnings.warn(
-                    old_gpu_warn
-                    % (d, name, major, minor, min_arch // 10, min_arch % 10)
+                    incompatible_gpu_warn
+                    % (
+                        d,
+                        name,
+                        major,
+                        minor,
+                        min_arch // 10,
+                        min_arch % 10,
+                        max_arch // 10,
+                        max_arch % 10,
+                    )
                 )
+                matched_arches = ""
+                for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
+                    if (
+                        current_arch >= arch_info["min"]
+                        and current_arch <= arch_info["max"]
+                    ):
+                        matched_arches += f" {arch}"
+                if matched_arches != "":
+                    warnings.warn(matched_cuda_warn.format(matched_arches))
 
 
 def _check_cubins():
@@ -1667,9 +1693,6 @@ class _WrappedTritonKernel:
 
 
 def _register_triton_kernels():
-    if torch._running_with_deploy():
-        return
-
     @_WrappedTritonKernel
     def kernel_impl(*args, **kwargs):
         from torch.sparse._triton_ops import bsr_dense_mm
@@ -1775,6 +1798,9 @@ def _compile_kernel(
 
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
+
+
+_POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 
 
 __all__ = [
