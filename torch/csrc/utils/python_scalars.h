@@ -50,21 +50,51 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
     case at::kLong:
       *(int64_t*)data = unpackIntegral<int64_t>(obj, "int64");
       break;
-    case at::kHalf:
-      *(at::Half*)data =
-          at::convert<at::Half, double>(THPUtils_unpackDouble(obj));
+    case at::kHalf: {
+      double val = THPUtils_unpackDouble(obj);
+      // Handle overflow by returning infinity instead of throwing
+      if (val > std::numeric_limits<at::Half>::max()) {
+        *(at::Half*)data = std::numeric_limits<at::Half>::infinity();
+      } else if (val < std::numeric_limits<at::Half>::lowest()) {
+        *(at::Half*)data = -std::numeric_limits<at::Half>::infinity();
+      } else {
+        *(at::Half*)data = at::convert<at::Half, double>(val);
+      }
       break;
+    }
     case at::kFloat:
       *(float*)data = (float)THPUtils_unpackDouble(obj);
       break;
     case at::kDouble:
       *(double*)data = THPUtils_unpackDouble(obj);
       break;
-    case at::kComplexHalf:
-      *(c10::complex<at::Half>*)data =
-          (c10::complex<at::Half>)static_cast<c10::complex<float>>(
-              THPUtils_unpackComplexDouble(obj));
+    case at::kComplexHalf: {
+      c10::complex<double> val = THPUtils_unpackComplexDouble(obj);
+      // Handle overflow by returning infinity instead of throwing
+      c10::complex<float> float_val = static_cast<c10::complex<float>>(val);
+      at::Half real_part, imag_part;
+      
+      // Handle real part overflow
+      if (float_val.real() > std::numeric_limits<at::Half>::max()) {
+        real_part = std::numeric_limits<at::Half>::infinity();
+      } else if (float_val.real() < std::numeric_limits<at::Half>::lowest()) {
+        real_part = -std::numeric_limits<at::Half>::infinity();
+      } else {
+        real_part = at::convert<at::Half, float>(float_val.real());
+      }
+      
+      // Handle imaginary part overflow
+      if (float_val.imag() > std::numeric_limits<at::Half>::max()) {
+        imag_part = std::numeric_limits<at::Half>::infinity();
+      } else if (float_val.imag() < std::numeric_limits<at::Half>::lowest()) {
+        imag_part = -std::numeric_limits<at::Half>::infinity();
+      } else {
+        imag_part = at::convert<at::Half, float>(float_val.imag());
+      }
+      
+      *(c10::complex<at::Half>*)data = c10::complex<at::Half>(real_part, imag_part);
       break;
+    }
     case at::kComplexFloat:
       *(c10::complex<float>*)data =
           (c10::complex<float>)THPUtils_unpackComplexDouble(obj);
@@ -75,31 +105,79 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
     case at::kBool:
       *(bool*)data = THPUtils_unpackNumberAsBool(obj);
       break;
-    case at::kBFloat16:
-      *(at::BFloat16*)data =
-          at::convert<at::BFloat16, double>(THPUtils_unpackDouble(obj));
+    case at::kBFloat16: {
+      double val = THPUtils_unpackDouble(obj);
+      // Handle overflow by returning infinity instead of throwing
+      if (val > std::numeric_limits<at::BFloat16>::max()) {
+        *(at::BFloat16*)data = std::numeric_limits<at::BFloat16>::infinity();
+      } else if (val < std::numeric_limits<at::BFloat16>::lowest()) {
+        *(at::BFloat16*)data = -std::numeric_limits<at::BFloat16>::infinity();
+      } else {
+        *(at::BFloat16*)data = at::convert<at::BFloat16, double>(val);
+      }
       break;
+    }
     // TODO(#146647): simplify below with macros
-    case at::kFloat8_e5m2:
-      *(at::Float8_e5m2*)data =
-          at::convert<at::Float8_e5m2, double>(THPUtils_unpackDouble(obj));
+    case at::kFloat8_e5m2: {
+      double val = THPUtils_unpackDouble(obj);
+      // Handle overflow by returning infinity instead of throwing
+      if (val > std::numeric_limits<at::Float8_e5m2>::max()) {
+        *(at::Float8_e5m2*)data = std::numeric_limits<at::Float8_e5m2>::infinity();
+      } else if (val < std::numeric_limits<at::Float8_e5m2>::lowest()) {
+        *(at::Float8_e5m2*)data = -std::numeric_limits<at::Float8_e5m2>::infinity();
+      } else {
+        *(at::Float8_e5m2*)data = at::convert<at::Float8_e5m2, double>(val);
+      }
       break;
-    case at::kFloat8_e5m2fnuz:
-      *(at::Float8_e5m2fnuz*)data =
-          at::convert<at::Float8_e5m2fnuz, double>(THPUtils_unpackDouble(obj));
+    }
+    case at::kFloat8_e5m2fnuz: {
+      double val = THPUtils_unpackDouble(obj);
+      // Handle overflow by returning infinity instead of throwing
+      if (val > std::numeric_limits<at::Float8_e5m2fnuz>::max()) {
+        *(at::Float8_e5m2fnuz*)data = std::numeric_limits<at::Float8_e5m2fnuz>::infinity();
+      } else if (val < std::numeric_limits<at::Float8_e5m2fnuz>::lowest()) {
+        *(at::Float8_e5m2fnuz*)data = -std::numeric_limits<at::Float8_e5m2fnuz>::infinity();
+      } else {
+        *(at::Float8_e5m2fnuz*)data = at::convert<at::Float8_e5m2fnuz, double>(val);
+      }
       break;
-    case at::kFloat8_e4m3fn:
-      *(at::Float8_e4m3fn*)data =
-          at::convert<at::Float8_e4m3fn, double>(THPUtils_unpackDouble(obj));
+    }
+    case at::kFloat8_e4m3fn: {
+      double val = THPUtils_unpackDouble(obj);
+      // Handle overflow by returning infinity instead of throwing
+      if (val > std::numeric_limits<at::Float8_e4m3fn>::max()) {
+        *(at::Float8_e4m3fn*)data = std::numeric_limits<at::Float8_e4m3fn>::infinity();
+      } else if (val < std::numeric_limits<at::Float8_e4m3fn>::lowest()) {
+        *(at::Float8_e4m3fn*)data = -std::numeric_limits<at::Float8_e4m3fn>::infinity();
+      } else {
+        *(at::Float8_e4m3fn*)data = at::convert<at::Float8_e4m3fn, double>(val);
+      }
       break;
-    case at::kFloat8_e4m3fnuz:
-      *(at::Float8_e4m3fnuz*)data =
-          at::convert<at::Float8_e4m3fnuz, double>(THPUtils_unpackDouble(obj));
+    }
+    case at::kFloat8_e4m3fnuz: {
+      double val = THPUtils_unpackDouble(obj);
+      // Handle overflow by returning infinity instead of throwing
+      if (val > std::numeric_limits<at::Float8_e4m3fnuz>::max()) {
+        *(at::Float8_e4m3fnuz*)data = std::numeric_limits<at::Float8_e4m3fnuz>::infinity();
+      } else if (val < std::numeric_limits<at::Float8_e4m3fnuz>::lowest()) {
+        *(at::Float8_e4m3fnuz*)data = -std::numeric_limits<at::Float8_e4m3fnuz>::infinity();
+      } else {
+        *(at::Float8_e4m3fnuz*)data = at::convert<at::Float8_e4m3fnuz, double>(val);
+      }
       break;
-    case at::kFloat8_e8m0fnu:
-      *(at::Float8_e8m0fnu*)data =
-          at::convert<at::Float8_e8m0fnu, double>(THPUtils_unpackDouble(obj));
+    }
+    case at::kFloat8_e8m0fnu: {
+      double val = THPUtils_unpackDouble(obj);
+      // Handle overflow by returning infinity instead of throwing
+      if (val > std::numeric_limits<at::Float8_e8m0fnu>::max()) {
+        *(at::Float8_e8m0fnu*)data = std::numeric_limits<at::Float8_e8m0fnu>::infinity();
+      } else if (val < std::numeric_limits<at::Float8_e8m0fnu>::lowest()) {
+        *(at::Float8_e8m0fnu*)data = -std::numeric_limits<at::Float8_e8m0fnu>::infinity();
+      } else {
+        *(at::Float8_e8m0fnu*)data = at::convert<at::Float8_e8m0fnu, double>(val);
+      }
       break;
+    }
     default:
       throw std::runtime_error("store_scalar: invalid type");
   }
