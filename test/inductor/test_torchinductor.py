@@ -8370,6 +8370,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.empty(0)
         self.common(fn, [a, b])
 
+    @parametrize("dtype", (torch.int8, torch.float16, torch.int64, torch.bool))
+    def test_slice_scatter_types_promotion(self, dtype):
+        def fn(a, b):
+            return torch.slice_scatter(a, b, dim=0, start=6)
+
+        a = torch.randn([8, 8])
+        b = torch.randn([2, 8])
+
+        self.common(fn, [a.to(dtype), b])
+        self.common(fn, [a, b.to(dtype)])
+
     @with_tf32_off
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
