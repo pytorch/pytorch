@@ -84,7 +84,7 @@ EOF
     # ROCm 6.3 had a regression where initializing static code objects had significant overhead
     # CI no longer builds for ROCm 6.3, but
     # ROCm 6.4 did not yet fix the regression, also HIP branch names are different
-    if [[ $(ver $ROCM_VERSION) -gt $(ver 6.3) ]] && [[ $(ver $ROCM_VERSION) -lt $(ver 7.0) ]]; then
+    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.4) ]] && [[ $(ver $ROCM_VERSION) -lt $(ver 7.0) ]]; then
         if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
             HIP_BRANCH=release/rocm-rel-6.4
             CLR_HASH=ca18eb3f77fa09292fcda62bc60c3e565d752ada  # branch release/rocm-rel-6.4.1-statco-hotfix
