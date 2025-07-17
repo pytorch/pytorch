@@ -259,7 +259,7 @@ class AOTInductorModelContainer {
       bool inactive_buffer,
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
-    AOTInductorModel* model;
+    AOTInductorModel* model = nullptr;
     ConstantState& const_folded = inactive_buffer == use_secondary_
         ? constant_folded_
         : constant_folded_secondary_;
@@ -367,6 +367,7 @@ class AOTInductorModelContainer {
 
   // We directly take ownership from AtenTensorHandle if constants are moved.
   void update_constant_buffer(
+      // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
       std::unordered_map<std::string, AtenTensorHandle>&& constants_map,
       bool use_inactive,
       bool validate_full_update) {
@@ -395,6 +396,7 @@ class AOTInductorModelContainer {
         continue;
       }
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       AtenTensorHandle tensor;
       if (it == constants_map.end()) {
         aoti_torch_clone(
@@ -443,6 +445,7 @@ class AOTInductorModelContainer {
         continue;
       }
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       AtenTensorHandle tensor;
       if (it == constants_map.end()) {
         tensor = original_constants_map->find(constant_name)->second.get();
@@ -465,8 +468,8 @@ class AOTInductorModelContainer {
       // Move the data to container handled blob.
       uint8_t* internal_constants_ptr =
           constants_blob_ptr + constants_internal_offset_[idx];
-      void* user_constant_ptr;
-      int64_t constant_size;
+      void* user_constant_ptr = nullptr;
+      int64_t constant_size = 0;
       aoti_torch_get_data_ptr(tensor, &user_constant_ptr);
       aoti_torch_get_storage_size(tensor, &constant_size);
 #ifdef USE_XPU
@@ -487,9 +490,10 @@ class AOTInductorModelContainer {
       // Generate Tensor from container handled blob.
       // We extract stride and offset from provided Tensor since we do not
       // guarantee that the tensor is contiguous.
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       AtenTensorHandle tensor_handle;
-      int64_t* stride;
-      int64_t offset;
+      int64_t* stride = nullptr;
+      int64_t offset = 0;
       int device_type = models_[0]->get_device_type();
       int device_idx = models_[0]->get_device_idx();
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(tensor, &stride));
@@ -608,7 +612,7 @@ class AOTInductorModelContainer {
   RAIIDataPtr constant_blob_;
   RAIIDataPtr constant_blob_secondary_;
 
-  size_t blob_size_;
+  size_t blob_size_ = 0; // dummy value; assigned in compute_constant_blob
   std::vector<size_t> constants_internal_offset_;
 
   // Determine which constants is being used for the model.
@@ -666,8 +670,12 @@ class AOTInductorModelContainer {
   std::shared_mutex model_exec_mutex_;
 
   RAIIDataPtr allocate_constant_blob() {
-#if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
-    return RAII_gpuMalloc(blob_size_);
+#if defined(USE_CUDA)
+    return RAII_cudaMalloc(blob_size_);
+#elif defined(USE_XPU)
+    return RAII_xpuMalloc(blob_size_);
+#elif defined(USE_MPS)
+    return RAII_mpsMalloc(blob_size_);
 #else
     return RAII_cpuMalloc(blob_size_);
 #endif // USE_CUDA
