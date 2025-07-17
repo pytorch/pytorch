@@ -1007,7 +1007,7 @@ tensor is constructed using :func:`torch.from_numpy`.
 
 If :attr:`data` is a CuPy array, the returned tensor will be located on the same device as the CuPy array unless
 specifically overwritten by :attr:`device` or a default device. The device of the CuPy array is inferred from the
-pointer of the array using `cudaPointerGetAttributes` unless :attr:`device` is provided.
+pointer of the array using `cudaPointerGetAttributes` unless :attr:`device` is provided with an explicit device index.
 
 .. seealso::
 
