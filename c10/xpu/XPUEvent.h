@@ -15,7 +15,7 @@ namespace c10::xpu {
  * not available. This could impact some applications that rely on cross-process
  * synchronization and communication.
  */
-struct TORCH_XPU_API XPUEvent {
+struct C10_XPU_API XPUEvent {
   // Constructors
   XPUEvent(bool enable_timing = false) noexcept
       : enable_timing_{enable_timing} {}
