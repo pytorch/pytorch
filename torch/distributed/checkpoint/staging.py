@@ -1,11 +1,15 @@
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from datetime import timedelta
+from typing import Any, cast, Optional, Union
 from typing_extensions import deprecated, Protocol, runtime_checkable
 
 import torch
+import torch.distributed as dist
+from torch.distributed import ProcessGroup
 from torch.distributed._state_dict_utils import _copy_state_dict, _create_cpu_state_dict
+from torch.distributed.checkpoint._pg_transport import PGTransport
 from torch.distributed.checkpoint._state_dict_stager import StateDictStager
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
@@ -305,6 +309,79 @@ class BlockingAsyncStager(AsyncStager):
         if self.state_dict_cache is None:
             self.state_dict_cache = _create_cpu_state_dict(state_dict, pin_memory=True)
         return _copy_state_dict(state_dict, self.state_dict_cache)
+
+    def synchronize_staging(self) -> None:
+        """
+        No-op function, since staging is blocking.
+        """
+
+    def close(self) -> None:
+        pass
+
+
+class _ReplicationStager(AsyncStager):
+    """
+    An AsyncStager implementation that replicates state_dict across training ranks
+    using PGTransport.
+
+    Args:
+        pg: ProcessGroup for distributed communication
+        timeout: Timeout for communication operations
+        device: Device to use for tensor operations
+    """
+
+    _synchronize_after_execute: bool = False
+
+    def __init__(
+        self,
+        pg: ProcessGroup,
+        timeout: timedelta = timedelta(minutes=30),
+        device: torch.device = torch.device("cpu"),
+    ):
+        self._pg = pg
+        self._timeout = timeout
+        self._device = device
+        self._transport = PGTransport(pg, timeout, device, None)
+        self._staging_executor = ThreadPoolExecutor(max_workers=1)
+        self._staging_future: Optional[Future[STATE_DICT_TYPE]] = None
+
+    def stage(
+        self, state_dict: STATE_DICT_TYPE
+    ) -> Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
+        """
+        Stage the state_dict by replicating it across ranks. Returns a state_dict representing
+        the received replica.
+
+        Perform the actual replication logic. Creates bidirectional pairs where each rank exchanges
+        state_dict with its partner at (rank + world_size//2) % world_size.
+        Uses simple rank-based ordering to prevent deadlocks.
+
+        Assumes world_size is always even.
+        """
+        if not dist.is_initialized():
+            return state_dict
+
+        world_size = dist.get_world_size()
+
+        current_rank = dist.get_rank()
+
+        # Calculate partner rank using half-world offset
+        # creates bidirectional pairs for replication.
+        offset = world_size // 2
+        partner_rank = (current_rank + offset) % world_size
+
+        # Use simple rank-based ordering to prevent deadlocks.
+        # Lower-numbered rank sends first, higher-numbered rank receives first.
+        if current_rank < partner_rank:
+            # Send first, then receive
+            self._transport.send_checkpoint([partner_rank], state_dict)
+            received_state_dict = self._transport.recv_checkpoint(partner_rank)
+            return cast(STATE_DICT_TYPE, received_state_dict)
+        else:
+            # Receive first, then send
+            received_state_dict = self._transport.recv_checkpoint(partner_rank)
+            self._transport.send_checkpoint([partner_rank], state_dict)
+            return cast(STATE_DICT_TYPE, received_state_dict)
 
     def synchronize_staging(self) -> None:
         """
