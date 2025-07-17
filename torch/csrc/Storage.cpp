@@ -41,25 +41,46 @@ PyObject* THPStorage_NewWithStorage(
       "Creating a Storage subclass from a class that does not inherit from ",
       "Storage is not possible. Make sure your class inherits from Storage.");
 
-  auto obj = _storage.unsafeGetStorageImpl()->pyobj_slot()->get_pyobj();
-  TORCH_CHECK(
-      allow_preexisting_pyobj,
-      "Creating a new Storage subclass ",
-      type->tp_name,
-      " but the raw Storage object is already associated to a python object ",
-      "of type ",
-      obj->ob_type->tp_name);
-  PyTypeObject* obj_type = Py_TYPE(obj);
-  TORCH_CHECK(
-      obj_type == type || PyType_IsSubtype(obj_type, type),
-      "Creating a new Storage subclass ",
-      type->tp_name,
-      " but the raw Storage object is already associated to a python object ",
-      "of type ",
-      obj->ob_type->tp_name,
-      " which is not a subclass of the "
-      "requested type");
-  return THPStorage_Wrap(std::move(_storage));
+  auto pyobj = _storage.unsafeGetStorageImpl()->pyobj_slot()->get_pyobj();
+  if (pyobj) {
+    TORCH_CHECK(
+        allow_preexisting_pyobj,
+        "Creating a new Storage subclass ",
+        type->tp_name,
+        " but the raw Storage object is already associated to a python object ",
+        "of type ",
+        pyobj->ob_type->tp_name);
+    PyTypeObject* obj_type = Py_TYPE(pyobj);
+    TORCH_CHECK(
+        obj_type == type || PyType_IsSubtype(obj_type, type),
+        "Creating a new Storage subclass ",
+        type->tp_name,
+        " but the raw Storage object is already associated to a python object ",
+        "of type ",
+        pyobj->ob_type->tp_name,
+        " which is not a subclass of the "
+        "requested type");
+    return THPStorage_Wrap(std::move(_storage));
+  }
+
+  PyObject* obj = type->tp_alloc(type, 0);
+  TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
+
+  auto s = (THPStorage*)obj;
+
+  new (&s->cdata) c10::MaybeOwned<c10::Storage>();
+
+  s->cdata = c10::MaybeOwned<c10::Storage>::owned(std::move(_storage));
+
+  if (!c10::impl::HermeticPyObjectTLS::get_state()) {
+    s->is_hermetic = false;
+    const auto& storage = THPStorage_Unpack(s);
+    storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(obj);
+  } else {
+    s->is_hermetic = true;
+  }
+
+  return obj;
 }
 
 // Wraps the c10::Storage with a storage PyObject
@@ -71,21 +92,24 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
   c10::impl::PyObjectSlot* pyobj_slot = storage_impl->pyobj_slot();
 
   PyObject* obj = pyobj_slot->get_pyobj();
+  if (obj) {
+    TORCH_CHECK(
+        THPStorage_Check(obj),
+        "Expected a storage type, but got ",
+        Py_TYPE(obj)->tp_name);
 
-  TORCH_CHECK(
-      THPStorage_Check(obj),
-      "Expected a storage type, but got ",
-      Py_TYPE(obj)->tp_name);
-
-  if (pyobj_slot->owns_pyobj()) {
-    pyobj_slot->set_owns_pyobj(false);
-    reinterpret_cast<THPStorage*>(obj)->cdata =
-        c10::MaybeOwned<c10::Storage>::owned(std::move(storage));
-    return obj;
-  } else {
-    Py_INCREF(obj);
-    return obj;
+    if (pyobj_slot->owns_pyobj()) {
+      pyobj_slot->set_owns_pyobj(false);
+      reinterpret_cast<THPStorage*>(obj)->cdata =
+          c10::MaybeOwned<c10::Storage>::owned(std::move(storage));
+      return obj;
+    } else {
+      Py_INCREF(obj);
+      return obj;
+    }
   }
+
+  return THPStorage_NewWithStorage(THPStorageClass, std::move(storage));
 }
 
 static bool THPStorage_isPreservable(THPStorage* self) {
@@ -117,6 +141,12 @@ static bool THPStorage_tryPreserve(THPStorage* self) {
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
 
   auto pyobj = storage_impl->pyobj_slot()->get_pyobj();
+  // NOTE: It is possible to just set the PyObjectSlot here, but the point is
+  // that we should have already set PyObjectSlot when the storage PyObject
+  // was created.
+  TORCH_INTERNAL_ASSERT(
+      pyobj,
+      "Trying to preserve a Python storage whose PyObjectSlot does not have a PyObject");
 
   TORCH_CHECK(
       THPStorage_Check(pyobj),

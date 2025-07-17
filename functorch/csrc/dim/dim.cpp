@@ -1188,7 +1188,7 @@ mpy::handle handle_from_tensor(Arena& A, TensorRef t) {
   // fast case: tensor is live in python
   std::optional<PyObject*> obj =
       t->unsafeGetTensorImpl()->pyobj_slot()->get_pyobj();
-  if (!t->unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
+  if (obj && !t->unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
     return *obj;
   }
   return A.autorelease(mpy::object::checked_steal(THPVariable_Wrap(*t)));
@@ -3393,11 +3393,11 @@ PyObject* _wrap(
   Arena A;
   PY_BEGIN
 
-#define ARGS(_)                                           \
-  _(mpy::handle, orig)                                    \
-  _(mpy::handle, dim_offset)                              \
-  _(mpy::handle, keepdim_offset) _(mpy::handle, dim_name) \
-      _(mpy::handle, single_dim) _(mpy::handle, reduce)
+#define ARGS(_)                  \
+  _(mpy::handle, orig)           \
+  _(mpy::handle, dim_offset)     \
+  _(mpy::handle, keepdim_offset) \
+  _(mpy::handle, dim_name) _(mpy::handle, single_dim) _(mpy::handle, reduce)
   MPY_PARSE_ARGS_KWNAMES("O|OOOOO", ARGS)
 
   std::string dim_name_str;

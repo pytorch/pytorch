@@ -407,6 +407,7 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   // associated with the TensorImpl. Swap this field as well.
   PyObject* obj_a = a->cdata->unsafeGetTensorImpl()->pyobj_slot()->get_pyobj();
   PyObject* obj_b = b->cdata->unsafeGetTensorImpl()->pyobj_slot()->get_pyobj();
+  TORCH_INTERNAL_ASSERT(obj_a && obj_b, "Both tensors should have PyObjects");
   TORCH_CHECK(obj_a == a_);
   TORCH_CHECK(obj_b == b_);
 

@@ -586,6 +586,7 @@ static void set_tensor_attr_with_capsule(
     py::capsule& capsule,
     const char* attr_name) {
   PyObject* obj = tensor->pyobj_slot()->get_pyobj();
+  TORCH_CHECK(obj, "Tensor subclass's PyInterpreter has no value");
   py::handle(obj).attr(attr_name) = capsule;
 }
 
