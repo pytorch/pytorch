@@ -290,8 +290,8 @@ def register_dataclass(
 
     Args:
         cls: The python type to register. The class must have the semantics of a
-        dataclass; in particular, it must be constructed by passing the fields
-        in.
+            dataclass; in particular, it must be constructed by passing the
+            fields in.
         field_names (Optional[List[str]]): A list of field names that correspond
             to the **non-constant data** in this class. This list must contain
             all the fields that are used to initialize the class. This argument
