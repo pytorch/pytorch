@@ -943,6 +943,7 @@ def break_graph_if_unsupported(*, push):
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
+                assert inst.arg is not None
                 call_insts = create_call_function(inst.arg, False)
                 call_insts[-1].copy_positions(inst)
                 self.output.add_output_instructions(call_insts)
@@ -3035,7 +3036,7 @@ class InstructionTranslatorBase(
             self.popn(2)
 
     def LOAD_FAST_CHECK(self, inst):
-        if isinstance(self.symbolic_locals.get(inst.argval, None), NullVariable):
+        if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
             unimplemented_v2(
                 gb_type="LOAD_FAST_CHECK on uninitialized variable",
                 context=inst.argval,

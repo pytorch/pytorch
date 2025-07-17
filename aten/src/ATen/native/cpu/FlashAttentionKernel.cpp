@@ -96,7 +96,14 @@ inline void _exp_reduce_sum_fusion_kernel(
   for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
     auto tmp0 = vec::Vectorized<T1>::loadu(a + i);
     auto tmp1 = tmp0 - vec_max;
-    auto tmp2 = tmp1.exp_u20();
+    Vectorized<T1> tmp2;
+    if constexpr (std::is_same_v<T1, float> &&
+              (std::is_same_v<T2, at::BFloat16> || std::is_same_v<T2, at::Half>))
+    {
+        tmp2 = tmp1.fexp_u20();
+    } else {
+        tmp2 = tmp1.exp_u20();
+    }
     vec_tmp_sum += tmp2;
     _store(out + i, tmp2);
   }
@@ -308,12 +315,12 @@ void cpu_flash_attention(
     bool is_causal,
     std::optional<Tensor> attn_mask,
     std::optional<double> scale) {
-  // Query (Batch x Num_heads  x Q_seq_len  x Dim_per_head)
-  //    -> (Batch x Q_seq_len  x Num_heads  x Dim_per_head)
-  // Key   (Batch x Num_heads  x KV_seq_len x Dim_per_head)
-  //    -> (Batch x KV_seq_len x Num_heads  x Dim_per_head)
-  // Value (Batch x Num_heads  x KV_seq_len x Dim_per_head)
-  //    -> (Batch x KV_seq_len x Num_heads  x Dim_per_head)
+  // Query (Batch x Num_heads    x Q_seq_len    x Dim_per_head)
+  //    -> (Batch x Q_seq_len    x Num_heads    x Dim_per_head)
+  // Key   (Batch x KV_num_heads x KV_seq_len   x Dim_per_head)
+  //    -> (Batch x KV_seq_len   x KV_num_heads x Dim_per_head)
+  // Value (Batch x KV_num_heads x KV_seq_len   x Dim_per_head)
+  //    -> (Batch x KV_seq_len   x KV_num_heads x Dim_per_head)
   at::Tensor query = q.transpose(1, 2);
   at::Tensor key = k.transpose(1, 2);
   at::Tensor value = v.transpose(1, 2);
@@ -331,6 +338,8 @@ void cpu_flash_attention(
   int64_t qSize = query.size(1);
   int64_t kvSize = value.size(1);
   int64_t num_head = query.size(2);
+  int64_t kv_num_head = key.size(2);
+  int64_t repeat_factor = num_head / kv_num_head;
   int64_t headSize = query.size(3);
 
   bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
@@ -391,7 +400,7 @@ void cpu_flash_attention(
     // When the number of gemm is greater than the number of pack,
     // the pack overhead can be overlapped.
     if (need_pack) {
-      double pack_size = batchSize * num_head * kvSize * headSize;
+      double pack_size = batchSize * kv_num_head * kvSize * headSize;
       double qs_per_thread = (batchSize * num_head * qSlice + num_thread - 1) / num_thread;
       double gemm_size_per_thread = qs_per_thread * qSplitSize *
           (is_causal ? std::min(qSize, kvSize) : kvSize) * headSize;
@@ -441,10 +450,10 @@ void cpu_flash_attention(
   at::Tensor qeury_t_padding;
   if (need_pack) {
     key_t_reorder = at::empty(
-      {batchSize, num_head, eheadSize, kvSize},
+      {batchSize, kv_num_head, eheadSize, kvSize},
       c10::CppTypeToScalarType<scalar_t>::value);
     value_t_reorder = at::empty(
-      {batchSize, num_head, kv_padding_size, headSize},
+      {batchSize, kv_num_head, kv_padding_size, headSize},
       c10::CppTypeToScalarType<scalar_t>::value);
     key_reorder_ptr = key_t_reorder.data_ptr<scalar_t>();
     value_reorder_ptr = value_t_reorder.data_ptr<scalar_t>();
@@ -463,11 +472,11 @@ void cpu_flash_attention(
       {num_thread, kvSplitSize, headSize},
       c10::CppTypeToScalarType<scalar_t>::value);
     scalar_t* transpose_buffer_ptr = tranpose_t_reorder.data_ptr<scalar_t>();
-    at::parallel_for(0, batchSize * num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
+    at::parallel_for(0, batchSize * kv_num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
         int ompIdx = at::get_thread_num();
-        int64_t i = 0, j = 0, l = 0, n = 0;
+        int64_t i = 0, kv_j = 0, l = 0, n = 0;
         scalar_t* transpose_ptr = transpose_buffer_ptr + ompIdx * kvSplitSize * headSize;
-        at::native::data_index_init(begin, i, batchSize, j, num_head, l, kvSlice);
+        at::native::data_index_init(begin, i, batchSize, kv_j, kv_num_head, l, kvSlice);
         for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
           n = l * kvSplitSize;
           int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
@@ -477,7 +486,7 @@ void cpu_flash_attention(
               kvBlockSize,
               headSize,
               /* src_ptr */
-              reinterpret_cast<const uint16_t*>(k_data + i * kStrideB + j * kStrideH + n * kStrideN),
+              reinterpret_cast<const uint16_t*>(k_data + i * kStrideB + kv_j * kStrideH + n * kStrideN),
               /* ld_src */ kStrideN,
               /* dst */ reinterpret_cast<uint16_t*>(transpose_ptr),
               /* ld_dst */ kvBlockSize);
@@ -485,24 +494,24 @@ void cpu_flash_attention(
           // Pack [headSize, kvBlockSize]
           at::vec::pack_vnni2(
             /* src */ reinterpret_cast<const uint16_t*>(transpose_ptr),
-            /* dst */ reinterpret_cast<uint16_t*>(key_reorder_ptr + i * num_head * eheadSize * kvSize +
-                    j * eheadSize * kvSize + n * eheadSize),
+            /* dst */ reinterpret_cast<uint16_t*>(key_reorder_ptr + i * kv_num_head * eheadSize * kvSize +
+                    kv_j * eheadSize * kvSize + n * eheadSize),
             /* ld_src */ kvBlockSize,
             /* K */ headSize,
             /* N */ kvBlockSize);
 
           // Pack [kvBlockSize, headSize]
           at::vec::pack_vnni2(
-            /* src */ reinterpret_cast<const uint16_t*>(v_data + i * vStrideB + j * vStrideH + n * vStrideN),
+            /* src */ reinterpret_cast<const uint16_t*>(v_data + i * vStrideB + kv_j * vStrideH + n * vStrideN),
             /* dst */ reinterpret_cast<uint16_t*>(value_reorder_ptr +
-                    i * num_head * kv_padding_size * headSize +
-                    j * kv_padding_size * headSize + n * headSize),
+                    i * kv_num_head * kv_padding_size * headSize +
+                    kv_j * kv_padding_size * headSize + n * headSize),
             /* ld_src */ vStrideN,
             /* K */ kvBlockSize,
             /* N */ headSize);
 
           // Move to the next query
-          at::native::data_index_step(i, batchSize, j, num_head, l, kvSlice);
+          at::native::data_index_step(i, batchSize, kv_j, kv_num_head, l, kvSlice);
         }
       });
   }
@@ -524,6 +533,7 @@ void cpu_flash_attention(
     for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
       int64_t m = k * qSplitSize;
       int64_t qBlockSize = std::min(qSplitSize, qSize - m);
+      int64_t kv_j = j / repeat_factor;
       // Initialize max and sum
       fill_stub(qk_max_data,
           -std::numeric_limits<accum_t>::infinity(), qBlockSize);
@@ -560,8 +570,8 @@ void cpu_flash_attention(
                 !headSize_even
                     ? query_t_padding_ptr
                     : q_data + i * qStrideB + j * qStrideH + m * qStrideM,
-                key_reorder_ptr + i * num_head * eheadSize * kvSize +
-                    j * eheadSize * kvSize + n * eheadSize,
+                key_reorder_ptr + i * kv_num_head * eheadSize * kvSize +
+                    kv_j * eheadSize * kvSize + n * eheadSize,
                 qk_data);
           }
         } else {
@@ -572,7 +582,7 @@ void cpu_flash_attention(
             qBlockSize,
             headSize,
             static_cast<accum_t>(1),
-            k_data + i * kStrideB + j * kStrideH +
+            k_data + i * kStrideB + kv_j * kStrideH +
                 n * kStrideN,
             kStrideN,
             q_data + i * qStrideB + j * qStrideH +
@@ -691,8 +701,8 @@ void cpu_flash_attention(
                   n > 0,
                   qk_reduced_data,
                   value_reorder_ptr +
-                      i * num_head * kv_padding_size * headSize +
-                      j * kv_padding_size * headSize + psize * headSize,
+                      i * kv_num_head * kv_padding_size * headSize +
+                      kv_j * kv_padding_size * headSize + psize * headSize,
                   dst_data);
           }
         } else {
@@ -703,7 +713,7 @@ void cpu_flash_attention(
             qBlockSize,
             kvBlockSize,
             static_cast<accum_t>(1),
-            v_data + i * vStrideB + j * vStrideH +
+            v_data + i * vStrideB + kv_j * vStrideH +
                 n * vStrideN,
             vStrideN,
             conditional_data_ptr(qk_data, qk_reduced_data),
@@ -768,13 +778,15 @@ void cpu_flash_attention_backward(
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
         "scaled_dot_product_attention_flash_attention_backward: Q/K/V should have the same head size");
-  // Query (Batch x Q_seq_len  x Num_heads x Dim_per_head)
-  // Key   (Batch x KV_seq_len x Num_heads x Dim_per_head)
-  // Value (Batch x KV_seq_len x Num_heads x Dim_per_head)
+  // Query (Batch x Q_seq_len  x Num_heads    x Dim_per_head)
+  // Key   (Batch x KV_seq_len x KV_num_heads x Dim_per_head)
+  // Value (Batch x KV_seq_len x KV_num_heads x Dim_per_head)
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(1);
   int64_t kvSize = value.size(1);
   int64_t num_head = query.size(2);
+  int64_t kv_num_head = key.size(2);
+  int64_t repeat_factor = num_head / kv_num_head;
   int64_t headSize = query.size(3);
 
   bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
@@ -865,9 +877,9 @@ void cpu_flash_attention_backward(
   accum_t* buf_data = buf.data_ptr<accum_t>();
   scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced.data_ptr<scalar_t>() : nullptr;
 
-  at::parallel_for(0, batchSize * num_head, 1, [&](int64_t begin, int64_t end) {
-    int64_t i = 0, j = 0;
-    data_index_init(begin, i, batchSize, j, num_head);
+  at::parallel_for(0, batchSize * kv_num_head, 1, [&](int64_t begin, int64_t end) {
+    int64_t i = 0, kv_j = 0;
+    data_index_init(begin, i, batchSize, kv_j, kv_num_head);
     int ompIdx = at::get_thread_num();
     accum_t* buf_ptr = buf_data + ompIdx * size_per_thread;
     accum_t* attn_data = buf_ptr;
@@ -879,196 +891,199 @@ void cpu_flash_attention_backward(
     at::Tensor dsum = at::empty({qSplitSize}, query.options().dtype(accumulate_dtype));
     accum_t* dsum_data = dsum.data_ptr<accum_t>();
     for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
-      // rowsum of grad_out * out
-      for (int64_t m = 0; m < qSize; m += qSplitSize) {
-        int64_t qBlockSize = std::min(qSplitSize, qSize - m);
-        // dsum <- rowsum(grad_out * out)
-        for (const auto row : c10::irange(qBlockSize)) {
-          *(dsum_data + row) = vec::map2_reduce_all<scalar_t>(
-            [](Vec x, Vec y) { return x * y; },
-            [](Vec x, Vec y) { return x + y; },
-            grad_out_data + i * grad_oStrideB + j * grad_oStrideH + (m + row) * grad_oStrideM,
-            out_data + i * oStrideB + j * oStrideH + (m + row) * oStrideM,
-            headSize);
-        }
-        int64_t num_keys = is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
-        for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
-          int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
-          // attn <- scale * q @ k.T
-          cpublas::gemm(
-            TransposeType::Transpose,
-            TransposeType::NoTranspose,
-            kvBlockSize,
-            qBlockSize,
-            headSize,
-            scaling_factor,
-            k_data + i * kStrideB + j * kStrideH +
-                n * kStrideN,
-            kStrideN,
-            q_data + i * qStrideB + j * qStrideH +
-                m * qStrideM,
-            qStrideM,
-            static_cast<accum_t>(0),
-            attn_data,
-            kvBlockSize);
-          // attn <- attn + mask
-          if (has_attn_mask) {
-            accum_t one = accum_t(1);
-            for (const auto row : c10::irange(qBlockSize)) {
-#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
-                _scale_attn_mask_fusion_kernel(
-                  attn_data + row * kvBlockSize,
-                  mask_data + i * mStrideB + j * mStrideH +
-                      (m + row) * mStrideM + (mStrideN == 0 ? 0 : n),
-                  kvBlockSize,
-                  attn_data + row * kvBlockSize,
-                  one,
-                  mStrideN == 0);
-#else
-                if (mStrideN == 0) {
-                  _scale_attn_mask_fusion_kernel</*is_stride_0*/ true>(
-                    attn_data + row * kvBlockSize,
-                    mask_data + i * mStrideB + j * mStrideH +
-                        (m + row) * mStrideM,
-                    kvBlockSize,
-                    attn_data + row * kvBlockSize,
-                    one);
-                } else {
-                  _scale_attn_mask_fusion_kernel</*is_stride_0*/ false>(
-                    attn_data + row * kvBlockSize,
-                    mask_data + i * mStrideB + j * mStrideH +
-                        (m + row) * mStrideM + n,
-                    kvBlockSize,
-                    attn_data + row * kvBlockSize,
-                    one);
-                }
-#endif
-            }
-          }
-          // restore self attention after softmax from logsumexp
-          // attn <- exp(attn - normalizer)
+      for (int64_t r = 0; r < repeat_factor; r++) {
+        int64_t j = kv_j * repeat_factor + r;
+        // rowsum of grad_out * out
+        for (int64_t m = 0; m < qSize; m += qSplitSize) {
+          int64_t qBlockSize = std::min(qSplitSize, qSize - m);
+          // dsum <- rowsum(grad_out * out)
           for (const auto row : c10::irange(qBlockSize)) {
-            accum_t normalizer = lse_data[i * lStrideB + j * lStrideH + (m + row) * lStrideM];
-            vec::map<accum_t>(
-              [normalizer](Vec x) { return (x - Vec(normalizer)).exp(); },
-              attn_data + row * kvBlockSize,
-              attn_data + row * kvBlockSize,
+            *(dsum_data + row) = vec::map2_reduce_all<scalar_t>(
+              [](Vec x, Vec y) { return x * y; },
+              [](Vec x, Vec y) { return x + y; },
+              grad_out_data + i * grad_oStrideB + j * grad_oStrideH + (m + row) * grad_oStrideM,
+              out_data + i * oStrideB + j * oStrideH + (m + row) * oStrideM,
+              headSize);
+          }
+          int64_t num_keys = is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
+          for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
+            int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
+            // attn <- scale * q @ k.T
+            cpublas::gemm(
+              TransposeType::Transpose,
+              TransposeType::NoTranspose,
+              kvBlockSize,
+              qBlockSize,
+              headSize,
+              scaling_factor,
+              k_data + i * kStrideB + kv_j * kStrideH +
+                  n * kStrideN,
+              kStrideN,
+              q_data + i * qStrideB + j * qStrideH +
+                  m * qStrideM,
+              qStrideM,
+              static_cast<accum_t>(0),
+              attn_data,
               kvBlockSize);
-          }
-          // Apply causal mask, filled unused with 0
-          if (is_causal && num_keys - n <= kvSplitSize) {
-            for (const auto row : c10::irange(qBlockSize)) {
-              int64_t last_col = m + row - n;
-              accum_t* row_ptr = attn_data + row * kvBlockSize;
-              fill_stub(row_ptr + last_col + 1, static_cast<accum_t>(0), kvBlockSize - last_col - 1);
+            // attn <- attn + mask
+            if (has_attn_mask) {
+              accum_t one = accum_t(1);
+              for (const auto row : c10::irange(qBlockSize)) {
+  #if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
+                  _scale_attn_mask_fusion_kernel(
+                    attn_data + row * kvBlockSize,
+                    mask_data + i * mStrideB + j * mStrideH +
+                        (m + row) * mStrideM + (mStrideN == 0 ? 0 : n),
+                    kvBlockSize,
+                    attn_data + row * kvBlockSize,
+                    one,
+                    mStrideN == 0);
+  #else
+                  if (mStrideN == 0) {
+                    _scale_attn_mask_fusion_kernel</*is_stride_0*/ true>(
+                      attn_data + row * kvBlockSize,
+                      mask_data + i * mStrideB + j * mStrideH +
+                          (m + row) * mStrideM,
+                      kvBlockSize,
+                      attn_data + row * kvBlockSize,
+                      one);
+                  } else {
+                    _scale_attn_mask_fusion_kernel</*is_stride_0*/ false>(
+                      attn_data + row * kvBlockSize,
+                      mask_data + i * mStrideB + j * mStrideH +
+                          (m + row) * mStrideM + n,
+                      kvBlockSize,
+                      attn_data + row * kvBlockSize,
+                      one);
+                  }
+  #endif
+              }
             }
-          }
-#ifdef _MSC_VER
-          if (is_reduced_type) {
-#else
-          if constexpr (is_reduced_type) {
-#endif
+            // restore self attention after softmax from logsumexp
+            // attn <- exp(attn - normalizer)
             for (const auto row : c10::irange(qBlockSize)) {
-              convert<accum_t, scalar_t>(
+              accum_t normalizer = lse_data[i * lStrideB + j * lStrideH + (m + row) * lStrideM];
+              vec::map<accum_t>(
+                [normalizer](Vec x) { return (x - Vec(normalizer)).exp(); },
                 attn_data + row * kvBlockSize,
-                attn_reduced_data + row * kvBlockSize,
+                attn_data + row * kvBlockSize,
                 kvBlockSize);
             }
-          }
-          // grad_v <- grad_v + attn.T @ grad_out
-          cpublas::gemm(
-            TransposeType::NoTranspose,
-            TransposeType::Transpose,
-            headSize,
-            kvBlockSize,
-            qBlockSize,
-            static_cast<accum_t>(1),
-            grad_out_data + i * grad_oStrideB + j * grad_oStrideH +
-                m * grad_oStrideM,
-            grad_oStrideM,
-            conditional_data_ptr(attn_data, attn_reduced_data),
-            kvBlockSize,
-            static_cast<accum_t>(1),
-            grad_v_data + i * grad_vStrideB + j * grad_vStrideH +
-                n * grad_vStrideN,
-            grad_vStrideN);
-          // grad_attn <- grad_out @ v.T
-          cpublas::gemm(
-            TransposeType::Transpose,
-            TransposeType::NoTranspose,
-            kvBlockSize,
-            qBlockSize,
-            headSize,
-            static_cast<accum_t>(1),
-            v_data + i * vStrideB + j * vStrideH +
-                n * vStrideN,
-            vStrideN,
-            grad_out_data + i * grad_oStrideB + j * grad_oStrideH +
-                m * grad_oStrideM,
-            grad_oStrideM,
-            static_cast<accum_t>(0),
-            grad_attn_data,
-            kvBlockSize);
-          // grad_attn <- attn * (grad_attn - dsum)
-          for (const auto row : c10::irange(qBlockSize)) {
-            accum_t d = *(dsum_data + row);
-            vec::map2<accum_t>(
-              [d](Vec attn, Vec grad_attn) { return attn * (grad_attn - Vec(d)); },
-              grad_attn_data + row * kvBlockSize,
-              attn_data + row * kvBlockSize,
-              grad_attn_data + row * kvBlockSize,
+            // Apply causal mask, filled unused with 0
+            if (is_causal && num_keys - n <= kvSplitSize) {
+              for (const auto row : c10::irange(qBlockSize)) {
+                int64_t last_col = m + row - n;
+                accum_t* row_ptr = attn_data + row * kvBlockSize;
+                fill_stub(row_ptr + last_col + 1, static_cast<accum_t>(0), kvBlockSize - last_col - 1);
+              }
+            }
+  #ifdef _MSC_VER
+            if (is_reduced_type) {
+  #else
+            if constexpr (is_reduced_type) {
+  #endif
+              for (const auto row : c10::irange(qBlockSize)) {
+                convert<accum_t, scalar_t>(
+                  attn_data + row * kvBlockSize,
+                  attn_reduced_data + row * kvBlockSize,
+                  kvBlockSize);
+              }
+            }
+            // grad_v <- grad_v + attn.T @ grad_out
+            cpublas::gemm(
+              TransposeType::NoTranspose,
+              TransposeType::Transpose,
+              headSize,
+              kvBlockSize,
+              qBlockSize,
+              static_cast<accum_t>(1),
+              grad_out_data + i * grad_oStrideB + j * grad_oStrideH +
+                  m * grad_oStrideM,
+              grad_oStrideM,
+              conditional_data_ptr(attn_data, attn_reduced_data),
+              kvBlockSize,
+              static_cast<accum_t>(1),
+              grad_v_data + i * grad_vStrideB + kv_j * grad_vStrideH +
+                  n * grad_vStrideN,
+              grad_vStrideN);
+            // grad_attn <- grad_out @ v.T
+            cpublas::gemm(
+              TransposeType::Transpose,
+              TransposeType::NoTranspose,
+              kvBlockSize,
+              qBlockSize,
+              headSize,
+              static_cast<accum_t>(1),
+              v_data + i * vStrideB + kv_j * vStrideH +
+                  n * vStrideN,
+              vStrideN,
+              grad_out_data + i * grad_oStrideB + j * grad_oStrideH +
+                  m * grad_oStrideM,
+              grad_oStrideM,
+              static_cast<accum_t>(0),
+              grad_attn_data,
               kvBlockSize);
-          }
-#ifdef _MSC_VER
-          if (is_reduced_type) {
-#else
-          if constexpr (is_reduced_type) {
-#endif
+            // grad_attn <- attn * (grad_attn - dsum)
             for (const auto row : c10::irange(qBlockSize)) {
-              convert<accum_t, scalar_t>(
+              accum_t d = *(dsum_data + row);
+              vec::map2<accum_t>(
+                [d](Vec attn, Vec grad_attn) { return attn * (grad_attn - Vec(d)); },
                 grad_attn_data + row * kvBlockSize,
-                grad_attn_reduced_data + row * kvBlockSize,
+                attn_data + row * kvBlockSize,
+                grad_attn_data + row * kvBlockSize,
                 kvBlockSize);
             }
+  #ifdef _MSC_VER
+            if (is_reduced_type) {
+  #else
+            if constexpr (is_reduced_type) {
+  #endif
+              for (const auto row : c10::irange(qBlockSize)) {
+                convert<accum_t, scalar_t>(
+                  grad_attn_data + row * kvBlockSize,
+                  grad_attn_reduced_data + row * kvBlockSize,
+                  kvBlockSize);
+              }
+            }
+            // grad_q <- grad_q + scale * grad_attn @ k
+            cpublas::gemm(
+              TransposeType::NoTranspose,
+              TransposeType::NoTranspose,
+              headSize,
+              qBlockSize,
+              kvBlockSize,
+              scaling_factor,
+              k_data + i * kStrideB + kv_j * kStrideH +
+                  n * kStrideN,
+              kStrideN,
+              conditional_data_ptr(grad_attn_data, grad_attn_reduced_data),
+              kvBlockSize,
+              static_cast<accum_t>(1),
+              grad_q_data + i * grad_qStrideB + j * grad_qStrideH +
+                  m * grad_qStrideM,
+              grad_qStrideM);
+            // grad_k <- grad_k + scale * grad_attn.T @ q
+            cpublas::gemm(
+              TransposeType::NoTranspose,
+              TransposeType::Transpose,
+              headSize,
+              kvBlockSize,
+              qBlockSize,
+              scaling_factor,
+              q_data + i * qStrideB + j * qStrideH +
+                  m * qStrideM,
+              qStrideM,
+              conditional_data_ptr(grad_attn_data, grad_attn_reduced_data),
+              kvBlockSize,
+              static_cast<accum_t>(1),
+              grad_k_data + i * grad_kStrideB + kv_j * grad_kStrideH +
+                  n * grad_kStrideN,
+              grad_kStrideN);
           }
-          // grad_q <- grad_q + scale * grad_attn @ k
-          cpublas::gemm(
-            TransposeType::NoTranspose,
-            TransposeType::NoTranspose,
-            headSize,
-            qBlockSize,
-            kvBlockSize,
-            scaling_factor,
-            k_data + i * kStrideB + j * kStrideH +
-                n * kStrideN,
-            kStrideN,
-            conditional_data_ptr(grad_attn_data, grad_attn_reduced_data),
-            kvBlockSize,
-            static_cast<accum_t>(1),
-            grad_q_data + i * grad_qStrideB + j * grad_qStrideH +
-                m * grad_qStrideM,
-            grad_qStrideM);
-          // grad_k <- grad_k + scale * grad_attn.T @ q
-          cpublas::gemm(
-            TransposeType::NoTranspose,
-            TransposeType::Transpose,
-            headSize,
-            kvBlockSize,
-            qBlockSize,
-            scaling_factor,
-            q_data + i * qStrideB + j * qStrideH +
-                m * qStrideM,
-            qStrideM,
-            conditional_data_ptr(grad_attn_data, grad_attn_reduced_data),
-            kvBlockSize,
-            static_cast<accum_t>(1),
-            grad_k_data + i * grad_kStrideB + j * grad_kStrideH +
-                n * grad_kStrideN,
-            grad_kStrideN);
         }
       }
       // Move to the next query
-      data_index_step(i, batchSize, j, num_head);
+      data_index_step(i, batchSize, kv_j, kv_num_head);
     }
   });
 }
