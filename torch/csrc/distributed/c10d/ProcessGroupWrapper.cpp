@@ -223,7 +223,7 @@ struct CollectiveFingerPrint {
   }
 
   std::pair<bool, std::string> compute_collective_diff(
-      CollectiveFingerPrint& other) {
+      CollectiveFingerPrint& other) const {
     // Computes the difference between two collectives (seq num, tensor shapes,
     // collective type, etc) for easier understanding of how mismatched
     // collectives across ranks differ.

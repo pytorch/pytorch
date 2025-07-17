@@ -24,10 +24,10 @@ namespace torch::unwind {
 struct Section {
   char* data = nullptr;
   size_t size = 0;
-  const char* string(size_t offset) {
+  const char* string(size_t offset) const {
     return lexer(offset).readCString();
   }
-  CheckedLexer lexer(size_t offset) {
+  CheckedLexer lexer(size_t offset) const {
     return CheckedLexer(data + offset, data, data + size);
   }
 };
@@ -101,7 +101,7 @@ struct MemFile {
 
   /// Returns whether or not the file descriptor
   /// of the underlying file is valid.
-  int valid() {
+  int valid() const {
     return fcntl(fd_, F_GETFD) != -1 || errno != EBADF;
   }
 
@@ -115,7 +115,7 @@ struct MemFile {
   }
 
   /// Returns the size of the underlying file defined by the `MemFile`
-  size_t size() {
+  size_t size() const {
     return n_bytes_;
   }
   [[nodiscard]] int fd() const {

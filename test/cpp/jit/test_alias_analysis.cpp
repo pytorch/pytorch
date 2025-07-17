@@ -66,7 +66,7 @@ class TopologicalMoveTest : public ::testing::Test {
     node->output()->setDebugName(name);
     nodes[name] = node;
 
-    if (blockInputNames.size() != 0) {
+    if (!blockInputNames.empty()) {
       node->addBlock();
       std::vector<Value*> blockDeps;
       for (const auto& name_ : blockInputNames) {

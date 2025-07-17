@@ -239,7 +239,7 @@ struct Block {
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
       : device(device), stream(stream), size(size), requested_size(0) {}
 
-  size_t gc_count() {
+  size_t gc_count() const {
     TORCH_INTERNAL_ASSERT(pool);
     return static_cast<int>(pool->get_free_blocks_call_count - gc_count_base);
   }
@@ -643,7 +643,7 @@ struct ExpandableSegment {
   }
 
  private:
-  void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
+  void setAccess(c10::DeviceIndex device, size_t begin, size_t end) const {
     CUmemAccessDesc desc;
     desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
@@ -712,18 +712,18 @@ struct ExpandableSegment {
       }
     }
   }
-  size_t numSegments(size_t size) {
+  size_t numSegments(size_t size) const {
     return (size + segment_size_ - 1) / segment_size_;
   }
-  size_t segmentLeft(char* p) {
+  size_t segmentLeft(const char* p) const {
     auto size = p - ptr();
     return size / segment_size_;
   }
-  size_t segmentRight(char* p) {
+  size_t segmentRight(const char* p) {
     auto size = p - ptr();
     return numSegments(size);
   }
-  SegmentRange rangeFromHandles(size_t begin, size_t end) {
+  SegmentRange rangeFromHandles(size_t begin, size_t end) const {
     return SegmentRange(
         ptr() + segment_size_ * begin, segment_size_ * (end - begin));
   }
@@ -1252,7 +1252,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  bool isHistoryEnabled() {
+  bool isHistoryEnabled() const {
     return record_history;
   }
 
@@ -1742,7 +1742,7 @@ class DeviceCachingAllocator {
   }
 
   /** get memory fraction limiting maximum allocated memory **/
-  double getMemoryFraction() {
+  double getMemoryFraction() const {
     if (!set_fraction) {
       return 1.0;
     }
@@ -2714,7 +2714,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  bool get_free_block(AllocParams& p) {
+  bool get_free_block(AllocParams& p) const {
     BlockPool& pool = *p.pool;
 
     if (C10_UNLIKELY(
@@ -3839,7 +3839,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override {
     device_allocator[device]->cacheInfo(largestBlock);
   }
-  void assertValidDevice(c10::DeviceIndex device) {
+  void assertValidDevice(c10::DeviceIndex device) const {
     const auto device_num = device_allocator.size();
     TORCH_CHECK(
         0 <= device && device < static_cast<int64_t>(device_num),
@@ -4050,7 +4050,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         expandable_segment_ = nullptr;
       }
     }
-    void* ptr() {
+    void* ptr() const {
       if (cuda_ipc_ptr_) {
         return cuda_ipc_ptr_;
       } else {
@@ -4246,7 +4246,7 @@ int MemPool::use_count() {
   return CUDACachingAllocator::getPoolUseCount(device_, id_);
 }
 
-c10::DeviceIndex MemPool::device() {
+c10::DeviceIndex MemPool::device() const {
   return device_;
 }
 

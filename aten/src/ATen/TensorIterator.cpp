@@ -760,7 +760,7 @@ int TensorIteratorBase::num_reduce_dims() const {
   return count;
 }
 
-void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
+void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) const {
   int64_t numel = this->numel();
   if (numel == 0) {
     return;
@@ -1216,7 +1216,7 @@ void TensorIteratorBase::mark_resize_outputs(const TensorIteratorConfig& config)
   }
 }
 
-void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config) {
+void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config) const {
   if (!config.check_mem_overlap_) {
     return;
   }

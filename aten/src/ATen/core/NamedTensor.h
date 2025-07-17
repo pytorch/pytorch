@@ -91,7 +91,7 @@ struct TORCH_API NoNamesGuard {
       reset();
     }
   }
-  void reset() {
+  void reset() const {
     TORCH_INTERNAL_ASSERT(initialized);
     NamesMode::set_enabled(prev_mode);
   }
