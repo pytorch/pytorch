@@ -1163,4 +1163,6 @@ def repeast_interleave_Tensor(
         return NotImplemented
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
-    return torch.searchsorted(cumsum, pos, out_int32=(repeat.dtype == torch.int32), right=True)
+    return torch.searchsorted(
+        cumsum, pos, out_int32=(repeat.dtype == torch.int32), right=True
+    )

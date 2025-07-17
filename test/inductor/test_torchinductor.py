@@ -13626,7 +13626,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 FileCheck().check("cpp_fused_add_0").run(code)
             self.assertEqual(refe_out, test_out)
 
-
     @parametrize("dtype", [torch.int32, torch.int64])
     def test_repeat_interleave_Tensor_decomp(self, dtype):
         device = "cpu"
