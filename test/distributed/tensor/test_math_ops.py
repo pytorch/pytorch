@@ -24,6 +24,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -662,8 +663,9 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     @skipIfRocm
+    @skip_if_lt_x_gpu(4)
     def test_foreach_add_different_mesh(self):
-        mesh_shape = (2, self.world_size // 2)
+        mesh_shape = (2, 2)
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=("x", "y")
         )
