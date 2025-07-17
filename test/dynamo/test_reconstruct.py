@@ -82,7 +82,6 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             opt_f(d_opt, t)
             self.assertEqual(d, d_opt)
 
-    @unittest.expectedFailure
     def test_ConstDict_popitem_reconstruct(self):
         """
         If something is pop'ed from the dict, we reconstruct everything

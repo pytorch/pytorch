@@ -50,6 +50,7 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
+    SM70OrLater,
     TEST_CUDA,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -2035,8 +2036,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             ref0 = fn(x)
             ref1 = fn(x)
 
-            random.seed(0)
             opt_fn = torch.compile(fn, backend="eager")
+            # Especially for internal usage, there are many calls to random functions
+            # on first compile, e.g., from various library initializations. Run once
+            # to get that out of the way before resetting the seed:
+            opt_fn(x)
+
+            random.seed(0)
             res0 = opt_fn(x)
             res1 = opt_fn(x)
 
@@ -5839,6 +5845,10 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
 
+    @unittest.skipIf(
+        not SM70OrLater,
+        "Triton only supports devices of CUDA capability >= 7.0",
+    )
     def test_add_complex_conj(self):
         def f(x):
             return x + x.conj()
@@ -6917,6 +6927,8 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         torch._dynamo.utils.clear_compilation_metrics()
 
+    # https://github.com/pytorch/pytorch/issues/156580
+    @serialTest()
     def test_dont_dce_rand(self):
         # https://github.com/pytorch/pytorch/issues/143431
         def f(image_latent):
@@ -7561,6 +7573,25 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         with mock.patch("torch.cuda.is_initialized", lambda: False):
             self.assertEqual(f(inp), inp + 2)
+
+    def test_named_tuple_vt_clone(self):
+        # https://github.com/pytorch/pytorch/issues/157945
+        class SVDCompressor(nn.Module):
+            def __init__(self, k=10):
+                super().__init__()
+                self.k = k
+
+            def forward(self, x):
+                U, S = torch.linalg.svd(x)[:2]
+                reduced = U[:, :, : self.k] @ torch.diag_embed(S[:, : self.k])
+                return reduced
+
+        input = torch.randn(4, 8, 6)
+        model = SVDCompressor(k=5)
+
+        out1 = model(input.clone())
+        out2 = torch.compile(model, backend="eager")(input.clone())
+        self.assertEqual(out1, out2)
 
 
 instantiate_parametrized_tests(ReproTests)
