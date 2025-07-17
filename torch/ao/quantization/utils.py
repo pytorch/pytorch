@@ -43,7 +43,7 @@ if sys.version_info < (3, 12):
         Callable,
         tuple[Callable, Callable],
         tuple[Callable, tuple[Callable, Callable]],
-        Any
+        Any,
     ]
     Pattern.__module__ = "torch.ao.quantization.utils"
 else:
@@ -55,7 +55,7 @@ else:
             Callable,
             tuple[Callable, Callable],
             tuple[Callable, tuple[Callable, Callable]],
-            Any
+            Any,
         ],
     )
 
