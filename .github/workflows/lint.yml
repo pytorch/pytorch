@@ -67,12 +67,14 @@ jobs:
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        echo "Running mypy"
+        ADDITIONAL_LINTRUNNER_ARGS="--take MYPY --all-files" .github/scripts/lintrunner.sh
+        echo "Running all other linters"
         if [ "$CHANGED_FILES" = "*" ]; then
-          export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT --all-files"
+          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT,MYPY --all-files" .github/scripts/lintrunner.sh
         else
-          export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
+          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT,MYPY ${CHANGED_FILES}" .github/scripts/lintrunner.sh
         fi
-        .github/scripts/lintrunner.sh
 
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
