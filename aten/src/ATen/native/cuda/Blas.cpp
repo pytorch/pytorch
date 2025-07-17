@@ -1129,7 +1129,7 @@ bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
       && scale.is_contiguous());
 }
 
-// 1x16 blocks for microscaled fp8 data and fp8_e8m0fnu scales
+// 1x32 blocks for microscaled fp8 data and fp8_e8m0fnu scales
 bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
   // TODO: We might want to enforce some structure on the shapes of the scale
   // tensors
@@ -1208,8 +1208,8 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
 //    - `mat2`: the second operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
 //    - `bias`: the bias, can be type `torch.float16` or `torch.bfloat16`
 //    - `out_dtype`: the output dtype, can either be a float8 or a higher precision floating point type
-//    - `scale_a`: a scalar or 1-dimensional tensor with the inverse scale of `mat1`, only needed if `mat1` is a float8 type
-//    - `scale_b`: a scalar or 1-dimensional tensor with the inverse scale of `mat2`, only needed if `mat2` is a float8 type
+//    - `scale_a`: a tensor with the inverse scale of `mat1`, whose shape/strides/dtype depend on the scaling scheme
+//    - `scale_b`: a tensor with the inverse scale of `mat2`, whose shape/strides/dtype depend on the scaling scheme
 //    - `scale_result`: a scalar tensor with the scale of the output, only utilized if the output is a float8 type
 //    - `use_fast_accum`: if true, enables fast float8 accumulation
 //    - `out`: a reference to the output tensor
