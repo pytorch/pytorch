@@ -350,37 +350,43 @@ def requires_nccl_version(version, msg):
 
 
 def requires_nccl_version_or(version, msg, backends):
-    assert(isinstance(backends, list))
+    assert isinstance(backends, list)
     if not c10d.is_nccl_available():
         return skip_but_pass_in_sandcastle_if(
-            'xccl' not in backends if c10d.is_xccl_available() else True,
-            "c10d was not compiled with the NCCL backend and " + str(backends) + " backend.",
+            "xccl" not in backends if c10d.is_xccl_available() else True,
+            "c10d was not compiled with the NCCL backend and "
+            + str(backends)
+            + " backend.",
         )
     else:
         return skip_but_pass_in_sandcastle_if(
             torch.cuda.nccl.version() < version,
             f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
         )
-    
+
+
 def requires_nccl():
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
     )
 
+
 def requires_nccl_or(backends):
-    assert(isinstance(backends, list))
+    assert isinstance(backends, list)
     return skip_but_pass_in_sandcastle_if(
-        not c10d.is_nccl_available() and
-        ( not c10d.is_xccl_available() if 'xccl' in backends else True ),
+        not c10d.is_nccl_available()
+        and (not c10d.is_xccl_available() if "xccl" in backends else True),
         "c10d was not compiled with the NCCL backend or " + str(backends) + " backend.",
     )
+
 
 def requires_xccl():
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_xccl_available(),
         "c10d was not compiled with the XCCL backend",
     )
+
 
 def requires_ucc():
     return skip_but_pass_in_sandcastle_if(
@@ -1493,11 +1499,12 @@ def _dynamo_dist_per_rank_init(
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
     if not fake_pg:
         torch.accelerator.set_device_index(rank)
-    
+
     if backend is None:
         backend = c10d.distributed_c10d.Backend.default_device_backend_map.get(
-                torch.accelerator.current_accelerator().type)
-        
+            torch.accelerator.current_accelerator().type
+        )
+
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "6789"
     if init_pg:
@@ -1547,7 +1554,9 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
         device = torch.accelerator.current_accelerator().type
         cls.device = f"{device}:{cls.rank}"
         cls.device_ids = None if device in cls.device else [cls.rank]
-        c10d.init_process_group(c10d.get_default_backend_for_device(device), rank=cls.rank, world_size=1)
+        c10d.init_process_group(
+            c10d.get_default_backend_for_device(device), rank=cls.rank, world_size=1
+        )
 
     @classmethod
     def tearDownClass(cls):

@@ -497,7 +497,9 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if (BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL) and torch.accelerator.device_count() < self.world_size:
+        if (
+            BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL
+        ) and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-accelerator-{self.world_size}"].exit_code)
 
         kwargs["device"] = DEVICE
@@ -830,10 +832,16 @@ instantiate_device_type_tests(
     TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE, allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestDistributedBackendCollectivesWithWorldSize4, globals(), only_for=DEVICE, allow_xpu=True
+    TestDistributedBackendCollectivesWithWorldSize4,
+    globals(),
+    only_for=DEVICE,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestFunctionalAutogradWithDistributedBackend, globals(), only_for=DEVICE, allow_xpu=True
+    TestFunctionalAutogradWithDistributedBackend,
+    globals(),
+    only_for=DEVICE,
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
