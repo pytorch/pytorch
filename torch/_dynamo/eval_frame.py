@@ -2218,10 +2218,8 @@ class TorchPatcher:
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
         def inner_fn(*args, **kwargs):
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, module="torch.distributed"
-            )
-            return fn(*args, **kwargs)
+            with torch._logging.dont_show_warnings():
+                return fn(*args, **kwargs)
 
         return inner_fn
 

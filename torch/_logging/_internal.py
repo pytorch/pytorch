@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import functools
 import hashlib
 import importlib.util
@@ -12,6 +13,7 @@ import re
 import sys
 import tempfile
 import time
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, Optional, Union
@@ -1154,6 +1156,24 @@ def warning_once(logger_obj, *args, **kwargs) -> None:
     another type of cache that includes the caller frame information in the hashing function.
     """
     logger_obj.warning(*args, **kwargs)
+
+
+@contextlib.contextmanager
+def dont_show_warnings():
+    """
+    A context manager that temporarily suppresses warnings,
+    using public API: https://docs.python.org/3/library/warnings.html#warnings.showwarning
+
+    Usage:
+        with dont_show_warnings():
+            ...
+    """
+    prior = warnings.showwarning
+    try:
+        warnings.showwarning = lambda *args, **kwargs: None
+        yield
+    finally:
+        warnings.showwarning = prior
 
 
 class LazyString(Generic[_P]):
