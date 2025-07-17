@@ -26,9 +26,14 @@ jobs:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
+
+  get-changed-files:
+    if: github.repository_owner == 'pytorch'
+    name: Get changed files
+    uses: ./.github/workflows/_get-changed-files.yml
   lintrunner-clang:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
-    needs: get-label-type
+    needs: [get-label-type, get-changed-files]
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -39,13 +44,18 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        if [ "$CHANGED_FILES" = "*" ]; then
+          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
+        else
+          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
+        fi
         export CLANG=1
         .github/scripts/lintrunner.sh
 
   lintrunner-noclang:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
-    needs: get-label-type
+    needs: [get-label-type, get-changed-files]
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -56,7 +66,12 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT --all-files"
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        if [ "$CHANGED_FILES" = "*" ]; then
+          export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT --all-files"
+        else
+          export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
+        fi
         .github/scripts/lintrunner.sh
 
   quick-checks:
