@@ -22,7 +22,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch.fx
 import torch.utils._pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
@@ -355,7 +355,13 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
                 continue
             gm_target = attrgetter(target_name)(gm)
             model_target = attrgetter(target_name)(mod)
-            if (
+            if isinstance(gm_target, FakeScriptObject):
+                if (
+                    isinstance(model_target, FakeScriptObject)
+                    and gm_target.real_obj is model_target.real_obj
+                ):
+                    continue
+            elif (
                 torch.equal(gm_target, model_target)
                 and gm_target.dtype == model_target.dtype
             ):
@@ -1022,30 +1028,23 @@ def _compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
-    # Dump provenance artifacts for debugging trace
-    provenance_info = V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
-    # provenance_info might be None if config.trace.enabled is not set
-    if provenance_info:
-        (
-            debug_info,
-            node_mappings,
-        ) = provenance_info
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_generated_kernel_to_post_grad_nodes",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(debug_info),
-        )
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_provenance_tracking_node_mappings",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(node_mappings),
-        )
+    if config.trace.provenance_tracking:
+        # Dump provenance artifacts for debugging trace
+        provenance_info = torch._inductor.debug.dump_inductor_provenance_info()
+        # provenance_info might be None if trace.provenance_tracking is not set
+        if provenance_info:
+            (
+                _,
+                node_mappings,
+            ) = provenance_info
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "inductor_provenance_tracking_node_mappings",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(node_mappings),
+            )
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
     if log.isEnabledFor(logging.INFO):
@@ -1288,7 +1287,7 @@ class _InProcessFxCompile(FxCompile):
                     },
                     payload_fn=lambda: inductor_post_grad_graph_str,
                 )
-                if config.trace.enabled:
+                if config.trace.provenance_tracking:
                     provenance_tracking_json = (
                         torch.fx.traceback.get_graph_provenance_json(gm.graph)
                     )
@@ -1812,7 +1811,7 @@ def compile_fx_aot(
     model_: GraphModule,
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
-    config_patches: Optional[dict[str, str]] = None,
+    config_patches: Optional[dict[str, Any]] = None,
 ) -> Union[list[Union[str, Weights]], str]:
     assert isinstance(model_, GraphModule), model_
 
@@ -1841,6 +1840,10 @@ def compile_fx_aot(
             **config_patches,
             "aot_inductor.output_path": code_hash(model_.code),
         }
+
+    from .utils import maybe_aoti_standalone_config
+
+    config_patches = maybe_aoti_standalone_config(config_patches)
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     saved_compile_id = model_.meta.get("dynamo_compile_id", None)
@@ -2031,6 +2034,12 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
+    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
+    if any(
+        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
+        for e in example_inputs_
+    ):
+        torch._inductor.async_compile.AsyncCompile.wakeup()
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
@@ -2131,7 +2140,8 @@ def compile_fx(
     with (
         _use_lazy_graph_module(dynamo_config.use_lazy_graph_module),
         enable_python_dispatcher(),
-        torch.fx.traceback.preserve_node_meta(config.trace.enabled),
+        torch.fx.traceback.preserve_node_meta(config.trace.provenance_tracking),
+        torch._inductor.debug.reset_provenance_globals(),
     ):
         # Pre-grad passes cannot be run if we weren't given a GraphModule.
         # Dynamo will always produce a GraphModule, but this handles cases
@@ -2391,6 +2401,10 @@ def compile_fx(
         )
 
         if V.aot_compilation:
+            from .utils import is_valid_aoti_model_name
+
+            is_valid_aoti_model_name()
+
             with functorch_config.patch(unlift_effect_tokens=True):
                 gm, graph_signature = aot_export_module(
                     model_,
