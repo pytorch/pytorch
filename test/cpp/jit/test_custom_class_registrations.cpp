@@ -506,9 +506,8 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("__obj_flatten__", &FlattenWithTensorOp::__obj_flatten__)
       .def_pickle(
           // __getstate__
-          [](const c10::intrusive_ptr<FlattenWithTensorOp>& self) -> at::Tensor {
-            return self->get();
-          },
+          [](const c10::intrusive_ptr<FlattenWithTensorOp>& self)
+              -> at::Tensor { return self->get(); },
           // __setstate__
           [](at::Tensor data) -> c10::intrusive_ptr<FlattenWithTensorOp> {
             return c10::make_intrusive<FlattenWithTensorOp>(std::move(data));
