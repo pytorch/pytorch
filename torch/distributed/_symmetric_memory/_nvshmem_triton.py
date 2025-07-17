@@ -197,3 +197,36 @@ if has_triton():
             is_pure=False,
             _builder=_builder,
         )
+
+    @core.extern
+    def my_pe(_builder=None):  # type: ignore[no-untyped-def]
+        return core.extern_elementwise(
+            "",
+            "",
+            [],
+            {(): ("nvshmem_my_pe", core.dtype("int32"))},
+            is_pure=True,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def n_pes(_builder=None):  # type: ignore[no-untyped-def]
+        return core.extern_elementwise(
+            "",
+            "",
+            [],
+            {(): ("nvshmem_n_pes", core.dtype("int32"))},
+            is_pure=True,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def barrier_all(_builder=None):  # type: ignore[no-untyped-def]
+        return core.extern_elementwise(
+            "",
+            "",
+            [],
+            {(): ("nvshmem_barrier_all", core.dtype("int32"))},
+            is_pure=False,
+            _builder=_builder,
+        )
