@@ -123,7 +123,7 @@ Indexing, Slicing, Joining, Mutating Ops
     scatter_add
     scatter_reduce
     segment_reduce
-    split
+    functional.split
     squeeze
     stack
     swapaxes
@@ -135,7 +135,7 @@ Indexing, Slicing, Joining, Mutating Ops
     tile
     transpose
     unbind
-    unravel_index
+    functional.unravel_index
     unsqueeze
     vsplit
     vstack
@@ -462,7 +462,7 @@ Reduction Ops
     median
     nanmedian
     mode
-    norm
+    functional.norm
     nansum
     prod
     quantile
@@ -470,8 +470,8 @@ Reduction Ops
     std
     std_mean
     sum
-    unique
-    unique_consecutive
+    functional.unique
+    functional.unique_consecutive
     var
     var_mean
     count_nonzero
@@ -520,7 +520,7 @@ Spectral Ops
     :toctree: generated
     :nosignatures:
 
-    stft
+    functional.stft
     istft
     bartlett_window
     blackman_window
@@ -536,17 +536,18 @@ Other Operations
     :toctree: generated
     :nosignatures:
 
-    atleast_1d
-    atleast_2d
-    atleast_3d
+    functional.atleast_1d
+    functional.atleast_2d
+    functional.atleast_3d
     bincount
-    block_diag
-    broadcast_tensors
+    functional.block_diag
+    functional.broadcast_tensors
     broadcast_to
-    broadcast_shapes
+    functional.broadcast_shapes
     bucketize
-    cartesian_prod
-    cdist
+    functional.cartesian_prod
+    functional.cdist
+    functional.chain_matmul
     clone
     combinations
     corrcoef
@@ -561,7 +562,7 @@ Other Operations
     diagflat
     diagonal
     diff
-    einsum
+    functional.einsum
     flatten
     flip
     fliplr
@@ -572,7 +573,7 @@ Other Operations
     histc
     histogram
     histogramdd
-    meshgrid
+    functional.meshgrid
     lcm
     logcumsumexp
     ravel
@@ -580,7 +581,7 @@ Other Operations
     repeat_interleave
     roll
     searchsorted
-    tensordot
+    functional.tensordot
     trace
     tril
     tril_indices
@@ -618,7 +619,7 @@ BLAS and LAPACK Operations
     det
     logdet
     slogdet
-    lu
+    functional.lu
     lu_solve
     lu_unpack
     matmul

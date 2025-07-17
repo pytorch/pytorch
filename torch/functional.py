@@ -22,7 +22,6 @@ __all__ = [
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
-    "align_tensors",
     "broadcast_shapes",
     "broadcast_tensors",
     "cartesian_prod",
@@ -2231,7 +2230,3 @@ lu = boolean_dispatch(
     func_name="lu",
 )
 lu.__doc__ = _lu_impl.__doc__
-
-
-def align_tensors(*tensors):
-    raise RuntimeError("`align_tensors` not yet implemented.")

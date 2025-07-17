@@ -735,16 +735,6 @@ coverage_ignore_functions = [
     "probs_to_logits",
     "tril_matrix_to_vec",
     "vec_to_tril_matrix",
-    # torch.functional
-    "align_tensors",
-    "block_diag",
-    "broadcast_shapes",
-    "broadcast_tensors",
-    "cartesian_prod",
-    "lu",
-    "unique",
-    "unique_consecutive",
-    "unravel_index",
     # torch.fx.annotate
     "annotate",
     # torch.fx.experimental.accelerator_partitioner
