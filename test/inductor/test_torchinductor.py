@@ -6328,7 +6328,7 @@ class CommonTemplate:
             config.triton.enable_native_matmul 
             and self.device == "cuda"
         ) :
-            # With default atol and rtol
+            # With default atol and rtol,
             # Mismatched elements: 16897 / 131072 (12.9%)
             # Greatest absolute difference: 0.0009765625 at index (32, 251)
             # Greatest relative difference: 0.013382526114583015 at index (86, 142) 
@@ -6387,7 +6387,7 @@ class CommonTemplate:
             else :
                 if config.triton.enable_native_matmul: 
                     FileCheck().check("triton.jit").run(source_codes[0])
-                    atol, rtol = 1e-2, 1e-2
+                    #atol, rtol = 1e-2, 1e-2
                 else :
                     FileCheck().check_not("triton.jit").run(source_codes[0])
 
