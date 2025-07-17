@@ -412,6 +412,77 @@ class TestAdvancedIndexing(TestCase):
 
         self._test_cases(cases + numpy_torch_cases, "Special index types")
 
+    def test_ellipsis(self):
+        """Tests containing ellipsis."""
+        cases = [
+            # Ellipsis + Basic indexing
+            {
+                "shape": (3, 4, 5),
+                "index": (slice(None), 0, ..., slice(None)),
+                "name": "empty ellipsis without advanced indexing",
+            },
+            {
+                "shape": (3, 4, 5),
+                "index": (slice(None), ..., 0),
+                "name": "non-empty ellipsis without advanced indexing",
+            },
+            # Ellipsis + Advanced indexing without separation
+            {
+                "shape": (3, 4, 5),
+                "index": (slice(None), ..., slice(None), (0, 1)),
+                "name": "empty ellipsis without separation",
+            },
+            {
+                "shape": (3, 4, 5),
+                "index": (slice(None), ..., (0, 1)),
+                "name": "non-empty ellipsis without separation",
+            },
+            # Ellipsis + Advanced indexing with separation
+            {
+                "shape": (3, 4, 5),
+                "index": (slice(None), (0, 1), ..., (0, 1)),
+                "name": "empty ellipsis separation",
+            },
+            {
+                "shape": (1, 3, 4, 5),
+                "index": (slice(None), (0, 1), ..., (0, 1)),
+                "name": "non-empty ellipsis separation",
+            },
+            {
+                "shape": (4, 3, 5),
+                "index": (slice(None), ((0,), (1,)), ..., (0, 1)),
+                "name": "empty ellipsis separation with 2-depth int sequence",
+            },
+            {
+                "shape": (4, 3, 5, 6),
+                "index": (slice(None), ((0,), (1,)), ..., (0, 1), slice(None)),
+                "name": "empty ellipsis separation with 2-depth int sequence and end slice",
+            },
+            {
+                "shape": (4, 3, 5, 6),
+                "index": (slice(None), ((0,), (1,)), ..., (0, 1), (((0, 1), (1, 2)),)),
+                "name": "empty ellipsis separation with 2 and 3-depth int sequence",
+            },
+            # Ellipsis + Boolean masks in advanced indexing with separation
+            {
+                "shape": (3, 4, 5),
+                "index": (slice(None), True, True, True, ..., 0, 0),
+                "name": "empty ellipsis separation with 0-dim boolean masks",
+            },
+            {
+                "shape": (4, 3, 5),
+                "index": (slice(None), (True, True, False), ..., (0, 1)),
+                "name": "empty ellipsis separation with 1-dim boolean masks",
+            },
+            # TODO(manuelcandales) Fix issue #71673 and enable this case
+            # {
+            #     "shape": (1, 2, 2, 4, 5),
+            #     "index": (slice(None), ((True, False), (True, True)), (0, 1, 2), ..., (0,)),
+            #     "name": "empty ellipsis separation with 2-dim boolean masks",
+            # },
+        ]
+        self._test_cases(cases, "Ellipsis and advanced indexing separation")
+
 
 if __name__ == "__main__":
     run_tests()
