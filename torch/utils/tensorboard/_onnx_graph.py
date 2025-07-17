@@ -1,4 +1,8 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
+import itertools
+from typing import Any
+
 from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
 from tensorboard.compat.proto.versions_pb2 import VersionDef
@@ -6,17 +10,16 @@ from tensorboard.compat.proto.attr_value_pb2 import AttrValue
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 
 
-def load_onnx_graph(fname):
+def load_onnx_graph(fname: str) -> GraphDef:
     import onnx
 
-    m = onnx.load(fname)  # type: ignore[attr-defined]
+    m = onnx.load(fname)
     g = m.graph
     return parse(g)
 
 
-def parse(graph):
-    nodes = []
-    import itertools
+def parse(graph: Any) -> GraphDef:
+    nodes: list[NodeDef] = []
 
     nodes_proto = list(itertools.chain(graph.input, graph.output))
 
@@ -41,8 +44,8 @@ def parse(graph):
         )
 
     for node in graph.node:
-        _attr = [" = ".join([str(f[1]) for f in s.ListFields()]) for s in node.attribute]
-        attr = ", ".join(_attr).encode(encoding="utf_8")
+        _attr: list[str] = [" = ".join([str(f[1]) for f in s.ListFields()]) for s in node.attribute]
+        attr: bytes = ", ".join(_attr).encode(encoding="utf_8")
         print(node.output[0])
         nodes.append(
             NodeDef(
@@ -54,8 +57,8 @@ def parse(graph):
         )
 
     # two pass token replacement, appends opname to object id
-    mapping = {}
+    mapping: dict[bytes, str] = {}
     for node in nodes:
-        mapping[node.name] = node.op + "_" + node.name
+        mapping[node.name] = node.op + "_" + node.name.decode('utf-8')
 
     return GraphDef(node=nodes, versions=VersionDef(producer=22))

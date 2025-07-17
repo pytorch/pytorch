@@ -1,5 +1,4 @@
-# mypy: allow-untyped-defs
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
@@ -16,7 +15,9 @@ from .expanded_weights_utils import (
 @implements_per_sample_grads(F.linear)
 class LinearPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, _, __, *expanded_args_and_kwargs):
+    def forward(
+        ctx: Any, _: object, __: object, *expanded_args_and_kwargs: torch.Tensor
+    ) -> torch.Tensor:
         if len(expanded_args_and_kwargs[0].shape) <= 1:
             raise RuntimeError(
                 "Input does not have a batch dimension. Expanded Weights expected input "
@@ -35,7 +36,9 @@ class LinearPerSampleGrad(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(ctx, grad_output):
+    def backward(
+        ctx: Any, grad_output: torch.Tensor
+    ) -> tuple[Optional[torch.Tensor], ...]:
         input, weight = ctx.args
         bias = ctx.kwargs["bias"]
         results: list[Optional[torch.Tensor]] = []
@@ -54,9 +57,9 @@ class LinearPerSampleGrad(torch.autograd.Function):
 
         # weight and bias get their grad_sample fields set directly if they exist
         set_grad_sample_if_exists(
-            weight, lambda _: torch.einsum("n...i,n...j->nij", grad_output, input)
+            weight, lambda _weight: torch.einsum("n...i,n...j->nij", grad_output, input)
         )
         set_grad_sample_if_exists(
-            bias, lambda _: torch.einsum("n...k->nk", grad_output)
+            bias, lambda _bias: torch.einsum("n...k->nk", grad_output)
         )
         return tuple(results)
