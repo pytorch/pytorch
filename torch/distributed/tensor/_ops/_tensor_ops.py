@@ -113,11 +113,10 @@ def copy_inplace_strategy(op_schema: OpSchema) -> StrategyType:
     # - our 'src' input may be redistributed to match up with the 'self' input, with the caveat of adjusting for
     #   broadcasting dim
     op_specs: list[OpSpec] = []
-    for self_spec in self_strategy.strategies:
+    for self_opspec in self_strategy.strategies:
         # for each 'self input' spec, we create the corresponding 'src' spec
-        # and build a strategy around it
-        assert self_spec.output_specs is not None
-        mapped_src_placements = list(self_spec.output_spec.placements)
+        # and then build a strategy around it
+        mapped_src_placements = list(self_opspec.output_spec.placements)
         for i, p in enumerate(mapped_src_placements):
             if p.is_shard():
                 reverse_index = self_strategy.ndim - 1 - cast(Shard, p).dim
@@ -126,16 +125,22 @@ def copy_inplace_strategy(op_schema: OpSchema) -> StrategyType:
                     mapped_src_placements[i] = Shard(src_dim)
                 else:
                     mapped_src_placements[i] = Replicate()
+        self_spec = self_opspec.output_spec
+        src_spec = DTensorSpec(
+            mesh=mesh,
+            placements=tuple(mapped_src_placements),
+            tensor_meta=src_meta,
+        )
         op_specs.append(
             OpSpec(
-                output_specs=self_spec.output_spec,
+                output_specs=self_spec,
                 input_specs=[
-                    self_spec.output_spec,
-                    DTensorSpec(
-                        mesh=mesh,
-                        placements=tuple(mapped_src_placements),
-                        tensor_meta=src_meta,
-                    ),
+                    self_spec,
+                    src_spec,
+                ],
+                redistribute_cost=[
+                    generate_redistribute_costs(self_strategy, self_spec),
+                    generate_redistribute_costs(src_strategy, src_spec),
                 ],
             )
         )
