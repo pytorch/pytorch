@@ -4,15 +4,14 @@
 set -ex
 
 # install dependencies
-dnf -y install gmp-devel libmpc-devel texinfo
+dnf -y install gmp-devel libmpc-devel texinfo flex bison
 
 cd /usr/local/src
-# fetch source for gcc 11
-curl -LO https://ftp.gnu.org/gnu/gcc/gcc-11.4.0/gcc-11.4.0.tar.xz
-tar xf gcc-11.4.0.tar.xz
+# fetch source for gcc 13
+git clone --depth 1 --branch releases/gcc-13.3.0  https://gcc.gnu.org/git/gcc.git gcc-13.3.0
 
-mkdir -p gcc-11.4.0/build-gomp
-cd gcc-11.4.0/build-gomp
+mkdir -p gcc-13.3.0/build-gomp
+cd gcc-13.3.0/build-gomp
 
 # configure gcc build
 # I got these flags by:
