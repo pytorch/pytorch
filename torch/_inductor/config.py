@@ -1448,12 +1448,12 @@ class aot_inductor:
     precompile_headers: bool = not is_fbcode()
 
     # Embed generated kernel binary files into model.so
-    embed_kernel_binary: bool = False
+    embed_kernel_binary: Optional[bool] = None
 
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
-    emit_multi_arch_kernel: bool = False
+    emit_multi_arch_kernel: Optional[bool] = None
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
