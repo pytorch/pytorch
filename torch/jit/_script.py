@@ -1039,7 +1039,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
             new_obj_dict[name] = sub_module
 
     for k, v in new_obj_dict.items():
-        obj.__dict__[name] = v
+        obj.__dict__[k] = v
 
     return obj
 
