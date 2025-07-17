@@ -184,6 +184,13 @@ bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
       v.requires_grad());
 }
 
+bool TensorCheck::check_requires_grad(const at::Tensor& v) {
+  // This is separate because out of all the other saved metadata, this is the
+  // only one that can be inplace mutated using requires_grad_(bool). So, for
+  // same tensor objects, we can check version count and requires_gradness
+  return requires_grad_ == v.requires_grad();
+}
+
 bool TensorCheck::check(
     const LocalState& state,
     const c10::DispatchKeySet& dispatch_key_set,
@@ -193,8 +200,7 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
   if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
-      dtype_ != dtype || device_index_ != device.index() ||
-      requires_grad_ != requires_grad) {
+      dtype_ != dtype || device_index_ != device.index()) {
     return false;
   }
 
@@ -3656,23 +3662,13 @@ class TENSOR_MATCH : public LeafGuard {
         std::move(tensor_dims_size),
         std::move(tensor_dims_stride));
 
-    // tensor can change metadata like requires_grad etc, without updating
-    // version counter. `skip_tensor_guards_with_matching_dict_tags=True` config
-    // flag instructs guards to ignore that a tensor can change its metadata.
-    py::object config_module = py::module_::import("torch._dynamo.config");
-    bool is_tensor_immutable =
-        config_module.attr("skip_tensor_guards_with_matching_dict_tags")
-            .cast<bool>();
-
-    if (is_tensor_immutable) {
-      // Get the weakref of the original tensor
-      _weakref = PyWeakref_NewRef(item, nullptr); // New ref
-      auto version_counter = torch::autograd::impl::version_counter(tensor);
-      // Check if inference_mode etc is enabled, preventing version counting.
-      _is_version_counting_enabled = version_counter.enabled();
-      if (_is_version_counting_enabled) {
-        _orig_version = version_counter.current_version();
-      }
+    // Get the weakref of the original tensor
+    _weakref = PyWeakref_NewRef(item, nullptr); // New ref
+    auto version_counter = torch::autograd::impl::version_counter(tensor);
+    // Check if inference_mode etc is enabled, preventing version counting.
+    _is_version_counting_enabled = version_counter.enabled();
+    if (_is_version_counting_enabled) {
+      _orig_version = version_counter.current_version();
     }
   }
 
@@ -3681,6 +3677,13 @@ class TENSOR_MATCH : public LeafGuard {
       return false;
     }
     auto tensor = THPVariable_Unpack(value);
+
+    // requires_grad attribute can be mutated w/o bumping version counter. So,
+    // check that first.
+    if (!_tensor_check->check_requires_grad(tensor)) {
+      return false;
+    }
+
 #if IS_PYTHON_3_13_PLUS
     if (_is_version_counting_enabled) {
       // Check if the weakref points to the same object as the input tensor

@@ -5052,25 +5052,24 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             # Versions are not supported. Ensure that it works
             run()
 
-        with torch._dynamo.config.patch(
-            skip_tensor_guards_with_matching_dict_tags=False
-        ):
-            torch.compiler.reset()
-            x = torch.randn(4)
-            print(x.requires_grad)
-            ref1 = fn(x)
+        torch.compiler.reset()
 
-            cnt = torch._dynamo.testing.CompileCounter()
-            opt_fn = torch.compile(fn, backend=cnt)
-            res1 = opt_fn(x)
-            self.assertEqual(ref1, res1)
+        # Check requires_grad_ change triggers recomp
+        x = torch.randn(4)
+        print(x.requires_grad)
+        ref1 = fn(x)
 
-            x.requires_grad_(True)
-            print(x.requires_grad)
-            opt_fn = torch.compile(fn, backend=cnt)
-            res1 = opt_fn(x)
-            self.assertEqual(ref1, res1)
-            self.assertEqual(cnt.frame_count, 2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        res1 = opt_fn(x)
+        self.assertEqual(ref1, res1)
+
+        x.requires_grad_(True)
+        print(x.requires_grad)
+        opt_fn = torch.compile(fn, backend=cnt)
+        res1 = opt_fn(x)
+        self.assertEqual(ref1, res1)
+        self.assertEqual(cnt.frame_count, 2)
 
 
 instantiate_parametrized_tests(FunctionTests)

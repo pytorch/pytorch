@@ -71,6 +71,7 @@ class TensorCheck {
       const at::Tensor& v,
       const std::string& tensor_name);
 
+  bool check_requires_grad(const at::Tensor& v);
   PyTypeObject* pytype;
 
  private:
