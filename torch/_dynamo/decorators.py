@@ -310,6 +310,8 @@ def substitute_in_graph(
     *,
     can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
+    # Graph break if cannot run the original function
+    graph_break_if_cannot_constant_fold: bool = False,
     # type that is embedded in the Python interpreter
     is_embedded_type: bool = False,  # internal use only
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
@@ -336,6 +338,8 @@ def substitute_in_graph(
             compilation. Defaults to ``False``.
         skip_signature_check (bool, optional): Whether to skip the signature check between the
             original function and the polyfill handler. Defaults to ``False``.
+        graph_break_if_cannot_constant_fold (bool, optional): Whether graph break if the pollyfilled
+        function cannot be constant-folded
 
     Returns:
         A decorator that registers the polyfill handler for the original function.
@@ -488,6 +492,8 @@ def substitute_in_graph(
         wrapped.__torch_dynamo_original__ = original_fn  # type: ignore[attr-defined]
         wrapped.__torch_dynamo_polyfill__ = traceable_fn  # type: ignore[attr-defined]
         wrapped.__torch_dynamo_can_constant_fold_through__ = can_constant_fold_through  # type: ignore[attr-defined]
+        gb = graph_break_if_cannot_constant_fold
+        wrapped.__torch_dynamo_graph_break_if_cannot_constant_fold__ = gb  # type: ignore[attr-defined]
 
         return wrapped  # type: ignore[return-value]
 

@@ -18,6 +18,7 @@ POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
     "itertools",
     "operator",
     "os",
+    "pickle",
     "pytree",
     "sys",
     "fx",

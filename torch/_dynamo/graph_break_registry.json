@@ -2499,5 +2499,16 @@
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
       ]
     }
+  ],
+  "GB0251": [
+    {
+      "Gb_type": "constant fold exception in polyfill",
+      "Context": "attempted to run function {self.fn} with arguments {args}, {kwargs}",
+      "Explanation": "Encountered exception when attempting to constant fold.",
+      "Hints": [
+        "Refactor or avoid using the function `{self.fn}` in traced code.",
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
   ]
 }
