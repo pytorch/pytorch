@@ -79,11 +79,11 @@ class Executor {
   Executor(
       torch::nativert::ExecutorConfig executorConfig,
       std::shared_ptr<Graph> graph,
-      std::shared_ptr<Weights> weights,
-      const Placement& placement = Placement(),
-      std::shared_ptr<caffe2::serialize::PyTorchStreamReader>
+      const std::shared_ptr<Weights>& weights,
+      Placement placement = Placement(),
+      const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           pytorchStreamReader = nullptr,
-      const MakeProxyExecutorFn& makeProxyExecutorFunc = nullptr);
+      MakeProxyExecutorFn makeProxyExecutorFunc = nullptr);
 
   std::shared_ptr<Weights> getWeights() {
     std::shared_ptr<Weights> ret;
@@ -91,7 +91,7 @@ class Executor {
     return ret;
   }
 
-  void processWeights(std::shared_ptr<Weights> weights);
+  void processWeights(const std::shared_ptr<Weights>& weights);
   void atomicSwapWeights(std::shared_ptr<Weights> weights);
 
   // This API only returns the flattened UserOutputs,
@@ -106,7 +106,7 @@ class Executor {
       const ITreeSpec& inputTreeSpec);
 
   ProfileMetrics benchmarkIndividualNodes(
-      std::vector<std::vector<c10::IValue>> inputsList,
+      const std::vector<std::vector<c10::IValue>>& inputsList,
       const uint32_t warmupRuns,
       const uint32_t mainRuns);
 
@@ -141,8 +141,8 @@ class Executor {
   c10::Synchronized<std::shared_ptr<Weights>> weights_;
 
   void initialize(
-      std::shared_ptr<Weights> weights,
-      std::shared_ptr<caffe2::serialize::PyTorchStreamReader>
+      const std::shared_ptr<Weights>& weights,
+      const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           pytorchStreamReader);
 
   ExecutorFramePtr getExecutorFrameFromPool();
@@ -171,11 +171,13 @@ class Executor {
     ExecutionFrameEntry& operator=(const ExecutionFrameEntry&) = delete;
   };
 
-  void maybeRunConstantFolding(std::shared_ptr<Weights> weights);
+  void maybeRunConstantFolding(const std::shared_ptr<Weights>& weights);
   void validateInputs(const std::vector<c10::IValue>& inputs) const;
 
   // Helper method to get current timestamp in seconds
   int64_t getCurrentTimestampSeconds() const;
+
+  void initWeights(const std::shared_ptr<Weights>& weights);
 
   std::unique_ptr<GraphExecutorBase> graphExecutor_;
 
