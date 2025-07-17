@@ -1563,7 +1563,6 @@ def forward(self, token, obj, x):
         args = (x,)
         mod = Mod()
         ep = torch.export.export(mod, (x, _empty_tensor_queue()))
-        ep.module().print_readable()
         _assertEqualScriptObject(
             self, ep.module()(x, _empty_tensor_queue()), mod(x, _empty_tensor_queue())
         )
