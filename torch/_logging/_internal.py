@@ -1162,11 +1162,10 @@ def warning_once(logger_obj, *args, **kwargs) -> None:
 def dont_show_warnings():
     """
     A context manager that temporarily suppresses warnings,
-    using public API: https://docs.python.org/3/library/warnings.html#warnings.showwarning
+    using public API: https://docs.python.org/3/library/warnings.html#warnings.showwarning.
 
-    Usage:
-        with dont_show_warnings():
-            ...
+    Useful to hide warnings without mutating warnings module state, see:
+    https://github.com/pytorch/pytorch/issues/128427#issuecomment-2161496162.
     """
     prior = warnings.showwarning
     try:
