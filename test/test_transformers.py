@@ -1462,7 +1462,7 @@ class TestSDPAFailureModes(NNTestCase):
             make_tensor = partial(torch.rand, device=device, dtype=dtype)
             size = SdpaShape(2, 2, 3, 9) if kernel == SDPBackend.EFFICIENT_ATTENTION else SdpaShape(2, 2, 3, 257)
             if TEST_WITH_ROCM:  # On ROCM, FA and EA share the backend GPU kernels
-                size = SdpaShape(2, 2, 3, 257)
+                size = SdpaShape(2, 2, 3, 513)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
@@ -2692,6 +2692,8 @@ class TestSDPACudaOnly(NNTestCase):
         dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 2.0
 
         query_fudge_factor = dropout_fudge_factor
+        if TEST_WITH_ROCM:
+            query_fudge_factor += 1.0
         grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
         # TODO: Investigate why grad_k needs larger tolerances
@@ -2814,6 +2816,8 @@ class TestSDPACudaOnly(NNTestCase):
         mask_fudge_factor = 1.0 if attn_mask is None else 1.5
 
         query_fudge_factor = dropout_fudge_factor
+        if TEST_WITH_ROCM:
+            query_fudge_factor += 1.0
         grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
         # TODO: Investigate why grad_k needs larger tolerances

@@ -1915,9 +1915,4 @@ if(BUILD_PYTHON)
 
   add_custom_target(python_copy_files ALL DEPENDS ${build_files})
 
-
-  # Install commands
-  # Pick up static python files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
-          FILES_MATCHING PATTERN "*.py")
 endif()

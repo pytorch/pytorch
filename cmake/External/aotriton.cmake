@@ -1,3 +1,16 @@
+macro(get_target_gpus_from_pytorch target_gpus)
+   set(gfx90a_key MI200)
+   set(gfx942_key MI300X)
+   set(gfx1100_key Navi31)
+
+   foreach(X IN LISTS PYTORCH_ROCM_ARCH)
+       set(key ${X})
+       string(APPEND key "_key")
+       string(APPEND target_gpus ${${key}})
+       string(APPEND target_gpus "|")
+   endforeach()
+endmacro()
+
 if(NOT __AOTRITON_INCLUDED)
   set(__AOTRITON_INCLUDED TRUE)
 
@@ -9,25 +22,31 @@ if(NOT __AOTRITON_INCLUDED)
   # Replaces .ci/docker/aotriton_version.txt
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
-  set(__AOTRITON_VER "0.7.1b")
+  set(__AOTRITON_RELEASE_PAGE "0.10b")
+  set(__AOTRITON_VER_LIST
+      "0.10b"  # rocm6.3
+      "0.10b"  # rocm6.4
+      "0.10b"  # rocm6.5
+      "0.10b"  # rocm7.0
+      )
   set(__AOTRITON_MANYLINUX_LIST
-      "manylinux_2_17"  # rocm6.1
-      "manylinux_2_17"  # rocm6.2
-      "manylinux_2_28"  # rocm6.2
       "manylinux_2_28"  # rocm6.3
+      "manylinux_2_28"  # rocm6.4
+      "manylinux_2_28"  # rocm6.5
+      "manylinux_2_28"  # rocm7.0
       )
   set(__AOTRITON_ROCM_LIST
-      "rocm6.1"
-      "rocm6.2"
-      "rocm6.2"
       "rocm6.3"
+      "rocm6.4"
+      "rocm6.5"
+      "rocm7.0"
       )
-  set(__AOTRITON_CI_COMMIT "f6b28a9b7265b69e3df54ea6ba0237e8a8d6f736")
+  set(__AOTRITON_CI_COMMIT "6fca155f4deeb8d9529326f7b69f350aeeb93477")    # source of rocm6.5 with gfx950
   set(__AOTRITON_SHA256_LIST
-      "4f73c9271f95d18c1ef0d824bb6ca0ac63fe7795cfe786ffe4964287be5ecff2"  # rocm6.1
-      "df00412ae36fe5732d0a4601802bd3622b5dec12df7ec86027c5147adeb54c25"  # rocm6.2
-      "852d0e6e280cee3256fc5c7c3abed657594d7f56081d768ff8616c08bf9098b2"  # rocm6.2
-      "e4e3b06d2431e68e0096fcc8d3668cd5034ca0fd6fe236fb3b96774427d934b8"  # rocm6.3
+      "861cd9f7479eec943933c27cb86920247e5b5dd139bc7c1376c81808abb7d7fe"  # rocm6.3
+      "acea7d811a2d3bbe718b6e07fc2a9f739e49eecd60b4b6a36fcb3fe8edf85d78"  # rocm6.4
+      "7e29c325d5bd33ba896ddb106f5d4fc7d715274dca7fe937f724fffa82017838"  # rocm6.5
+      "1e9b3dddf0c7fc07131c6f0f5266129e83ce2331f459fa2be8c63f4ae91b0f5b"  # rocm7.0
       )
   set(__AOTRITON_Z "gz")
 
@@ -57,13 +76,14 @@ if(NOT __AOTRITON_INCLUDED)
     list(FIND __AOTRITON_ROCM_LIST "rocm${__AOTRITON_ROCM}" __AOTRITON_ROCM_INDEX)
     list(GET __AOTRITON_SHA256_LIST ${__AOTRITON_ROCM_INDEX} __AOTRITON_SHA256)
     list(GET __AOTRITON_MANYLINUX_LIST ${__AOTRITON_ROCM_INDEX} __AOTRITON_MANYLINUX)
+    list(GET __AOTRITON_VER_LIST ${__AOTRITON_ROCM_INDEX} __AOTRITON_VER)
     set(__AOTRITON_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
     string(CONCAT __AOTRITON_FILE "aotriton-"
                                   "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
                                   "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
                                   "-shared.tar.${__AOTRITON_Z}")
     string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"
-                                 "${__AOTRITON_VER}/${__AOTRITON_FILE}")
+                                 "${__AOTRITON_RELEASE_PAGE}/${__AOTRITON_FILE}")
     ExternalProject_Add(aotriton_external
       URL "${__AOTRITON_URL}"
       URL_HASH SHA256=${__AOTRITON_SHA256}

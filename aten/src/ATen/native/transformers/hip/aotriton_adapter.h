@@ -127,6 +127,12 @@ inline aotriton::TensorView<0> mk_philoxtensor(const int64_t* ptr)
                                  aotriton::DType::kUInt64);  // AOTriton excepts unsigned int64
 }
 
+inline aotriton::TensorView<0> mk_atomictensor(const int32_t* ptr)
+{
+  return aotriton::TensorView<0>(reinterpret_cast<intptr_t>(ptr),
+                                 aotriton::DType::kInt32);
+}
+
 } // namespace aotriton_adapter
 
 } // namespace sdp
