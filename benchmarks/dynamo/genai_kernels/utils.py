@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from typing import Any, Callable
-from torch._inductor.runtime.benchmarking import benchmarker
+
 import torch
+from torch._inductor.runtime.benchmarking import benchmarker
+
 
 def benchmark_kernel_in_milliseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
@@ -126,7 +128,7 @@ class BenchmarkKernel:
             args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
             try:
                 avg_time = benchmark_kernel_in_milliseconds(
-                    getattr(self, backend)(args, kwargs)
+                    getattr(self, backend)(args_ref, kwargs_ref)
                 )
             except Exception as e:
                 print(

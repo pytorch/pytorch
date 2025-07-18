@@ -2,15 +2,16 @@ from typing import Any
 
 import cutlass
 import cutlass.torch as cutlass_torch
-
+from utils import BenchmarkKernel
 
 import torch
 import torch.nn.functional as F
-from utils import BenchmarkKernel
+
 
 # TODO1: visualization
 # TODO2: roof line analysis
 # TODO: Record peak memory
+
 
 class CrossEntropyForward(BenchmarkKernel):
     def __init__(self):
@@ -76,11 +77,34 @@ class CrossEntropyForward(BenchmarkKernel):
 
     def benchmark(self):
         for M, N in self.get_shapes():
-            print(f"Tensor dimensions: [{M}, {N}]")
+            print(f"\n Tensor dimensions: [{M}, {N}]")
             torch_dtype = cutlass_torch.dtype(cutlass.BFloat16)
             x = 0.1 * torch.randn(M, N, device="cuda", dtype=torch_dtype)
             target = torch.randint(0, N, (M,), device="cuda", dtype=torch.int64)
             self.benchmark_single_shape((x, target), setting=f"shape: [{M}, {N}]")
+
+    def check_accuracy(self, args, kwargs) -> None:
+        res = {}
+        for backend in self.available_backends:
+            args_ref, kwargs_ref = self.clone_inputs(args, kwargs)
+            res[backend] = getattr(self, backend)(args_ref, kwargs_ref)()
+        gold = res["eager"]
+        for backend in self.available_backends:
+            if backend == "eager":
+                continue
+            if backend == "quack":
+                # quack's cross_entropy only returns float32 loss output.
+                # Need to convert it to the same dtype as gold for comparison.
+                res[backend] = res[backend].to(gold.dtype)
+            try:
+                torch.testing.assert_close(res[backend], gold)
+                print(
+                    f"Accuracy check \033[92m✓ succeed\033[0m for {backend} backend on {self.name} kernel"
+                )
+            except Exception as e:
+                print(
+                    f"Accuracy check \033[91m✗ failed\033[0m for {backend} backend on {self.name} kernel. Error {e}"
+                )
 
 
 class CrossEntropyBackward(BenchmarkKernel):
@@ -550,6 +574,7 @@ class LayerNormBackward(BenchmarkKernel):
         self.available_backends = ["eager", "compiled", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
+        # OOM for (16384, 131072), (8192, 262144)
         return (
             (32768, 256),
             (32768, 512),
@@ -560,8 +585,6 @@ class LayerNormBackward(BenchmarkKernel):
             (32768, 16384),
             (32768, 32768),
             (32768, 65536),
-            (16384, 131072),
-            (8192, 262144),
         )
 
     def get_memory_bytes(self, args, kwargs) -> int:
