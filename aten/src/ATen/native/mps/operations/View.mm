@@ -7,6 +7,8 @@
 // For MTLLanguageVersion_3_1
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <c10/core/Device.h>
+#include <c10/core/impl/COW.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -18,6 +20,29 @@
 #endif
 
 namespace at::native::mps {
+
+static bool is_cow_mps_backed_or_not_cow(const Tensor& self) {
+  const DataPtr& data_ptr = self.storage().data_ptr();
+  return !c10::impl::cow::is_cow_data_ptr(data_ptr) || c10::impl::cow::is_cow_data_ptr_on_device(data_ptr, c10::kMPS);
+}
+
+static IntArrayRef updateTensorBaseShape(const Tensor& self) {
+  IntArrayRef base_shape = getIMPSAllocator()->getBufferShape(self.storage().data());
+  // if there's no base_shape stored in MPSAllocator, then infer it from tensor's size and store it
+  if (base_shape.size() == 0) {
+    // IntArrayRef wouldn't own the data, so we use a static storage
+    static const int64_t shape_1d = 1;
+    // self.sizes().size() could be zero
+    base_shape = self.sizes().size()
+        ? self.sizes()
+        : ((self.is_view() && self._base().sizes().size()) ? self._base().sizes() : IntArrayRef(&shape_1d, 1));
+
+    // base_shape will be retained in MPSAllocator until buffer gets recycled
+    if (self.storage().data() && is_cow_mps_backed_or_not_cow(self))
+      getIMPSAllocator()->setBufferShape(self.storage().data(), base_shape);
+  }
+  return base_shape;
+}
 
 // For both scatter and gather kernels, there are 4 specized ones (for 1D to 4D tensor)
 // and one generic, for 5+D ones. Assumption (to be tested) about specialized kernels

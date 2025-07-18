@@ -3,6 +3,7 @@
 #include <ATen/CPUFunctions.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/mps/MPSAllocator.h>
+#include <ATen/mps/MPSStream.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
 #include <c10/util/env.h>
@@ -148,7 +149,12 @@ bool MPSHeapAllocatorImpl::alloc_buffer(AllocParams& params) {
   // insert heap after a buffer was created on it to update the order of heap's set
   pool.heaps.insert(heap);
   params.buffer_block = new BufferBlock(params.size(), params.requested_size, buffer, heap);
-  m_allocated_buffers[params.buffer_block->buffer] = params.buffer_block;
+  m_allocated_buffers_by_device_ptr[params.buffer_block->buffer] = params.buffer_block;
+
+  if (pool.usage & UsageFlags::SHARED) {
+    params.buffer_block->cpu_ptr = [params.buffer_block->buffer contents];
+    m_allocated_buffers_by_cpu_ptr[params.buffer_block->cpu_ptr] = params.buffer_block;
+  }
   pool.allocated_size += params.size();
   pool.n_buffers++;
 
@@ -319,9 +325,17 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   buffer_block->in_use = false;
 }
 
-BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(const void* ptr) {
-  auto it = m_allocated_buffers.find(ptr);
-  if (it == m_allocated_buffers.end()) {
+BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block_by_device_ptr(const void* ptr) {
+  auto it = m_allocated_buffers_by_device_ptr.find(ptr);
+  if (it == m_allocated_buffers_by_device_ptr.end()) {
+    return nullptr;
+  }
+  return it->second;
+}
+
+BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block_by_cpu_ptr(const void* ptr) {
+  auto it = m_allocated_buffers_by_cpu_ptr.find(ptr);
+  if (it == m_allocated_buffers_by_cpu_ptr.end()) {
     return nullptr;
   }
   return it->second;
@@ -332,7 +346,8 @@ bool MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove
   BufferPool& pool = *heap_block->pool;
   pool.allocated_size -= buffer_block->size;
   pool.available_size -= buffer_block->size;
-  m_allocated_buffers.erase(buffer_block->buffer);
+  m_allocated_buffers_by_device_ptr.erase(buffer_block->buffer);
+  m_allocated_buffers_by_cpu_ptr.erase(buffer_block->cpu_ptr);
   pool.available_buffers.erase(buffer_block);
   pool.n_buffers--;
   // will re-insert later to keep the heaps list sorted based on heap's new available size (if heap not empty)
@@ -512,10 +527,18 @@ id<MTLBuffer> MPSHeapAllocatorImpl::malloc(size_t size, uint32_t usage) {
   return buffer_block ? buffer_block->buffer : nullptr;
 }
 
+bool MPSHeapAllocatorImpl::isSharedBufferCPUPtr(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+  BufferBlock* buffer_block = get_allocated_buffer_block_by_cpu_ptr(ptr);
+  // it's OK for the buffer_block to not exist yet
+  return buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED);
+}
+
 bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  BufferBlock* buffer_block = get_allocated_buffer_block_by_device_ptr(ptr);
   // it's OK for the buffer_block to not exist yet
   return buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED);
 }
@@ -529,27 +552,34 @@ id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size
     if (!buffer_block) {
       return nullptr;
     }
-    if (!buffer_block->cpu_ptr) {
-      buffer_block->cpu_ptr = [buffer_block->buffer contents];
-    }
+    TORCH_INTERNAL_ASSERT(buffer_block->cpu_ptr);
   }
   // buffer is out of the pool, so no mutex lock is needed
   memcpy(buffer_block->cpu_ptr, value, size);
   return buffer_block->buffer;
 }
 
-std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const void* ptr) {
+std::pair<void*, uint32_t> MPSHeapAllocatorImpl::getSharedCPUPtrFromDevicePtr(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  BufferBlock* buffer_block = get_allocated_buffer_block_by_device_ptr(ptr);
   // return if buffer was not allocated on MPSAllocator or isn't a Shared buffer
   if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
     return {nullptr, 0};
   }
-  if (!buffer_block->cpu_ptr) {
-    buffer_block->cpu_ptr = [buffer_block->buffer contents];
-  }
+  TORCH_INTERNAL_ASSERT(buffer_block->cpu_ptr);
   return {buffer_block->cpu_ptr, buffer_block->retainCount()};
+}
+
+std::pair<void*, uint32_t> MPSHeapAllocatorImpl::getSharedDevicePtrFromCPUPtr(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+  BufferBlock* buffer_block = get_allocated_buffer_block_by_cpu_ptr(ptr);
+  // return if buffer was not allocated on MPSAllocator
+  if (!buffer_block) {
+    return {nullptr, 0};
+  }
+  return {buffer_block->buffer, buffer_block->retainCount()};
 }
 
 bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
@@ -557,7 +587,7 @@ bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   for (const auto& buffer : buffers) {
-    BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
+    BufferBlock* buffer_block = get_allocated_buffer_block_by_device_ptr(buffer);
     // return if buffer was not allocated on MPSAllocator or isn't a Shared buffer
     if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
       if (!buffer_block->event) {
@@ -576,7 +606,7 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
   {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     for (const auto& buffer : buffers) {
-      BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
+      BufferBlock* buffer_block = get_allocated_buffer_block_by_device_ptr(buffer);
       // wait on event if "shared" buffer was allocated on MPSAllocator and
       // or actually needs waiting (based on retainCount)
       if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED) && buffer_block->retainCount() > 1 &&
@@ -609,14 +639,14 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
 id_t MPSHeapAllocatorImpl::getBufferId(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  BufferBlock* buffer_block = get_allocated_buffer_block_by_device_ptr(ptr);
   return buffer_block ? buffer_block->buf_id : 0;
 }
 
 ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  BufferBlock* buffer_block = get_allocated_buffer_block_by_device_ptr(ptr);
   if (buffer_block) {
     return (ssize_t)buffer_block->requested_size;
   }
@@ -627,7 +657,7 @@ ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(const void* ptr) {
 void MPSHeapAllocatorImpl::setBufferShape(const void* ptr, const IntArrayRef& shape) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  BufferBlock* buffer_block = get_allocated_buffer_block_by_device_ptr(ptr);
   TORCH_INTERNAL_ASSERT(buffer_block, "failed to find the buffer ", ptr);
   // note that the IntArrayRef doesn't own the underlying data, and the backing
   // memory for shape data must persist as long as the buffer is in use.
@@ -638,7 +668,7 @@ void MPSHeapAllocatorImpl::setBufferShape(const void* ptr, const IntArrayRef& sh
 IntArrayRef MPSHeapAllocatorImpl::getBufferShape(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  BufferBlock* buffer_block = get_allocated_buffer_block_by_device_ptr(ptr);
   if (buffer_block && !buffer_block->shape.empty()) {
     return IntArrayRef{buffer_block->shape};
   }
@@ -650,7 +680,10 @@ void MPSHeapAllocatorImpl::free(void* ptr) {
   {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-    buffer_block = get_allocated_buffer_block(ptr);
+    buffer_block = get_allocated_buffer_block_by_device_ptr(ptr);
+    if (!buffer_block) {
+      buffer_block = get_allocated_buffer_block_by_cpu_ptr(ptr);
+    }
     TORCH_INTERNAL_ASSERT(buffer_block);
     const BufferPool& pool = *buffer_block->heap->pool;
     if (!(pool.usage & UsageFlags::SCALAR)) {
@@ -714,7 +747,7 @@ HeapAllocator::MPSHeapAllocatorImpl& _getAllocImpl() {
 } // namespace
 
 // MPS allocator struct to be registered with Pytorch
-struct TORCH_API MPSAllocator final : public IMPSAllocator {
+struct TORCH_API MPSAllocator : public IMPSAllocator {
  public:
   explicit MPSAllocator(uint32_t Usage)
       : m_has_unified_memory(_getAllocImpl().Device().hasUnifiedMemory), m_usage(Usage) {
@@ -736,8 +769,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
 
   DataPtr allocate(const size_t nbytes) override {
-    __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
-    return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
+    return allocate_mps(nbytes);
   }
 
   // implementation of IMPSAllocator interface
@@ -745,11 +777,17 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     id<MTLBuffer> buf = _getAllocImpl().allocScalarBufferWithValue(value, size);
     return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
-  std::pair<const void*, uint32_t> getSharedBufferPtr(const void* ptr) const override {
-    return _getAllocImpl().getSharedBufferPtr(ptr);
+  std::pair<void*, uint32_t> getSharedCPUPtrFromDevicePtr(const void* ptr) const override {
+    return _getAllocImpl().getSharedCPUPtrFromDevicePtr(ptr);
+  }
+  std::pair<void*, uint32_t> getSharedDevicePtrFromCPUPtr(const void* ptr) const override {
+    return _getAllocImpl().getSharedDevicePtrFromCPUPtr(ptr);
   }
   bool isSharedBuffer(const void* ptr) const override {
     return _getAllocImpl().isSharedBuffer(ptr);
+  }
+  bool isSharedBufferCPUPtr(const void* cpu_ptr) const override {
+    return _getAllocImpl().isSharedBufferCPUPtr(cpu_ptr);
   }
   bool isSharedStorageSupported() const override {
     return m_has_unified_memory;
@@ -810,10 +848,31 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
 
   void copy_data(void* dest, const void* src, std::size_t count) const final {
+    if (isSharedBuffer(dest)) {
+      TORCH_INTERNAL_ASSERT(isSharedBuffer(src));
+    } else if (isSharedBufferCPUPtr(dest)) {
+      TORCH_INTERNAL_ASSERT(isSharedBufferCPUPtr(src));
+    }
     default_copy_data(dest, src, count);
   }
 
- private:
+  void* get_cpu_ptr_from_device_ptr(void* device_ptr) const override {
+    return getSharedCPUPtrFromDevicePtr(device_ptr).first;
+  }
+
+  const void* get_cpu_ptr_from_device_ptr(const void* device_ptr) const override {
+    return getSharedCPUPtrFromDevicePtr(device_ptr).first;
+  }
+
+  void* get_device_ptr_from_cpu_ptr(void* cpu_ptr) const override {
+    return getSharedDevicePtrFromCPUPtr(cpu_ptr).first;
+  }
+
+  const void* get_device_ptr_from_cpu_ptr(const void* cpu_ptr) const override {
+    return getSharedDevicePtrFromCPUPtr(cpu_ptr).first;
+  }
+
+ protected:
   bool m_has_unified_memory;
   uint32_t m_usage;
 
@@ -821,6 +880,36 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     if (ptr) {
       _getAllocImpl().free(ptr);
     }
+  }
+
+  DataPtr allocate_cpu(const size_t nbytes) {
+    TORCH_INTERNAL_ASSERT(m_has_unified_memory);
+    TORCH_INTERNAL_ASSERT(m_usage & HeapAllocator::UsageFlags::SHARED);
+    __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
+    void* cpu_ptr = getSharedCPUPtrFromDevicePtr(buf).first;
+    if (nbytes > 0) {
+      TORCH_INTERNAL_ASSERT(cpu_ptr);
+    }
+    return {cpu_ptr, cpu_ptr, &Delete, at::Device(at::DeviceType::CPU)};
+  }
+
+  DataPtr allocate_mps(const size_t nbytes) {
+    __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
+    return {buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
+  }
+};
+
+struct TORCH_API MPSPinnedAllocator : public MPSAllocator {
+ public:
+  explicit MPSPinnedAllocator() : MPSAllocator{HeapAllocator::UsageFlags::SHARED} {}
+
+  DataPtr allocate(const size_t nbytes) override {
+    return allocate_cpu(nbytes);
+  }
+
+  DataPtr allocScalarBufferWithValue(void* value, size_t size) const override {
+    TORCH_INTERNAL_ASSERT(false);
+    return DataPtr();
   }
 };
 
@@ -834,9 +923,22 @@ MPSAllocator& _getPrivateAllocator() {
   static MPSAllocator s_mps_private_alloc(HeapAllocator::UsageFlags::PRIVATE);
   return s_mps_private_alloc;
 }
+
+MPSPinnedAllocator& _getPinnedAllocator() {
+  static MPSPinnedAllocator s_mps_pinned_alloc;
+  return s_mps_pinned_alloc;
+}
 } // anonymous namespace
 
-IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
+IMPSAllocator* getIMPSAllocator(bool sharedAllocator, bool pinnedAllocator) {
+  if (pinnedAllocator) {
+    TORCH_INTERNAL_ASSERT(sharedAllocator);
+    auto& pa = _getPinnedAllocator();
+    if (pa.isSharedStorageSupported()) {
+      return &pa;
+    }
+    return nullptr;
+  }
   if (!sharedAllocator) {
     return &_getPrivateAllocator();
   }
@@ -847,12 +949,16 @@ IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
   return nullptr;
 }
 
+at::Allocator* getPinnedMemoryAllocator() {
+  return getIMPSAllocator(true, true);
+}
+
 // torch.is_pinned() implementation
 // Pinned memory will be helpful on Apple Silicon Macs with Unified memory as we
 // will be able to use SharedStorageMode for MTLBuffer allocations. This will
 // avoid extra copies on DataLoading operations.
 bool isMPSPinnedPtr(const void* data) {
-  return at::mps::_getSharedAllocator().isSharedBuffer(data);
+  return at::mps::_getPinnedAllocator().isSharedBufferCPUPtr(data);
 }
 
 } // namespace at::mps

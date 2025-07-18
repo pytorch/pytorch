@@ -27,6 +27,7 @@
 #include <ATen/native/Normalization.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/IMPSAllocator.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -2603,6 +2604,25 @@ Call this whenever a new thread is created in order to propagate values from
         return reinterpret_cast<std::intptr_t>(tensor.storage().data());
       },
       "Gets the memory address of the Tensor's data pointer.");
+
+  py_module.def(
+      "_data_address_resolve_unified",
+      [](const at::Tensor& tensor) {
+        const void* data_ptr = tensor.storage().data();
+        if (tensor.device().type() == c10::kCPU) {
+          c10::Allocator* allocator = tensor.storage().allocator();
+          if (c10::IMPSAllocator* allocator_ =
+                  dynamic_cast<c10::IMPSAllocator*>(allocator)) {
+            return reinterpret_cast<std::intptr_t>(
+                allocator_->get_device_ptr_from_cpu_ptr(data_ptr));
+          }
+        }
+        return reinterpret_cast<std::intptr_t>(data_ptr);
+      },
+      ("Gets the memory address of the Tensor's data pointer. If the device "
+       "is CPU and the allocator has unified memory on some other device, then "
+       "the CPU data address is resolved to the address space of the other "
+       "device."));
 
   py_module.def(
       "_is_cow_tensor",

@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/core/impl/COW.h>
+#include <c10/core/DispatchKey.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -13,6 +14,7 @@
 #include <ATen/ops/_unpack_dual_native.h>
 #include <ATen/ops/_lazy_clone_native.h>
 #include <ATen/ops/alias.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -91,18 +93,83 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
   return base.storage().sym_nbytes() / base.itemsize() == other.storage().sym_nbytes() / other.itemsize();
 }
 
-Tensor _lazy_clone(Tensor const& self) {
+Tensor _lazy_clone(Tensor const& self, std::optional<c10::Device> device_opt) {
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
-  c10::intrusive_ptr<c10::StorageImpl> storage =
-    c10::impl::cow::lazy_clone_storage(*self_storage);
+  c10::intrusive_ptr<c10::StorageImpl> storage = nullptr;
+
+  if (device_opt.has_value()) {
+    c10::Device src_device = self.device();
+    c10::Device dst_device = device_opt.value();
+    c10::DeviceType src_device_type = src_device.type();
+    c10::DeviceType dst_device_type = dst_device.type();
+    TORCH_CHECK(
+      (src_device_type == dst_device_type)
+      || (src_device_type == c10::kCPU && dst_device_type == c10::kMPS)
+      || (src_device_type == c10::kMPS && dst_device_type == c10::kCPU),
+      "Lazy cloning is only supported in the following cases: ",
+      "cpu to mps, ",
+      "mps to cpu, ",
+      "or between the same device. Got ", src_device, " to ", dst_device
+    );
+
+    if (src_device_type == dst_device_type) {
+      c10::DeviceIndex src_index = at::empty({}, at::TensorOptions().device(src_device)).device().index();
+      c10::DeviceIndex dst_index = at::empty({}, at::TensorOptions().device(dst_device)).device().index();
+
+      // NOTE: This case might already work, but we do not have any tests for it
+      // yet, so throw an error.
+      TORCH_CHECK(
+        src_index == dst_index,
+        "Lazy cloning between the same device type is only supported if the ",
+        "device indices are the same. Got ", src_device, " to ", dst_device
+      );
+    }
+
+    c10::Allocator* allocator = nullptr;
+
+    if (src_device_type == c10::kMPS && dst_device_type == c10::kCPU) {
+      // For MPS-to-CPU, need the output to use the pinned MPS allocator, not
+      // the regular CPU allocator.
+      allocator = at::globalContext().getPinnedMemoryAllocator(c10::kMPS);
+      TORCH_INTERNAL_ASSERT(allocator != nullptr);
+    } else {
+      allocator = at::empty({}, at::TensorOptions().device(dst_device)).storage().allocator();
+      TORCH_INTERNAL_ASSERT(allocator != nullptr);
+    }
+
+    if (src_device_type == c10::kCPU && dst_device_type == c10::kMPS) {
+      TORCH_CHECK(self.is_pinned(),
+        "It is only possible to lazy clone a CPU tensor to MPS if the tensor ",
+        "is pinned.");
+    }
+    storage = c10::impl::cow::lazy_clone_storage(*self_storage, device_opt.value(), *allocator);
+  } else {
+    storage = c10::impl::cow::lazy_clone_storage(*self_storage);
+  }
   TORCH_CHECK(storage != nullptr);
+  c10::DispatchKeySet key_set = self.key_set();
+  // If the target device differs, then we must change the key set
+  if (device_opt.has_value() && device_opt.value().type() != self.device().type()) {
+    c10::BackendComponent old_backend = c10::toBackendComponent(self.device().type());
+    c10::BackendComponent new_backend = c10::toBackendComponent(device_opt.value().type());
+    key_set = key_set.remove_backend(old_backend) | c10::DispatchKeySet(new_backend);
+  }
   auto tensor = c10::make_intrusive<c10::TensorImpl>(
       c10::Storage(std::move(storage)),
-      self.key_set(),
+      key_set,
       self.dtype());
   tensor->set_sizes_and_strides(self.sym_sizes(),
                                 self.sym_strides(),
                                 self.sym_storage_offset());
+  // When cloning from MPS to CPU, need to synchronize the source device before
+  // this function returns the lazy cloned tensor. The MPS device may have
+  // pending write operations on the source tensor's data, and we must force
+  // them to finish before trying to read it from the CPU.
+  if (device_opt.has_value() && device_opt.value() != self.device()) {
+    if (self.device().type() == c10::kMPS) {
+      at::detail::getMPSHooks().deviceSynchronize();
+    }
+  }
   return Tensor(std::move(tensor));
 }
 
