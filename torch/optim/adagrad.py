@@ -572,7 +572,3 @@ def _fused_adagrad(
             torch._foreach_sub_(
                 device_state_steps, [device_found_inf] * len(device_state_steps)
             )
-
-# We prefer torch.optim.Adagrad over torch.optim.adagrad.Adagrad
-Adagrad.__module__ = "torch.optim"
-adagrad.__module__ = "torch.optim"
