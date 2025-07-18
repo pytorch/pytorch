@@ -5,15 +5,12 @@ import copy
 import dataclasses
 import functools
 import operator
-import re
 import types
 import warnings
 from collections import defaultdict, namedtuple
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Callable, final, Optional, TYPE_CHECKING, Union
-
-from sortedcontainers import SortedDict, SortedList
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -43,6 +40,7 @@ if TYPE_CHECKING:
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import (
+    _build_cache,
     _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
@@ -620,32 +618,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
     for old_ph, new_ph in zip(old_placeholders, new_placeholders):
         new_ph.name = new_ph.target = old_ph.name
 
-    def build_cache(name, find_available, used_names):
-        used_names.add(name)
-        match = re.match(r"(.*)_(\d+)", name)
-        if match:
-            prefix, n = match.group(1), match.group(2)
-        if name not in find_available:
-            find_available[name] = SortedList([0])
-
-        if match and prefix not in find_available:
-            find_available[prefix] = SortedList([0])
-
-        if match:
-            find_available[prefix].add(int(n))
-            while (
-                len(find_available[prefix]) >= 2
-                and find_available[prefix][0] + 1 == find_available[prefix][1]
-            ):
-                find_available[prefix].pop(0)
-
     # handle name collisions with newly decomposed graph nodes
     name_map = {}
-    find_available = SortedDict()
+    find_available = defaultdict(int)
     used_names = set()
     for ph in new_placeholders:
         name_map[ph.name] = ph.name
-        build_cache(ph.name, find_available, used_names)
+        _build_cache(ph.name, find_available, used_names)
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             continue

@@ -8,12 +8,11 @@ import json
 import math
 import operator
 import re
+from collections import defaultdict
 from collections.abc import Iterable
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-
-from sortedcontainers import SortedDict, SortedList
 
 import torch
 from torch._guards import detect_fake_mode
@@ -257,7 +256,7 @@ def _get_shape_env_from_gm(gm: torch.fx.GraphModule):
 
 def _rename_without_collisions(
     name_map: dict[str, str],
-    find_available: SortedDict[str, SortedList[int]],
+    find_available: dict[str, int],
     used_names: set[str],
     orig_name: str,
     name: str,
@@ -276,12 +275,6 @@ def _rename_without_collisions(
     if match:
         prefix, n = match.group(1), match.group(2)
 
-    if name not in find_available:
-        find_available[name] = SortedList([0])
-
-    if match and prefix not in find_available:
-        find_available[prefix] = SortedList([0])
-
     if is_placeholder or not match:
         key = name
     else:
@@ -289,18 +282,13 @@ def _rename_without_collisions(
 
     new_name = name
     if new_name in used_names:
-        new_name = f"{key}_{find_available[key][0] + 1}"
+        new_name = f"{key}_{find_available[key] + 1}"
 
     match = re.match(r"(.*)_(\d+)", new_name)
     if match:
         prefix, n = match.group(1), match.group(2)
-        find_available[prefix].add(int(n))
-
-        while len(find_available[prefix]) >= 2 and (
-            find_available[prefix][0] + 1 == find_available[prefix][1]
-            or find_available[prefix][0] == find_available[prefix][1]
-        ):
-            find_available[prefix].pop(0)
+        if int(n) > find_available[prefix]:
+            find_available[prefix] = int(n)
 
     name_map[orig_name] = new_name
     used_names.add(new_name)
@@ -893,6 +881,15 @@ def _bind_signature_to_inputs(mod, fake_args, fake_kwargs):
     return {**sig.bind_partial(*fake_args).arguments, **fake_kwargs}
 
 
+def _build_cache(name, find_available, used_names):
+    used_names.add(name)
+    match = re.match(r"(.*)_(\d+)", name)
+    if match:
+        prefix, n = match.group(1), match.group(2)
+        if int(n) > find_available[prefix]:
+            find_available[prefix] = int(n)
+
+
 def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     """
     Propagate placeholder names from the top-level graph into HigherOrderOp subgraphs,
@@ -900,25 +897,6 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     Different HOO subgraph types have different input schemas, so we first enumerate them
     and gather the top-level named placeholder nodes.
     """
-
-    def build_cache(name, find_available, used_names):
-        used_names.add(name)
-        match = re.match(r"(.*)_(\d+)", name)
-        if match:
-            prefix, n = match.group(1), match.group(2)
-        if name not in find_available:
-            find_available[name] = SortedList([0])
-
-        if match and prefix not in find_available:
-            find_available[prefix] = SortedList([0])
-
-        if match:
-            find_available[prefix].add(int(n))
-            while (
-                len(find_available[prefix]) >= 2
-                and find_available[prefix][0] + 1 == find_available[prefix][1]
-            ):
-                find_available[prefix].pop(0)
 
     # gather all HOO subgraphs and their top-level named placeholder nodes
     subgraph_ph_tuples: list[tuple[torch.fx.GraphModule, list[torch.fx.Node]]] = []
@@ -943,13 +921,13 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     # propagate names
     for subgraph, hoo_phs in subgraph_ph_tuples:
         name_map: dict[str, str] = {}
-        find_available = SortedDict()
+        find_available = defaultdict(int)
         used_names = set()
         for i, node in enumerate(subgraph.graph.nodes):
             if i < len(hoo_phs):  # placeholder, retain name
                 name_map[node.name] = hoo_phs[i].name
                 node.name = node.target = hoo_phs[i].name
-                build_cache(node.name, find_available, used_names)
+                _build_cache(node.name, find_available, used_names)
             else:  # non-placeholder, check for collisions
                 node.name = _rename_without_collisions(
                     name_map, find_available, used_names, node.name, node.name
@@ -1013,7 +991,7 @@ def placeholder_naming_pass(
             raise RuntimeError(f"Pytree key of type {type(x)} not handled for {x}")
 
     name_map: dict[str, str] = {}
-    find_available = SortedDict()
+    find_available = defaultdict(int)
     used_names = set()
 
     # map user input names with mod.forward() signature
