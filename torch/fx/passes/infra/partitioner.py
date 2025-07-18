@@ -10,6 +10,7 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.node import _get_qualified_name, Node
 from torch.fx.passes.operator_support import OperatorSupportBase
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
+import time
 
 
 logger = logging.getLogger(__name__)
@@ -18,16 +19,16 @@ logger.setLevel(logging.WARNING)
 
 class Partition:
     def __init__(
-        self, id: Optional[int] = None, nodes: Optional[Iterable[Node]] = None
+        self, id: Optional[int] = None, nodes: Optional[Iterable[tuple[Node, int]]] = None
     ):
         self.id = id
-        self.nodes = dict.fromkeys(nodes) if nodes is not None else {}
+        self.nodes = {node: node_order for node, node_order in nodes} if nodes is not None else {}
 
     def __repr__(self) -> str:
         return str(self.nodes)
 
-    def add_node(self, node: Node):
-        self.nodes.update({node: None})
+    def add_node(self, node: Node, node_order: Optional[int] = None):
+        self.nodes.update({node: node_order})
 
     def remove_node(self, node: Node):
         del self.nodes[node]
@@ -144,7 +145,10 @@ class CapabilityBasedPartitioner:
                 # merge is aborted
                 return self_id, False
 
+            # merge the smaller partition into the larger.
             merge_id, removed_id = self_id, other_id
+            if len(self_nodes) <= len(other_nodes):
+                merge_id, removed_id = removed_id, merge_id
             # no cyclic dependency found, move forward with the merge
             # updating partition nodes
             partitions_by_id[merge_id].nodes.update(partitions_by_id[removed_id].nodes)
@@ -169,7 +173,7 @@ class CapabilityBasedPartitioner:
 
             return merge_id, True
 
-        def merge_single_node(node: Node, id: Optional[int]):
+        def merge_single_node(node: Node, node_order: Optional[int], id: Optional[int]):
             def _update_partition_map(node: Node, id: int):
                 # Iterate through all the users of this node and update the partition map to indicate
                 # that there is a path from the partition id of this node to the target partition id.
@@ -186,16 +190,16 @@ class CapabilityBasedPartitioner:
                 assignment.pop(node)
             elif id not in partitions_by_id:
                 assignment[node] = id
-                partitions_by_id[id] = Partition(id=id, nodes=[node])
+                partitions_by_id[id] = Partition(id=id, nodes=[(node, node_order)])
                 partition_users[id] = set(node.users)
                 _update_partition_map(node, id)
             else:
                 assignment[node] = id
-                partitions_by_id[id].add_node(node)
+                partitions_by_id[id].add_node(node, node_order)
 
         logger.debug("Proposing partitions...")
 
-        for node in reversed(self.graph_module.graph.nodes):
+        for node_order, node in enumerate(reversed(self.graph_module.graph.nodes)):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
             merge_candidates: dict[int, None] = {}
 
@@ -208,7 +212,7 @@ class CapabilityBasedPartitioner:
                 partition_id = next(new_partition_id)
                 nodes_order[node] = partition_id
                 partitions_order[partition_id] = partition_id
-                merge_single_node(node, partition_id)
+                merge_single_node(node, node_order, partition_id)
                 merge_candidates[partition_id] = None
 
             # merge all possible partitions
@@ -224,6 +228,14 @@ class CapabilityBasedPartitioner:
                     # note: merge partitions if it doesn't create cyclic dependency
                     # in the graph, otherwise, this is a no-op
                     self_id, _ = maybe_merge_partition(self_id, other_id)
+
+        print(f"---- Graph has {len(self.graph_module.graph.nodes)} nodes")
+        start_time = time.perf_counter()
+        for _, partition in partitions_by_id.items():
+            # sort partition nodes based on descending node order
+            partition.nodes = dict(sorted(partition.nodes.items(), key=operator.itemgetter(1), reverse=True))
+        end_time = time.perf_counter()
+        print(f"---- Partition nodes sorting took {end_time - start_time:.6f} seconds")
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
@@ -245,7 +257,7 @@ class CapabilityBasedPartitioner:
                     if assignment.get(user, None) != id:  # type: ignore[arg-type]
                         nodes_reassignment[user] = id  # type: ignore[assignment]
         for node, id in nodes_reassignment.items():
-            merge_single_node(node, id)
+            merge_single_node(node, None, id)
 
         # filter out single node partitions
         if not self.allows_single_node_partition:
