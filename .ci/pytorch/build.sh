@@ -309,6 +309,24 @@ else
     fi
     pip_install_whl "$(echo dist/*.whl)"
 
+    if [[ -n "${BUILD_ADDITIONAL_PACKAGES}" ]]; then
+      if [[ "${BUILD_ADDITIONAL_PACKAGES}" == *vision* ]]; then
+        install_torchvision
+      fi
+
+      if [[ "${BUILD_ADDITIONAL_PACKAGES}" == *audio* ]]; then
+        install_torchaudio
+      fi
+
+      if [[ "${BUILD_ADDITIONAL_PACKAGES}" == *torchrec* || "${BUILD_ADDITIONAL_PACKAGES}" == *fbgemm* ]]; then
+        install_torchrec_and_fbgemm
+      fi
+
+      if [[ "${BUILD_ADDITIONAL_PACKAGES}" == *torchao* ]]; then
+        install_torchao
+      fi
+    fi
+
     if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
       echo "Checking that xpu is compiled"
       pushd dist/
