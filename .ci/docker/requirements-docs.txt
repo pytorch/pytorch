@@ -15,6 +15,10 @@ sphinxext-opengraph==0.9.1
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 0.9.1
 
+sphinx-tabs==3.4.7
+#Description: This is used to generate PyTorch docs
+#Pinned versions: 3.4.7
+
 sphinx_sitemap==2.6.0
 #Description: This is used to generate sitemap for PyTorch docs
 #Pinned versions: 2.6.0
