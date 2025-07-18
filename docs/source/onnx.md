@@ -87,7 +87,6 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     onnx_dynamo
     onnx_ops
     onnx_verification
-    onnx_dynamo_onnxruntime_backend
     onnx_torchscript
 ```
 
@@ -96,7 +95,6 @@ for tracking purposes -->
 ```{eval-rst}
 .. py:module:: torch.onnx.errors
 .. py:module:: torch.onnx.operators
-.. py:module:: torch.onnx.symbolic_caffe2
 .. py:module:: torch.onnx.symbolic_helper
 .. py:module:: torch.onnx.symbolic_opset10
 .. py:module:: torch.onnx.symbolic_opset11

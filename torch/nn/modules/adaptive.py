@@ -18,13 +18,15 @@ _ASMoutput = namedtuple("_ASMoutput", ["output", "loss"])
 
 
 class AdaptiveLogSoftmaxWithLoss(Module):
-    """Efficient softmax approximation.
+    (
+        """Efficient softmax approximation.
 
     As described in
     `Efficient softmax approximation for GPUs by Edouard Grave, Armand Joulin,
     Moustapha Ciss\u00e9, David Grangier, and Herv\u00e9 J\u00e9gou
     <https://arxiv.org/abs/1609.04309>`__.
-""" r"""
+"""
+        r"""
     Adaptive softmax is an approximate strategy for training models with large
     output spaces. It is most effective when the label distribution is highly
     imbalanced, for example in natural language modelling, where the word
@@ -104,6 +106,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     .. _Zipf's law: https://en.wikipedia.org/wiki/Zipf%27s_law
     """
+    )
 
     in_features: int
     n_classes: int
@@ -182,8 +185,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         if targ_dim == 1:
             if input_.size(0) != target_.size(0):
                 raise RuntimeError(
-                    "Input and target should have the same size "
-                    "in the batch dimension."
+                    "Input and target should have the same size in the batch dimension."
                 )
             if input_.dim() != 2:
                 raise RuntimeError(

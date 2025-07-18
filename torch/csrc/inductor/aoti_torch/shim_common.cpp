@@ -393,6 +393,15 @@ AOTITorchError aoti_torch_get_storage_offset(
   });
 }
 
+AOTITorchError aoti_torch_is_contiguous(
+    AtenTensorHandle tensor,
+    bool* ret_is_contiguous) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_contiguous = t->is_contiguous();
+  });
+}
+
 AOTITorchError aoti_torch_new_tensor_handle(
     AtenTensorHandle orig_handle,
     AtenTensorHandle* new_handle) {

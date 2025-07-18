@@ -34,6 +34,7 @@ from .ctx_manager import (
     InferenceModeVariable,
     JvpIncrementNestingCtxManagerVariable,
     SDPAKernelVariable,
+    SetFullgraphVariable,
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
@@ -68,10 +69,13 @@ from .functions import (
     TMADescriptorStableVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrapperUserFunctionVariable,
+    WrapperUserMethodVariable,
 )
 from .higher_order_ops import (
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
+    ReparametrizeModuleCallVariable,
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
@@ -144,6 +148,7 @@ from .user_defined import (
     UserDefinedExceptionObjectVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
 
@@ -195,6 +200,7 @@ __all__ = [
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",
+    "SetFullgraphVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",

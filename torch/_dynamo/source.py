@@ -587,6 +587,34 @@ class ConstDictKeySource(ChainedSource):
         return True
 
 
+@dataclasses.dataclass(frozen=True)
+class NonSerializableSetGetItemSource(ChainedSource):
+    index: int
+
+    def __post_init__(self):
+        from .variables import ConstantVariable
+
+        assert ConstantVariable.is_literal(self.index)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "set_getitem")
+        )
+        codegen(self.base)
+        codegen.append_output(codegen.create_load_const(self.index))
+        codegen.extend_output(create_call_function(2, False))
+
+    def name(self):
+        # set ordering might not be stable
+        return f"list({self.base.name()})[{self.index!r}]"
+
+    def is_dict_key(self):
+        return False
+
+
 # Used to access an item from the dictionary
 @dataclasses.dataclass(frozen=True)
 class DictGetItemSource(ChainedSource):
@@ -786,6 +814,33 @@ class FSDPNNModuleSource(NNModuleSource):
 class GlobalStateSource(Source):
     def name(self):
         return ""
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+
+@dataclasses.dataclass(frozen=True)
+class TorchSource(Source):
+    """Points to the actual `torch` module - used instead of GlobalSource
+    in case the user has overridden `torch` in their local namespace"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .guards import GuardBuilder, install_guard
+
+        install_guard(self.make_guard(GuardBuilder.ID_MATCH))
+
+    def name(self):
+        return "__import__('torch')"
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.extend_output(
+            [
+                codegen.create_load_const(0),  # level
+                create_instruction("BUILD_TUPLE", arg=0),  # fromlist
+                codegen.create_import_name("torch"),
+            ]
+        )
 
     def guard_source(self):
         return GuardSource.GLOBAL
