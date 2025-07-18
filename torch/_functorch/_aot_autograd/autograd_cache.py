@@ -95,7 +95,7 @@ class FXGraphCacheMiss(BypassAOTAutogradCache):
 
 
 def should_use_remote_autograd_cache():
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         return False
     if config.enable_remote_autograd_cache is not None:
         return config.enable_remote_autograd_cache
@@ -116,7 +116,7 @@ def should_use_remote_autograd_cache():
 
 
 def should_use_local_autograd_cache():
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         return False
     return config.enable_autograd_cache
 

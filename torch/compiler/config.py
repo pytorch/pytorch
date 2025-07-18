@@ -66,6 +66,18 @@ Tag to be included in the cache key generation for all torch compile caching.
 A common use case for such a tag is to break caches.
 """
 
+force_disable_caches: bool = Config(
+    justknob="pytorch/remote_cache:force_disable_caches",
+    env_name_force=[
+        "TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+        "TORCH_COMPILE_FORCE_DISABLE_CACHES",
+    ],
+    default=False,
+)
+"""
+Force disables all caching -- This will take precedence over and override any other caching flag
+"""
+
 dynamic_sources: str = Config(
     env_name_default="TORCH_COMPILE_DYNAMIC_SOURCES", default=""
 )
