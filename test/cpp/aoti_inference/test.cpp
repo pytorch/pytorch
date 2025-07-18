@@ -144,6 +144,8 @@ void test_aoti_package_loader_multi_gpu(
     const std::string& device,
     bool use_runtime_constant_folding) {
   torch::NoGradGuard no_grad;
+  // Ensure that this test will reset the default CUDA device on exit.
+  torch::DeviceGuard device_guard(c10::Device("cuda"));
 
   std::string data_path =
       (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
