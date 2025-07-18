@@ -1313,10 +1313,10 @@ EOF
 
   # Step 2. Make sure that the public API test "test_correct_module_names" fails when an existing
   # file is modified to introduce an invalid public API function.
-  EXISTING_FILEPATH="${TORCH_INSTALL_DIR}/nn/parameter.py"
+  EXISTING_FILEPATH="${TORCH_INSTALL_DIR}/cuda/streams.py"
   cp -v "${EXISTING_FILEPATH}" "${EXISTING_FILEPATH}.orig"
   echo "${BAD_PUBLIC_FUNC}" >> "${EXISTING_FILEPATH}"
-  invalid_api="torch.nn.parameter.new_public_func"
+  invalid_api="torch.cuda.streams.new_public_func"
   echo "Appended an invalid public API function to existing file ${EXISTING_FILEPATH}..."
 
   check_public_api_test_fails \
