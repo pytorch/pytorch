@@ -1,7 +1,6 @@
 #define PY_SSIZE_T_CLEAN
 #include <opcode.h>
 #include <signal.h>
-#include <string.h>
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
@@ -19,37 +18,6 @@ typedef struct {
 } ModuleState;
 
 // static int active_dynamo_threads = 0;
-
-#if IS_PYTHON_3_12_PLUS
-
-#define num_callables \
-  sizeof(((PyInterpreterState){0}).monitoring_callables) / sizeof(PyObject*)
-PyObject* prev_monitoring_callables[num_callables] = {NULL};
-#undef num_callables
-
-void disable_monitoring_callables() {
-  PyInterpreterState* interp = PyThreadState_GET()->interp;
-  memcpy(
-      prev_monitoring_callables,
-      interp->monitoring_callables,
-      sizeof(prev_monitoring_callables));
-  memset(interp->monitoring_callables, 0, sizeof(prev_monitoring_callables));
-}
-
-void enable_monitoring_callables() {
-  PyInterpreterState* interp = PyThreadState_GET()->interp;
-  memcpy(
-      interp->monitoring_callables,
-      prev_monitoring_callables,
-      sizeof(prev_monitoring_callables));
-}
-
-#else
-
-void disable_monitoring_callables() {}
-void enable_monitoring_callables() {}
-
-#endif // IS_PYTHON_3_12_PLUS
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
@@ -71,6 +39,14 @@ void eval_frame_callback_set(PyObject* obj) {
   }
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
+
+#if IS_PYTHON_3_12_PLUS
+const size_t sys_monitoring_num_callables =
+    sizeof((PyInterpreterState){0}.monitoring_callables) / sizeof(PyObject*);
+PyObject** get_monitoring_callables(PyInterpreterState* interp) {
+  return (PyObject**)interp->monitoring_callables;
+}
+#endif
 
 // 3.14 Not supported at all. See cpython_defs.c for hints
 #if !(IS_PYTHON_3_14_PLUS)

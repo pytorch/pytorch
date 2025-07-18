@@ -7,12 +7,64 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 
+#include <cstring>
+#include <unordered_map>
+#include <vector>
+
 extern "C" {
 extern PyObject* guard_complete_hook;
 }
 
 static constexpr const char* cache_lookup_profiler_str =
     "TorchDynamo Cache Lookup";
+
+#if IS_PYTHON_3_12_PLUS
+
+// keeps track of original monitoring callables for restoration
+static std::
+    unordered_map<PyInterpreterState*, std::vector<std::vector<PyObject*>>>
+        monitoring_callables;
+
+// disables sys.monitoring callables for the current interpreter
+void disable_monitoring_callables() {
+  PyInterpreterState* interp = PyThreadState_GET()->interp;
+  // emplace if not already present
+  monitoring_callables.try_emplace(interp);
+  PyObject** interp_monitoring_callables = get_monitoring_callables(interp);
+  monitoring_callables[interp].emplace_back(
+      interp_monitoring_callables,
+      interp_monitoring_callables + sys_monitoring_num_callables);
+  memset(
+      (char*)interp_monitoring_callables,
+      0,
+      sys_monitoring_num_callables * sizeof(PyObject*));
+}
+
+// enables previous sys.monitoring callables for the current interpreter
+void enable_monitoring_callables() {
+  PyInterpreterState* interp = PyThreadState_GET()->interp;
+  auto it = monitoring_callables.find(interp);
+  if (it != monitoring_callables.end() && !it->second.empty()) {
+    // NOTE: these values should not be non-nullptr, but there are no
+    // guarantees.
+    PyObject** interp_monitoring_callables = get_monitoring_callables(interp);
+    for (size_t i = 0; i < sys_monitoring_num_callables; ++i) {
+      Py_XDECREF(interp_monitoring_callables + i);
+    }
+    memcpy(
+        (char*)interp_monitoring_callables,
+        (char*)(it->second.back().data()),
+        sys_monitoring_num_callables * sizeof(PyObject*));
+    it->second.pop_back();
+  }
+}
+
+#else
+
+void disable_monitoring_callables() {}
+void enable_monitoring_callables() {}
+
+#endif // IS_PYTHON_3_12_PLUS
 
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
 // torch/_dynamo/types.py if this function's signature changes.
