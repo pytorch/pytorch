@@ -14,7 +14,6 @@ from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.autotune_process import TritonBenchmarkRequest
-from torch._inductor.codegen.common import RemovedArg
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
@@ -453,26 +452,21 @@ class TestTemplateRender(TestCase):
         especially in the case that the hooks are finalized manually by the
         caller i.e. by calling template.finalize_hook(hook_name)
         """
+        hook_identifier = "# CUSTOM_HOOK"
 
         class ExtensionTritonTemplateKernel(TritonTemplateKernel):
-            # Custom hook
-            def output_ptr_var(self) -> str:
+            def custom_hook(self) -> str:
                 """
-                Return the variable name of the output pointer argument used in the
-                kernel template
+                Custom hook that just returns a test string for
+                validation
                 """
 
                 def hook() -> str:
-                    assert len(self.args.output_buffers) > 0
-                    # Since this template has a single output_node, pick the output buffer
-                    # that has not been removed
-                    for value in self.args.output_buffers.values():
-                        if not isinstance(value, RemovedArg):
-                            return value
+                    return hook_identifier
 
-                assert "<OUTPUT_PTR_VAR>" not in self.render_hooks
-                self.render_hooks["<OUTPUT_PTR_VAR>"] = hook
-                return "<OUTPUT_PTR_VAR>"
+                assert "<CUSTOM_HOOK>" not in self.render_hooks
+                self.render_hooks["<CUSTOM_HOOK>"] = hook
+                return "<CUSTOM_HOOK>"
 
             def render(
                 self, template, kwargs, record_input_dependent_tracked_event=False
@@ -496,7 +490,7 @@ class TestTemplateRender(TestCase):
                         self.gen_defines,
                         # This function registers a hook that the scheduler does
                         # not directly finalize
-                        self.output_ptr_var,
+                        self.custom_hook,
                     ]
                 }
                 return PartialRender(
@@ -513,13 +507,14 @@ class TestTemplateRender(TestCase):
             source=(
                 r"""
 {{def_kernel("A", "B")}}
-    # test_finalized_subclass_hooks_marker
+    {{custom_hook()}}
     xoffset = tl.program_id(0)
     xindex = xoffset + tl.arange(0, XBLOCK)
+    xmask = tl.full([XBLOCK], True, tl.int1)
     tmp0 = tl.load(A + xindex)
     tmp1 = tl.load(B + xindex)
     tmp2 = tmp0 + tmp1
-    tl.store({{output_ptr_var()}} + xindex, tmp2)
+    {{store_output(("xindex",), "tmp2", mask="xmask")}}
     """
             ),
         )
@@ -559,7 +554,7 @@ class TestTemplateRender(TestCase):
 
             _result, kernels = run_and_get_kernels(add, a, b)
             assert len(kernels) == 1
-            assert "test_finalized_subclass_hooks_marker" in kernels[0]
+            assert hook_identifier in kernels[0]
 
 
 if __name__ == "__main__":
