@@ -62,7 +62,7 @@ extensions = [
     "sphinxcontrib.katex",
     "sphinx_copybutton",
     "sphinx_design",
-    "myst_parser",
+    "myst_nb",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
@@ -81,6 +81,10 @@ sitemap_excludes = [
     "genindex.html",
 ]
 sitemap_url_scheme = "{link}"
+
+html_additional_pages = {
+    "404": "404.html",
+}
 
 # build the templated autosummary files
 autosummary_generate = True

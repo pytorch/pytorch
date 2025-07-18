@@ -1319,6 +1319,8 @@ def get_cpp_torch_device_options(
 
     include_dirs = cpp_extension.include_paths(device_type)
     libraries_dirs = cpp_extension.library_paths(device_type)
+    if not config.is_fbcode():
+        libraries += ["c10"]
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1765,9 +1767,13 @@ class CppBuilder:
         """
 
         definitions = " ".join(self._build_option.get_definitions())
-        target_library_type = (
-            "STATIC" if config.aot_inductor.compile_standalone else "SHARED"
-        )
+        if config.aot_inductor.compile_standalone:
+            if config.test_configs.testing_aot_inductor_compile_standalone:
+                add_target = f"add_library({self._target_name} STATIC)"
+            else:
+                add_target = f"add_executable({self._target_name} ${{CMAKE_CURRENT_SOURCE_DIR}}/main.cpp)"
+        else:
+            add_target = f"add_library({self._target_name} SHARED)"
 
         contents = textwrap.dedent(
             f"""
@@ -1775,22 +1781,43 @@ class CppBuilder:
             project({self._target_name} LANGUAGES CXX)
             set(CMAKE_CXX_STANDARD 17)
 
-            # May need to point CMAKE_PREFIX_PATH to the right torch location
-            find_package(Torch REQUIRED)
-
-            # Set a shared library target
-            add_library({self._target_name} {target_library_type})
-
-            # Add macro definitions
-            target_compile_definitions({self._target_name} PRIVATE {definitions})
-
-            # Add compile flags
-            target_compile_options({self._target_name} PRIVATE {self._cflags_args})
-            # Backend specific flags
-            target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
+            # Set target
+            {add_target}
 
             """
         )
+
+        if (
+            not config.aot_inductor.compile_standalone
+            or config.test_configs.testing_aot_inductor_compile_standalone
+        ):
+            # When compile_standalone is True, the generated cpp project should
+            # not use Torch. But for unit testing purpose, we need to use Torch here.
+            contents += textwrap.dedent(
+                """
+                # May need to point CMAKE_PREFIX_PATH to the right torch location
+                find_package(Torch REQUIRED)
+
+                """
+            )
+            # flags and macros here are mostly CPU specific. Not emitting them for GPU models
+            # will make the generated CMake file more portable and won't really hurt performance.
+            # NOTE: standalone focuses on GPU now. For CPU, some of the flags and macros may
+            # be still needed.
+            contents += textwrap.dedent(
+                f"""
+                # Add macro definitions
+                target_compile_definitions({self._target_name} PRIVATE {definitions})
+
+                # Add compile flags
+                target_compile_options({self._target_name} PRIVATE {self._cflags_args})
+
+                # Backend-specific flags
+                target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
+
+                """
+            )
+
         if device_type == "cuda" and torch.version.hip is None:
             from torch._inductor.codecache import _nvcc_arch_as_compile_option
 
@@ -1798,7 +1825,11 @@ class CppBuilder:
             contents += textwrap.dedent(
                 f"""
                 enable_language(CUDA)
+                set(CMAKE_CUDA_STANDARD 17)
                 find_package(CUDAToolkit REQUIRED)
+                target_include_directories({self._target_name} PRIVATE ${{CUDAToolkit_INCLUDE_DIRS}})
+                target_compile_definitions({self._target_name} PRIVATE USE_CUDA)
+                target_link_libraries({self._target_name} PRIVATE cuda CUDA::cudart_static)
 
                 find_program(OBJCOPY_EXECUTABLE objcopy)
                 if(NOT OBJCOPY_EXECUTABLE)
@@ -1883,6 +1914,13 @@ class CppBuilder:
                 )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
+        if (
+            config.aot_inductor.compile_standalone
+            and not config.test_configs.testing_aot_inductor_compile_standalone
+        ):
+            # When compile_standalone is True, do not link with libtorch
+            return
+
         lflags = " ".join(self._build_option.get_ldflags())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(

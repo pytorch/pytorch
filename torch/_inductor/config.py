@@ -138,8 +138,12 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # None: Not set -- Off for OSS, JustKnobs based for internal
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
-# See torch.compiler.force_disable_caches
-force_disable_caches: bool = Config(alias="torch.compiler.config.force_disable_caches")
+# Force disabled all inductor level caching -- This will override any other caching flag
+force_disable_caches: bool = Config(
+    justknob="pytorch/remote_cache:force_disable_caches",
+    env_name_force="TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+    default=False,
+)
 
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
@@ -570,7 +574,6 @@ realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8
-realize_acc_reads_size_threshold = 3 * (1024**3)
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
@@ -1832,6 +1835,9 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
+
+    # If set,
+    testing_aot_inductor_compile_standalone = False
 
 
 if TYPE_CHECKING:
