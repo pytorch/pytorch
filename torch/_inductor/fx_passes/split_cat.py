@@ -62,6 +62,7 @@ pre_grad_pass_names = [
     "split_stack_to_cats_pass",
     "unbind_stack_to_slices_pass",
     "move_reshape_out_of_split_stack_pass",
+    "einsum_to_pointwise_pass",
 ]
 
 post_grad_pass_names = [
@@ -247,7 +248,7 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
         return
     # remove the dummy split whose split sections size is one
     # theoretically nodes with no users should be removed, but we have seen the corner case
-    # thus we add its uers check to walk around the StopIteration error.
+    # thus we add its users check to walk around the StopIteration error.
     if len(split_sections) == 1 and len(split_node.users.keys()) > 0:
         # find the grand children of the split_node
         next_users = find_next_users(split_node)
@@ -302,7 +303,7 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
 
 
 @register_graph_pattern(
-    CallFunctionVarArgs(torch.cat, users=MULTIPLE),
+    CallFunctionVarArgs([torch.cat, torch.concat], users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
 )
 def normalize_cat_default(match: Match, *args, **kwargs):
@@ -347,6 +348,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         cat_node.args == new_args
         and cat_node.kwargs == new_kwargs
         and cat_node.op == "call_function"
+        and cat_node.target == torch.cat
     ):
         return
 
@@ -1525,7 +1527,7 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
             # find the index of getitems to be cated/stacked
             # type: ignore[union-attr]
             indices = [arg.args[1] for arg in cat_user.args[0]]  # type: ignore[union-attr]
-            # the gettitems to be merged must be consecutive, otherwise
+            # the getitems to be merged must be consecutive, otherwise
             # returned sliced tensor could be wrong
             if not is_sorted_and_consecutive(indices):  # type: ignore[arg-type]
                 continue
@@ -1627,7 +1629,7 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
             for getitem in cat_user.args[0]:  # type: ignore[union-attr]
                 indices.append(getitem.args[1])  # type: ignore[union-attr]
                 idx_to_getitem[getitem.args[1]] = getitem  # type: ignore[union-attr]
-            # the gettitems to be merged must be consecutive, otherwise
+            # the getitems to be merged must be consecutive, otherwise
             # returned sliced tensor could be wrong
             if not is_sorted_and_consecutive(indices):  # type: ignore[arg-type]
                 continue
@@ -1700,6 +1702,12 @@ def normalize_split_default_aten(match: Match, *args, **kwargs):
         return
     if split_dim < 0:  # Normalize split dim
         split_dim += split_input.meta["val"].dim()
+    # we also need to check the input of the split_node
+    # primals =torch.randn(4096, 300)
+    # split = torch.ops.aten.split.Tensor(primals, 320, 1) -> truncate to 300 automatically
+    # split_2 = torch.ops.aten.split_with_sizes.default(primals, [320], dim = 1) -> runtime error
+    split_input_size = split_input.meta["val"].shape[split_dim]
+    split_size = min(split_size, split_input_size)
     split_section_list = [split_size] * (len(split_node.meta["val"]))
     new_args = (split_input, split_section_list)
     new_kwargs = {"dim": split_dim}
@@ -1783,7 +1791,11 @@ def merge_split_cat_aten(match: Match, *args, **kwargs):
     for cat_node in list(getitem_nodes[0].users.keys()):
         cat_dim = get_arg_value(cat_node, 1, "dim")
         cat_inputs = get_arg_value(cat_node, 0, "tensors")
-        if len(cat_inputs) < threshold_to_cat:
+        try:
+            cat_input_len = len(cat_inputs)
+        except TypeError:
+            continue
+        if cat_input_len < threshold_to_cat:
             continue
         # check split node and cat node has same dim, and all getitem nodes have same parent node
         parent_to_indices = defaultdict(list)  # type: ignore[var-annotated]
@@ -2069,7 +2081,7 @@ def update_args_from_split_getitem(
     threshold_to_cat: int = 2,
 ):
     split_input, split_size, split_dim = _get_split_args_default(parents_seen[-1])
-    # case 1: the number of getitems is the same as the split size, elimiate the split
+    # case 1: the number of getitems is the same as the split size, eliminate the split
     if len(split_size) == len(getitem_indices) and is_sorted_and_consecutive(
         getitem_indices
     ):
@@ -2164,7 +2176,7 @@ def update_args_from_unbind_getitem(
     unbind_input = get_arg_value(parents_seen[-1], 0, "input")  # split or unbind input
     unbind_dim = get_arg_value(parents_seen[-1], 1, "dim")  # split or unbind dim
     cat_dim = get_arg_value(node, 1, "dim")  # cat or stack dim
-    # case 1: the number of getitems is the same as the split size, elimiate the split
+    # case 1: the number of getitems is the same as the split size, eliminate the split
     size = list(unbind_input.meta["example_value"].shape)[unbind_dim]
     if size == len(getitem_indices):
         cat_shape = torch.cat(
@@ -2958,3 +2970,65 @@ def move_view_after_cat(match: Match, *args, **kwargs):
             view_node.meta.update(cat_node.meta)
             graph.erase_node(cat_node)
         counters["inductor"]["move_view_after_cat_aten_pass"] += 1
+
+
+def match_einsum_strings(s: str) -> bool:
+    """
+    This function takes a string s as input, where s is in the format "3 letter string,
+    4 letter string -> 3 letter string".
+    It checks if the strings match the rule and returns True if they do, False otherwise.
+
+    The rule is:
+    - The three strings have the same first two characters.
+    - The first two strings have the same third character.
+    - The second and third strings have the same last character.
+    """
+
+    # Split the input string into parts
+    parts = s.replace("->", ",").split(",")
+
+    # Strip leading/trailing whitespaces from each part
+    parts = [part.strip() for part in parts]
+
+    # Check if we have exactly three parts
+    if len(parts) != 3:
+        return False
+
+    # Extract the strings
+    s1, s2, s3 = parts
+
+    # Check if the strings have the correct lengths
+    if len(s1) != 3 or len(s2) != 4 or len(s3) != 3:
+        return False
+
+    # Check the rule
+    return s1[:2] == s2[:2] == s3[:2] and s1[2] == s2[2] and s2[3] == s3[2]
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.functional.einsum, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("einsum_to_pointwise_pass"),
+)
+def replace_einsum_to_pointwise(match: Match, *args, **kwargs):
+    def repl(input, weights):
+        return (input.unsqueeze(-1) * weights).sum(-2)
+
+    def should_replace_einsum(einsum_node) -> bool:
+        equation = get_arg_value(einsum_node, 0)
+        users = einsum_node.users.keys()
+        # for now, we only consider the case of two operands
+        return (
+            len(einsum_node.args) == 3
+            and is_node_meta_valid(input)
+            and is_node_meta_valid(weights)
+            and any(
+                user.target == "add" or user.target == operator.add for user in users
+            )
+            and match_einsum_strings(equation)
+        )
+
+    einsum_node = match.nodes[0]
+    input, weights = get_arg_value(einsum_node, 1), get_arg_value(einsum_node, 2)
+    if should_replace_einsum(einsum_node):
+        match.replace_by_example(repl, [input, weights])
+        counters["inductor"]["einsum_to_pointwise_pass"] += 1

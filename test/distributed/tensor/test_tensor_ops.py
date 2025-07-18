@@ -6,6 +6,7 @@ from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
+    init_device_mesh,
     Partial,
     Replicate,
     Shard,
@@ -593,6 +594,48 @@ class DistTensorOpsTest(DTensorTestBase):
             )
 
     @with_comms
+    def test_index_put_scalar(self):
+        device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        global_input = torch.randn(2, 4, 8, device=self.device_type)
+        global_index = [
+            torch.randint(global_input.shape[i], size=(), device=self.device_type)
+            for i in range(3)
+        ]
+        global_value = torch.randn(size=(), device=self.device_type)
+        value_dt = distribute_tensor(
+            global_value, device_mesh, [Replicate(), Replicate()]
+        )
+        placement_choice_pool = [Shard(0), Shard(1), Replicate()]
+        for i in placement_choice_pool:
+            for j in placement_choice_pool:
+                input_dt = distribute_tensor(global_input, device_mesh, [i, j])
+                ref = torch.index_put(global_input, global_index, global_value)
+                output_dt = torch.index_put(input_dt, global_index, value_dt)
+                assert isinstance(output_dt, DTensor)
+                # for value is a scalar case, output placement must be replicate
+                self.assertEqual(output_dt.placements, (Replicate(), Replicate()))
+                self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
+    def test_index_put_tensor(self):
+        device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        global_input = torch.randn(2, 4, 8, device=self.device_type)
+        global_index = [
+            torch.randint(global_input.shape[0], size=(), device=self.device_type)
+        ]
+        global_value = torch.zeros([4, 8], device=self.device_type)
+        value_dt = distribute_tensor(global_value, device_mesh, [Shard(1), Replicate()])
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0), Replicate()])
+        for accumulate in [True, False]:
+            ref = torch.index_put(global_input, global_index, global_value, accumulate)
+            output_dt = torch.index_put(input_dt, global_index, value_dt, accumulate)
+            assert isinstance(output_dt, DTensor)
+            # `input_dt` follows `value_dt`'s Shard(1) plus a offset value of
+            # global_value.ndim-global_input.ndim, which results in Shard(2)
+            self.assertEqual(output_dt.placements, (Shard(2), Replicate()))
+            self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
     def test_where_type_promotion(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))  # 1D mesh
 
@@ -664,6 +707,34 @@ class DistTensorOpsTest(DTensorTestBase):
 
         self.assertEqual(sharded_out.full_tensor(), global_out)
         self.assertEqual(sharded_dtensor.grad.full_tensor(), global_tensor.grad)
+
+    @with_comms
+    def test_split_on_partial(self):
+        self.run_subtests(
+            {
+                "reduce_op": ["sum", "avg", "product", "min", "max"],
+                "split_size": [2, 3, 4],
+                "split_dim": [0, 1],
+            },
+            self._test_split_on_partial,
+        )
+
+    def _test_split_on_partial(self, reduce_op: str, split_size: int, split_dim: int):
+        torch.manual_seed(self.rank)
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        partial_tensor = torch.randn(8, 8, device=self.device_type)
+        partial_dt = DTensor.from_local(
+            local_tensor=partial_tensor,
+            device_mesh=mesh,
+            placements=[Partial(reduce_op=reduce_op)],
+        )
+        self._test_op_on_dtensor(
+            torch.split,
+            partial_dt,
+            split_size,
+            dim=split_dim,
+        )
 
 
 if __name__ == "__main__":

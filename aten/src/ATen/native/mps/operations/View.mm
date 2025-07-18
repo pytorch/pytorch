@@ -19,8 +19,7 @@
 #include <ATen/ops/view_as_real.h>
 #endif
 
-namespace at::native {
-namespace mps {
+namespace at::native::mps {
 
 static bool is_cow_mps_backed_or_not_cow(const Tensor& self) {
   const DataPtr& data_ptr = self.storage().data_ptr();
@@ -205,26 +204,4 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
   return output;
 }
 
-} // namespace mps
-
-// implementation of as_strided() op
-Tensor as_strided_tensorimpl_mps(const Tensor& self,
-                                 IntArrayRef size,
-                                 IntArrayRef stride,
-                                 std::optional<int64_t> storage_offset_) {
-  auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto result =
-      detail::make_tensor<TensorImpl>(c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
-  setStrided(result, size, stride, storage_offset);
-
-  // creating the view graph will be deferred until gatherViewTensor() or scatterViewTensor() are called.
-  // In as_strided, we just update the base shape of the buffer in order to retrieve it later
-  // when we create/run the view graph.
-  IntArrayRef base_shape = mps::updateTensorBaseShape(self);
-  TORCH_INTERNAL_ASSERT(
-      !base_shape.empty(), "Failed to update the base shape of tensor's buffer at ", self.storage().data());
-
-  return result;
-}
-
-} // namespace at::native
+} // namespace at::native::mps

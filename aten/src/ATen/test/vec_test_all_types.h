@@ -1,6 +1,7 @@
 #pragma once
-#include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/vec_quant.h>
 #include <c10/util/bit_cast.h>
 #include <c10/util/irange.h>
 #include <gtest/gtest.h>
@@ -21,7 +22,9 @@
 #else
 #define CACHE_LINE 32
 #endif
-
+#ifndef _WIN32
+#include <ATen/native/cpu/utils.h>
+#endif
 #if defined(__GNUC__)
 #define CACHE_ALIGN __attribute__((aligned(CACHE_LINE)))
 #define not_inline __attribute__((noinline))
@@ -335,7 +338,7 @@ T safe_fpt_division(T f1, T f2)
 }
 
 template<class T>
-std::enable_if_t<std::is_floating_point_v<T> || c10::is_reduced_floating_point_v<T>, bool>
+std::enable_if_t<std::is_floating_point_v<T>, bool>
 nearlyEqual(T a, T b, T tolerance) {
     if (check_both_nan<T>(a, b)) return true;
     if (check_both_big(a, b)) return true;
@@ -351,7 +354,7 @@ nearlyEqual(T a, T b, T tolerance) {
 }
 
 template<class T>
-std::enable_if_t<!std::is_floating_point_v<T> && !c10::is_reduced_floating_point_v<T>, bool>
+std::enable_if_t<!std::is_floating_point_v<T>, bool>
 nearlyEqual(T a, T b, T tolerance) {
     return a == b;
 }
@@ -528,7 +531,7 @@ template <typename T>
 std::enable_if_t<is_complex<T>::value, void>
 filter_div_ub(T& val1, T& val2) {
     //missing
-    //at least consdier zero division
+    //at least consider zero division
     auto ret = std::abs(val2);
     if (ret == 0) {
         val2 = T(1, 2);
@@ -849,7 +852,7 @@ public:
         {
             stream << "Arguments:\n";
             stream << "#\t " << arg0 << "\n";
-            if (argSize >= 2)
+            if (argSize == 2)
             {
                 stream << "#\t " << arg1 << "\n";
             }
@@ -1288,7 +1291,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_multiply(Compl
     T y_real = y.real();
     T y_imag = y.imag();
 #if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
-    //check multiplication considerin swap and fma
+    //check multiplication considering swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
     T neg_imag = -y_imag;
@@ -1359,7 +1362,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
     return Complex<T>(rr, ii);
 #else /* defined(CPU_CAPABILITY_ZVECTOR) */
 #if defined(CPU_CAPABILITY_VSX)
-    //check multiplication considerin swap and fma
+    //check multiplication considering swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
     T neg_imag = -y_imag;
@@ -1400,22 +1403,6 @@ std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
     using op_math_t = typename OpMathType<T>::type;
     auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
     return static_cast<T>(noFma.sub(ab, op_math_t(c)));
-}
-
-template <typename T>
-std::enable_if_t<!is_complex<T>::value, T> local_fnmadd(T a, T b, T c) {
-    PreventFma noFma;
-    using op_math_t = typename OpMathType<T>::type;
-    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
-    return static_cast<T>(noFma.add(-ab, op_math_t(c)));
-}
-
-template <typename T>
-std::enable_if_t<!is_complex<T>::value, T> local_fnmsub(T a, T b, T c) {
-    PreventFma noFma;
-    using op_math_t = typename OpMathType<T>::type;
-    auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
-    return static_cast<T>(noFma.sub(-ab, op_math_t(c)));
 }
 
 template <typename T>
@@ -1572,11 +1559,6 @@ int32_t widening_subtract(T val, T b) {
 template<typename T>
 T getDefaultTolerance() {
     return static_cast<T>(0.0);
-}
-
-template<>
-c10::Half getDefaultTolerance() {
-    return 1e-2;
 }
 
 template<>

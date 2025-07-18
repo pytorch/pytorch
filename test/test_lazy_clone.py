@@ -1,11 +1,7 @@
-# Owner(s): ["module: tests"]
+# Owner(s): ["module: copy on write"]
 
 import torch
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    skipCUDAIf,
-    skipXLA,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
@@ -15,15 +11,9 @@ from torch.testing._internal.common_utils import (
 
 
 class TestLazyCloneDeviceType(TestCase):
-    def skip_if_lt_two_devices(self, device_type):
-        if device_type == "cuda":
-            if torch.cuda.device_count() < 2:
-                self.skipTest("Only one CUDA device found")
-        elif device_type == "mps":
-            if torch.mps.device_count() < 2:
-                self.skipTest("Only one MPS device found")
-        else:
-            self.skipTest(f"Index not supported for device type {device_type}")
+    def skip_if_lt_two_accelerators(self):
+        if torch.accelerator.device_count() < 2:
+            self.skipTest("Only one accelerator device found")
 
     def get_src_dest_devices(self, case, device):
         device_type = torch.device(device).type
@@ -41,11 +31,11 @@ class TestLazyCloneDeviceType(TestCase):
             src_device = device_type
             dest_device = device_type
         elif case == "from_0_to_1":
-            self.skip_if_lt_two_devices(device_type)
+            self.skip_if_lt_two_accelerators()
             src_device = f"{device_type}:0"
             dest_device = f"{device_type}:1"
         elif case == "from_1_to_0":
-            self.skip_if_lt_two_devices(device_type)
+            self.skip_if_lt_two_accelerators()
             src_device = f"{device_type}:1"
             dest_device = f"{device_type}:0"
         else:
@@ -53,9 +43,7 @@ class TestLazyCloneDeviceType(TestCase):
 
         return src_device, dest_device
 
-    @skipCUDAIf(True, "Does not work for CUDA")
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    @skipXLA
     @parametrize("materialize_first", ("src", "dest"))
     @parametrize(
         "case",
@@ -143,9 +131,7 @@ class TestLazyCloneDeviceType(TestCase):
 
     # Test that COW a tensor with a different target device can be used in read
     # operations.
-    @skipCUDAIf(True, "Does not work for CUDA")
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    @skipXLA
     @parametrize(
         "case",
         [
@@ -209,7 +195,9 @@ class TestLazyCloneDeviceType(TestCase):
         self.assertEqual(torch._C._data_address_resolve_unified(b), orig_data_ptr)
 
 
-instantiate_device_type_tests(TestLazyCloneDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(
+    TestLazyCloneDeviceType, globals(), allow_mps=True, only_for=["cpu", "mps"]
+)
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True

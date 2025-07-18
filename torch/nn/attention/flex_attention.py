@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # flake8: noqa: B950
 """This module implements the user facing API for flex_attention in PyTorch."""
+
 import functools
 import inspect
 import itertools
@@ -8,10 +9,22 @@ import math
 import operator
 import warnings
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 from torch import Tensor
+
+
+try:
+    from typing import TypedDict
+except ImportError:
+    from typing_extensions import TypedDict
+
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing_extensions import NotRequired
+
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch._prims_common import DeviceLikeType
@@ -26,6 +39,7 @@ from torch.utils._pytree import tree_map_only
 __all__ = [
     "BlockMask",
     "flex_attention",
+    "FlexKernelOptions",
     "create_block_mask",
     "create_mask",
     "create_nested_block_mask",
@@ -36,6 +50,123 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
+
+
+class FlexKernelOptions(TypedDict, total=False):
+    """Options for controlling the behavior of FlexAttention kernels.
+
+    These options are passed to the underlying Triton kernels to control performance
+    and numerical behavior. Most users will not need to specify these options as the
+    default autotuning provides good performance.
+
+    The options can be prefixed with 'fwd_' or 'bwd_' to apply only to forward or
+    backward pass respectively. For example: 'fwd_BLOCK_M' and 'bwd_BLOCK_M1'.
+
+    Note:
+      We currently do not provide any backward compatibility guarantees for these options.
+      That being said most of these have remained pretty stable since their introduction. But
+      We do not consider this part of the public API just yet. We think that some documentation
+      Is better than secret hidden flags, but we may change these options in the future.
+
+    Example Usage:
+        .. code-block:: python
+
+            # Using dictionary (backward compatible)
+            kernel_opts = {"BLOCK_M": 64, "BLOCK_N": 64, "PRESCALE_QK": True}
+            output = flex_attention(q, k, v, kernel_options=kernel_opts)
+
+            # Using TypedDict (recommended for type safety)
+            from torch.nn.attention.flex_attention import FlexKernelOptions
+
+            kernel_opts: FlexKernelOptions = {
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "PRESCALE_QK": True,
+            }
+            output = flex_attention(q, k, v, kernel_options=kernel_opts)
+
+            # Forward/backward specific options
+            kernel_opts: FlexKernelOptions = {
+                "fwd_BLOCK_M": 64,
+                "bwd_BLOCK_M1": 32,
+                "PRESCALE_QK": False,
+            }
+            output = flex_attention(q, k, v, kernel_options=kernel_opts)
+    """
+
+    # Performance tuning options
+    num_warps: NotRequired[int]
+    """Number of warps to use in the CUDA kernel. Higher values may improve performance
+    but increase register pressure. Default is determined by autotuning."""
+
+    num_stages: NotRequired[int]
+    """Number of pipeline stages in the CUDA kernel. Higher values may improve performance
+    but increase shared memory usage. Default is determined by autotuning."""
+
+    BLOCK_M: NotRequired[int]
+    """Thread block size for the sequence length dimension of Q in forward pass.
+    Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
+
+    BLOCK_N: NotRequired[int]
+    """Thread block size for the sequence length dimension of K/V in forward pass.
+    Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
+
+    # Backward-specific block sizes (when prefixed with 'bwd_')
+    BLOCK_M1: NotRequired[int]
+    """Thread block size for Q dimension in backward pass. Use as 'bwd_BLOCK_M1'.
+    Default is determined by autotuning."""
+
+    BLOCK_N1: NotRequired[int]
+    """Thread block size for K/V dimension in backward pass. Use as 'bwd_BLOCK_N1'.
+    Default is determined by autotuning."""
+
+    BLOCK_M2: NotRequired[int]
+    """Thread block size for second Q dimension in backward pass. Use as 'bwd_BLOCK_M2'.
+    Default is determined by autotuning."""
+
+    BLOCK_N2: NotRequired[int]
+    """Thread block size for second K/V dimension in backward pass. Use as 'bwd_BLOCK_N2'.
+    Default is determined by autotuning."""
+
+    PRESCALE_QK: NotRequired[bool]
+    """Whether to pre-scale QK by 1/sqrt(d) and change of base. This is slightly faster but
+    may have more numerical error. Default: False."""
+
+    ROWS_GUARANTEED_SAFE: NotRequired[bool]
+    """If True, guarantees that at least one value in each row is not masked out.
+    Allows skipping safety checks for better performance. Only set this if you are certain
+    your mask guarantees this property. For example, causal attention is guaranteed safe
+    because each query has at least 1 key-value to attend to. Default: False."""
+
+    BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
+    """If True, guarantees that all blocks in the mask are contiguous.
+    Allows optimizing block traversal. For example, causal masks would satisfy this,
+    but prefix_lm + sliding window would not. Default: False."""
+
+    WRITE_DQ: NotRequired[bool]
+    """Controls whether gradient scatters are done in the DQ iteration loop of the backward pass.
+    Setting this to False will force this to happen in the DK loop which depending on your
+    specific score_mod and mask_mod might be faster. Default: True."""
+
+    FORCE_USE_FLEX_ATTENTION: NotRequired[bool]
+    """If True, forces the use of the flex attention kernel instead of potentially using
+    the more optimized flex-decoding kernel for short sequences. This can be a helpful
+    option for debugging. Default: False."""
+
+    USE_TMA: NotRequired[bool]
+    """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
+    This is experimental and may not work on all hardware, currently specific
+    to NVIDIA GPUs Hopper+. Default: False."""
+
+    # ROCm-specific options
+    kpack: NotRequired[int]
+    """ROCm-specific kernel packing parameter."""
+
+    matrix_instr_nonkdim: NotRequired[int]
+    """ROCm-specific matrix instruction non-K dimension."""
+
+    waves_per_eu: NotRequired[int]
+    """ROCm-specific waves per execution unit."""
 
 
 class _ModificationType(Enum):
@@ -291,14 +422,12 @@ class BlockMask:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
         assert kv_num_blocks is not None, "kv_num_blocks must be provided"
         assert kv_indices is not None, "kv_indices must be provided"
-        assert q_num_blocks is not None, "q_num_blocks must be provided"
-        assert q_indices is not None, "q_indices must be provided"
-        assert (full_kv_num_blocks is None) == (
-            full_kv_indices is None
-        ), "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
-        assert (full_q_num_blocks is None) == (
-            full_q_indices is None
-        ), "full_q_num_blocks and full_q_indices must be both provided or omitted"
+        assert (full_kv_num_blocks is None) == (full_kv_indices is None), (
+            "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+        )
+        assert (full_q_num_blocks is None) == (full_q_indices is None), (
+            "full_q_num_blocks and full_q_indices must be both provided or omitted"
+        )
 
         self.seq_lengths = seq_lengths
         self.kv_num_blocks = kv_num_blocks
@@ -322,6 +451,7 @@ class BlockMask:
         BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
         mask_mod: Optional[_mask_mod_signature] = None,
         seq_lengths: Optional[tuple[int, int]] = None,
+        compute_q_blocks: bool = True,
     ):
         """
         Creates a BlockMask instance from key-value block information.
@@ -344,18 +474,22 @@ class BlockMask:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
 
-        assert (full_kv_num_blocks is None) == (
-            full_kv_indices is None
-        ), "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+        assert (full_kv_num_blocks is None) == (full_kv_indices is None), (
+            "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+        )
 
         # Generate q_num_blocks and q_indices
-        q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
-        if full_kv_num_blocks is not None:
-            assert full_kv_indices is not None
-            full_q_num_blocks, full_q_indices = _transpose_ordered(
-                full_kv_num_blocks, full_kv_indices
-            )
+        if compute_q_blocks:
+            q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
+            if full_kv_num_blocks is not None:
+                assert full_kv_indices is not None
+                full_q_num_blocks, full_q_indices = _transpose_ordered(
+                    full_kv_num_blocks, full_kv_indices
+                )
+            else:
+                full_q_num_blocks, full_q_indices = None, None
         else:
+            q_num_blocks, q_indices = None, None
             full_q_num_blocks, full_q_indices = None, None
 
         if isinstance(BLOCK_SIZE, int):
@@ -364,7 +498,7 @@ class BlockMask:
         mask_mod = mask_mod if mask_mod is not None else noop_mask
         if seq_lengths is None:
             q_length = kv_indices.shape[-2] * BLOCK_SIZE[0]
-            kv_length = q_indices.shape[-2] * BLOCK_SIZE[1]
+            kv_length = kv_indices.shape[-1] * BLOCK_SIZE[1]
             seq_lengths = (q_length, kv_length)
 
         return cls(
@@ -434,29 +568,34 @@ class BlockMask:
                 def causal_mask(b, h, q_idx, kv_idx):
                     return q_idx >= kv_idx
 
-                block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device="cuda")
-                assert block_mask.kv_num_blocks.shape == (4,2,4)
-                assert block_mask.kv_indices.shape == (4,2,4,4)
+
+                block_mask = create_block_mask(
+                    causal_mask, 4, 2, 512, 512, device="cuda"
+                )
+                assert block_mask.kv_num_blocks.shape == (4, 2, 4)
+                assert block_mask.kv_indices.shape == (4, 2, 4, 4)
 
                 # Index on batch dimension
                 new_block_mask = block_mask[0]
-                assert new_block_mask.kv_num_blocks.shape == (2,4)
-                assert new_block_mask.kv_indices.shape == (2,4,4)
+                assert new_block_mask.kv_num_blocks.shape == (2, 4)
+                assert new_block_mask.kv_indices.shape == (2, 4, 4)
 
                 # Index on batch and head dimension
                 new_block_mask = block_mask[0, 1]
                 assert new_block_mask.kv_num_blocks.shape == (4,)
-                assert new_block_mask.kv_indices.shape == (4,4)
+                assert new_block_mask.kv_indices.shape == (4, 4)
 
                 # slicing on batch and head dimension
                 new_block_mask = block_mask[0:2, 1:2]
-                assert new_block_mask.kv_num_blocks.shape == (2,1,4)
-                assert new_block_mask.kv_indices.shape == (2,1,4,4)
+                assert new_block_mask.kv_num_blocks.shape == (2, 1, 4)
+                assert new_block_mask.kv_indices.shape == (2, 1, 4, 4)
 
                 # slicing on batch, head, and query dimension
-                new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
-                assert new_block_mask.kv_num_blocks.shape == (2,1,1)
-                assert new_block_mask.kv_indices.shape == (2,1,1,4)
+                new_block_mask = block_mask[
+                    0:2, 1:2, torch.tensor([1], dtype=torch.int32)
+                ]
+                assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
+                assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
         """
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
@@ -475,6 +614,7 @@ class BlockMask:
             BLOCK_SIZE=self.BLOCK_SIZE,
             mask_mod=None,
             seq_lengths=self.seq_lengths,
+            compute_q_blocks=self.q_indices is not None,
         )
 
     def __repr__(self):
@@ -485,7 +625,7 @@ class BlockMask:
             f"BlockMask(\n"
             f"    kv_num_blocks={self.kv_num_blocks.shape},\n"
             f"    kv_indices={self.kv_indices.shape},\n"
-            f"    full_kv_num_blocks={shape_or_none(self.full_kv_num_blocks )},\n"
+            f"    full_kv_num_blocks={shape_or_none(self.full_kv_num_blocks)},\n"
             f"    full_kv_indices={shape_or_none(self.full_kv_indices)},\n"
             f"    q_num_blocks={shape_or_none(self.q_num_blocks)},\n"
             f"    q_indices={shape_or_none(self.q_indices)},\n"
@@ -636,7 +776,7 @@ class BlockMask:
 
         Note:
             This method does not modify the original BlockMask in-place.
-            Instead, it returns a new BlockMask instance where invidual tensor attributes
+            Instead, it returns a new BlockMask instance where individual tensor attributes
             may or may not be moved to the specified device, depending on their
             current device placement.
         """
@@ -857,6 +997,7 @@ def create_block_mask(
             def causal_mask(b, h, q_idx, kv_idx):
                 return q_idx >= kv_idx
 
+
             block_mask = create_block_mask(causal_mask, 1, 1, 8192, 8192, device="cuda")
             query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
             key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
@@ -864,9 +1005,9 @@ def create_block_mask(
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
     mod_type = _get_mod_type(mask_mod)
-    assert (
-        mod_type == _ModificationType.MASK_MOD
-    ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
+    assert mod_type == _ModificationType.MASK_MOD, (
+        f"create-block_mask requires a mask_mod function! Got {mask_mod}"
+    )
     if B is None:
         B = 1
     if H is None:
@@ -962,7 +1103,10 @@ def _nested_mod_func_adapter(
         kv_seq_idx = q_seq_idx
     else:
         # cross attention case
-        kv_seq_idx = _build_seq_idx(kv_offsets, kv_nt._values.shape[kv_nt._ragged_idx - 1])  # type: ignore[attr-defined]
+        kv_seq_idx = _build_seq_idx(
+            kv_offsets,
+            kv_nt._values.shape[kv_nt._ragged_idx - 1],  # type: ignore[attr-defined]
+        )
 
     # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
     # to the sequence length for each sequence in the NJT, for use in given
@@ -1039,10 +1183,14 @@ def create_nested_block_mask(
             key = torch.nested.nested_tensor(..., layout=torch.jagged)
             value = torch.nested.nested_tensor(..., layout=torch.jagged)
 
+
             def causal_mask(b, h, q_idx, kv_idx):
                 return q_idx >= kv_idx
 
-            block_mask = create_nested_block_mask(causal_mask, 1, 1, query, _compile=True)
+
+            block_mask = create_nested_block_mask(
+                causal_mask, 1, 1, query, _compile=True
+            )
             output = flex_attention(query, key, value, block_mask=block_mask)
 
         .. code-block:: python
@@ -1052,11 +1200,15 @@ def create_nested_block_mask(
             key = torch.nested.nested_tensor(..., layout=torch.jagged)
             value = torch.nested.nested_tensor(..., layout=torch.jagged)
 
+
             def causal_mask(b, h, q_idx, kv_idx):
                 return q_idx >= kv_idx
 
+
             # cross attention case: pass both query and key/value NJTs
-            block_mask = create_nested_block_mask(causal_mask, 1, 1, query, key, _compile=True)
+            block_mask = create_nested_block_mask(
+                causal_mask, 1, 1, query, key, _compile=True
+            )
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
     # use same structure for kv as for q by default
@@ -1222,7 +1374,7 @@ def flex_attention(
     scale: Optional[float] = None,
     enable_gqa: bool = False,
     return_lse: bool = False,
-    kernel_options: Optional[dict[str, Any]] = None,
+    kernel_options: Optional[FlexKernelOptions] = None,
 ) -> Union[Tensor, tuple[Tensor, Tensor]]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
@@ -1258,7 +1410,9 @@ def flex_attention(
         scale (Optional[float]): Scaling factor applied prior to softmax. If none, the default value is set to :math:`\frac{1}{\sqrt{E}}`.
         enable_gqa (bool): If set to True, enables Grouped Query Attention (GQA) and broadcasts key/value heads to query heads.
         return_lse (bool): Whether to return the logsumexp of the attention scores. Default is False.
-        kernel_options (Optional[Dict[str, Any]]): Options to pass into the Triton kernels.
+        kernel_options (Optional[FlexKernelOptions]):
+            Options to control the behavior of the underlying Triton kernels.
+            See :class:`FlexKernelOptions` for available options and usage examples.
 
     Returns:
         output (Tensor): Attention output; shape :math:`(B, Hq, L, Ev)`.
@@ -1381,7 +1535,13 @@ def flex_attention(
             torch._dynamo.mark_static(x, -1)
 
         out, lse = flex_attention_hop(
-            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options  # type: ignore[union-attr]
+            query,
+            key,
+            value,
+            score_mod,
+            block_mask.as_tuple(),
+            scale,
+            kernel_options,  # type: ignore[union-attr]
         )
         if return_lse:
             return out, lse * math.log(2)
