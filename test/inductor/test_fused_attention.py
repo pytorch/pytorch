@@ -1023,7 +1023,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             return attn_weights.matmul(value), key, value
 
         tensor_shape = (4, 2, 16, 32)
-        attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.float, device=self.device)
+        attn_mask = torch.randn((1, 1, 2, 2), dtype=torch.float, device=self.device)
         args = [
             torch.randn(tensor_shape, device=self.device),
             torch.randn(tensor_shape, device=self.device),
@@ -1035,6 +1035,16 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             args1=args,
             has_dropout=False,
             check_train=False,
+        )
+        # test attn_mask with stride of last dim != 1
+        attn_mask_ = attn_mask.transpose(2, 3)
+        args[3] = attn_mask_
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            has_dropout=False,
+            check_train=False,
+            contains=self.device == "cpu",
         )
 
     def _test_sdpa_rewriter_23(self):
