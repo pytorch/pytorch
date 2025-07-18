@@ -323,6 +323,11 @@ jobs:
             "${USED_IMAGE}" \
             ${DOCKER_SHELL_CMD}
           )
+
+          if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
+            docker exec -t "${container_name}" sh -c "python3 -m pip install -r requirements.txt"
+          fi
+
           docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
           END_TIME=$(date +%s)
