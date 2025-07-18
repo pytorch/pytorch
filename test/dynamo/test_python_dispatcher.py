@@ -5,6 +5,12 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter, EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import TEST_XPU
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class PythonDispatcherTests(torch._dynamo.test_case.TestCase):
@@ -74,7 +80,7 @@ class GraphModule(torch.nn.Module):
 """,  # NOQA: B950
         )
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
     def test_dispatch_key_set_guard(self):
         counter = CompileCounter()
 
@@ -96,7 +102,7 @@ class GraphModule(torch.nn.Module):
         # No recompile since the dispatch key set is the same though the tensor is different.
         self.assertEqual(counter.frame_count, 1)
 
-        x3 = torch.randn(2, 3, device="cuda")
+        x3 = torch.randn(2, 3, device=device_type)
         dks3 = torch._C._dispatch_keys(x3)
         self.assertEqual(fn(x3, dks3), torch.sin(x3 - 1))
         # Re-compile since the dispatch key set is different.

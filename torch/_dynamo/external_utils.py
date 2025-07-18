@@ -1,5 +1,3 @@
-# This module contains functions that *will be allowed* by dynamo
-
 """
 This module contains utility functions that are explicitly allowed to be called during
 TorchDynamo compilation. These functions are carefully vetted to ensure they work

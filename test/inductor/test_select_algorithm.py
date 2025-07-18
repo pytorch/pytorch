@@ -20,7 +20,7 @@ aten = torch.ops.aten
 
 
 def patches(fn):
-    def skip_cache(self, choices, name, key, benchmark):
+    def skip_cache(self, choices, name, key, benchmark, hint_override=None):
         if benchmark is None:
             return {}
         return benchmark(choices)

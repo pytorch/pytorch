@@ -1,6 +1,8 @@
+#include <c10/metal/common.h>
 #include <metal_simdgroup>
 #include <metal_stdlib>
 using namespace metal;
+using c10::metal::simdgroup_size;
 
 template <typename T>
 kernel void layer_norm_single_row(
@@ -18,7 +20,6 @@ kernel void layer_norm_single_row(
     uint tid [[thread_position_in_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
-  constexpr int SIMD_SIZE = 32;
   constexpr int N_READS = 4;
 
   // each threadgroup handles one full “row” of length axis_size
@@ -52,8 +53,8 @@ kernel void layer_norm_single_row(
   }
 
   // threadgroup‐wide reduction
-  threadgroup float local_sums[SIMD_SIZE];
-  threadgroup float local_sums_sq[SIMD_SIZE];
+  threadgroup float local_sums[simdgroup_size];
+  threadgroup float local_sums_sq[simdgroup_size];
   threadgroup float tg_mean[1];
   threadgroup float tg_inv_std[1];
 
@@ -142,7 +143,6 @@ kernel void layer_norm_looped(
     uint lsize [[threads_per_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simdgroup_id [[simdgroup_index_in_threadgroup]]) {
-  constexpr int SIMD_SIZE = 32;
   constexpr int N_READS = 4;
 
   uint row_offset = tg_id * axis_size;
@@ -178,8 +178,8 @@ kernel void layer_norm_looped(
   partial_sum = simd_sum(partial_sum);
   partial_sum_sq = simd_sum(partial_sum_sq);
 
-  threadgroup float local_sums[SIMD_SIZE];
-  threadgroup float local_sums_sq[SIMD_SIZE];
+  threadgroup float local_sums[simdgroup_size];
+  threadgroup float local_sums_sq[simdgroup_size];
   threadgroup float tg_mean[1];
   threadgroup float tg_inv_std[1];
 

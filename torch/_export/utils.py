@@ -1269,7 +1269,7 @@ def _collect_all_valid_cia_ops() -> set["OperatorBase"]:
 
 
 def _get_decomp_for_cia(op: "OperatorBase"):
-    # [NOTE] Seperating out func.decompose
+    # [NOTE] Separating out func.decompose
     # Ideally we should be able to just register func.decompose but
     # we can't as this decomp is gonna be registered to the py_impl.
     # As a result it will infinitely recurse. So we first check if the op

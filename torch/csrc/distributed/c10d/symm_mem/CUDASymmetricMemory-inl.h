@@ -266,7 +266,7 @@ __device__ __inline__ T add_bf16x2(T a, T b) {
     __hip_bfloat16 bf[2];
   } _bf2f_a = {.f = 0}, _bf2f_b = {.f = 0};
 
-  //__hip_bfloat162 is a struct wtih two __hip_bfloat16 elements called x and y
+  //__hip_bfloat162 is a struct with two __hip_bfloat16 elements called x and y
   // This typecasts input a and b as bfloat16 and maps to low bits of a float
   // and does the addition in float
   _bf2f_a.bf[1] = reinterpret_cast<__hip_bfloat162*>(&a)->x;

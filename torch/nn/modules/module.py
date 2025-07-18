@@ -42,7 +42,7 @@ class _IncompatibleKeys(
 ):
     __slots__ = ()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if not self.missing_keys and not self.unexpected_keys:
             return "<All keys matched successfully>"
         return super().__repr__()
@@ -70,7 +70,7 @@ _global_parameter_registration_hooks: dict[int, Callable] = OrderedDict()
 
 
 class _WrappedHook:
-    def __init__(self, hook: Callable, module: Optional["Module"] = None):
+    def __init__(self, hook: Callable, module: Optional["Module"] = None) -> None:
         self.hook: Callable = hook
         functools.update_wrapper(self, hook)
 
@@ -927,7 +927,7 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
-        def compute_should_use_set_data(tensor, tensor_applied):
+        def compute_should_use_set_data(tensor, tensor_applied) -> bool:
             if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
@@ -1536,7 +1536,7 @@ class Module:
 
         return backward_pre_hooks
 
-    def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn):
+    def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn) -> None:
         if not isinstance(result, torch.Tensor):
             if not (
                 isinstance(result, tuple)
@@ -1964,7 +1964,7 @@ class Module:
         )
 
     def __setattr__(self, name: str, value: Union[Tensor, "Module"]) -> None:
-        def remove_from(*dicts_or_sets):
+        def remove_from(*dicts_or_sets) -> None:
             for d in dicts_or_sets:
                 if name in d:
                     if isinstance(d, dict):
@@ -2065,7 +2065,7 @@ class Module:
                 else:
                     super().__setattr__(name, value)
 
-    def __delattr__(self, name):
+    def __delattr__(self, name) -> None:
         if name in self._parameters:
             del self._parameters[name]
         elif name in self._buffers:
@@ -2132,7 +2132,7 @@ class Module:
         self._state_dict_pre_hooks[handle.id] = hook
         return handle
 
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
+    def _save_to_state_dict(self, destination, prefix, keep_vars) -> None:
         r"""Save module state to the `destination` dictionary.
 
         The `destination` dictionary will contain the state
@@ -2342,7 +2342,7 @@ class Module:
         missing_keys,
         unexpected_keys,
         error_msgs,
-    ):
+    ) -> None:
         r"""Copy parameters and buffers from :attr:`state_dict` into only this module, but not its descendants.
 
         This is called on every submodule
@@ -2568,7 +2568,7 @@ class Module:
             # mypy isn't aware that "_metadata" exists in state_dict
             state_dict._metadata = metadata  # type: ignore[attr-defined]
 
-        def load(module, local_state_dict, prefix=""):
+        def load(module, local_state_dict, prefix="") -> None:
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
             if assign:
                 local_metadata["assign_to_params_buffers"] = assign
@@ -2971,7 +2971,7 @@ class Module:
         """
         return ""
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         # We treat the extra repr like the sub-module, one item per line
         extra_lines = []
         extra_repr = self.extra_repr()

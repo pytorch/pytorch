@@ -94,7 +94,7 @@ class elementwise_type_promotion_wrapper:
 
     Takes two kwargs, type_promoting_args and type_promotion_kind.
 
-    type_promoting_args must be a string Sequence specifiying the argument names of all
+    type_promoting_args must be a string Sequence specifying the argument names of all
     arguments that participate in type promotion (and should be type promoted). If the
     arg specifies a Sequence-type then every element of the Sequence will participate in
     type promotion.

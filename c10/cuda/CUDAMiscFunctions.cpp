@@ -1,7 +1,20 @@
 #include <c10/cuda/CUDAMiscFunctions.h>
 #include <c10/util/env.h>
+#include <cstring>
+#include <string>
 
 namespace c10::cuda {
+
+// Explain common CUDA errors
+// NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
+std::string get_cuda_error_help(const char* error_string) noexcept {
+  std::string help_text;
+  if (strstr(error_string, "invalid device ordinal")) {
+    help_text.append(
+        "\nGPU device may be out of range, do you have enough GPUs?");
+  }
+  return help_text;
+}
 
 // NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
 const char* get_cuda_check_suffix() noexcept {

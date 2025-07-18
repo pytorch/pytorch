@@ -10,7 +10,10 @@ from pathlib import Path
 
 import torch
 from torch._inductor import config
-from torch._inductor.debug import create_node_mapping
+from torch._inductor.debug import (
+    create_mapping_pre_post_grad_nodes,
+    create_node_mapping_kernel_to_post_grad,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda
@@ -56,6 +59,7 @@ class Model3(torch.nn.Module):
 
 
 @config.patch("trace.enabled", True)
+@config.patch("trace.provenance_tracking", True)
 class TestProvenanceTracingArtifact(TestCase):
     """
     This test checks that generated provenance tracing artifact from "post_grad" to
@@ -121,6 +125,10 @@ class TestProvenanceTracingArtifact(TestCase):
                                 "mul_2",
                             ],
                         }
+                        if backend == "aot_inductor":
+                            expected_data["aoti_torch_cuda_mm_out"] = ["mm_default"]
+                        else:
+                            expected_data["extern_kernels.mm"] = ["mm_default"]
                         self._check_provenance_tracing_artifact(filepath, expected_data)
                         expected_mapping = [
                             (
@@ -171,6 +179,16 @@ class TestProvenanceTracingArtifact(TestCase):
                                 },
                             ),
                         ]
+                        if backend == "aot_inductor":
+                            expected_mapping[0][1]["aoti_torch_cuda_mm_out"] = [
+                                "mm_default"
+                            ]
+                            expected_mapping[1][1]["mm_default"] = [
+                                "aoti_torch_cuda_mm_out"
+                            ]
+                        else:
+                            expected_mapping[0][1]["extern_kernels.mm"] = ["mm_default"]
+                            expected_mapping[1][1]["mm_default"] = ["extern_kernels.mm"]
                         self._check_provenance_tracking_node_mappings(
                             filepath, expected_mapping
                         )
@@ -180,7 +198,7 @@ class TestProvenanceTracingArtifact(TestCase):
                         if backend == "aot_inductor":
                             expected_data = {
                                 "cpp_fused_mul_0": ["mul"],
-                                "aoti_torch_cpu_addmm_out": ["addmm", "mul"],
+                                "aoti_torch_cpu_addmm_out": ["addmm"],
                                 "cpp_fused_gelu_1": [
                                     "mul_3",
                                     "mul_1",
@@ -193,7 +211,6 @@ class TestProvenanceTracingArtifact(TestCase):
                             # backend == "inductor"
                             expected_data = {
                                 "cpp_fused_mul_0": ["mul"],
-                                "aoti_torch_cpu_addmm_out": ["addmm", "mul"],
                                 "cpp_fused_gelu_1": [
                                     "mul_3",
                                     "mul_1",
@@ -201,7 +218,7 @@ class TestProvenanceTracingArtifact(TestCase):
                                     "erf",
                                     "mul_2",
                                 ],
-                                "extern_kernels.addmm": ["addmm", "mul"],
+                                "extern_kernels.addmm": ["addmm"],
                             }
                         self._check_provenance_tracing_artifact(filepath, expected_data)
 
@@ -252,14 +269,12 @@ class TestProvenanceTracingArtifact(TestCase):
                     filepath = Path(m.group(1))
                     if backend == "inductor":
                         expected_data = {
-                            "aoti_torch_cuda_addmm_out": ["addmm", "_tensor_constant1"],
-                            "triton_poi_fused_0": ["_tensor_constant1"],
                             "extern_kernels.addmm": ["addmm"],
                         }
                     else:
                         # backend = aot_inductor
                         expected_data = {
-                            "aoti_torch_cuda_addmm_out": ["addmm", "_tensor_constant1"],
+                            "aoti_torch_cuda_addmm_out": ["addmm"],
                             "triton_poi_fused_0": ["_tensor_constant1"],
                         }
                     self._check_provenance_tracing_artifact(filepath, expected_data)
@@ -374,11 +389,17 @@ class TestProvenanceTracingNodeMapping(TestCase):
             "triton_poi_fused_addmm_relu_sigmoid_0": ["relu", "add_tensor"]
         }
 
-        result = create_node_mapping(
+        result = create_mapping_pre_post_grad_nodes(
             pre_grad_graph_id,
             post_to_pre_grad_nodes_json,
-            triton_kernel_to_post_grad_json,
         )
+        result = {
+            **result,
+            **create_node_mapping_kernel_to_post_grad(
+                triton_kernel_to_post_grad_json,
+            ),
+        }
+
         self.assertEqual(
             result,
             {

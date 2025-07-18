@@ -376,7 +376,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
   // for more info.
 
   // This is the type we will use to marshall information on disk during
-  // ser/de. It is a simple tuple composed of primitive types and simple
+  // Ser/De. It is a simple tuple composed of primitive types and simple
   // collection types like vector, optional, and dict.
   using SerializationType = std::tuple<
       std::vector<std::string> /*input_names_*/,

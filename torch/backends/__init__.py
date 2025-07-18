@@ -136,5 +136,6 @@ from torch.backends import (
     mps as mps,
     nnpack as nnpack,
     openmp as openmp,
+    opt_einsum as opt_einsum,
     quantized as quantized,
 )

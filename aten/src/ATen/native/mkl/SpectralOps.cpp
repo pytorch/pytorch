@@ -337,6 +337,7 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 #include <cmath>
 
 #include <mkl_dfti.h>
+#include <mkl_version.h>
 #include <ATen/mkl/Exceptions.h>
 #include <ATen/mkl/Descriptors.h>
 #include <ATen/mkl/Limits.h>
@@ -478,6 +479,19 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   const auto value_type = c10::toRealValueType(input.scalar_type());
   out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
+
+  // fix mkl issue
+  // https://github.com/pytorch/pytorch/issues/154477
+#ifdef INTEL_MKL_VERSION
+#if INTEL_MKL_VERSION > 20210400L
+  for (const auto& stride : input.strides()) {
+    if (stride == 0) {
+      input = input.clone(MemoryFormat::Contiguous);
+      break;
+    }
+  }
+#endif
+#endif
 
   auto descriptor = _plan_mkl_fft(
       input.strides(), out.strides(), signal_size, input.is_complex(),

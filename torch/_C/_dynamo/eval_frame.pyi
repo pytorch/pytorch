@@ -58,7 +58,7 @@ class _PyInterpreterFrame:
     f_globals: dict[str, object]
     f_builtins: dict[str, object]
     f_lasti: int
-    f_lineo: int
+    f_lineno: int
     f_back: types.FrameType
     # A tuple containing cell objects captured by this frame.
     closure: tuple[types.CellType]

@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """Testing utilities for Dynamo, providing a specialized TestCase class and test running functionality.
 
 This module extends PyTorch's testing framework with Dynamo-specific testing capabilities.
@@ -18,7 +16,7 @@ import os
 import re
 import sys
 import unittest
-from typing import Union
+from typing import Any, Callable, Union
 
 import torch
 import torch.testing
@@ -151,7 +149,12 @@ class CPythonTestCase(TestCase):
     fail = unittest.TestCase.fail
     failureException = unittest.TestCase.failureException
 
-    def compile_fn(self, fn, backend, nopython):
+    def compile_fn(
+        self,
+        fn: Callable[..., Any],
+        backend: Union[str, Callable[..., Any]],
+        nopython: bool,
+    ) -> Callable[..., Any]:
         # We want to compile only the test function, excluding any setup code
         # from unittest
         method = getattr(self, self._testMethodName)
@@ -159,7 +162,7 @@ class CPythonTestCase(TestCase):
         setattr(self, self._testMethodName, method)
         return fn
 
-    def _dynamo_test_key(self):
+    def _dynamo_test_key(self) -> str:
         suffix = super()._dynamo_test_key()
         test_cls = self.__class__
         test_file = inspect.getfile(test_cls).split(os.sep)[-1].split(".")[0]

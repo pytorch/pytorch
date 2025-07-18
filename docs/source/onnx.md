@@ -87,7 +87,6 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     onnx_dynamo
     onnx_ops
     onnx_verification
-    onnx_dynamo_onnxruntime_backend
     onnx_torchscript
 ```
 

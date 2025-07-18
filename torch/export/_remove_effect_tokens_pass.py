@@ -23,7 +23,7 @@ def _remove_effect_tokens_from_graph_helper(
     output_node = None
     with_effect_nodes: list[torch.fx.Node] = []
 
-    # Output node need to check its args agianst output_token_names (collected from output_spec)
+    # Output node need to check its args against output_token_names (collected from output_spec)
     # Therefore, we only need to find the top-levele output node
     output_node = next(reversed(ep.graph_module.graph.find_nodes(op="output")))
     for module in ep.graph_module.modules():
@@ -126,7 +126,7 @@ def _remove_effect_tokens_from_graph_helper(
 
 def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
     """
-    Removes the existance of tokens from the exported program, including:
+    Removes the existence of tokens from the exported program, including:
     - Removes the input and output tokens
     - Replaces with_effects(token, func, args) with just func(args)
 

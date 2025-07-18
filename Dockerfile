@@ -33,7 +33,7 @@ RUN case ${TARGETPLATFORM} in \
          *)              MINICONDA_ARCH=x86_64   ;; \
     esac && \
     curl -fsSL -v -o ~/miniconda.sh -O  "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${MINICONDA_ARCH}.sh"
-COPY requirements.txt .
+COPY requirements.txt requirements-build.txt .
 # Manually invoke bash on miniconda script per https://github.com/conda/conda/issues/10431
 RUN chmod +x ~/miniconda.sh && \
     bash ~/miniconda.sh -b -p /opt/conda && \
@@ -57,7 +57,7 @@ RUN --mount=type=cache,target=/opt/ccache \
     export eval ${CMAKE_VARS} && \
     TORCH_CUDA_ARCH_LIST="7.0 7.2 7.5 8.0 8.6 8.7 8.9 9.0 9.0a" TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" \
-    python setup.py install
+    python -m pip install --no-build-isolation -v .
 
 FROM conda as conda-installs
 ARG PYTHON_VERSION=3.11

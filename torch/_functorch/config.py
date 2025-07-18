@@ -61,6 +61,10 @@ autograd_cache_allow_custom_autograd_functions: bool = Config(
 # need to add env vars or make it configurable
 bundled_autograd_cache: bool = False
 
+# Whether or not to normalize placeholder names in graphs
+# from dynaom in AOTAutogradCache
+autograd_cache_normalize_inputs = not is_fbcode()
+
 
 def remote_autograd_cache_default() -> Optional[bool]:
     if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
@@ -292,7 +296,7 @@ strict_autograd_cache = False
 #   which can reorder or ,delete duplicate nodes in the graph
 # - If any of these passes reorder/delete/duplicate a collective
 #   in a setting where the compiler is being run independently on multiple
-#   ranks, we run the risk that the compiler will make a different decison on
+#   ranks, we run the risk that the compiler will make a different decision on
 #   different ranks, resulting in a NCCL hang when using torch.compile
 # To handle this, we will (by default) ensure that collectives are not modified
 # by the compiler.

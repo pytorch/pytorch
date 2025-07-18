@@ -556,21 +556,6 @@ class TestNew2dParallelTraining(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_raise_invalid_tp_composition(self):
-        with self.assertRaisesRegex(
-            RuntimeError, r"Found TP device_mesh on the \d dimension of its parent mesh"
-        ):
-            mesh_2d = init_device_mesh(
-                self.device_type, (2, self.world_size // 2), mesh_dim_names=("tp", "dp")
-            )
-            parallelize_plan = {
-                "net1": ColwiseParallel(),
-                "net2": RowwiseParallel(),
-            }
-            parallelize_module(SimpleModel().cuda(), mesh_2d["tp"], parallelize_plan)
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_state_enable_extension(self):
         mesh_2d = init_device_mesh(
             self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")

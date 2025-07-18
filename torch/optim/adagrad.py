@@ -54,17 +54,17 @@ class Adagrad(Optimizer):
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps}")
 
-        defaults = dict(
-            lr=lr,
-            lr_decay=lr_decay,
-            eps=eps,
-            weight_decay=weight_decay,
-            initial_accumulator_value=initial_accumulator_value,
-            foreach=foreach,
-            maximize=maximize,
-            differentiable=differentiable,
-            fused=fused,
-        )
+        defaults = {
+            "lr": lr,
+            "lr_decay": lr_decay,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "initial_accumulator_value": initial_accumulator_value,
+            "foreach": foreach,
+            "maximize": maximize,
+            "differentiable": differentiable,
+            "fused": fused,
+        }
         super().__init__(params, defaults)
 
         if fused:

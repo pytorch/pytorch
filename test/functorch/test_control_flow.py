@@ -1409,7 +1409,6 @@ def forward(self, pred_1, x_1):
                 f, (torch.ones(3, 4, 5), torch.ones(4, 4, 5)), torch.ones(5)
             )
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_map_illegal_outputs(self):
         def f(x, y):
             return x.item()
@@ -2013,7 +2012,7 @@ def forward(self, pred_1, x_1):
         if autograd:
             self.check_autograd(result, expected_result, (init, inp))
 
-    # TODO: Does not work because of the usage of vmap witin associative_scan
+    # TODO: Does not work because of the usage of vmap within associative_scan
     # The paT206899919 rameterization is commented out for the moment and the test is marked with expected fail
     # Fails with: AssertionError: scan is not an OpOverload
     @skipIfRocm(msg="Unsupported on ROCM yet")
@@ -4143,7 +4142,7 @@ class GraphModule(torch.nn.Module):
             inputs=inp,
         )
 
-    # TODO: Does not work because of the usage of vmap witin associative_scan
+    # TODO: Does not work because of the usage of vmap within associative_scan
     # TODO: Re-enable additional parameters again once this issues has been resolved
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -4241,7 +4240,7 @@ class GraphModule(torch.nn.Module):
             inputs=inp,
         )
 
-    # TODO: Does not work because of the usage of vmap witin associative_scan
+    # TODO: Does not work because of the usage of vmap within associative_scan
     # TODO: Re-enable additional parameters again once this issues has been resolved
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -4314,7 +4313,7 @@ class GraphModule(torch.nn.Module):
             inputs=inp,
         )
 
-    # TODO: Does not work because of the usage of vmap witin associative_scan
+    # TODO: Does not work because of the usage of vmap within associative_scan
     # TODO: Re-enable additional parameters again once this issues has been resolved
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -5315,7 +5314,7 @@ def forward(self, arg0_1):
             )
 
     @parametrize("func_type", ["no", "cpp", "python", "functorch"])
-    # - "simple_with_linear" and "nested_with_linear" doesn't work becaue parameters and buffers
+    # - "simple_with_linear" and "nested_with_linear" doesn't work because parameters and buffers
     #   are not inputs so they're not wrapped by functionalization and tracing.
     #
     # - make_fx tracing mode "real" fails for "int_carry", "pytree_int_carry" and "const_and_symint_output"
@@ -8034,7 +8033,6 @@ class GraphModule(torch.nn.Module):
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     @parametrize("dynamic", [True, False])
     @parametrize("backend", ["eager", "aot_eager"])
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_op_pytree_int_carry_compile(self, dynamic, backend):
         m, args = WHILE_LOOP_TESTS["pytree_int_carry"]
         if backend == "eager":
@@ -8196,7 +8194,6 @@ class GraphModule(torch.nn.Module):
         return normalize_gm(non_strict_ep.module().print_readable(print_output=False))
 
     @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cond_eager_run_with_item(self):
         class M(torch.nn.Module):
             def forward(self, a, b1, b2, c):

@@ -13,20 +13,17 @@ import sys
 import time
 
 
-def run_command(
-    args: list[str],
-    env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess[str]:
+def run_command(args: list[str]) -> subprocess.CompletedProcess[bytes]:
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
-        return subprocess.run(args, env=env, text=True, encoding="utf-8", check=True)
+        return subprocess.run(args, check=True)
     finally:
         end_time = time.monotonic()
         logging.debug("took %dms", (end_time - start_time) * 1000)
 
 
-def main() -> None:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="pip initializer")
     parser.add_argument(
         "packages",
@@ -55,20 +52,13 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    env: dict[str, str] = {
-        **os.environ,
-        "UV_PYTHON": sys.executable,
-        "UV_PYTHON_DOWNLOADS": "never",
-        "FORCE_COLOR": "1",
-        "CLICOLOR_FORCE": "1",
-    }
-    uv_index_url = env.get("UV_INDEX_URL", env.get("PIP_EXTRA_INDEX_URL"))
-    if uv_index_url:
-        env["UV_INDEX_URL"] = uv_index_url
+    uv_available = (
+        any(prefix in sys.base_prefix for prefix in ["uv/python", "uv\\python"])
+        and shutil.which("uv") is not None
+    )
 
-    uv: str | None = shutil.which("uv")
-    if uv:
-        pip_args = [uv, "pip", "install"]
+    if uv_available:
+        pip_args = ["uv", "pip", "install"]
     elif sys.executable:
         pip_args = [sys.executable, "-mpip", "install"]
     else:
@@ -102,8 +92,4 @@ def main() -> None:
         print(f"Would have run: {pip_args}")
         sys.exit(0)
 
-    run_command(pip_args, env=env)
-
-
-if __name__ == "__main__":
-    main()
+    run_command(pip_args)

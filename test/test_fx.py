@@ -908,7 +908,7 @@ class TestFX(JitTestCase):
             wrapper = WrapperModule(interpreter)
 
             # Create a graph that: 1) Takes function arguments 2) Invokes the interpreter
-            # 3) Returns the speficied return value
+            # 3) Returns the specified return value
 
             # FIXME: The following code could be greatly simplified by symbolic_trace'ing
             # the wrapper with a Tracer that considers the Wrapper instance a root
@@ -954,7 +954,7 @@ class TestFX(JitTestCase):
         script_out = scripted_lowered(x)
         torch.testing.assert_close(script_out, ref_out)
 
-        # Test TorchScript ser/de
+        # Test TorchScript Ser/De
         import_copy = self.getExportImportCopy(scripted_lowered)
         imported_out = import_copy(x)
         torch.testing.assert_close(imported_out, ref_out)
@@ -2225,8 +2225,8 @@ class TestFX(JitTestCase):
         foo_scripted = torch.jit.script(Foo())
         foo_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
-        fxed = symbolic_trace(Foo())
-        fxed_scripted = torch.jit.script(fxed)
+        fixed = symbolic_trace(Foo())
+        fxed_scripted = torch.jit.script(fixed)
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
     def test_fn_type_annotation_empty(self):

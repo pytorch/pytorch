@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_userdict.py b/test/dynamo/cpython/3_13/test_userdict.py
-index 61e79f553e8..c953390355e 100644
+index 61e79f553e8..75b789633ed 100644
 --- a/test/dynamo/cpython/3_13/test_userdict.py
 +++ b/test/dynamo/cpython/3_13/test_userdict.py
-@@ -1,3 +1,54 @@
+@@ -1,3 +1,57 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_userdict.py
 +
 +import sys
 +import torch
@@ -57,7 +60,7 @@ index 61e79f553e8..c953390355e 100644
  # Check every path through every method of UserDict
  
  from test import mapping_tests, support
-@@ -215,10 +266,10 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
+@@ -215,10 +269,10 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
  
      # Decorate existing test with recursion limit, because
      # the test is for C structure, but `UserDict` is a Python structure.

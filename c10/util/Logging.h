@@ -79,7 +79,7 @@ C10_API void UpdateLoggingLevelsFromFlags();
     const char* msg,
     const void* caller = nullptr);
 
-[[noreturn]] C10_API inline void ThrowEnforceNotMet(
+[[noreturn]] inline void ThrowEnforceNotMet(
     const char* file,
     const int line,
     const char* condition,
@@ -102,7 +102,7 @@ C10_API void UpdateLoggingLevelsFromFlags();
     const char* msg,
     const void* caller = nullptr);
 
-[[noreturn]] C10_API inline void ThrowEnforceFiniteNotMet(
+[[noreturn]] inline void ThrowEnforceFiniteNotMet(
     const char* file,
     const int line,
     const char* condition,

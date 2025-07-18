@@ -634,7 +634,7 @@ class DispatchKeySet final {
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
-C10_API inline int getDispatchTableIndexForDispatchKey(DispatchKey k) {
+inline int getDispatchTableIndexForDispatchKey(DispatchKey k) {
   return DispatchKeySet(k).getDispatchTableIndexForDispatchKeySet();
 }
 

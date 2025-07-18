@@ -476,7 +476,7 @@ class AOTInductorModelContainer {
           ->memcpy(internal_constants_ptr, user_constant_ptr, constant_size)
           .wait();
 #elif USE_CUDA
-      AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
+      AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
           internal_constants_ptr,
           user_constant_ptr,
           constant_size,

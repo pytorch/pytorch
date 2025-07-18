@@ -37,7 +37,9 @@ def save_wrapper(
 
 class _ThreadBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
     def __init__(self) -> None:
-        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="AsyncCheckpointExecutor"
+        )
 
     def execute_save(
         self,

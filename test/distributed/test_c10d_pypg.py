@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+import time
+import unittest
 import weakref
 
 import test_c10d_common
@@ -10,6 +12,7 @@ import torch.nn as nn
 from torch._C._distributed_c10d import _create_work_from_future
 from torch.futures import Future
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -196,6 +199,37 @@ class TestPyProcessGroup(TestCase):
         pg = DummyAttrProcessGroup(0, 1)
         pg.abort()
         pg.shutdown()
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
+    def test_block_current_stream(self) -> None:
+        class BlockWork(dist._Work):
+            def __init__(self):
+                super().__init__()
+                self.future_ = torch.futures.Future()
+
+            def get_future(self):
+                return self.future_
+
+        # nothing in queue so instantly resolves
+        event1 = torch.cuda.Event()
+        event1.record()
+        time.sleep(0.1)
+        self.assertTrue(event1.query())
+
+        work = BlockWork()
+        work.block_current_stream()
+
+        # stream is blocked so doesn't resolve
+        event = torch.cuda.Event()
+        event.record()
+        time.sleep(0.1)
+        self.assertFalse(event.query())
+
+        # resolve the work
+        work.get_future().set_result(None)
+
+        torch.cuda.current_stream().synchronize()
+        self.assertTrue(event.query())
 
 
 if __name__ == "__main__":

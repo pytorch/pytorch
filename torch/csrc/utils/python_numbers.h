@@ -79,7 +79,7 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
     throw python_error();
   }
   if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking long");
+    throw std::runtime_error("Overflow when unpacking long long");
   }
   return (int64_t)value;
 }
@@ -167,6 +167,16 @@ inline c10::complex<double> THPUtils_unpackComplexDouble(PyObject* obj) {
 }
 
 inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
+#ifdef USE_NUMPY
+  // Handle NumPy boolean scalars (np.bool_)
+  if (torch::utils::is_numpy_bool(obj)) {
+    int truth = PyObject_IsTrue(obj);
+    if (truth == -1) {
+      throw python_error();
+    }
+    return truth != 0;
+  }
+#endif
   if (PyFloat_Check(obj)) {
     return (bool)PyFloat_AS_DOUBLE(obj);
   }

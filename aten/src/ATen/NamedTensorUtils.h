@@ -167,14 +167,14 @@ TORCH_API TensorImpl* propagate_names(
 
 TORCH_API void propagate_names(TensorImpl* result, /*const */ TensorImpl* src);
 
-TORCH_API inline void propagate_names(
+inline void propagate_names(
     const TensorBase& result,
     DimnameList names,
     bool validate_names = false) {
   propagate_names(result.unsafeGetTensorImpl(), names, validate_names);
 }
 
-TORCH_API inline void propagate_names_if_nonempty(
+inline void propagate_names_if_nonempty(
     const TensorBase& result,
     DimnameList names,
     bool validate_names = false) {
@@ -182,9 +182,7 @@ TORCH_API inline void propagate_names_if_nonempty(
       result.unsafeGetTensorImpl(), names, validate_names);
 }
 
-TORCH_API inline void propagate_names(
-    const TensorBase& result,
-    const TensorBase& src) {
+inline void propagate_names(const TensorBase& result, const TensorBase& src) {
   propagate_names(result.unsafeGetTensorImpl(), src.unsafeGetTensorImpl());
 }
 

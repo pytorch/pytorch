@@ -1274,7 +1274,7 @@ class TestCompileTorchbind(TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
         tq2 = _empty_tensor_queue()
-        # make first tensor's secon dim dynamic
+        # make first tensor's second dim dynamic
         tq2.push(torch.randn(2, 4, requires_grad=False))
         torch.compile(mod, backend=cnt)(tq2, x)
         self.assertEqual(cnt.frame_count, 2)

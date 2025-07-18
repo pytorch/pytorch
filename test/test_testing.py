@@ -2369,6 +2369,7 @@ class TestImports(TestCase):
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.examples",  # requires CUDA and torchvision
                            "torch.distributed.tensor.examples",  # example scripts
+                           "torch.distributed._tools.sac_ilp",  # depends on pulp
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
                            ]

@@ -4,6 +4,9 @@
 # ruff: noqa
 # flake8: noqa
 
+# Test copied from
+# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/list_tests.py
+
 import sys
 import torch
 import torch._dynamo.test_case
@@ -168,10 +171,6 @@ class CommonTest(seq_tests.CommonTest):
         a[-2] = 8
         a[-1] = 9
         self.assertEqual(a, self.type2test([5,6,7,8,9]))
-
-        msg = "list indices must be integers or slices"
-        with self.assertRaisesRegex(TypeError, msg):
-            a['a'] = "python"
 
     def test_delitem(self):
         a = self.type2test([0, 1])

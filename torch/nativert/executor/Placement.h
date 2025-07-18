@@ -9,21 +9,6 @@
 namespace torch::nativert {
 
 /**
- * This function returns a normalized version of the input device:
- * - For CPU devices, the returned device will have no index (i.e., the default
- * CPU device).
- * - For CUDA devices, if no index is specified, index 0 is assumed.
- * - For other device types, the function will raise an error.
- *
- * @param device The input c10::Device to normalize.
- * @return A normalized c10::Device with standardized indexing.
- *
- * @throws c10::Error If the device type is not CPU or CUDA.
- */
-
-c10::Device normalizeDevice(const c10::Device& device);
-
-/**
  * Returns true if the two devices are the same and has the same device index
  * (if cuda).
  */

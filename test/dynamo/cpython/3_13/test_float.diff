@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_float.py b/test/dynamo/cpython/3_13/test_float.py
-index 97f951f1299..ce2c46777e0 100644
+index 87af79eb446..9313a1a63d7 100644
 --- a/test/dynamo/cpython/3_13/test_float.py
 +++ b/test/dynamo/cpython/3_13/test_float.py
-@@ -1,3 +1,54 @@
+@@ -1,3 +1,57 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_float.py
 +
 +import sys
 +import torch
@@ -57,7 +60,7 @@ index 97f951f1299..ce2c46777e0 100644
  import fractions
  import operator
  import os
-@@ -8,11 +59,84 @@ import time
+@@ -8,11 +62,84 @@ import time
  import unittest
  
  from test import support
@@ -147,7 +150,7 @@ index 97f951f1299..ce2c46777e0 100644
  from math import isinf, isnan, copysign, ldexp
  import math
  
-@@ -35,7 +159,7 @@ class FloatSubclass(float):
+@@ -35,7 +162,7 @@ class FloatSubclass(float):
  class OtherFloatSubclass(float):
      pass
  
@@ -156,7 +159,7 @@ index 97f951f1299..ce2c46777e0 100644
  
      def test_float(self):
          self.assertEqual(float(3.14), 3.14)
-@@ -620,7 +744,7 @@ class GeneralFloatCases(unittest.TestCase):
+@@ -620,7 +747,7 @@ class GeneralFloatCases(unittest.TestCase):
  
  
  @unittest.skipUnless(hasattr(float, "__getformat__"), "requires __getformat__")
@@ -165,7 +168,7 @@ index 97f951f1299..ce2c46777e0 100644
      def test_getformat(self):
          self.assertIn(float.__getformat__('double'),
                        ['unknown', 'IEEE, big-endian', 'IEEE, little-endian'])
-@@ -645,7 +769,7 @@ LE_FLOAT_NAN = bytes(reversed(BE_FLOAT_NAN))
+@@ -645,7 +772,7 @@ LE_FLOAT_NAN = bytes(reversed(BE_FLOAT_NAN))
  # is accident (today).
  # let's also try to guarantee that -0.0 and 0.0 don't get confused.
  
@@ -174,7 +177,7 @@ index 97f951f1299..ce2c46777e0 100644
  
      @support.requires_IEEE_754
      def test_double_specials_do_unpack(self):
-@@ -670,7 +794,7 @@ class IEEEFormatTestCase(unittest.TestCase):
+@@ -670,7 +797,7 @@ class IEEEFormatTestCase(unittest.TestCase):
          self.assertEqual(struct.pack("<f", 3.40282356e38), struct.pack("<f", FLT_MAX))
          self.assertEqual(struct.pack("<f", -3.40282356e38), struct.pack("<f", -FLT_MAX))
  
@@ -183,7 +186,16 @@ index 97f951f1299..ce2c46777e0 100644
  
      def test_format(self):
          # these should be rewritten to use both format(x, spec) and
-@@ -767,7 +891,7 @@ class FormatTestCase(unittest.TestCase):
+@@ -724,8 +851,6 @@ class FormatTestCase(unittest.TestCase):
+         self.assertEqual(format(INF, 'F'), 'INF')
+ 
+     @support.requires_IEEE_754
+-    @unittest.skipUnless(sys.float_repr_style == 'short',
+-                         "applies only when using short float repr style")
+     def test_format_testfile(self):
+         with open(format_testfile, encoding="utf-8") as testfile:
+             for line in testfile:
+@@ -769,7 +894,7 @@ class FormatTestCase(unittest.TestCase):
          self.assertEqual(format(-123.34, '00.10e'), '-1.2334000000e+02')
          self.assertEqual(format(-123.34, '00.10g'), '-123.34')
  
@@ -192,7 +204,7 @@ index 97f951f1299..ce2c46777e0 100644
      def test_repr(self):
          with open(os.path.join(os.path.split(__file__)[0],
                    'mathdata',
-@@ -832,7 +956,29 @@ class ReprTestCase(unittest.TestCase):
+@@ -834,7 +959,29 @@ class ReprTestCase(unittest.TestCase):
              self.assertEqual(repr(float(negs)), str(float(negs)))
  
  @support.requires_IEEE_754
@@ -223,7 +235,7 @@ index 97f951f1299..ce2c46777e0 100644
  
      def test_inf_nan(self):
          self.assertRaises(OverflowError, round, INF)
-@@ -955,7 +1101,7 @@ class RoundTestCase(unittest.TestCase, FloatsAreIdenticalMixin):
+@@ -957,7 +1104,7 @@ class RoundTestCase(unittest.TestCase, FloatsAreIdenticalMixin):
  
  # Beginning with Python 2.6 float has cross platform compatible
  # ways to create and represent inf and nan
@@ -232,7 +244,7 @@ index 97f951f1299..ce2c46777e0 100644
      def test_inf_from_str(self):
          self.assertTrue(isinf(float("inf")))
          self.assertTrue(isinf(float("+inf")))
-@@ -1056,12 +1202,35 @@ class InfNanTest(unittest.TestCase):
+@@ -1058,12 +1205,35 @@ class InfNanTest(unittest.TestCase):
  
  fromHex = float.fromhex
  toHex = float.hex
@@ -269,7 +281,7 @@ index 97f951f1299..ce2c46777e0 100644
      def identical(self, x, y):
          self.assertFloatsAreIdentical(x, y)
  
-@@ -1500,5 +1669,5 @@ class HexFloatTestCase(FloatsAreIdenticalMixin, unittest.TestCase):
+@@ -1502,5 +1672,5 @@ class HexFloatTestCase(FloatsAreIdenticalMixin, unittest.TestCase):
          self.assertEqual(getattr(f, 'foo', 'none'), 'bar')
  
  

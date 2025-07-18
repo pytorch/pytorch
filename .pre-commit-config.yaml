@@ -1,0 +1,12 @@
+repos:
+  - repo: local
+    hooks:
+      - id: lintrunner
+        name: Run Lintrunner in an isolated venv before every push. The first run may be slow...
+        entry: python scripts/run_lintrunner.py   # wrapper below
+        language: python                          # pre‑commit manages venv for the wrapper
+        additional_dependencies: []               # wrapper handles lintrunner install
+        always_run: true
+        stages: [pre-push]                        # fire only on pre‑push
+        pass_filenames: false                     # Lintrunner gets no per‑file args
+        verbose: true                             # stream output as it is produced...allegedly anyways

@@ -664,7 +664,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 
     # These timeout tests are skipped on ROCm because timeout calls trap(), which
     # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
+    # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
@@ -690,7 +690,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 
     # These timeout tests are skipped on ROCm because timeout calls trap(), which
     # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
+    # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
@@ -719,7 +719,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 
     # These timeout tests are skipped on ROCm because timeout calls trap(), which
     # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
+    # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
@@ -1064,10 +1064,6 @@ class SymmMemSingleProcTest(TestCase):
     @skipIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 0),
         "stream_write_value32 currently only supports cuda version>=12.0",
-    )
-    @skipIf(
-        _get_torch_cuda_version() >= (12, 6),
-        "https://github.com/pytorch/pytorch/issues/154073",
     )
     @runOnRocmArch(MI300_ARCH)
     def test_stream_write_value32(self):

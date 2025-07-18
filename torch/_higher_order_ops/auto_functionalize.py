@@ -586,7 +586,7 @@ class FunctionalCallableWithEpilogue:
     def __call__(self, *args, **kwargs):
         # We call torch.func.functionalize. This allows us to inline the epilogue graph.
         # Inlining has the benefit of allowing easiser fusion inside subgraph.
-        # Though the epilogue graph contains copy_, it is OK becuase inductor can handle it
+        # Though the epilogue graph contains copy_, it is OK because inductor can handle it
         # and this is also how we have been supporting top-level graph input mutation.
         return tuple(torch.func.functionalize(self.orig_callable)(*args, **kwargs))
 
@@ -944,7 +944,7 @@ def auto_functionalized_v2_proxy(
         # Below code materializes the callable inputs to the hop as graph modules.
         # kwargs may contain general callables, that are not proxable e.g. FunctionWithNoFreeVars
         # this could happen when we auto_functionalize the backward of the hop,
-        # where backward fn is a callablle that wrapps forward graph module.
+        # where backward fn is a callablle that wraps forward graph module.
         # This function materialize the callable args according to the schema of the hop.
 
         # We cannot materialize the callables in kwargs directly because the inputs to callable

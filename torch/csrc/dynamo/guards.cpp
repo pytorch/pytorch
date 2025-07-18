@@ -36,6 +36,45 @@
 #include <tuple>
 #include <utility>
 
+// Uncomment next line to count instructions for guard eval.
+// #define GUARD_INSTRUCTION_COUNT
+#ifdef GUARD_INSTRUCTION_COUNT
+#include <linux/perf_event.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <cstdint>
+#include <functional>
+
+int open_counter() {
+  perf_event_attr attr{};
+  attr.type = PERF_TYPE_HARDWARE;
+  attr.size = sizeof(attr);
+  attr.config = PERF_COUNT_HW_INSTRUCTIONS; // retired instructions
+  attr.disabled = 1; // start stopped
+  attr.exclude_kernel = 1; // user-space only
+  attr.exclude_hv = 1;
+
+  return syscall(__NR_perf_event_open, &attr, 0, -1, -1, 0);
+}
+
+uint64_t count_instructions(const std::function<void()>& fn) {
+  int fd = open_counter();
+  if (fd == -1)
+    throw std::runtime_error("perf_event_open failed");
+
+  ioctl(fd, PERF_EVENT_IOC_RESET, 0);
+  ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+  fn(); // run the code you care about
+  ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
+
+  uint64_t count;
+  read(fd, &count, sizeof(count));
+  close(fd);
+  return count;
+}
+#endif
+
 // Certain CPython data structures are defined in `.c` files in earlier Python
 // versions, e.g., for TupleIteratorGetItemAccessor, we need a fast way to
 // retrieve the underlying tuple and access the item. Before Python 3.12
@@ -3840,6 +3879,13 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    // NOTE for future guard optimization developers - We tried saving the dict
+    // pointer and weakref of the original object to avoid calling
+    // PyObject_GenericGetDict on a fast path, but this did not lead any
+    // meaningful speedups because of 2 reasons
+    // 1) Once __dict__ is generated, accessing it the second time is fast.
+    // 2) Getting the object from weakref, from 3.13 onwards, requires
+    // Py_DECREF, which further eats into the benefit.
     PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
     if (x == nullptr) {
       // Attribute absent, clear the exception and return false.
@@ -5482,6 +5528,7 @@ void install_storage_overlapping_guard(
       /* overlapping= */ false);
 }
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-volatile")
 char flush_cache_by_eviction() {
   constexpr size_t evict_size = 32 * 1024 * 1024;
   std::vector<char> buffer(evict_size, 1);
@@ -5492,6 +5539,7 @@ char flush_cache_by_eviction() {
   }
   return sink;
 }
+C10_DIAGNOSTIC_POP()
 
 double profile_guard_manager(
     RootGuardManager* root,
@@ -5547,6 +5595,13 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
   if (root == nullptr) {
     return false;
   }
+
+#ifdef GUARD_INSTRUCTION_COUNT
+  auto n = count_instructions(
+      [&] { ((RootGuardManager*)root)->check_nopybind(f_locals); });
+  std::cout << "#instructions in guard eval = " << n << std::endl << std::flush;
+#endif
+
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 

@@ -47,15 +47,15 @@ class Rprop(Optimizer):  # noqa: D101
         if not 0.0 < etas[0] < 1.0 < etas[1]:
             raise ValueError(f"Invalid eta values: {etas[0]}, {etas[1]}")
 
-        defaults = dict(
-            lr=lr,
-            etas=etas,
-            step_sizes=step_sizes,
-            foreach=foreach,
-            maximize=maximize,
-            differentiable=differentiable,
-            capturable=capturable,
-        )
+        defaults = {
+            "lr": lr,
+            "etas": etas,
+            "step_sizes": step_sizes,
+            "foreach": foreach,
+            "maximize": maximize,
+            "differentiable": differentiable,
+            "capturable": capturable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):  # noqa: D105

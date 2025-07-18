@@ -419,8 +419,8 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     assert isinstance(input_tuple_strategy, TupleStrategy)
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     assert isinstance(norm_type, (int, float, str)), f"{norm_type}"
-    output_tuple_strategy_childs: list[OpStrategy] = []
-    for op_strategy in input_tuple_strategy.childs:
+    output_tuple_strategy_children: list[OpStrategy] = []
+    for op_strategy in input_tuple_strategy.children:
         assert isinstance(op_strategy, OpStrategy), f"{op_strategy}"
         reduce_dims = list(range(op_strategy.ndim))
         output_strategy = common_reduction_strategy(
@@ -429,8 +429,8 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
             reduction_linear=True,
             reduction_op=NormReduction(norm_type),
         )
-        output_tuple_strategy_childs.append(output_strategy)
-    return TupleStrategy(output_tuple_strategy_childs)
+        output_tuple_strategy_children.append(output_strategy)
+    return TupleStrategy(output_tuple_strategy_children)
 
 
 @register_op_strategy(
@@ -1085,8 +1085,32 @@ def topk_strategy(op_schema: OpSchema) -> OpStrategy:
         if dim != topk_dim:
             dim_shardings: PlacementList = [Shard(dim)] * 3
             single_mesh_dim_strategies.append(dim_shardings)
-    # TODO: topk on sharded dim requries non-trival reduction, address it later
+    # TODO: topk on sharded dim requires non-trival reduction, address it later
 
     return expand_to_full_mesh_op_strategy(
         input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
+    )
+
+
+@register_op_strategy(
+    [aten.histc.default],
+    # strategy choice depends on the value of 'min' and 'max' kwargs, which are position 2 and 3
+    schema_info=RuntimeSchemaInfo(2),
+)
+def histc_strategy(op_schema: OpSchema) -> OpStrategy:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    single_mesh_dim_strategies: list[PlacementList] = []
+    single_mesh_dim_strategies.append([Replicate(), Replicate()])
+
+    # histc can support sharded input and partial output on any input dim, provided the min and max
+    # values are user-specified.  If not user-specified, the true min and max of the data in each local
+    # tensor will be used to compute bin boundaries, which will not be the same across ranks, leading to
+    # an incorrect final result
+    if len(op_schema.args_schema) == 4:
+        for dim in range(input_strategy.ndim):
+            dim_shardings: PlacementList = [Partial(), Shard(dim)]
+            single_mesh_dim_strategies.append(dim_shardings)
+
+    return expand_to_full_mesh_op_strategy(
+        input_strategy.mesh, op_schema, single_mesh_dim_strategies
     )

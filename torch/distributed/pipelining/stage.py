@@ -462,11 +462,10 @@ class _PipelineStageBase(ABC):
         """
         Get the gradient send ops for current stage's backward.
         """
-        self._check_chunk_id(bwd_chunk_id)
-
         if not self.has_backward or self.is_first:
             return []
 
+        self._check_chunk_id(bwd_chunk_id)
         # Create bwd send infra lazily
         if self.grad_send_info is None:
             # Send info for input grads during backward:
@@ -761,6 +760,10 @@ class _PipelineStageBase(ABC):
         last_backward is controlled by the schedule and signals synchronization of gradients across DP groups
         after the last backward.
         """
+        # skip backward computation if backward is not enabled
+        if not self.has_backward:
+            return
+
         self._check_chunk_id(bwd_chunk_id)
 
         (

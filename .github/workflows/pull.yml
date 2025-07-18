@@ -315,14 +315,14 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-py3-clang12-mobile-build:
-    name: linux-jammy-py3-clang12-mobile-build
+  linux-jammy-py3-clang18-mobile-build:
+    name: linux-jammy-py3-clang18-mobile-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3-clang12-mobile-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3-clang15-asan
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-clang18-asan
       build-generates-artifacts: false
       test-matrix: |
         { include: [

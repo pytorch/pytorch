@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_set.py b/test/dynamo/cpython/3_13/test_set.py
-index d9102eb98a5..0b8e99a04c4 100644
+index d9102eb98a5..3543d60751e 100644
 --- a/test/dynamo/cpython/3_13/test_set.py
 +++ b/test/dynamo/cpython/3_13/test_set.py
-@@ -1,3 +1,53 @@
+@@ -1,3 +1,56 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_set.py
 +
 +import sys
 +import torch
@@ -56,7 +59,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  import unittest
  from test import support
  from test.support import warnings_helper
-@@ -38,7 +88,7 @@ class HashCountingInt(int):
+@@ -38,7 +91,7 @@ class HashCountingInt(int):
          self.hash_count += 1
          return int.__hash__(self)
  
@@ -65,7 +68,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      # Tests common to both set and frozenset
  
      def setUp(self):
-@@ -47,6 +97,7 @@ class TestJointOps:
+@@ -47,6 +100,7 @@ class TestJointOps:
          self.letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
          self.s = self.thetype(word)
          self.d = dict.fromkeys(word)
@@ -73,7 +76,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_new_or_init(self):
          self.assertRaises(TypeError, self.thetype, [], 2)
-@@ -355,7 +406,7 @@ class TestJointOps:
+@@ -355,7 +409,7 @@ class TestJointOps:
      def test_free_after_iterating(self):
          support.check_free_after_iterating(self, iter, self.thetype)
  
@@ -82,7 +85,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      thetype = set
      basetype = set
  
-@@ -675,7 +726,7 @@ class TestSetSubclass(TestSet):
+@@ -675,7 +729,7 @@ class TestSetSubclass(TestSet):
              subclass_with_new([1, 2], newarg=3)
  
  
@@ -91,7 +94,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      thetype = frozenset
      basetype = frozenset
  
-@@ -811,10 +862,17 @@ class TestFrozenSetSubclass(TestFrozenSet):
+@@ -811,10 +865,17 @@ class TestFrozenSetSubclass(TestFrozenSet):
  class SetSubclassWithSlots(set):
      __slots__ = ('x', 'y', '__dict__')
  
@@ -112,7 +115,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
  class FrozenSetSubclassWithSlots(frozenset):
      __slots__ = ('x', 'y', '__dict__')
-@@ -828,7 +886,7 @@ empty_set = set()
+@@ -828,7 +889,7 @@ empty_set = set()
  
  #==============================================================================
  
@@ -121,7 +124,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_repr(self):
          if self.repr is not None:
-@@ -934,7 +992,7 @@ class TestBasicOps:
+@@ -934,7 +995,7 @@ class TestBasicOps:
  
  #------------------------------------------------------------------------------
  
@@ -130,7 +133,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      def setUp(self):
          self.case   = "empty set"
          self.values = []
-@@ -942,10 +1000,11 @@ class TestBasicOpsEmpty(TestBasicOps, unittest.TestCase):
+@@ -942,10 +1003,11 @@ class TestBasicOpsEmpty(TestBasicOps, unittest.TestCase):
          self.dup    = set(self.values)
          self.length = 0
          self.repr   = "set()"
@@ -143,7 +146,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      def setUp(self):
          self.case   = "unit set (number)"
          self.values = [3]
-@@ -953,6 +1012,7 @@ class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
+@@ -953,6 +1015,7 @@ class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
          self.dup    = set(self.values)
          self.length = 1
          self.repr   = "{3}"
@@ -151,7 +154,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_in(self):
          self.assertIn(3, self.set)
-@@ -962,7 +1022,7 @@ class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
+@@ -962,7 +1025,7 @@ class TestBasicOpsSingleton(TestBasicOps, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -160,7 +163,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      def setUp(self):
          self.case   = "unit set (tuple)"
          self.values = [(0, "zero")]
-@@ -970,6 +1030,7 @@ class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
+@@ -970,6 +1033,7 @@ class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
          self.dup    = set(self.values)
          self.length = 1
          self.repr   = "{(0, 'zero')}"
@@ -168,7 +171,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_in(self):
          self.assertIn((0, "zero"), self.set)
-@@ -979,7 +1040,7 @@ class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
+@@ -979,7 +1043,7 @@ class TestBasicOpsTuple(TestBasicOps, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -177,7 +180,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      def setUp(self):
          self.case   = "triple set"
          self.values = [0, "zero", operator.add]
-@@ -987,36 +1048,39 @@ class TestBasicOpsTriple(TestBasicOps, unittest.TestCase):
+@@ -987,36 +1051,39 @@ class TestBasicOpsTriple(TestBasicOps, unittest.TestCase):
          self.dup    = set(self.values)
          self.length = 3
          self.repr   = None
@@ -220,7 +223,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      def setUp(self):
          self.enterContext(warnings_helper.check_warnings())
          warnings.simplefilter('ignore', BytesWarning)
-@@ -1025,6 +1089,7 @@ class TestBasicOpsMixedStringBytes(TestBasicOps, unittest.TestCase):
+@@ -1025,6 +1092,7 @@ class TestBasicOpsMixedStringBytes(TestBasicOps, unittest.TestCase):
          self.set    = set(self.values)
          self.dup    = set(self.values)
          self.length = 4
@@ -228,7 +231,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_repr(self):
          self.check_repr_against_values()
-@@ -1038,7 +1103,7 @@ def baditer():
+@@ -1038,7 +1106,7 @@ def baditer():
  def gooditer():
      yield True
  
@@ -237,7 +240,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      """SF 628246:  Set constructor should not trap iterator TypeErrors"""
  
      def test_instanceWithException(self):
-@@ -1065,7 +1130,7 @@ class TestExceptionPropagation(unittest.TestCase):
+@@ -1065,7 +1133,7 @@ class TestExceptionPropagation(unittest.TestCase):
  
  #==============================================================================
  
@@ -246,7 +249,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      def test_constructor(self):
          inner = frozenset([1])
          outer = set([inner])
-@@ -1078,9 +1143,10 @@ class TestSetOfSets(unittest.TestCase):
+@@ -1078,9 +1146,10 @@ class TestSetOfSets(unittest.TestCase):
  
  #==============================================================================
  
@@ -258,7 +261,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_eq(self):              # SF bug 643115
          self.assertEqual(self.set, set({2:1,4:3,6:5}))
-@@ -1151,9 +1217,10 @@ class TestBinaryOps(unittest.TestCase):
+@@ -1151,9 +1220,10 @@ class TestBinaryOps(unittest.TestCase):
  
  #==============================================================================
  
@@ -270,7 +273,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_union_subset(self):
          self.set |= set([2])
-@@ -1237,10 +1304,11 @@ class TestUpdateOps(unittest.TestCase):
+@@ -1237,10 +1307,11 @@ class TestUpdateOps(unittest.TestCase):
  
  #==============================================================================
  
@@ -283,7 +286,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_add_present(self):
          self.set.add("c")
-@@ -1311,7 +1379,7 @@ class TestMutate(unittest.TestCase):
+@@ -1311,7 +1382,7 @@ class TestMutate(unittest.TestCase):
  
  #==============================================================================
  
@@ -292,7 +295,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      case2method = {"<=": "issubset",
                     ">=": "issuperset",
-@@ -1334,22 +1402,22 @@ class TestSubsets:
+@@ -1334,22 +1405,22 @@ class TestSubsets:
              result = eval("x" + case + "y", locals())
              self.assertEqual(result, expected)
              # Test the "friendly" method-name spelling, if one exists.
@@ -321,7 +324,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      left  = set()
      right = set()
      name  = "both empty"
-@@ -1357,7 +1425,7 @@ class TestSubsetEqualEmpty(TestSubsets, unittest.TestCase):
+@@ -1357,7 +1428,7 @@ class TestSubsetEqualEmpty(TestSubsets, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -330,7 +333,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      left  = set([1, 2])
      right = set([1, 2])
      name  = "equal pair"
-@@ -1365,7 +1433,7 @@ class TestSubsetEqualNonEmpty(TestSubsets, unittest.TestCase):
+@@ -1365,7 +1436,7 @@ class TestSubsetEqualNonEmpty(TestSubsets, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -339,7 +342,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      left  = set()
      right = set([1, 2])
      name  = "one empty, one non-empty"
-@@ -1373,7 +1441,7 @@ class TestSubsetEmptyNonEmpty(TestSubsets, unittest.TestCase):
+@@ -1373,7 +1444,7 @@ class TestSubsetEmptyNonEmpty(TestSubsets, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -348,7 +351,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      left  = set([1])
      right = set([1, 2])
      name  = "one a non-empty proper subset of other"
-@@ -1381,7 +1449,7 @@ class TestSubsetPartial(TestSubsets, unittest.TestCase):
+@@ -1381,7 +1452,7 @@ class TestSubsetPartial(TestSubsets, unittest.TestCase):
  
  #------------------------------------------------------------------------------
  
@@ -357,7 +360,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      left  = set([1])
      right = set([2])
      name  = "neither empty, neither contains"
-@@ -1389,7 +1457,7 @@ class TestSubsetNonOverlap(TestSubsets, unittest.TestCase):
+@@ -1389,7 +1460,7 @@ class TestSubsetNonOverlap(TestSubsets, unittest.TestCase):
  
  #==============================================================================
  
@@ -366,7 +369,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_eq_ne(self):
          # Unlike the others, this is testing that == and != *are* allowed.
-@@ -1505,47 +1573,52 @@ class TestOnlySetsInBinaryOps:
+@@ -1505,47 +1576,52 @@ class TestOnlySetsInBinaryOps:
  
  #------------------------------------------------------------------------------
  
@@ -425,7 +428,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      def setUp(self):
          def gen():
              for i in range(0, 10, 2):
-@@ -1553,10 +1626,11 @@ class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, unittest.TestCase):
+@@ -1553,10 +1629,11 @@ class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, unittest.TestCase):
          self.set   = set((1, 2, 3))
          self.other = gen()
          self.otherIsIterable = True
@@ -438,7 +441,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_copy(self):
          dup = self.set.copy()
-@@ -1577,40 +1651,46 @@ class TestCopying:
+@@ -1577,40 +1654,46 @@ class TestCopying:
  
  #------------------------------------------------------------------------------
  
@@ -491,7 +494,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_binopsVsSubsets(self):
          a, b = self.a, self.b
-@@ -1727,7 +1807,7 @@ def L(seqn):
+@@ -1727,7 +1810,7 @@ def L(seqn):
      'Test multiple tiers of iterators'
      return chain(map(lambda x:x, R(Ig(G(seqn)))))
  
@@ -500,7 +503,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_constructor(self):
          for cons in (set, frozenset):
-@@ -1785,7 +1865,7 @@ class bad_dict_clear:
+@@ -1785,7 +1868,7 @@ class bad_dict_clear:
      def __hash__(self):
          return 0
  
@@ -509,7 +512,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      def test_8420_set_merge(self):
          # This used to segfault
          global be_bad, set2, dict2
-@@ -1826,7 +1906,7 @@ class TestWeirdBugs(unittest.TestCase):
+@@ -1826,7 +1909,7 @@ class TestWeirdBugs(unittest.TestCase):
          s.update(other)
  
  
@@ -518,7 +521,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      """Regression test for bpo-46615"""
  
      constructor1 = None
-@@ -1862,7 +1942,7 @@ class TestOperationsMutating:
+@@ -1862,7 +1945,7 @@ class TestOperationsMutating:
                  self.assertIn("changed size during iteration", str(e))
  
  
@@ -527,7 +530,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_eq_with_mutation(self):
          self.check_set_op_does_not_crash(lambda a, b: a == b)
-@@ -1933,24 +2013,24 @@ class TestBinaryOpsMutating(TestOperationsMutating):
+@@ -1933,24 +2016,24 @@ class TestBinaryOpsMutating(TestOperationsMutating):
          self.check_set_op_does_not_crash(f3)
  
  
@@ -557,7 +560,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_issubset_with_mutation(self):
          self.check_set_op_does_not_crash(set.issubset)
-@@ -1986,27 +2066,27 @@ class TestMethodsMutating(TestOperationsMutating):
+@@ -1986,27 +2069,27 @@ class TestMethodsMutating(TestOperationsMutating):
          self.check_set_op_does_not_crash(set.update)
  
  
@@ -591,7 +594,7 @@ index d9102eb98a5..0b8e99a04c4 100644
      constructor1 = set
      constructor2 = list
  
-@@ -2068,7 +2148,7 @@ def faces(G):
+@@ -2068,7 +2151,7 @@ def faces(G):
      return f
  
  
@@ -600,7 +603,7 @@ index d9102eb98a5..0b8e99a04c4 100644
  
      def test_cube(self):
  
-@@ -2118,4 +2198,4 @@ class TestGraphs(unittest.TestCase):
+@@ -2118,4 +2201,4 @@ class TestGraphs(unittest.TestCase):
  #==============================================================================
  
  if __name__ == "__main__":

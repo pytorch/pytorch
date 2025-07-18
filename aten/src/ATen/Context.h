@@ -431,7 +431,8 @@ class TORCH_API Context {
       at::SDPBackend::flash_attention,
       at::SDPBackend::efficient_attention,
       at::SDPBackend::math,
-      at::SDPBackend::cudnn_attention};
+      at::SDPBackend::cudnn_attention,
+      at::SDPBackend::overrideable};
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;

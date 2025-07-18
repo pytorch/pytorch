@@ -8,7 +8,6 @@ import torch._dynamo
 import torch._dynamo.backends
 import torch._dynamo.test_case
 from torch._dynamo.backends.debugging import ExplainWithBackend
-from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
 from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
@@ -137,10 +136,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     @requires_cuda
     def test_aot_cudagraphs(self, device):
         self._check_backend_works("cudagraphs", device)
-
-    @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
-    def test_onnxrt(self, device):
-        self._check_backend_works("onnxrt", device)
 
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm(self, device):

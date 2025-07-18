@@ -15,10 +15,10 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
+from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
-    ExportedProgram,
     ExportGraphSignature,
     InputKind,
     ModuleCallSignature,
@@ -701,7 +701,7 @@ def unflatten(
     """Unflatten an ExportedProgram, producing a module with the same module
     hierarchy as the original eager module. This can be useful if you are trying
     to use :mod:`torch.export` with another system that expects a module
-    hierachy instead of the flat graph that :mod:`torch.export` usually produces.
+    hierarchy instead of the flat graph that :mod:`torch.export` usually produces.
 
     .. note:: The args/kwargs of unflattened modules will not necessarily match
         the eager module, so doing a module swap (e.g. :code:`self.submod =

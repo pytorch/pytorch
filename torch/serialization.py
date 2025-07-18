@@ -189,7 +189,7 @@ def set_crc32_options(compute_crc32: bool):
         able to load the file.
 
     Args:
-        compute_crc32 (bool): set crc32 compuation flag
+        compute_crc32 (bool): set crc32 computation flag
     """
     from torch.utils.serialization import config
 
@@ -1066,7 +1066,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             # tensor]`, where `tensor.storage()` is the same as `storage`, and
             # `tensor.element_size() > 1`. Let's say that `tensor.dtype ==
             # torch.float`.  The storage will be serialized with element size
-            # of 1, since we're choosing to serialize the first occurance of
+            # of 1, since we're choosing to serialize the first occurrence of
             # a duplicate storage. Since this legacy serialization format saves
             # the numel of the storage, rather than nbytes directly, we'll be
             # effectively saving nbytes in this case.  We'll be able to load it
@@ -1109,15 +1109,15 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             return res
         return None
 
-    sys_info = dict(
-        protocol_version=PROTOCOL_VERSION,
-        little_endian=sys.byteorder == "little",
-        type_sizes=dict(
-            short=SHORT_SIZE,
-            int=INT_SIZE,
-            long=LONG_SIZE,
-        ),
-    )
+    sys_info = {
+        "protocol_version": PROTOCOL_VERSION,
+        "little_endian": sys.byteorder == "little",
+        "type_sizes": {
+            "short": SHORT_SIZE,
+            "int": INT_SIZE,
+            "long": LONG_SIZE,
+        },
+    }
 
     pickle_module.dump(MAGIC_NUMBER, f, protocol=pickle_protocol)
     pickle_module.dump(PROTOCOL_VERSION, f, protocol=pickle_protocol)
@@ -1328,11 +1328,11 @@ def load(
             loading only tensors, primitive types, dictionaries
             and any types added via :func:`torch.serialization.add_safe_globals`.
             See :ref:`weights-only` for more details.
-        mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
+        mmap: Indicates whether the file should be mapped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
             second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
-            tensor storages from disk to CPU memory in the first step, ``f`` is mmaped, which means tensor storages
+            tensor storages from disk to CPU memory in the first step, ``f`` is mapped, which means tensor storages
             will be lazily loaded when their data is accessed.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
@@ -1988,7 +1988,7 @@ def _load(
         # for a given key.
         offsets[name] = storage_offset
 
-        # Increment current_offset of offset where next zipfile header starts
+        # Increment current_offset to offset where next zipfile header starts
         current_offset = storage_offset + numel
         # add size of data descriptor after payload
         if numel > 0:
@@ -2004,7 +2004,10 @@ def _load(
         if torch._guards.detect_fake_mode(None) is not None:
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
-            storage._checkpoint_offset = zip_file.get_record_offset(name)
+            if can_calculate_storage_offsets:
+                storage._checkpoint_offset = _get_offset(key, name, numel)
+            else:
+                storage._checkpoint_offset = zip_file.get_record_offset(name)
         elif _serialization_tls.skip_data:
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes)

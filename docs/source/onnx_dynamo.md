@@ -263,12 +263,3 @@ Each initialized value, input, output has the following metadata:
     :members:
 .. autofunction:: torch.onnx.enable_fake_mode
 ```
-
-## Deprecated
-
-The following classes and functions are deprecated and will be removed.
-
-```{eval-rst}
-.. autofunction:: torch.onnx.dynamo_export
-.. autoclass:: torch.onnx.ExportOptions
-```

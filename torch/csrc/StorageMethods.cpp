@@ -390,10 +390,7 @@ static PyObject* THPStorage_fromFile(
     storage->set_nbytes(actual_nbytes);
   }
 
-  return THPStorage_NewWithStorage(
-      THPStorageClass,
-      std::move(storage),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  return THPStorage_NewWithStorage(THPStorageClass, std::move(storage));
   END_HANDLE_TH_ERRORS
 }
 

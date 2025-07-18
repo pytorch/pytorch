@@ -1,6 +1,8 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
+#include <torch/csrc/stable/ops.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <optional>
 
@@ -32,6 +34,8 @@ Tensor sgd_out_of_place(
     const float weight_decay,
     const double lr,
     const bool maximize) {
+  STD_TORCH_CHECK(param.dim() == 1, "param must be 1D");
+
   int64_t *param_sizes;
   int64_t *param_strides;
   aoti_torch_get_sizes(param.get(), &param_sizes);
@@ -253,4 +257,22 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("is_contiguous", &boxed_is_contiguous);
+}
+
+Tensor my_transpose(Tensor t, int64_t dim0, int64_t dim1) {
+  return transpose(t, dim0, dim1);
+}
+
+void boxed_my_transpose(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_transpose(to<Tensor>(stack[0]), to<int64_t>(stack[1]), to<int64_t>(stack[2]));
+
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("my_transpose", &boxed_my_transpose);
 }

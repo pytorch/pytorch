@@ -1843,11 +1843,11 @@ bool LoopNest::hasLoopCarriedDependence(const ForPtr& loop) {
       auto bLoads = NodeFinder<Load>::find(*it2);
       // ReadAfterWrite
       for (auto& aStore : aStores) {
-        for (auto& bLoad : bLoads) { // codespell:ignore
+        for (auto& bLoad : bLoads) {
           if (aStore->buf() == bLoad->buf()) {
             if (!areIndicesLoopIndependent(
                     aStore->indices(), bLoad->indices(), outer_loop_vars)) {
-              if (isOverlapping(analyzer, aStore, bLoad)) { // codespell:ignore
+              if (isOverlapping(analyzer, aStore, bLoad)) {
                 return true;
               }
             }

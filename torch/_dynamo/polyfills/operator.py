@@ -5,14 +5,18 @@ Python polyfills for operator
 from __future__ import annotations
 
 import operator
-from typing import Any, Callable, overload, TypeVar
+from typing import Any, Callable, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
 
 from ..decorators import substitute_in_graph
 
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+
 # Most unary and binary operators are handled by BuiltinVariable (e.g., `pos`, `add`)
-__all__ = ["attrgetter", "itemgetter", "methodcaller"]
+__all__ = ["attrgetter", "itemgetter", "methodcaller", "countOf"]
 
 
 _T = TypeVar("_T")
@@ -103,3 +107,9 @@ def methodcaller(name: str, /, *args: Any, **kwargs: Any) -> Callable[[Any], Any
         return getattr(obj, name)(*args, **kwargs)
 
     return caller
+
+
+# Reference: https://docs.python.org/3/library/operator.html#operator.countOf
+@substitute_in_graph(operator.countOf, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def countOf(a: Iterable[_T], b: _T, /) -> int:
+    return sum(it is b or it == b for it in a)

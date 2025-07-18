@@ -1616,6 +1616,7 @@ class MultiProcContinousTest(TestCase):
 
     @classmethod
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):
+        raised_exception = False
         # Sub tests are going to access these values, check first
         assert 0 <= rank < world_size
         # set class variables for the test class
@@ -1641,12 +1642,23 @@ class MultiProcContinousTest(TestCase):
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
             except BaseException as ex:
-                # Send the exception back to the dispatcher
-                completion_queue.put(ex)
+                raised_exception = True
+                # Send the exception and stack trace back to the dispatcher
+                exc_info = sys.exc_info()
+                tb_str = "".join(traceback.format_exception(*exc_info))
+                # Create a new exception with the original exception and traceback
+                enhanced_ex = RuntimeError(f"Exception in worker process:\n{tb_str}")
+                enhanced_ex.__cause__ = ex
+                completion_queue.put(enhanced_ex)
 
         # Termination
         logger.info("Terminating ...")
-        c10d.destroy_process_group()
+        # Calling destroy_process_group when workers have exceptions
+        # while others are doing collectives will cause a deadlock since
+        # it waits for enqueued collectives to finish.
+        # Only call this on a clean exit path
+        if not raised_exception:
+            c10d.destroy_process_group()
 
     @classmethod
     def _spawn_processes(cls, world_size) -> None:

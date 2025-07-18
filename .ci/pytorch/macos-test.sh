@@ -185,7 +185,7 @@ torchbench_setup_macos() {
 }
 
 pip_benchmark_deps() {
-  python -mpip install --no-input astunparse requests cython scikit-learn
+  python -mpip install --no-input requests cython scikit-learn six
 }
 
 

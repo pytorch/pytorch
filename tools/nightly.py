@@ -250,7 +250,6 @@ class Venv:
         self._env = {
             "PIP_EXTRA_INDEX_URL": self.pip_source.index_url,
             "UV_INDEX": self.pip_source.index_url,
-            "UV_PYTHON_DOWNLOADS": "never",
             "FORCE_COLOR": "1",
             "CLICOLOR_FORCE": "1",
         }
@@ -476,12 +475,13 @@ class Venv:
         cmd = [str(self.bindir / "uv"), *args]
         env = popen_kwargs.pop("env", None) or {}
         check = popen_kwargs.pop("check", True)
+        env["UV_PYTHON"] = str(python)
         return subprocess.run(
             cmd,
             check=check,
             text=True,
             encoding="utf-8",
-            env={**self._env, **env, "UV_PYTHON": str(python)},
+            env={**self._env, **env},
             **popen_kwargs,
         )
 

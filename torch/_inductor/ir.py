@@ -66,7 +66,6 @@ from torch.fx.experimental.symbolic_shapes import (
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
-    statically_known_true,
     SymTypes,
 )
 from torch.fx.node import Node
@@ -437,8 +436,16 @@ def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
-def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
-    if not isinstance(x, IRNode) or x.maybe_get_stride() is None:
+def is_aligned_realized_tensor_hint(
+    x: Union[Buffer, TensorBox], alignment: int
+) -> bool:
+    # Use this as a hint. This won't guard since size_hint doesn't guard.
+    if (
+        not isinstance(x, IRNode)
+        or x.maybe_get_stride() is None
+        or free_unbacked_symbols(x.get_stride())
+        or free_unbacked_symbols(x.get_size())
+    ):
         return False
 
     aligned_strides = all(
@@ -534,12 +541,23 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
 
 
 class IRNode:
+    """Base class for all intermediate representation (IR) nodes in TorchInductor.
+
+    Note:
+        This is an abstract base class. Most methods raise NotImplementedError
+        and must be overridden by concrete subclasses.
+    """
+
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
+    # traces back to where the IRNode is created in Inductor
     traceback: Optional[list[str]] = dataclasses.field(init=False)
     origin_node: Optional[torch.fx.Node] = dataclasses.field(init=False)
+    # trace backs to user model code
+    # a single IRNode could correspond to multiple lines of code
+    stack_traces: dict[str, str] = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -551,6 +569,19 @@ class IRNode:
         finally:
             IRNode._current_origins = old
 
+    @staticmethod
+    def is_realized_node(node: IRNode) -> bool:
+        return isinstance(
+            node,
+            (
+                ComputedBuffer,
+                InputsKernel,
+                InputBuffer,
+                ReinterpretView,
+                TemplateBuffer,
+            ),
+        )
+
     def _post_init_setattr(self, attr: str, value: Any) -> None:
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
         # If you must, can also be used for setting provenance info
@@ -558,11 +589,40 @@ class IRNode:
         object.__setattr__(self, attr, value)
 
     def __post_init__(self) -> None:
-        self._post_init_setattr("origins", OrderedSet(self._current_origins))
+        origins = OrderedSet(self._current_origins)
+        self._post_init_setattr("origins", origins)
         self._post_init_setattr(
             "traceback", traceback.format_stack() if config.debug_ir_traceback else None
         )
         self._post_init_setattr("origin_node", None)
+
+        # Group nodes by their stack traces to deduplicate
+        nodes_to_stack_trace = {}
+        if config.trace.provenance_tracking:
+            for node in origins:
+                if node.stack_trace:
+                    # nodes in the backward graph don't have mapping to pre_grad_graph
+                    nodes_to_stack_trace["post_grad+" + node.name] = node.stack_trace
+                else:
+                    if (
+                        "postToPre"
+                        not in torch._inductor.debug._inductor_post_to_pre_grad_nodes
+                    ):
+                        continue
+                    node_names = torch._inductor.debug._inductor_post_to_pre_grad_nodes[
+                        "postToPre"
+                    ].get(node.name, None)
+                    if node_names:
+                        for node_name in node_names:
+                            stack_trace = torch._inductor.debug._inductor_pre_grad_node_stack_trace.get(
+                                node_name, None
+                            )
+                            if stack_trace:
+                                nodes_to_stack_trace["pre_grad+" + node_name] = (
+                                    stack_trace
+                                )
+
+        self._post_init_setattr("stack_traces", nodes_to_stack_trace)
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -581,7 +641,15 @@ class IRNode:
         if shorten and len(origins) > 64:
             # this can get *very* long
             origins = f"{origins[:61]}..."
-        return [origins]
+        if not self.stack_traces:
+            return [origins]
+
+        stack_trace_str = []
+        for stack_trace in self.stack_traces.values():
+            stack_trace_str.append("stack_traces = {{")
+            stack_trace_str += stack_trace.split("\n")
+            stack_trace_str.append("}")
+        return [origins] + stack_trace_str
 
     def str_helper(
         self, lines: Sequence[object], shorten: bool = True, multiline: bool = True
@@ -2682,8 +2750,8 @@ def is_unaligned(node: IRNode) -> bool:
 
     if isinstance(node, ReinterpretView):
         layout = node.layout
-        has_unaligned_layout = not statically_known_true(
-            layout.offset * get_dtype_size(layout.dtype) % GPU_ALIGN_BYTES == 0
+        has_unaligned_layout = not V.graph.sizevars.statically_known_multiple_of(
+            layout.offset * get_dtype_size(layout.dtype), GPU_ALIGN_BYTES
         )
         return is_unaligned(node.data) or has_unaligned_layout
 
@@ -4857,7 +4925,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self,
         layout: Layout,
         inputs: Sequence[IRNode],
-        choice_timings_fn: Callable[[], dict[ChoiceCaller, float]],
+        choice_timings_fn: Callable[[Optional[int]], dict[ChoiceCaller, float]],
         unfiltered_choices: list[ChoiceCaller],
         allowed_prologue_inps: OrderedSet[str],
     ) -> None:
@@ -4868,7 +4936,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
             allowed_prologue_inps=allowed_prologue_inps,
         )
         self._choice_timings_fn = choice_timings_fn
-        self._choice_timings: Optional[dict[ChoiceCaller, float]] = None
+        self._choice_timings: dict[Optional[int], dict[ChoiceCaller, float]] = {}
         self.original_inputs = inputs
         self._output_plannable = all(
             isinstance(choice, TritonTemplateCallerBase)
@@ -4878,6 +4946,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
             )
             for choice in unfiltered_choices
         )
+        self._make_kernel_renders: dict[Optional[int], Any] = {}
 
     @property
     def output_plannable(self) -> bool:
@@ -4886,11 +4955,12 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         """
         return self._output_plannable
 
-    @property
-    def choice_timings(self) -> dict[ChoiceCaller, float]:
-        if self._choice_timings is None:
-            self._choice_timings = self._choice_timings_fn()
-        return self._choice_timings
+    def choice_timings(
+        self, hint_override: Optional[int] = None
+    ) -> dict[ChoiceCaller, float]:
+        if hint_override not in self._choice_timings:
+            self._choice_timings[hint_override] = self._choice_timings_fn(hint_override)
+        return self._choice_timings[hint_override]
 
     @contextlib.contextmanager
     def swap_as_triton_caller(self, caller: TritonTemplateCallerBase) -> Iterator[None]:
@@ -4914,8 +4984,22 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         assert self.get_stride() == caller.layout.stride
         self.make_kernel_render = caller.get_make_kernel_render()
 
-    def get_min_choice(self) -> tuple[ChoiceCaller, float]:
-        return min(self.choice_timings.items(), key=lambda x: x[1])
+    def get_min_choice(
+        self, hint_override: Optional[int] = None
+    ) -> tuple[ChoiceCaller, float]:
+        timings = self.choice_timings(hint_override=hint_override)
+        min_choice = min(timings, key=timings.get)  # type: ignore[arg-type]
+        return (min_choice, timings[min_choice])
+
+    def finalize_as_triton_callers(
+        self, callers: dict[Optional[int], TritonTemplateCallerBase]
+    ) -> None:
+        """Finalize with multiple callers for different hint overrides"""
+        for hint_override, caller in callers.items():
+            self._make_kernel_renders[hint_override] = caller.get_make_kernel_render()
+
+        # Set the default to be the one without hint override
+        self.make_kernel_render = self._make_kernel_renders[None]
 
 
 class CUDATemplateBuffer(TemplateBuffer):
@@ -5674,7 +5758,9 @@ class ExternKernel(InputsKernel):
                     # the current size and stride already satisfies this order.
                     # However by freezing it to the required order, the layout will be changed to:
                     # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
-
+                    use_current_stride_order = is_stride_order_storage_and_layout(
+                        x, order
+                    ) and not free_unbacked_symbols(x.get_layout().stride)
                     # fix flexiblelayout to be FixedLayout with stride_order
                     as_storage_and_layout(
                         x,
@@ -5682,9 +5768,11 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=(
                             get_stride_order(
-                                V.graph.sizevars.size_hints(x.get_layout().stride)
+                                V.graph.sizevars.size_hints_or_throw(
+                                    x.get_layout().stride
+                                )
                             )
-                            if is_stride_order_storage_and_layout(x, order)
+                            if use_current_stride_order
                             else order
                         ),
                         allow_padding=allow_padding,
@@ -7801,17 +7889,9 @@ class StorageBox(MutableBox):
         )
 
     def realize(self) -> Optional[str]:
-        if isinstance(
-            self.data,
-            (
-                ComputedBuffer,
-                InputsKernel,
-                InputBuffer,
-                ReinterpretView,
-                TemplateBuffer,
-            ),
-        ):
+        if IRNode.is_realized_node(self.data):
             return self.data.get_name()
+
         assert isinstance(self.data, (Pointwise, Reduction, Scan, Sort)), type(
             self.data
         )

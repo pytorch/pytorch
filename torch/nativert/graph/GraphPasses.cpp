@@ -101,7 +101,7 @@ std::string selectScalarOverloadName(const Node& node) {
       "floor_divide_out",
       "_conj"};
   std::vector<std::string_view> atoms = c10::split(node.target(), '.');
-  TORCH_CHECK_GE(atoms.size(), 3);
+  TORCH_CHECK(atoms.size() >= 3);
 
   std::string ns = std::string{atoms[atoms.size() - 3]};
   std::string opName = std::string{atoms[atoms.size() - 2]};

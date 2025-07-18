@@ -1,4 +1,5 @@
 import logging
+import math
 import operator
 from typing import Any, Callable, Optional, Union
 
@@ -34,10 +35,27 @@ def bucket_all_gather(
     merge_all_gather(gm, ag_buckets)
 
 
+def bucket_reduce_scatter(
+    gm: torch.fx.GraphModule,
+    reduce_scatter_bucket_cap_mb_callback: Callable[[int], float],
+) -> None:
+    rs_buckets = bucket_reduce_scatter_by_mb(gm, reduce_scatter_bucket_cap_mb_callback)
+    if len(rs_buckets) == 0:
+        return
+    merge_reduce_scatter(gm, rs_buckets)
+
+
 def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
     return (
         node.op == "call_function"
         and node.target == torch.ops._c10d_functional.all_gather_into_tensor.default
+    )
+
+
+def is_reduce_scatter_tensor(node: torch.fx.Node) -> bool:
+    return (
+        node.op == "call_function"
+        and node.target == torch.ops._c10d_functional.reduce_scatter_tensor.default
     )
 
 
@@ -117,6 +135,88 @@ def bucket_all_gather_by_mb(
         ag_buckets.append(cur_bucket)
 
     return ag_buckets
+
+
+def bucket_reduce_scatter_by_mb(
+    gm: torch.fx.GraphModule,
+    reduce_scatter_bucket_cap_mb_callback: Callable[[int], float],
+) -> list[list[torch.fx.Node]]:
+    """
+    Identifies all reduce_scatter nodes and groups them into buckets based on size limit `reduce_scatter_bucket_cap_mb_callback`.
+
+
+    Returns a list of buckets, where each bucket is a list of reduce_scatter nodes.
+    """
+
+    node_list = list(gm.graph.nodes)
+
+    # Prerequisite: Check if there is any reduce_scatter node
+    found_reduce_scatter = False
+    for node in node_list:
+        if is_reduce_scatter_tensor(node):
+            found_reduce_scatter = True
+            break
+    if not found_reduce_scatter:
+        return []
+
+    rs_nodes: list[torch.fx.Node] = []
+
+    # Step 1: Find all reduce_scatter nodes
+    for node in node_list:
+        if is_wait_tensor(node) and is_reduce_scatter_tensor(node.args[0]):
+            rs_node = node.args[0]
+            rs_nodes.append(rs_node)
+
+    # Step 2: Put reduce_scatter nodes into buckets
+    rs_buckets: list[list[torch.fx.Node]] = []
+    cur_bucket: list[torch.fx.Node] = []
+    cur_bucket_size_bytes: int = 0
+    cur_bucket_id: int = 0
+    # Convert MiB to bytes
+    reduce_scatter_bucket_size_bytes = int(
+        reduce_scatter_bucket_cap_mb_callback(cur_bucket_id) * 1024 * 1024
+    )
+    for rs_node in rs_nodes:
+        assert is_reduce_scatter_tensor(rs_node)
+        rs_input = rs_node.args[0]
+        assert "val" in rs_input.meta  # type: ignore[union-attr]
+        rs_input_size_bytes = (
+            rs_input.meta["val"].numel()  # type: ignore[union-attr]
+            * torch.finfo(rs_input.meta["val"].dtype).bits  # type: ignore[union-attr]
+            // 8
+        )
+        if (
+            cur_bucket_size_bytes + rs_input_size_bytes
+            > reduce_scatter_bucket_size_bytes
+            and cur_bucket
+        ):
+            # Current bucket is full, create new bucket
+            total_size = cur_bucket_size_bytes + rs_input_size_bytes
+            logger.info(
+                f"Reduce scatter bucket {cur_bucket_id} full: "  # noqa: G004
+                f"total_size = {total_size} = cur_bucket_size_bytes + rs_input_size_bytes = "
+                f"{cur_bucket_size_bytes} + {rs_input_size_bytes},"
+                f"bucket_cap = {reduce_scatter_bucket_size_bytes}"
+            )
+            rs_buckets.append(cur_bucket)
+            cur_bucket = []
+            cur_bucket_size_bytes = 0
+            cur_bucket_id += 1
+            reduce_scatter_bucket_size_bytes = int(
+                reduce_scatter_bucket_cap_mb_callback(cur_bucket_id) * 1024 * 1024
+            )
+        cur_bucket_size_bytes += rs_input_size_bytes
+        cur_bucket.append(rs_node)
+    if cur_bucket:
+        # add remaining nodes in the last bucket
+        logger.info(
+            f"Reduce scatter last bucket {cur_bucket_id}: "  # noqa: G004
+            f"total_size = {cur_bucket_size_bytes}, "
+            f"bucket_cap = {reduce_scatter_bucket_size_bytes}"
+        )
+        rs_buckets.append(cur_bucket)
+
+    return rs_buckets
 
 
 def node_copy(  # type: ignore[no-untyped-def]
@@ -429,4 +529,254 @@ def merge_all_gather(
                 bucket_id_is_scheduled[bucket_id] = True
         else:
             continue
+    gm.graph = new_graph
+
+
+def find_recursive_users_of_fx_node(node, collected_node_set, criteria_cb=None) -> None:  # type: ignore[no-untyped-def]
+    if criteria_cb and criteria_cb(node):
+        return
+    for user_node in node.users:
+        if user_node in collected_node_set:
+            continue
+        collected_node_set.add(user_node)
+        find_recursive_users_of_fx_node(
+            user_node,
+            collected_node_set,
+            criteria_cb=criteria_cb,
+        )
+
+
+def merge_reduce_scatter(
+    gm: torch.fx.GraphModule, rs_buckets: list[list[torch.fx.Node]]
+) -> None:
+    """
+    Transforms the graph to use bucketed reduce_scatter operations based on `rs_buckets`.
+    """
+    assert len(rs_buckets) > 0
+
+    rs_nodes: list[torch.fx.Node] = []
+    rs_node_to_wait_node: dict[torch.fx.Node, torch.fx.Node] = {}
+    rs_node_to_bucket_id = {}
+
+    # Map nodes to buckets and identify wait nodes
+    for bucket_id, bucket in enumerate(rs_buckets):
+        for rs_node in bucket:
+            assert is_reduce_scatter_tensor(rs_node), (
+                f"Expected reduce_scatter node, got {rs_node}"
+            )
+            # Find the wait_tensor node that uses this reduce_scatter node
+            wait_nodes = list(rs_node.users)
+            assert len(wait_nodes) == 1, (
+                f"Expected exactly one user for {rs_node}, got {wait_nodes}"
+            )
+            wait_node = wait_nodes[0]
+            assert is_wait_tensor(wait_node), (
+                f"Expected wait_tensor node, got {wait_node}"
+            )
+
+            rs_node_to_wait_node[rs_node] = wait_node
+            rs_nodes.append(rs_node)
+            rs_node_to_bucket_id[rs_node] = bucket_id
+
+    order = {x: i for i, x in enumerate(gm.graph.nodes)}
+    rs_wait_nodes = list(rs_node_to_wait_node.values())
+    rs_and_its_recursive_users = OrderedSet(rs_nodes + rs_wait_nodes)
+
+    # Prepare bucketed operation info
+    bucket_id_to_bucketed_op_info = {}
+    bucket_id_is_scheduled = {}
+    for bucket_id, rs_bucket in enumerate(rs_buckets):
+        _, reduce_op, group_size, group_name = next(
+            iter(rs_node_to_wait_node.keys())
+        ).args
+        rs_input_nodes = []
+        wait_nodes = []
+        wait_node_recursive_users = OrderedSet()  # type: ignore[var-annotated]
+        for rs_node in rs_bucket:
+            assert (
+                rs_node in rs_node_to_wait_node
+                and rs_node.args[1] == reduce_op
+                and rs_node.args[2] == group_size
+                and rs_node.args[3] == group_name
+            )
+            rs_input_nodes.append(rs_node.args[0])
+            wait_node = rs_node_to_wait_node[rs_node]
+            wait_nodes.append(wait_node)
+            find_recursive_users_of_fx_node(wait_node, wait_node_recursive_users)
+            rs_and_its_recursive_users |= wait_node_recursive_users
+        bucket_id_to_bucketed_op_info[bucket_id] = (
+            rs_input_nodes,
+            reduce_op,
+            group_size,
+            group_name,
+            wait_nodes,
+            wait_node_recursive_users,
+        )
+
+    new_graph: torch.fx.Graph = torch.fx.Graph()
+    env: dict[torch.fx.Node, torch.fx.Node] = {}
+
+    node_list = list(gm.graph.nodes)
+    for node in node_list:
+        if node not in rs_and_its_recursive_users:
+            # not reduce_scatter or its (recursive) users - schedule it normally
+            node_copy(env, new_graph, node, lambda x: env_lookup(env, x, node))
+        elif node in rs_node_to_wait_node:
+            assert node in rs_node_to_bucket_id
+            bucket_id = rs_node_to_bucket_id[node]
+            if (
+                bucket_id not in bucket_id_is_scheduled
+                and rs_buckets[bucket_id][-1] == node
+            ):
+                # If we are at the last node in the bucket, we can start to schedule the bucketed reduce_scatter node
+                (
+                    rs_input_nodes,
+                    reduce_op,
+                    group_size,
+                    group_name,
+                    orig_wait_nodes,
+                    orig_wait_node_recursive_users,
+                ) = bucket_id_to_bucketed_op_info[bucket_id]
+                # parents of rs have been scheduled, so we can directly use the env
+                unsharded_grads = [env[x] for x in rs_input_nodes]  # type: ignore[index]
+                reduce_dtype = unsharded_grads[0].meta["val"].dtype
+                # Only float32 and bfloat16 are supported for now.
+                # To support fp16, please see FSDP2 `_get_gradient_divide_factors`.
+                assert reduce_dtype in (
+                    torch.float32,
+                    torch.bfloat16,
+                ), f"reduce_dtype {reduce_dtype} is not supported"
+                assert all(
+                    grad.meta["val"].dtype == reduce_dtype for grad in unsharded_grads
+                )
+                device = unsharded_grads[0].meta["val"].device
+                rank = device.index
+                shard_dim = 0
+
+                def _get_dim0_padded_size(
+                    tensor_size: torch.Size, dim0_factor: int
+                ) -> torch.Size:
+                    padded_dim0 = math.ceil(tensor_size[0] / dim0_factor) * dim0_factor
+                    return torch.Size([padded_dim0]) + tensor_size[1:]
+
+                padded_unsharded_sizes = tuple(
+                    _get_dim0_padded_size(grad.meta["val"].size(), group_size)  # type: ignore[arg-type]
+                    for grad in unsharded_grads
+                )
+                reduce_scatter_input_numel = sum(
+                    s.numel() for s in padded_unsharded_sizes
+                )
+
+                """
+                NOTE: the relationship between the next few nodes is tricky:
+                - reduce_scatter_input_reshaped is a view of reduce_scatter_input
+                (same storage, same # elems, different shape).
+                - chunk_cat writes into reduce_scatter_input_reshaped,
+                which indirectly writes into reduce_scatter_input
+                (since they share the same storage).
+                - reduce_scatter_tensor reads from reduce_scatter_input.
+                """
+                reduce_scatter_input = new_graph_call_function(
+                    new_graph,
+                    torch.ops.aten.empty.memory_format,
+                    ([reduce_scatter_input_numel],),
+                    {
+                        "dtype": reduce_dtype,
+                        "device": device,
+                        "pin_memory": False,
+                    },
+                )
+                reduce_scatter_input_reshaped = new_graph_call_function(
+                    new_graph,
+                    torch.ops.aten.reshape.default,
+                    (reduce_scatter_input, [group_size, -1]),
+                    {},
+                )
+                new_graph_call_function(
+                    new_graph,
+                    torch.ops.fsdp.chunk_cat.default,
+                    (unsharded_grads,),
+                    {
+                        "dim": 0,
+                        "num_chunks": group_size,
+                        "out": reduce_scatter_input_reshaped,
+                    },
+                )
+                reduce_scatter_tensor = new_graph_call_function(
+                    new_graph,
+                    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                    (reduce_scatter_input, reduce_op, group_size, group_name),
+                    {},
+                )
+
+                wait_tensor = new_graph_call_function(
+                    new_graph,
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    (reduce_scatter_tensor,),
+                    {},
+                )
+
+                def _chunk_with_empty(
+                    tensor: torch.Tensor, num_chunks: int, dim: int
+                ) -> list[torch.Tensor]:
+                    chunks = list(torch.chunk(tensor, num_chunks, dim=dim))
+                    while len(chunks) < num_chunks:
+                        chunks.append(chunks[0].new_empty(0))
+                    return chunks
+
+                reduce_output = wait_tensor
+                # View out and accumulate sharded gradients
+                new_sharded_grads = []
+                flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
+                for padded_unsharded_size, unsharded_grad in zip(
+                    padded_unsharded_sizes, unsharded_grads
+                ):
+                    # NOTE: we only care about the shape of tensors in `chunks`, so using meta tensor here
+                    chunks = _chunk_with_empty(
+                        torch.empty_like(unsharded_grad.meta["val"], device="meta"),
+                        group_size,  # type: ignore[arg-type]
+                        dim=shard_dim,
+                    )
+                    sharded_param = chunks[rank]
+                    sharded_size = sharded_param.size()
+                    contiguous_sharded_stride = (
+                        torch._prims_common.make_contiguous_strides_for(sharded_size)
+                    )
+                    # Assume even sharding for Shard(i), i > 0; otherwise would require
+                    # copy-out for contiguous strides
+                    new_sharded_grad = new_graph_call_function(
+                        new_graph,
+                        torch.ops.aten.as_strided.default,
+                        (reduce_output,),
+                        {
+                            "size": sharded_size,
+                            "stride": contiguous_sharded_stride,
+                            "storage_offset": flat_grad_offset,
+                        },
+                    )
+                    new_sharded_grads.append(new_sharded_grad)
+                    padded_sharded_numel = padded_unsharded_size.numel() // group_size  # type: ignore[operator]
+                    flat_grad_offset += padded_sharded_numel  # type: ignore[assignment]
+                assert len(orig_wait_nodes) == len(new_sharded_grads)
+                assert len(orig_wait_nodes) > 0
+                for new_sharded_grad, orig_wait_node in zip(
+                    new_sharded_grads, orig_wait_nodes
+                ):
+                    env[orig_wait_node] = new_sharded_grad  # noqa: PERF403
+                for user in sorted(
+                    orig_wait_node_recursive_users, key=lambda x: order[x]
+                ):
+                    # We skip output node here, because output node will be inserted (later)
+                    # as the last node in the new graph.
+                    if user.op != "output":
+                        node_copy(
+                            env, new_graph, user, lambda x: env_lookup(env, x, user)
+                        )
+                bucket_id_is_scheduled[bucket_id] = True
+        else:
+            continue
+    assert node_list[-1].op == "output"
+    # Finally, insert the output node
+    output_node = node_list[-1]
+    node_copy(env, new_graph, output_node, lambda x: env_lookup(env, x, output_node))
     gm.graph = new_graph

@@ -50,7 +50,7 @@ class TestActivationSparsifier(TestCase):
         sparsifier_defaults = activation_sparsifier.defaults
         combined_defaults = {**defaults, "sparse_config": sparse_config}
 
-        # more keys are populated in activation sparsifier (eventhough they may be None)
+        # more keys are populated in activation sparsifier (even though they may be None)
         assert len(combined_defaults) <= len(activation_sparsifier.defaults)
 
         for key, config in sparsifier_defaults.items():

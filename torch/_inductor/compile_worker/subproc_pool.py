@@ -13,7 +13,7 @@ import traceback
 import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import Any, Callable, IO, Optional, TypeVar
 from typing_extensions import Never, ParamSpec
 
@@ -36,31 +36,42 @@ _P = ParamSpec("_P")
 _T = TypeVar("_T")
 
 
-def _pack_msg(job_id: int, length: int) -> bytes:
-    return struct.pack("nn", job_id, length)
+class MsgHeader(IntEnum):
+    ERROR = 0
+    SHUTDOWN = 1
+    QUIESCE = 2
+    WAKEUP = 3
+    JOB = 4
 
 
-def _unpack_msg(data: bytes) -> tuple[int, int]:
+def _pack_msg(msg_header: MsgHeader, job_id: int, length: int) -> bytes:
+    return struct.pack("nnn", int(msg_header), job_id, length)
+
+
+def _unpack_msg(data: bytes) -> tuple[MsgHeader, int, int]:
     if not data:
-        return -1, -1
-    return struct.unpack("nn", data)
+        return MsgHeader.ERROR, -1, -1
+    msg_header, job_id, length = struct.unpack("nnn", data)
+    return MsgHeader(msg_header), job_id, length
 
 
-msg_bytes = len(_pack_msg(0, 0))
+msg_bytes = len(_pack_msg(MsgHeader.JOB, 0, 0))
 
 
-def _send_msg(write_pipe: IO[bytes], job_id: int, job_data: bytes = b"") -> None:
-    length = len(job_data)
-    write_pipe.write(_pack_msg(job_id, length))
+def _send_msg(
+    write_pipe: IO[bytes], msg_header: MsgHeader, job_id: int = -1, data: bytes = b""
+) -> None:
+    length = len(data)
+    write_pipe.write(_pack_msg(msg_header, job_id, length))
     if length > 0:
-        write_pipe.write(job_data)
+        write_pipe.write(data)
     write_pipe.flush()
 
 
-def _recv_msg(read_pipe: IO[bytes]) -> tuple[int, bytes]:
-    job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
+def _recv_msg(read_pipe: IO[bytes]) -> tuple[MsgHeader, int, bytes]:
+    msg_header, job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
     data = read_pipe.read(length) if length > 0 else b""
-    return job_id, data
+    return msg_header, job_id, data
 
 
 class _SubprocExceptionInfo:
@@ -147,9 +158,7 @@ class SubprocPool:
                 "PYTHONPATH": os.environ.get(
                     "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
                 ),
-                # We don't want to re-warm the pool when the subprocess imports
-                # torch._inductor.codecache since the warming process is what
-                # creates the SubprocPool in the first place.
+                # Safeguard against creating a SubprocPool in the subprocess.
                 "TORCH_WARM_POOL": "0",
                 # Some internal usages need a modified LD_LIBRARY_PATH.
                 "LD_LIBRARY_PATH": get_ld_library_path(),
@@ -182,24 +191,28 @@ class SubprocPool:
             job_id = next(self.job_id_count)
             self.pending_futures[job_id] = future = Future()
         future.set_running_or_notify_cancel()
+        self._send(MsgHeader.JOB, job_id, job_data)
+        return future
+
+    def _send(self, msg_header: MsgHeader, job_id: int = -1, data: bytes = b"") -> None:
         with self.write_lock:
             if not self.running:
-                raise RuntimeError("submit() on closed pool")
-            _send_msg(self.write_pipe, job_id, job_data)
-        return future
+                raise RuntimeError("Attempting to use a closed pool")
+            _send_msg(self.write_pipe, msg_header, job_id, data)
 
     def _read_thread(self) -> None:
         while True:
             data = b""
+            job_id = -1
             try:
-                job_id, data = _recv_msg(self.read_pipe)
+                msg_header, job_id, data = _recv_msg(self.read_pipe)
             except Exception:
                 # Something went wrong during the read. There's no way we have a
-                # valid job_id.
+                # valid msg.
                 log.exception("failure in subproc_pool._recv_msg")
-                job_id = -1
+                msg_header = MsgHeader.ERROR
 
-            if job_id < 0:
+            if msg_header != MsgHeader.JOB:
                 # read_pipe returned None or got exception
                 if self.running:
                     log.warning("SubprocPool unclean exit")
@@ -232,13 +245,19 @@ class SubprocPool:
                     self.pending_futures[job_id].set_result(result)
                 del self.pending_futures[job_id]
 
+    def quiesce(self) -> None:
+        self._send(MsgHeader.QUIESCE)
+
+    def wakeup(self) -> None:
+        self._send(MsgHeader.WAKEUP)
+
     def shutdown(self) -> None:
         try:
             with self.write_lock:
                 if not self.running:
                     return
                 self.running = False
-                _send_msg(self.write_pipe, -1)
+                _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
                 self.write_pipe.close()
             self.process.wait(300)
         except OSError as e:
@@ -268,37 +287,36 @@ class SubprocMain:
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
         self.nprocs = nprocs
-        self.pool = self._new_pool(nprocs, True)
+        self.pool: Optional[ProcessPoolExecutor] = None
         self.running = True
-
-    def _new_pool(self, nprocs: int, warm: bool) -> ProcessPoolExecutor:
-        pool = TrackedProcessPoolExecutor(
-            nprocs,
-            mp_context=multiprocessing.get_context(self.kind.value),
-            initializer=functools.partial(_async_compile_initializer, os.getpid()),
-        )
-        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
-        if warm:
-            _warm_process_pool(pool, nprocs)
-        return pool
 
     def main(self) -> None:
         while True:
-            job_id, data = _recv_msg(self.read_pipe)
-            if job_id < 0:
+            msg_header, job_id, data = _recv_msg(self.read_pipe)
+            if msg_header == MsgHeader.JOB:
+                self.submit(job_id, data)
+            elif msg_header == MsgHeader.WAKEUP:
+                self._start_pool()
+            elif msg_header == MsgHeader.QUIESCE:
+                self._quiesce()
+            else:
                 return self._shutdown()
-            self.submit(job_id, data)
+
+    def _quiesce(self) -> None:
+        if self.pool is not None:
+            self.pool.shutdown(wait=False)
+            self.pool = None
 
     def _shutdown(self) -> None:
         with self.write_lock:
             self.running = False
             try:
-                _send_msg(self.write_pipe, -1)
+                _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
                 self.write_pipe.close()
             except BrokenPipeError:
                 pass  # parent process already shutdown
             self.read_pipe.close()
-        self.pool.shutdown()
+        self._quiesce()
 
     def submit(self, job_id: int, data: bytes) -> None:
         while self.running:
@@ -309,7 +327,7 @@ class SubprocMain:
                 # If any subprocess in the pool crashes, we get a BrokenProcessPool
                 # exception and the whole pool becomes unusable. Handle crashes by
                 # recreating the pool and resubmitting.
-                self.pool = self._new_pool(self.nprocs, False)
+                self.pool = None
 
     def _submit_inner(self, job_id: int, data: bytes) -> None:
         def callback(fut: Future[Any]) -> None:
@@ -323,13 +341,30 @@ class SubprocMain:
             assert isinstance(result, bytes)
             with self.write_lock:
                 if self.running:
-                    _send_msg(self.write_pipe, job_id, result)
+                    _send_msg(self.write_pipe, MsgHeader.JOB, job_id, result)
             return
+
+        self._start_pool()
+        assert self.pool is not None
 
         future = self.pool.submit(
             functools.partial(SubprocMain.do_job, self.pickler, data)
         )
         future.add_done_callback(callback)
+
+    def _start_pool(self) -> None:
+        if self.pool is not None:
+            return
+
+        self.pool = TrackedProcessPoolExecutor(
+            self.nprocs,
+            mp_context=multiprocessing.get_context(self.kind.value),
+            initializer=functools.partial(_async_compile_initializer, os.getpid()),
+        )
+        multiprocessing.util.Finalize(
+            None, self.pool.shutdown, exitpriority=sys.maxsize
+        )
+        _warm_process_pool(self.pool, self.nprocs)
 
     @staticmethod
     def do_job(pickler: SubprocPickler, data: bytes) -> bytes:

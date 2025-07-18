@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import ctypes
+import unittest
 
 import torch
 from torch._inductor.async_compile import AsyncCompile
@@ -9,6 +10,10 @@ from torch._inductor.codegen.cuda.cuda_env import nvcc_exist
 from torch._inductor.exc import CUDACompileError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 _SOURCE_CODE = r"""
@@ -36,6 +41,7 @@ int saxpy(int n, float a, float *x, float *y) {
 
 
 class TestCUDACodeCache(InductorTestCase):
+    @requires_cuda
     def test_cuda_load(self):
         with fresh_cache():
             # Test both .o and .so compilation.
@@ -63,12 +69,14 @@ class TestCUDACodeCache(InductorTestCase):
             )
             torch.testing.assert_close(y, expected_y)
 
+    @requires_cuda
     def test_compilation_error(self):
         with fresh_cache():
             error_source_code = _SOURCE_CODE.replace("saxpy_device", "saxpy_wrong", 1)
             with self.assertRaises(CUDACompileError):
                 CUDACodeCache.compile(error_source_code, "o")
 
+    @requires_cuda
     def test_async_compile(self):
         with fresh_cache():
             async_compile = AsyncCompile()

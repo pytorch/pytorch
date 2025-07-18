@@ -14,24 +14,36 @@ class AliasAnalyzer {
       const Graph& graph,
       const c10::FastMap<std::string /* target */, FunctionSchema>& schemas);
 
-  C10_ALWAYS_INLINE const AllocationLifetime& lifetime(
+  const c10::FastSet<const Value*>* get_sources_of_alias(
       const Value* value) const {
+    const auto it = aliases_.find(value);
+    if (it == aliases_.end()) {
+      return nullptr;
+    }
+    return &it->second;
+  }
+
+  const AllocationLifetime& lifetime(const Value* value) const {
     return lifetimes_.at(value);
   }
 
-  C10_ALWAYS_INLINE bool is_alias(const Value* value) const {
+  bool is_alias(const Value* value) const {
     return aliases_.find(value) != aliases_.end();
   }
 
-  C10_ALWAYS_INLINE bool is_storage_associated_with_output(
-      const Value* value) const {
+  bool is_storage_associated_with_output(const Value* value) const {
     return values_associated_with_outputs_.find(value) !=
         values_associated_with_outputs_.end();
   }
 
-  C10_ALWAYS_INLINE const c10::FastSet<const Value*>&
-  values_associated_with_output_storage() const {
+  const c10::FastSet<const Value*>& values_associated_with_output_storage()
+      const {
     return values_associated_with_outputs_;
+  }
+
+  const std::vector<const Value*>& alive_values_at_time(size_t time) const {
+    TORCH_CHECK(time < alive_values_at_time_.size());
+    return alive_values_at_time_[time];
   }
 
  private:
@@ -72,14 +84,35 @@ class AliasAnalyzer {
   // even if they aren't explicitly considered outputs)
   void maybe_extend_lifetimes(const Graph& graph);
 
+  // in the event that we have aliases-of-aliases
+  // we want to make sure that the 'sources'
+  // are propagated
+  //
+  // e.g.,
+  // %x0 = ...
+  // %x1 = some_aliasing_op(x0)
+  // %x2 = some_aliasing_op(x1)
+  //
+  // we want aliases_[x2] = x0
+  // instead of aliases[x2] = x1
+  //
+  // the result is aliases_ will contain a
+  // mapping from each alias to its backed
+  // source (i.e., the value that owns its
+  // associated dataptr)
+  void squash_deep_aliases(const Graph& graph);
+
   void log_state() const;
 
-  // mapping from alias to the set of values that it aliases
+  // mapping from alias to its source
   c10::FastMap<const Value*, c10::FastSet<const Value*>> aliases_;
   c10::FastMap<const Value*, AllocationLifetime> lifetimes_;
   // non-aliasing outputs or non-aliasing intermediates that are aliased by
   // outputs
   c10::FastSet<const Value*> values_associated_with_outputs_;
+  // alive_values_at_time_[i] = values that are "alive" during the
+  // computation of node i
+  std::vector<std::vector<const Value*>> alive_values_at_time_;
 };
 
 } // namespace torch::nativert

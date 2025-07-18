@@ -22,6 +22,7 @@ from ..utils import (
     get_num_sms,
     has_free_symbols,
     use_aten_gemm_kernels,
+    use_triton_template,
 )
 from .mm_common import (
     _is_static_problem,
@@ -434,23 +435,30 @@ def grouped_mm_args(
 
         if out_dtype is None:
             out_dtype = mat1.get_dtype()
+        alignment = 16 // out_dtype.itemsize
 
-        dims = []
         if m1dim == 2:
             if m2dim == 2:
                 assert offs is not None
-                dims = [offs.get_size()[0], mat1_size[0], mat2_size[1]]
+                out_size = [offs.get_size()[0], mat1_size[0], mat2_size[1]]
             else:
-                dims = [mat1_size[0], mat2_size[-1]]
+                out_size = [mat1_size[0], mat2_size[-1]]
         else:
             if m2dim == 2:
-                dims = [mat1_size[1], mat2_size[1]]
+                out_size = [mat1_size[1], mat2_size[1]]
             else:
-                dims = [mat1_size[0], mat1_size[1], mat2_size[-1]]
+                out_size = [mat1_size[0], mat1_size[1], mat2_size[-1]]
+        size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
+        if len(out_size) == 2:
+            out_stride = [size_padded, 1]
+        else:
+            out_stride = [out_size[1] * size_padded, size_padded, 1]
+
         layout = FixedLayout(
             mat1.get_device(),
             out_dtype,
-            dims,
+            out_size,
+            out_stride,
         )
     else:
         assert out_dtype is None, "out_dtype is ignored if layout is specified."
@@ -604,7 +612,11 @@ def _tuned_grouped_mm_common(
     # Checking only for the equality of corresponding dims of
     # multiplicands here, relying on meta function checks for
     # everything else.
-    if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result):
+    if (
+        is_nonzero
+        and use_triton_template(layout)
+        and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
+    ):
         scaled = scale_a is not None
         if len(m1_size) == 2:
             if len(m2_size) == 2:

@@ -224,6 +224,10 @@ inconsistent 'UUID' assignment across ranks, and to prevent races during initial
 .. autofunction:: is_torchelastic_launched
 ```
 
+```{eval-rst}
+.. autofunction:: get_default_backend_for_device
+```
+
 ______________________________________________________________________
 
 Currently three initialization methods are supported:
@@ -1470,4 +1474,10 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.checkpoint.state_dict
+```
+
+```{toctree}
+:hidden:
+
+distributed._dist2
 ```

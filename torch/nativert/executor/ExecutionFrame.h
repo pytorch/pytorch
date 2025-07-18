@@ -46,13 +46,14 @@ class ExecutionFrame {
   }
 
   template <typename CB>
-  auto withMemoryPlanner(CB&& cb) {
+  auto withManagedMemory(CB&& cb) {
     if (!layoutManager_) {
-      return std::forward<CB>(cb)();
+      return std::forward<CB>(cb)(nullptr);
     }
 
     LayoutManagerGuard guard(*layoutManager_);
-    return std::forward<CB>(cb)();
+    return std::forward<CB>(cb)(
+        const_cast<const LayoutManager*>(layoutManager_.get()));
   }
 
   std::vector<c10::IValue> tryMoveUserOutputs();
@@ -123,8 +124,10 @@ class ExecutionFrame {
   }
 
   c10::intrusive_ptr<c10d::Work> getWork(int64_t workId) const {
-    CHECK(work_.find(workId) != work_.end())
-        << "Couldn't find work with Id: " << workId;
+    TORCH_CHECK(
+        work_.find(workId) != work_.end(),
+        "Couldn't find work with Id: ",
+        workId);
     return work_.at(workId);
   }
 
@@ -150,7 +153,7 @@ class ExecutionFrame {
 
  private:
   bool isOutputMovable(size_t idx) const {
-    TORCH_CHECK_LT(idx, moveable_output_mask_.size());
+    TORCH_CHECK(idx < moveable_output_mask_.size());
     return moveable_output_mask_[idx];
   }
 

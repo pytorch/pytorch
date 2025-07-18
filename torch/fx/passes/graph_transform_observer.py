@@ -42,7 +42,7 @@ class GraphTransformObserver:
 
         self.log_url = log_url
 
-        self.active = trace.enabled or self.log_url is not None
+        self.active = trace.provenance_tracking or self.log_url is not None
 
         if self.active:
             self.erased_nodes: set[str] = set()

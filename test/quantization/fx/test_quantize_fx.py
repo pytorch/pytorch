@@ -6648,7 +6648,7 @@ class TestQuantizeFx(QuantizationTestCase):
             """
 
             def __init__(self, input_dim, output_dim):
-                super(__class__, self).__init__()
+                super().__init__()
                 self.w = nn.Parameter(torch.randn(input_dim, output_dim))
                 self.b = nn.Parameter(torch.randn(input_dim))
 
@@ -6661,7 +6661,7 @@ class TestQuantizeFx(QuantizationTestCase):
             """
 
             def __init__(self, input_dim, hidden_dim, output_dim):
-                super(__class__, self).__init__()
+                super().__init__()
                 self.submodule_1 = SubModule(hidden_dim, input_dim)
                 setattr(self, 'submodule|2', SubModule(hidden_dim, hidden_dim))
                 setattr(self, 'submodule/3', SubModule(hidden_dim, hidden_dim))

@@ -209,7 +209,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     const int total_q = q.size(0);
     const int total_k = k.size(0);
 
-    TORCH_CHECK(batch_size > 0, "batch size must be postive");
+    TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size_og <= 256, "CK only supports head dimension at most 256");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 

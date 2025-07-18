@@ -42,7 +42,7 @@ call choco upgrade -y cmake --no-progress --installargs 'ADD_CMAKE_TO_PATH=Syste
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
-call pip install mkl-include==2021.4.0 mkl-devel==2021.4.0
+call pip install mkl==2024.2.0 mkl-static==2024.2.0 mkl-include==2024.2.0
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
@@ -125,6 +125,11 @@ if "%USE_CUDA%"=="1" (
   for /F "usebackq delims=" %%n in (`cygpath -m "%CUDA_PATH%\bin\nvcc.exe"`) do set CMAKE_CUDA_COMPILER=%%n
   set CMAKE_CUDA_COMPILER_LAUNCHER=%TMP_DIR%/bin/randomtemp.exe;%TMP_DIR%\bin\sccache.exe
 )
+
+:: Install build-system requirements before running setup.py commands
+python -m pip install -r requirements-build.txt
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
 
 :: Print all existing environment variable for debugging
 set

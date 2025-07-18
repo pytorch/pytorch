@@ -72,7 +72,7 @@ class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
         mesh_fsdp_tp = init_device_mesh(
             self.device_type, (2, 4), mesh_dim_names=("dp", "tp")
         )
-        # TODO: we are using an internal API atm. Change to a publich API once it is ready.
+        # TODO: we are using an internal API atm. Change to a public API once it is ready.
         mesh_fsdp_ep = _mesh_resources.create_child_mesh(mesh_fsdp_tp, ("dp",))
         del _mesh_resources.child_to_parent_mapping[mesh_fsdp_ep]
 

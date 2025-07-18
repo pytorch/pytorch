@@ -422,9 +422,11 @@ std::unique_ptr<Graph> jsonToSubgraph(
     }
 
     auto it = jsonTensorValue.find(inputName);
-    CHECK(it != jsonTensorValue.end())
-        << "Missing tensor metadata for " << inputName
-        << "in thriftGraph.tensorValue";
+    TORCH_CHECK(
+        it != jsonTensorValue.end(),
+        "Missing tensor metadata for ",
+        inputName,
+        "in thriftGraph.tensorValue");
     weightsTensorMeta[weightName] = it->second;
   }
   graph->setWeightsMeta(weightsTensorMeta);

@@ -23,7 +23,7 @@ symbolic_opset9.py.
 
 To extend support for updated operators in different opset versions on top of opset 9,
 simply add the updated symbolic functions in the respective symbolic_opset{version}.py file.
-Checkout topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.py for example.
+Check out topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.py for example.
 
 ## Editing Symbolic Files
 

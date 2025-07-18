@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_dict.py b/test/dynamo/cpython/3_13/test_dict.py
-index 4729132c5a5..14f829c1715 100644
+index 4c095464cbb..fcda6484ea6 100644
 --- a/test/dynamo/cpython/3_13/test_dict.py
 +++ b/test/dynamo/cpython/3_13/test_dict.py
-@@ -1,3 +1,57 @@
+@@ -1,3 +1,60 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_dict.py
 +
 +import sys
 +import torch
@@ -60,7 +63,7 @@ index 4729132c5a5..14f829c1715 100644
  import collections
  import collections.abc
  import gc
-@@ -11,7 +65,7 @@ from test import support
+@@ -11,7 +68,7 @@ from test import support
  from test.support import import_helper, get_c_recursion_limit
  
  
@@ -69,15 +72,48 @@ index 4729132c5a5..14f829c1715 100644
  
      def test_invalid_keyword_arguments(self):
          class Custom(dict):
-@@ -265,6 +319,7 @@ class DictTest(unittest.TestCase):
+@@ -265,39 +322,7 @@ class DictTest(unittest.TestCase):
  
          self.assertRaises(ValueError, {}.update, [(1, 2, 3)])
  
+-    def test_update_shared_keys(self):
+-        class MyClass: pass
+-
+-        # Subclass str to enable us to create an object during the
+-        # dict.update() call.
+-        class MyStr(str):
+-            def __hash__(self):
+-                return super().__hash__()
+-
+-            def __eq__(self, other):
+-                # Create an object that shares the same PyDictKeysObject as
+-                # obj.__dict__.
+-                obj2 = MyClass()
+-                obj2.a = "a"
+-                obj2.b = "b"
+-                obj2.c = "c"
+-                return super().__eq__(other)
+-
+-        obj = MyClass()
+-        obj.a = "a"
+-        obj.b = "b"
+-
+-        x = {}
+-        x[MyStr("a")] = MyStr("a")
+-
+-        # gh-132617: this previously raised "dict mutated during update" error
+-        x.update(obj.__dict__)
+-
+-        self.assertEqual(x, {
+-            MyStr("a"): "a",
+-            "b": "b",
+-        })
+-
 +    @unittest.skip("test hangs")
      def test_fromkeys(self):
          self.assertEqual(dict.fromkeys('abc'), {'a':None, 'b':None, 'c':None})
          d = {}
-@@ -477,7 +532,7 @@ class DictTest(unittest.TestCase):
+@@ -510,7 +535,7 @@ class DictTest(unittest.TestCase):
          for copymode in -1, +1:
              # -1: b has same structure as a
              # +1: b is a.copy()
@@ -86,7 +122,7 @@ index 4729132c5a5..14f829c1715 100644
                  size = 2**log2size
                  a = {}
                  b = {}
-@@ -1006,18 +1061,6 @@ class DictTest(unittest.TestCase):
+@@ -1039,18 +1064,6 @@ class DictTest(unittest.TestCase):
              pass
          self._tracked(MyDict())
  
@@ -105,7 +141,7 @@ index 4729132c5a5..14f829c1715 100644
      def make_shared_key_dict(self, n):
          class C:
              pass
-@@ -1622,7 +1665,7 @@ class DictTest(unittest.TestCase):
+@@ -1655,7 +1668,7 @@ class DictTest(unittest.TestCase):
                  self.assertGreaterEqual(eq_count, 1)
  
  
@@ -114,7 +150,7 @@ index 4729132c5a5..14f829c1715 100644
  
      # Test _PyDict_GetItem_KnownHash()
      @support.cpython_only
-@@ -1666,4 +1709,4 @@ class SubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+@@ -1699,4 +1712,4 @@ class SubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
  
  
  if __name__ == "__main__":

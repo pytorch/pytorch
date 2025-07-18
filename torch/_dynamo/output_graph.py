@@ -347,7 +347,7 @@ class StackLocalsMetadata:
 
 def get_builtins_dict(global_scope):
     # f_globals["__builtins__"] can be a dict or a module. This is an
-    # implemenation detail -
+    # implementation detail -
     # https://docs.python.org/3/library/builtins.html.
 
     # This makes guarding on any builtin messy because the guard check_fn

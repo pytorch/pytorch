@@ -213,13 +213,14 @@ def get_model_info(
                 path_prefix = prefix
             elif prefix != path_prefix:
                 raise Exception(f"Mismatched prefixes: {path_prefix} != {prefix}")  # noqa: TRY002
-            zip_files.append(dict(
-                filename=zi.filename,
-                compression=zi.compress_type,
-                compressed_size=zi.compress_size,
-                file_size=zi.file_size,
-            ))
-
+            zip_files.append(
+                {
+                    "filename": zi.filename,
+                    "compression": zi.compress_type,
+                    "compressed_size": zi.compress_size,
+                    "file_size": zi.file_size,
+                }
+            )
         assert path_prefix is not None
         version = zf.read(path_prefix + "/version").decode("utf-8").strip()
 
@@ -332,18 +333,20 @@ def get_model_info(
                 continue
             extra_pickles[zi.filename] = contents
 
-    return {"model": dict(
-        title=title,
-        file_size=file_size,
-        version=version,
-        zip_files=zip_files,
-        interned_strings=list(interned_strings),
-        code_files=code_files,
-        model_data=model_data,
-        constants=constants,
-        extra_files_jsons=extra_files_jsons,
-        extra_pickles=extra_pickles,
-    )}
+    return {
+        "model": {
+            "title": title,
+            "file_size": file_size,
+            "version": version,
+            "zip_files": zip_files,
+            "interned_strings": list(interned_strings),
+            "code_files": code_files,
+            "model_data": model_data,
+            "constants": constants,
+            "extra_files_jsons": extra_files_jsons,
+            "extra_pickles": extra_pickles,
+        }
+    }
 
 
 def get_inline_skeleton():

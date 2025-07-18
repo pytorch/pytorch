@@ -4330,6 +4330,19 @@ class CPUReproTests(TestCase):
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
 
+    def test_float32_to_uint8(self):
+        # https://github.com/pytorch/pytorch/issues/156788
+        @torch.compile
+        def fn(x):
+            return x.to(torch.uint8)
+
+        x = torch.tensor([-1.0, -2.0, -3.0, -4.0], dtype=torch.float32, device="cpu")
+        self.assertEqual(
+            x.to(torch.uint8),
+            fn(x),
+            msg=f"Expected {x.to(torch.uint8)} but got {fn(x)}",
+        )
+
     def test_non_contiguous_reduction_store(self):
         # https://github.com/pytorch/pytorch/issues/113018
         class M(torch.nn.Module):

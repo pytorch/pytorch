@@ -820,6 +820,33 @@ class GlobalStateSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class TorchSource(Source):
+    """Points to the actual `torch` module - used instead of GlobalSource
+    in case the user has overridden `torch` in their local namespace"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .guards import GuardBuilder, install_guard
+
+        install_guard(self.make_guard(GuardBuilder.ID_MATCH))
+
+    def name(self):
+        return "__import__('torch')"
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.extend_output(
+            [
+                codegen.create_load_const(0),  # level
+                create_instruction("BUILD_TUPLE", arg=0),  # fromlist
+                codegen.create_import_name("torch"),
+            ]
+        )
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+
+@dataclasses.dataclass(frozen=True)
 class TorchFunctionModeStackSource(Source):
     ind: int
 
