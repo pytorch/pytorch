@@ -738,6 +738,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
+    "torch/csrc/distributed/c10d/cuda/CUDAEventCache.cpp",
     "torch/csrc/distributed/c10d/cuda/utils.cpp",
     "torch/csrc/distributed/c10d/cuda/StreamBlock.cu",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
