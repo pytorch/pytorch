@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import functools
-import textwrap
 import unittest.mock
 from typing import Callable
 from unittest.mock import patch
@@ -33,7 +32,6 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
     requires_triton,
 )
-from torch.utils._ordered_set import OrderedSet
 
 
 aten = torch.ops.aten
@@ -476,24 +474,6 @@ class TestTemplateRender(TestCase):
                 self.render_hooks["<OUTPUT_PTR_VAR>"] = hook
                 return "<OUTPUT_PTR_VAR>"
 
-            def store_output(self, output_ptr_name, value, indent_width=4):
-                with self.create_subgraph_body("<STORE_OUTPUT>"):
-                    self.body.writeline(f"tl.store({output_ptr_name}, {value})")
-                    self.codegen_body()
-
-                self.args.output(self.output_node.get_name())
-
-                def hook() -> str:
-                    self.codegen_body()
-                    self.cse.invalidate(OrderedSet())
-                    return textwrap.indent(
-                        self.body.getvalue(), " " * indent_width
-                    ).strip()
-
-                assert "<STORE_OUTPUT>" not in self.render_hooks
-                self.render_hooks["<STORE_OUTPUT>"] = hook
-                return "<STORE_OUTPUT>"
-
             def render(
                 self, template, kwargs, record_input_dependent_tracked_event=False
             ):
@@ -533,16 +513,13 @@ class TestTemplateRender(TestCase):
             source=(
                 r"""
 {{def_kernel("A", "B")}}
+    # test_finalized_subclass_hooks_marker
     xoffset = tl.program_id(0)
     xindex = xoffset + tl.arange(0, XBLOCK)
-    output_block_ptr = tl.make_block_ptr(
-        base={{output_ptr_var()}},
-        shape=[32], strides=[1], offsets=[xoffset],
-        block_shape=[XBLOCK], order=[0])
     tmp0 = tl.load(A + xindex)
     tmp1 = tl.load(B + xindex)
     tmp2 = tmp0 + tmp1
-    {{store_output("output_block_ptr", "tmp2")}}
+    tl.store({{output_ptr_var()}} + xindex, tmp2)
     """
             ),
         )
@@ -582,7 +559,7 @@ class TestTemplateRender(TestCase):
 
             _result, kernels = run_and_get_kernels(add, a, b)
             assert len(kernels) == 1
-            assert "output_block_ptr" in kernels[0]
+            assert "test_finalized_subclass_hooks_marker" in kernels[0]
 
 
 if __name__ == "__main__":

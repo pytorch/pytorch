@@ -167,7 +167,7 @@ class PartialRender:
     of replacements after the initial render.
     """
 
-    FINALIZED_HOOK: None = None
+    FINALIZED_HOOK: object = object()
 
     def __init__(self, code, replacement_hooks) -> None:
         super().__init__()
