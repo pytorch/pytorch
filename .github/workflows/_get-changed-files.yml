@@ -1,0 +1,43 @@
+name: Get Changed Files
+
+on:
+  workflow_call:
+    outputs:
+      changed-files:
+        description: "List of changed files (space-separated) or '*' if not in a PR"
+        value: ${{ jobs.get-changed-files.outputs.changed-files }}
+
+jobs:
+  get-changed-files:
+    runs-on: ubuntu-latest
+    outputs:
+      changed-files: ${{ steps.get-files.outputs.changed-files }}
+
+    steps:
+      - name: Get changed files
+        id: get-files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Check if we're in a pull request context
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            echo "Running in PR context"
+
+            # Get the PR number from the github context
+            PR_NUMBER="${{ github.event.number }}"
+
+            # Use gh CLI to get changed files in the PR with explicit repo
+            CHANGED_FILES=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json files --jq '.files[].path' | tr '\n' ' ' | sed 's/ $//')
+
+            if [ -z "$CHANGED_FILES" ]; then
+              echo "No changed files found, setting to '*'"
+              CHANGED_FILES="*"
+            fi
+
+            echo "Changed files: $CHANGED_FILES"
+            echo "changed-files=$CHANGED_FILES" >> "$GITHUB_OUTPUT"
+
+          else
+            echo "Not in PR context, setting changed files to '*'"
+            echo "changed-files=*" >> "$GITHUB_OUTPUT"
+          fi
