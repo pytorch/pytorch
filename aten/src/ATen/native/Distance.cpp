@@ -152,6 +152,11 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, std::optional<i
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.sym_size(-1) == x2.sym_size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.sym_size(-1), " X2: ", x2.sym_size(-1));
   auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
+  if (x2.storage().allocator() == at::globalContext().getPinnedMemoryAllocator(c10::kMPS)) {
+    // See Note [CPU pinned to MPS failures]
+    // `python test/test_mps.py -k test_output_match_cdist_mps_float32`
+    x2.mutable_data_ptr();
+  }
   auto result = [&]() {
     NoNamesGuard guard;
     SymInt r1 = x1.sym_size(-2);

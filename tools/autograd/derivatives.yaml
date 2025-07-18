@@ -452,7 +452,7 @@
   result: auto_linear
 
 - name: _lazy_clone(Tensor self, *, Device? device=None) -> Tensor
-  self: grad
+  self: _to_copy_backward(grad, self.options())
   result: auto_linear
 
 - name: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor

@@ -11,6 +11,7 @@
 #include <ATen/ops/_has_same_storage_numel_native.h>
 #include <ATen/ops/_make_dual_native.h>
 #include <ATen/ops/_new_zeros_with_same_feature_meta_native.h>
+#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/_unpack_dual_native.h>
 #include <ATen/ops/_lazy_clone_native.h>
 #include <ATen/ops/alias.h>
@@ -96,11 +97,15 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
 Tensor _lazy_clone(Tensor const& self, std::optional<c10::Device> device_opt) {
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
   c10::intrusive_ptr<c10::StorageImpl> storage = nullptr;
+  c10::Device src_device = self.device();
+  c10::DeviceType src_device_type = src_device.type();
 
-  if (device_opt.has_value()) {
-    c10::Device src_device = self.device();
+  if (src_device_type == c10::kMeta) {
+    return zeros_like(self, self.options());
+  }
+
+  if (device_opt.has_value() && device_opt.value() != src_device) {
     c10::Device dst_device = device_opt.value();
-    c10::DeviceType src_device_type = src_device.type();
     c10::DeviceType dst_device_type = dst_device.type();
     TORCH_CHECK(
       (src_device_type == dst_device_type)
@@ -127,7 +132,10 @@ Tensor _lazy_clone(Tensor const& self, std::optional<c10::Device> device_opt) {
 
     c10::Allocator* allocator = nullptr;
 
-    if (src_device_type == c10::kMPS && dst_device_type == c10::kCPU) {
+    if (src_device_type == dst_device_type) {
+      allocator = self_storage->allocator();
+
+    } else if (src_device_type == c10::kMPS && dst_device_type == c10::kCPU) {
       // For MPS-to-CPU, need the output to use the pinned MPS allocator, not
       // the regular CPU allocator.
       allocator = at::globalContext().getPinnedMemoryAllocator(c10::kMPS);

@@ -854,16 +854,22 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
     TORCH_INTERNAL_ASSERT(dest, "dest is null");
     TORCH_INTERNAL_ASSERT(src, "src is null");
 
+    void* dest_mps = nullptr;
+    const void* src_mps = nullptr;
+
     if (isSharedBuffer(dest)) {
       TORCH_INTERNAL_ASSERT(isSharedBuffer(src));
+      dest_mps = dest;
+      src_mps = src;
     } else if (isSharedBufferCPUPtr(dest)) {
       TORCH_INTERNAL_ASSERT(isSharedBufferCPUPtr(src));
+      dest_mps = get_device_ptr_from_cpu_ptr(dest);
+      src_mps = get_device_ptr_from_cpu_ptr(src);
     }
-    if (isSharedBufferCPUPtr(dest)) {
-      default_copy_data(dest, src, count);
-    } else {
-      id<MTLBuffer> src_buffer = __builtin_bit_cast(id<MTLBuffer>, src);
-      id<MTLBuffer> dest_buffer = __builtin_bit_cast(id<MTLBuffer>, dest);
+
+    @autoreleasepool {
+      id<MTLBuffer> src_buffer = __builtin_bit_cast(id<MTLBuffer>, src_mps);
+      id<MTLBuffer> dest_buffer = __builtin_bit_cast(id<MTLBuffer>, dest_mps);
       MPSStream* stream = getCurrentMPSStream();
       id<MTLCommandQueue> commandQueue = stream->commandQueue();
       id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];

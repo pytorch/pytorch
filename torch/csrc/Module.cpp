@@ -2606,23 +2606,32 @@ Call this whenever a new thread is created in order to propagate values from
       "Gets the memory address of the Tensor's data pointer.");
 
   py_module.def(
-      "_data_address_resolve_unified",
-      [](const at::Tensor& tensor) {
+      "_data_address_unified_mps",
+      [](const at::Tensor& tensor, c10::Device device) {
         const void* data_ptr = tensor.storage().data();
-        if (tensor.device().type() == c10::kCPU) {
-          c10::Allocator* allocator = tensor.storage().allocator();
-          if (c10::IMPSAllocator* allocator_ =
-                  dynamic_cast<c10::IMPSAllocator*>(allocator)) {
-            return reinterpret_cast<std::intptr_t>(
-                allocator_->get_device_ptr_from_cpu_ptr(data_ptr));
+        c10::Allocator* allocator = tensor.storage().allocator();
+        if (c10::IMPSAllocator* allocator_ =
+                dynamic_cast<c10::IMPSAllocator*>(allocator)) {
+          c10::DeviceType device_type = device.type();
+
+          TORCH_CHECK(
+              device_type == c10::kMPS || device_type == c10::kCPU,
+              "device_type must be either mps or cpu, but got: ",
+              device_type);
+
+          if (tensor.device().type() != device_type) {
+            if (device_type == c10::kMPS) {
+              data_ptr = allocator_->get_device_ptr_from_cpu_ptr(data_ptr);
+            } else {
+              data_ptr = allocator_->get_cpu_ptr_from_device_ptr(data_ptr);
+            }
           }
         }
         return reinterpret_cast<std::intptr_t>(data_ptr);
       },
-      ("Gets the memory address of the Tensor's data pointer. If the device "
-       "is CPU and the allocator has unified memory on some other device, then "
-       "the CPU data address is resolved to the address space of the other "
-       "device."));
+      ("If the tensor is not held in unified MPS memory, returns its data "
+       "address. Otherwise, returns the unified memory address in the address "
+       "space of the specified device, which must be either CPU or MPS."));
 
   py_module.def(
       "_is_cow_tensor",

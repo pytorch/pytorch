@@ -186,6 +186,15 @@ Tensor group_norm(
   const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = bias_opt.value_or(Tensor());
 
+  // See Note [CPU pinned to MPS failures]
+  // `python test/test_mps.py -k  test_output_match_nn_functional_group_norm_mps`
+  if (weight_opt.has_value() && weight.storage().allocator() == at::globalContext().getPinnedMemoryAllocator(c10::kMPS)) {
+    weight.mutable_data_ptr();
+  }
+  if (bias_opt.has_value() && bias.storage().allocator() == at::globalContext().getPinnedMemoryAllocator(c10::kMPS)) {
+    bias.mutable_data_ptr();
+  }
+
   const auto N = input.sym_size(0);
   const auto C = input.sym_size(1);
   check_group_norm_inputs(input, weight, bias, C, num_groups);

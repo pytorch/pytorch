@@ -5239,6 +5239,7 @@ else:
     # in-between the two write operations, by adding checks between them, so
     # that they have to materialize in the expected order.
     @skipXLA
+    @skipIfTorchInductor("Decomp of _lazy_clone is eager clone")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_lazy_clone(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
@@ -5261,6 +5262,7 @@ else:
 
     # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA
+    @skipIfTorchInductor("Decomp of _lazy_clone is eager clone")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_lazy_clone_view(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
@@ -5288,6 +5290,7 @@ else:
 
     # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA
+    @skipIfTorchInductor("Decomp of _lazy_clone is eager clone")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_lazy_clone_view_materialize(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
@@ -5334,6 +5337,7 @@ else:
         self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
 
     @skipXLA
+    @skipIfTorchInductor("Decomp of _lazy_clone is eager clone")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_lazy_clone_binary_op_no_materialize(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)

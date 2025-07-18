@@ -55,6 +55,10 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/Indexing_metallib.h>
 #endif
 
+// WARNING: If any tensors in the iterator are COW and they are materialized
+// after this function call, the output of this function becomes invalid.
+// Always either materialize beforehand by calling `mutable_data_ptr` or avoid
+// materializing with `const_data_ptr`.
 id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
                                         const TensorIteratorBase& iter,
                                         bool use_64bit_index) {
@@ -180,9 +184,10 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
                                              0};
     for (uint32_t idx = 0; idx < num_indices; idx++) {
       const auto& indexTensor = iter.tensor_base(idx + 2);
-      indexAB.push_back(getMTLBufferStorage(indexTensor).gpuAddress + iter_tensor_offset(iter, idx + 2));
+      auto indexBuffer = ConstMTLBufferTensor(indexTensor).mtl_buffer_unsafe();
+      indexAB.push_back(indexBuffer.gpuAddress + iter_tensor_offset(iter, idx + 2));
       TORCH_CHECK(indexTensor.scalar_type() == ScalarType::Long, "index(): Expected dtype int64 for Index");
-      [computeEncoder useResource:getMTLBufferStorage(indexTensor) usage:MTLResourceUsageRead];
+      [computeEncoder useResource:indexBuffer usage:MTLResourceUsageRead];
     }
     [computeEncoder setComputePipelineState:indexSelectPSO];
     bind_iter_tensors(computeEncoder, iter, 2);
