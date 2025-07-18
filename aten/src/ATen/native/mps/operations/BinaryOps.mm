@@ -150,7 +150,9 @@ static void binaryOpTensor(const Tensor& self,
                                     self,
                                     /*mpsShape*/ nil,
                                     /*gatherTensorData=*/true,
-                                    getMPSScalarType(inputDataType));
+                                    getMPSScalarType(inputDataType),
+                                    /*useMPSStridedAPI=*/true,
+                                    /*isConst=*/true);
       feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
     }
     if (is_other_scalar && !other.is_mps()) {
@@ -161,7 +163,9 @@ static void binaryOpTensor(const Tensor& self,
                                      other,
                                      /*mpsShape*/ nil,
                                      /*gatherTensorData=*/true,
-                                     getMPSScalarType(otherDataType));
+                                     getMPSScalarType(otherDataType),
+                                     /*useMPSStridedAPI=*/true,
+                                     /*isConst=*/true);
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
 

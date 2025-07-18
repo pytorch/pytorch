@@ -848,12 +848,31 @@ struct TORCH_API MPSAllocator : public IMPSAllocator {
   }
 
   void copy_data(void* dest, const void* src, std::size_t count) const final {
+    if (count == 0) {
+      return;
+    }
+    TORCH_INTERNAL_ASSERT(dest, "dest is null");
+    TORCH_INTERNAL_ASSERT(src, "src is null");
+
     if (isSharedBuffer(dest)) {
       TORCH_INTERNAL_ASSERT(isSharedBuffer(src));
     } else if (isSharedBufferCPUPtr(dest)) {
       TORCH_INTERNAL_ASSERT(isSharedBufferCPUPtr(src));
     }
-    default_copy_data(dest, src, count);
+    if (isSharedBufferCPUPtr(dest)) {
+      default_copy_data(dest, src, count);
+    } else {
+      id<MTLBuffer> src_buffer = __builtin_bit_cast(id<MTLBuffer>, src);
+      id<MTLBuffer> dest_buffer = __builtin_bit_cast(id<MTLBuffer>, dest);
+      MPSStream* stream = getCurrentMPSStream();
+      id<MTLCommandQueue> commandQueue = stream->commandQueue();
+      id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
+      id<MTLBlitCommandEncoder> encoder = [commandBuffer blitCommandEncoder];
+      [encoder copyFromBuffer:src_buffer sourceOffset:0 toBuffer:dest_buffer destinationOffset:0 size:count];
+      [encoder endEncoding];
+      [commandBuffer commit];
+      [commandBuffer waitUntilCompleted];
+    }
   }
 
   void* get_cpu_ptr_from_device_ptr(void* device_ptr) const override {

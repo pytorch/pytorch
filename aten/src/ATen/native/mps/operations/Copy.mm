@@ -105,7 +105,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     }
   }
 
-  id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
+  id<MTLBuffer> sourceBuffer = ConstMTLBufferTensor(src).mtl_buffer_unsafe();
   size_t dst_tensor_nbytes = dst.nbytes();
 
   @autoreleasepool {
@@ -258,7 +258,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
     src = src_;
   }
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst_);
-  id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
+  id<MTLBuffer> sourceBuffer = ConstMTLBufferTensor(src).mtl_buffer_unsafe();
 
   // Scatter to `dst` if the memory is not contiguous
   // If the memory is not contiguous, it means that the tensor has strides and we would not be
@@ -295,7 +295,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
     } else if (dst_byte_offset) {
       auto maybeCastedSource =
           at::empty(dst_.sizes(), dst_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-      auto maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
+      auto maybeCastedSourceBuffer = ConstMTLBufferTensor(maybeCastedSource).mtl_buffer_unsafe();
       copy_cast_mps(maybeCastedSource, src, maybeCastedSourceBuffer, sourceBuffer);
 
       uint64_t profile_id = getMPSProfiler().beginProfileCopy(
