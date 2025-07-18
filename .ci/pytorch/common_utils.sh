@@ -197,7 +197,7 @@ function install_torchrec_and_fbgemm() {
     PATCH_VERSION=$(grep 'ROCM_VERSION_PATCH' "$rocm_version_h" | awk '{print $3}')
     ROCM_INT=$(($MAJOR_VERSION * 10000 + $MINOR_VERSION * 100 + $PATCH_VERSION))
     echo "ROCm version: $ROCM_INT"
-    export BUILD_ROCM_VERSION="${MAJOR_VERSION}.${MINOR_VERSION}"
+    export BUILD_ROCM_VERSION="$MAJOR_VERSION.$MINOR_VERSION"
 
     pip_install tabulate  # needed for newer fbgemm
     pip_install patchelf  # needed for rocm fbgemm
