@@ -212,6 +212,9 @@ skip:
       - stable_diffusion_text_encoder
       - llava
       - moco
+      # timeout on aarch64
+      - timm_regnet
+      - timm_nfnet
 
     cuda: []
 

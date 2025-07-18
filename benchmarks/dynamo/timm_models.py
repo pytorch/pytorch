@@ -231,6 +231,10 @@ class TimmRunner(BenchmarkRunner):
         return self._config["skip"]
 
     @property
+    def skip_models_for_cpu(self):
+        return self._skip["device"]["cpu"]
+
+    @property
     def skip_models(self):
         return self._skip["all"]
 

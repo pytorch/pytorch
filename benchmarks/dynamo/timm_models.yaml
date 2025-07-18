@@ -1,9 +1,12 @@
 # removing this file prevents the TimmRunner from dynamically skipping models
 skip:
   all:
-    # timeout on aarch64
-    - dm_nfnet_f0
-    - nfnet_l0
-    - resnest101e
-    - swsl_resnext101_32x16d
-    - visformer_small
+    - ~
+  device:
+    cpu:
+      # timeout on aarch64
+      - dm_nfnet_f0
+      - nfnet_l0
+      - resnest101e
+      - swsl_resnext101_32x16d
+      - visformer_small
