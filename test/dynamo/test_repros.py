@@ -7072,6 +7072,30 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.compile(f, backend="eager", fullgraph=True)(x, out_res)
         self.assertEqual(out_ref, out_res)
 
+    def test_sys_monitoring(self):
+        found_dynamo = False
+
+        def callback(code, offset):
+            nonlocal found_dynamo
+            torch._dynamo.graph_break()
+            if (
+                code
+                is torch._dynamo.symbolic_convert.InstructionTranslator.run.__code__
+            ):
+                found_dynamo = True
+
+        sys.monitoring.use_tool_id(0, "test")
+        sys.monitoring.register_callback(0, sys.monitoring.events.PY_START, callback)
+        sys.monitoring.set_events(0, sys.monitoring.events.PY_START)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x + 1
+
+        fn(torch.ones(3))
+        # sys.monitoring should still run in Python dynamo
+        self.assertTrue(found_dynamo)
+
     def test_unbind_copy_out(self):
         def f(eye, out):
             torch.unbind_copy(eye, out=out)

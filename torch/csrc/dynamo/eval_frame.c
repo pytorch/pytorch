@@ -31,8 +31,22 @@ static PyObject* eval_frame_callback_get(void) {
 }
 
 void eval_frame_callback_set(PyObject* obj) {
+  // Disable sys.monitoring unless we run eagerly
+  if (obj == Py_None || obj == Py_False) {
+    enable_monitoring_callables();
+  } else {
+    disable_monitoring_callables();
+  }
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
+
+#if IS_PYTHON_3_12_PLUS
+const size_t sys_monitoring_num_callables =
+    sizeof((PyInterpreterState){0}.monitoring_callables) / sizeof(PyObject*);
+PyObject** get_monitoring_callables(PyInterpreterState* interp) {
+  return (PyObject**)interp->monitoring_callables;
+}
+#endif
 
 // 3.14 Not supported at all. See cpython_defs.c for hints
 #if !(IS_PYTHON_3_14_PLUS)
