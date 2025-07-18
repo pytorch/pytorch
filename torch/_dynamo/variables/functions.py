@@ -666,6 +666,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
         finally:
             counters["unimplemented"] |= counters["inline_call"]
 
+    def call_obj_hasattr(self, tx, name):
+        if name in self.python_type().__dict__:
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
+
     def has_unpack_var_sequence(self, tx):
         return False
 
@@ -885,12 +890,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
-        elif name == "__contains__":
-            # The generator needs to be lazily consumed here to avoid unintended
-            # side effects
-            return variables.UserFunctionVariable(
-                polyfills.generator___contains__
-            ).call_function(tx, [self, *args], {})
 
         super().call_method(tx, name, args, kwargs)
 

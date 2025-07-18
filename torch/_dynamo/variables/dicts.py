@@ -1184,6 +1184,11 @@ class DictViewVariable(VariableTracker):
         codegen.load_method(self.kv)
         codegen.call_method(0)
 
+    def call_obj_hasattr(self, tx, name):
+        if name in self.python_type().__dict__:
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
+
     def call_method(
         self,
         tx,
