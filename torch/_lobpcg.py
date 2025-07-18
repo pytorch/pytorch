@@ -57,7 +57,7 @@ def _polynomial_coefficients_given_roots(roots):
         # So the code below tries to circumvent the explicit root finding by series
         # of operations on memory copies imitating the Horner's method.
         # The memory copies are required to construct nodes in the computational graph
-        # by exploting the explicit (not in-place, separate node for each step)
+        # by exploiting the explicit (not in-place, separate node for each step)
         # recursion of the Horner's method.
         # Needs more memory, O(... * k^2), but with only O(... * k^2) complexity.
         poly_coeffs_new = poly_coeffs.clone() if roots.requires_grad else poly_coeffs
@@ -80,7 +80,7 @@ def _polynomial_value(poly, x, zero_power, transition):
                      poly[..., i] = (a_{i_0}, ..., a{i_n} (==1)), and
                      poly(x) = poly[..., 0] * zero_power + ... + poly[..., n] * x^n
 
-      x (Tensor): the value (possible batched) to evalate the polynomial `poly` at.
+      x (Tensor): the value (possible batched) to evaluate the polynomial `poly` at.
 
       zero_power (Tensor): the representation of `x^0`. It is application-specific.
 
@@ -168,7 +168,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     # of the characteristic polynomial.
     chr_poly_D = _polynomial_coefficients_given_roots(D)
 
-    # the code belows finds the explicit solution to the Sylvester equation
+    # the code below finds the explicit solution to the Sylvester equation
     # U_ortho^T A U_ortho dX - dX D = -U_ortho^T A U
     # and incorporates it into the whole gradient stored in the `res` variable.
     #
@@ -391,9 +391,16 @@ def lobpcg(
       we do the following symmetrization map: `A -> (A + A.t()) / 2`.
       The map is performed only when the `A` requires gradients.
 
+    .. warning:: LOBPCG algorithm is not applicable when the number of `A`'s rows
+      is smaller than 3x the number of requested eigenpairs `n`.
+
     Args:
 
       A (Tensor): the input tensor of size :math:`(*, m, m)`
+
+      k (integer, optional): the number of requested
+                  eigenpairs. Default is the number of :math:`X`
+                  columns (when specified) or `1`.
 
       B (Tensor, optional): the input tensor of size :math:`(*, m,
                   m)`. When not specified, `B` is interpreted as
@@ -404,19 +411,21 @@ def lobpcg(
                   initial approximation of eigenvectors. X must be a
                   dense tensor.
 
-      iK (tensor, optional): the input tensor of size :math:`(*, m,
-                  m)`. When specified, it will be used as preconditioner.
-
-      k (integer, optional): the number of requested
-                  eigenpairs. Default is the number of :math:`X`
-                  columns (when specified) or `1`.
-
       n (integer, optional): if :math:`X` is not specified then `n`
                   specifies the size of the generated random
                   approximation of eigenvectors. Default value for `n`
-                  is `k`. If :math:`X` is specified, the value of `n`
-                  (when specified) must be the number of :math:`X`
-                  columns.
+                  is `k`. If :math:`X` is specified, any provided value of `n` is
+                  ignored and `n` is automatically set to the number of
+                  columns in :math:`X`.
+
+      iK (tensor, optional): the input tensor of size :math:`(*, m,
+                  m)`. When specified, it will be used as preconditioner.
+
+      niter (int, optional): maximum number of iterations. When
+                 reached, the iteration process is hard-stopped and
+                 the current approximation of eigenpairs is returned.
+                 For infinite iteration but until convergence criteria
+                 is met, use `-1`.
 
       tol (float, optional): residual tolerance for stopping
                  criterion. Default is `feps ** 0.5` where `feps` is
@@ -431,12 +440,6 @@ def lobpcg(
       method (str, optional): select LOBPCG method. See the
                  description of the function above. Default is
                  "ortho".
-
-      niter (int, optional): maximum number of iterations. When
-                 reached, the iteration process is hard-stopped and
-                 the current approximation of eigenpairs is returned.
-                 For infinite iteration but until convergence criteria
-                 is met, use `-1`.
 
       tracker (callable, optional) : a function for tracing the
                  iteration process. When specified, it is called at

@@ -384,7 +384,7 @@ Tensor& set_storage_cpu_(
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
   at::OptionalIntArrayRef stride_opt =
       stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : std::nullopt;
-  // We can re-use this kernel for the meta device.
+  // We can reuse this kernel for the meta device.
   // We just need to make sure we don't actually try to resize the (null)
   // storage.
   at::native::resize_impl_cpu_(
@@ -459,8 +459,7 @@ Tensor& set_storage_meta__symint(
                 size, stride, itemsize, std::move(storage_offset));
 
       if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() &&
-          TORCH_GUARD_SIZE_OBLIVIOUS(
-              new_size_bytes.sym_gt(storage.sym_nbytes()))) {
+          (new_size_bytes > storage.sym_nbytes())) {
         storage.set_nbytes(std::move(new_size_bytes));
       }
     }
@@ -506,7 +505,7 @@ Tensor& set_cpu_(Tensor& result) {
   return result;
 }
 
-// We can't re-use the cpu kernel here because we don't want to use the cpu
+// We can't reuse the cpu kernel here because we don't want to use the cpu
 // allocator.
 Tensor& set_meta_(Tensor& result) {
   caffe2::TypeMeta dtype = result.dtype();
@@ -763,22 +762,22 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 }
 
 Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
+  TORCH_CHECK_VALUE(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
 }
 
 Tensor cat(TensorList tensors, Dimname dim) {
-  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
+  TORCH_CHECK_VALUE(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat(tensors, dimname_to_position(tensors[0], dim));
 }
 
 // torch.concat, alias for torch.cat
 Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+  return cat_out(tensors, dim, result);
 }
 
 Tensor concat(TensorList tensors, Dimname dim) {
-  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+  return at::cat(tensors, dim);
 }
 
 Tensor& concat_out(TensorList tensors, int64_t dim, Tensor& result) {
@@ -791,11 +790,11 @@ Tensor concat(TensorList tensors, int64_t dim) {
 
 // torch.concatenate, alias for torch.cat
 Tensor& concatenate_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+  return cat_out(tensors, dim, result);
 }
 
 Tensor concatenate(TensorList tensors, Dimname dim) {
-  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+  return at::cat(tensors, dim);
 }
 
 Tensor& concatenate_out(TensorList tensors, int64_t dim, Tensor& result) {
@@ -1409,9 +1408,6 @@ Tensor as_strided_tensorimpl(
     IntArrayRef size,
     IntArrayRef stride,
     std::optional<int64_t> storage_offset_) {
-  TORCH_INTERNAL_ASSERT(
-      !self.is_mps(),
-      "as_strided_tensorimpl does not work with MPS; call self.as_strided(...) instead");
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW,
@@ -1908,7 +1904,7 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
 }
 
 Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
-  // If self.size() > len(reps), reps is promoted to self.size() by pre-pending
+  // If self.size() > len(reps), reps is promoted to self.size() by prepending
   // 1’s to it to keep the same behaviour as `numpy.tile`.
   // Thus for a tensor of shape (2, 3, 4, 5), a dims of (2, 2) is treated
   // as (1, 1, 2, 2).
@@ -1999,19 +1995,18 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
-  auto sym_sizes = self.sym_sizes();
-  auto sym_strides = self.sym_strides();
-  auto sym_numel = self.sym_numel();
-  if (definitely_contiguous(sym_sizes, sym_strides, sym_numel) &&
-      !self.is_mkldnn()) {
+  if (self.is_contiguous_or_false() && !self.is_mkldnn()) {
     return self.view_symint(proposed_shape);
   }
 
+  auto sym_numel = self.sym_numel();
   c10::SymDimVector shape = infer_size_dv(proposed_shape, sym_numel);
 
   if (self.is_mkldnn()) {
     return at::_mkldnn_reshape(self, C10_AS_INTARRAYREF_SLOW(shape));
   }
+  auto sym_sizes = self.sym_sizes();
+  auto sym_strides = self.sym_strides();
 
   // `computeStride` returns the proper strides to use if this
   // `reshape` can be just a view.
@@ -2433,7 +2428,7 @@ Tensor index_select_sparse_cpu(
     const auto dim_indices = indices[dim].contiguous();
 
     // If nnz is smaller than size, then either indices[dim] or index gets
-    // sorted, then this is followed by a binary search to find interesections.
+    // sorted, then this is followed by a binary search to find intersections.
     const auto get_selected_indices_small_nnz_large_size =
         [&]() -> std::tuple<Tensor, Tensor> {
       const auto grain_size = at::internal::GRAIN_SIZE;
@@ -3939,7 +3934,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
         quantizer->scalar_type());
   }
   // TODO: quantized Tensor support for SymInt needs to be added but basic
-  // building blocs are missing for now.
+  // building blocks are missing for now.
   auto result = make_qtensor(
       self,
       C10_AS_INTARRAYREF_SLOW(sizes),

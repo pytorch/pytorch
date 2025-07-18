@@ -13,6 +13,7 @@ import gc
 import importlib
 import inspect
 import itertools
+import logging
 import os
 import random
 import sys
@@ -43,11 +44,13 @@ import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same, skipIfPy312
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
+from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
+    SM70OrLater,
     TEST_CUDA,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -59,6 +62,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -176,9 +180,9 @@ def shapes_to_tensor(x, device=None):
     if torch.jit.is_scripting():
         return torch.as_tensor(x, device=device)
     if torch.jit.is_tracing():
-        assert all(
-            isinstance(t, torch.Tensor) for t in x
-        ), "Shape should be tensor during tracing!"
+        assert all(isinstance(t, torch.Tensor) for t in x), (
+            "Shape should be tensor during tracing!"
+        )
         # as_tensor should not be used in tracing because it records a constant
         ret = torch.stack(x)
         if ret.device != device:  # avoid recording a hard-coded device if not necessary
@@ -477,9 +481,9 @@ class PartialT5(torch.nn.Module):
         real_seq_length = seq_length
 
         if past_key_value is not None:
-            assert (
-                len(past_key_value) == 2
-            ), f"past_key_value should have 2 past states: keys and values. Got {len(past_key_value)} past states"
+            assert len(past_key_value) == 2, (
+                f"past_key_value should have 2 past states: keys and values. Got {len(past_key_value)} past states"
+            )
             real_seq_length += (
                 past_key_value[0].shape[2] if query_length is None else query_length
             )
@@ -943,6 +947,26 @@ class IncByOne:
 class IncByTwo:
     def __init__(self, x):
         self.x = x + 2
+
+
+class LRUCacheWarningTests(LoggingTestCase):
+    @requires_cuda
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_issued_during_tracing(self, records):
+        torch.set_default_device("cuda")
+
+        @torch.compile(backend="eager")
+        def f(x):
+            torch.get_device_module()
+            x = x.cos().sin()
+            return x
+
+        result = f(torch.randn(1024))
+        self.assertIsInstance(result, torch.Tensor)
+
+        for record in records:
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
+                self.fail("lru_cache warning was incorrectly logged")
 
 
 class ReproTests(torch._dynamo.test_case.TestCase):
@@ -2012,8 +2036,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             ref0 = fn(x)
             ref1 = fn(x)
 
-            random.seed(0)
             opt_fn = torch.compile(fn, backend="eager")
+            # Especially for internal usage, there are many calls to random functions
+            # on first compile, e.g., from various library initializations. Run once
+            # to get that out of the way before resetting the seed:
+            opt_fn(x)
+
+            random.seed(0)
             res0 = opt_fn(x)
             res1 = opt_fn(x)
 
@@ -3461,6 +3490,40 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(obj1.b.item(), 0)
         self.assertEqual(obj2.a.item(), 2)
 
+    def test_delattr_return(self):
+        class MyObject:
+            def __init__(self, val):
+                self.val = val
+                self.deletion_attempted = False
+
+            def __delattr__(self, attr):
+                if attr == "val":
+                    self.deletion_attempted = True
+                else:
+                    super().__delattr__(attr)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def test_delattr(input_tensor):
+            instance_a = MyObject(1)
+            instance_b = MyObject(2)
+            del instance_a.val
+            del instance_b.val
+            exists_a = hasattr(instance_a, "val")
+            exists_b = hasattr(instance_b, "val")
+            deletion_attempted_a = instance_a.deletion_attempted
+            deletion_attempted_b = instance_b.deletion_attempted
+            return (
+                input_tensor + 1,
+                exists_a,
+                exists_b,
+                deletion_attempted_a,
+                deletion_attempted_b,
+            )
+
+        result = test_delattr(torch.ones(1))
+        self.assertEqual(result[0], torch.tensor([2.0]))
+        self.assertEqual(result[1:], (True, True, True, True))
+
     def test_delattr_raises(self):
         class MyObj:
             def __init__(self, a, b):
@@ -3883,7 +3946,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(17, (12,), out2)
 
     @requires_cuda
-    @serialTest
+    @serialTest()
     def test_mem_leak_guards(self):
         def gn(x0, x):
             return x0 * x
@@ -4404,6 +4467,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # frame_count should stay at 1.
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_tensor_set_data_mismatched_dtype(self):
+        def func(x, y):
+            x.data = y.to(dtype=torch.bfloat16)
+
+        x1 = torch.tensor([], dtype=torch.float32)
+        x2 = torch.tensor([], dtype=torch.float32)
+        y1 = torch.tensor([1, 2, 3], dtype=torch.float32)
+        y2 = torch.tensor([1, 2, 3], dtype=torch.float32)
+        func(x1, y1)
+        torch.compile(func, backend="eager")(x2, y2)
+        self.assertEqual(x1, x2)
+        self.assertEqual(x1.data, x2.data)
+        self.assertEqual(y1, y2)
+
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
             def __enter__(self):
@@ -4821,9 +4898,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 with warnings.catch_warnings(record=True):
                     data_len = len(value)
                 if len(self._fields):
-                    assert (
-                        len(self) == data_len
-                    ), f"Adding a field of length {data_len} to a Instances of length {len(self)}"
+                    assert len(self) == data_len, (
+                        f"Adding a field of length {data_len} to a Instances of length {len(self)}"
+                    )
                 self._fields[name] = value
 
             def get(self, name: str) -> Any:
@@ -4959,6 +5036,66 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         ref = fn(x_weak, y)
         res = opt_fn(x_weak, y)
         self.assertEqual(ref, res)
+
+    # The programming model around (weak)references is that we DO NOT guarantee
+    # any behavior that depends on deallocation order. We do guarantee "eventual consistency",
+    # that is, after the torch.compile'd function is finished running (including any graph breaks),
+    # refcount semantics will match eager's.
+    def test_weakref_callback(self):
+        called1 = False
+
+        def callback1(ref):
+            nonlocal called1
+            called1 = True
+            if not torch.compiler.is_compiling():
+                raise RuntimeError("callback1 expected to be compiled")
+
+        # weakref callbacks that should be called in the compiled region will be compiled.
+        # But the exact place in the compiled code that the callback is made is undefined.
+        @torch.compile(backend="eager")
+        def fn(x):
+            y = x + 1
+            ref = weakref.ref(y, callback1)
+            torch._dynamo.graph_break()
+            return ref
+
+        fn(torch.ones(3))
+        self.assertTrue(called1)
+
+        called2 = False
+
+        def callback2(ref):
+            nonlocal called2
+            called2 = True
+            if torch.compiler.is_compiling():
+                raise RuntimeError("callback2 expected to not be compiled")
+
+        # weakref callbacks that fire outside the compiled region work
+        @torch.compile(backend="eager")
+        def gn(x):
+            y = x + 1
+            ref = weakref.ref(y, callback2)
+            torch._dynamo.graph_break()
+            return y, ref
+
+        y, _ = gn(torch.ones(3))
+        del y
+        self.assertTrue(called2)
+
+        def callback3(ref):
+            raise RuntimeError("callback3 should not be called")
+
+        # The callback will NOT be called if both the weakref and the referrent are
+        # deleted in the same compiled region (graph breaks act like a "memory sync"
+        # and thus make things tricky - the callback is actually expected to be called).
+        # This test does NOT mean that this behavior is part of the (weak)ref programming
+        # model, but rather reminds us that this is an intentionally allowed weakref-Dynamo behavior.
+        @torch.compile(backend="eager")
+        def hn(x):
+            y = x + 1
+            _ = weakref.ref(y, callback3)
+
+        hn(torch.ones(3))
 
     #     @torch._functorch.config.patch(
     #         recompute_views=True,
@@ -5433,7 +5570,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             y = torch.randn(100, 10)
             return torch.mm(x, y).sum()
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             torch.compile(fn)()
 
         torch.compile(fn2)()
@@ -5708,6 +5845,21 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
 
+    @unittest.skipIf(
+        not SM70OrLater,
+        "Triton only supports devices of CUDA capability >= 7.0",
+    )
+    def test_add_complex_conj(self):
+        def f(x):
+            return x + x.conj()
+
+        x = torch.randn(4, dtype=torch.complex64, requires_grad=True)
+        out = torch.compile(f)(x)
+        expected_complex = (2 * x.real).to(dtype=out.dtype)
+
+        self.assertTrue(out.dtype == torch.complex64)
+        self.assertEqual(out, expected_complex)
+
     # https://github.com/pytorch/pytorch/issues/132200
     def test_partitioner_cse_respects_mutation_boundaries(self):
         set_available = hasattr(torch.ops, "fsdp") and hasattr(torch.ops.fsdp, "set_")
@@ -5766,6 +5918,43 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(result, result_test)
         self.assertEqual(x, x_test)
+
+    def test_aot_autograd_runtime_wrapper_prologue_profiled(self):
+        # Names for prologue profiling event
+        prologue_name = "AOTDispatcher Runtime Wrapper Prologue"
+
+        # Simple linear op to compile
+        mod = torch.nn.Linear(4, 4)
+        opt_mod = torch.compile(mod)
+        x = torch.randn(4, 4)
+
+        # Run this test with grad and no-grad to test both boolean cases trace_joint
+        for c in [contextlib.nullcontext, torch.no_grad]:
+            # Run compiled op with profiling
+            with c():
+                # warmup before profiling
+                opt_mod(x)
+                with profile(activities=[ProfilerActivity.CPU]) as prof:
+                    opt_mod(x)
+
+            # Make sure events are populated then find prologue event and last start time
+            events = prof.events()
+            self.assertTrue(events is not None)
+
+            prologue_event = None
+            last_start_time = 0
+            for event in events:
+                if hasattr(event, "name") and prologue_name in event.name:
+                    prologue_event = event
+                if event.time_range.start > last_start_time:
+                    last_start_time = event.time_range.start
+
+            # Make sure prologue event exist
+            self.assertTrue(prologue_event is not None)
+
+            # Make sure there is at least one other event (compiled function) that starts
+            # after prologue starts
+            self.assertLess(prologue_event.time_range.end, last_start_time)
 
     def test_changing_stride(self):
         cnt = torch._dynamo.testing.CompileCounter()
@@ -5980,7 +6169,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(out_ref, out_test)
 
     @requires_cuda
-    # This test will fail as flip in combination with particular input lenghts
+    # This test will fail as flip in combination with particular input lengths
     # produces weird results.
     # This is under investigations in
     # https://github.com/pytorch/pytorch/issues/131805
@@ -6738,6 +6927,8 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         torch._dynamo.utils.clear_compilation_metrics()
 
+    # https://github.com/pytorch/pytorch/issues/156580
+    @serialTest()
     def test_dont_dce_rand(self):
         # https://github.com/pytorch/pytorch/issues/143431
         def f(image_latent):
@@ -6781,9 +6972,12 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         ):
             torch.compile(lambda: None)
 
-        with torch._dynamo.config.patch(
-            suppress_errors=True, fail_on_recompile_limit_hit=True
-        ), self.assertRaises(AssertionError):
+        with (
+            torch._dynamo.config.patch(
+                suppress_errors=True, fail_on_recompile_limit_hit=True
+            ),
+            self.assertRaises(AssertionError),
+        ):
             torch.compile(lambda: None)
 
     def test_str_isalnum(self):
@@ -6795,6 +6989,100 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         x = torch.randn(3)
         c = "foobar"
         self.assertEqual(f(x, c), opt_f(x, c))
+
+    def test_nn_param_freevar_codegen(self):
+        class Model2(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3)
+                self.batchnorm = nn.BatchNorm2d(num_features=5)
+                self.conv_weight = torch.randn(5, 3, 3, 3)
+                self.conv_bias = torch.randn(5)
+
+            def forward(self, x):
+                self.conv.weight = nn.Parameter(self.conv_weight)
+                self.conv.bias = nn.Parameter(self.conv_bias, requires_grad=False)
+                self.conv.eval()
+                x = self.conv(x)
+                x = self.batchnorm(x)
+                x = F.relu(x)
+                return x
+
+        input_tensor = torch.randn(1, 3, 10, 10)
+        func = Model2().to("cpu")
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        with torch.no_grad():
+            func.train(False)
+            v1 = func(input_tensor)
+            jit_func = torch.compile(wrapper, backend="eager", fullgraph=True)
+            v2 = jit_func(input_tensor)
+            self.assertEqual(v1, v2)
+
+    def test_amp_foreach_fake_impl(self):
+        inv_scale = torch.full((1,), 0.25)
+        found_inf = torch.full((1,), 0.0)
+        grads = [torch.ones(10), torch.ones(10)]
+
+        def f():
+            res = torch._amp_foreach_non_finite_check_and_unscale_(
+                grads, found_inf, inv_scale
+            )
+            return res
+
+        ref = f()
+        res = torch.compile(f, backend="aot_eager")()
+        self.assertEqual(ref, res)
+
+    def test_deleted_compile_wrapper_segfault(self):
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        # This calls cached_backend.clear() which removes any strong references
+        # to the callback
+        torch._dynamo.reset()
+        opt_fn(torch.randn(3))
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(3))  # possible segfault due to first opt_fn deletion
+
+    def test_delete_local_error(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y = x + 1
+            del y
+            z = y + 1  # noqa: F821
+            return z
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn(torch.ones(3))
+
+    def test_nanmean_out(self):
+        def f(x, out):
+            torch.nanmean(x, out=out)
+
+        x = torch.randn(4)
+        out_ref = torch.tensor(0.0)
+        out_res = torch.tensor(0.0)
+
+        f(x, out_ref)
+        torch.compile(f, backend="eager", fullgraph=True)(x, out_res)
+        self.assertEqual(out_ref, out_res)
+
+    def test_unbind_copy_out(self):
+        def f(eye, out):
+            torch.unbind_copy(eye, out=out)
+
+        eye = torch.eye(3)
+        out_ref = (torch.zeros(3), torch.zeros(3), torch.zeros(3))
+        out_res = (torch.zeros(3), torch.zeros(3), torch.zeros(3))
+
+        f(eye, out_ref)
+        torch.compile(f, backend="eager", fullgraph=True)(eye, out_res)
+        self.assertEqual(out_ref, out_res)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -7173,7 +7461,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # *are* saved for backward, and become back inputs.
         # The easier-to-test thing I'm checking for here is that the recompute
         # on primals_2 happens in the backward. With the recompute,
-        # there are 5 _to_copy ops in the backwrad. Without it, there are 4
+        # there are 5 _to_copy ops in the backward. Without it, there are 4
         # (aka if you set torch._functorch.config.treat_parameters_as_free_to_save = False)
         self.assertEqual(mode.ops_counter[torch.ops.aten._to_copy.default], 5)
 
@@ -7272,6 +7560,38 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             f1(torch.ones(3))
 
         self.assertEqual(f2(torch.ones(3)), torch.ones(3) + 1)
+
+    def test_torch_cuda_is_initialized(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(x):
+            if torch.cuda.is_initialized():
+                return x + 1
+            return x + 2
+
+        inp = torch.randn(3)
+        self.assertEqual(f(inp), inp + 1)
+
+        with mock.patch("torch.cuda.is_initialized", lambda: False):
+            self.assertEqual(f(inp), inp + 2)
+
+    def test_named_tuple_vt_clone(self):
+        # https://github.com/pytorch/pytorch/issues/157945
+        class SVDCompressor(nn.Module):
+            def __init__(self, k=10):
+                super().__init__()
+                self.k = k
+
+            def forward(self, x):
+                U, S = torch.linalg.svd(x)[:2]
+                reduced = U[:, :, : self.k] @ torch.diag_embed(S[:, : self.k])
+                return reduced
+
+        input = torch.randn(4, 8, 6)
+        model = SVDCompressor(k=5)
+
+        out1 = model(input.clone())
+        out2 = torch.compile(model, backend="eager")(input.clone())
+        self.assertEqual(out1, out2)
 
 
 instantiate_parametrized_tests(ReproTests)
