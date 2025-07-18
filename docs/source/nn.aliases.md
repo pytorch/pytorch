@@ -1,20 +1,27 @@
+```{eval-rst}
 .. role:: hidden
     :class: hidden-section
+```
 
-Aliases in torch.nn
-====================
+
+# Aliases in torch.nn
+```{eval-rst}
 .. automodule:: torch.nn.modules
+```
+
 
 The following are aliases to their counterparts in ``torch.nn`` in nested namespaces.
 
-torch.nn.modules
----------------------------------
+## torch.nn.modules
 
 The following are aliases to their counterparts in ``torch.nn`` in the ``torch.nn.modules`` namespace.
 
-Containers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### Containers (Aliases)
+```{eval-rst}
 .. currentmodule:: torch.nn.modules
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -27,8 +34,10 @@ Containers (Aliases)
     container.ParameterList
     container.ParameterDict
 
-Convolution Layers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Convolution Layers (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -49,8 +58,10 @@ Convolution Layers (Aliases)
     fold.Unfold
     fold.Fold
 
-Pooling layers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Pooling layers (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -77,8 +88,10 @@ Pooling layers (Aliases)
     pooling.AdaptiveAvgPool2d
     pooling.AdaptiveAvgPool3d
 
-Padding Layers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Padding Layers (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -100,8 +113,10 @@ Padding Layers (Aliases)
     padding.CircularPad2d
     padding.CircularPad3d
 
-Non-linear Activations (weighted sum, nonlinearity) (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Non-linear Activations (weighted sum, nonlinearity) (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -133,8 +148,10 @@ Non-linear Activations (weighted sum, nonlinearity) (Aliases)
     activation.Threshold
     activation.GLU
 
-Non-linear Activations (other) (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Non-linear Activations (other) (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -146,8 +163,10 @@ Non-linear Activations (other) (Aliases)
     activation.LogSoftmax
     adaptive.AdaptiveLogSoftmaxWithLoss
 
-Normalization Layers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Normalization Layers (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -171,8 +190,10 @@ Normalization Layers (Aliases)
     normalization.LocalResponseNorm
     normalization.RMSNorm
 
-Recurrent Layers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Recurrent Layers (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -186,8 +207,10 @@ Recurrent Layers (Aliases)
     rnn.LSTMCell
     rnn.GRUCell
 
-Transformer Layers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Transformer Layers (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -199,8 +222,10 @@ Transformer Layers (Aliases)
     transformer.TransformerEncoderLayer
     transformer.TransformerDecoderLayer
 
-Linear Layers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Linear Layers (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -211,8 +236,10 @@ Linear Layers (Aliases)
     linear.Bilinear
     linear.LazyLinear
 
-Dropout Layers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Dropout Layers (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -225,8 +252,10 @@ Dropout Layers (Aliases)
     dropout.AlphaDropout
     dropout.FeatureAlphaDropout
 
-Sparse Layers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Sparse Layers (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -235,8 +264,10 @@ Sparse Layers (Aliases)
     sparse.Embedding
     sparse.EmbeddingBag
 
-Distance Functions (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Distance Functions (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -245,8 +276,10 @@ Distance Functions (Aliases)
     distance.CosineSimilarity
     distance.PairwiseDistance
 
-Loss Functions (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Loss Functions (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -274,8 +307,10 @@ Loss Functions (Aliases)
     loss.TripletMarginLoss
     loss.TripletMarginWithDistanceLoss
 
-Vision Layers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Vision Layers (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -287,8 +322,10 @@ Vision Layers (Aliases)
     upsampling.UpsamplingNearest2d
     upsampling.UpsamplingBilinear2d
 
-Shuffle Layers (Aliases)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+### Shuffle Layers (Aliases)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -296,14 +333,19 @@ Shuffle Layers (Aliases)
 
     channelshuffle.ChannelShuffle
 
-torch.nn.utils
----------------------------------
+```
+
+## torch.nn.utils
 
 The following are aliases to their counterparts in ``torch.nn.utils`` in nested namespaces.
 
 Utility functions to clip parameter gradients.
 
+```{eval-rst}
 .. currentmodule:: torch.nn.utils
+```
+
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -313,8 +355,11 @@ Utility functions to clip parameter gradients.
     clip_grad.clip_grad_value_
 
 
+```
+
 Utility functions to flatten and unflatten Module parameters to and from a single vector.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -322,8 +367,11 @@ Utility functions to flatten and unflatten Module parameters to and from a singl
     convert_parameters.parameters_to_vector
     convert_parameters.vector_to_parameters
 
+```
+
 Utility functions to fuse Modules with BatchNorm modules.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -333,8 +381,11 @@ Utility functions to fuse Modules with BatchNorm modules.
     fusion.fuse_linear_bn_eval
     fusion.fuse_linear_bn_weights
 
+```
+
 Utility functions to convert Module parameter memory formats.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -342,8 +393,11 @@ Utility functions to convert Module parameter memory formats.
     memory_format.convert_conv2d_weight_memory_format
     memory_format.convert_conv3d_weight_memory_format
 
+```
+
 Utility functions to apply and remove weight normalization from Module parameters.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -353,10 +407,14 @@ Utility functions to apply and remove weight normalization from Module parameter
     spectral_norm.spectral_norm
     spectral_norm.remove_spectral_norm
 
+```
+
 Utility functions for initializing Module parameters.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     init.skip_init
+```
