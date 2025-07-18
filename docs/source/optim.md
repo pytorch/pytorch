@@ -2,7 +2,6 @@
 
 ```{eval-rst}
 .. automodule:: torch.optim
-.. currentmodule:: torch.optim
 ```
 
 ## How to use an optimizer
