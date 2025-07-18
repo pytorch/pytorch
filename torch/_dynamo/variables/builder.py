@@ -51,6 +51,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import TracingContext
+from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -2999,6 +3000,12 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif (
         isinstance(example_value, (int, float, bool))
         and proxy.node.target is call_torchbind
+    ):
+        set_example_value(proxy.node, example_value)
+        return ConstantVariable.create(example_value, **options)
+    elif (
+        isinstance(example_value, (int, float, bool))
+        and proxy.node.target is flat_apply
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
