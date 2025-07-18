@@ -188,7 +188,6 @@ S390X_BLOCKLIST = [
     "onnx/test_utility_funs",
     "profiler/test_profiler",
     "test_ao_sparsity",
-    "test_cpp_extensions_open_device_registration",
     "test_jit",
     "test_metal",
     "test_mps",
@@ -271,7 +270,6 @@ XPU_TEST = [
 RUN_PARALLEL_BLOCKLIST = [
     "test_extension_utils",
     "test_cpp_extensions_jit",
-    "test_cpp_extensions_open_device_registration",
     "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
@@ -1254,7 +1252,6 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
-    "test_cpp_extensions_open_device_registration": run_test_with_openreg,
     "test_openreg": run_test_with_openreg,
     "test_transformers_privateuse1": run_test_with_openreg,
 }
