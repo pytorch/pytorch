@@ -485,20 +485,15 @@ void kai_quant_pack_lhs_int4_mm(
     if (bl == k) {
         const auto input_dtype = input.dtype();
 
-        if (input_dtype == at::kBFloat16) {
-            if (cpuinfo_has_arm_bf16()) {
+        if ((input_dtype == at::kBFloat16) )
+        {
+            if (cpuinfo_has_arm_bf16())
+            {
                 kleidiai::kai_quant_pack_lhs_int4_mm_bf16_channelwise(
                     output, input, weight, m, n, k);
             } else {
-                // Fallback to FP32 kernel, output is BF16!
-                TORCH_WARN("CPU does not support BF16. Falling back to FP32 kernel.");
-                at::Tensor input_fp32 = kleidi_bf16_to_fp32(input);
-                // Allocate a temporary FP32 output tensor
-                at::Tensor temp_fp32_output = at::empty(output.sizes(), output.options().dtype(at::kFloat));
-                kleidiai::kai_quant_pack_lhs_int4_mm_channelwise(
-                    temp_fp32_output, input_fp32, weight, m, n, k);
-                // Convert/copy to BF16 output
-                output.copy_(temp_fp32_output.to(at::kBFloat16));
+                TORCH_CHECK(
+                false, "BF16 Unsupported: CPU does not support BF16. Please use a CPU with BF16 support.");
             }
         } else if (input_dtype == at::kFloat) {
             kleidiai::kai_quant_pack_lhs_int4_mm_channelwise(
