@@ -10,7 +10,6 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.node import _get_qualified_name, Node
 from torch.fx.passes.operator_support import OperatorSupportBase
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
-import time
 
 
 logger = logging.getLogger(__name__)
@@ -19,10 +18,12 @@ logger.setLevel(logging.WARNING)
 
 class Partition:
     def __init__(
-        self, id: Optional[int] = None, nodes: Optional[Iterable[tuple[Node, int]]] = None
+        self,
+        id: Optional[int] = None,
+        nodes: Optional[Iterable[tuple[Node, int]]] = None,
     ):
         self.id = id
-        self.nodes = {node: node_order for node, node_order in nodes} if nodes is not None else {}
+        self.nodes = dict(nodes) if nodes is not None else {}
 
     def __repr__(self) -> str:
         return str(self.nodes)
@@ -229,13 +230,13 @@ class CapabilityBasedPartitioner:
                     # in the graph, otherwise, this is a no-op
                     self_id, _ = maybe_merge_partition(self_id, other_id)
 
-        print(f"---- Graph has {len(self.graph_module.graph.nodes)} nodes")
-        start_time = time.perf_counter()
-        for _, partition in partitions_by_id.items():
-            # sort partition nodes based on descending node order
-            partition.nodes = dict(sorted(partition.nodes.items(), key=operator.itemgetter(1), reverse=True))
-        end_time = time.perf_counter()
-        print(f"---- Partition nodes sorting took {end_time - start_time:.6f} seconds")
+        # sort partition nodes based on descending node order
+        for partition in partitions_by_id.values():
+            partition.nodes = dict(
+                sorted(
+                    partition.nodes.items(), key=operator.itemgetter(1), reverse=True
+                )
+            )
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
