@@ -42,7 +42,7 @@ aten = torch.ops.aten
 def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
     # For ops with a single tensor input, we perform a 1:1 mapping such that
     # for each strategy that the input supports, we create a corresponding strategy.
-    # Note: this may be a complete waste of work, becuase it should be equivalent to
+    # Note: this may be a complete waste of work, because it should be equivalent to
     # `return first_input_strategy` (unless creating a deep copy is important for some reason)
     assert len([s for s in op_schema.args_schema if isinstance(s, OpStrategy)]) == 1, (
         "propagate_single_input_strategy only works for single-tensor-input ops"
