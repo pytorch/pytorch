@@ -62,7 +62,7 @@ def _warn_once(
 ) -> None:
     """Helper to ensure each warning is shown only once per process."""
     if warning_id not in _WARNINGS_SHOWN:
-        warnings.warn(message, category, stacklevel=3)
+        warnings.warn(message, category, stacklevel=2)
         _WARNINGS_SHOWN.add(warning_id)
 
 
@@ -1580,13 +1580,14 @@ def flex_attention(
 
     if not _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
         _warn_once(
-            "flex_attention_performance",
-            "flex_attention called without torch.compile() - this will use an unrolled vmap "
-            "implementation that materializes the full attention matrix instead of generating "
-            "a fused kernels. Use torch.compile(flex_attention)(...). "
-            "If you need to debug your score_mod/mask_mod functions with breakpoints, you can set "
-            "torch.nn.attention.flex_attention._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG=True, but note "
-            "this is not guaranteed to work with all score/mask mods and may produce incorrect results.",
+            warning_id="flex_attention_performance",
+            message=(
+                "flex_attention called without torch.compile() - this will use an unfused implementation that materializes the full scores matrix instead of generating a fused kernel.\n\n"
+                "SOLUTION: Use torch.compile(flex_attention)(...)\n\n"
+                "If you want to debug your score_mod/mask_mod, you can set:\n"
+                "torch.nn.attention.flex_attention._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True\n\n"
+                "This will allow you to use print statements or breakpoints. Note: This doesn't work with the backwards pass and may produce incorrect results."
+            ),
         )
 
     if not torch._dynamo.is_dynamo_supported():
