@@ -47,11 +47,11 @@ def enable_symm_mem_for_group(group_name: str) -> None:
 
 
 _is_test_mode: bool = False
-_mocked_group_names: set[str] | None = None
+_mocked_group_names: Optional[set[str]] = None
 
 
 @contextmanager
-def _test_mode(group_names: set[str] | None = None) -> Generator[None, None, None]:
+def _test_mode(group_names: Optional[set[str]] = None) -> Generator[None, None, None]:
     """
     Forces ``is_symm_mem_enabled_for_group()`` to return ``True`` and the ops
     defined in the ``symm_mem`` namespace to use fallback implementations.
