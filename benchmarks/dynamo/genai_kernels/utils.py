@@ -1,5 +1,7 @@
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Optional
+from collections import defaultdict
+import matplotlib.pyplot as plt
 
 import torch
 from torch._inductor.runtime.benchmarking import benchmarker
@@ -47,7 +49,10 @@ class Performance:
 class BenchmarkKernel:
     def __init__(self):
         self.name = self.__class__.__name__
-        self.available_backends = []
+        self.available_backends: list[str] = []
+
+        # mapping from backend to list of performance results
+        self.profiling_results: defaultdict[str, list[Performance]] = defaultdict(lambda: [])
 
     def get_memory_bytes(self, args, kwargs) -> int:
         # Get the necessary memory access in bytes for the kernelßß
@@ -140,6 +145,100 @@ class BenchmarkKernel:
             flops = self.get_flops(args_ref, kwargs_ref)
             perf = Performance(setting, avg_time, mem_bytes, flops)
             print(f"{self.name} kernel on {backend} backend. {perf}")
+            self.profiling_results[backend].append(perf)
 
         if should_check_accuracy:
             self.check_accuracy(args, kwargs)
+
+    def visualize(self) -> None:
+        visualize_latency_comparison(self.profiling_results, output_path=f"{self.name}_bench")
+        return
+
+
+def get_backend_colors() -> dict[str, str]:
+    """Get consistent color scheme for different backends."""
+    return {
+        "eager": "#1f77b4",  # blue
+        "compiled": "#ff7f0e",  # orange
+        "quack": "#2ca02c",  # green
+        "liger": "#d62728",  # red
+        "helion": "#9467bd",  # purple
+        "triton": "#8c564b",  # brown
+        "cutlass": "#e377c2",  # pink
+        "flash_attn": "#7f7f7f",  # gray
+        "default": "#000000",  # black
+    }
+
+
+def visualize_latency_comparison(
+    profiling_results: dict[str, list[Performance]],
+    title: str = "Latency Comparison",
+    output_path: Optional[str] = None,
+) -> None:
+    """
+    Create a single latency comparison plot from profiling results.
+
+    Args:
+        profiling_results: Dict mapping backend names to lists of Performance objects
+        title: Title for the plot
+        output_path: Path to save the plot (optional)
+    """
+    # Get backend colors
+    backend_colors = get_backend_colors()
+
+    # Extract settings from eager backend which runs all settings
+    all_settings = []
+    for perf in profiling_results["eager"]:
+        all_settings.append(perf.setting)
+
+    # Create single plot
+    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+
+    for backend in profiling_results:
+        backend_perfs = profiling_results[backend]
+        perf_dict = {perf.setting: perf for perf in backend_perfs}
+
+        x_vals = []
+        y_vals = []
+        for i, setting in enumerate(all_settings):
+            if setting in perf_dict:
+                x_vals.append(i)
+                y_vals.append(perf_dict[setting].latency)
+
+        if x_vals:  # Only plot if we have data
+            color = backend_colors.get(backend, backend_colors["default"])
+            ax.plot(
+                x_vals,
+                y_vals,
+                "o-",
+                label=backend,
+                color=color,
+                linewidth=2,
+                markersize=8,
+                alpha=0.8,
+            )
+
+    # Configure the plot
+    ax.set_title(title, fontsize=16, fontweight="bold")
+    ax.set_xlabel("Configuration", fontsize=12)
+    ax.set_ylabel("Latency (ms)", fontsize=12)
+    ax.set_xticks(range(len(all_settings)))
+    ax.set_xticklabels(
+        [
+            s.replace("shape: ", "").replace("[", "").replace("]", "")
+            for s in all_settings
+        ],
+        rotation=45,
+        ha="right",
+    )
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    # Save the plot if output path is provided
+    if output_path:
+        # Save as PNG
+        plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white")
+
+    plt.close()

@@ -62,6 +62,7 @@ def run_benchmark(benchmark_name: str):
     benchmark_class = BENCHMARK_REGISTRY[benchmark_name]
     benchmark = benchmark_class()
     benchmark.benchmark()
+    benchmark.visualize()
 
     return True
 
@@ -75,6 +76,7 @@ def run_all_benchmarks():
         print(f"\n{'=' * 20} {name.upper()} {'=' * 20}")
         benchmark = cls()
         benchmark.benchmark()
+        benchmark.visualize()
         print()
 
 
