@@ -495,6 +495,7 @@ class RingFlexAttentionTest(DTensorTestBase):
         expect_out, expect_lse = flex_attention(
             q, k, v, block_mask=block_mask, return_lse=True
         )
+        expect_out.sum().backward()
 
         # test flex attention on DTensor
         device_mesh = init_device_mesh(
@@ -539,6 +540,10 @@ class RingFlexAttentionTest(DTensorTestBase):
                 buffers=[cp_q, cp_k, cp_v],
                 buffer_seq_dims=[2, 2, 2],
             ):
+                cp_q.requires_grad = True
+                cp_k.requires_grad = True
+                cp_v.requires_grad = True
+
                 cp_out, cp_lse = flex_attention(
                     cp_q,
                     cp_k,
@@ -547,10 +552,17 @@ class RingFlexAttentionTest(DTensorTestBase):
                     return_lse=True,
                 )
 
+                cp_out.sum().backward()
+
+                cp_q.requires_grad = False
+                cp_k.requires_grad = False
+                cp_v.requires_grad = False
+
         self.assertDictEqual(
             comm_mode.get_comm_counts(),
             {
-                c10d_functional.all_gather_into_tensor: 2
+                c10d_functional.all_gather_into_tensor: 2,
+                c10d_functional.reduce_scatter_tensor: 2,  # backward
             },  # currently we have k and v all-gather separate
         )
 
@@ -558,6 +570,16 @@ class RingFlexAttentionTest(DTensorTestBase):
         cp_out, cp_lse = context_parallel_unshard(device_mesh, [cp_out, cp_lse], [2, 2])
         torch.testing.assert_close(cp_out, expect_out, atol=1e-6, rtol=1e-2)
         torch.testing.assert_close(cp_lse, expect_lse, atol=1e-6, rtol=1e-2)
+
+        # unshard the gradient
+        cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
+            device_mesh,
+            [cp_q.grad, cp_k.grad, cp_v.grad],
+            [2, 2, 2],
+        )
+        torch.testing.assert_close(cp_q_grad, q.grad, atol=1e-6, rtol=1e-2)
+        torch.testing.assert_close(cp_k_grad, k.grad, atol=1e-6, rtol=1e-2)
+        torch.testing.assert_close(cp_v_grad, v.grad, atol=1e-6, rtol=1e-2)
 
         # reset CP context dispatch mode to default
         torch.distributed.tensor.experimental._attention._dispatch_mode = (

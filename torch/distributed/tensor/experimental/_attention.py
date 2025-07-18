@@ -1205,6 +1205,8 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             block_mask_t: tuple[Any, ...],
             device_mesh: DeviceMesh,
         ) -> tuple[Any, ...]:
+            ctx.device_mesh = device_mesh
+
             # all-gather KV
             global_key = unshard(key, device_mesh, 2)  # TODO: change the shard_dim
             global_value = unshard(value, device_mesh, 2)
@@ -1218,12 +1220,27 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             )
             cp_block_mask = rewrite_context_parallel_block_mask(block_mask, device_mesh)
 
-            return global_key, global_value, cp_block_mask
+            return query, global_key, global_value, cp_block_mask
 
         @staticmethod
-        def backward(ctx, *args, **kwargs):
-            # raise NotImplementedError()
-            return torch._higher_order_ops.flex_attention_backward(*args, **kwargs)
+        def backward(
+            ctx: Any,
+            grad_query: torch.Tensor,
+            grad_key: torch.Tensor,
+            grad_value: torch.Tensor,
+            *none_grads,
+        ) -> tuple[Optional[torch.Tensor], ...]:
+            device_mesh = ctx.device_mesh
+
+            # reduce-scatter KV grads
+            grad_key = ft_c.reduce_scatter_tensor(
+                grad_key, reduceOp="sum", scatter_dim=seq_dim, group=device_mesh
+            )
+            grad_value = ft_c.reduce_scatter_tensor(
+                grad_value, reduceOp="sum", scatter_dim=seq_dim, group=device_mesh
+            )
+
+            return grad_query, grad_key, grad_value, None, None, None
 
     class DistributeFunction(TorchFunctionMode):
         def __init__(
@@ -1256,13 +1273,15 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
                 assert isinstance(score_mod, Callable)
                 assert isinstance(block_mask, tuple)
 
-                global_key, global_value, cp_block_mask = CPFlexAttentionPreOp.apply(
-                    query,
-                    key,
-                    value,
-                    score_mod,
-                    block_mask,
-                    self._device_mesh,
+                query, global_key, global_value, cp_block_mask = (
+                    CPFlexAttentionPreOp.apply(
+                        query,
+                        key,
+                        value,
+                        score_mod,
+                        block_mask,
+                        self._device_mesh,
+                    )
                 )
                 return func(
                     query,
