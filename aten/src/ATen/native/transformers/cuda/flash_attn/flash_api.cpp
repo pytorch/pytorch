@@ -389,11 +389,8 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         std::optional<at::Generator> gen_) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    // bool is_sm75_or_newer = (dprops->major * 10 + dprops->minor) >= 80;
-    bool is_sm80_or_newer = (dprops->major * 10 + dprops->minor) >= 80;
+    bool is_sm80_or_newer = (dprops->major * 10) >= 80;
     TORCH_CHECK(is_sm80_or_newer, "FlashAttention only supports Ampere GPUs or newer.");
-    // We will support Turing in the near future
-    // TORCH_CHECK(is_sm75_or_newer, "FlashAttention only supports Turing GPUs or newer.");
 
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -574,11 +571,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                std::optional<at::Generator> gen_) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    // bool is_sm75_or_newer = (dprops->major * 10 + dprops->minor) >= 80;
-    bool is_sm80_or_newer = (dprops->major * 10 + dprops->minor) >= 80;
+    bool is_sm80_or_newer = (dprops->major * 10) >= 80;
     TORCH_CHECK(is_sm80_or_newer, "FlashAttention only supports Ampere GPUs or newer.");
-    // We will support Turing in the near future
-    // TORCH_CHECK(is_sm75_or_newer, "FlashAttention only supports Turing GPUs or newer.");
 
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -832,11 +826,8 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     #endif
     if (is_causal) { window_size_right = 0; }
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    // bool is_sm75_or_newer = (dprops->major * 10 + dprops->minor) >= 80;
-    bool is_sm80_or_newer = (dprops->major * 10 + dprops->minor) >= 80;
+    bool is_sm80_or_newer = (dprops->major * 10) >= 80;
     TORCH_CHECK(is_sm80_or_newer, "FlashAttention only supports Ampere GPUs or newer.");
-    // We will support Turing in the near future
-    // TORCH_CHECK(is_sm75_or_newer, "FlashAttention only supports Turing GPUs or newer.");
 
     bool is_dropout = p_dropout > 0.0;
     auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -1045,11 +1036,8 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
 
     if (is_causal) { window_size_right = 0; }
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    // bool is_sm75_or_newer = (dprops->major * 10 + dprops->minor) >= 80;
-    bool is_sm80_or_newer = (dprops->major * 10 + dprops->minor) >= 80;
+    bool is_sm80_or_newer = (dprops->major * 10) >= 80;
     TORCH_CHECK(is_sm80_or_newer, "FlashAttention only supports Ampere GPUs or newer.");
-    // We will support Turing in the near future
-    // TORCH_CHECK(is_sm75_or_newer, "FlashAttention only supports Turing GPUs or newer.");
 
     bool is_dropout = p_dropout > 0.0;
     auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -1267,11 +1255,8 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
                 ) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    // bool is_sm75_or_newer = (dprops->major * 10 + dprops->minor) >= 75;
-    bool is_sm80_or_newer = (dprops->major * 10 + dprops->minor) >= 80;
+    bool is_sm80_or_newer = (dprops->major * 10) >= 80;
     TORCH_CHECK(is_sm80_or_newer, "FlashAttention only supports Ampere GPUs or newer.");
-    // We will support Turing in the near future
-    // TORCH_CHECK(is_sm75_or_newer, "FlashAttention only supports Turing GPUs or newer.");
 
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
