@@ -8,6 +8,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
+from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -305,6 +306,58 @@ class TestOperatorReorderForPeakMemory(TestCase):
 
         expected_bound = a.size(0) * c.size(1) * a.dtype.itemsize * 2
         self.assertLess(peak_mem, expected_bound)
+
+    @serialTest()
+    def test_fusion_acc_large_reads(self):
+        def f(x, y, z):
+            res = torch.zeros_like(x[0])
+            for i in range(4):
+                temp = torch.matmul(x, y) + z
+                res = res + temp
+            return res
+
+        N = 128
+        x = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
+        y = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
+        z = torch.rand(N, N, dtype=torch.float32, device=GPU_TYPE)
+
+        # CASE 1: no restriction on the amount of accumulation
+        with config.patch({"realize_acc_reads_size_threshold": float("inf")}):
+            f_compiled = torch.compile(f)
+            code = run_and_get_triton_code(f_compiled, x, y, z)
+            (
+                FileCheck()
+                .check("triton_poi_fused_add_0.run(buf4, arg2_1, buf1, buf2, buf3")
+                .run(code)
+            )
+
+        # CASE 2: for tensors with the same size as x (which is 4 * N**2 bytes)
+        # at most 12 / 4 = 3 reads can be accumulated during fusion
+        with config.patch({"realize_acc_reads_size_threshold": 12 * N**2}):
+            f_compiled = torch.compile(f)
+            code = run_and_get_triton_code(f_compiled, x, y, z)
+            (
+                FileCheck()
+                .check("triton_poi_fused_add_0.run(buf3, arg2_1, buf1, buf2,")
+                .check("triton_poi_fused_add_1.run(buf5, buf4, arg2_1,")
+                .run(code)
+            )
+
+        # CASE 3: no such fusion allowed
+        with config.patch({"realize_acc_reads_size_threshold": N**2}):
+            f_compiled = torch.compile(f)
+            code = run_and_get_triton_code(f_compiled, x, y, z)
+            (
+                FileCheck()
+                .check("triton_poi_fused_add_0.run(buf1, arg2_1,")
+                .check("triton_poi_fused_add_0.run(buf3, arg2_1,")
+                .check("triton_poi_fused_add_0.run(buf4, buf3,")
+                .check("triton_poi_fused_add_0.run(buf6, arg2_1,")
+                .check("triton_poi_fused_add_0.run(buf7, buf6,")
+                .check("triton_poi_fused_add_0.run(buf9, arg2_1,")
+                .check("triton_poi_fused_add_0.run(buf10, buf9,")
+                .run(code)
+            )
 
 
 if __name__ == "__main__":
