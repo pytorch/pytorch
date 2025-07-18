@@ -234,9 +234,7 @@ class graph:
         # Free as much memory as we can for the graph
         torch.cuda.synchronize()
 
-        from torch._inductor import config
-
-        if config.triton.force_cudagraph_gc:
+        if torch.compiler.config.force_cudagraph_gc:
             # Originally we unconditionally garbage collected here. On one hand
             # that's nice because we have a chance to collect more memory, but
             # on the other hand it is REALLY expensive, especially for doing
