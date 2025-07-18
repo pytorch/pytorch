@@ -25,7 +25,7 @@ pytest-subtests==0.13.1
 pytest-xdist==3.3.1
 pytest==7.3.2
 pyyaml==6.0.2
-scipy==1.12.0
+scipy==1.13.1
 setuptools==80.9.0
 sympy==1.13.3
 tlparse==0.3.30
