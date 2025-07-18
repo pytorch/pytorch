@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 # multipy/deploy is no longer being used internally so we should be able to delete this  # codespell:ignore multipy
 def _running_with_deploy() -> builtins.bool:
-    False
+    return False
 
 
 from torch._utils import (
