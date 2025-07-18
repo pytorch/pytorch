@@ -4,8 +4,8 @@ import torch
 import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 from torch.testing._internal.common_utils import serialTest
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
 class TestEinsumtoPointwise(torch.nn.Module):
