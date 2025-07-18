@@ -338,31 +338,23 @@ def requires_gloo():
 
 
 def requires_nccl_version(version, msg):
-    if not c10d.is_nccl_available():
-        return skip_but_pass_in_sandcastle(
-            "c10d was not compiled with the NCCL backend",
-        )
+    if TEST_CUDA:
+        if c10d.is_nccl_available():
+            return skip_but_pass_in_sandcastle(
+                "c10d was not compiled with the NCCL backend",
+            )
+        else:
+            return skip_but_pass_in_sandcastle_if(
+                torch.cuda.nccl.version() < version,
+                f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version() }, reason: {msg}",        
+            )
     else:
-        return skip_but_pass_in_sandcastle_if(
-            torch.cuda.nccl.version() < version,
-            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
-        )
-
-
-def requires_nccl_version_or(version, msg, backends):
-    assert isinstance(backends, list)
-    if not c10d.is_nccl_available():
-        return skip_but_pass_in_sandcastle_if(
-            "xccl" not in backends if c10d.is_xccl_available() else True,
-            "c10d was not compiled with the NCCL backend and "
-            + str(backends)
-            + " backend.",
-        )
-    else:
-        return skip_but_pass_in_sandcastle_if(
-            torch.cuda.nccl.version() < version,
-            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
-        )
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+            return wrapper
+        return decorator
 
 
 def requires_nccl():
@@ -370,16 +362,6 @@ def requires_nccl():
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
     )
-
-
-def requires_nccl_or(backends):
-    assert isinstance(backends, list)
-    return skip_but_pass_in_sandcastle_if(
-        not c10d.is_nccl_available()
-        and (not c10d.is_xccl_available() if "xccl" in backends else True),
-        "c10d was not compiled with the NCCL backend or " + str(backends) + " backend.",
-    )
-
 
 def requires_xccl():
     return skip_but_pass_in_sandcastle_if(
@@ -469,12 +451,8 @@ def sm_is_or_higher_than(device: torch.device, major: int, minor: int) -> bool:
     Returns False if device is a RoCM device.
     Returns True if device is an XPU device.
     """
-    if device.type == "xpu":
-        # XPU devices have different compute capability codes
-        return True
-
     if device.type != "cuda":
-        raise ValueError("sm_is_or_later() is only supported for CUDA devices")
+        return True
 
     if torch.version.hip is not None:
         # ROCm devices may have different compute capability codes
