@@ -1162,10 +1162,10 @@ def split_strategy(op_schema: OpSchema) -> OpStrategy:
 )
 def clamp_strategy(op_schema: OpSchema) -> OpStrategy:
     # Op clamp is kind of special in the input args. Arg `min` and `max` can be
-    # either Number or Tensor (but both should be the same type), which results
-    # in different number of input_specs/redistribute_cost in output strategy.
-    # When `min` and `max` are of type Tensor, they can be either be the shape
-    # of the input, or be a scalar tensor.
+    # either Number or Tensor (Tensor can broadcast), which results in different
+    # number of input_specs/redistribute_cost in output strategy. When `min` and
+    # `max` are of type Tensor, they can be broadcasted to match input tensor
+    # shape.
     self_strategy = op_schema.args_schema[0]
     assert isinstance(self_strategy, OpStrategy)
     min_strategy, max_strategy = None, None
