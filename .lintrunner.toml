@@ -1159,10 +1159,6 @@ exclude_patterns = [
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/utils/model_dump/preact.mjs',
-    # These files are all grandfathered in, feel free to remove from this list
-    # as necessary
-    # NOTE: remove the patterns in the order they are listed
-    'aten/src/ATen/[a-mA-M]*/**',
 ]
 init_command = [
     'python3',
