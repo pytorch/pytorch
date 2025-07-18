@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import typing
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -10,6 +11,7 @@ import torch
 from . import config
 from .codecache import write_text
 from .metrics import get_metric_table, is_metric_table_enabled
+from .models.mm_kernel_prediction_model import get_model
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .template_heuristics import (
@@ -22,12 +24,16 @@ from .template_heuristics import (
 from .virtualized import V
 
 
+log = logging.getLogger(__name__)
+
+
 if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
     from triton import Config as TritonConfig
 
+    from torch._inductor.ir import Layout, MutableBox
     from torch.utils._ordered_set import OrderedSet
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
@@ -78,6 +84,21 @@ class InductorChoices:
         else:
             return mm_heuristics.get_exhaustive_mm_configs()
 
+    def get_mm_configs_search_space(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        if config.max_autotune_gemm_search_space != "EXHAUSTIVE":
+            return mm_heuristics.get_mm_configs()
+        else:
+            return mm_heuristics.get_exhaustive_mm_configs()
+
+    def get_exhaustive_mm_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        return mm_heuristics.get_exhaustive_mm_configs()
+
     def get_extra_mm_configs(
         self, device_type: Optional[str] = "cuda"
     ) -> partial[Generator[TritonConfig, None, None]]:
@@ -119,6 +140,45 @@ class InductorChoices:
     ) -> partial[Generator[TritonConfig, None, None]]:
         mm_heuristics = self.get_config_heuristics(device_type)
         return mm_heuristics.get_mm_plus_mm_configs()
+
+    def filter_triton_mm_choices(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        mat1: MutableBox,
+        mat2: MutableBox,
+        layout: Layout,
+        choices: list[TritonConfig],
+        default_topk: int,
+    ) -> list[TritonConfig]:
+        benchmarking_space = config.matmul_gemm_autotune_benchmark_space
+        if benchmarking_space == "DEFAULT":
+            # set benchmarking_space to match the number of configs in the default space
+            benchmarking_space = default_topk
+
+        if benchmarking_space != "SAME" and len(choices) > benchmarking_space:
+            # filter configs
+            model = get_model()
+            if model is None:
+                log.warning("Failed to load the model for kernel prediction.")
+                return choices
+            encoded = model.encode(m, n, k, mat1.dtype, choices)
+            inference = model.inference(encoded)
+            res = torch.exp(inference)
+            timings = list(zip(res.flatten().tolist(), choices))
+            timings.sort(key=lambda x: x[0])
+
+            top_configs = timings[:benchmarking_space]
+            msg = f"Top X predicted configs on M:{m} K:{k} N:{n}: "
+            log.info(msg)
+            for timing, cfg in top_configs:
+                kw = cfg.kwargs
+                msg = f"{timing}, Config(M: {kw['BLOCK_M']}, K: {kw['BLOCK_K']}, K: {kw['BLOCK_N']}, \
+num_stages: {cfg.num_stages}, num_warps: {cfg.num_warps})"
+                log.info(msg)
+            choices = [cfg for _, cfg in top_configs]
+        return choices
 
     # Conv configs
     def get_conv_configs(

@@ -3239,6 +3239,8 @@ class AlgorithmSelectorCache(PersistentCache):
         if not clear_defaults:
             self._register_default_preprocessing_fns()
 
+    def clear_feedback_savers(self):
+        self.feedback_saver_fns = []
 
 _ALGORITHM_SELECTOR_CACHE: Optional[AlgorithmSelectorCache] = None
 
@@ -3306,6 +3308,11 @@ def clear_preprocessing_fns(clear_defaults: bool = False):
     cache = get_algorithm_selector_cache()
     cache.clear_preprocessing_fns(clear_defaults)
 
+def clear_feedback_saver():
+    global _ALGORITHM_SELECTOR_CACHE
+    if _ALGORITHM_SELECTOR_CACHE is None:
+        _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+    _ALGORITHM_SELECTOR_CACHE.clear_feedback_savers()
 
 def realize_inputs(*args):
     if len(args) == 1:

@@ -471,12 +471,65 @@ max_autotune_conv_backends = os.environ.get(
 ).upper()
 
 
+# Specify the size of the benchmarking space for GEMM autotuning with the neural network model.
+# SAME     - There should be no functional difference between this and max_autotune_gemm_search_space
+# DEFAULT  - Benchmark the same number of configs as max_autotune, but search over a larger space using the model
+# <number> - Use the top <number> configs as predicted by the model.
+def parse_matmul_gemm_autotune_benchmark_space() -> Union[
+    int, Literal["SAME", "DEFAULT"]
+]:
+    value = os.environ.get("TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE")
+    if value is not None:
+        value = value.upper()
+        if value in ["SAME", "DEFAULT"]:
+            return value  # type: ignore[return-value]
+        # Try to parse as an integer first
+        try:
+            return int(value)
+        except ValueError:
+            if os.environ.get("TORCHINDUCTOR_FAST_AUTOTUNE") == "1":
+                return 1
+            return "SAME"
+    return "SAME"
+
+
+matmul_gemm_autotune_benchmark_space: Union[int, Literal["SAME", "DEFAULT"]] = (
+    parse_matmul_gemm_autotune_benchmark_space()
+)
+
+
+def parse_matmul_gemm_autotune_search_space() -> Literal["DEFAULT", "EXHAUSTIVE"]:
+    # The search space should be whatever it's set to, unless we're using the model,
+    # in which case we should use the exhaustive search space because it will be filtered by the model.
+    benchmarking_space = parse_matmul_gemm_autotune_benchmark_space()
+    if benchmarking_space == "SAME":
+        val = os.environ.get(
+            "TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE", "DEFAULT"
+        ).upper()
+        if val in ["DEFAULT", "EXHAUSTIVE"]:
+            return val  # type: ignore[return-value]
+        return "DEFAULT"
+    # If we are using the model, the configs we're considering should be exhaustive
+    return "EXHAUSTIVE"
+
+
 # Specify the size of the search space for GEMM autotuning.
 # DEFAULT     - balance between compile time overhead and performance
 # EXHAUSTIVE  - maximize performance
-max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
-).upper()  # type: ignore[assignment]
+max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = (
+    parse_matmul_gemm_autotune_search_space()
+)
+
+#
+fast_autotune_model_directory: Optional[str] = os.environ.get(
+    "TORCHINDUCTOR_FAST_AUTOTUNE_MODEL_DIRECTORY"
+)
+
+# `fast_autotune` will only slightly increase compile time for better mm performance.
+# This uses an ml model to predict the best config for a given kernel, then benchmarks this against aten.
+# The sweetspot for compile time cost vs performance somewhere between max_autotune and no max_autotune.
+# Equivalent to TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE == 1 with max autotune
+fast_autotune = os.environ.get("TORCHINDUCTOR_FAST_AUTOTUNE") == "1"
 
 # Specify the size of the search space for flex attention autotuning.
 # DEFAULT     - balance between compile time overhead and performance

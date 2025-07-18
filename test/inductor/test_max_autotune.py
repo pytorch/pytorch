@@ -27,6 +27,10 @@ from torch._inductor.autotune_process import (
     TuningProcess,
     TuningProcessPool,
 )
+from torch._inductor.config import (
+    parse_matmul_gemm_autotune_benchmark_space,
+    parse_matmul_gemm_autotune_search_space,
+)
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
@@ -2420,6 +2424,53 @@ class TestPrologueFusion(TestCase):
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
+
+
+class TestConfig(TestCase):
+    """Tests for config.py"""
+
+    def test_parse_matmul_gemm_autotune_benchmark_space(self):
+        with mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE": "5"}
+        ):
+            self.assertEqual(parse_matmul_gemm_autotune_benchmark_space(), 5)
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE": "fish",
+                "TORCHINDUCTOR_FAST_AUTOTUNE": "1",
+            },
+        ):
+            self.assertEqual(parse_matmul_gemm_autotune_benchmark_space(), 1)
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE": "fish",
+            },
+        ):
+            self.assertEqual(parse_matmul_gemm_autotune_benchmark_space(), "DEFAULT")
+
+        self.assertEqual(parse_matmul_gemm_autotune_benchmark_space(), "SAME")
+
+    def test_parse_matmul_gemm_autotune_search_space(self):
+        # Case 1: Benchmarking_space is "SAME" -- don't use model
+        self.assertEqual(parse_matmul_gemm_autotune_search_space(), "DEFAULT")
+
+        # Case 2: Benchmarking_space is an int
+        with mock.patch.dict(
+            os.environ,
+            {"TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE": "1"},
+        ):
+            self.assertEqual(parse_matmul_gemm_autotune_search_space(), "EXHAUSTIVE")
+
+        # Case 3: Benchmarking_space is "DEFAULT"
+        with mock.patch.dict(
+            os.environ,
+            {"TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE": "Invalid"},
+        ):
+            self.assertEqual(parse_matmul_gemm_autotune_search_space(), "EXHAUSTIVE")
 
 
 if __name__ == "__main__":
