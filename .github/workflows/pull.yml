@@ -372,6 +372,9 @@ jobs:
     name: linux-jammy-cpu-py3.10-gcc11-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     needs: get-label-type
+    permissions:
+      id-token: write
+      contents: read
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-bazel-test
