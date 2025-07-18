@@ -12962,6 +12962,16 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         y = torch.tensor(5)
         f(x, y)
 
+    def test_tensorfiy_float32_tensor_to_scalar(self):
+        # fix https://github.com/pytorch/pytorch/issues/158083
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            y = x.sum()
+            return x + y.item()
+
+        x = torch.ones(3, 3, dtype=torch.float32)
+        self.assertEqual(f(x), x + x.sum().item())
+
 
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
