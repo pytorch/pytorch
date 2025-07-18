@@ -98,7 +98,14 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool query_event(CUDAEventPool::Event& event) override {
-    return event->query();
+    cudaError_t err = cudaEventQuery(*event);
+    if (err == cudaErrorNotReady) {
+      (void)cudaGetLastError(); // clear CUDA error
+      return false;
+    } else if (err != cudaSuccess) {
+      C10_CUDA_CHECK(err);
+    }
+    return true;
   }
 
   bool pinned_use_background_threads() override {
