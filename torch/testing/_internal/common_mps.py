@@ -576,7 +576,6 @@ if torch.backends.mps.is_available():
                         torch.uint8,
                         torch.int8,
                     ],
-                    "nn.functional.max_pool2d": [torch.uint8],
                 }
             )
 

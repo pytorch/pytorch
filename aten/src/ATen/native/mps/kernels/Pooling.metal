@@ -88,6 +88,54 @@ void max_pool_3d_input_iter(
   }
 }
 
+template <typename T>
+void max_pool_2d_input_iter(
+    constant T* input,
+    device T* output,
+    device int64_t* indices,
+    constant int32_t* input_sizes,
+    constant int32_t* input_strides,
+    thread int32_t (&pooling_dim_indices)[3],
+    constant int32_t* kernel_size,
+    constant int32_t* stride,
+    constant int32_t* padding,
+    constant int32_t* dilation,
+    bool return_indices) {
+  auto bounds0 = get_input_iter_bounds<0>(
+      input_sizes, pooling_dim_indices, kernel_size, stride, padding, dilation);
+  auto bounds1 = get_input_iter_bounds<1>(
+      input_sizes, pooling_dim_indices, kernel_size, stride, padding, dilation);
+
+  auto d0 = dilation[0];
+  auto d1 = dilation[1];
+
+  T max_value = input
+      [input_strides[0] * bounds0.start + input_strides[1] * bounds1.start];
+  auto max_index = bounds0.start * input_sizes[1] + bounds1.start;
+
+  for (auto i0 = bounds0.start; i0 < bounds0.end; i0 += d0) {
+    auto offset0 = input_strides[0] * i0;
+
+    for (auto i1 = bounds1.start; i1 < bounds1.end; i1 += d1) {
+      auto offset1 = input_strides[1] * i1;
+
+      auto input_value = input[offset0 + offset1];
+      bool is_greater = input_value > max_value;
+
+      max_value = is_greater ? input_value : max_value;
+
+      if (return_indices) {
+        auto input_index = i0 * input_sizes[1] + i1;
+        max_index = is_greater ? input_index : max_index;
+      }
+    }
+  }
+  *output = max_value;
+  if (return_indices) {
+    *indices = max_index;
+  }
+}
+
 struct PoolOffsets {
   int32_t output;
   int32_t indices;
@@ -168,6 +216,16 @@ PoolOffsets find_pool_offsets(
           leading_dims,
           return_indices,
           tid);
+    case 3:
+      return find_pool_offsets_dim_specific<3>(
+          output_sizes,
+          output_strides,
+          indices_strides,
+          input_strides,
+          pooling_dim_indices,
+          leading_dims,
+          return_indices,
+          tid);
   }
 }
 
@@ -213,18 +271,33 @@ kernel void max_pool(
   indices += offsets.indices;
   input += offsets.input_leading;
 
-  max_pool_3d_input_iter<T>(
-      input,
-      output,
-      indices,
-      input_sizes + leading_dims,
-      input_strides + leading_dims,
-      pooling_dim_indices,
-      kernel_size,
-      stride,
-      padding,
-      dilation,
-      return_indices);
+  if (pooling_dims == 3) {
+    max_pool_3d_input_iter<T>(
+        input,
+        output,
+        indices,
+        input_sizes + leading_dims,
+        input_strides + leading_dims,
+        pooling_dim_indices,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        return_indices);
+  } else if (pooling_dims == 2) {
+    max_pool_2d_input_iter<T>(
+        input,
+        output,
+        indices,
+        input_sizes + leading_dims,
+        input_strides + leading_dims,
+        pooling_dim_indices,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        return_indices);
+  }
 }
 
 // Finds the element in the grad input which corresponds to the index into the
