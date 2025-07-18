@@ -752,7 +752,12 @@ class TestMaxAutotune(TestCase):
     @skipIfXpu(
         msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
     )
-    @config.patch(max_autotune_gemm_backends="TRITON")
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "TRITON",
+            "benchmark_epilogue_fusion": False,
+        }
+    )
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)
 
