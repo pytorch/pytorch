@@ -32,6 +32,10 @@ class DTensorSpec:
     def __post_init__(self) -> None:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
+        if not len(self.placements) == self.mesh.ndim:
+            raise ValueError(
+                f"DTensorSpec requires one placement per mesh dim (mesh.ndim={self.mesh.ndim}), got {self.placements=}"
+            )
         self._hash: Optional[int] = None
 
     def __setattr__(self, attr: str, value: Any) -> None:
@@ -240,7 +244,7 @@ class DTensorSpec:
                 if placement.is_shard():
                     placement = cast(Shard, placement)
                     raise RuntimeError(
-                        f"DeviceMesh dimension cann't be mapped to two dimension of the same tensor: {i} and {placement.dim}"
+                        f"DeviceMesh dimension can't be mapped to two dimension of the same tensor: {i} and {placement.dim}"
                     )
                 elif placement.is_partial():
                     raise RuntimeError(

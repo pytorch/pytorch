@@ -487,6 +487,9 @@ class RingFlexAttentionTest(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_ring_flex_attention(self) -> None:
+        # use_compile = True  # Dynamo does not know how to trace method `_shard_tensor` of class `Shard`
+        use_compile = False
+
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
             # return torch.zeros_like(q_idx).bool()
@@ -556,6 +559,7 @@ class RingFlexAttentionTest(DTensorTestBase):
         q_local_size[2] //= self.world_size
         k_local_size = list(k.shape)
         k_local_size[2] //= self.world_size
+        torch.distributed.tensor.experimental._attention._cp_shard_dim = 2
 
         # this is the block_mask created within the training step
         # NOTE: flex_attention checks block_mask shape and input shape before
@@ -592,8 +596,8 @@ class RingFlexAttentionTest(DTensorTestBase):
         cp_k = k.detach().clone()
         cp_v = v.detach().clone()
 
-        # test_fn = torch.compile(self._perform_ring_flex_attention, fullgraph=True)
         test_fn = self._perform_ring_flex_attention
+        test_fn = torch.compile(test_fn, fullgraph=True) if use_compile else test_fn
         cp_out, cp_lse = test_fn(
             cp_q,
             cp_k,

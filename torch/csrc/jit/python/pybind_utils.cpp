@@ -313,7 +313,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
           bool is_symbolic = false;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            if (torch::is_symint(elm)) {
+            if (torch::is_symint(elm) || THPVariable_Check(elm.ptr())) {
               is_symbolic = true;
               break;
             }
@@ -809,7 +809,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
 }
 
 // This function is used to check if the schema is valid for the given args and
-// kwargs. It checks script object by checking wether the FakeScriptObject is
+// kwargs. It checks script object by checking whether the FakeScriptObject is
 // an instance of the corresponding fake class for the actual class used in
 // schema.
 bool checkSchemaAllowFakeScriptObject(

@@ -104,6 +104,11 @@ single_dim_common = merge_dicts(
 """
     },
     {
+        "opt_dim_without_none": """
+    dim (int, optional): the dimension to reduce. If omitted, all dimensions are reduced. Explicit ``None`` is not supported.
+"""
+    },
+    {
         "keepdim_details": """If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
@@ -2777,6 +2782,12 @@ Returns a copy of :attr:`input`.
     result of this operation to :attr:`input`. To create a tensor without an
     autograd relationship to :attr:`input` see :meth:`~Tensor.detach`.
 
+    In addition, when ``torch.preserve_format`` is used:
+    If the input tensor is dense (i.e., non-overlapping strided),
+    its memory format (including strides) is retained.
+    Otherwise (e.g., a non-dense view like a stepped slice),
+    the output is converted to the dense (contiguous) format.
+
 Args:
     {input}
 
@@ -4575,6 +4586,8 @@ For a 3-D tensor the output is specified by::
 It is also required that ``index.size(d) <= input.size(d)`` for all
 dimensions ``d != dim``.  :attr:`out` will have the same shape as :attr:`index`.
 Note that ``input`` and ``index`` do not broadcast against each other.
+When :attr:`index` is empty, we always return an empty output with the same shape
+without further error checking.
 
 Args:
     input (Tensor): the source tensor
@@ -5115,7 +5128,7 @@ For each N-dimensional point in input:
 If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the N sequences
 of bin edges. Each 1D tensor should contain a strictly increasing sequence with at
 least one element. A sequence of K bin edges defines K-1 bins, explicitly specifying
-the left and right edges of all bins. Every bin is exclusive of its left edge. Only
+the left and right edges of all bins. Every bin is inclusive of its left edge. Only
 the rightmost bin is inclusive of its right edge.
 
 If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width bins
@@ -6543,7 +6556,7 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {opt_dim_all_reduce}
+    {opt_dim_without_none}
     {opt_keepdim}
 
 Keyword args:
@@ -6574,7 +6587,7 @@ Example::
 
 See :func:`torch.maximum`.
 
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -6647,10 +6660,10 @@ dimension(s) :attr:`dim`.
 .. note::
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
         - ``amax``/``amin`` supports reducing on multiple dimensions,
-        - ``amax``/``amin`` does not return indices,
-        - ``amax``/``amin`` evenly distributes gradient between equal values,
-          while ``max(dim)``/``min(dim)`` propagates gradient only to a single
-          index in the source tensor.
+        - ``amax``/``amin`` does not return indices.
+
+    Both ``max``/``min`` and ``amax``/``amin`` evenly distribute gradients between equal values
+    when there are multiple input elements with the same minimum or maximum value.
 
 {keepdim_details}
 
@@ -7161,7 +7174,7 @@ the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {opt_dim_all_reduce}
+    {opt_dim_without_none}
     {opt_keepdim}
 
 Keyword args:
@@ -7255,10 +7268,10 @@ dimension(s) :attr:`dim`.
 .. note::
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
         - ``amax``/``amin`` supports reducing on multiple dimensions,
-        - ``amax``/``amin`` does not return indices,
-        - ``amax``/``amin`` evenly distributes gradient between equal values,
-          while ``max(dim)``/``min(dim)`` propagates gradient only to a single
-          index in the source tensor.
+        - ``amax``/``amin`` does not return indices.
+
+    Both ``max``/``min`` and ``amax``/``amin`` evenly distribute gradients between equal values
+    when there are multiple input elements with the same minimum or maximum value.
 
 {keepdim_details}
 
@@ -9524,6 +9537,34 @@ Out-of-place version of :meth:`torch.Tensor.scatter_reduce_`
 )
 
 add_docstr(
+    torch.segment_reduce,
+    r"""
+segment_reduce(data: Tensor, reduce: str, *, lengths: Tensor | None = None, indices: Tensor | None = None, offsets: Tensor | None = None, axis: _int = 0, unsafe: _bool = False, initial: Number | _complex | None = None) -> Tensor # noqa: B950
+
+Perform a segment reduction operation on the input tensor along the specified axis.
+
+Args:
+    data (Tensor): The input tensor on which the segment reduction operation will be performed.
+    reduce (str): The type of reduction operation. Supported values are ``sum``, ``mean``, ``max``, ``min``, ``prod``.
+
+Keyword args:
+    lengths (Tensor, optional): Length of each segment. Default: ``None``.
+    offsets (Tensor, optional): Offset of each segment. Default: ``None``.
+    axis (int, optional): The axis perform reduction. Default: ``0``.
+    unsafe (bool, optional): Skip validation If `True`. Default: ``False``.
+    initial (Number, optional): The initial value for the reduction operation. Default: ``None``.
+
+Example::
+
+    >>> data = torch.tensor([[1, 2, 3, 4],[5, 6, 7, 8],[9, 10, 11, 12]], dtype=torch.float32, device='cuda')
+    >>> lengths = torch.tensor([2, 1], device='cuda')
+    >>> torch.segment_reduce(data, 'max', lengths=lengths)
+    tensor([[ 5.,  6.,  7.,  8.],
+            [ 9., 10., 11., 12.]], device='cuda:0')
+""",
+)
+
+add_docstr(
     torch.select,
     r"""
 select(input, dim, index) -> Tensor
@@ -10015,7 +10056,7 @@ Args:
         subtracted by the number before it denotes the number of
         elements or blocks in a given compressed dimension.
     plain_indices (array_like): Plain dimension (column or row)
-        co-ordinates of each element or block in values. (B+1)-dimensional
+        coordinates of each element or block in values. (B+1)-dimensional
         tensor with the same length as values.
 
     values (array_list): Initial values for the tensor. Can be a list,
@@ -10083,7 +10124,7 @@ Args:
         starts. Each successive number in the tensor subtracted by the
         number before it denotes the number of elements in a given
         row.
-    col_indices (array_like): Column co-ordinates of each element in
+    col_indices (array_like): Column coordinates of each element in
         values. (B+1)-dimensional tensor with the same length
         as values.
     values (array_list): Initial values for the tensor. Can be a list,
@@ -10146,7 +10187,7 @@ Args:
         starts. Each successive number in the tensor subtracted by the
         number before it denotes the number of elements in a given
         column.
-    row_indices (array_like): Row co-ordinates of each element in
+    row_indices (array_like): Row coordinates of each element in
         values. (B+1)-dimensional tensor with the same length as
         values.
     values (array_list): Initial values for the tensor. Can be a list,
@@ -10209,7 +10250,7 @@ Args:
         given row block starts. Each successive number in the tensor
         subtracted by the number before it denotes the number of
         blocks in a given row.
-    col_indices (array_like): Column block co-ordinates of each block
+    col_indices (array_like): Column block coordinates of each block
         in values. (B+1)-dimensional tensor with the same length as
         values.
     values (array_list): Initial values for the tensor. Can be a list,
@@ -10277,7 +10318,7 @@ Args:
         column starts. Each successive number in the tensor subtracted
         by the number before it denotes the number of elements in a
         given column.
-    row_indices (array_like): Row block co-ordinates of each block in
+    row_indices (array_like): Row block coordinates of each block in
         values. (B+1)-dimensional tensor with the same length
         as values.
     values (array_list): Initial blocks for the tensor. Can be a list,
@@ -12096,6 +12137,12 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
     nondeterministic behavior from using the data as an input to an operation.
     Floating point and complex tensors are filled with NaN, and integer tensors
     are filled with the maximum value.
+
+    When ``torch.preserve_format`` is used:
+    If the input tensor is dense (i.e., non-overlapping strided),
+    its memory format (including strides) is retained.
+    Otherwise (e.g., a non-dense view like a stepped slice),
+    the output is converted to the dense format.
 
 Args:
     {input}

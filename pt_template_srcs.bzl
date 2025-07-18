@@ -210,7 +210,7 @@ def get_metal_registration_files_outs():
 
 # There is a really weird issue with the arvr windows builds where
 # the custom op files are breaking them. See https://fburl.com/za87443c
-# The hack is just to not build them for that platform and pray they arent needed.
+# The hack is just to not build them for that platform and pray they aren't needed.
 def get_metal_registration_files_outs_windows():
     outs = {}
     for file_path in METAL_SOURCE_LIST:
