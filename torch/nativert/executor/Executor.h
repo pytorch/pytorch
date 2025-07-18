@@ -82,8 +82,7 @@ class Executor {
       const std::shared_ptr<Weights>& weights,
       Placement placement = Placement(),
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
-          pytorchStreamReader = nullptr,
-      MakeProxyExecutorFn makeProxyExecutorFunc = nullptr);
+          pytorchStreamReader = nullptr);
 
   std::shared_ptr<Weights> getWeights() {
     std::shared_ptr<Weights> ret;
@@ -177,6 +176,8 @@ class Executor {
   // Helper method to get current timestamp in seconds
   int64_t getCurrentTimestampSeconds() const;
 
+  void initWeights(const std::shared_ptr<Weights>& weights);
+
   std::unique_ptr<GraphExecutorBase> graphExecutor_;
 
   const Placement placement_;
@@ -187,8 +188,6 @@ class Executor {
   std::vector<ConstFoldingExecution> constFoldingExecutions_;
 
   std::optional<ConstantFolder> constantFolder_;
-
-  MakeProxyExecutorFn makeProxyExecutorFunc_;
 
   c10::Semaphore sem_;
   torch::nativert::detail::MPMCQueue<std::unique_ptr<ExecutionFrame>>

@@ -216,7 +216,7 @@ def map_placements_after_broadcast(
                 # the input shape shard dim before broadcasting,
                 # in this case it means implicit broadcasting happen
                 # in this dim, so we can just mark it as replicate
-                # and implict broadcast will broadcast automatically
+                # and implicit broadcast will broadcast automatically
                 # to the sharded shape
                 new_placements.append(Replicate())
 
@@ -226,6 +226,11 @@ def map_placements_after_broadcast(
 def generate_redistribute_costs(
     src_strategy: OpStrategy, dst_spec: DTensorSpec
 ) -> list[float]:
+    """Generates one row in the 'redistribute_costs' matrix in an OpSpec
+    The length of the returned list will match the number of strategies in 'src_strategy'.
+
+    Each value in the row is the cost of redistributing from a particular src_strategy to dst_spec.
+    """
     redistribute_costs: list[float] = [
         redistribute_cost(strat.output_spec, dst_spec)
         for strat in src_strategy.strategies
