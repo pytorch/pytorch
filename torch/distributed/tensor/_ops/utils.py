@@ -130,12 +130,12 @@ def prod(xs: Iterable[int]) -> int:
 def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     """Check if the shape is shardable according to the spec."""
     # number of shards in each tensor dimension
-    if len(shape) == 0:
-        return False
     shards_map = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
         if placement.is_shard():
             shard_dim = cast(Shard, placement).dim
+            if shard_dim >= len(shape):
+                return False
             shards_map[shard_dim] *= spec.mesh.size(i)
 
     for i, dim_size in enumerate(shape):
