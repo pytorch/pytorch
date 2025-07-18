@@ -138,7 +138,7 @@ def maybe_realize(args: list[Optional[IRNode]]):
 
 def get_float32_precision():
     if (
-        torch.get_float32_matmul_precision() == "highest"
+        torch.backends.cuda.matmul.fp32_precision == "ieee"
         or torch.version.hip
         or torch.mtia.is_available()
     ):
