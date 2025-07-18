@@ -185,7 +185,7 @@ conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_p
 source activate "$tmp_env_name"
 
 retry pip install -r "${pytorch_rootdir}/requirements-build.txt"
-pip install "numpy${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing-extensions
+pip install "numpy${NUMPY_PINNED_VERSION}" "pyyaml${PYYAML_PINNED_VERSION}" requests ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing-extensions
 retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
 retry brew install libomp
 
