@@ -531,9 +531,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         std::string filename_extension = output_path_str.substr(extension_idx);
         if (filename_extension == ".cpp") {
           cpp_filename = output_path_str;
-        } else if (filename_extension.compare(object_file_ext()) == 0) {
+        } else if (filename_extension == object_file_ext()) {
           obj_filenames.push_back(output_path_str);
-        } else if (filename_extension.compare(extension_file_ext()) == 0) {
+        } else if (filename_extension == extension_file_ext()) {
           so_filename = output_path_str;
         }
       }
