@@ -6263,7 +6263,7 @@ class ShapeEnv:
                 return
             self._resimplify_floor_div_axioms = False
             new_items = {}
-            for k, v in axioms.items():
+            for k, v in list(axioms.items()):
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
                 # to the shapeEnv. This handles such issue but its not ideal. This is the only expression
                 # simplification that depends on the global state of shape env.
@@ -6353,7 +6353,6 @@ class ShapeEnv:
         # expression when creating contiguous strides.
         if not size_oblivious:
             min_max_replacements = {}
-            axioms = dict(self.axioms)
             for atom in expr.atoms(Max):  # type: ignore[has-type]
                 if len(atom.args) > 2:
                     continue
@@ -6361,9 +6360,9 @@ class ShapeEnv:
                 if b == 1 or b == 0:
                     a, b = b, a
 
-                if a == 1 and self._maybe_evaluate_static(sympy.Ge(b, 1), axioms=axioms):
+                if a == 1 and self._maybe_evaluate_static(sympy.Ge(b, 1)):
                     min_max_replacements[atom] = b
-                if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0), axioms=axioms):
+                if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0)):
                     min_max_replacements[atom] = b
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
