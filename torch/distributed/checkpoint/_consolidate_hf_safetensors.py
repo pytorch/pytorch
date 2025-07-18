@@ -371,11 +371,11 @@ def _write_sub_tensor_to_file_optimized(
     """
     Optimized version that writes the maximum number of contiguous bytes possible.
 
-    Uses a unified algorithm that calculates the maximum contiguous bytes that can be 
+    Uses a unified algorithm that calculates the maximum contiguous bytes that can be
     written in each iteration and continues until the entire subtensor is written.
     Handles all sharding patterns efficiently:
     - Full sub-tensor at once for row-wise sharding
-    - Row-by-row for column-wise sharding  
+    - Row-by-row for column-wise sharding
     - Optimized chunks for other patterns
 
     Args:
@@ -402,10 +402,10 @@ def _write_sub_tensor_to_file_optimized(
         sub_tensor_strides.insert(0, sub_tensor_strides[0] * sub_tensor_shape[i])
 
     total_elements = math.prod(sub_tensor_shape)
-    
+
     with fs.open(output_file_path, "r+b") as out_f:
         elements_written = 0
-        
+
         while elements_written < total_elements:
             # Convert linear index to multi-dimensional indices
             temp_idx = elements_written
@@ -414,69 +414,79 @@ def _write_sub_tensor_to_file_optimized(
                 indices.append(temp_idx % dim_size)
                 temp_idx //= dim_size
             indices.reverse()
-            
+
             # Calculate maximum contiguous elements we can write from this position
             max_contiguous = _calculate_max_contiguous_elements(
                 indices, sub_tensor_shape, tensor_shape
             )
-            
+
             # Calculate source position in bytes
-            src_pos = sum(idx * stride for idx, stride in zip(indices, sub_tensor_strides))
+            src_pos = sum(
+                idx * stride for idx, stride in zip(indices, sub_tensor_strides)
+            )
             src_byte_offset = src_pos * element_size
-            
+
             # Calculate destination position in bytes
-            dest_indices = [idx + offset for idx, offset in zip(indices, sub_tensor_offsets)]
-            dest_pos = sum(idx * stride for idx, stride in zip(dest_indices, tensor_strides))
+            dest_indices = [
+                idx + offset for idx, offset in zip(indices, sub_tensor_offsets)
+            ]
+            dest_pos = sum(
+                idx * stride for idx, stride in zip(dest_indices, tensor_strides)
+            )
             dest_byte_offset = output_start_byte + dest_pos * element_size
-            
+
             # Write the contiguous chunk
             bytes_to_write = max_contiguous * element_size
             out_f.seek(dest_byte_offset)
-            chunk_data = sub_tensor_bytes[src_byte_offset:src_byte_offset + bytes_to_write]
+            chunk_data = sub_tensor_bytes[
+                src_byte_offset : src_byte_offset + bytes_to_write
+            ]
             out_f.write(chunk_data)
-            
+
             elements_written += max_contiguous
 
 
 def _calculate_max_contiguous_elements(
     indices: list[int],
     sub_tensor_shape: list[int],
-    tensor_shape: list[int], 
+    tensor_shape: list[int],
 ) -> int:
     """
     Calculate the maximum number of contiguous elements that can be written from current position.
-    
+
     This determines the largest chunk by checking how elements are laid out in memory
     and finding natural boundaries where contiguity breaks.
     """
     # Start with elements remaining in the last dimension
     max_contiguous = sub_tensor_shape[-1] - indices[-1]
-    
+
     # Check if we can extend across multiple dimensions
-    # We can write across dimension boundaries if we're writing complete "rows" 
+    # We can write across dimension boundaries if we're writing complete "rows"
     # and the layout in destination tensor maintains contiguity
-    
+
     # For 2D case: check if we can write multiple complete rows
     if len(sub_tensor_shape) >= 2:
         # If we're at the start of a row and can write complete rows
         if indices[-1] == 0:  # At start of last dimension (column)
             rows_remaining = sub_tensor_shape[-2] - indices[-2]  # Rows left to write
-            
+
             # Check if writing complete rows maintains contiguity in destination
             # This is true for row-wise sharding or when sub-tensor spans full width
             if sub_tensor_shape[-1] == tensor_shape[-1]:  # Full width
                 max_contiguous = rows_remaining * sub_tensor_shape[-1]
-            
+
             # For higher dimensions, check if we can extend further
             if len(sub_tensor_shape) >= 3 and indices[-2] == 0:
                 # Check if we can write complete 2D slices
                 remaining_in_dim = sub_tensor_shape[-3] - indices[-3]
-                if (sub_tensor_shape[-1] == tensor_shape[-1] and 
-                    sub_tensor_shape[-2] == tensor_shape[-2]):
-                    max_contiguous = (remaining_in_dim * 
-                                    sub_tensor_shape[-2] * 
-                                    sub_tensor_shape[-1])
-    
+                if (
+                    sub_tensor_shape[-1] == tensor_shape[-1]
+                    and sub_tensor_shape[-2] == tensor_shape[-2]
+                ):
+                    max_contiguous = (
+                        remaining_in_dim * sub_tensor_shape[-2] * sub_tensor_shape[-1]
+                    )
+
     return max_contiguous
 
 
