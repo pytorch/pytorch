@@ -119,6 +119,7 @@ class L1Loss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
+
     __constants__ = ["reduction"]
 
     def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
@@ -233,6 +234,7 @@ class NLLLoss(_WeightedLoss):
         >>> loss = loss_fn(output, target)
         >>> loss.backward()
     """
+
     __constants__ = ["ignore_index", "reduction"]
     ignore_index: int
 
@@ -331,6 +333,7 @@ class PoissonNLLLoss(_Loss):
         - Output: scalar by default. If :attr:`reduction` is ``'none'``, then :math:`(*)`,
           the same shape as the input.
     """
+
     __constants__ = ["log_input", "full", "eps", "reduction"]
     log_input: bool
     full: bool
@@ -427,6 +430,7 @@ class GaussianNLLLoss(_Loss):
         Conference on Neural Networks (ICNN'94), Orlando, FL, USA, 1994, pp. 55-60
         vol.1, doi: 10.1109/ICNN.1994.374138.
     """
+
     __constants__ = ["full", "eps", "reduction"]
     full: bool
     eps: float
@@ -467,7 +471,7 @@ class KLDivLoss(_Loss):
 
     .. code-block:: python
 
-        if not log_target: # default
+        if not log_target:  # default
             loss_pointwise = target * (target.log() - input)
         else:
             loss_pointwise = target.exp() * (target - input)
@@ -527,6 +531,7 @@ class KLDivLoss(_Loss):
         >>> log_target = F.log_softmax(torch.rand(3, 5), dim=1)
         >>> output = kl_loss(input, log_target)
     """
+
     __constants__ = ["reduction"]
 
     def __init__(
@@ -601,6 +606,7 @@ class MSELoss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
+
     __constants__ = ["reduction"]
 
     def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
@@ -684,6 +690,7 @@ class BCELoss(_WeightedLoss):
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
+
     __constants__ = ["reduction"]
 
     def __init__(
@@ -785,7 +792,7 @@ class BCEWithLogitsLoss(_Loss):
             operations. For a target of size [B, C, H, W] (where B is batch size) pos_weight of
             size [B, C, H, W] will apply different pos_weights to each element of the batch or
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
-            along all spacial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
+            along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
 
     Shape:
@@ -876,6 +883,7 @@ class HingeEmbeddingLoss(_Loss):
         - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the input
     """
+
     __constants__ = ["margin", "reduction"]
     margin: float
 
@@ -950,6 +958,7 @@ class MultiLabelMarginLoss(_Loss):
         tensor(0.85...)
 
     """
+
     __constants__ = ["reduction"]
 
     def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
@@ -1030,6 +1039,7 @@ class SmoothL1Loss(_Loss):
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
     """
+
     __constants__ = ["reduction"]
 
     def __init__(
@@ -1092,6 +1102,7 @@ class HuberLoss(_Loss):
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
     """
+
     __constants__ = ["reduction", "delta"]
 
     def __init__(self, reduction: str = "mean", delta: float = 1.0) -> None:
@@ -1134,6 +1145,7 @@ class SoftMarginLoss(_Loss):
           shape as input.
 
     """
+
     __constants__ = ["reduction"]
 
     def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
@@ -1215,7 +1227,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
-            If given, has to be a Tensor of size `C` and floating point dtype
+            If given, has to be a Tensor of size `C`.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
@@ -1276,6 +1288,7 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
+
     __constants__ = ["ignore_index", "reduction", "label_smoothing"]
     ignore_index: int
     label_smoothing: float
@@ -1342,6 +1355,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         - Target: :math:`(N, C)`, label targets must have the same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
     """
+
     __constants__ = ["reduction"]
 
     def __init__(
@@ -1410,6 +1424,7 @@ class CosineEmbeddingLoss(_Loss):
         >>> output = loss(input1, input2, target)
         >>> output.backward()
     """
+
     __constants__ = ["margin", "reduction"]
     margin: float
 
@@ -1475,6 +1490,7 @@ class MarginRankingLoss(_Loss):
         >>> output = loss(input1, input2, target)
         >>> output.backward()
     """
+
     __constants__ = ["margin", "reduction"]
     margin: float
 
@@ -1554,6 +1570,7 @@ class MultiMarginLoss(_WeightedLoss):
         >>> loss(x, y)
         tensor(0.32...)
     """
+
     __constants__ = ["p", "margin", "reduction"]
     margin: float
     p: int
@@ -1657,6 +1674,7 @@ class TripletMarginLoss(_Loss):
     .. _Learning shallow convolutional feature descriptors with triplet losses:
         https://bmva-archive.org.uk/bmvc/2016/papers/paper119/index.html
     """
+
     __constants__ = ["margin", "p", "eps", "swap", "reduction"]
     margin: float
     p: float
@@ -1672,7 +1690,7 @@ class TripletMarginLoss(_Loss):
         size_average=None,
         reduce=None,
         reduction: str = "mean",
-    ):
+    ) -> None:
         super().__init__(size_average, reduce, reduction)
         if margin <= 0:
             raise ValueError(
@@ -1794,6 +1812,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         V. Balntas, et al.: Learning shallow convolutional feature descriptors with triplet losses:
         https://bmva-archive.org.uk/bmvc/2016/papers/paper119/index.html
     """
+
     __constants__ = ["margin", "swap", "reduction"]
     margin: float
     swap: bool
@@ -1805,7 +1824,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         margin: float = 1.0,
         swap: bool = False,
         reduction: str = "mean",
-    ):
+    ) -> None:
         super().__init__(size_average=None, reduce=None, reduction=reduction)
         if margin <= 0:
             raise ValueError(
@@ -1889,10 +1908,10 @@ class CTCLoss(_Loss):
     Examples:
 
         >>> # Target are to be padded
-        >>> T = 50      # Input sequence length
-        >>> C = 20      # Number of classes (including blank)
-        >>> N = 16      # Batch size
-        >>> S = 30      # Target sequence length of longest target in batch (padding length)
+        >>> T = 50  # Input sequence length
+        >>> C = 20  # Number of classes (including blank)
+        >>> N = 16  # Batch size
+        >>> S = 30  # Target sequence length of longest target in batch (padding length)
         >>> S_min = 10  # Minimum target length, for demonstration purposes
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,N,C)
@@ -1902,16 +1921,21 @@ class CTCLoss(_Loss):
         >>> target = torch.randint(low=1, high=C, size=(N, S), dtype=torch.long)
         >>>
         >>> input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.long)
-        >>> target_lengths = torch.randint(low=S_min, high=S, size=(N,), dtype=torch.long)
+        >>> target_lengths = torch.randint(
+        ...     low=S_min,
+        ...     high=S,
+        ...     size=(N,),
+        ...     dtype=torch.long,
+        ... )
         >>> ctc_loss = nn.CTCLoss()
         >>> loss = ctc_loss(input, target, input_lengths, target_lengths)
         >>> loss.backward()
         >>>
         >>>
         >>> # Target are to be un-padded
-        >>> T = 50      # Input sequence length
-        >>> C = 20      # Number of classes (including blank)
-        >>> N = 16      # Batch size
+        >>> T = 50  # Input sequence length
+        >>> C = 20  # Number of classes (including blank)
+        >>> N = 16  # Batch size
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,N,C)
         >>> input = torch.randn(T, N, C).log_softmax(2).detach().requires_grad_()
@@ -1919,15 +1943,20 @@ class CTCLoss(_Loss):
         >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
         >>> target_lengths = torch.randint(low=1, high=T, size=(N,), dtype=torch.long)
-        >>> target = torch.randint(low=1, high=C, size=(sum(target_lengths),), dtype=torch.long)
+        >>> target = torch.randint(
+        ...     low=1,
+        ...     high=C,
+        ...     size=(sum(target_lengths),),
+        ...     dtype=torch.long,
+        ... )
         >>> ctc_loss = nn.CTCLoss()
         >>> loss = ctc_loss(input, target, input_lengths, target_lengths)
         >>> loss.backward()
         >>>
         >>>
         >>> # Target are to be un-padded and unbatched (effectively N=1)
-        >>> T = 50      # Input sequence length
-        >>> C = 20      # Number of classes (including blank)
+        >>> T = 50  # Input sequence length
+        >>> C = 20  # Number of classes (including blank)
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,C)
         >>> # xdoctest: +SKIP("FIXME: error in doctest")
@@ -1936,7 +1965,12 @@ class CTCLoss(_Loss):
         >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
         >>> target_lengths = torch.randint(low=1, high=T, size=(), dtype=torch.long)
-        >>> target = torch.randint(low=1, high=C, size=(target_lengths,), dtype=torch.long)
+        >>> target = torch.randint(
+        ...     low=1,
+        ...     high=C,
+        ...     size=(target_lengths,),
+        ...     dtype=torch.long,
+        ... )
         >>> ctc_loss = nn.CTCLoss()
         >>> loss = ctc_loss(input, target, input_lengths, target_lengths)
         >>> loss.backward()
@@ -1963,13 +1997,14 @@ class CTCLoss(_Loss):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
     """
+
     __constants__ = ["blank", "reduction"]
     blank: int
     zero_infinity: bool
 
     def __init__(
         self, blank: int = 0, reduction: str = "mean", zero_infinity: bool = False
-    ):
+    ) -> None:
         super().__init__(reduction=reduction)
         self.blank = blank
         self.zero_infinity = zero_infinity

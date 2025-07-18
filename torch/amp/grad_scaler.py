@@ -134,7 +134,8 @@ class GradScaler:
         if self._device == "cuda":
             if enabled and torch.cuda.amp.common.amp_definitely_not_available():
                 warnings.warn(
-                    "torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling."
+                    "torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling.",
+                    stacklevel=2,
                 )
                 self._enabled = False
 
@@ -175,20 +176,16 @@ class GradScaler:
         )
 
     @overload
-    def scale(self, outputs: torch.Tensor) -> torch.Tensor:
-        ...
+    def scale(self, outputs: torch.Tensor) -> torch.Tensor: ...
 
     @overload
-    def scale(self, outputs: list[torch.Tensor]) -> list[torch.Tensor]:
-        ...
+    def scale(self, outputs: list[torch.Tensor]) -> list[torch.Tensor]: ...
 
     @overload
-    def scale(self, outputs: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]:
-        ...
+    def scale(self, outputs: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, ...]: ...
 
     @overload
-    def scale(self, outputs: Iterable[torch.Tensor]) -> Iterable[torch.Tensor]:
-        ...
+    def scale(self, outputs: Iterable[torch.Tensor]) -> Iterable[torch.Tensor]: ...
 
     def scale(
         self,
@@ -458,9 +455,9 @@ class GradScaler:
         if optimizer_state["stage"] is OptState.READY:
             self.unscale_(optimizer)
 
-        assert (
-            len(optimizer_state["found_inf_per_device"]) > 0
-        ), "No inf checks were recorded for this optimizer."
+        assert len(optimizer_state["found_inf_per_device"]) > 0, (
+            "No inf checks were recorded for this optimizer."
+        )
 
         retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
 
@@ -504,8 +501,10 @@ class GradScaler:
             if isinstance(new_scale, float):
                 self._scale.fill_(new_scale)
             else:
-                reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor or \
-                    torch.FloatTensor with requires_grad=False."
+                reason = (
+                    "new_scale should be a float or a 1-element torch.cuda.FloatTensor or "
+                    "torch.FloatTensor with requires_grad=False."
+                )
                 assert new_scale.device.type == self._device, reason
                 assert new_scale.numel() == 1, reason
                 assert new_scale.requires_grad is False, reason
@@ -683,9 +682,9 @@ class GradScaler:
         dummy_inv_scale = torch.full((), 1.0, dtype=torch.float32, device=_scale.device)
         found_inf = torch.full((), 0.0, dtype=torch.float32, device=_scale.device)
 
-        self._per_optimizer_states[id(optimizer)][
-            "found_inf_per_device"
-        ] = self._unscale_grads_(optimizer, dummy_inv_scale, found_inf, True)
+        self._per_optimizer_states[id(optimizer)]["found_inf_per_device"] = (
+            self._unscale_grads_(optimizer, dummy_inv_scale, found_inf, True)
+        )
 
         return self._per_optimizer_states[id(optimizer)]["found_inf_per_device"]
 

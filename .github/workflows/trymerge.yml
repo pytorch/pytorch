@@ -102,7 +102,7 @@ jobs:
           s3-prefix: merges/${{ github.repository }}/${{ github.event.client_payload.pr_num }}/${{ github.event.client_payload.comment_id }}/${{ github.run_id }}
           path: merge_record.json
 
-# We want newer merge commands to supercede old ones
+# We want newer merge commands to supersede old ones
 concurrency:
   group: try-merge-${{ github.event.client_payload.pr_num }}
   cancel-in-progress: true
