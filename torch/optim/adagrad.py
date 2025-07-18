@@ -21,7 +21,7 @@ from .optimizer import (
 )
 
 
-__all__ = ["Adagrad", "adagrad"]
+__all__: list[str] = ["Adagrad", "adagrad"]
 
 
 class Adagrad(Optimizer):
@@ -117,6 +117,7 @@ class Adagrad(Optimizer):
                 )
 
     def share_memory(self):
+        """Calls tensor.share_memory_() on the state sum tensors."""
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
