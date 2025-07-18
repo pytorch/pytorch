@@ -346,14 +346,17 @@ def requires_nccl_version(version, msg):
         else:
             return skip_but_pass_in_sandcastle_if(
                 torch.cuda.nccl.version() < version,
-                f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version() }, reason: {msg}",        
+                f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version() }, reason: {msg}",
             )
     else:
+
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
                 return func(*args, **kwargs)
+
             return wrapper
+
         return decorator
 
 
@@ -362,6 +365,7 @@ def requires_nccl():
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
     )
+
 
 def requires_xccl():
     return skip_but_pass_in_sandcastle_if(
