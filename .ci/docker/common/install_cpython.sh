@@ -3,11 +3,10 @@
 set -uex -o pipefail
 
 PYTHON_DOWNLOAD_URL=https://www.python.org/ftp/python
-PYTHON_DOWNLOAD_GITHUB_BRANCH=https://github.com/python/cpython/archive/refs/heads  # @lint-ignore
 GET_PIP_URL=https://bootstrap.pypa.io/get-pip.py
 
 # Python versions to be installed in /opt/$VERSION_NO
-CPYTHON_VERSIONS=${CPYTHON_VERSIONS:-"3.9.0 3.10.1 3.11.0 3.12.0 3.13.0 3.13.0t"}
+CPYTHON_VERSIONS=${CPYTHON_VERSIONS:-"3.9.0 3.10.1 3.11.0 3.12.0 3.13.0 3.13.0t 3.14.0 3.14.0t"}
 
 function check_var {
     if [ -z "$1" ]; then
@@ -24,9 +23,8 @@ function do_cpython_build {
     tar -xzf Python-$py_ver.tgz
 
     local additional_flags=""
-    if [ "$py_ver" == "3.13.0t" ]; then
+    if [[ "$py_ver" == *"t" ]]; then
         additional_flags=" --disable-gil"
-        mv cpython-3.13/ cpython-3.13t/
     fi
 
     pushd $py_folder
@@ -76,24 +74,20 @@ function do_cpython_build {
 function build_cpython {
     local py_ver=$1
     check_var $py_ver
-    check_var $PYTHON_DOWNLOAD_URL
-    local py_ver_folder=$py_ver
+    local py_suffix=$py_ver
+    local py_folder=$py_ver
 
-    if [ "$py_ver" = "3.13.0t" ]; then
-        PY_VER_SHORT="3.13"
-        PYT_VER_SHORT="3.13t"
-        check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
-        wget $PYTHON_DOWNLOAD_GITHUB_BRANCH/$PY_VER_SHORT.tar.gz -O Python-$py_ver.tgz
-        do_cpython_build $py_ver cpython-$PYT_VER_SHORT
-    elif [ "$py_ver" = "3.13.0" ]; then
-        PY_VER_SHORT="3.13"
-        check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
-        wget $PYTHON_DOWNLOAD_GITHUB_BRANCH/$PY_VER_SHORT.tar.gz -O Python-$py_ver.tgz
-        do_cpython_build $py_ver cpython-$PY_VER_SHORT
-    else
-        wget -q $PYTHON_DOWNLOAD_URL/$py_ver_folder/Python-$py_ver.tgz
-        do_cpython_build $py_ver Python-$py_ver
+    # Special handling for nogil
+    if [[ "${py_ver}" == *"t" ]]; then
+        py_suffix=${py_ver::-1}
+        py_folder=$py_suffix
     fi
+    # Only b3 is available now
+    if [ "$py_suffix" == "3.14.0" ]; then
+        py_suffix="3.14.0b3"
+    fi
+    wget -q $PYTHON_DOWNLOAD_URL/$py_folder/Python-$py_suffix.tgz -O Python-$py_ver.tgz
+    do_cpython_build $py_ver Python-$py_suffix
 
     rm -f Python-$py_ver.tgz
 }

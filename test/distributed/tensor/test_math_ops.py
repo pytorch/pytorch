@@ -441,9 +441,11 @@ class DistMathOpsTest(DTensorTestBase):
             out_req_grad: bool
 
         subtest_fails = {}
-        valid_filter = lambda cfg: not (  # noqa: E731
-            cfg.ln_req_grad and not cfg.elementwise_affine
-        ) and any(cfg[2:])
+        valid_filter = (  # noqa: E731
+            lambda cfg: (
+                not (cfg.ln_req_grad and not cfg.elementwise_affine) and any(cfg[2:])
+            )
+        )
         subtest_cfgs = list(
             filter(
                 valid_filter,
@@ -566,9 +568,9 @@ class DistMathOpsTest(DTensorTestBase):
             except Exception as e:
                 subtest_fails[subtest_cfg] = e
         # if any subtest fails, provide the failed subtests and report the overall failure
-        assert (
-            not subtest_fails
-        ), f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
+        assert not subtest_fails, (
+            f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
+        )
 
     @with_comms
     def test_topk(self):

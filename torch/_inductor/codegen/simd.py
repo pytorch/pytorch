@@ -86,6 +86,11 @@ pexpr = PythonPrinter().doprint
 all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
 
 
+def get_max_tiles(default: int = 2) -> int:
+    max_tiles = torch._inductor.config.triton.max_tiles
+    return max_tiles if max_tiles is not None else default
+
+
 @dataclasses.dataclass
 class IterationRanges:
     """
@@ -146,7 +151,7 @@ class IterationRanges:
 class IterationRangesRoot(IterationRanges):
     """
     Root of a iteration range tree that represents a single
-    tiled dimension in the output kernel. It contains muliple
+    tiled dimension in the output kernel. It contains multiple
     sets of iteration represented with IterationRangesEntry.
     """
 
@@ -411,7 +416,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.code_hash: Optional[str] = None
 
         # define this in a closure to make cache local to object
-        @functools.lru_cache(None)
+        @functools.cache
         def simplify_indexing(index: sympy.Expr):
             index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
             for tree in self.range_trees:
@@ -750,13 +755,35 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def split_and_set_ranges(
         self, lengths: Sequence[Sequence[sympy.Expr]]
     ) -> list[list[sympy.Expr]]:
+        """
+        Split and set iteration ranges for the kernel based on the provided lengths.
+
+        This method maps the kernel's tiling structure to the node's iteration space,
+        handling both pointwise and reduction dimensions appropriately.
+
+        Args:
+            lengths: A sequence of sequences of symbolic expressions representing
+                    the sizes of different dimensions for each node.
+
+        Returns:
+            A list of lists of symbolic expressions representing the mapped
+            iteration variables for each dimension.
+        """
+        # Create a dictionary mapping each range tree prefix to its total number of elements
         tiling = {rt.prefix: rt.numel for rt in self.range_trees}
+
+        # If we're not inside a reduction loop, set all reduction dimensions to 1
+        # This effectively disables reduction dimensions when not needed
         if not self.inside_reduction:
             for prefix in tiling:
                 if prefix_is_reduction(prefix):
                     tiling[prefix] = sympy.S.One
 
+        # Extract the values from the tiling dictionary to create groups
         groups = [*tiling.values()]
+
+        # Map the kernel's group structure to the node's sizes and set the ranges
+        # using the set_ranges method, returning the resulting iteration variables
         return self.map_kernel_groups_to_node_sizes(groups, lengths, self.set_ranges)
 
     @classmethod
@@ -942,6 +969,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         if isinstance(value, tuple):
             return tuple(map(fn, value))
         return fn(value)
+
+    def estimate_flops(self) -> Optional[int]:
+        flops = [
+            node.estimate_flops()
+            for node in NodeScheduleMarker.only_nodes(self.features.node_schedule)
+        ]
+        return sum(filter(None, flops))
 
     def estimate_kernel_num_bytes(self):
         """
@@ -1254,8 +1288,8 @@ class SIMDScheduling(BaseScheduling):
         done = OrderedSet[scheduler.BaseSchedulerNode]()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
-        not_ready_yet_nodes = OrderedSet[str]()
-        current_loop_buffer_usage = OrderedSet[str]()
+        not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
+        current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
         maybe_split_index: Optional[int] = None
 
         def fits_in_main_body(n):
@@ -1354,7 +1388,7 @@ class SIMDScheduling(BaseScheduling):
 
         nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
 
-        if torch._inductor.config.test_configs.global_tiling_analysis:
+        if torch._inductor.config.triton.coalesce_tiling_analysis:
             coalesce_analysis = analyze_memory_coalescing(node)
         else:
             coalesce_analysis = None
@@ -1392,9 +1426,9 @@ class SIMDScheduling(BaseScheduling):
 
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
-        V.graph.sizevars.guard_leq(numel, int_max)  # type: ignore[arg-type]
+        V.graph.sizevars.check_leq(numel, int_max)  # type: ignore[arg-type]
         for size in buf_sizes:
-            V.graph.sizevars.guard_leq(size, int_max)  # type: ignore[arg-type]
+            V.graph.sizevars.check_leq(size, int_max)  # type: ignore[arg-type]
         return True
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
@@ -1450,7 +1484,7 @@ class SIMDScheduling(BaseScheduling):
         V.graph.inplaced_to_remove |= final_kernel.inplaced_to_remove
 
         if (
-            V.graph.wrapper_code.supports_intermediate_hooks
+            V.graph.wrapper_code.supports_intermediate_hooks  # type: ignore[has-type]
             and config.generate_intermediate_hooks
         ):
             # Not every node in the schedule will actually be live on output;
@@ -1565,7 +1599,7 @@ class SIMDScheduling(BaseScheduling):
                         p_n.can_codegen_without_upcasts() for p_n in prologue_group
                     )
 
-                    # TODO - this doesnt work with libdevice calls, potentially other bugs
+                    # TODO - this doesn't work with libdevice calls, potentially other bugs
                     # upcasting to fp32 and downcasting gives large slowdown
                     with config.patch(
                         "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
@@ -1589,7 +1623,9 @@ class SIMDScheduling(BaseScheduling):
                             kernel.cse.invalidate(OrderedSet())
 
         if not isinstance(partial_code, str):
-            partial_code.finalize_hook("<DEF_KERNEL>")
+            # This is used to calculate flops in TritonTemplateKernels
+            with ir.IRNode.current_origins(template_node.node.origins):
+                partial_code.finalize_hook("<DEF_KERNEL>")
             partial_code.finalize_hook("<ARGDEFS>", strict=False)
         # finalize must be called after adding epilogue above
 
@@ -1903,7 +1939,7 @@ class SIMDScheduling(BaseScheduling):
         reduction_numel,
     ) -> list[dict[str, tuple[sympy.Expr]]]:
         """
-        Creates N-dimensional tiling candidiates, attempting to simplify loads/stores
+        Creates N-dimensional tiling candidates, attempting to simplify loads/stores
         by tiling the kernel into higher dimensions.
 
         Returns a list of tilings ranked by dimensionality.
@@ -1993,7 +2029,7 @@ class SIMDScheduling(BaseScheduling):
 
             # Flatten leading dimensions, assigning labels to each dim.
             for node_tiling in node_tilings:
-                num_leading_dims = max(0, len(node_tiling) - config.triton.max_tiles)
+                num_leading_dims = max(0, len(node_tiling) - get_max_tiles(2))
                 first_trailing_dim = num_leading_dims + 1
                 collapsed_leading_dim = sympy_product(node_tiling[:first_trailing_dim])
                 collapsed_splits = (collapsed_leading_dim,) + tuple(
@@ -2123,7 +2159,7 @@ class SIMDScheduling(BaseScheduling):
                 split_scores.append(prev_var_coalesced_score)
 
             # penalize splits that leave small blocks
-            # where we cant fully utilize full memory transaction
+            # where we can't fully utilize full memory transaction
             # TODO: incorporate exact bitwidth, and read/write
             # coalesced write is 2x more important
             for i in range(len(splits)):
@@ -2165,7 +2201,7 @@ class SIMDScheduling(BaseScheduling):
                 )
             )
 
-        if torch._inductor.config.triton.max_tiles == 3 and reduction_numel == 1:
+        if get_max_tiles(default=3) == 3 and reduction_numel == 1:
             for vars_to_use in itertools.combinations(overlapping_iter_vars, 2):
                 score_split.append(
                     (
@@ -2187,13 +2223,16 @@ class SIMDScheduling(BaseScheduling):
 
         # add a slight penalty for longer tilings that dont increase score much,
         # and are poor sizes
-        additional_tiling_penalty = 1.025
+        bad_size_additional_tiling_penalty = 1.025
+        good_size_tiling_penalty = 1.005
 
         def score_mod(t):
             score_factor = 1.0
             for tile_size in t[0].tiling.values():
                 if not CandidateTiling.is_good_size(tile_size):
-                    score_factor = score_factor / additional_tiling_penalty
+                    score_factor = score_factor / bad_size_additional_tiling_penalty
+                else:
+                    score_factor = score_factor / good_size_tiling_penalty
 
             return -t[0].score * score_factor
 
@@ -2204,7 +2243,7 @@ class SIMDScheduling(BaseScheduling):
             ):
                 # we always include default reduction numel == 1, dont include
                 tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
-                if tiling_len > torch._inductor.config.triton.max_tiles:
+                if tiling_len > get_max_tiles(default=3):
                     perf_hint_log.info(
                         "Found optimal tiling with %s tiles but torch._inductor.config.triton.max_tiles "
                         "set to %s. Consider increasing",
@@ -2289,16 +2328,17 @@ class SIMDScheduling(BaseScheduling):
 
         # # TODO: enable by default
         if (
-            torch._inductor.config.test_configs.global_tiling_analysis
+            torch._inductor.config.triton.coalesce_tiling_analysis
             and coalesce_analysis
+            and not config.triton.prefer_nd_tiling
         ):
             return cls.compute_tiling_strategy(
                 node_schedule, numel, reduction_numel, coalesce_analysis
             )
 
-        if (
-            not is_pointwise and not config.triton.tile_reductions
-        ) or config.triton.max_tiles <= 1:
+        if (not is_pointwise and not config.triton.tile_reductions) or get_max_tiles(
+            default=2
+        ) <= 1:
             # Emit a perf hint in case we miss an opportunity to tile a reduction.
             if perf_hint_log.level <= logging.WARNING:
                 for node in EnableReduction.filter(node_schedule):
@@ -2318,7 +2358,7 @@ class SIMDScheduling(BaseScheduling):
 
             return default_tiling, None
 
-        seen_names = OrderedSet[str]()
+        seen_names: OrderedSet[str] = OrderedSet()
         candidate_tiles: Counter[CandidateTiling] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
             for candidate_tiling in cls.candidate_tilings(node, numel, reduction_numel):
@@ -2333,7 +2373,7 @@ class SIMDScheduling(BaseScheduling):
             for candidate_tiling, score in candidate_tiles.most_common()
         ]
 
-        if config.triton.max_tiles >= 3 and is_pointwise:
+        if get_max_tiles(default=2) >= 3 and is_pointwise:
             # Consider adding a third dimension of tiling, but only
             # when a1 is a multiple of b1; otherwise, you have a lot
             # of stragglers which is annoying to generate code for.

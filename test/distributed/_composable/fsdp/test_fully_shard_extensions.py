@@ -385,9 +385,9 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         only some ranks may require padding, in which case only those ranks
         will error out and the all-gather will timeout.
         """
-        assert (
-            self.world_size >= 2
-        ), f"Assumes world size of at least 2 but got {self.world_size=}"
+        assert self.world_size >= 2, (
+            f"Assumes world size of at least 2 but got {self.world_size=}"
+        )
         model = MLP(dim=3, dim_multiplier=3)
         for module in model.modules():
             for param_name, param in module.named_parameters(recurse=False):

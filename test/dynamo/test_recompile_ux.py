@@ -238,9 +238,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
 tensor 'x' size mismatch at index 0. expected 11, actual 12
 tensor 'x' size mismatch at index 0. expected 10, actual 12
 tensor 'x' size mismatch at index 0. expected 9, actual 12
-tensor 'x' size mismatch at index 0. expected 8, actual 12""".split(
-            "\n"
-        ):
+tensor 'x' size mismatch at index 0. expected 8, actual 12""".split("\n"):
             self.assertIn(
                 line,
                 failure_str,
@@ -276,9 +274,7 @@ tensor 'x' size mismatch at index 0. expected 8, actual 12""".split(
             opt_f([7, 8])
 
             for line in """\
-len(x) == 3""".split(
-                "\n"
-            ):
+len(x) == 3""".split("\n"):
                 self.assertIn(line, filter_reasons())
 
             failure_reasons.clear()
@@ -286,9 +282,7 @@ len(x) == 3""".split(
 
             for line in """\
 len(x) == 2
-len(x) == 3""".split(
-                "\n"
-            ):
+len(x) == 3""".split("\n"):
                 self.assertIn(line, filter_reasons())
 
     @torch._dynamo.config.patch(recompile_limit=1)

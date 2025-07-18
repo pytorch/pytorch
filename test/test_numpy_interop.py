@@ -286,6 +286,14 @@ class TestNumPyInterop(TestCase):
                 pass
         self.assertTrue(sys.getrefcount(x) == 2)
 
+    @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
+    @onlyCPU
+    def test_from_numpy_zero_element_type(self):
+        # This tests that dtype check happens before strides check
+        # which results in div-by-zero on-x86
+        x = np.ndarray((3, 3), dtype=str)
+        self.assertRaises(TypeError, lambda: torch.from_numpy(x))
+
     @skipMeta
     def test_from_list_of_ndarray_warning(self, device):
         warning_msg = (

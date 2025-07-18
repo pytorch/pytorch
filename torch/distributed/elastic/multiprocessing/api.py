@@ -290,7 +290,7 @@ class DefaultLogsSpecs(LogsSpecs):
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/error.json`
         """
         nprocs = len(envs)
-        global_env = {}  # use only to query properies that are not dependent on a rank
+        global_env = {}  # use only to query properties that are not dependent on a rank
         if nprocs > 0:
             global_env = envs[0]
         else:
@@ -452,7 +452,7 @@ class PContext(abc.ABC):
         # all local ranks are accounted for
         nprocs = len(args)
 
-        # TODO log_line_prefixes can be exanded too
+        # TODO log_line_prefixes can be expanded too
         logs_dest = logs_specs.reify(envs)
 
         _validate_full_rank(logs_dest.stdouts, nprocs, "stdouts")

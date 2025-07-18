@@ -373,7 +373,7 @@ class ListTest(list_tests.CommonTest):
             a.append(4)
             self.assertEqual(list(it), [])
 
-    @unittest.expectedFailure
+    @unittest.skip("Fails on python <=3.13.2 and passes on >=3.13.3")
     def test_deopt_from_append_list(self):
         # gh-132011: it used to crash, because
         # of `CALL_LIST_APPEND` specialization failure.
