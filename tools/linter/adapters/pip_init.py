@@ -73,7 +73,9 @@ if __name__ == "__main__":
     # https://bit.ly/3vD4kvl) and conda (see: https://bit.ly/3KG7ZfU). So in
     # these cases perform a regular installation.
     if not in_conda and not in_virtualenv:
-        pip_args.append("--user")
+        # uv does not support --user
+        if not uv_available:
+            pip_args.append("--user")
 
     pip_args.extend(args.packages)
 
