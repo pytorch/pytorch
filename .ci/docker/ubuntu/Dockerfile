@@ -176,11 +176,6 @@ RUN rm install_openmpi.sh
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
-# Install LLVM dev version (Defined in the pytorch/builder github repository)
-ARG SKIP_LLVM_SRC_BUILD_INSTALL
-COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
-RUN if [ -n "${SKIP_LLVM_SRC_BUILD_INSTALL}" ]; then set -eu; rm -rf /opt/llvm; fi
-
 # AWS specific CUDA build guidance
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
 ENV CUDA_PATH /usr/local/cuda
