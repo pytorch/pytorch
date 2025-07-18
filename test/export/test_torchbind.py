@@ -1378,7 +1378,7 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
 
         class TestMod(torch.nn.Module):
             def forward(self, obj, x):
-                return obj.get() + x + obj.get().size(1)
+                return obj.get() + x + obj.get().size(0)
 
         mod = TestMod()
 
@@ -1398,7 +1398,7 @@ def forward(self, token, obj, x):
     add = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.call_torchbind, obj, 'get');  getitem = obj = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    add_1 = torch.ops.aten.add.Tensor(add, 2);  add = None
+    add_1 = torch.ops.aten.add.Tensor(add, 3);  add = None
     return (getitem_2, add_1)""",  # noqa: B950
         )
         self.assertEqual(eager_out, compiled_out)
