@@ -62,7 +62,8 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual std::optional<at::Tensor> bias() = 0;
 
   virtual void set_bias(const std::optional<at::Tensor>& bias) {
-    throw std::runtime_error(
+    TORCH_CHECK(
+        false,
         "set_bias is not implemented for this packed "
         "parameter type");
   }
