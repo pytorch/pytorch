@@ -35,6 +35,21 @@ def ensure_lintrunner() -> None:
     )
 
 
+def ensure_virtual_environment() -> None:
+    """Fail if not running within a virtual environment."""
+    in_venv = (
+        os.environ.get("VIRTUAL_ENV") is not None
+        or hasattr(sys, "real_prefix")
+        or (hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix)
+    )
+
+    if not in_venv:
+        sys.exit(
+            "❌ This script must be run from within a virtual environment. "
+            "Please activate your virtual environment before running this script."
+        )
+
+
 def compute_file_hash(path: Path) -> str:
     """Returns SHA256 hash of a file's contents."""
     hasher = hashlib.sha256()
@@ -59,6 +74,9 @@ def initialize_lintrunner_if_needed() -> None:
         print("⚠️ No .lintrunner.toml found. Skipping init.")
         return
 
+    print(
+        f"INITIALIZED_LINTRUNNER_TOML_HASH_PATH = {INITIALIZED_LINTRUNNER_TOML_HASH_PATH}"
+    )
     current_hash = compute_file_hash(LINTRUNNER_TOML_PATH)
     stored_hash = read_stored_hash(INITIALIZED_LINTRUNNER_TOML_HASH_PATH)
 
@@ -72,7 +90,9 @@ def initialize_lintrunner_if_needed() -> None:
 
 
 def main() -> None:
-    print(f"🐍 Lintrunner is using Python: {sys.executable}", file=sys.stderr)
+    # 0. Ensure we're running in a virtual environment
+    ensure_virtual_environment()
+    print(f"🐍 Virtual env being used: {VENV_ROOT}", file=sys.stderr)
 
     # 1. Ensure lintrunner binary is available
     ensure_lintrunner()

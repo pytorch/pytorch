@@ -2,8 +2,8 @@
 """
 Bootstrap Git pre‑push hook.
 
-✓ Installs pipx automatically (via Homebrew on macOS)
-✓ Installs/updates pre‑commit with pipx  (global, venv‑proof)
+✓ Requires uv to be installed (fails if not available)
+✓ Installs/updates pre‑commit with uv  (global, venv‑proof)
 ✓ Registers the repo's pre‑push hook and freezes hook versions
 
 Run this from the repo root (inside or outside any project venv):
@@ -31,37 +31,37 @@ def which(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
 
-# ───────────────────────────────────────────
-# 1. Ensure pipx exists (install via brew on macOS)
-# ───────────────────────────────────────────
-def ensure_pipx() -> None:
-    if which("pipx"):
-        return
-    # If we're on a mac
-    if sys.platform == "darwin":
-        # Try Homebrew installation
-        if which("brew"):
-            print("pipx not found – installing with Homebrew …")
-            run(["brew", "install", "pipx"])
-            run(["pipx", "ensurepath"])
+def ensure_uv() -> None:
+    if which("uv"):
+        # Ensure the path uv installs binaries to is part of the system path
+        print("$ uv tool update-shell")
+        result = subprocess.run(
+            ["uv", "tool", "update-shell"], capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            # Check if the output indicates changes were made
+            if (
+                "Updated" in result.stdout
+                or "Added" in result.stdout
+                or "Modified" in result.stdout
+            ):
+                print(
+                    "⚠️  Shell configuration updated. You may need to restart your terminal for changes to take effect."
+                )
+            elif result.stdout.strip():
+                print(result.stdout)
+            return
         else:
             sys.exit(
-                "\n❌  pipx is required but neither pipx nor Homebrew were found.\n"
-                "    Please install Homebrew (https://brew.sh) or pipx manually:\n"
-                "    https://pipx.pypa.io/stable/installation/\n"
+                f"❌ Warning: uv tool update-shell failed: {result.stderr}. uv installed tools may not be available."
             )
-    else:
-        # Non‑macOS: ask user to install pipx manually
-        sys.exit(
-            "\n❌  pipx is required but was not found on your PATH.\n"
-            "    Install pipx first (https://pipx.pypa.io/stable/installation/),\n"
-            "    then rerun  python scripts/setup_hooks.py\n"
-        )
-    if not which("pipx"):
-        sys.exit(
-            "\n❌  pipx installation appeared to succeed, but it's still not on PATH.\n"
-            "    Restart your terminal or add pipx's bin directory to PATH and retry.\n"
-        )
+
+    sys.exit(
+        "\n❌  uv is required but was not found on your PATH.\n"
+        "    Please install uv first using the instructions at:\n"
+        "    https://docs.astral.sh/uv/getting-started/installation/\n"
+        "    Then rerun  python scripts/setup_hooks.py\n"
+    )
 
 
 def ensure_tool_installed(tool: str, force_update: bool = False) -> None:
@@ -73,8 +73,8 @@ def ensure_tool_installed(tool: str, force_update: bool = False) -> None:
     needs to be opened before git pushes work as expected.
     """
     if force_update or not which(tool):
-        print(f"Ensuring latest {tool} via pipx …")
-        run(["pipx", "install", "--quiet", "--force", tool])
+        print(f"Ensuring latest {tool} via uv …")
+        run(["uv", "tool", "install", "--force", tool])
         if not which(tool):
             print(
                 f"\n⚠️  {tool} installation succeed, but it's not on PATH. Launch a new terminal if your git pushes don't work.\n"
@@ -87,24 +87,21 @@ if sys.platform.startswith("win"):
     )
     sys.exit(0)
 
-ensure_pipx()
+# ───────────────────────────────────────────
+# 1. Install dependencies
+# ───────────────────────────────────────────
 
-# Ensure the path pipx installs binaries to is part of the system path.
-# Modifies the shell's configuration files (like ~/.bashrc, ~/.zshrc, etc.)
-#  to include the directory where pipx installs executables in your PATH
-#  variable.
-# Note that further down we run pre-commit through pipx because the path
-#  this command adds may not be in the current shell's PATH.
-run(["pipx", "ensurepath"])
+ensure_uv()
 
-# Ensure pre-commit is installed globally via pipx
+# Ensure pre-commit is installed globally via uv
 ensure_tool_installed("pre-commit", force_update=True)
+
 # Don't force a lintrunner update because it might break folks
 # who already have it installed in a different way
 ensure_tool_installed("lintrunner")
 
 # ───────────────────────────────────────────
-# 3. Activate (or refresh) the pre‑push hook
+# 2. Activate (or refresh) the pre‑push hook
 # ───────────────────────────────────────────
 
 # ── Activate (or refresh) the repo’s pre‑push hook ──────────────────────────
@@ -116,7 +113,8 @@ ensure_tool_installed("lintrunner")
 # a branch that doesn't have pre-commit installed
 run(
     [
-        "pipx",
+        "uv",
+        "tool",
         "run",
         "pre-commit",
         "install",
@@ -132,10 +130,10 @@ run(
 #    to the latest commit on its default branch.
 # 2. `--freeze` immediately rewrites each `rev:` to the exact commit SHA,
 #    ensuring all contributors and CI run identical hook code.
-run(["pipx", "run", "pre-commit", "autoupdate", "--freeze"])
+run(["uv", "tool", "run", "pre-commit", "autoupdate", "--freeze"])
 
 
 print(
-    "\n✅  pre‑commit is installed globally via pipx and the pre‑push hook is active.\n"
+    "\n✅  pre‑commit is installed globally via uv and the pre‑push hook is active.\n"
     "   Lintrunner will now run automatically on every `git push`.\n"
 )
