@@ -47,7 +47,7 @@ runs:
         export DESIRED_PYTHON=3.10
         echo "DESIRED_PYTHON=3.10" | tee -a "${GITHUB_ENV}"
         .ci/pytorch/windows/internal/install_python.bat
-        echo "PATH=$(pwd)/Python/Scripts;$(pwd)/Python;$(pwd)" | tee -a "${GITHUB_ENV}"
+        echo "PATH=$(pwd)/Python/Scripts;$(pwd)/Python;$(pwd);/usr/bin/;${PATH}" | tee -a "${GITHUB_ENV}"
         echo "PYTHON_PATH=$(pwd)/Python" | tee -a "${GITHUB_ENV}"
         ln -s "$(pwd)/Python/python.exe" "$(pwd)/Python/python3.exe"
 
