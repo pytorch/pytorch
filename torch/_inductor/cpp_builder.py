@@ -28,6 +28,7 @@ from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import aoti_model_name_from_config
 from torch.torch_version import TorchVersion
 
 
@@ -144,6 +145,7 @@ def check_compiler_exist_windows(compiler: str) -> None:
 def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
+        compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
@@ -630,6 +632,9 @@ def _get_optimization_cflags(
                 else:
                     cflags.append("march=native")
 
+        if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+            cflags.append("flto=thin")
+
         return cflags
 
 
@@ -670,6 +675,10 @@ def get_cpp_options(
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
+
+    if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+        ldflags.append("fuse-ld=lld")
+        ldflags.append("flto=thin")
 
     passthrough_args.append(" ".join(extra_flags))
 
@@ -1065,6 +1074,19 @@ def _get_openmp_args(
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
 
+def _get_libstdcxx_args(cpp_compiler: str) -> tuple[list[str], list[str]]:
+    """
+    For fbcode, we should link stdc++ instead assuming the binary where dlopen is executed is built with dynamic stdc++.
+    """
+    lib_dir_paths: list[str] = []
+    libs: list[str] = []
+    if config.is_fbcode():
+        lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
+        libs.append("stdc++")
+
+    return lib_dir_paths, libs
+
+
 def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
     macros = []
     if use_mmap_weights:
@@ -1080,6 +1102,15 @@ def get_cpp_torch_options(
     use_relative_path: bool,
     use_mmap_weights: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """
+    This function is used to get the build args of torch related build options.
+    1. Torch include_directories, libraries, libraries_directories.
+    2. Python include_directories, libraries, libraries_directories.
+    3. OpenMP related.
+    4. Torch MACROs.
+    5. MISC
+    6. Return the build args
+    """
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -1116,6 +1147,11 @@ def get_cpp_torch_options(
         omp_passthrough_args,
     ) = _get_openmp_args(cpp_compiler)
 
+    (
+        stdcxx_lib_dir_paths,
+        stdcxx_libs,
+    ) = _get_libstdcxx_args(cpp_compiler)
+
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
@@ -1135,8 +1171,13 @@ def get_cpp_torch_options(
     )
     cflags = sys_libs_cflags + omp_cflags
     ldflags = omp_ldflags
-    libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
-    libraries = torch_libraries + omp_lib
+    libraries_dirs = (
+        python_libraries_dirs
+        + torch_libraries_dirs
+        + omp_lib_dir_paths
+        + stdcxx_lib_dir_paths
+    )
+    libraries = torch_libraries + omp_lib + stdcxx_libs
     passthrough_args = (
         sys_libs_passthrough_args + isa_ps_args_build_flags + omp_passthrough_args
     )
@@ -1279,6 +1320,8 @@ def get_cpp_torch_device_options(
 
     include_dirs = cpp_extension.include_paths(device_type)
     libraries_dirs = cpp_extension.library_paths(device_type)
+    if not config.is_fbcode():
+        libraries += ["c10"]
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1497,6 +1540,7 @@ class CppBuilder:
         self._aot_mode: bool = False
 
         self._name = name
+        self._target_name = aoti_model_name_from_config()
 
         # Code start here, initial self internal variables firstly.
         self._build_option = BuildOption
@@ -1722,25 +1766,29 @@ class CppBuilder:
         """
 
         definitions = " ".join(self._build_option.get_definitions())
+        target_library_type = (
+            "STATIC" if config.aot_inductor.compile_standalone else "SHARED"
+        )
+
         contents = textwrap.dedent(
             f"""
             cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
-            project(aoti_model LANGUAGES CXX)
+            project({self._target_name} LANGUAGES CXX)
             set(CMAKE_CXX_STANDARD 17)
 
             # May need to point CMAKE_PREFIX_PATH to the right torch location
             find_package(Torch REQUIRED)
 
             # Set a shared library target
-            add_library(aoti_model SHARED)
+            add_library({self._target_name} {target_library_type})
 
             # Add macro definitions
-            target_compile_definitions(aoti_model PRIVATE {definitions})
+            target_compile_definitions({self._target_name} PRIVATE {definitions})
 
             # Add compile flags
-            target_compile_options(aoti_model PRIVATE {self._cflags_args})
+            target_compile_options({self._target_name} PRIVATE {self._cflags_args})
             # Backend specific flags
-            target_compile_options(aoti_model PRIVATE {self._passthrough_parameters_args} -c)
+            target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
 
             """
         )
@@ -1815,7 +1863,7 @@ class CppBuilder:
         # Remove the directory part of file_path
         src_path = "${CMAKE_CURRENT_SOURCE_DIR}/" + Path(src_path).name
         with open(cmake_path, "a") as f:
-            f.write(f"target_sources(aoti_model PRIVATE {src_path})\n")
+            f.write(f"target_sources({self._target_name} PRIVATE {src_path})\n")
 
     def save_kernel_asm_to_cmake(self, cmake_path: str, asm_files: list[str]) -> None:
         # TODO: make this work beyond CUDA
@@ -1829,9 +1877,9 @@ class CppBuilder:
                     """
                 )
                 f.write(contents)
-            f.write("add_dependencies(aoti_model ${KERNEL_TARGETS})\n")
+            f.write(f"add_dependencies({self._target_name} ${{KERNEL_TARGETS}})\n")
             f.write(
-                "target_link_libraries(aoti_model PRIVATE ${KERNEL_OBJECT_FILES})\n"
+                f"target_link_libraries({self._target_name} PRIVATE ${{KERNEL_OBJECT_FILES}})\n"
             )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
@@ -1840,10 +1888,10 @@ class CppBuilder:
         contents = textwrap.dedent(
             f"""
             # Add linker flags
-            target_link_options(aoti_model PRIVATE {lflags})
+            target_link_options({self._target_name} PRIVATE {lflags})
 
             # Add libraries
-            target_link_libraries(aoti_model PRIVATE {libs})
+            target_link_libraries({self._target_name} PRIVATE {libs})
          """
         )
 

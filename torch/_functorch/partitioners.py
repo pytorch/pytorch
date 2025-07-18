@@ -513,7 +513,7 @@ def should_quantize(node: torch.fx.Node) -> bool:
     ].get("skip_dynamo_guards", False):
         return size_in_mb >= size_threshold
     else:
-        # case 1: we alway quantize tensors with dynamic shapes
+        # case 1: we always quantize tensors with dynamic shapes
         if torch._inductor.config.post_grad_fusion_options[
             "activation_quantization_aten_pass"
         ].get("quantize_dynamic_shape", False):
@@ -521,7 +521,7 @@ def should_quantize(node: torch.fx.Node) -> bool:
                 size_in_mb >= size_threshold
             ) or not statically_known_false(size_in_mb >= size_threshold)
         else:
-            # case 2: we alway not quantize tensors with dynamic shapes
+            # case 2: we always not quantize tensors with dynamic shapes
             return statically_known_true(size_in_mb >= size_threshold)
 
 
@@ -592,7 +592,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     output_updated_args = [
         node_to_quant[node] if node in node_to_quant else node for node in fwd_outputs
     ]
-    # add the scale nodes to the ouput find the first sym_node in the output
+    # add the scale nodes to the output find the first sym_node in the output
     idx = find_first_sym_node(output_updated_args)
     scale_nodes = tensor_scale_nodes + sym_scale_nodes
     if scale_nodes:
@@ -684,47 +684,11 @@ def quantize_activation_bw(graph: torch.fx.Graph) -> None:
     counters["inductor"]["activation_quantization_bwd_aten_pass"] += 1
 
 
-def enable_activation_quantization(
-    saved_values: list[fx.Node],
+def perform_fp8_activation_quantization(
     fwd_module: fx.GraphModule,
     bwd_module: fx.GraphModule,
-    static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
+    bwd_module_inputs: dict[str, fx.Node],
 ) -> None:
-    if (
-        inductor_config.post_grad_fusion_options.get(
-            "activation_quantization_aten_pass", None
-        )
-        is None
-    ):
-        return
-
-    static_input_names = (
-        [node.name for node in static_lifetime_input_nodes]
-        if static_lifetime_input_nodes
-        else []
-    )
-    saved_values_names = {node.name: node for node in saved_values}
-    if torch._inductor.config.post_grad_fusion_options[
-        "activation_quantization_aten_pass"
-    ].get("exclude_primals", False):
-        saved_values_names = {
-            node.name: node for node in saved_values if "primals" not in node.name
-        }
-    fwd_module_outputs = fwd_module.graph.find_nodes(op="output")[0].args[0]
-    bwd_module_inputs = {
-        node.name: node for node in bwd_module.graph.find_nodes(op="placeholder")
-    }
-    for node in fwd_module_outputs:
-        if node.name in saved_values_names and should_quantize(node):
-            if node.name in static_input_names:
-                log.debug("Skipping quantization of static input %s: ", node.name)
-                continue
-            node.meta["saved_for_quantization"] = True
-            node.meta["dequant_type"] = node.meta["val"].dtype
-            # some of the fwd outputs and bwd inputs are not share the same object
-            bwd_module_inputs[node.name].meta["saved_for_quantization"] = True
-            bwd_module_inputs[node.name].meta["dequant_type"] = node.meta["val"].dtype
-
     trace_structured(
         "artifact",
         metadata_fn=lambda: {
@@ -806,6 +770,53 @@ def enable_activation_quantization(
             print_output=False, include_stride=True, include_device=True
         ),
     )
+
+
+def enable_activation_quantization(
+    saved_values: list[fx.Node],
+    fwd_module: fx.GraphModule,
+    bwd_module: fx.GraphModule,
+    static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
+) -> None:
+    if (
+        inductor_config.post_grad_fusion_options.get(
+            "activation_quantization_aten_pass", None
+        )
+        is None
+    ):
+        return
+
+    static_input_names = (
+        [node.name for node in static_lifetime_input_nodes]
+        if static_lifetime_input_nodes
+        else []
+    )
+    saved_values_names = {node.name: node for node in saved_values}
+    if torch._inductor.config.post_grad_fusion_options[
+        "activation_quantization_aten_pass"
+    ].get("exclude_primals", False):
+        saved_values_names = {
+            node.name: node for node in saved_values if "primals" not in node.name
+        }
+    fwd_module_outputs = fwd_module.graph.find_nodes(op="output")[0].args[0]
+    bwd_module_inputs = {
+        node.name: node for node in bwd_module.graph.find_nodes(op="placeholder")
+    }
+    should_perform_fp8_quant = False
+    for node in fwd_module_outputs:
+        if node.name in saved_values_names and should_quantize(node):
+            if node.name in static_input_names:
+                log.debug("Skipping quantization of static input %s: ", node.name)
+                continue
+            node.meta["saved_for_quantization"] = True
+            node.meta["dequant_type"] = node.meta["val"].dtype
+            # some of the fwd outputs and bwd inputs are not share the same object
+            bwd_module_inputs[node.name].meta["saved_for_quantization"] = True
+            bwd_module_inputs[node.name].meta["dequant_type"] = node.meta["val"].dtype
+            should_perform_fp8_quant = True
+
+    if should_perform_fp8_quant:
+        perform_fp8_activation_quantization(fwd_module, bwd_module, bwd_module_inputs)
 
 
 def _extract_fwd_bwd_modules(
@@ -1094,7 +1105,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     """
     This pass finds the first bwd node in the graph (by looking at users of
     tangents) and then reorders the graph by walking from this node to all the
-    way to the end of the graph. At each op in this traveral, we insert this op
+    way to the end of the graph. At each op in this traversal, we insert this op
     in a new graph and try to bring only the relevant subgraph from the other
     non-bwd edges relevant for this op. This closely mimics the behavior of
     autograd engine.
@@ -1364,7 +1375,7 @@ def functionalize_rng_ops(
         get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
     )
     devices.discard(torch.device("cpu"))
-    # multiple cuda devices wont work with cudagraphs anyway,
+    # multiple cuda devices won't work with cudagraphs anyway,
     # fallback to non graphsafe rng checkpointing
     multi_cuda_devices = len(devices) > 1
 
@@ -2489,7 +2500,7 @@ def choose_saved_values_set(
     )[0]
 
 
-def _broadcast_rank0_decision(
+def _sync_decision_cross_ranks(
     joint_graph: torch.fx.Graph, saved_values: list[torch.fx.Node]
 ):
     # use the same policy across different GPUs
@@ -2525,11 +2536,48 @@ def _broadcast_rank0_decision(
     ):
         with no_dispatch(), unset_fake_temporarily():
             objects = [[x.name for x in saved_values]]
-            # TODO: maybe use a different process group for this
-            torch.distributed.broadcast_object_list(objects, src=0)
-            saved_values_names = objects[0]
+            saved_ops_names_all_ranks: list[list[str]] = [
+                [] for _ in range(torch.distributed.get_world_size())
+            ]
+            torch.distributed.all_gather_object(saved_ops_names_all_ranks, objects[0])
             name_to_node = get_name_to_node(joint_graph)
-            saved_values = [name_to_node[n] for n in saved_values_names]
+            saved_sizes: list[int] = []
+            saved_ops_with_sizes: dict[str, int] = {}
+
+            for idx, saved_ops_names in enumerate(saved_ops_names_all_ranks):
+                saved_nodes = [name_to_node[op_name] for op_name in saved_ops_names]
+                saved_size = 0
+                for node in saved_nodes:
+                    size_of_node = _size_of(node)
+                    saved_size += size_of_node
+                    if idx == torch.distributed.get_rank():
+                        saved_ops_with_sizes[node.name] = size_of_node
+                saved_ops_with_sizes["total size"] = saved_size
+                saved_sizes.append(saved_size)
+
+            saved_sizes_tensor = torch.tensor(
+                saved_sizes,
+                device=torch.distributed.distributed_c10d._get_object_coll_device(),
+            )
+            torch.distributed.all_reduce(
+                saved_sizes_tensor, op=torch.distributed.distributed_c10d.ReduceOp.MAX
+            )
+
+            picked_rank_idx = int(torch.argmin(saved_sizes_tensor).item())
+            sync_decision_cross_ranks_str = f"picked_rank_idx={picked_rank_idx}, saved_nodes of current rank={saved_ops_with_sizes}"
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "aot_joint_graph_sync_decision_cross_ranks",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: sync_decision_cross_ranks_str,
+            )
+
+            saved_values = [
+                name_to_node[n] for n in saved_ops_names_all_ranks[picked_rank_idx]
+            ]
+
     return saved_values
 
 
@@ -2676,8 +2724,8 @@ def min_cut_rematerialization_partition(
         node_info,
         memory_budget=memory_budget,
     )
-    if config._broadcast_rank0_decision:
-        saved_values = _broadcast_rank0_decision(joint_graph, saved_values)
+    if config._sync_decision_cross_ranks:
+        saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))

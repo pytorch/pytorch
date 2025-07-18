@@ -102,6 +102,8 @@ class AOTIRunnerUtil:
                 return torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
             elif device == "xpu":
                 return torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
+            elif device == "mps":
+                return torch._C._aoti.AOTIModelContainerRunnerMps(so_path, 1)
             else:
                 return torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
 
@@ -222,7 +224,7 @@ def check_model(
         if not isinstance(model, types.FunctionType):
             model = model.to(self.device)
 
-        # For non mixed device inputs with default "cpu",set the device manully.
+        # For non mixed device inputs with default "cpu",set the device manually.
         if all(
             t.device.type == "cpu"
             for t in example_inputs

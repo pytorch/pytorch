@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/CachingDeviceAllocator.h>
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 
@@ -30,7 +31,7 @@ TORCH_API bool isAccelerator(c10::DeviceType device_type);
 template <
     typename... T,
     typename = std::enable_if_t<(std::is_same_v<T, c10::DeviceType> && ...)>>
-TORCH_API inline bool isAcceleratorExcluded(
+inline bool isAcceleratorExcluded(
     c10::DeviceType device_type,
     c10::DeviceType first_excluded,
     T... rest_excluded) {
@@ -71,6 +72,27 @@ TORCH_API c10::DeviceIndex exchangeDevice(c10::DeviceIndex device_index);
 // context if the context for device_index is not initialized. Return the
 // original device index that was active before the change.
 TORCH_API c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index);
+
+TORCH_API inline void emptyCache() {
+  const auto device_type = getAccelerator(true).value();
+  at::getDeviceAllocator(device_type)->emptyCache();
+}
+
+TORCH_API inline at::CachingDeviceAllocator::DeviceStats getDeviceStats(
+    c10::DeviceIndex device_index) {
+  const auto device_type = getAccelerator(true).value();
+  return at::getDeviceAllocator(device_type)->getDeviceStats(device_index);
+}
+
+TORCH_API inline void resetAccumulatedStats(c10::DeviceIndex device_index) {
+  const auto device_type = getAccelerator(true).value();
+  at::getDeviceAllocator(device_type)->resetAccumulatedStats(device_index);
+}
+
+TORCH_API inline void resetPeakStats(c10::DeviceIndex device_index) {
+  const auto device_type = getAccelerator(true).value();
+  at::getDeviceAllocator(device_type)->resetPeakStats(device_index);
+}
 
 } // namespace at::accelerator
 
