@@ -392,4 +392,4 @@ cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x"
 #test that import: test_cuda.py
 
 safetensors==0.5.3
-#Description: required for testing test_hf_safetensor_e2e.py and test_consolidate_hf_safetensors.py
+#Description: required for HF safetensor-based tests
