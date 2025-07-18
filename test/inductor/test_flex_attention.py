@@ -9,7 +9,7 @@ from collections import namedtuple
 from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import product
-from typing import Callable, Optional, TypeVar, Union
+from typing import Callable, Literal, Optional, TypeVar, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -58,7 +58,7 @@ running_on_a100_only = skipUnless(
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
-torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.fp32_precision = "tf32"
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
@@ -81,19 +81,19 @@ def large_tensor_test_class(
 
 
 @contextmanager
-def temp_float32_matmul_precision(precision: str):
+def temp_float32_matmul_precision(precision: Literal["tf32", "ieee"]):
     """
     Temporarily set the float32 matmul precision and restore it after the context is exited.
 
     Args:
-    precision (str): The precision to set ('highest', 'high', or 'medium').
+    precision (str): The precision to set (`ieee`, `tf32).
     """
-    original_precision = torch.get_float32_matmul_precision()
+    original_precision = torch.backends.cuda.matmul.fp32_precision
     try:
-        torch.set_float32_matmul_precision(precision)
+        torch.backends.cuda.matmul.fp32_precision = precision
         yield
     finally:
-        torch.set_float32_matmul_precision(original_precision)
+        torch.backends.cuda.matmul.fp32_precision = original_precision
 
 
 def skip_on_cpu(test_func):
@@ -2771,7 +2771,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def score_mod(score, b, h, q, kv):
             return score * 2
 
-        with temp_float32_matmul_precision("highest"):
+        with temp_float32_matmul_precision("ieee"):
             out_eager = flex_attention(query, key, value, score_mod)
             flex_compiled = torch.compile(flex_attention, fullgraph=True)
             out_compiled = flex_compiled(query, key, value, score_mod)
