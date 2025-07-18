@@ -697,7 +697,7 @@ const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
   return options_->global_ranks_in_group;
 }
 
-c10::intrusive_ptr<Backend> ProcessGroupGloo::splitBackend(
+c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
     const std::vector<int>& ranks,
     const c10::intrusive_ptr<Backend::Options> opts) {
   auto it = std::find(ranks.begin(), ranks.end(), rank_);
@@ -723,6 +723,18 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::splitBackend(
       "store inside ProcessGroupGloo not a ProcessGroupGloo::GlooStore.");
   auto pg = c10::make_intrusive<ProcessGroupGloo>(
       store->_getStore()->clone(), groupRank, ranks.size(), glooOpts);
+  return c10::static_intrusive_pointer_cast<Backend>(pg);
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupGloo::merge(
+    const c10::intrusive_ptr<Store>& store,
+    const c10::intrusive_ptr<Backend::Options> opts,
+    const int& rank,
+    const int& size) {
+  auto glooOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
+  TORCH_CHECK(glooOpts != nullptr, "opts not a ProcessGroupGloo::Options.");
+  auto pg = c10::make_intrusive<ProcessGroupGloo>(
+      store->clone(), rank, size, glooOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
