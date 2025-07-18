@@ -1638,7 +1638,6 @@ class SIMDScheduling(BaseScheduling):
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
                 partial_code.finalize_hook(subgraph_name, strict=False)
 
-
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                 if not isinstance(partial_code, str):
                     partial_code.finalize_hook("<STORE_OUTPUT>")
