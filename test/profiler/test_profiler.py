@@ -1496,7 +1496,7 @@ class TestProfiler(TestCase):
 
     def test_profiler_correlation_id(self):
         """
-        We expect the correlation_id to be unique across multiple invokation of the profiler,
+        We expect the correlation_id to be unique across multiple invocation of the profiler,
         So we will reuse id_uniqueness_set.
         """
         id_uniqueness_set = set()
@@ -3090,7 +3090,7 @@ aten::mm""",
             assert "Overload Name" in key_averages.table()
             validate_json(prof)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requries CUDA")
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_profiler_debug_autotuner(self):
         """
         This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.
