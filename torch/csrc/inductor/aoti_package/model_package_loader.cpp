@@ -509,7 +509,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         << found_filenames[1];
   }
 
-  temp_dir_ = create_temp_dir();
+  temp_dir_ = normalize_path_separator(create_temp_dir());
 
   std::string so_filename;
   std::string cpp_filename;
@@ -541,6 +541,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             .append(k_separator)
             .append(filename);
       }
+
+      output_path_str = normalize_path_separator(output_path_str);
 
       LOG(INFO) << "Extract file: " << filename_str << " to "
                 << output_path_str;
