@@ -216,7 +216,7 @@ def map_placements_after_broadcast(
                 # the input shape shard dim before broadcasting,
                 # in this case it means implicit broadcasting happen
                 # in this dim, so we can just mark it as replicate
-                # and implict broadcast will broadcast automatically
+                # and implicit broadcast will broadcast automatically
                 # to the sharded shape
                 new_placements.append(Replicate())
 
