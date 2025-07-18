@@ -11,6 +11,8 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._ops.utils import is_tensor_shardable
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
@@ -775,6 +777,60 @@ class DistTensorOpsTest(DTensorTestBase):
             split_size,
             dim=split_dim,
         )
+
+    @with_comms
+    def test_clamp(self):
+        import itertools
+
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        global_tensor = torch.randn(8, 16, device=self.device_type, dtype=torch.float32)
+        min_choice = [
+            # test on regular tensor
+            torch.randn(8, 16, device=self.device_type, dtype=torch.float32),
+            # test on scalar tensor
+            torch.randn((), device=self.device_type, dtype=torch.float32),
+            # test on value
+            torch.randn((), device=self.device_type, dtype=torch.float32).item(),
+        ]
+        max_choice = [
+            torch.randn(8, 16, device=self.device_type, dtype=torch.float32),
+            torch.randn((), device=self.device_type, dtype=torch.float32),
+            torch.randn((), device=self.device_type, dtype=torch.float32).item(),
+        ]
+        placement_choice = [Shard(0), Shard(1), Replicate()]
+        placement_comb = itertools.product(
+            placement_choice, placement_choice, placement_choice
+        )
+
+        for output_placement, min_placement, max_placement in placement_comb:
+            sharded_dtensor = distribute_tensor(global_tensor, mesh, [output_placement])
+            for min, max in zip(min_choice, max_choice):
+                min_dt, max_dt = min, max
+                if isinstance(min, torch.Tensor):
+                    spec = DTensorSpec(mesh, (min_placement,))
+                    if min_placement.is_shard():
+                        if not is_tensor_shardable(min.shape, spec):
+                            continue
+                    min_dt = distribute_tensor(min, mesh, [min_placement])
+                else:
+                    if min_placement.is_shard():
+                        continue
+                if isinstance(max, torch.Tensor):
+                    spec = DTensorSpec(mesh, (max_placement,))
+                    if max_placement.is_shard():
+                        if not is_tensor_shardable(max.shape, spec):
+                            continue
+                    max_dt = distribute_tensor(max, mesh, [max_placement])
+                else:
+                    if max_placement.is_shard():
+                        continue
+
+                self._test_op_on_dtensor(torch.clamp, sharded_dtensor, min=min_dt)
+                self._test_op_on_dtensor(
+                    torch.clamp, sharded_dtensor, min=min_dt, max=max_dt
+                )
+                self._test_op_on_dtensor(torch.clamp_min, sharded_dtensor, min=min_dt)
+                self._test_op_on_dtensor(torch.clamp_max, sharded_dtensor, max=max_dt)
 
 
 if __name__ == "__main__":
