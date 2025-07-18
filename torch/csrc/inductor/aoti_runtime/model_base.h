@@ -1,9 +1,15 @@
 #pragma once
 
+#ifdef _WIN32
+#include <Windows.h>
+#include <functional> // std::function
+#else
 #include <dlfcn.h>
-#include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
+
+#include <fcntl.h>
 #include <optional>
 #include <regex>
 #include <stdexcept>

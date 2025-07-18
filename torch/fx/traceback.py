@@ -51,6 +51,8 @@ class NodeSource:
     action: list["NodeSourceAction"]
     from_node: list["NodeSource"]
     node_info: Optional["NodeInfo"]
+    _dict: Optional[dict[str, Any]]
+    _action_string: Optional[str]
 
     def __init__(
         self,
