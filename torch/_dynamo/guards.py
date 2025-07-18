@@ -1591,7 +1591,7 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         id_val = self.id_ref(val, guard.name)
         code = f"___check_obj_id({ref}, {id_val})"
-        self._set_guard_export_info(guard, [code])
+        self._set_guard_export_info(guard, [code], provided_func_name="ID_MATCH")
 
         self.get_guard_manager(guard).add_id_match_guard(
             id_val, get_verbose_code_parts(code, guard)
@@ -2473,7 +2473,9 @@ class GuardBuilder(GuardBuilderBase):
                 self._set_guard_export_info(guard, code)
 
     # A util that in the case of export, adds data onto guards
-    def _set_guard_export_info(self, guard, code_list, provided_guarded_object=None):
+    def _set_guard_export_info(
+        self, guard, code_list, provided_guarded_object=None, provided_func_name=None
+    ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
         # than they should.  See TestMisc.test_release_module_memory
@@ -2482,7 +2484,7 @@ class GuardBuilder(GuardBuilderBase):
         caller = cur_frame.f_back
         del cur_frame
         assert caller is not None
-        func_name = caller.f_code.co_name
+        func_name = provided_func_name or caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
         assert func_name in self.__class__.__dict__, (
@@ -2841,6 +2843,32 @@ class CheckFunctionManager:
 
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
+
+        # TODO Be more explicit about the behavior for the users.
+        if (
+            torch._dynamo.config.caching_precompile
+            and self.guards_serialization_mode != "load"
+        ):
+            _guard_filter_fn = guard_filter_fn or (lambda gs: [True for g in gs])
+
+            def guard_filter_fn(guards):
+                ret = []
+                for keep, g in zip(_guard_filter_fn(guards), guards):
+                    if not keep:
+                        ret.append(False)
+                    elif (
+                        g.guard_type in ("ID_MATCH", "CLOSURE_MATCH", "WEAKREF_ALIVE")
+                        or "ID_MATCH" in g.derived_guard_types
+                    ):
+                        log.warning(
+                            "%s guard on %s is dropped with caching_precompile=True.",
+                            g.guard_type,
+                            g.orig_guard.name,
+                        )
+                        ret.append(False)
+                    else:
+                        ret.append(True)
+                return ret
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
         builder, guard_manager = self.build_guards(
