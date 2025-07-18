@@ -702,6 +702,7 @@ class SideEffects:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "object_new")
                     )
+                assert var.mutation_type.cls_source is not None
                 cg(var.mutation_type.cls_source)
 
                 # Generate the args to the __new__ method
