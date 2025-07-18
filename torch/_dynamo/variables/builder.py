@@ -36,7 +36,6 @@ import re
 import sys
 import traceback
 import types
-import warnings
 import weakref
 from collections.abc import MutableMapping
 from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
@@ -304,8 +303,7 @@ DimList = list
 
 
 def safe_has_grad(t):
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+    with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return hasattr(t, "grad")
 
 
@@ -445,8 +443,18 @@ class VariableBuilder:
         if vt.source is None:
             vt.source = self.source
 
+        def _is_deduplicable_sym_variable(value, vt):
+            # Constants like 0, 1, 2, etc. can be unspecialized as SymNodeVariables sometimes, but we
+            # should NOT track them. If we use a single SymNodeVariable instance to track them
+            # across multiple uses, then guards created for one usage will incorrectly apply to
+            # all other usages of that constant, leading to unnecessary recompilations.
+            return is_torch_sym(value) and isinstance(vt, SymNodeVariable)
+
         if (
-            self._can_lift_attrs_to_inputs(vt)
+            (
+                self._can_lift_attrs_to_inputs(vt)
+                or _is_deduplicable_sym_variable(value, vt)
+            )
             and value not in self.tx.output.side_effects
             and not is_wrapper_or_member_descriptor(value)
         ):
