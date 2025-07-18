@@ -1274,7 +1274,7 @@ class TestCompileTorchbind(TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
         tq2 = _empty_tensor_queue()
-        # make first tensor's secon dim dynamic
+        # make first tensor's second dim dynamic
         tq2.push(torch.randn(2, 4, requires_grad=False))
         torch.compile(mod, backend=cnt)(tq2, x)
         self.assertEqual(cnt.frame_count, 2)
@@ -1303,7 +1303,7 @@ class TestCompileTorchbind(TestCase):
 
         tq1 = _empty_tensor_queue()
         tq1.push(x)
-        with self.assertRaisesRegex(RuntimeError, "is alising"):
+        with self.assertRaisesRegex(RuntimeError, "is aliasing"):
             torch.compile(mod, backend=backend)(tq1, x)
 
     @parametrize("backend", ["eager", "aot_eager"])

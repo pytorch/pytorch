@@ -135,7 +135,7 @@ You can view the exported model using [Netron](https://netron.app/).
 
 ## When the conversion fails
 
-Function {func}`torch.onnx.export` should called a second time with
+Function {func}`torch.onnx.export` should be called a second time with
 parameter ``report=True``. A markdown report is generated to help the user
 to resolve the issue.
 
@@ -143,6 +143,114 @@ to resolve the issue.
 :hidden:
 onnx_dynamo_memory_usage
 ```
+## Metadata
+
+During ONNX export, each ONNX node is annotated with metadata that helps trace its origin and context from the original PyTorch model. This metadata is useful for debugging, model inspection, and understanding the mapping between PyTorch and ONNX graphs.
+
+The following metadata fields are added to each ONNX node:
+
+- **namespace**
+
+  A string representing the hierarchical namespace of the node, consisting of a stack trace of modules/methods.
+
+  *Example:*
+  `__main__.SimpleAddModel/add: aten.add.Tensor`
+
+- **pkg.torch.onnx.class_hierarchy**
+
+  A list of class names representing the hierarchy of modules leading to this node.
+
+  *Example:*
+  `['__main__.SimpleAddModel', 'aten.add.Tensor']`
+
+- **pkg.torch.onnx.fx_node**
+
+  The string representation of the original FX node, including its name, number of consumers, the targeted torch op, arguments, and keyword arguments.
+
+  *Example:*
+  `%cat : [num_users=1] = call_function[target=torch.ops.aten.cat.default](args = ([%tensor_x, %input_dict_tensor_x, %input_list_0], 1), kwargs = {})`
+
+- **pkg.torch.onnx.name_scopes**
+
+  A list of name scopes (methods) representing the path to this node in the PyTorch model.
+
+  *Example:*
+  `['', 'add']`
+
+- **pkg.torch.onnx.stack_trace**
+
+  The stack trace from the original code where this node was created, if available.
+
+  *Example:*
+  ```
+  File "simpleadd.py", line 7, in forward
+      return torch.add(x, y)
+  ```
+
+These metadata fields are stored in the metadata_props attribute of each ONNX node and can be inspected using Netron or programmatically.
+
+The overall ONNX graph has the following `metadata_props`:
+
+- **pkg.torch.export.ExportedProgram.graph_signature**
+
+  This property contains a string representation of the graph_signature from the original PyTorch ExportedProgram. The graph signature describes the structure of the model's inputs and outputs and how they map to the ONNX graph. The inputs are defined as `InputSpec` objects, which include the kind of input (e.g., `InputKind.PARAMETER` for parameters, `InputKind.USER_INPUT` for user-defined inputs), the argument name, the target (which can be a specific node in the model), and whether the input is persistent. The outputs are defined as `OutputSpec` objects, which specify the kind of output (e.g., `OutputKind.USER_OUTPUT`) and the argument name.
+
+  To read more about the graph signature, please see the {doc}`torch.export <export>` for more information.
+
+- **pkg.torch.export.ExportedProgram.range_constraints**
+
+  This property contains a string representation of any range constraints that were present in the original PyTorch ExportedProgram. Range constraints specify valid ranges for symbolic shapes or values in the model, which can be important for models that use dynamic shapes or symbolic dimensions.
+
+  *Example:*
+  `s0: VR[2, int_oo]`, which indicates that the size of the input tensor must be at least 2.
+
+  To read more about range constraints, please see the {doc}`torch.export <export>` for more information.
+
+Each input value in the ONNX graph may have the following metadata property:
+
+- **pkg.torch.export.graph_signature.InputSpec.kind**
+
+  The kind of input, as defined by PyTorch's InputKind enum.
+
+  *Example values:*
+  - "USER_INPUT": A user-provided input to the model.
+  - "PARAMETER": A model parameter (e.g., weight).
+  - "BUFFER": A model buffer (e.g., running mean in BatchNorm).
+  - "CONSTANT_TENSOR": A constant tensor argument.
+  - "CUSTOM_OBJ": A custom object input.
+  - "TOKEN": A token input.
+
+- **pkg.torch.export.graph_signature.InputSpec.persistent**
+
+  Indicates whether the input is persistent (i.e., should be saved as part of the model's state).
+
+  *Example values:*
+  - "True"
+  - "False"
+
+Each output value in the ONNX graph may have the following metadata property:
+
+- **pkg.torch.export.graph_signature.OutputSpec.kind**
+
+  The kind of input, as defined by PyTorch's OutputKind enum.
+
+  *Example values:*
+  - "USER_OUTPUT": A user-visible output.
+  - "LOSS_OUTPUT": A loss value output.
+  - "BUFFER_MUTATION": Indicates a buffer was mutated.
+  - "GRADIENT_TO_PARAMETER": Gradient output for a parameter.
+  - "GRADIENT_TO_USER_INPUT": Gradient output for a user input.
+  - "USER_INPUT_MUTATION": Indicates a user input was mutated.
+  - "TOKEN": A token output.
+
+Each initialized value, input, output has the following metadata:
+
+- **pkg.torch.onnx.original_node_name**
+
+  The original name of the node in the PyTorch FX graph that produced this value in the case where the value was renamed. This helps trace initializers back to their source in the original model.
+
+  *Example:*
+  `fc1.weight`
 
 ## API Reference
 
@@ -154,13 +262,4 @@ onnx_dynamo_memory_usage
 .. autoclass:: torch.onnx.OnnxExporterError
     :members:
 .. autofunction:: torch.onnx.enable_fake_mode
-```
-
-## Deprecated
-
-The following classes and functions are deprecated and will be removed.
-
-```{eval-rst}
-.. autofunction:: torch.onnx.dynamo_export
-.. autoclass:: torch.onnx.ExportOptions
 ```

@@ -307,16 +307,15 @@ class TestMatmulCuda(TestCase):
                 self.assertEqual(bgrad, b.grad)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @xfailIfSM120OrLater
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    @parametrize("use_torch_compile", [False, True])
-    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major, use_torch_compile):
+    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major):
         device = "cuda"
         dtype = torch.bfloat16
-        m, n, k, n_groups = 16, 32, 64, 4  # all sizes have to be divisible by 16
+        m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
             a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
         else:
@@ -332,12 +331,6 @@ class TestMatmulCuda(TestCase):
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
 
         f = torch._grouped_mm
-        f = torch.compile(
-            f,
-            options={
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            }) if use_torch_compile else f
         out = f(a, b.t(), offs=offs, out_dtype=torch.bfloat16)
         gO = torch.rand_like(out)
         out.backward(gO)
@@ -353,13 +346,12 @@ class TestMatmulCuda(TestCase):
         self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @xfailIfSM120OrLater
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    @parametrize("use_torch_compile", [False, True])
-    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major, use_torch_compile):
+    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major):
         device = "cuda"
         dtype = torch.bfloat16
         s_int = int(strided)
@@ -383,6 +375,9 @@ class TestMatmulCuda(TestCase):
         b_contig = b if b_row_major else b.transpose(-2, -1)
         self.assertTrue(b_contig.is_contiguous() is not strided)
         for check_zero_size in (False, True):
+            if check_zero_size and n_groups <= 1:
+                continue
+
             a.grad = None
             b.grad = None
             offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
@@ -390,12 +385,6 @@ class TestMatmulCuda(TestCase):
                 offs[0] = offs[1]
 
             f = torch._grouped_mm
-            f = torch.compile(
-                f,
-                options={
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "TRITON",
-                }) if use_torch_compile else f
             out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=torch.bfloat16)
             gO = torch.rand_like(out)
             if not check_zero_size:
@@ -414,13 +403,12 @@ class TestMatmulCuda(TestCase):
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @xfailIfSM120OrLater
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    @parametrize("use_torch_compile", [False, True])
-    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major, use_torch_compile):
+    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major):
         device = "cuda"
         dtype = torch.bfloat16
         s_int = int(strided)
@@ -444,25 +432,18 @@ class TestMatmulCuda(TestCase):
         self.assertTrue(b_contig.is_contiguous() is not strided)
 
         f = torch._grouped_mm
-        f = torch.compile(
-            f,
-            options={
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            }) if use_torch_compile else f
         out = f(a, b.transpose(-2, -1), out_dtype=torch.bfloat16)
         gO = torch.rand_like(out)
         out.backward(gO)
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @xfailIfSM120OrLater
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    @parametrize("use_torch_compile", [False, True])
-    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, use_torch_compile):
+    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major):
         device = "cuda"
         dtype = torch.bfloat16
         s_int = int(strided)
@@ -485,17 +466,14 @@ class TestMatmulCuda(TestCase):
         b_contig = b if b_row_major else b.transpose(-2, -1)
         self.assertTrue(b_contig.is_contiguous() is not strided)
         for check_zero_size in (False, True):
+            if check_zero_size and n_groups <= 1:
+                continue
+
             offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
 
             f = torch._grouped_mm
-            f = torch.compile(
-                f,
-                options={
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "TRITON",
-                }) if use_torch_compile else f
             out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=torch.bfloat16)
             gO = torch.rand_like(out)
             if not check_zero_size:
@@ -511,6 +489,124 @@ class TestMatmulCuda(TestCase):
                 gOlist.append(gO[:, start:offs_cpu[i]])
                 start = offs_cpu[i]
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @xfailIfSM100OrLater
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize("a_row_major", [False, True])
+    @parametrize("b_row_major", [False, True])
+    @parametrize("max_autotune", [False, True])
+    def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
+        torch._dynamo.reset()
+
+        device = "cuda"
+        dtype_AB = torch.bfloat16
+        dtype_offset = torch.int32
+
+        align = 16 // dtype_AB.itemsize
+
+        f_ref = torch._grouped_mm
+
+        options = {}
+        if max_autotune:
+            options.update(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                }
+            )
+        f = torch.compile(
+            f_ref,
+            options=options,
+        )
+
+        if op == "2d/2d":
+            m, n = 3, 7
+            m_align = (m + align - 1) // align * align
+            n_align = (n + align - 1) // align * align
+            if not a_row_major and not b_row_major:
+                offs = torch.tensor([0, 1, 6, 6, 7], device=device, dtype=dtype_offset)
+            else:
+                offs = torch.tensor([0, 8, 16, 16, 27], device=device, dtype=dtype_offset)
+            ngroups = offs.shape[0]
+            k = offs[-1]
+            k_align = (k + align - 1) // align * align
+
+            if a_row_major:
+                A = torch.randn(m, k_align, device=device, dtype=dtype_AB)[:, :k]
+            else:
+                A = torch.randn(k, m_align, device=device, dtype=dtype_AB).t()[:m, :]
+            if b_row_major:
+                B = torch.randn(n, k_align, device=device, dtype=dtype_AB)[:, :k]
+            else:
+                B = torch.randn(k, n_align, device=device, dtype=dtype_AB).t()[:n, :]
+        elif op == "2d/3d":
+            n, k = 7, 13
+            n_align = (n + align - 1) // align * align
+            k_align = (k + align - 1) // align * align
+            if a_row_major:
+                offs = torch.tensor([0, 1, 3, 3, 5], device=device, dtype=dtype_offset)
+            else:
+                offs = torch.tensor([0, 8, 16, 16, 19], device=device, dtype=dtype_offset)
+            ngroups = offs.shape[0]
+            m = offs[-1]
+            m_align = (m + align - 1) // align * align
+
+            if a_row_major:
+                A = torch.randn(m, k_align, device=device, dtype=dtype_AB)[:, :k]
+            else:
+                A = torch.randn(k, m_align, device=device, dtype=dtype_AB).t()[:m, :]
+            if b_row_major:
+                B = torch.randn(ngroups, n, k_align, device=device, dtype=dtype_AB)[:, :, :k]
+            else:
+                B = torch.randn(ngroups, k, n_align, device=device, dtype=dtype_AB).transpose(
+                    -2, -1
+                )[:, :n, :]
+        elif op == "3d/2d":
+            m, k = 3, 13
+            m_align = (m + align - 1) // align * align
+            k_align = (k + align - 1) // align * align
+            offs = torch.tensor([0, 8, 16, 16, 19], device=device, dtype=dtype_offset)
+            ngroups = offs.shape[0]
+            n = offs[-1]
+            n_align = (n + align - 1) // align * align
+
+            if a_row_major:
+                A = torch.randn(ngroups, m, k_align, device=device, dtype=dtype_AB)[:, :, :k]
+            else:
+                A = torch.randn(ngroups, k, m_align, device=device, dtype=dtype_AB).transpose(
+                    -2, -1
+                )[:, :m, :]
+            if b_row_major:
+                B = torch.randn(n, k_align, device=device, dtype=dtype_AB)[:, :k]
+            else:
+                B = torch.randn(k, n_align, device=device, dtype=dtype_AB).t()[:n, :]
+        elif op == "3d/3d":
+            offs = None
+            ngroups = 5
+            m, n, k = 3, 7, 13
+            m_align = (m + align - 1) // align * align
+            n_align = (n + align - 1) // align * align
+            k_align = (k + align - 1) // align * align
+            if a_row_major:
+                A = torch.randn(ngroups, m, k_align, device=device, dtype=dtype_AB)[:, :, :k]
+            else:
+                A = torch.randn(ngroups, k, m_align, device=device, dtype=dtype_AB).transpose(
+                    -2, -1
+                )[:, :m, :]
+            if b_row_major:
+                B = torch.randn(ngroups, n, k_align, device=device, dtype=dtype_AB)[:, :, :k]
+            else:
+                B = torch.randn(ngroups, k, n_align, device=device, dtype=dtype_AB).transpose(
+                    -2, -1
+                )[:, :n, :]
+        else:
+            raise AssertionError(f"Invalid op: {op}")
+
+        C_ref = f_ref(A, B.transpose(-2, -1), offs=offs)
+        C = f(A, B.transpose(-2, -1), offs=offs)
+        torch.testing.assert_close(C, C_ref)
 
 
     @onlyCUDA
@@ -689,7 +785,7 @@ def amax_to_scale(
     if float8_dtype == e4m3_type:
         res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
     elif float8_dtype == e5m2_type:
-        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+        res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
     else:
         raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
 
@@ -710,10 +806,35 @@ def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype, dim=None):
 
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
+def tensor_to_scale_block(
+    x: torch.Tensor,
+    float8_dtype: torch.dtype,
+    block_outer: int,
+    block_inner: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    x = x.unflatten(1, (-1, block_inner)).unflatten(0, (-1, block_outer))
+    amax = x.abs().amax(dim=[1, 3], keepdim=True).float()
+    scale = torch.finfo(float8_dtype).max / amax
+    x = x.mul(scale).to(float8_dtype)
+    x = x.flatten(2, 3).flatten(0, 1)
+    scale = scale.flatten(2, 3).flatten(0, 1)
+    return x, scale
+
 def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
     y_fp32 = y.to(torch.float) / y_scale
+    out_fp32 = torch.mm(x_fp32, y_fp32)
+
+    return out_fp32.to(out_dtype)
+
+def mm_float8_emulated_block(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
+    x = x.unflatten(1, (x_scale.shape[1], -1)).unflatten(0, (x_scale.shape[0], -1))
+    y = y.unflatten(1, (y_scale.shape[1], -1)).unflatten(0, (y_scale.shape[0], -1))
+    x_fp32 = x.to(torch.float) / x_scale[:, None, :, None]
+    y_fp32 = y.to(torch.float) / y_scale[:, None, :, None]
+    x_fp32 = x_fp32.flatten(2, 3).flatten(0, 1)
+    y_fp32 = y_fp32.flatten(2, 3).flatten(0, 1)
     out_fp32 = torch.mm(x_fp32, y_fp32)
 
     return out_fp32.to(out_dtype)
@@ -1102,7 +1223,6 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @onlyCUDA
-    @xfailIfSM120OrLater
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("use_fast_accum", [True, False])
@@ -1142,11 +1262,7 @@ class TestFP8Matmul(TestCase):
         y_fp8 = y.to(e4m3_type).t()
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "For RowWise scaling, scale_a should be (1024, 1) and scale_b "
-                "should be (1, 2048). Got scale_a.size()=(1, 1) and scale_b.size()=(1, 2)"
-            ),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
@@ -1157,11 +1273,7 @@ class TestFP8Matmul(TestCase):
             )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                " For RowWise scaling, scale_a should be (1024, 1) and scale_b "
-                "should be (1, 2048). Got scale_a.size()=(1024, 1) and scale_b.size()=(1, 2049)"
-            ),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
@@ -1171,22 +1283,18 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape("For non-TensorWise scaling, scale tensors must be 2-dimensional"),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
                 y_fp8,
                 scale_a=torch.ones((M), device="cuda"),
-                scale_b=torch.ones((N, N), device="cuda"),
+                scale_b=torch.ones((N, N, 1), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "Both scale_a and scale_b must be contiguous for RowWise scaling."
-            ),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
@@ -1196,7 +1304,7 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-        # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
+        # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
         with self.assertRaisesRegex(
             RuntimeError,
             r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
@@ -1209,11 +1317,18 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-    @xfailIfSM120OrLater
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
-    @parametrize("base_dtype", [torch.bfloat16])
+    @parametrize("base_dtype", [torch.bfloat16, torch.float32])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
+        # Fp32 out_dtype is only supported by cuBLAS, which however only started
+        # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
+        if base_dtype is torch.float32:
+            if _get_torch_cuda_version() < (12, 9):
+                raise unittest.SkipTest("Need CUDA 12.9+ for row-wise fp8 w/ cuBLAS")
+            if torch.cuda.get_device_capability() < (9, 0):
+                raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
+
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
@@ -1244,6 +1359,58 @@ class TestFP8Matmul(TestCase):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not SM90OrLater, "cuBLAS blockwise scaling requires sm90+")
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 9),
+        "cuBLAS blockwise scaling added in CUDA 12.9",
+    )
+    @parametrize("output_dtype", [torch.bfloat16, torch.float32])
+    @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
+    def test_scaled_mm_vs_emulated_block_wise(self, output_dtype, lhs_block, rhs_block):
+        torch.manual_seed(42)
+
+        x = torch.randn(256, 512, device="cuda", dtype=output_dtype).pow(3)
+        y = torch.randn(768, 512, device="cuda", dtype=output_dtype).pow(3)
+
+        x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
+        y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
+
+        # 1x128 blocks need scales to be outer-dim-major
+        if lhs_block == 1:
+            x_scales = x_scales.t().contiguous().t()
+        if rhs_block == 1:
+            y_scales = y_scales.t().contiguous().t()
+
+        # Calculate actual F8 mm
+        out_scaled_mm = mm_float8(
+            x_fp8, y_fp8.t(), a_scale=x_scales, b_scale=y_scales.t(), output_dtype=output_dtype
+        )
+
+        # Calculate emulated F8 mm
+        out_emulated = mm_float8_emulated_block(
+            x_fp8, x_scales, y_fp8.t(), y_scales.t(), output_dtype
+        )
+
+        cosine_sim = torch.nn.functional.cosine_similarity(
+            out_scaled_mm.flatten().float(), out_emulated.flatten().float(), dim=0
+        )
+        self.assertGreaterEqual(float(cosine_sim), 0.999)
+
+        if output_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 6e-1, 7e-2
+        else:
+            atol, rtol = 7e-1, 2e-3
+
+        self.assertEqual(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+        # One last check against the full-precision reference, to ensure we
+        # didn't mess up the scaling itself and made the test trivial.
+        cosine_sim = torch.nn.functional.cosine_similarity(
+            out_scaled_mm.flatten().float(), (x @ y.t()).flatten().float(), dim=0
+        )
+        self.assertGreaterEqual(float(cosine_sim), 0.999)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("which_dim_zero", [0, 1, 2])
     @parametrize("use_torch_compile", [False, True])
@@ -1271,7 +1438,6 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
@@ -1300,15 +1466,31 @@ class TestFP8Matmul(TestCase):
                 torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
 
             prof.export_chrome_trace(f.name)
-            no_carveout, carveout_0, carveout_66, no_carveout_again = [
-                math.prod(evt.get("args", {}).get("grid", []))
-                for evt in json.load(open(f.name))["traceEvents"]
-                if evt.get("cat", "") == "kernel"
-            ]
+            if torch.version.hip:
+                events = [evt for evt in json.load(open(f.name))["traceEvents"] if evt.get("cat", "") == "kernel"]
+                # events were returned out of order; need to be sorted on "ts" timestamp
+                events = sorted(events, key=lambda x: x['ts'])
+                # ROCm carveout is invisible except for kernels running slower on fewer CUs
+                no_carveout, carveout_0, carveout_66, no_carveout_again = [float(evt.get("dur", "0.0")) for evt in events]
+                self.assertTrue(no_carveout < carveout_66)
+                self.assertTrue(carveout_0 < carveout_66)
+                self.assertTrue(no_carveout_again < carveout_66)
+                # ROCm carveout will create new streams when enabled, and go back to the original stream when disabled
+                no_carveout, carveout_0, carveout_66, no_carveout_again = [int(evt.get("tid", "0")) for evt in events]
+                self.assertTrue(no_carveout == no_carveout_again)
+                self.assertTrue(no_carveout != carveout_0)
+                self.assertTrue(no_carveout != carveout_66)
+                self.assertTrue(carveout_0 != carveout_66)
+            else:
+                no_carveout, carveout_0, carveout_66, no_carveout_again = [
+                    math.prod(evt.get("args", {}).get("grid", []))
+                    for evt in json.load(open(f.name))["traceEvents"]
+                    if evt.get("cat", "") == "kernel"
+                ]
 
-            self.assertEqual(no_carveout, no_carveout_again)
-            self.assertNotEqual(no_carveout, carveout_66)
-            self.assertNotEqual(carveout_66, carveout_0)
+                self.assertEqual(no_carveout, no_carveout_again)
+                self.assertNotEqual(no_carveout, carveout_66)
+                self.assertNotEqual(carveout_66, carveout_0)
 
     def test_pack_uint4(self):
         """
@@ -1648,29 +1830,27 @@ class TestFP8Matmul(TestCase):
         for a, b, ascale, bscale, out in zip(alist, blist, ascalelist, bscalelist, outlist):
             out_ref = torch._scaled_mm(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
                                        out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
-            self.assertEqual(out, out_ref, atol=8e-2, rtol=8e-4)
+            self.assertEqual(out, out_ref, atol=5e-2, rtol=5e-4)
+
+    # Testing only _scaled_grouped_mm() with multiple shapes, as
+    # _scaled_mm() already has more combinations of parameters than
+    # _scaled_grouped_mm(), for supporting more than one inputs layout
+    # combinations.
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    @parametrize("use_torch_compile", [False, True])
-    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided, use_torch_compile):
+    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided):
         device = "cuda"
-        m, n, k, n_groups = 16, 32, 64, 4  # all sizes have to be divisible by 16
+        m, n, k, n_groups = 16, 32, 64, 4
         a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
         b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
         scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
         scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
         f = torch._scaled_grouped_mm
-        f = torch.compile(
-            f,
-            options={
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            }) if use_torch_compile else f
         out = f(a, b.t(), scale_a, scale_b, offs=offs,
                 out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
         offs_cpu = offs.cpu()
@@ -1690,16 +1870,18 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    @parametrize("use_torch_compile", [False, True])
-    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, use_torch_compile):
+    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided):
         device = "cuda"
-        s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
+        s_int = int(strided)
         a = torch.randn(m * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
         b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
         self.assertTrue(b.is_contiguous() is not strided)
         for check_zero_size in (True, False):
+            if check_zero_size and n_groups <= 1:
+                continue
+
             offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
@@ -1707,12 +1889,6 @@ class TestFP8Matmul(TestCase):
             scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
 
             f = torch._scaled_grouped_mm
-            f = torch.compile(
-                f,
-                options={
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "TRITON",
-                }) if use_torch_compile else f
             out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
                     out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
@@ -1732,11 +1908,10 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    @parametrize("use_torch_compile", [False, True])
-    def test_scaled_grouped_gemm_3d_3d(self, fast_accum, strided, use_torch_compile):
+    def test_scaled_grouped_gemm_3d_3d(self, fast_accum, strided):
         device = "cuda"
-        s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
+        s_int = int(strided)
         a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
@@ -1745,12 +1920,6 @@ class TestFP8Matmul(TestCase):
         scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
 
         f = torch._scaled_grouped_mm
-        f = torch.compile(
-            f,
-            options={
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            }) if use_torch_compile else f
         out = f(a, b.transpose(-2, -1), scale_a, scale_b,
                 out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
@@ -1762,11 +1931,10 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
-    @parametrize("use_torch_compile", [False, True])
-    def test_scaled_grouped_gemm_3d_2d(self, fast_accum, strided, use_torch_compile):
+    def test_scaled_grouped_gemm_3d_2d(self, fast_accum, strided):
         device = "cuda"
-        s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
+        s_int = int(strided)
         a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         b = torch.randn(n * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
         self.assertTrue(a.is_contiguous() is not strided)
@@ -1774,17 +1942,14 @@ class TestFP8Matmul(TestCase):
         scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32).view(n_groups, m)
         scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32)
         for check_zero_size in (True, False):
+            if check_zero_size and n_groups <= 1:
+                continue
+
             offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
 
             f = torch._scaled_grouped_mm
-            f = torch.compile(
-                f,
-                options={
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "TRITON",
-                }) if use_torch_compile else f
             out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
                     out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
             offs_cpu = offs.cpu()

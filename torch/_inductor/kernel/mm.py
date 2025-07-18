@@ -38,6 +38,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _use_cutlass_for_op,
     get_k_splits,
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
@@ -46,7 +47,6 @@ from ..utils import (
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
-    use_max_autotune,
     use_triton_template,
     use_triton_tma_template,
 )
@@ -682,7 +682,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     )
 
     aten_layout = layout
-    if not use_max_autotune():
+    if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
         aten_layout = FlexibleLayout(
             device=layout.device, dtype=layout.dtype, size=layout.size
         )
@@ -697,12 +697,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
+    dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
         for config in mm_configs(
             m,
             n,
             k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -716,7 +717,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 m,
                 n,
                 k,
-                **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+                **mm_config_kwargs(
+                    device_type, _is_large_block_for_cpu, dtype.itemsize
+                ),
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -772,7 +775,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     layout=layout,
                 )
 
-    if is_nonzero and use_cutlass_template(layout, m, n, k):
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("mm")
+    ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
@@ -867,7 +874,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     )
 
-    if use_cutlass:
+    if use_cutlass and _use_cutlass_for_op("int_mm"):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
@@ -906,7 +913,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         layout,
     )
 
-    if (not is_nonzero) or (not use_max_autotune()):
+    if (not is_nonzero) or (
+        not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
+    ):
         # Use a FlexibleLayout if we are not autotuning.
         # This allows padding strides for the output.
         from torch._inductor.ir import FixedLayout, FlexibleLayout
@@ -959,9 +968,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
 
+    dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
         for config in mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -975,7 +988,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+                m,
+                n,
+                k,
+                **mm_config_kwargs(
+                    device_type, _is_large_block_for_cpu, dtype.itemsize
+                ),
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -991,7 +1009,11 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 )
 
-    if is_nonzero and use_cutlass_template(layout, m, n, k):
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("addmm")
+    ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
@@ -1036,8 +1058,8 @@ def tuned_sparse_semi_structured_mm(
     m1, k1 = mat1.get_size()
     m2, _ = mat1_meta.get_size()
     k2, n = mat2.get_size()
-    m = V.graph.sizevars.guard_equals(m1, m2)
-    k = V.graph.sizevars.guard_equals(2 * k1, k2)
+    m = V.graph.sizevars.check_equals_and_simplify(m1, m2)
+    k = V.graph.sizevars.check_equals_and_simplify(2 * k1, k2)
 
     if layout is None:
         from torch._inductor.ir import FixedLayout
@@ -1061,7 +1083,11 @@ def tuned_sparse_semi_structured_mm(
         else []
     )
 
-    if m * n != 0 and use_cutlass_template(layout, m, n, k):
+    if (
+        m * n != 0
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("sparse_semi_structured_mm")
+    ):
         CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2, mat1_meta], fuseable=True, non_fuseable=True
         )
@@ -1086,6 +1112,21 @@ def tuned_scaled_mm(
     use_fast_accum=False,
     layout=None,
 ):
+    """
+    Performs an optimized matrix multiplication where scaling factors are applied
+    to the inputs and/or output.
+
+    Args:
+        mat1 (Tensor): First input matrix
+        mat2 (Tensor): Second input matrix
+        scale1 (Tensor): Scale factor applied to mat1 (supports broadcasting)
+        scale2 (Tensor): Scale factor applied to mat2 (supports broadcasting)
+        bias (Tensor, optional): Optional bias tensor to add to the result
+        layout: Layout hint for optimization
+
+    Returns:
+        Tensor: The result of the scaled matrix multiplication
+    """
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
@@ -1213,7 +1254,11 @@ def tuned_scaled_mm(
                 epilogue_fn_hash="scale_mm_epilogue",
             )
 
-    if is_nonzero and use_cutlass_template(layout, m, n, k):
+    if (
+        is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("scaled_mm")
+    ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,

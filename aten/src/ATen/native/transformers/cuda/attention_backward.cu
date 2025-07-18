@@ -87,21 +87,23 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
 
+#ifndef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
   const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
   const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
+#endif
 
   std::optional<at::Tensor> dq{std::nullopt};
   std::optional<at::Tensor> dk{std::nullopt};
   std::optional<at::Tensor> dv{std::nullopt};
 
-  //  The kernel computes irregardless we will drop for this functions return
+  //  The kernel computes regardless we will drop for this functions return
   Tensor grad_softmax;
 
   // Currently unused args:
   std::optional<at::Tensor> alibi_slopes{std::nullopt};
   const float softcap = 0.0;
 
-  bool determinisitic{false};
+  bool deterministic{false};
   auto& ctx = at::globalContext();
   if (ctx.deterministicAlgorithms()) {
     if (ctx.deterministicAlgorithmsWarnOnly()) {
@@ -109,7 +111,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
           "Flash Attention defaults to a non-deterministic algorithm. ",
           "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
     } else {
-      determinisitic = true;
+      deterministic = true;
     }
   }
 
@@ -136,10 +138,15 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         softmax_scale,
         false /*zero_tensors*/,
         is_causal,
+#ifdef USE_ROCM
+        window_size_left,
+        window_size_right,
+#else
         non_null_window_left,
         non_null_window_right,
+#endif
         softcap,
-        determinisitic,
+        deterministic,
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
@@ -159,10 +166,15 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dropout_p,
         softmax_scale,
         is_causal,
+#ifdef USE_ROCM
+        window_size_left,
+        window_size_right,
+#else
         non_null_window_left,
         non_null_window_right,
+#endif
         softcap,
-        determinisitic,
+        deterministic,
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
@@ -750,7 +762,7 @@ _efficient_attention_backward(
       // when we need a staging area for gK/gV. let's avoid that
       if (Kernel::kNeedsAccumGradK || Kernel::kNeedsAccumGradV) {
         p.num_splits_key = std::min(
-            int(p.num_splits_key), 200 / (p.num_batches * p.num_heads));
+            int32_t(p.num_splits_key), 200 / ((int32_t)(p.num_batches * p.num_heads)));
       }
     }
     if (!Kernel::kEnableSplitKeys || p.num_splits_key < 1) {
