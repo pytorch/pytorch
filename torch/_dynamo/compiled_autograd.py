@@ -27,6 +27,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.external_utils import (
+    call_accumulate_grad,
     call_backward,
     call_hook,
     FakeCompiledAutogradEngine,
@@ -38,6 +39,10 @@ from torch._dynamo.utils import (
     get_chromium_event_logger,
     lazy_format_graph_code,
     set_locals_to_steal,
+)
+from torch._functorch._aot_autograd.runtime_wrappers import (
+    AutogradLazyBackwardCompileInfo,
+    CachedAutogradLazyBackwardCompileInfo,
 )
 from torch._guards import compile_context, CompileContext, CompileId
 from torch._logging import getArtifactLogger, trace_structured
@@ -64,11 +69,11 @@ if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
 
 
-TURN_OFF_MSG = """Turn off compiled autograd by either:
-1. Moving the unsupported autograd calls outside of the torch.compile'd region.
-2. Wrapping the unsupported in the torch._dynamo.compiled_autograd._disable() context manager.
-3. Setting torch._dynamo.config.compiled_autograd to False for the torch.compile call containing the unsupported autograd call.
-4. Setting torch._dynamo.config.compiled_autograd to False at the start of the program."""
+TURN_OFF_MSG = """You can turn off compiled autograd by either:
+1. Moving the unsupported autograd call outside of the torch.compile'd region.
+2. Wrapping the unsupported autograd call in the torch._dynamo.compiled_autograd._disable() context manager.
+3. Setting torch._dynamo.config.compiled_autograd=False for the torch.compile call containing the unsupported autograd call.
+4. Setting torch._dynamo.config.compiled_autograd=False at the start of the program."""
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
@@ -88,6 +93,22 @@ def maybe_clone(x):
     if x is not None:
         return clone_preserve_strides(x)
     return x
+
+
+def extract_bw_module(CompiledFunction):
+    if isinstance(
+        CompiledFunction._lazy_backward_info, AutogradLazyBackwardCompileInfo
+    ):
+        return CompiledFunction._lazy_backward_info.bw_module
+    elif isinstance(
+        CompiledFunction._lazy_backward_info, CachedAutogradLazyBackwardCompileInfo
+    ):
+        with torch._subclasses.fake_tensor.unset_fake_temporarily():
+            return CompiledFunction._lazy_backward_info.bw_module_fn()
+    else:
+        raise AssertionError(
+            "Unexpected Lazy Backward Compilation Info Type. Please file an issue."
+        )
 
 
 # Note: [Anomaly Mode Semantics in Compiled Autograd]
@@ -111,7 +132,7 @@ class NaNChecker:
     def prep_with_graph(self, graph: torch.fx.Graph):
         inputs_node = next(iter(graph.nodes))
         acc_grad_nodes = graph.find_nodes(
-            op="call_function", target=torch.ops.inductor.accumulate_grad_.default
+            op="call_function", target=call_accumulate_grad
         )
         output_nodes = graph.find_nodes(op="output")[0].args[0]
         assert self.accumulate_grad == bool(
@@ -143,7 +164,7 @@ class NaNChecker:
             if grad is not None:
                 assert not torch.isnan(grad).any(), (
                     f"Compiled autograd running under anomaly mode with inputs[{idx}] already "
-                    "having NaN gradient. This is not supported."
+                    "having NaN gradient. This is not supported. {TURN_OFF_MSG}"
                 )
 
             self.params_to_check[f"inputs[{idx}]"] = inputs[idx]
@@ -232,7 +253,7 @@ _impure_targets = OrderedSet(
         call_hook,
         call_backward,
         FakeCompiledAutogradEngine._exec_final_callbacks_stub,
-        torch.ops.inductor.accumulate_grad_.default,
+        call_accumulate_grad,
     ]
 )
 
@@ -283,11 +304,13 @@ class AutogradCompilerInstance:
         accumulate_grad: bool,
         check_nans: bool,
     ):
+        global in_compiled_autograd_initial_trace
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
         self.aot_id_counter: dict[int, int] = defaultdict(int)
         self.compile_context = make_compile_context(self.id)
         self.compile_context.__enter__()
+        in_compiled_autograd_initial_trace = True
         self.nan_checker = NaNChecker(accumulate_grad) if check_nans else None
         self.start_time_ns = time.time_ns()
         get_chromium_event_logger().log_event_start(
@@ -429,6 +452,7 @@ class AutogradCompilerInstance:
 
         # NOTE: we should only close over constants
         CompiledFunction = ctx._forward_cls
+        bw_module = extract_bw_module(CompiledFunction)
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
@@ -479,9 +503,9 @@ class AutogradCompilerInstance:
                         break
                 return num_args
 
-            # set up the proxy inputs to ctx._bw_module
+            # set up the proxy inputs to bw_module
             # the calling convention is: [*symints, *args (primals and tangents), backward_state]
-            num_args = num_inputs(ctx._bw_module.graph)
+            num_args = num_inputs(bw_module.graph)
             pall_args = [
                 pgrads[i] for i in range(num_args - int(pbackward_state is not None))
             ]
@@ -511,7 +535,7 @@ class AutogradCompilerInstance:
                 # make it both informative and unique
                 return f"aot{deduped_aot_id}_{node_name}"
 
-            for node in ctx._bw_module.graph.nodes:
+            for node in bw_module.graph.nodes:
                 if node.op == "placeholder":
                     ph = pall_args[args_idx].node
                     ph.name = make_unique(node.name)
@@ -528,9 +552,7 @@ class AutogradCompilerInstance:
                 elif node.op == "get_attr":
                     name = node.target
                     qualname = self.fx_tracer.get_fresh_qualname(name)
-                    setattr(
-                        self.fx_tracer.root, qualname, getattr(ctx._bw_module, name)
-                    )
+                    setattr(self.fx_tracer.root, qualname, getattr(bw_module, name))
                     result = self.fx_tracer.create_node("get_attr", qualname, (), {})
                     result.name = make_unique(node.name)
                     value_remap[node] = result
@@ -548,9 +570,7 @@ class AutogradCompilerInstance:
                 elif node.op == "call_module":
                     name = node.target
                     qualname = self.fx_tracer.get_fresh_qualname(name)
-                    setattr(
-                        self.fx_tracer.root, qualname, getattr(ctx._bw_module, name)
-                    )
+                    setattr(self.fx_tracer.root, qualname, getattr(bw_module, name))
                     result = self.fx_tracer.graph.node_copy(
                         node, lambda n: value_remap[n]
                     )
@@ -727,13 +747,14 @@ class AutogradCompilerInstance:
         self.bind_objects_to_proxies([result], [proxy_out])
         return result
 
-    def accumulate_grad(self, variable, grad):
+    def accumulate_grad(self, variable, grad, has_post_hooks):
         self.fx_tracer.create_proxy(
             "call_function",
-            torch.ops.inductor.accumulate_grad_.default,
+            call_accumulate_grad,
             args=(
                 self.to_proxy(variable),
                 self.to_proxy(grad),
+                has_post_hooks,
             ),
             kwargs={},
         )
@@ -950,6 +971,8 @@ class AutogradCompilerInstance:
         return GraphModule(self.fx_tracer.root, self.fx_tracer.graph, id)
 
     def end_capture(self, outputs):
+        global in_compiled_autograd_initial_trace
+
         self.fx_tracer.create_proxy(
             "call_function",
             FakeCompiledAutogradEngine._exec_final_callbacks_stub,
@@ -1066,6 +1089,7 @@ class AutogradCompilerInstance:
             log_pt2_compile_event=True,
         )
         self.compile_context.__exit__(None, None, None)
+        in_compiled_autograd_initial_trace = False
         return runtime_wrapper, self.compiler_fn(graph)
 
     @staticmethod
@@ -1091,7 +1115,7 @@ class AutogradCompilerInstance:
         pass attempts to reorder the graph to mimic eager behavior.
         """
         for node in self.fx_tracer.graph.find_nodes(
-            op="call_function", target=torch.ops.inductor.accumulate_grad_.default
+            op="call_function", target=call_accumulate_grad
         ):
             param_node, grad_node = node.args[0], node.args[1]
             getitem_node = None
@@ -1233,10 +1257,7 @@ class AutogradCompilerInstance:
             # find the corresponding acc_grad node
             acc_grad_node = None
             for n in list(param_node.users.keys()):
-                if (
-                    n.op == "call_function"
-                    and n.target == torch.ops.inductor.accumulate_grad_.default
-                ):
+                if n.op == "call_function" and n.target == call_accumulate_grad:
                     acc_grad_node = n
                     break
 
@@ -1285,10 +1306,7 @@ class AutogradCompilerInstance:
                 )
 
             arg = max(input_nodes_and_users)  # last input users
-            if (
-                arg.op == "call_function"
-                and arg.target == torch.ops.inductor.accumulate_grad_.default
-            ):
+            if arg.op == "call_function" and arg.target == call_accumulate_grad:
                 param_node = arg.args[0]
                 post_acc_grad_hook_node = None
                 for n in list(param_node.users.keys()):
@@ -1381,10 +1399,15 @@ compiled_autograd_enabled = False
 # global flag to check if compiled autograd is enabled but Dynamo stance is "force_eager"
 compiled_autograd_enabled_force_eager = False
 
+# global flag to check if we are capturing for compiled autograd
+in_compiled_autograd_initial_trace = False
+
 # global flag to check if we are processing graphs produced from a compiled autograd graph
 in_compiled_autograd_region = False
 
 active_disable_ctx = False
+
+depth = 0
 
 
 @contextlib.contextmanager
@@ -1441,6 +1464,9 @@ def _enable(compiler_fn, dynamic: bool = True, ignore_active_disable_ctx=True):
                 torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)  # type:ignore[arg-type]
             global compiled_autograd_enabled
             compiled_autograd_enabled = True
+            global depth
+            prior_depth = depth
+            depth += 1
             try:
                 with torch.autograd.set_multithreading_enabled(False):
                     yield
@@ -1449,6 +1475,10 @@ def _enable(compiler_fn, dynamic: bool = True, ignore_active_disable_ctx=True):
                     compiled_autograd_enabled = False
                 torch._C._dynamo.compiled_autograd.set_autograd_compiler(
                     prior_compiler, prior_dynamic
+                )
+                depth -= 1
+                assert depth == prior_depth, (
+                    "Nested Compiled Autograd Contexts must return before their parent context"
                 )
 
 
@@ -1476,12 +1506,13 @@ def _disable():
 
 # return to starting state of a new process
 def reset() -> None:
-    global compiled_autograd_enabled
+    global compiled_autograd_enabled, in_compiled_autograd_initial_trace
     compiled_autograd_enabled = False
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
     torch._C._dynamo.compiled_autograd.clear_cache()
+    in_compiled_autograd_initial_trace = False
     global COMPILE_COUNTER
     COMPILE_COUNTER = itertools.count()
 

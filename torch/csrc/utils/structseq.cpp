@@ -5,7 +5,7 @@
  * https://github.com/python/cpython/blob/2.7/Objects/structseq.c
  *
  * The purpose of this file is to overwrite the default behavior
- * of repr of structseq to provide better printting for returned
+ * of repr of structseq to provide better printing for returned
  * structseq objects from operators, aka torch.return_types.*
  *
  * For more information on copyright of CPython, see:

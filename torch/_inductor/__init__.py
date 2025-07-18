@@ -15,6 +15,7 @@ from .standalone_compile import CompiledArtifact  # noqa: TC001
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
     from torch.export import ExportedProgram
+    from torch.export.pt2_archive._package_weights import Weights
     from torch.types import FileLike
 
 __all__ = [
@@ -197,13 +198,13 @@ def _aoti_compile_and_package_inner(
         path = [
             os.path.splitext(file)[0]
             for file in aoti_files
-            if os.path.splitext(file)[1] == ".so"
+            if isinstance(file, str) and os.path.splitext(file)[1] == ".so"
         ]
         if len(path) == 0:
             path = [
                 os.path.splitext(file)[0]
                 for file in aoti_files
-                if os.path.splitext(file)[1] == ".cpp"
+                if isinstance(file, str) and os.path.splitext(file)[1] == ".cpp"
             ]
         package_path = path[0] + ".pt2"
 
@@ -274,7 +275,7 @@ def aot_compile(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     options: Optional[dict[str, Any]] = None,
-) -> Union[str, list[str]]:
+) -> Union[str, list[Union[str, Weights]]]:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 

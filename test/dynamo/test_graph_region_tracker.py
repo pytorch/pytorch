@@ -317,6 +317,17 @@ class GraphRegionTrackerTests(TestCase):
             """{sin_: OrderedSet([0]), add_: OrderedSet([0])}""",
         )
 
+    def test_mutation_tracking_setitem(self):
+        def fn(x):
+            y = x + 1
+            y[0] = 3
+            return y
+
+        self.assertExpectedInline(
+            self.get_mutation_tracking(fn, torch.rand(10, 10)),
+            """{setitem: OrderedSet([0])}""",
+        )
+
     def test_mutation_tracking_allow_in_graph(self):
         @torch._dynamo.allow_in_graph
         def fn_mut(x, y):

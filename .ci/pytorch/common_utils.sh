@@ -127,9 +127,9 @@ function install_torchaudio() {
   if [[ "$1" == "cuda" ]]; then
     # TODO: This is better to be passed as a parameter from _linux-test workflow
     # so that it can be consistent with what is set in build
-    TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
+    TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install --no-use-pep517 "git+https://github.com/pytorch/audio.git@${commit}"
   else
-    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
+    pip_install --no-use-pep517 "git+https://github.com/pytorch/audio.git@${commit}"
   fi
 
 }
@@ -139,8 +139,8 @@ function install_torchtext() {
   local text_commit
   data_commit=$(get_pinned_commit data)
   text_commit=$(get_pinned_commit text)
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/data.git@${data_commit}"
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/text.git@${text_commit}"
+  pip_install --no-use-pep517 "git+https://github.com/pytorch/data.git@${data_commit}"
+  pip_install --no-use-pep517 "git+https://github.com/pytorch/text.git@${text_commit}"
 }
 
 function install_torchvision() {
@@ -153,7 +153,7 @@ function install_torchvision() {
     echo 'char* dlerror(void) { return "";}'|gcc -fpic -shared -o "${HOME}/dlerror.so" -x c -
     LD_PRELOAD=${orig_preload}:${HOME}/dlerror.so
   fi
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
+  pip_install --no-use-pep517 "git+https://github.com/pytorch/vision.git@${commit}"
   if [ -n "${LD_PRELOAD}" ]; then
     LD_PRELOAD=${orig_preload}
   fi
@@ -173,25 +173,50 @@ function install_torchrec_and_fbgemm() {
 
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
     # install torchrec first because it installs fbgemm nightly on top of rocm fbgemm
-    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+    pip_install --no-use-pep517 "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
     pip_uninstall fbgemm-gpu-nightly
+
+    # Set ROCM_HOME isn't available, use ROCM_PATH if set or /opt/rocm
+    ROCM_HOME="${ROCM_HOME:-${ROCM_PATH:-/opt/rocm}}"
+
+    # Find rocm_version.h header file for ROCm version extract
+    rocm_version_h="${ROCM_HOME}/include/rocm-core/rocm_version.h"
+    if [ ! -f "$rocm_version_h" ]; then
+        rocm_version_h="${ROCM_HOME}/include/rocm_version.h"
+    fi
+
+    # Error out if rocm_version.h not found
+    if [ ! -f "$rocm_version_h" ]; then
+        echo "Error: rocm_version.h not found in expected locations." >&2
+        exit 1
+    fi
+
+    # Extract major, minor and patch ROCm version numbers
+    MAJOR_VERSION=$(grep 'ROCM_VERSION_MAJOR' "$rocm_version_h" | awk '{print $3}')
+    MINOR_VERSION=$(grep 'ROCM_VERSION_MINOR' "$rocm_version_h" | awk '{print $3}')
+    PATCH_VERSION=$(grep 'ROCM_VERSION_PATCH' "$rocm_version_h" | awk '{print $3}')
+    ROCM_INT=$(($MAJOR_VERSION * 10000 + $MINOR_VERSION * 100 + $PATCH_VERSION))
+    echo "ROCm version: $ROCM_INT"
+    export BUILD_ROCM_VERSION="$MAJOR_VERSION.$MINOR_VERSION"
 
     pip_install tabulate  # needed for newer fbgemm
     pip_install patchelf  # needed for rocm fbgemm
+    pushd /tmp
     git clone --recursive https://github.com/pytorch/fbgemm
     pushd fbgemm/fbgemm_gpu
     git checkout "${fbgemm_commit}"
     python setup.py install \
-      --package_variant=rocm \
+      --build-variant=rocm \
       -DHIP_ROOT_DIR="${ROCM_PATH}" \
       -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
       -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
     popd
     rm -rf fbgemm
+    popd
   else
     # See https://github.com/pytorch/pytorch/issues/106971
-    CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
-    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+    CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
+    pip_install --no-use-pep517 "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
   fi
 }
 
@@ -234,7 +259,7 @@ function checkout_install_torchbench() {
 function install_torchao() {
   local commit
   commit=$(get_pinned_commit torchao)
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/ao.git@${commit}"
+  pip_install --no-use-pep517 "git+https://github.com/pytorch/ao.git@${commit}"
 }
 
 function print_sccache_stats() {

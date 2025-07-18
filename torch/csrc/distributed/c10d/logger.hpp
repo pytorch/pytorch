@@ -10,7 +10,7 @@ namespace c10d {
 // A struct to hold the latest status of the process group.
 struct ProcessGroupStatus {
   // the sequential number of the last collective enqueued into workMetaList_
-  // This is useful for indentifying a rank that has not join a collective
+  // This is useful for identifying a rank that has not join a collective
   // initialized to be -1 to indicate no collective has been enqueued
   int64_t lastEnqueuedSeq{-1};
   // the sequential number of the last collective started as the kernel

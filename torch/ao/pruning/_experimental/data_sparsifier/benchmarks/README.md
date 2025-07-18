@@ -14,7 +14,7 @@ The [DataNormSparsifier](https://github.com/pytorch/pytorch/blob/main/torch/ao/p
 3. Norm: L1 and L2
 
 ## Dataset
-The benchmarks are created for the dlrm model on the Kaggle CriteoDataset which can be downloaded from [here](https://ailab.criteo.com/ressources/) or [here](https://figshare.com/articles/dataset/Kaggle_Display_Advertising_Challenge_dataset/5732310/1).
+The benchmarks are created for the dlrm model on the Kaggle CriteoDataset which can be downloaded from [here](https://ailab.criteo.com/ressources/) or [here](https://figshare.com/articles/dataset/Kaggle_Display_Advertising_Challenge_dataset/5732310/1). <!-- codespell:ignore -->
 
 ## Results
 1. **Disk Usage**: Introducing sparsity in the embeddings reduces file size after compression. The compressed model size goes down from 1.9 GB to 150 MB after 100% sparsity.
@@ -34,7 +34,7 @@ The takeaway is that the dlrm model with sparse coo tensor is slower (roughly 2x
 ## Setup
 The benchmark codes depend on the [DLRM codebase](https://github.com/facebookresearch/dlrm).
 1. Clone the dlrm git repository
-2. Download the dataset from [here](https://ailab.criteo.com/ressources/) or [here](https://figshare.com/articles/dataset/Kaggle_Display_Advertising_Challenge_dataset/5732310/1)
+2. Download the dataset from [here](https://ailab.criteo.com/ressources/) or [here](https://figshare.com/articles/dataset/Kaggle_Display_Advertising_Challenge_dataset/5732310/1) <!-- codespell:ignore -->
 3. The DLRM model can be trained using the following script
 ```
 # Make sure you go into the file and make sure that the path to dataset is correct.
