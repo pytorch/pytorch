@@ -26,22 +26,14 @@ class Performance:
     # Number of  memory access in bytes
     memory_bytes: float
 
-    # Number of flops computation
-    flops: float
-
     # Memory bandwidth in GB/s
     memory_bandwidth: float = 0.0
 
     # Compute intensity in FLOPs/byte
     compute_intensity: float = 0.0
 
-    # Computationi per second
-    tflops_per_seconds: float = 0.0
-
     def __post_init__(self):
         self.memory_bandwidth = self.memory_bytes / (self.latency / 1000) / 1e9
-        self.compute_intensity = self.flops / self.memory_bytes
-        self.flops_per_seconds = self.flops / (self.latency / 1000) / 1e12
 
     def __str__(self):
         return f"setting: {self.setting}, latency: {self.latency} ms, memory bandwidth: {self.memory_bandwidth} GB/s"
@@ -57,10 +49,6 @@ class BenchmarkKernel:
 
     def get_memory_bytes(self, args, kwargs) -> int:
         # Get the necessary memory access in bytes for the kernelßß
-        raise NotImplementedError
-
-    def get_flops(self, args, kwargs) -> int:
-        # Get the number of flops for the kernel
         raise NotImplementedError
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -119,6 +107,9 @@ class BenchmarkKernel:
                 continue
             try:
                 torch.testing.assert_close(res[backend], gold)
+                for t, gold_t in zip(res[backend], gold):
+                    if t.requires_grad:
+                        torch.testing.assert_close(t.grad, gold_t.grad)
                 print(
                     f"Accuracy check \033[92m✓ succeed\033[0m for {backend} backend on {self.name} kernel"
                 )
@@ -143,8 +134,7 @@ class BenchmarkKernel:
                 self.available_backends.remove(backend)
                 continue
             mem_bytes = self.get_memory_bytes(args_ref, kwargs_ref)
-            flops = self.get_flops(args_ref, kwargs_ref)
-            perf = Performance(setting, avg_time, mem_bytes, flops)
+            perf = Performance(setting, avg_time, mem_bytes)
             print(f"{self.name} kernel on {backend} backend. {perf}")
             self.profiling_results[backend].append(perf)
 

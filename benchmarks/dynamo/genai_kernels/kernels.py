@@ -8,11 +8,6 @@ import torch
 import torch.nn.functional as F
 
 
-# TODO1: visualization
-# TODO2: roof line analysis
-# TODO: Record peak memory
-
-
 class CrossEntropyForward(BenchmarkKernel):
     def __init__(self):
         super().__init__()
@@ -39,10 +34,6 @@ class CrossEntropyForward(BenchmarkKernel):
         M, N = x.shape
         dtype = x.dtype
         return (M * N + M + M) * dtype.itemsize
-
-    def get_flops(self, args, kwargs) -> int:
-        # TODO
-        return 0
 
     def eager(self, args, kwargs=None) -> Any:
         assert kwargs is None
@@ -138,10 +129,6 @@ class CrossEntropyBackward(BenchmarkKernel):
             + M * dloss.dtype.itemsize
         )
 
-    def get_flops(self, args, kwargs) -> int:
-        # TODO
-        return 0
-
     def eager(self, args, kwargs=None) -> Any:
         assert kwargs is None
         x, target, dloss = args
@@ -223,9 +210,6 @@ class SoftmaxForward(BenchmarkKernel):
         M, N = x.shape
         return 2 * M * N * x.dtype.itemsize
 
-    def get_flops(self, args, kwargs) -> int:
-        return 0
-
     def eager(self, args, kwargs=None) -> Any:
         assert kwargs is None
         (x,) = args
@@ -287,9 +271,6 @@ class SoftmaxBackward(BenchmarkKernel):
         x, dy = args
         M, N = x.shape
         return 3 * M * N * x.dtype.itemsize
-
-    def get_flops(self, args, kwargs) -> int:
-        return 0
 
     def eager(self, args, kwargs=None) -> Any:
         assert kwargs is None
@@ -359,9 +340,6 @@ class RMSNormForward(BenchmarkKernel):
         x, w = args
         M, N = x.shape
         return 2 * M * N * x.dtype.itemsize + N * w.dtype.itemsize
-
-    def get_flops(self, args, kwargs) -> int:
-        return 0
 
     def rms_norm_ref(self, x, w):
         x_f32 = x.float()
@@ -433,9 +411,6 @@ class RMSNormBackward(BenchmarkKernel):
         M, N = x.shape
         # Read x, w, dy, write dx, dw
         return 3 * M * N * x.dtype.itemsize + 2 * N * w.dtype.itemsize
-
-    def get_flops(self, args, kwargs) -> int:
-        return 0
 
     def rms_norm_ref(self, x, w):
         x_f32 = x.float()
@@ -520,9 +495,6 @@ class LayerNormForward(BenchmarkKernel):
         # Read x ([M, N]), w ([N]), write y ([M, N])
         return 2 * M * N * x.dtype.itemsize + N * w.dtype.itemsize
 
-    def get_flops(self, args, kwargs) -> int:
-        return 0
-
     def layernorm_ref(self, x: torch.Tensor, w: torch.Tensor, eps: float = 1e-6):
         x_f32 = x.float()
         return F.layer_norm(x_f32, w.shape, w, None, eps).to(x.dtype)
@@ -596,9 +568,6 @@ class LayerNormBackward(BenchmarkKernel):
             + 2 * N * w.dtype.itemsize
             + M * N * dy.dtype.itemsize
         )
-
-    def get_flops(self, args, kwargs) -> int:
-        return 0
 
     def layernorm_ref(self, x: torch.Tensor, w: torch.Tensor, eps: float = 1e-6):
         x_f32 = x.float()

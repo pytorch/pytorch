@@ -49,7 +49,7 @@ def list_benchmarks():
     print(f"Available benchmarks: {list(BENCHMARK_REGISTRY.keys())}")
 
 
-def run_benchmark(benchmark_name: str):
+def run_benchmark(benchmark_name: str, should_visualize: bool = False):
     """Run a specific benchmark."""
     if benchmark_name not in BENCHMARK_REGISTRY:
         print(f"Error: Unknown benchmark '{benchmark_name}'")
@@ -62,12 +62,13 @@ def run_benchmark(benchmark_name: str):
     benchmark_class = BENCHMARK_REGISTRY[benchmark_name]
     benchmark = benchmark_class()
     benchmark.benchmark()
-    benchmark.visualize()
+    if should_visualize:
+        benchmark.visualize()
 
     return True
 
 
-def run_all_benchmarks():
+def run_all_benchmarks(should_visualize: bool = False):
     """Run all available benchmarks."""
     print("Running all benchmarks...")
     print("=" * 60)
@@ -76,7 +77,8 @@ def run_all_benchmarks():
         print(f"\n{'=' * 20} {name.upper()} {'=' * 20}")
         benchmark = cls()
         benchmark.benchmark()
-        benchmark.visualize()
+        if should_visualize:
+            benchmark.visualize()
         print()
 
 
@@ -107,6 +109,12 @@ Examples:
         "--all", action="store_true", help="Run all available benchmarks"
     )
 
+    parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Visualize results after running benchmarks",
+    )
+
     args = parser.parse_args()
 
     # Handle list option
@@ -116,7 +124,7 @@ Examples:
 
     # Handle all option
     if args.all:
-        run_all_benchmarks()
+        run_all_benchmarks(args.visualize)
         return
 
     # Handle specific benchmarks
@@ -126,14 +134,9 @@ Examples:
         parser.print_help()
         sys.exit(1)
 
-    success = True
     for benchmark_name in args.benchmarks:
-        if not run_benchmark(benchmark_name):
-            success = False
+        run_benchmark(benchmark_name, args.visualize)
         print()  # Add spacing between benchmarks
-
-    if not success:
-        sys.exit(1)
 
 
 if __name__ == "__main__":
