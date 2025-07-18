@@ -2,9 +2,9 @@
 #include <c10/util/TypeIndex.h>
 #include <gtest/gtest.h>
 
-using c10::string_view;
 using c10::util::get_fully_qualified_type_name;
 using c10::util::get_type_index;
+using std::string_view;
 
 // NOLINTBEGIN(modernize-unary-static-assert)
 namespace {

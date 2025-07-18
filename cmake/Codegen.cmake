@@ -35,7 +35,7 @@ endfunction()
 
 ################################################################################
 
-# -- [ Deterine commit hash
+# -- [ Determine commit hash
 execute_process(
     COMMAND "${Python_EXECUTABLE}" -c "from tools.generate_torch_version import get_sha;print(get_sha('.'), end='')"
     OUTPUT_VARIABLE COMMIT_SHA
@@ -81,7 +81,7 @@ if(INTERN_BUILD_ATEN_OPS)
   if(USE_CUDA)
     # The stable/nightly builds do not enable some SM architectures,
     # like 89/90a/100a.  Still, some files need to be built for these
-    # architecturs specifically.  This function makes it possible to
+    # architectures specifically.  This function makes it possible to
     # enable building given file for a specific such architecture, in
     # case if PyTorch is built for corresponding other architecture;
     # for example, it will enable building for SM 90a in case PyTorch
@@ -108,6 +108,11 @@ if(INTERN_BUILD_ATEN_OPS)
               list(APPEND _file_compile_flags "-gencode;arch=compute_100a,code=sm_100a")
             endif()
           endif()
+          if("${_arch}" STREQUAL "120a")
+            if(_existing_arch_flags MATCHES ".*compute_120.*")
+              list(APPEND _file_compile_flags "-gencode;arch=compute_120a,code=sm_120a")
+            endif()
+          endif()
         endforeach()
       endif()
       list(JOIN _file_compile_flags " " _file_compile_flags)
@@ -117,13 +122,13 @@ if(INTERN_BUILD_ATEN_OPS)
 
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
-      "89;90a;100a")
+      "89;90a;100a;120a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
       "90a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
-      "90a")
+      "90a;100a")
 
   endif()
 
@@ -390,22 +395,20 @@ if(INTERN_BUILD_ATEN_OPS)
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_ZVECTOR_FLAGS}")
   endif(CXX_ZVECTOR_FOUND)
 
-  if(CXX_SVE_FOUND)
-    if(CXX_SVE256_FOUND)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION -DHAVE_SVE256_CPU_DEFINITION")
-      list(APPEND CPU_CAPABILITY_NAMES "SVE256")
-      if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
-      else()
-        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
-      endif()
-    endif(CXX_SVE256_FOUND)
-  endif(CXX_SVE_FOUND)
+  if(CXX_SVE_FOUND AND CXX_SVE256_FOUND AND CXX_ARM_BF16_FOUND)
+    list(APPEND CPU_CAPABILITY_NAMES "SVE256")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION -DHAVE_SVE256_CPU_DEFINITION -DHAVE_ARM_BF16_CPU_DEFINITION")
+    if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+    else()
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
+    endif()
+  endif()
 
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
 
-  # The sources list might get reordered later based on the capabilites.
+  # The sources list might get reordered later based on the capabilities.
   # See NOTE [ Linking AVX and non-AVX files ]
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
     function(process_vec NAME)

@@ -12,7 +12,7 @@ import re
 import typing
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
@@ -20,6 +20,7 @@ from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
+from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
@@ -212,34 +213,6 @@ class _Namespace:
         self._used_names.add(name)
 
 
-dtype_abbrs = {
-    torch.bfloat16: "bf16",
-    torch.float64: "f64",
-    torch.float32: "f32",
-    torch.float16: "f16",
-    torch.float8_e4m3fn: "f8e4m3fn",
-    torch.float8_e5m2: "f8e5m2",
-    torch.float8_e4m3fnuz: "f8e4m3fnuz",
-    torch.float8_e5m2fnuz: "f8e5m2fnuz",
-    torch.float8_e8m0fnu: "f8e8m0fnu",
-    torch.float4_e2m1fn_x2: "f4e2m1fnx2",
-    torch.complex32: "c32",
-    torch.complex64: "c64",
-    torch.complex128: "c128",
-    torch.int8: "i8",
-    torch.int16: "i16",
-    torch.int32: "i32",
-    torch.int64: "i64",
-    torch.bool: "b8",
-    torch.uint8: "u8",
-    torch.uint16: "u16",
-    torch.uint32: "u32",
-    torch.uint64: "u64",
-    torch.bits16: "b16",
-    torch.bits1x8: "b1x8",
-}
-
-
 @compatibility(is_backward_compatible=True)
 @dataclass
 class PythonCode:
@@ -344,6 +317,9 @@ def _parse_stack_trace(stack_trace: str):
 
 @compatibility(is_backward_compatible=False)
 class CodeGen:
+    # This is an override hook so we can customize the SymNode printer.
+    _sym_repr: Callable[["torch.types.PySymType"], str] = lambda x: repr(x)
+
     def __init__(self):
         self._body_transformer: Optional[TransformCodeFunc] = None
         self._func_name: str = "forward"
@@ -473,7 +449,7 @@ class CodeGen:
                         # This code-path used in Python < 3.9
                         return origin_typename
 
-                    return f'{origin_typename}[{",".join(args)}]'
+                    return f"{origin_typename}[{','.join(args)}]"
                 else:
                     # Bare type, such as `typing.Tuple` with no subscript
                     # This code-path used in Python 3.9+
@@ -597,7 +573,7 @@ class CodeGen:
                             summary_str = parsed_stack_trace.get_summary_str()
                         else:
                             summary_str = ""
-                        body.append(f'\n {dim(f"# {summary_str}")}\n')
+                        body.append(f"\n {dim(f'# {summary_str}')}\n")
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
                     no_stacktrace_msg = "# No stacktrace found for following nodes"
@@ -636,7 +612,8 @@ class CodeGen:
                         f'{dim_blue(stride_annotation)}{dim_green(device_annotation)}"'
                     )
                 elif isinstance(meta_val, py_sym_types):
-                    maybe_type_annotation = f': "Sym({meta_val})"'
+                    val_str = CodeGen._sym_repr(meta_val)
+                    maybe_type_annotation = f': "Sym({val_str})"'
                 elif isinstance(meta_val, TensorMetadata):
                     maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
 
@@ -865,7 +842,7 @@ class _PyTreeCodeGen(CodeGen):
             if len(has_annotation) > 0:
                 fn_definition += "\n    " + "".join(has_annotation) + "\n"
             fn_definition += f"""
-    {', '.join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
+    {", ".join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
         return fn_definition
 
     def generate_output(self, output_args):
@@ -1028,7 +1005,7 @@ class Graph:
 
         Returns:
 
-            Iteratable of nodes with the requested op and target.
+            Iterable of nodes with the requested op and target.
         """
         node_list = self._find_nodes_lookup_table.find_nodes(op=op, target=target)
         if sort:
@@ -1444,6 +1421,7 @@ class Graph:
         args: Optional[tuple["Argument", ...]] = None,
         kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
+        name: Optional[str] = None,
     ) -> Node:
         """
         Insert a ``call_function`` ``Node`` into the ``Graph``. A ``call_function`` node
@@ -1464,6 +1442,8 @@ class Graph:
             type_expr (Optional[Any]): an optional type annotation representing the
                 Python type the output of this node will have.
 
+            name (Optional[str]): The name of the node. If not specified, set to None
+
         Returns:
 
             The newly created and inserted ``call_function`` node.
@@ -1473,7 +1453,7 @@ class Graph:
             as :meth:`Graph.create_node`.
         """
         return self.create_node(
-            "call_function", the_function, args, kwargs, type_expr=type_expr
+            "call_function", the_function, args, kwargs, name=name, type_expr=type_expr
         )
 
     @compatibility(is_backward_compatible=True)
@@ -1585,7 +1565,7 @@ class Graph:
         # To do this, we create a new namespace just for this source. All names
         # that get printed must come from this namespace.
         #
-        # Why can't we re-use node.name? Because it was generated within the
+        # Why can't we reuse node.name? Because it was generated within the
         # namespace `self._graph_namespace`. In order to provide uniqueness
         # over both locals (node.name) *and* globals, we create a completely
         # new namespace to put all identifiers in.
@@ -1593,7 +1573,7 @@ class Graph:
 
         # Override Node's repr to generate a valid name within our namespace.
         # Since repr() is designed to produce a valid Python expression, it
-        # makes sense to re-use it. This way, it's easy to print something like
+        # makes sense to reuse it. This way, it's easy to print something like
         # Tuple[Node, Node] by simply calling repr() on it. Node's __repr__ is
         # implemented cooperatively to allow this.
         def node_repr(n: Node):
@@ -1806,6 +1786,8 @@ class Graph:
             of functional operations or you supply your own custom
             function for detecting side-effectful nodes.
         """
+        from torch.utils._ordered_set import OrderedSet
+
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
         self.lint()
@@ -1827,6 +1809,20 @@ class Graph:
             if not has_side_effect(node) and len(node.users) == 0:
                 self.erase_node(node)
                 changed = True
+
+        # Call DCE on the subgraphs
+        if self.owning_module is not None:
+            subgraph_names = OrderedSet(
+                x.target for x in self.find_nodes(op="get_attr")
+            )
+            for child_name, child_module in self.owning_module.named_children():
+                # Sometimes an owning_module can have unused children. Skip them
+                # by checking them from get_attr node targets.
+                if child_name in subgraph_names and isinstance(
+                    child_module, torch.fx.GraphModule
+                ):
+                    changed |= child_module.graph.eliminate_dead_code()
+                    child_module.recompile()
 
         return changed
 
@@ -1881,7 +1877,9 @@ class Graph:
             # through `insert_pdb`:
             gm.graph.on_generate_code(
                 lambda current_trans: (
-                    lambda body: insert_pdb(current_trans(body) if current_trans else body)
+                    lambda body: insert_pdb(
+                        current_trans(body) if current_trans else body
+                    )
                 )
             )
 
@@ -1916,6 +1914,18 @@ class Graph:
                 self._codegen._body_transformer = on_gen_code_old
 
         return on_generate_code_context_manager()
+
+
+@contextmanager
+def _override_sym_repr(
+    override: Callable[["torch.types.PySymType"], str],
+) -> Iterator[None]:
+    tmp = CodeGen._sym_repr
+    try:
+        CodeGen._sym_repr = override
+        yield
+    finally:
+        CodeGen._sym_repr = tmp
 
 
 def _identity(x):

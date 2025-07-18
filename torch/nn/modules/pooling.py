@@ -607,6 +607,9 @@ class AvgPool1d(_AvgPoolNd):
         When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
         or the input. Sliding windows that would start in the right padded region are ignored.
 
+    .. note::
+        pad should be at most half of effective kernel size.
+
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can each be
     an ``int`` or a one-element tuple.
 
@@ -688,9 +691,12 @@ class AvgPool2d(_AvgPoolNd):
         When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
         or the input. Sliding windows that would start in the right padded region are ignored.
 
+    .. note::
+        pad should be at most half of effective kernel size.
+
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can either be:
 
-        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a single ``int`` or a single-element tuple -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
           and the second `int` for the width dimension
 
@@ -796,6 +802,9 @@ class AvgPool3d(_AvgPoolNd):
     Note:
         When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
         or the input. Sliding windows that would start in the right padded region are ignored.
+
+    .. note::
+        pad should be at most half of effective kernel size.
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
 
@@ -996,7 +1005,8 @@ class FractionalMaxPool3d(Module):
 
     Args:
         kernel_size: the size of the window to take a max over.
-                     Can be a single number k (for a square kernel of k x k x k) or a tuple `(kt x kh x kw)`
+                     Can be a single number `k` (for a square kernel of `k x k x k`) or a tuple `(kt x kh x kw)`,
+                     `k` must greater than 0.
         output_size: the target output size of the image of the form `oT x oH x oW`.
                      Can be a tuple `(oT, oH, oW)` or a single number oH for a square image `oH x oH x oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
@@ -1037,6 +1047,11 @@ class FractionalMaxPool3d(Module):
         _random_samples=None,
     ) -> None:
         super().__init__()
+        if (isinstance(kernel_size, int) and kernel_size <= 0) or (
+            isinstance(kernel_size, (tuple, list))
+            and not all(k > 0 for k in kernel_size)
+        ):
+            raise ValueError(f"kernel_size must greater than 0, but got {kernel_size}")
         self.kernel_size = _triple(kernel_size)
         self.return_indices = return_indices
         self.register_buffer("_random_samples", _random_samples)

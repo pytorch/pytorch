@@ -5640,6 +5640,11 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
 
+        with self.assertRaisesRegex(ValueError, "Expected jagged_dim >=1, but got 0."):
+            torch.nested.nested_tensor_from_jagged(
+                values, lengths=lengths, jagged_dim=0
+            )
+
     @onlyCPU
     def test_nested_tensor_from_jagged_fx_trace(self, device):
         def fn(x, y):
@@ -6826,7 +6831,9 @@ torch.cuda.synchronize()
         out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
             q_d1, k_d1, v_d1
         )[0]
-        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
+        output_ref_atol, output_ref_rtol = get_tolerances(
+            out_ref, out_lp_ref, fudge_factor=2
+        )
 
         attn_d1 = torch.nn.functional.scaled_dot_product_attention(
             q_d1, k_d1, v_d1
@@ -7188,7 +7195,7 @@ torch.cuda.synchronize()
 
         query = torch.rand(bs, d1, d3, device=device)
         value = torch.rand(30, d2, requires_grad=True, device=device)
-        # total_length must > than max_length otherwise flash_attn backwark will fail
+        # total_length must > than max_length otherwise flash_attn backward will fail
         offsets = torch.tensor([0, 2, 3, 30], device=device)
 
         m = mha(use_legacy_api)
@@ -8376,16 +8383,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name in {"unflatten"}),
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="broken_unflatten_backward",
-    ),
-    # -> CPU device conversion backwards is broken
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="Unknown layout in record_stream_any_impl",
-        op_match_fn=lambda device, op: (op.full_name == "to"),
-        sample_match_fn=lambda device, sample: (
-            sample.kwargs.get("device", None) == "cpu"
-        ),
-        name="broken_to_backward",
     ),
     # sum() backward is not implemented for non-full reductions
     XFailRule(

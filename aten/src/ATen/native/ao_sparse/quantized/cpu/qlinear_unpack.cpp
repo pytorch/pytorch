@@ -46,7 +46,7 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
         scales,
         zero_points,
         0, // The output channel axis is 0
-        device(c10::kCPU).dtype(c10::kQInt8));
+        at::device(c10::kCPU).dtype(c10::kQInt8));
   }
 
   int8_t* weight_ptr_int8 =
@@ -100,7 +100,7 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
         scales,
         zero_points,
         0, // The output channel axis is 0
-        device(c10::kCPU).dtype(c10::kQInt8));
+        at::device(c10::kCPU).dtype(c10::kQInt8));
   }
 
   int8_t* weight_ptr_int8 =

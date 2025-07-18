@@ -112,7 +112,7 @@ def freeze_rng_state(*args, **kwargs):
 # Class to keep track of test flags configurable by environment variables.
 # Flags set here are intended to be read-only and should not be modified after
 # definition.
-# TODO: Expand this class to handle abritrary settings in addition to boolean flags?
+# TODO: Expand this class to handle arbitrary settings in addition to boolean flags?
 class TestEnvironment:
     # Set of env vars to set for the repro command that is output on test failure.
     # Specifically, this includes env vars that are set to non-default values and
@@ -902,6 +902,11 @@ def prof_callable(callable, *args, **kwargs):
 
     return callable(*args, **kwargs)
 
+def raise_on_run_directly(file_to_call):
+    raise RuntimeError("This test file is not meant to be run directly, "
+                       f"use:\n\n\tpython {file_to_call} TESTNAME\n\n"
+                       "instead.")
+
 def prof_func_call(*args, **kwargs):
     return prof_callable(func_call, *args, **kwargs)
 
@@ -1125,8 +1130,8 @@ def lint_test_case_extension(suite):
             test_case = first_test
 
         if test_case is not None:
-            test_class = test_case.id().split('.', 1)[1].split('.')[0]
             if not isinstance(test_case, TestCase):
+                test_class = test_case.id().split('.', 1)[1].split('.')[0]
                 err = "This test class should extend from torch.testing._internal.common_utils.TestCase but it doesn't."
                 print(f"{test_class} - failed. {err}")
                 succeed = False
@@ -1231,7 +1236,7 @@ def run_tests(argv=UNITTEST_ARGS):
         if RERUN_DISABLED_TESTS:
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
-            other_args += ['--save-xml', args.save_xml]
+            other_args += ['--save-xml', TEST_SAVE_XML]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1297,7 +1302,7 @@ def run_tests(argv=UNITTEST_ARGS):
         # exitcode of 5 means no tests were found, which happens since some test configs don't
         # run tests from certain files
         sys.exit(0 if exit_code == 5 else exit_code)
-    elif TEST_SAVE_XML is not None:
+    elif TEST_SAVE_XML:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
         from xmlrunner.result import _XMLTestResult  # type: ignore[import]
@@ -1500,6 +1505,26 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 
 TEST_CUDA_CUDSS = TEST_CUDA and (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
 
+TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and (
+    torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12
+)
+
+if TEST_CUDA_PYTHON_BINDINGS:
+    def cuda_python_error_check(function_call_output):
+        """Makes calls to cuda-python's cuda runtime functions more
+        pythonic by throwing an exception if they return a status
+        which is not cudaSuccess
+        """
+        import cuda.bindings  # type: ignore[import]
+
+        error, *others = function_call_output
+        if error != cuda.bindings.runtime.cudaError_t.cudaSuccess:
+            raise ValueError(f"CUDA failure! {error}")
+        else:
+            return tuple(others)
+else:
+    cuda_python_error_check = None  # type: ignore[assignment]
+
 def allocator_option_enabled_fn(allocator_config, _, option):
     if allocator_config is None:
         return False
@@ -1555,6 +1580,10 @@ TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
     env_var="PYTORCH_TEST_WITH_DYNAMO",
     implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER,
 )
+TEST_WITHOUT_COMPILED_AUTOGRAD: bool = TestEnvironment.def_flag(
+    "TEST_WITHOUT_COMPILED_AUTOGRAD",
+    env_var="PYTORCH_TEST_WITHOUT_COMPILED_AUTOGRAD",
+)
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
@@ -1567,6 +1596,9 @@ if TEST_WITH_TORCHDYNAMO:
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
+    else:
+        # only dynamo for now
+        torch._dynamo.config.compiled_autograd = not TEST_WITHOUT_COMPILED_AUTOGRAD
 
 
 # seems like this is only used in test/torch_np
@@ -1642,10 +1674,32 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
     return decorator
 
+def runWithoutCompiledAutograd(msg="test doesn't currently work with compiled autograd"):
+    """
+    Usage:
+    @runWithoutCompiledAutograd(msg)
+    def test_blah(self):
+        ...
+    """
+    assert isinstance(msg, str)
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            with torch._dynamo.compiled_autograd._disable():
+                func(*args, **kwargs)
+        return wrapper
+
+    return decorator
+
 def serialTest(condition=True):
     """
     Decorator for running tests serially.  Requires pytest
     """
+    # If one apply decorator directly condition will be callable
+    # And test will essentially be essentially skipped, which is undesirable
+    assert type(condition) is bool
+
     def decorator(fn):
         if has_pytest and condition:
             return pytest.mark.serial(fn)
@@ -1761,19 +1815,6 @@ TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 
 if TEST_WITH_TV:
     torch.fx.experimental._config.translation_validation = True
-
-# Some tests take too long when dynamic_shapes is combined with
-# translation_validation. Whenever that happens, we solve that by
-# disabling translation_validation.
-def disable_translation_validation_if_dynamic_shapes(fn):
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        if torch._dynamo.config.dynamic_shapes:
-            # Turning TV off due to high latency on dynamic shapes.
-            torch.fx.experimental._config.translation_validation = False
-        return fn(*args, **kwargs)
-    return wrapper
-
 
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
@@ -1916,6 +1957,14 @@ def runOnRocmArch(arch: tuple[str, ...]):
 def xfailIfS390X(func):
     return unittest.expectedFailure(func) if IS_S390X else func
 
+def xfailIf(condition):
+    def wrapper(func):
+        if condition:
+            return unittest.expectedFailure(func)
+        else:
+            return func
+    return wrapper
+
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
     def dec_fn(fn):
         reason = f"skipIfXpu: {msg}"
@@ -1999,6 +2048,26 @@ def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows 
     if func:
         return dec_fn(func)
     return dec_fn
+
+def requires_cuda_p2p_access():
+    cuda_p2p_access_available = (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (8, 0)
+        and torch.cuda.device_count() >= 2
+    )
+    num_devices = torch.cuda.device_count()
+    for i in range(num_devices - 1):
+        for j in range(i + 1, num_devices):
+            if not torch.cuda.can_device_access_peer(i, j):
+                cuda_p2p_access_available = False
+                break
+        if not cuda_p2p_access_available:
+            break
+
+    return skip_but_pass_in_sandcastle_if(
+        not cuda_p2p_access_available,
+        "cuda p2p access is not available",
+    )
 
 # Reverts the linalg backend back to default to make sure potential failures in one
 # test do not affect other tests
@@ -2396,7 +2465,7 @@ class CudaNonDefaultStream:
                                      device_type=deviceStream.device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
-    def __exit__(self, exec_type, exec_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         # After completing CUDA test load previously active streams on all
         # CUDA devices.
         beforeDevice = torch.cuda.current_device()
@@ -2444,9 +2513,9 @@ class CudaMemoryLeakCheck:
             driver_mem_allocated = bytes_total - bytes_free
             self.driver_befores.append(driver_mem_allocated)
 
-    def __exit__(self, exec_type, exec_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         # Don't check for leaks if an exception was thrown
-        if exec_type is not None:
+        if exc_type is not None:
             return
 
         # Compares caching allocator before/after statistics
@@ -2514,18 +2583,18 @@ class CudaMemoryLeakCheck:
                 msg = ("CUDA caching allocator reports a memory leak not "  # type: ignore[possibly-undefined]
                        f"verified by the driver API in {self.name}! "
                        f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
-                       f"and is now reported as {caching_allocator_mem_allocated} "
+                       f"and is now reported as {caching_allocator_mem_allocated} "  # type: ignore[possibly-undefined]
                        f"on device {i}. "
-                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")
+                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")  # type: ignore[possibly-undefined]
                 warnings.warn(msg)
-            elif caching_allocator_discrepancy and driver_discrepancy:
+            elif caching_allocator_discrepancy and driver_discrepancy:  # type: ignore[possibly-undefined]
                 # A caching allocator discrepancy validated by the driver API is a
                 #   failure (except on ROCm, see below)
                 msg = (f"CUDA driver API confirmed a leak in {self.name}! "  # type: ignore[possibly-undefined]
                        f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
-                       f"and is now reported as {caching_allocator_mem_allocated} "
+                       f"and is now reported as {caching_allocator_mem_allocated} "  # type: ignore[possibly-undefined]
                        f"on device {i}. "
-                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")
+                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")  # type: ignore[possibly-undefined]
 
                 raise RuntimeError(msg)
 
@@ -3157,6 +3226,13 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
+    def _dynamo_test_key(self):
+        return f"{self.__class__.__name__}.{self._testMethodName}"
+
+    def compile_fn(self, fn, backend, nopython):
+        # Allows subclasses to control compilation
+        return torch._dynamo.optimize(backend, nopython=nopython)(fn)
+
     def _run_custom(self, result=None):
         using_unittest = isinstance(result, unittest.TestResult)
 
@@ -3232,16 +3308,16 @@ class TestCase(expecttest.TestCase):
 
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
             if TEST_WITH_AOT_EAGER:
-                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
+                super_run = self.compile_fn(super_run, "aot_eager_decomp_partition", nopython)
             elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
                 if TEST_WITH_TORCHINDUCTOR:
-                    super_run = torch._dynamo.optimize("inductor")(super_run)
+                    super_run = self.compile_fn(super_run, "inductor", nopython)
                 else:
                     # Assume eager-generated GraphModules will not error out.
                     # If we do, this is probably a Dynamo bug!
-                    super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
+                    super_run = self.compile_fn(super_run, "eager_noexcept", nopython)
 
-                key = f"{self.__class__.__name__}.{self._testMethodName}"
+                key = self._dynamo_test_key()
 
                 def expect_failure(f, file_name):
                     @wraps(f)
@@ -3291,10 +3367,17 @@ class TestCase(expecttest.TestCase):
                     file_name = os.path.join(subdir, key)
                     setattr(self, self._testMethodName, ignore_failure(method, file_name))
 
+                from .dynamo_test_failures import compiled_autograd_skips
+                if torch._dynamo.config.compiled_autograd and key in compiled_autograd_skips:
+                    # Still run the test, but with compiled autograd disabled
+                    super_run = runWithoutCompiledAutograd()(super_run)
+
             super_run(result=result)
 
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
+        elif torch._dynamo.config.compiled_autograd:
+            torch._dynamo.compiled_autograd.reset()
 
         # Early terminate test if necessary.  If using pytest, use the -x flag instead
         if using_unittest and self._should_stop_test_suite():
@@ -3753,14 +3836,14 @@ class TestCase(expecttest.TestCase):
                         if target is None:
                             target = batch_data[layout] = (ext_coo_indices1, d[1])
                         else:
-                            target[0].set_(torch.cat((target[0], ext_coo_indices1), 1))
+                            target[0].set_(torch.cat((target[0], ext_coo_indices1), 1))  # type: ignore[call-overload]
                             target[1].set_(torch.cat((target[1], d[1])))
                     else:
                         if target is None:
                             target = batch_data[layout] = tuple(d[j].unsqueeze(0) for j in range(len(d)))
                         else:
                             for j in range(len(d)):
-                                target[j].set_(torch.cat((target[j], d[j].unsqueeze(0))))
+                                target[j].set_(torch.cat((target[j], d[j].unsqueeze(0))))  # type: ignore[call-overload]
             return batch_data
 
         def generate_values(base, densesize):
@@ -3901,7 +3984,7 @@ class TestCase(expecttest.TestCase):
                     ((0, 0), [(1, 2)], [()]),
             ]:
                 for blocksize in blocksizes:
-                    for densesize in densesizes:
+                    for densesize in densesizes:  # type: ignore[attr-defined]
                         if layout == torch.strided:
                             indices = ()  # type: ignore[assignment]
                             values = torch.empty((basesize + densesize), device=device, dtype=dtype)
@@ -4497,7 +4580,7 @@ def find_free_port():
 
     NOTE: If this function is being used to allocate a port to Store (or
     indirectly via init_process_group or init_rpc), it should be used
-    in conjuction with the `retry_on_connect_failures` decorator as there is a potential
+    in conjunction with the `retry_on_connect_failures` decorator as there is a potential
     race condition where the allocated port may become unavailable before it can be used
     """
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
@@ -5223,23 +5306,6 @@ def dtype_name(dtype):
     return str(dtype).split('.')[1]
 
 
-dtype_abbrs = {
-    torch.bfloat16: 'bf16',
-    torch.float64: 'f64',
-    torch.float32: 'f32',
-    torch.float16: 'f16',
-    torch.complex32: 'c32',
-    torch.complex64: 'c64',
-    torch.complex128: 'c128',
-    torch.int8: 'i8',
-    torch.int16: 'i16',
-    torch.int32: 'i32',
-    torch.int64: 'i64',
-    torch.bool: 'b8',
-    torch.uint8: 'u8',
-}
-
-
 @functools.lru_cache
 def get_cycles_per_ms() -> float:
     """Measure and return approximate number of cycles per millisecond for torch.cuda._sleep
@@ -5559,6 +5625,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n(    .+\n( +[~^]+ *\n)?)+', repl_frame, s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
+    s = re.sub(r'https:/([a-zA-Z0-9_.-]+)', r'https://\1', s)
     s = re.sub(file, _as_posix_path(os.path.basename(file)), s)
     s = re.sub(_as_posix_path(os.path.join(os.path.dirname(torch.__file__), "")), "", s)
     if suppress_suffix:
@@ -5601,7 +5668,7 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
                 f"{num_garbage_objs} tensors were found in the garbage. Did you introduce a reference cycle?"
             )
             try:
-                import objgraph  # type: ignore[import-not-found]
+                import objgraph  # type: ignore[import-not-found,import-untyped]
                 warnings.warn(
                     f"Dumping first {limit} objgraphs of leaked {matched_type}s rendered to png"
                 )
@@ -5627,6 +5694,36 @@ def remove_cpp_extensions_build_root():
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
 
+
+def install_cpp_extension(extension_root):
+    # Wipe the build / install dirs if they exist
+    build_dir = os.path.join(extension_root, "build")
+    install_dir = os.path.join(extension_root, "install")
+    for d in (build_dir, install_dir):
+        if os.path.exists(d):
+            shutil.rmtree(d)
+
+    # Build the extension
+    setup_py_path = os.path.join(extension_root, "setup.py")
+    cmd = [sys.executable, setup_py_path, "install", "--root", install_dir]
+    return_code = shell(cmd, cwd=extension_root, env=os.environ)
+    if return_code != 0:
+        raise RuntimeError(f"build failed for cpp extension at {extension_root}")
+
+    mod_install_dir = None
+    # install directory is the one that is named site-packages
+    for root, directories, _ in os.walk(install_dir):
+        for directory in directories:
+            if "-packages" in directory:
+                mod_install_dir = os.path.join(root, directory)
+
+    if mod_install_dir is None:
+        raise RuntimeError(f"installation failed for cpp extension at {extension_root}")
+
+    if mod_install_dir not in sys.path:
+        sys.path.insert(0, mod_install_dir)
+
+
 # Decorator to provide a helper to load inline extensions to a temp directory
 def scoped_load_inline(func):
 
@@ -5645,5 +5742,25 @@ def scoped_load_inline(func):
                 return cpp_extension.load_inline(*args, **kwargs)
 
         return func(*args, load_inline=load_inline, **kwargs)
-
     return wrapper
+
+def recover_orig_fp32_precision(fn):
+    @contextlib.contextmanager
+    def recover():
+        old_mkldnn_conv_p = torch.backends.mkldnn.conv.fp32_precision  # type: ignore[attr-defined]
+        old_mkldnn_rnn_p = torch.backends.mkldnn.rnn.fp32_precision  # type: ignore[attr-defined]
+        old_mkldnn_matmul_p = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
+        old_cudnn_conv_p = torch.backends.cudnn.conv.fp32_precision  # type: ignore[attr-defined]
+        old_cudnn_rnn_p = torch.backends.cudnn.rnn.fp32_precision  # type: ignore[attr-defined]
+        old_cuda_matmul_p = torch.backends.cuda.matmul.fp32_precision
+        try:
+            yield
+        finally:
+            torch.backends.mkldnn.conv.fp32_precision = old_mkldnn_conv_p  # type: ignore[attr-defined]
+            torch.backends.mkldnn.rnn.fp32_precision = old_mkldnn_rnn_p  # type: ignore[attr-defined]
+            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_matmul_p  # type: ignore[attr-defined]
+            torch.backends.cudnn.conv.fp32_precision = old_cudnn_conv_p  # type: ignore[attr-defined]
+            torch.backends.cudnn.rnn.fp32_precision = old_cudnn_rnn_p  # type: ignore[attr-defined]
+            torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
+
+    return recover()(fn)

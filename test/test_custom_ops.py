@@ -2,16 +2,20 @@
 # ruff: noqa: F841
 
 import collections
+import io
 import itertools
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import typing
 import unittest
+from pathlib import Path
 from typing import *  # noqa: F403
 
 import numpy as np
+import yaml
 
 import torch._custom_ops as custom_ops
 import torch.testing._internal.optests as optests
@@ -20,7 +24,15 @@ import torch.utils.cpp_extension
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
-from torch._library.fake_profile import MissingOpProfile, OpProfile, TensorMetadata
+from torch._library.fake_profile import (
+    generate_yaml_from_profiles,
+    load_op_profiles,
+    MissingOpProfile,
+    OpProfile,
+    read_profiles_from_yaml,
+    save_op_profiles,
+    TensorMetadata,
+)
 from torch._library.infer_schema import tuple_to_list
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -39,6 +51,7 @@ from torch.testing._internal.common_utils import (
     scoped_load_inline,
     skipIfTorchDynamo,
     subtest,
+    TemporaryFileName,
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
@@ -154,6 +167,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
 
         x = torch.tensor(3.14159 / 3, requires_grad=True, device=device)
         with self.assertRaisesRegex(
@@ -212,6 +226,31 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         example = torch.zeros([10, 20], device=device)
         torch.library.opcheck(f, args=[example])
 
+    # https://github.com/pytorch/pytorch/issues/150472
+    def test_single_element_tuple_output(self, device):
+        # Helper function to register id_tuple custom and the fake tensor implementation
+        # so that Dynamo has the fake tensor implementation
+        def get_id_tuple():
+            @torch.library.custom_op("test::id_tuple", mutates_args=[])
+            def id_tuple(x: torch.Tensor) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            @id_tuple.register_fake
+            def _(
+                x: torch.Tensor,
+            ) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            return id_tuple
+
+        id_tuple = get_id_tuple()
+        x = torch.randn(3, device=device)
+        ret = id_tuple(x)
+        # Check if ret is a tuple and has exactly one and the same element
+        self.assertIsInstance(ret, tuple)
+        self.assertEqual(len(ret), 1)
+        self.assertEqual(x, ret[0])
+
     def test_missing_abstract_impl(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -233,6 +272,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
 
         x = torch.tensor([0, 1.0], requires_grad=True)
         with self.assertRaisesRegex(
@@ -274,6 +314,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
         lib.impl("foo", foo_meta, "Meta")
 
         x = torch.tensor([0, 1.0], requires_grad=True)
@@ -305,6 +346,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
         lib.impl("foo", foo_meta, "Meta")
 
         x = torch.tensor([0, 1.0])
@@ -331,6 +373,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         lib.impl("foo", Foo.apply, "CPU")
         lib.impl("foo", Foo.apply, "CUDA")
+        lib.impl("foo", Foo.apply, "XPU")
         lib.impl("foo", lambda x: x.clone(), "Meta")
 
         x = torch.randn([], requires_grad=True)
@@ -424,6 +467,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
 
         x = torch.randn(3, requires_grad=True, device=device)
         # Should not raise
@@ -473,6 +517,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         lib.impl("foo", Foo.apply, "CPU")
         lib.impl("foo", Foo.apply, "CUDA")
+        lib.impl("foo", Foo.apply, "XPU")
 
         x = torch.randn(3, requires_grad=True, device=device)
         with self.assertRaisesRegex(AssertionError, "incorrectly registered"):
@@ -498,62 +543,6 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
 class TestCustomOp(CustomOpTestCaseBase):
     test_ns = "_test_custom_op"
-
-    def test_deploy_interaction(self):
-        # run in a different process to avoid parallel issues when we monkeypatch torch._running_with_deploy
-        script = """
-import torch
-torch._running_with_deploy = lambda: True
-
-# creating the library is a no-op, so you can DEF multiple times
-m1 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
-m2 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
-
-m = torch.library.Library("aten", "FRAGMENT")  # noqa: TOR901
-
-# define is a no-op
-m.define("foobarbaz9996(Tensor x) -> Tensor")
-assert not hasattr(torch.ops.aten, "foobarbaz9996"), "m.define should have been a noop"
-
-def sin_override(x):
-    raise AssertionError("m.impl should have been a noop")
-
-# impl is a no-op
-m.impl("sin", sin_override, "CompositeImplicitAutograd")
-x = torch.randn(3)
-y = torch.sin(x)
-
-# should be a no-op
-@torch.library.custom_op("mylib::foobar", mutates_args={})
-def foobar(x: torch.Tensor) -> torch.Tensor:
-    return x.sin()
-
-# should be a no-op
-@foobar.register_fake
-def _(x):
-    return torch.empty_like(x)
-
-# should be a no-op
-m2.define("foobarbaz9996(Tensor x) -> Tensor")
-
-# should be a no-op
-@torch.library.register_fake("mylib4392::foobarbaz9996")
-def _(x):
-    return torch.empty_like(x)
-        """
-        script = script.strip()
-        env = os.environ.copy()
-        try:
-            subprocess.check_output(
-                [sys.executable, "-c", script],
-                stderr=subprocess.STDOUT,
-                # On Windows, opening the subprocess with the default CWD makes `import torch`
-                # fail, so just set CWD to this script's directory
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-                env=env,
-            )
-        except subprocess.CalledProcessError as e:
-            self.fail(msg=("Subprocess exception:\n" + e.output.decode("utf-8")))
 
     @requires_compile
     def test_functionalize_error(self):
@@ -592,7 +581,7 @@ def _(x):
                 g(x)
 
     def test_invalid_schemas(self):
-        # function schmea validation goes through torchgen, so this is just a
+        # function schema validation goes through torchgen, so this is just a
         # basic test.
         with self.assertRaisesRegex(AssertionError, "Invalid function schema: foo"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(")
@@ -2674,7 +2663,7 @@ class TestCustomOpAPI(TestCase):
                 self.assertEqual(ctx.needs_input_grad, expected)
                 return list(grad.unbind(0))
 
-        # call two applys, do a backward on the first
+        # call two applies, do a backward on the first
         def t():
             return torch.randn([], requires_grad=True)
 
@@ -3825,6 +3814,7 @@ Please use `add.register_fake` to add an fake impl.""",
             self.assertEqual(result, w * 2 * 3 * 42)
 
     def test_layout_constraint_tags(self):
+        needs_exact_strides = torch._C.Tag.needs_exact_strides
         needs_fixed_stride_order = torch._C.Tag.needs_fixed_stride_order
         flexible_layout = torch._C.Tag.flexible_layout
         # (tags, the result of the tag inference)
@@ -3832,11 +3822,11 @@ Please use `add.register_fake` to add an fake impl.""",
             ({needs_fixed_stride_order}, needs_fixed_stride_order),
             ({flexible_layout}, flexible_layout),
             # If no tags are provided, then the following is the default
-            (set(), needs_fixed_stride_order),
+            (set(), needs_exact_strides),
             # If multiple tags are provided, then we use the most constrained tag.
             ({flexible_layout, needs_fixed_stride_order}, needs_fixed_stride_order),
         ]
-        from torch._inductor.lowering import get_layout_constraint_tag
+        from torch._library.utils import get_layout_constraint_tag
 
         for tags, expected in tests:
             with torch.library._scoped_library("mylib", "FRAGMENT") as m:
@@ -4459,9 +4449,9 @@ class TestTypeConversion(TestCase):
 
 
 class TestOpProfiles(TestCase):
-    def get_sample_op_profile(self) -> dict[str, set[OpProfile]]:
+    def get_sample_op_profile(self, opname) -> dict[str, set[OpProfile]]:
         return {
-            "mylib.foo.default": {
+            opname: {
                 OpProfile(
                     args_profile=(
                         TensorMetadata(
@@ -4494,46 +4484,46 @@ class TestOpProfiles(TestCase):
         t1 = fm.from_tensor(torch.ones(3, 3))
         t2 = fm.from_tensor(torch.ones(3, 3))
 
-        op_profiles = self.get_sample_op_profile()
+        op_profiles = self.get_sample_op_profile("mylib.foo2.default")
 
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
-                "mylib::foo",
+                "mylib::foo2",
                 "(Tensor a, Tensor b) -> Tensor",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
 
-            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch.library.impl("mylib::foo2", "cpu", lib=lib)
             def foo_impl(a, b):
                 return a + b
 
             with (
                 self.assertRaisesRegex(
                     torch._subclasses.fake_tensor.UnsupportedOperatorException,
-                    "mylib.foo.default",
+                    "mylib.foo2.default",
                 ),
                 fm,
             ):
-                torch.ops.mylib.foo(t1, t2)
+                torch.ops.mylib.foo2(t1, t2)
 
             with (
                 torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles),
                 fm,
             ):
-                torch.ops.mylib.foo(t1, t2)
+                torch.ops.mylib.foo2(t1, t2)
 
-                with self.assertRaisesRegex(MissingOpProfile, "mylib::foo"):
-                    torch.ops.mylib.foo(torch.ones(3, 3, 3), torch.ones(3, 3, 3))
+                with self.assertRaisesRegex(MissingOpProfile, "mylib::foo2"):
+                    torch.ops.mylib.foo2(torch.ones(3, 3, 3), torch.ones(3, 3, 3))
 
             with (
                 self.assertRaisesRegex(
                     torch._subclasses.fake_tensor.UnsupportedOperatorException,
-                    "mylib.foo.default",
+                    "mylib.foo2.default",
                 ),
                 fm,
             ):
-                torch.ops.mylib.foo(t1, t2)
+                torch.ops.mylib.foo2(t1, t2)
 
     def test_duplicate_registration_impl(self):
         fm = torch._subclasses.FakeTensorMode(
@@ -4542,33 +4532,33 @@ class TestOpProfiles(TestCase):
         t1 = fm.from_tensor(torch.ones(3, 3))
         t2 = fm.from_tensor(torch.ones(3, 3))
 
-        op_profiles = self.get_sample_op_profile()
+        op_profiles = self.get_sample_op_profile("mylib.foo3.default")
 
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
-                "mylib::foo",
+                "mylib::foo3",
                 "(Tensor a, Tensor b) -> Tensor",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
 
-            @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            def foo_impl(a, b):
+            @torch.library.impl("mylib::foo3", "cpu", lib=lib)
+            def foo3_impl(a, b):
                 return a + b
 
-            @torch.library.register_fake("mylib::foo", lib=lib)
-            def foo_impl_fake(a, b):
+            @torch.library.register_fake("mylib::foo3", lib=lib)
+            def foo3_impl_fake(a, b):
                 return (a + b).to(dtype=torch.bfloat16)
 
             with fm:
-                self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.bfloat16)
+                self.assertEqual(torch.ops.mylib.foo3(t1, t2).dtype, torch.bfloat16)
 
             with torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles):
                 with fm:
-                    self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.float32)
+                    self.assertEqual(torch.ops.mylib.foo3(t1, t2).dtype, torch.float32)
 
             with fm:
-                self.assertEqual(torch.ops.mylib.foo(t1, t2).dtype, torch.bfloat16)
+                self.assertEqual(torch.ops.mylib.foo3(t1, t2).dtype, torch.bfloat16)
 
     def test_duplicate_registration_custom_op(self):
         fm = torch._subclasses.FakeTensorMode(
@@ -4577,7 +4567,7 @@ class TestOpProfiles(TestCase):
         t1 = fm.from_tensor(torch.ones(3, 3))
         t2 = fm.from_tensor(torch.ones(3, 3))
 
-        op_profiles = self.get_sample_op_profile()
+        op_profiles = self.get_sample_op_profile("mylib.foo1.default")
 
         @torch.library.custom_op("mylib::foo1", mutates_args=())
         def foo_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -4590,10 +4580,6 @@ class TestOpProfiles(TestCase):
         with fm:
             self.assertEqual(torch.ops.mylib.foo1(t1, t2).dtype, torch.bfloat16)
 
-        op_profiles = {
-            "mylib.foo1.default": self.get_sample_op_profile()["mylib.foo.default"]
-        }
-
         with torch._library.fake_profile.unsafe_generate_fake_kernels(op_profiles):
             with fm:
                 self.assertEqual(torch.ops.mylib.foo1(t1, t2).dtype, torch.float32)
@@ -4601,9 +4587,51 @@ class TestOpProfiles(TestCase):
         with fm:
             self.assertEqual(torch.ops.mylib.foo1(t1, t2).dtype, torch.bfloat16)
 
+    def test_yaml(self):
+        op_profiles = self.get_sample_op_profile("mylib.foo.default")
+        yaml_str = generate_yaml_from_profiles(op_profiles)
+        loaded = read_profiles_from_yaml(yaml_str)
+        self.assertEqual(op_profiles, loaded)
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestCustomOpTesting, globals(), only_for=only_for)
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+    def test_save_to_file(self):
+        op_profile = self.get_sample_op_profile("mylib.foo.default")
+
+        # Saving with buffer
+        buffer = io.BytesIO()
+        save_op_profiles(op_profile, buffer)
+        buffer.seek(0)
+        loaded = load_op_profiles(buffer)
+        self.assertEqual(op_profile, loaded)
+
+        # Saving with file
+        with tempfile.NamedTemporaryFile() as f:
+            save_op_profiles(op_profile, f.name)
+            f.seek(0)
+            loaded = load_op_profiles(f.name)
+            self.assertEqual(op_profile, loaded)
+
+        # Saving with Path
+        with TemporaryFileName() as fname:
+            path = Path(fname)
+            save_op_profiles(op_profile, path)
+            loaded = load_op_profiles(path)
+            self.assertEqual(op_profile, loaded)
+
+    def test_version(self):
+        op_profiles = self.get_sample_op_profile("mylib.foo.default")
+        yaml_str = generate_yaml_from_profiles(op_profiles)
+        loaded = yaml.safe_load(yaml_str)
+        loaded["torch_version"] = "2.7"
+        yaml_str = yaml.dump(loaded, sort_keys=False)
+        with self.assertRaisesRegex(RuntimeError, "Unable to load outdated profile"):
+            loaded = read_profiles_from_yaml(yaml_str)
+
+
+only_for = ("cpu", "cuda", "xpu")
+instantiate_device_type_tests(
+    TestCustomOpTesting, globals(), only_for=only_for, allow_xpu=True
+)
 instantiate_parametrized_tests(TestCustomOp)
 instantiate_parametrized_tests(TestCustomOpAPI)
 

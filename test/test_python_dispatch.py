@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import logging
+import pickle
 import sys
 import tempfile
 import unittest
@@ -155,7 +156,7 @@ class TestPythonRegistration(TestCase):
                 # New dispatcher call should hit the first callback again
                 self.assertFalse(first_called)
                 a, b = args
-                # Make a substraction here instead of add !
+                # Make a subtraction here instead of add !
                 c = a - b
                 self.assertTrue(first_called)
                 return c
@@ -225,6 +226,20 @@ class TestPythonRegistration(TestCase):
             with torch._C._IncludeDispatchKeyGuard(torch.DispatchKey.Meta):
                 torch.ops.custom.sum.default(a)
                 self.assertTrue(meta_is_called)
+
+    def test_dispatchkeyset_pickle(self) -> None:
+        keyset = torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
+        serialized = pickle.dumps(keyset)
+        new_keyset = pickle.loads(serialized)
+        self.assertEqual(new_keyset, keyset)
+
+    def test_dispatchkeyset_eq(self) -> None:
+        a = torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
+        b = torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
+        c = torch._C.DispatchKeySet(torch._C.DispatchKey.CPU)
+        self.assertTrue(a == b)
+        self.assertFalse(a != b)
+        self.assertTrue(a != c)
 
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
@@ -726,9 +741,8 @@ $4: f32[1] = torch._ops.aten._foobar.default($0, False, arg3=False)""",
 $0: f32[2, 2] = input('x')
 $1: f64[2, 2] = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
 $2: f64[2, 2] = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
-$3: f32[2, 2] = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
-$4: f32[2] = torch._ops.aten.select.int($3, 1, 1)
-$5: f32[2] = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)""",
+$3: f32[2] = torch._ops.aten.select.int($0, 1, 1)
+$4: f32[2] = torch._ops.aten.clone.default($3, memory_format=torch.contiguous_format)""",
         )
 
     def test_optional_tensor_list(self) -> None:
@@ -2465,6 +2479,39 @@ def forward(self, x_1):
 
         self.assertEqual(res, t.a)
         self.assertIs(type(res), torch.Tensor)
+
+    def test_custom_dispatch_mode_supports_higher_order_operators(self):
+        class Mode(TorchDispatchMode):
+            supports_higher_order_operators = True
+
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                if func is torch.ops.higher_order.cond:
+                    return torch.ones(3, 3)
+                return NotImplemented
+
+        pred = torch.tensor(True)
+        x = torch.randn(1, 1)
+        with Mode():
+            out = torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
+        self.assertEqual(out, torch.ones(3, 3))
+
+    def test_custom_dispatch_mode_not_supports_higher_order_operators(self):
+        class Mode(TorchDispatchMode):
+            supports_higher_order_operators = False
+
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                if func is torch.ops.higher_order.cond:
+                    return torch.ones(3, 3)
+                return NotImplemented
+
+        pred = torch.tensor(True)
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "There was no rule registered for HigherOrderOperator cond and mode",
+        ):
+            with Mode():
+                torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
 
 
 class TestPythonDispatcher(TestCase):

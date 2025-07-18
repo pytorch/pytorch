@@ -41,6 +41,9 @@ DeviceType parse_type(const std::string& device_string) {
         "'mkldnn' is no longer used as device type. So torch.device('mkldnn') will be "
         "deprecated and removed in the future. Please use other valid device types instead.");
   }
+  if (device_string == get_privateuse1_backend()) {
+    return DeviceType::PrivateUse1;
+  }
   auto device = std::find_if(
       types.begin(),
       types.end(),
@@ -49,9 +52,6 @@ DeviceType parse_type(const std::string& device_string) {
       });
   if (device != types.end()) {
     return device->second;
-  }
-  if (device_string == get_privateuse1_backend()) {
-    return DeviceType::PrivateUse1;
   }
   std::vector<const char*> device_names;
   for (const auto& it : types) {
@@ -83,10 +83,11 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
        pstate != DeviceStringParsingState::ERROR && i < device_string.size();
        ++i) {
     const char ch = device_string.at(i);
+    const unsigned char uch = static_cast<unsigned char>(ch);
     switch (pstate) {
       case DeviceStringParsingState::START:
         if (ch != ':') {
-          if (isalpha(ch) || ch == '_') {
+          if (std::isalpha(uch) || ch == '_') {
             device_name.push_back(ch);
           } else {
             pstate = DeviceStringParsingState::ERROR;
@@ -97,7 +98,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
         break;
 
       case DeviceStringParsingState::INDEX_START:
-        if (isdigit(ch)) {
+        if (std::isdigit(uch)) {
           device_index_str.push_back(ch);
           pstate = DeviceStringParsingState::INDEX_REST;
         } else {
@@ -110,7 +111,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
           pstate = DeviceStringParsingState::ERROR;
           break;
         }
-        if (isdigit(ch)) {
+        if (std::isdigit(uch)) {
           device_index_str.push_back(ch);
         } else {
           pstate = DeviceStringParsingState::ERROR;

@@ -362,7 +362,7 @@ TORCH_API void THP_encodeBuffer<c10::complex<double>>(
 
 #define DEFINE_ENCODE(TYPE)                       \
   template TORCH_API void THP_encodeBuffer<TYPE>( \
-      uint8_t * dst, const TYPE* src, THPByteOrder order, size_t len);
+      uint8_t* dst, const TYPE* src, THPByteOrder order, size_t len);
 
 DEFINE_ENCODE(int16_t)
 DEFINE_ENCODE(int32_t)

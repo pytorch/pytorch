@@ -11,28 +11,25 @@ from numpy.testing import assert_array_equal
 import torch
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._tensor import (
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
-    init_device_mesh,
-)
-from torch.distributed._tensor.experimental import implicit_replication
-from torch.distributed._tensor.placement_types import (
-    DTensorSpec,
     Partial,
     Replicate,
     Shard,
-    TensorMeta,
 )
 from torch.distributed.tensor._api import _shard_tensor
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental import implicit_replication
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import IS_FBCODE, run_tests
+from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -441,7 +438,7 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(type(out_view), AsyncCollectiveTensor)
         self.assertFalse(out.completed)
 
-        # Use the daa, requiring a sync
+        # Use the data, requiring a sync
         ref = torch.ones((4, 2), device=self.device_type) + 1
         ref = ref.view(-1)
         out_data = out_view + 1
@@ -543,6 +540,7 @@ class DTensorTest(DTensorTestBase):
         reloaded_st = torch.load(buffer, weights_only=True)
         self.assertEqual(sharded_tensor, reloaded_st)
 
+    @skipIfHpu
     @with_comms
     @unittest.skipIf(
         IS_FBCODE,
@@ -743,7 +741,7 @@ class DTensorMeshTest(DTensorTestBase):
             ),
         ]
 
-        from torch.distributed._tensor._utils import (
+        from torch.distributed.tensor._utils import (
             compute_local_shape_and_global_offset,
         )
 
@@ -1009,7 +1007,8 @@ class DTensorLogTest(LoggingTestCase):
             """\
 import logging
 import torch
-from torch.distributed._tensor import  init_device_mesh, distribute_tensor, Shard
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, Shard
 
 mesh = init_device_mesh("cuda", (1,), mesh_dim_names=("dp",))
 placements = [Shard(0)]

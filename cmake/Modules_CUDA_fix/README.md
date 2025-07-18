@@ -23,5 +23,5 @@ to allow submodules to use these fixes because we can't patch their
 `CMakeList.txt`.
 
 If you need to update files under `./upstream` folder, we recommend you issue PRs
-against [the CMake mainline branch](https://gitlab.kitware.com/cmake/cmake/tree/master/Modules/FindCUDA.cmake),
+against [the CMake mainline branch](https://github.com/Kitware/CMake/blob/master/Modules/FindCUDA.cmake),
 and then backport it here for earlier CMake compatibility.

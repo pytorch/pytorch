@@ -2,7 +2,6 @@
 import dataclasses
 import inspect
 import sys
-import warnings
 from collections.abc import Iterable, Iterator
 from typing import Any, Callable, Union
 
@@ -10,15 +9,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch import _C, _utils_internal
 from torch._ops import OpOverload
-
-
-def warn_deploy(stacklevel=3):
-    warnings.warn(
-        "Python torch.library APIs do nothing under torch::deploy (multipy). "
-        "Please instead use C++ custom operator registration APIs.",
-        RuntimeWarning,
-        stacklevel=stacklevel,
-    )
 
 
 @dataclasses.dataclass
@@ -442,7 +432,7 @@ class MutationChecker:
                     f"{self.op._name}: for argument '{info.name}': the operator's schema "
                     f"{self.op._schema} specified that "
                     f"the operator {'mutates' if info.is_write else 'does not mutate'} "
-                    f"the argument, but this seems to be emperically wrong. "
+                    f"the argument, but this seems to be empirically wrong. "
                     f"Please make the schema and operator behavior consistent. "
                     f"You can specify that an operator mutates a Tensor by "
                     f"e.g. changing its schema type from 'Tensor name' to 'Tensor(a!) name'"
@@ -501,3 +491,25 @@ def mutated_args_kwargs(schema: _C.FunctionSchema) -> tuple[list[int], list[str]
             else:
                 idxs.append(i)
     return idxs, keys
+
+
+tags_by_priority = [
+    _C.Tag.needs_exact_strides,
+    _C.Tag.needs_contiguous_strides,
+    _C.Tag.needs_fixed_stride_order,
+    _C.Tag.flexible_layout,
+]
+
+
+def get_layout_constraint_tag(fn, *, with_default=True):
+    for tag in tags_by_priority:
+        if tag in fn.tags:
+            return tag
+    if with_default:
+        if is_builtin(fn):
+            return _C.Tag.flexible_layout
+        import torch._functorch
+        from torch._functorch import config
+
+        return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
+    return None

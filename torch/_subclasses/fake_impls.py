@@ -12,6 +12,7 @@ import torch._logging
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
+    contiguous_for_memory_format_or_false,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -68,6 +69,8 @@ _like_tensor_constructors = ordered_set(
     aten.randn_like.default,
     aten.randn_like.out,
     aten.randint_like.default,
+    aten.randint_like.Tensor,
+    aten.randint_like.Tensor_out,
     aten.randint_like.out,
     aten.randint_like.low_dtype,
     aten.randint_like.low_dtype_out,
@@ -111,7 +114,7 @@ def contains_tensor_types(type):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_tensor_constructor(func: OpOverload):
     assert isinstance(func, OpOverload)
     schema = func._schema
@@ -126,9 +129,9 @@ def _is_tensor_constructor(func: OpOverload):
 def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverload]):
     def impl_decorator(op_impl):
         if isinstance(run_impl_check, OpOverload):
-            assert (
-                run_impl_check not in op_implementations_dict
-            ), f"duplicate registration: {run_impl_check}"
+            assert run_impl_check not in op_implementations_dict, (
+                f"duplicate registration: {run_impl_check}"
+            )
             op_implementations_dict[run_impl_check] = op_impl
         elif isinstance(run_impl_check, (list, tuple)):
             for op in run_impl_check:
@@ -228,7 +231,7 @@ def stride_incorrect_op(op):
 # These operators have meta implementations with incorrect strides
 @register_op_impl(stride_incorrect_op)
 def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
-    # This is a workaround for meta implmentations with incorrect strides
+    # This is a workaround for meta implementations with incorrect strides
 
     def is_symbolic(x):
         if isinstance(x, FakeTensor):
@@ -572,25 +575,25 @@ def assert_tensor_metadata(
     layout=None,
 ) -> None:
     if sizes is not None:
-        assert (
-            t.size() == sizes
-        ), f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+        assert t.size() == sizes, (
+            f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+        )
     if strides is not None:
-        assert (
-            t.stride() == strides
-        ), f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+        assert t.stride() == strides, (
+            f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+        )
     if dtype is not None:
-        assert (
-            t.dtype == dtype
-        ), f"Tensor dtype mismatch! Expected: {dtype}, Got: {t.dtype}"
+        assert t.dtype == dtype, (
+            f"Tensor dtype mismatch! Expected: {dtype}, Got: {t.dtype}"
+        )
     if layout is not None:
-        assert (
-            t.layout == layout
-        ), f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout()}"
+        assert t.layout == layout, (
+            f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout()}"
+        )
     if device is not None:
-        assert (
-            t.device == device
-        ), f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
+        assert t.device == device, (
+            f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
+        )
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -634,8 +637,11 @@ def has_meta(func):
     return torch._C._dispatch_has_computed_kernel_for_dispatch_key(func.name(), "Meta")
 
 
+# These are for the `torch._foreach_...` ops like `torch._foreach_add`.
 @register_op_impl(
-    lambda func: is_builtin(func) and "foreach" in func.name() and has_meta(func)
+    lambda func: is_builtin(func)
+    and func.name().startswith("aten::_foreach_")
+    and has_meta(func)
 )
 def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     tensor_lists = [
@@ -844,7 +850,8 @@ def bincount(fake_mode, func, inputs, weights=None, minlength=0):
 
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
-    _constrain_range_for_size(new_size, min=minlength)
+    _constrain_range_for_size(new_size)
+    torch._check(new_size >= minlength)
     return inputs.new_empty(new_size)
 
 
@@ -888,7 +895,7 @@ def register_fast_op_impl(func: OpOverload):
 
 # infer_size_impl in ExpandUtils
 def infer_size(a, b):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     dimsA = len(a)
     dimsB = len(b)
@@ -913,14 +920,12 @@ def infer_size(a, b):
         # were not the case, we'd need to write this using torch.sym_or() or
         # something like that).
         torch._check(
-            guard_size_oblivious(sizeA == 1)
-            or guard_size_oblivious(sizeB == 1)
-            or sizeA == sizeB,
+            guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
             f"at non-singleton dimension {i})",
         )
-        expandedSizes[i] = sizeB if guard_size_oblivious(sizeA == 1) else sizeA
+        expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
     return tuple(expandedSizes)
 
 
@@ -957,7 +962,7 @@ def make_fast_binary_impl(
             final_shape = infer_size(final_shape, shape)
         assert final_shape is not None
 
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
         # Do some extra safety checks to see if the output
         # stride is obvious
@@ -965,10 +970,12 @@ def make_fast_binary_impl(
             if (
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
-                and guard_size_oblivious(sym_eq(op.shape, final_shape))
+                # take the slow path if result is not determined.
+                and guard_or_false(sym_eq(op.shape, final_shape))
             ):
                 break
         else:
+            # if we never break in the for loop above we take the slow path.
             return slow("both tensors nontrivially broadcast")
 
         # compute_types
@@ -1011,22 +1018,29 @@ def make_fast_binary_impl(
                 return slow("error")
 
         # compute_fast_setup_type
-        is_contiguous = True
-        is_channels_last = True
-        # TODO: is_non-overlapping_and_dense (not bound from Python
+        definitely_contiguous = True
+        definitely_channels_last = True
+
+        # TODO: is_non-overlapping_and_dense not bound from Python
         # no inplace, no out, everything defined
 
         if is_noncontiguous_supported(common_device):
             for op in operands:
                 if not isinstance(op, torch.Tensor):
                     continue
-                is_contiguous = is_contiguous and op.is_contiguous(
-                    memory_format=torch.contiguous_format
+                definitely_contiguous = (
+                    definitely_contiguous
+                    and contiguous_for_memory_format_or_false(
+                        op, memory_format=torch.contiguous_format
+                    )
                 )
-                is_channels_last = is_channels_last and op.is_contiguous(
-                    memory_format=torch.channels_last
+                definitely_channels_last = (
+                    definitely_channels_last
+                    and contiguous_for_memory_format_or_false(
+                        op, memory_format=torch.channels_last
+                    )
                 )
-        if is_contiguous:
+        if definitely_contiguous:
             # do contiguous
             count_label("fast is_contiguous")
             return FakeTensor(
@@ -1039,7 +1053,7 @@ def make_fast_binary_impl(
                 ),
                 device=common_device,
             )
-        if is_channels_last:
+        if definitely_channels_last:
             count_label("fast channels_last")
             # do channels last
             return FakeTensor(
@@ -1060,13 +1074,15 @@ def make_fast_binary_impl(
 
 # disable the python dispatcher to avoid decomposing detach() further
 # (proxy_mode should still decompose detach() though)
-def fast_detach(fake_mode, x):
+def fast_detach(fake_mode, x, include_real=False):
     with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
         out = torch.ops.aten.detach.default(x)
-    return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
+    if include_real:
+        return FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
+    return FakeTensor(fake_mode, out, x.device)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_fast_op_impls():
     import torch._refs
 
@@ -1076,7 +1092,9 @@ def get_fast_op_impls():
     register_fast_op_impl(torch.ops.aten.sub.Tensor)(
         make_fast_binary_impl(torch._refs.sub)
     )
-    register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))  # type: ignore[has-type]
+    register_fast_op_impl(torch.ops.aten.mul.Tensor)(
+        make_fast_binary_impl(torch._refs.mul)
+    )  # type: ignore[has-type]
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
         make_fast_binary_impl(
             torch._refs.div,

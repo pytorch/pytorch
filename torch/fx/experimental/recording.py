@@ -155,7 +155,7 @@ class ShapeEnvEvent:
                 fn=lambda args: tuple(maybe_convert_node(a) for a in args),
             )
         if self.is_evaluate_expr() or self.is_defer_runtime_assert():
-            # ShapeEnv.evaluate_expr and ShapeEnv.defer_runtime_assert:
+            # ShapeEnv.evaluate_expr and ShapeEnv.guard_or_defer_runtime_assert:
             # "fx_node" parameter is an (optional) FX node that represents the evaluate expression.
             # They must be replaced, since it will be part of a "call_function" FX node for
             # torch._assert, which will be added to the FX graph of the new shape_env.
@@ -175,7 +175,7 @@ class ShapeEnvEvent:
         return self.name == "evaluate_expr"
 
     def is_defer_runtime_assert(self) -> bool:
-        return self.name == "defer_runtime_assert"
+        return self.name == "guard_or_defer_runtime_assert"
 
 
 NEST = 0
@@ -214,6 +214,10 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 # save_tracked_fakes: saves a snapshot of the TrackedFake list.
 # This is used when calling ShapeEnv.produce_guards at arbitrary points in time.
 #
+# name: the name of the function being recorded. Normally (and by default) this
+# is taken from the decorated function but can be set if you need to override
+# it.
+#
 # When to save the list of TrackedFake?
 # =====================================
 # We should save the list of TrackedFake whenever the translation validation
@@ -224,8 +228,10 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 #
 # At the moment, there are 2 methods that save the list:
 #   - ShapeEnv.evaluate_expr
-#   - ShapeEnv.defer_runtime_assert
-def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
+#   - ShapeEnv.guard_or_defer_runtime_assert
+def record_shapeenv_event(
+    *, save_tracked_fakes: bool = False, name: Optional[str] = None
+) -> Callable:
     def decorator(fn: Callable) -> Callable:
         assert callable(fn)
         args = inspect.getfullargspec(fn).args
@@ -233,7 +239,9 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
             "record_shapeenv_event should only wrap methods on ShapeEnv; refactor your "
             "code so that it calls into a method on ShapeEnv"
         )
-        name = fn.__name__
+        nonlocal name
+        if name is None:
+            name = fn.__name__
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
@@ -252,8 +260,9 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                 trace_shape_events_log.debug("%s-> %s", " " * (NEST - 1), r)
                 return r
 
+            shape_env = args[0]
+
             try:
-                shape_env = args[0]
                 if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
@@ -280,7 +289,11 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                     )
                     # Record the event for 'fn'.
                     event = ShapeEnvEvent(
-                        fn, list(args), kwargs, tracked_fakes, name=fn.__name__
+                        fn,
+                        list(args),
+                        kwargs,
+                        tracked_fakes,
+                        name=name,
                     )
                     # Play the event on this ShapeEnv.
                     # NB: It's important to put the event first, because running
@@ -296,6 +309,9 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                         raise
 
             except Exception:
+                if not shape_env.should_record_events or shape_env.is_recording:
+                    # If ShapeEnv is disabled or already recording an event, re-raise the exception without logging.
+                    raise
                 log.error(  # noqa: G201
                     "failed while running %s(*%s, **%s)",
                     name,
@@ -444,7 +460,7 @@ def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value)
     # Here, we allow the value of each field to be mapped, so that we appropriately
     # compare the two values.
     def compare_vars(
-        map_value: Callable[[str, Any], Any]
+        map_value: Callable[[str, Any], Any],
     ) -> list[tuple[str, str, str]]:
         env1_set, env2_set = set(env1_vars), set(env2_vars)
 

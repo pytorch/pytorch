@@ -2,6 +2,7 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <c10/core/Device.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 
 namespace torch::inductor {
@@ -11,7 +12,8 @@ class TORCH_API AOTIModelPackageLoader {
       const std::string& model_package_path,
       const std::string& model_name = "model",
       const bool run_single_threaded = false,
-      const size_t num_runners = 1);
+      const size_t num_runners = 1,
+      const c10::DeviceIndex device_index = -1);
   ~AOTIModelPackageLoader();
 
   AOTIModelContainerRunner* get_runner();

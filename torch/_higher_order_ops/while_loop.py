@@ -6,14 +6,11 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
     check_meta_consistency,
     reenter_make_fx,
-    UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
@@ -110,9 +107,9 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
         - body_fn and cond_fn must not in-place mutate the carried_inputs. A clone before the mutation is required.
 
-        - body_fn and cond_fn must not mutate python varialbles (e.g. list/dict) created outside of the body_fn.
+        - body_fn and cond_fn must not mutate python variables (e.g. list/dict) created outside of the body_fn.
 
-        - body_fn and cond_fn's output cannot aliase any of the inputs. A clone is required.
+        - body_fn and cond_fn's output cannot alias any of the inputs. A clone is required.
 
     .. warning::
         Temporal Limitations:
@@ -205,12 +202,12 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
     while pred := cond_fn(*carried_vals, *additional_inputs):
         _validate_cond_output(pred)
         out = body_fn(*carried_vals, *additional_inputs)
-        assert isinstance(
-            out, tuple
-        ), f"body_fn should return a tuple but got {type(out)}"
-        assert len(out) == len(
-            carried_inputs
-        ), "body_fn should return the same number of elements as carried_inputs"
+        assert isinstance(out, tuple), (
+            f"body_fn should return a tuple but got {type(out)}"
+        )
+        assert len(out) == len(carried_inputs), (
+            "body_fn should return the same number of elements as carried_inputs"
+        )
         carried_vals = out
     return carried_vals
 
@@ -233,9 +230,9 @@ def _find_or_create_fake_mode() -> FakeTensorMode:
 def _create_unbacked_symint(
     fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
 ) -> torch.SymInt:
-    assert (
-        fake_mode is not None and fake_mode.shape_env is not None
-    ), "Must provide a fake_mode with shape_env."
+    assert fake_mode is not None and fake_mode.shape_env is not None, (
+        "Must provide a fake_mode with shape_env."
+    )
     ctx = (
         contextlib.nullcontext()
         if not ignore_fresh_unbacked_symbols
@@ -282,8 +279,8 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         #   For this reason, we treat int, symint outputs in the same way:
         #   - they can match against any of int, symint carry
         #   - we unspecialize them with new unbacked symints in fake while_loop
-        #   Similarly, we could do some analysis to refine the output ranges but it's eaiser to start with
-        #   fresh unbacked symints. One suprising case can be: an input unbacked symint is constrained by
+        #   Similarly, we could do some analysis to refine the output ranges but it's easier to start with
+        #   fresh unbacked symints. One surprising case can be: an input unbacked symint is constrained by
         #   users to be >= 0 (either before while_loop or inside body_fn) and it increments by 1 in each
         #   iteration. Ideally, we should know that the final output is >= 0 but we didn't constrain the
         #   unbacked symint output of subgraph as of today because this requires a smart range analysis.
@@ -380,7 +377,11 @@ def while_loop_fake_tensor_mode(
             # so we could just return the output after one iteration.
             body_outs = body_fn(*carried_inputs, *additional_inputs)
             check_meta_consistency(
-                carried_inputs, body_outs, "carried_inputs", "body_output"
+                carried_inputs,
+                body_outs,
+                "carried_inputs",
+                "body_output",
+                include_contiguity=False,
             )
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
@@ -396,6 +397,8 @@ def while_loop_fake_tensor_mode(
 
 @while_loop_op.py_functionalize_impl
 def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
+    from torch._higher_order_ops.utils import _check_alias_and_mutation
+
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
@@ -407,19 +410,7 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
             (cond_fn, "cond_fn"),
             (body_fn, "body_fn"),
         ]:
-            if _has_potential_branch_input_mutation(
-                fn, unwrapped_inputs, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    f"torch.while_loop's {fn_name} might be modifying the input!"
-                )
-
-            if _has_potential_branch_input_alias(
-                fn, unwrapped_inputs, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    f"torch.while_loop's {fn_name} might be aliasing the input!"
-                )
+            _check_alias_and_mutation(fn, unwrapped_inputs, fn_name, pre_dispatch)
         ret = while_loop_op(
             functional_cond_fn,
             functional_body_fn,

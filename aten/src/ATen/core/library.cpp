@@ -61,9 +61,17 @@ void Library::reset() {
 
 #if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
 namespace detail {
+  // Insertion of library initializers into torch_library_initializers is not
+  // thread-safe as we expect this to be handled by the applications dynamic
+  // library loader, which would guarantee that only one thread is inserting
+  // libraries into the vector. We do require thread safety when calling
+  // initialize_torch_libraries however, as this can be called from any
+  // thread, and potentially race and corrupt the library initializer vector.
+  std::mutex torch_library_initializer_mutex;
   std::vector<TorchLibraryInit*> torch_library_initializers;
 } // namespace detail
 void initialize_torch_libraries() {
+  const std::lock_guard<std::mutex> lock(detail::torch_library_initializer_mutex);
   for (auto* initializer : detail::torch_library_initializers) {
     initializer->initialize();
   }

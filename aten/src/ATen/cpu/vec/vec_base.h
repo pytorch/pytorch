@@ -143,7 +143,29 @@ DEFINE_INT_OF_SIZE(int8_t);
 template <typename T>
 using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 
-// NOTE: If you specialize on a type, you must define all operations!
+/**
+ * Detect at compile time whether Vectorized has an explicit
+ * specialization for T. (You are required to specialize this type
+ * whenever you specialize Vectorized). Useful for generic algorithms
+ * to decide whether to rely on a specialization being fast. For
+ * example, they might choose to handle reduced-precision floating
+ * point types directly if they're supported, or convert through float
+ * if not.
+ */
+#if defined(__s390x__)
+template <class T, class TEMP = void>
+#else
+template <typename T>
+#endif
+struct is_vec_specialized_for : std::bool_constant<false> {
+};
+
+template <typename T>
+constexpr bool is_vec_specialized_for_v = is_vec_specialized_for<T>::value;
+
+// NOTE: If you specialize Vectorized on a type, you must define all
+// operations!  You must also specialize is_vec_specialized_for for
+// that type.
 
 // emulates Vectorized types
 #if defined(__s390x__)
@@ -216,9 +238,6 @@ struct Vectorized {
     Vectorized vector;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
-#if defined(__clang__) && __ARM_FEATURE_SVE
-#pragma clang loop vectorize(disable)
-#endif
     for (const auto i : c10::irange(size())) {
       if (buffer[i] & 0x01) {
         vector[i] = b[i];
@@ -523,6 +542,9 @@ struct Vectorized {
     return map(std::expm1);
   }
   Vectorized<T> exp_u20() const {
+    return map(std::exp);
+  }
+  Vectorized<T> fexp_u20() const {
     return map(std::exp);
   }
   Vectorized<T> frac() const {
@@ -1323,7 +1345,7 @@ inline Vectorized<IntType> convert_to_int_of_same_size(
   static_assert(sizeof(T) == sizeof(IntType));
   static constexpr int size = Vectorized<T>::size();
 
-  std::array<T, size> src_arr;
+  std::array<T, size> src_arr = {};
   src.store(static_cast<void*>(src_arr.data()));
   std::array<IntType, size> buffer;
   std::transform(

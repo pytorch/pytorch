@@ -5,14 +5,14 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/accumulate.h>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 #include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
 #endif
 
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 template <typename KT>
 __global__ void __launch_bounds__(32 /* num_threads */)
@@ -89,7 +89,7 @@ std::tuple<Tensor, Tensor> _sparse_semi_structured_apply_typed(Tensor input, Ten
 
 std::tuple<Tensor, Tensor> _sparse_semi_structured_apply(const Tensor& input, const Tensor& threads_masks) // Returned by `_sparse_semi_structured_tile`
 {
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
   TORCH_CHECK(false, "_sparse_semi_structured_apply: not supported");
   return std::make_tuple(Tensor{}, Tensor{});
 #else
