@@ -6,8 +6,19 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, final, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Concatenate, ParamSpec
+from collections.abc import Iterator
+from functools import cached_property
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    final,
+    Generic,
+    Optional,
+    TYPE_CHECKING,
+    Union,
+)
+from typing_extensions import Concatenate, ParamSpec, TypeVar
 
 import torch
 import torch.utils._pytree as pytree
@@ -21,8 +32,8 @@ if TYPE_CHECKING:
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
 
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
+_T = TypeVar("_T", default=Any)
+_P = ParamSpec("_P", default=...)
 
 
 # Query `hasattr` only once.
@@ -74,7 +85,7 @@ class OperatorBase:
 
         # This table allows you to override the behavior of a particular
         # dispatch key to call a custom Python function, rather than the
-        # ordinary C++ configured behavior.  This is the raison d'etre of
+        # ordinary C++ configured behavior.  This is the raison d'etre of  # codespell:ignore
         # Python dispatcher: to let you program the dispatcher from Python
         # in case you need something unusual, and don't want to clobber
         # the existing registrations using the Python operator registration
@@ -286,7 +297,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             self.fallthrough(dispatch_key)
 
         # [NOTE] We have to register pre-dispatch key implementation
-        # because sometimes HOP use aot-dispatch tracing to detect certaion
+        # because sometimes HOP use aot-dispatch tracing to detect certain
         # mutations. This is problematic when we are functionalizing HOP
         # during pre-dispatch because when the inner tracer starts, it will see
         # that PreDispatch key is still active. In that case, we just redispatch
@@ -318,6 +329,18 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             ):
                 with torch._C._AutoDispatchBelowAutograd():
                     return self(*args, **kwargs)
+
+            from torch._higher_order_ops.utils import _has_gen_schema
+
+            if _has_gen_schema(self):
+                schema = self.gen_schema(*args, **kwargs)
+                if any(arg.is_write for arg in schema.arguments):
+                    raise RuntimeError(
+                        f"The {self.name()} HigherOrderOperator does not currently support training "
+                        "with in-place input or buffer mutations "
+                        "If you require this feature, please submit an issue to PyTorch. "
+                        "Alternatively, consider creating your own custom autograd.Function. "
+                    )
 
             return fn(*args, **kwargs)
 
@@ -392,10 +415,19 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                         # TODO(rzou): we should support torch_dispatch calling convention too.
                         result = handler(mode, *args, **kwargs)
                 else:
-                    raise NotImplementedError(
-                        f"There was no rule registered for HOP {self._name} and mode {curr_mode}. "
-                        f"We recommend filing an issue."
-                    )
+                    if curr_mode.supports_higher_order_operators:
+                        with _pop_mode_temporarily() as mode:
+                            return curr_mode.__torch_dispatch__(self, [], args, kwargs)
+                    else:
+                        raise NotImplementedError(
+                            f"There was no rule registered for HigherOrderOperator {self._name} and mode {curr_mode}."
+                            f"Hint: set {curr_mode}'s supports_higher_order_operators to True."
+                            f" This causes all higher order operators to pass through {curr_mode}'s __torch_dispatch__,"
+                            f" so handle them accordingly by"
+                            f" adding support for HigerOrderOperators (in this case, {self._name}) in"
+                            f" {curr_mode}.__torch_dispatch__ or"
+                            f" returning NotImplemented when not supported."
+                        )
                 if result is not NotImplemented:
                     return result
 
@@ -434,10 +466,12 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
             # All handlers returned NotImplemented
             raise TypeError(
-                f"Multiple dispatch failed for {self._name}. There was no registered that "
-                f"did not return NotImplemented. Use HOP.py_impl to register some. "
-                f"Tried mode: {curr_mode}) and subclasses: "
-                f"{[type(a) for a in overloaded_args]}"
+                f"HigherOrderOperator '{self._name}' is not supported for the given input types. "
+                f"This typically happens when using custom tensor types or dispatch modes that don't "
+                f"have implementations for this operation.\n\n"
+                f"Current mode: {curr_mode}\n"
+                f"Input types: {[type(a).__name__ for a in overloaded_args]}\n\n"
+                f"To fix this, can add support for '{self._name}' in {curr_mode}'s __torch_dispatch__\n"
             )
 
         functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
@@ -734,8 +768,15 @@ def get_cached_ops():
 
 # Each OpOverload object contains pointer to a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
-class OpOverload(OperatorBase):
-    def __init__(self, overloadpacket, op, op_dk, schema, tags):
+class OpOverload(OperatorBase, Generic[_P, _T]):
+    def __init__(
+        self,
+        overloadpacket: "OpOverloadPacket",
+        op: Callable[_P, _T],
+        op_dk: Callable[Concatenate[DispatchKey, _P], _T],
+        schema: torch._C.FunctionSchema,
+        tags: list[Any],
+    ) -> None:
         super().__init__()
         self._op = op
         self._op_dk = op_dk
@@ -755,9 +796,6 @@ class OpOverload(OperatorBase):
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
         self.__annotations__ = {}
-        # Only compute the OperatorHandle when we need it. Not all OpOverloads have
-        # OperatorHandles (the TorchScript ones don't...)
-        self._lazy_handle = None
 
         # If the OpOverload was constructed from a Library.def in Python.
         self._defined_in_python = self.__qualname__ in torch.library._defs
@@ -775,40 +813,38 @@ class OpOverload(OperatorBase):
                 is_write = a.alias_info.is_write or is_write
         self.is_view = is_write is not None and not is_write
 
-    @property
-    def _namespace(self):
-        return self._schema.name.split("::")[0]
+    @cached_property
+    def _namespace(self) -> str:
+        return self._schema.name.split("::", maxsplit=1)[0]
 
-    @property
-    def _opname(self):
-        return self._schema.name.split("::")[1]
+    @cached_property
+    def _opname(self) -> str:
+        return self._schema.name.split("::", maxsplit=1)[1]
 
-    @property
-    def _handle(self):
-        if self._lazy_handle is None:
-            self._lazy_handle = torch._C._dispatch_find_schema_or_throw(
-                self._schema.name, self._schema.overload_name
-            )
-        return self._lazy_handle
+    @cached_property
+    def _handle(self) -> torch._C._DispatchOperatorHandle:
+        return torch._C._dispatch_find_schema_or_throw(
+            self._schema.name, self._schema.overload_name
+        )
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
 
     def __repr__(self):
-        return "<OpOverload(op='{}.{}', overload='{}')>".format(
-            *self._schema.name.split("::"), self._overloadname
-        )
+        return f"<OpOverload(op='{self._namespace}.{self._opname}', overload='{self._overloadname}')>"
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
-    def __call__(self, /, *args, **kwargs):
+    def __call__(self, /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
         return self._op(*args, **kwargs)
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
-    def redispatch(self, /, keyset, *args, **kwargs):
-        return self._handle.redispatch_boxed(keyset, *args, **kwargs)
+    def redispatch(
+        self, /, keyset: torch._C.DispatchKeySet, *args: _P.args, **kwargs: _P.kwargs
+    ) -> _T:
+        return self._handle.redispatch_boxed(keyset, *args, **kwargs)  # type: ignore[return-value]
 
     def __hash__(self):
         return hash(self._op)
@@ -817,27 +853,27 @@ class OpOverload(OperatorBase):
     def __str__(self):
         return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
 
-    def has_kernel_for_dispatch_key(self, k):
+    def has_kernel_for_dispatch_key(self, k: DispatchKey) -> bool:
         return super().has_kernel_for_dispatch_key(
             k
         ) or torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), k)
 
-    def has_kernel_for_any_dispatch_key(self, ks):
+    def has_kernel_for_any_dispatch_key(self, ks: torch._C.DispatchKeySet) -> bool:
         return torch._C._dispatch_has_kernel_for_any_dispatch_key(
             self.name(), ks
         ) or super().has_kernel_for_any_dispatch_key(ks)
 
     @property
-    def namespace(self):
-        return self._schema.name.split("::")[0]
+    def namespace(self) -> str:
+        return self._namespace
 
-    def _can_decompose(self):
+    def _can_decompose(self) -> bool:
         dk = DispatchKey.CompositeImplicitAutograd
         return dk in self.py_kernels or torch._C._dispatch_has_kernel_for_dispatch_key(
             self.name(), dk
         )
 
-    def decompose(self, *args, **kwargs):
+    def decompose(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
         dk = DispatchKey.CompositeImplicitAutograd
         if dk in self.py_kernels:
             # NB: This branch is not too necessary anymore, because we can
@@ -858,11 +894,11 @@ class OpOverload(OperatorBase):
     # registering Autograd affects AutogradCPU).  del_dispatch is to be used
     # only if you are specifically modifying how get_dispatch handles a
     # particular input 'key'.
-    def _uncache_dispatch(self, key):
+    def _uncache_dispatch(self, key: DispatchKey) -> None:
         self._dispatch_cache.pop(key, None)
 
     # This implements the pre-computation logic for the Python dispatcher.
-    def _get_dispatch(self, key):
+    def _get_dispatch(self, key: DispatchKey) -> Union[DispatchKey, Callable[_P, _T]]:
         # This is only called upon a cache miss
         assert key not in self._dispatch_cache, f"{self} {key}"
 
@@ -872,7 +908,7 @@ class OpOverload(OperatorBase):
                 add_cached_op(self)
                 return key
 
-            def handler(*args, **kwargs):
+            def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
                 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
                 # TODO: We also need to handle tensor subclasses here
@@ -912,7 +948,7 @@ class OpOverload(OperatorBase):
                 )
             ):
 
-                def handler(*args, **kwargs):
+                def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
                     @contextlib.contextmanager
                     def _temporarily_pop_modes_from_pre_dispatch():
                         top_mode = _pop_mode_from_pre_dispatch()
@@ -945,7 +981,7 @@ class OpOverload(OperatorBase):
             import torch._dispatch.python as pydispatch
 
             if pydispatch.CROSSREF_FUNCTIONALIZE:
-                handler = pydispatch.make_crossref_functionalize(self, final_key)
+                handler = pydispatch.make_crossref_functionalize(self, final_key)  # type: ignore[assignment]
                 if cache_result:
                     self._dispatch_cache[key] = handler
                     add_cached_op(self)
@@ -979,7 +1015,7 @@ class OpOverload(OperatorBase):
 # schema consists of torch.ScriptObject (i.e. custom class) input.
 # TorchBindOpOverload will skip C++ dispatcher and purely dispatched in python
 # when its inputs contain FakeScriptObject in a similar way as higher order ops.
-class TorchBindOpOverload(OpOverload):
+class TorchBindOpOverload(OpOverload[_P, _T]):
     def _fallthrough_keys(self) -> list[DispatchKey]:
         # TODO: we should be calling the fallback for these, but a fallthrough is almost close
         # enough to the fallback in most cases that we care about.
@@ -1028,7 +1064,7 @@ class TorchBindOpOverload(OpOverload):
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
-    def __call__(self, /, *args, **kwargs):
+    def __call__(self, /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
         if _must_dispatch_in_python(args, kwargs):
             # When any inputs are FakeScriptObject, we need to
             # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher
@@ -1041,10 +1077,14 @@ class TorchBindOpOverload(OpOverload):
             # 2. We don't want to register the op as effectful for all torchbind ops in ctor because this might
             #    cause unexpected behavior for some autograd.profiler ops e.g. profiler._record_function_exit._RecordFunction.
             with self._register_as_effectful_op_temporarily():
-                return self._dispatch_in_python(args, kwargs, self._fallthrough_keys())
+                return self._dispatch_in_python(
+                    self._fallthrough_keys(), *args, **kwargs
+                )
         return self._op(*args, **kwargs)
 
-    def _dispatch_in_python(self, args, kwargs, fallthrough_keys):
+    def _dispatch_in_python(
+        self, fallthrough_keys: list[DispatchKey], *args: _P.args, **kwargs: _P.kwargs
+    ) -> _T:
         non_fallthrough_keys = torch._C._dispatch_keyset_full()
         for key in fallthrough_keys:
             non_fallthrough_keys = non_fallthrough_keys.remove(key)
@@ -1065,7 +1105,9 @@ class TorchBindOpOverload(OpOverload):
                 self.name(), dispatch_key
             ):
                 return self._dispatch_in_python(
-                    args, kwargs, fallthrough_keys + [dispatch_key]
+                    fallthrough_keys + [dispatch_key],
+                    *args,
+                    **kwargs,
                 )
 
             raise RuntimeError(
@@ -1073,7 +1115,7 @@ class TorchBindOpOverload(OpOverload):
                 f" but no python implementation is found."
                 f" Please file an issue on this when you encounter this error."
                 f" This error can happen when you export or compile the model."
-                f" It can still happpen even if a C++ implementation for {dispatch_key}. "
+                f" It can still happen even if a C++ implementation for {dispatch_key}. "
                 f" has been registered. That's because FakeScriptObject purely lives in python and cannot work "
                 f" with a C++ implementation."
             )
@@ -1097,15 +1139,23 @@ def _has_script_object_arg(schema: torch.FunctionSchema) -> bool:
 
 # OpOverloadPacket class contains pointer to a base unresolved operator that doesn't correspond to a specific operator
 # You can obtain an OpOverload object through attribute query.
-class OpOverloadPacket:
-    def __init__(self, qualified_op_name, op_name, op, overload_names):
+class OpOverloadPacket(Generic[_P, _T]):
+    __file__: ClassVar[str] = "torch.ops"
+
+    def __init__(
+        self,
+        qualified_op_name: str,
+        op_name: str,
+        op: Callable[_P, _T],
+        overload_names: list[str],
+    ) -> None:
         # These attributes are accessible on the object through the properties
         # defined below but are immutable
         self._qualified_op_name = qualified_op_name
         self.__name__ = op_name
         self._op = op
         self._overload_names = overload_names
-        self._dir = []
+        self._dir: list[str] = []
         self._has_torchbind_op_overload = any(
             _has_script_object_arg(schema) for schema in self._schemas.values()
         )
@@ -1136,11 +1186,7 @@ class OpOverloadPacket:
             for overload_name in self._overload_names
         }
 
-    def __getattr__(self, key) -> Any:
-        # It is not a valid op_name when __file__ is passed in
-        if key == "__file__":
-            return "torch.ops"
-
+    def __getattr__(self, key: str) -> OpOverload[_P, _T]:
         # ensure that query for dunder attributes that does not exist on
         # opoverloadpacket but instead exists on the self._op object does not unnecessarily call
         # `_get_operation_overload` (which is an expensive operation).
@@ -1175,7 +1221,7 @@ class OpOverloadPacket:
 
             op_, op_dk_, tags = op_dk_tags
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
-            overload = (
+            overload: OpOverload[_P, _T] = (
                 OpOverload(self, op_, op_dk_, schema, tags)
                 if not _has_script_object_arg(schema)
                 else TorchBindOpOverload(self, op_, op_dk_, schema, tags)
@@ -1189,12 +1235,12 @@ class OpOverloadPacket:
                 f"The underlying op of '{str(self)}' has no overload name '{key}'"
             ) from None
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._dir)
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
-    def __call__(self, /, *args, **kwargs):
+    def __call__(self, /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
         # overloading __call__ to ensure torch.ops.foo.bar()
         # is still callable from JIT
         # We save the function ptr as the `op` attribute on
@@ -1204,8 +1250,8 @@ class OpOverloadPacket:
         # the schema and cause an error for torchbind op when inputs consist of FakeScriptObject so we
         # intercept it here and call TorchBindOpverload instead.
         if self._has_torchbind_op_overload and _must_dispatch_in_python(args, kwargs):
-            return _call_overload_packet_from_python(self, args, kwargs)
-        return self._op(*args, **(kwargs or {}))
+            return _call_overload_packet_from_python(self, *args, **kwargs)
+        return self._op(*args, **kwargs)
 
     # TODO: use this to make a __dir__
     def overloads(self):
@@ -1214,8 +1260,10 @@ class OpOverloadPacket:
 
 # Note - this mirrors the logic of the cpp_function defined in jit/python/init.cpp
 # _jit_get_operations, which calls _get_operation_for_overload_or_packet.
-def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
-    # Re-use the torch function handling logic in cpp
+def _call_overload_packet_from_python(
+    op: OpOverloadPacket[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+) -> _T:
+    # Reuse the torch function handling logic in cpp
     torch_function_called, ret = torch._C._maybe_call_torch_function_for_op_packet(
         op, *args, **kwargs
     )
@@ -1288,19 +1336,18 @@ class _OpNamespace(types.ModuleType):
         operation will already exist).
     """
 
-    def __init__(self, name):
+    __file__ = "torch.ops"
+
+    def __init__(self, name: str) -> None:
         super().__init__("torch.ops." + name)
         self.name = name
-        self._dir = []
+        self._dir: list[str] = []
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._dir)
 
-    def __getattr__(self, op_name) -> Any:
-        # It is not a valid op_name when __file__ is passed in
-        if op_name == "__file__":
-            return "torch.ops"
-        elif op_name in ["__origin__", "__self__"]:
+    def __getattr__(self, op_name: str) -> OpOverloadPacket:
+        if op_name in ("__origin__", "__self__"):
             raise AttributeError(
                 f"Invalid attribute '{op_name}' for '_OpNamespace' '{self.name}'"
             )
@@ -1353,19 +1400,25 @@ def _refresh_packet(packet):
     packet._overload_names = overload_names
 
 
-class _PyOpNamespace(_OpNamespace):
-    def __init__(self, name, ops):
-        super().__init__(name)
-        self._ops = ops
+class _HigherOrderNamespace(types.ModuleType):
+    __file__ = "torch.ops"
 
-    def __getattr__(self, name):
-        # Following _OpNamespace.__getattr__, we cache the op on the _PyOpNamespace object.
-        op = self._ops.get(name, None)
+    def __init__(self) -> None:
+        super().__init__("torch.ops.higher_order")
+        self._dir: list[str] = []
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._dir)
+
+    def __getattr__(self, name: str) -> HigherOrderOperator:
+        # Following _OpNamespace.__getattr__, we cache the op on this object.
+        op = _higher_order_ops.get(name, None)
         if op is None:
             raise AttributeError(
-                f"'_PyOpNamespace' '{self.name}' object has no attribute '{name}'"
+                f"'_HigherOrderNamespace' 'torch.ops.higher_order' object has no attribute '{name}'"
             )
         setattr(self, name, op)
+        self._dir.append(name)
         return op
 
 
@@ -1375,23 +1428,17 @@ class _Ops(types.ModuleType):
     def __init__(self):
         super().__init__("torch.ops")
         self.loaded_libraries = set()
-        self._higher_order_op_namespace = _PyOpNamespace(
-            "torch.ops.higher_order", _higher_order_ops
-        )
+        self.higher_order = _HigherOrderNamespace()
         self._dir = []
 
-    def __getattr__(self, name):
-        # Check if the name is a HigherOrderOperator
-        if name == "higher_order":
-            return self._higher_order_op_namespace
-
+    def __getattr__(self, name: str) -> _OpNamespace:
         # Here we are creating `torch.ops.my_namespace`
         namespace = _OpNamespace(name)
         setattr(self, name, namespace)
         self._dir.append(name)
         return namespace
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._dir)
 
     def import_module(self, module):
@@ -1431,15 +1478,15 @@ class _Ops(types.ModuleType):
         Args:
             path (str): A path to a shared library to load.
         """
-        if torch._running_with_deploy():
-            return
-
         path = _utils_internal.resolve_library_path(path)
         with dl_open_guard():
             # Import the shared library into the process, thus running its
             # static (global) initialization code in order to register custom
             # operators with the JIT.
-            ctypes.CDLL(path)
+            try:
+                ctypes.CDLL(path)
+            except Exception as e:
+                raise RuntimeError(f"Could not load this library: {path}") from e
         self.loaded_libraries.add(path)
 
 

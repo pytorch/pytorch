@@ -32,9 +32,7 @@ inline namespace CPU_CAPABILITY {
     static constexpr size_type size() {                                       \
       return vl;                                                              \
     }                                                                         \
-    Vectorized() {                                                            \
-      values = svdup_n_s##bit(0);                                             \
-    }                                                                         \
+    Vectorized() {}                                                           \
     Vectorized(svint##bit##_t v) : values(v) {}                               \
     Vectorized(int##bit##_t val) {                                            \
       values = svdup_n_s##bit(val);                                           \

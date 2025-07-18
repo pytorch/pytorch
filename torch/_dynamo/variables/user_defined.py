@@ -10,7 +10,9 @@ The key classes are:
   attribute access, and other Python object behaviors.
 - Specialized subclasses for common patterns:
   - UserDefinedDictVariable: For dict subclasses
+  - UserDefinedSetVariable: For set subclasses
   - UserDefinedTupleVariable: For tuple subclasses
+  - UserDefinedExceptionObjectVariable: For exception subclasses
   - FrozenDataClassVariable: Special handling of frozen dataclasses
   - MutableMappingVariable: For collections.abc.MutableMapping subclasses
 
@@ -66,9 +68,11 @@ from ..utils import (
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
+    frozenset_methods,
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
+    is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -77,6 +81,7 @@ from ..utils import (
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
+    set_methods,
     tensortype_to_dtype,
     tuple_methods,
     unpatched_nn_module_getattr,
@@ -104,6 +109,10 @@ if TYPE_CHECKING:
 
 def is_standard_setattr(val):
     return val in (object.__setattr__, BaseException.__setattr__)
+
+
+def is_standard_delattr(val):
+    return val in (object.__delattr__, BaseException.__delattr__)
 
 
 def is_forbidden_context_manager(ctx):
@@ -145,7 +154,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return f"{self.__class__.__name__}({self.value})"
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _constant_fold_classes():
         return {
             torch.device,
@@ -155,12 +164,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
         }
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _in_graph_classes():
         _in_graph_class_list = {
             torch.Tensor,
+            torch.cuda.FloatTensor,
+            torch.cuda.DoubleTensor,
+            torch.cuda.HalfTensor,
+            torch.cuda.BFloat16Tensor,
+            torch.cuda.ByteTensor,
+            torch.cuda.CharTensor,
+            torch.cuda.IntTensor,
+            torch.cuda.ShortTensor,
+            torch.cuda.LongTensor,
+            torch.Stream,
+            torch.Event,
             torch.cuda.Stream,
             torch.cuda.Event,
+            torch.xpu.Stream,
+            torch.xpu.Event,
         }
         if hasattr(torch, "hpu"):
             _in_graph_class_list.update(
@@ -173,7 +195,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return set(tensortype_to_dtype.keys()) | _in_graph_class_list
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def supported_c_new_functions():
         exceptions = [
             getattr(builtins, name).__new__
@@ -184,6 +206,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return {
             object.__new__,
             dict.__new__,
+            set.__new__,
+            frozenset.__new__,
             tuple.__new__,
             list.__new__,
         }.union(exceptions)
@@ -268,6 +292,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(obj)
         elif isinstance(obj, enum.Enum):
             return EnumVariable(obj)
+        elif self.value is collections.OrderedDict:
+            return variables.GetAttrVariable(self, name)
         elif name in getattr(self.value, "__dict__", {}) or (
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
@@ -379,6 +405,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
+        elif issubclass(self.value, dict) and name != "__new__":
+            # __new__ is handled below
+            return variables.BuiltinVariable(dict).call_method(tx, name, args, kwargs)
+        elif issubclass(self.value, (set, frozenset)) and name != "__new__":
+            # __new__ is handled below
+            return variables.BuiltinVariable(set).call_method(tx, name, args, kwargs)
         elif (
             name == "__new__"
             and self.value is collections.OrderedDict
@@ -473,7 +505,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
         elif self.value is weakref.ref:
-            return variables.WeakRefVariable(args[0])
+            if len(args) > 1:
+                callback = args[1]
+            else:
+                callback = variables.ConstantVariable.create(None)
+            return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
                 unimplemented("functools.partial malformed")
@@ -769,7 +805,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.base_cls_vt = base_cls_vt
         self.init_args = init_args
 
-        # This records names of the attributes that were modifed via instance
+        # This records names of the attributes that were modified via instance
         # `__dict__` directly, rather than the normal setattr path.
         #
         # TODO consider emulating `obj.__dict__` as a `ConstDictVariable` to get
@@ -839,7 +875,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _supported_random_functions():
         fns = {
             random.random,
@@ -873,6 +909,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
+
+            if is_standard_delattr(method):
+                return self.method_setattr_standard(
+                    tx, args[0], variables.DeletedVariable()
+                )
 
             if method is object.__eq__ and len(args) == 1 and not kwargs:
                 other = args[0]
@@ -1234,6 +1275,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # e.g.: inspect.getattr_static({}, "fromkeys")
             func = subobj.__get__(self.value, None)
             return VariableTracker.build(tx, func, source)
+        elif is_lru_cache_wrapped_function(subobj):
+            # getattr_static returns the lru_wrapped function, and we cannot
+            # extract the underlying method from the wrapped function. To handle
+            # it, manually create a wrapped user method vt.
+            return variables.WrapperUserMethodVariable(
+                subobj, "__wrapped__", self, source=source
+            )
         elif inspect.getattr_static(
             type(subobj), "__get__", NO_SUCH_SUBOBJ
         ) is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(
@@ -1503,7 +1551,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             self.exc_vt.args = args
             self.value.args = args
             return variables.ConstantVariable(None)
-        if (
+        elif (
             name == "__setattr__"
             and len(args) == 2
             and isinstance(args[0], variables.ConstantVariable)
@@ -1511,6 +1559,8 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             in ("__cause__", "__context__", "__suppress_context__", "__traceback__")
         ):
             self.exc_vt.call_setattr(tx, args[0], args[1])
+        elif name == "with_traceback":
+            return self.exc_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     @property
@@ -1647,6 +1697,91 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._dict_vt)
+
+    @property
+    def items(self):
+        return self._dict_vt.items
+
+    def install_dict_keys_match_guard(self):
+        return self._dict_vt.install_dict_keys_match_guard()
+
+    def install_dict_contains_guard(self):
+        return self._dict_vt.install_dict_contains_guard()
+
+
+class UserDefinedSetVariable(UserDefinedObjectVariable):
+    """
+    Represents user defined objects that are subclasses of set.
+
+    Internally, it uses a SetVariable to represent the set part of the
+    variable tracker. For everything else, it falls back to
+    UserDefinedObjectVariable.
+    """
+
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, set_vt=None, **kwargs):
+        super().__init__(value, **kwargs)
+        self._set_vt = set_vt
+
+        python_type = set if isinstance(value, set) else frozenset
+        self._set_methods = set_methods if python_type is set else frozenset_methods
+
+        if self._set_vt is None:
+            assert self.source is None, (
+                "set_vt must be constructed by builder.py when source is present"
+            )
+            if python_type is set:
+                # set is initialized later
+                self._set_vt = variables.SetVariable(
+                    {}, mutation_type=ValueMutationNew()
+                )
+            else:
+                init_args = kwargs.get("init_args", {})
+                tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+                self._set_vt = variables.BuiltinVariable(python_type).call_function(
+                    tx, init_args, {}
+                )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        method = self._maybe_get_baseclass_method(name)
+        if method in self._set_methods:
+            return self._set_vt.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def as_python_constant(self):
+        return self._set_vt.as_python_constant()
+
+    def unpack_var_sequence(self, tx):
+        if inspect.getattr_static(self.value, "__iter__") in (
+            set.__iter__,
+            frozenset.__iter__,
+        ):
+            return self._set_vt.unpack_var_sequence(tx)
+        raise NotImplementedError
+
+    @property
+    def set_items(self):
+        return self._set_vt.set_items
+
+    @property
+    def items(self):
+        return self._set_vt.items
+
+    def is_underlying_vt_modified(self, side_effects):
+        return side_effects.is_modified(self._set_vt)
+
+    def install_dict_keys_match_guard(self):
+        return self._set_vt.install_dict_keys_match_guard()
+
+    def install_dict_contains_guard(self):
+        return self._set_vt.install_dict_contains_guard()
 
 
 class UserDefinedListVariable(UserDefinedObjectVariable):

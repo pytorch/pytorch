@@ -459,7 +459,7 @@ copy_graphstate() -> T, a somewhat legacy name, is expected to emit a snapshot o
 can also be taken in at restore_graphstate(T) calls.
 
 When to snapshot, is, at the moment, an implementation detail of upstream callers. Checkpointable
-does not provide any garuantees around consistency, idempotency, or safety of calling its APIs, yet.
+does not provide any guarantees around consistency, idempotency, or safety of calling its APIs, yet.
 
 In the future, it will have a closer coupling to a generic Checkpoint management system.
 """
@@ -864,7 +864,7 @@ class TracingContext:
         # See note [Tensor Fakification and Symbol Caching]
         self.tensor_to_context = WeakTensorKeyDictionary()
 
-        # If this true, Aot Autograd will return output Fake Tensors with appropiate
+        # If this true, Aot Autograd will return output Fake Tensors with appropriate
         # meta on the first invocation
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
@@ -985,6 +985,13 @@ class TracingContext:
         # Save the current location in the frame. Lazily generate the
         # framesummary.
         TracingContext.get().loc_in_frame = (filename, lineno, frame_name)
+
+    @staticmethod
+    def get_traced_code():
+        tc = TracingContext.try_get()
+        if tc is None:
+            return None
+        return tc.traced_code
 
 
 @contextmanager

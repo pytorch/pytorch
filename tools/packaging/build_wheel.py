@@ -62,7 +62,7 @@ def venv(interpreter: str) -> Iterator[str]:
 
 
 class Builder:
-    # The python interpeter that we should be using
+    # The python interpreter that we should be using
     interpreter: str
 
     def __init__(self, interpreter: str) -> None:
@@ -124,7 +124,7 @@ def main() -> None:
         with venv(interpreter) as venv_interpreter:
             builder = Builder(venv_interpreter)
             # clean actually requires setuptools so we need to ensure we
-            # install requriements before
+            # install requirements before
             builder.install_requirements()
             builder.clean()
 
