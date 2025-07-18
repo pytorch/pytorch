@@ -201,7 +201,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
-  pip_install --user "ninja==1.10.2"
+  pip_install "ninja==1.10.2"
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
@@ -287,6 +287,12 @@ if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
+fi
+
+if [[ "${TEST_CONFIG}" == "legacy_nvidia_driver" ]]; then
+  # Make sure that CUDA can be initialized
+  (cd test && python -c "import torch; torch.rand(2, 2, device='cuda')")
+  export USE_LEGACY_DRIVER=1
 fi
 
 test_python_legacy_jit() {
@@ -496,7 +502,7 @@ DYNAMO_BENCHMARK_FLAGS=()
 
 pr_time_benchmarks() {
 
-  pip_install --user "fbscribelogger"
+  pip_install "fbscribelogger"
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -1471,8 +1477,8 @@ test_bazel() {
 
 test_benchmarks() {
   if [[ "$BUILD_ENVIRONMENT" == *cuda* && $TEST_CONFIG != *nogpu* ]]; then
-    pip_install --user "pytest-benchmark==3.2.3"
-    pip_install --user "requests"
+    pip_install "pytest-benchmark==3.2.3"
+    pip_install "requests"
     BENCHMARK_DATA="benchmarks/.data"
     mkdir -p ${BENCHMARK_DATA}
     pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_default.json --fuser=default --executor=default
@@ -1600,7 +1606,13 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
 fi
 if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
   # Install numpy-2.0.2 and compatible scipy & numba versions
-  python -mpip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
+  # Force re-install of pandas to avoid error where pandas checks numpy version from initial install and fails upon import
+  TMP_PANDAS_VERSION=$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null)
+  if [ -n "$TMP_PANDAS_VERSION" ]; then
+    python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0 pandas=="$TMP_PANDAS_VERSION" --force-reinstall
+  else
+    python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
+  fi
   python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_numpy_interop.py test_tensor_creation_ops.py test_torch.py torch_np/test_basic.py
 elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
   test_linux_aarch64
