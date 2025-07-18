@@ -65,7 +65,11 @@ from torch.testing._internal.inductor_utils import (
 )
 from torch.testing._internal.triton_utils import requires_cuda
 
-from . import custom_inductor_config
+
+try:
+    from . import custom_inductor_config
+except ImportError:
+    import custom_inductor_config
 
 
 if HAS_TRITON:
