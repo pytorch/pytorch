@@ -433,7 +433,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
         aot_eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
 
         log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
 
         result = None

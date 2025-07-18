@@ -18,13 +18,18 @@ import time
 import traceback
 from collections import defaultdict
 from contextlib import nullcontext
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import detect_fake_mode, dynamo_timed, lazy_format_graph_code
+from torch._dynamo.utils import (
+    CompileEventLogger,
+    detect_fake_mode,
+    dynamo_timed,
+    lazy_format_graph_code,
+)
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
@@ -46,10 +51,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from .dispatch_and_compile_graph import (
-    aot_dispatch_autograd_graph,
-    aot_dispatch_base_graph,
-)
+from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
     AOTDedupeWrapper,
@@ -67,7 +69,13 @@ from .runtime_wrappers import (
     pre_compile,
     RuntimeWrapper,
 )
-from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
+from .schemas import (
+    AOTConfig,
+    AOTGraphCapture,
+    AOTState,
+    MutationType,
+    ViewAndMutationMeta,
+)
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
     _get_symint_hints,
@@ -92,6 +100,7 @@ aten = torch.ops.aten
 
 # Returns a Callable and a ViewAndMutationMeta.
 # Currently, only export needs the ViewAndMutationMeta after this function.
+# TODO: Refactor this
 DispatchReturn = tuple[Callable, ViewAndMutationMeta]
 
 
@@ -102,46 +111,68 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
     return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
 
 
-# Export's dispatching logic is unique in a few ways: it only needs the "graph"
-# bits of aot_autograd, and doesn't need to do any specific wrapping.
-def aot_dispatch_export(
+def aot_stage1_graph_capture(
+    aot_state: AOTState,
     flat_fn: Callable,
-    flat_args: list[Any],
-    aot_config: AOTConfig,
-    *,
-    fw_metadata: ViewAndMutationMeta,
-    needs_autograd: bool,
-) -> DispatchReturn:
-    wrappers = _create_wrappers_for_dispatch(needs_autograd)
-    flat_fn, flat_args, fw_metadata = pre_compile(
+) -> AOTGraphCapture:
+    aot_config = aot_state.aot_config
+
+    wrappers = _create_wrappers_for_dispatch(aot_state.needs_autograd)
+    flat_fn, aot_state.flat_args, aot_state.fw_metadata = pre_compile(
         wrappers,
         flat_fn,
-        flat_args,
+        aot_state.flat_args,
         aot_config,
-        fw_metadata=fw_metadata,
+        fw_metadata=aot_state.fw_metadata,
     )
-    if needs_autograd and not aot_config.pre_dispatch:
-        graph, _, _ = aot_dispatch_autograd_graph(
-            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-        )
+    # NB: This is currently only used for backwards, where fwd/bwd
+    # deterministic TLS can be different
+    aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
+    updated_flat_args: Union[list[Any], tuple[list[Any], list[Any]]]
+    if aot_state.needs_autograd and not aot_config.pre_dispatch:
+        # FYI: this being moved to trigger in export is new, seems fine!
+        with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
+            graph, updated_flat_args, maybe_subclass_meta = aot_dispatch_autograd_graph(
+                flat_fn,
+                aot_state.flat_args,
+                aot_config,
+                fw_metadata=aot_state.fw_metadata,
+            )
     else:
-        graph, _, _ = aot_dispatch_base_graph(
-            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
+        graph, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(
+            flat_fn, aot_state.flat_args, aot_config, fw_metadata=aot_state.fw_metadata
         )
+
+    return AOTGraphCapture(
+        wrappers=wrappers,
+        graph=graph,
+        updated_flat_args=updated_flat_args,
+        maybe_subclass_meta=maybe_subclass_meta,
+    )
+
+
+def aot_stage2_export(
+    aot_state: AOTState, aot_graph_capture: AOTGraphCapture
+) -> DispatchReturn:
+    graph = aot_graph_capture.graph
+    aot_config = aot_state.aot_config
+    wrappers = aot_graph_capture.wrappers
+
+    CompileEventLogger.try_add_pt2_compile("backend_compile", dispatch_mode="export")
 
     # NB: the wrappers that run in pre_compile for export are
     # either a no-op, because they're not needed, or will raise a runtime error,
     # since they don't support export.
     # We still run these wrappers to make sure that they're not needed pre compile,
     # but we technically don't need to run them post compile at all here.
-    compiled_fn, fw_metadata = post_compile(
-        wrappers, graph, aot_config, runtime_metadata=fw_metadata
+    compiled_fn, aot_state.fw_metadata = post_compile(
+        wrappers, graph, aot_config, runtime_metadata=aot_state.fw_metadata
     )
 
     # Therefore, since no wrapperes run, we don't get back a callable - we get back the raw fx graph
     # (either a joint or an inference-only graph)
     assert isinstance(compiled_fn, torch.fx.GraphModule)
-    return compiled_fn, fw_metadata
+    return compiled_fn, aot_state.fw_metadata
 
 
 def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
@@ -166,23 +197,33 @@ def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
     )
 
 
-def aot_dispatch_base(
-    flat_fn,
-    flat_args: list[Any],
-    aot_config: AOTConfig,
-    *,
-    fw_metadata: ViewAndMutationMeta,
+def aot_stage2_compile(
+    aot_state: AOTState,
+    aot_graph_capture: AOTGraphCapture,
+) -> DispatchReturn:
+    if aot_state.needs_autograd and not aot_state.aot_config.pre_dispatch:
+        return aot_stage2_autograd(aot_state, aot_graph_capture)
+    else:
+        return aot_stage2_inference(aot_state, aot_graph_capture)
+
+
+def aot_stage2_inference(
+    aot_state: AOTState,
+    aot_graph_capture: AOTGraphCapture,
 ) -> DispatchReturn:
     """
     Handles functions that don't need autograd. Runs wrappers and compiles with fw_compiler.
     """
-    wrappers = _create_wrappers_for_dispatch(needs_autograd=False)
-    flat_fn, flat_args, fw_metadata = pre_compile(
-        wrappers, flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-    )
-    fw_module, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(  # type: ignore[misc]
-        flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-    )
+
+    aot_config = aot_state.aot_config
+    fw_metadata = aot_state.fw_metadata
+    fw_module = aot_graph_capture.graph
+    wrappers = aot_graph_capture.wrappers
+    updated_flat_args = aot_graph_capture.updated_flat_args
+    maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
+
+    CompileEventLogger.try_add_pt2_compile("backend_compile", dispatch_mode="inference")
+
     # Save the forward_graph_str right after aot_dispatch_base_graph,
     # to save in the cache
     aot_forward_graph_str = None
@@ -195,19 +236,11 @@ def aot_dispatch_base(
         )
 
     fakified_out_wrapper = FakifiedOutWrapper()
-    (
-        fw_module,
-        updated_flat_args,
-        fw_metadata,
-    ) = fakified_out_wrapper.pre_compile(
+    fakified_out_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
     )
     functionalized_rng_wrapper = FunctionalizedRngRuntimeWrapper()
-    (
-        fw_module,
-        updated_flat_args,
-        fw_metadata,
-    ) = functionalized_rng_wrapper.pre_compile(
+    functionalized_rng_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
     )
     assert isinstance(fw_module, GraphModule)
@@ -852,7 +885,7 @@ def create_wrap_fn(fn, args):
 
 
 def prepare_hook_gm(aot_config, fn, args):
-    from torch._functorch._aot_autograd.dispatch_and_compile_graph import _create_graph
+    from torch._functorch._aot_autograd.graph_capture import _create_graph
 
     fn, args = create_wrap_fn(fn, args)
     gm = _create_graph(fn, args, aot_config=aot_config)
@@ -1247,31 +1280,23 @@ def maybe_inline_graph_saved_tensors_hooks(
     bw_module.recompile()
 
 
-def aot_dispatch_autograd(
-    flat_fn,
-    flat_args: list[Any],
-    aot_config: AOTConfig,
-    *,
-    fw_metadata: ViewAndMutationMeta,
+def aot_stage2_autograd(
+    aot_state: AOTState, aot_graph_capture: AOTGraphCapture
 ) -> DispatchReturn:
     """
     Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
     and returns a wrapped torch.autograd.Function with a forward and backward.
     """
-    wrappers = _create_wrappers_for_dispatch(needs_autograd=True)
-    flat_fn, flat_args, fw_metadata = pre_compile(
-        wrappers,
-        flat_fn,
-        flat_args,
-        aot_config,
-        fw_metadata=fw_metadata,
-    )
 
-    fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
-    with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
-        fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
-            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-        )
+    wrappers = aot_graph_capture.wrappers
+    fx_g = aot_graph_capture.graph
+    flat_args = aot_state.flat_args
+    joint_inputs = aot_graph_capture.updated_flat_args
+    maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
+    aot_config = aot_state.aot_config
+    fw_metadata = aot_state.fw_metadata
+
+    CompileEventLogger.try_add_pt2_compile("backend_compile", dispatch_mode="autograd")
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -1579,11 +1604,7 @@ def aot_dispatch_autograd(
             adjusted_flat_args = joint_inputs[0]
 
             fakified_out_wrapper = FakifiedOutWrapper()
-            (
-                fw_module,
-                adjusted_flat_args,
-                fw_metadata,
-            ) = fakified_out_wrapper.pre_compile(
+            fakified_out_wrapper.pre_compile(
                 fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
             )
 
@@ -1600,11 +1621,7 @@ def aot_dispatch_autograd(
                 ]
                 adjusted_flat_args.extend(rng_states)  # type: ignore[arg-type]
 
-            (
-                fw_module,
-                adjusted_flat_args,
-                fw_metadata,
-            ) = functionalized_rng_wrapper.pre_compile(
+            functionalized_rng_wrapper.pre_compile(
                 fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
             )
             if tracing_context := torch._guards.TracingContext.try_get():
