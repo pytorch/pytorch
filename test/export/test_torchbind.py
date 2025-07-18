@@ -1286,7 +1286,7 @@ class TestCompileTorchbind(TestCase):
         torch.compile(mod, backend=cnt)(tq3, x)
         self.assertEqual(cnt.frame_count, 2)
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_error_on_input_aliasing_contents(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1334,7 +1334,7 @@ class TestCompileTorchbind(TestCase):
         ):
             torch.compile(setattr_f, backend=backend)(_empty_tensor_queue())
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_body_aliasing_contents(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1397,7 +1397,7 @@ def forward(self, token, obj, x):
     return (getitem, add_3)""",  # noqa: B950
         )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_error_on_non_fakified_method(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1418,7 +1418,7 @@ def forward(self, token, obj, x):
         ):
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x)
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_as_hop_input(self, backend):
         def f(tq, x):
             def fn(tq, x):
@@ -1434,7 +1434,7 @@ def forward(self, token, obj, x):
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x),
         )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_closure(self, backend):
         def f(x):
             def inner_f(x):
@@ -1449,7 +1449,7 @@ def forward(self, token, obj, x):
         x = torch.randn(3, 2)
         _assertEqualScriptObject(self, f(x), opt_f(x))
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_global_obj(self, backend):
         global _TENSOR_QUEUE_GLOBAL_TEST
         _TENSOR_QUEUE_GLOBAL_TEST = _empty_tensor_queue()
@@ -1485,7 +1485,7 @@ def forward(self, token, obj, x):
         )
         self.assertEqual(cnt.frame_count, 4)
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_attributes(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1517,7 +1517,7 @@ def forward(self, token, obj, x):
         return (call_torchbind_1,)""",
             )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_torchbind_op(self, backend):
         def f(tq, x):
             torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
@@ -1534,7 +1534,7 @@ def forward(self, token, obj, x):
 
     @requires_gpu
     @parametrize("device", ["cpu", "cuda"])
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_torchbind_op_with_autocast(self, backend, device):
         def f(tq, x):
             with torch.autocast(device_type=device):
