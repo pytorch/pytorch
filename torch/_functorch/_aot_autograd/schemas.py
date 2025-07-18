@@ -4,33 +4,54 @@ The various dataclasses, Enums, namedtuples etc used in AOTAutograd. This includ
 input/output types, metadata, config, function signatures etc.
 """
 
+from __future__ import annotations
+
 import collections
-import contextlib
 import dataclasses
 import functools
 import itertools
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, NewType, Optional, Protocol, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    NewType,
+    Optional,
+    Protocol,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree
-from torch import Tensor
-from torch._guards import Source
-from torch._inductor.output_code import OutputCode
-from torch._inductor.utils import InputType
-from torch._ops import OpOverload
+from torch import SymInt, Tensor
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
+
+
+if TYPE_CHECKING:
+    import contextlib
+    from collections.abc import Iterable, Sequence
+
+    from torch._guards import Source
+    from torch._inductor.output_code import OutputCode
+    from torch._inductor.utils import InputType
+    from torch._ops import OpOverload
+    from .descriptors import AOTInput, AOTOutput
+
 from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
     FunctionalTensorMetadataEq,
 )
 from .utils import strict_zip
+
+
+if TYPE_CHECKING:
+    from .graph_capture_wrappers import JointFnHandle
 
 
 zip = strict_zip
@@ -170,7 +191,7 @@ class MemoryFormatMeta:
     memory_format: Optional[torch.memory_format] = None
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> Optional["MemoryFormatMeta"]:
+    def from_tensor(t: torch.Tensor) -> Optional[MemoryFormatMeta]:
         # We only memorize expected memory format for
         # 1. Traceable wrapper subclasses
         # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
@@ -236,7 +257,7 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: dict[str, Union["SubclassCreationMeta", PlainTensorMeta]]
+    attrs: dict[str, Union[SubclassCreationMeta, PlainTensorMeta]]
     outer_size: Iterable[Union[None, int, torch.SymInt]]
     outer_stride: Iterable[Union[None, int, torch.SymInt]]
     meta: Any
@@ -390,6 +411,9 @@ class ViewAndMutationMeta:
     # Stashing them as part of our "metadata" makes it simpler if we want to run our analysis
     # pass once, and re-use the output throughout AOTAutograd
     traced_tangents: list[Any]
+
+    # TODO doc
+    traced_tangents_descs: list[AOTInput]
 
     # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
     # They are used throughout AOTDispatch to tell us how to generate a list of subclass tensors,
@@ -832,7 +856,7 @@ class GraphSignature:
         num_user_outputs: int,
         loss_index: Optional[int],
         backward_signature: Optional[BackwardSignature],
-    ) -> "GraphSignature":
+    ) -> GraphSignature:
         graph_inputs = graph_input_names
         graph_outputs = graph_output_names
         parameters = list(named_parameters)
@@ -966,9 +990,18 @@ class AOTConfig:
             assert self.is_export, "Can only have pre_dispatch IR for export."
 
 
+# TODO: types here
+# plain_tensor_trace_fn, when it is joint, has tuple structure on the trace
+# info too!
+# TODO: this needs to be generic, parameterized on AOTDescriptor
 SubclassTracingInfo = collections.namedtuple(
     "SubclassTracingInfo",
-    ["plain_tensor_trace_fn", "plain_tensor_args", "maybe_subclass_meta"],
+    [
+        "plain_tensor_trace_fn",
+        "plain_tensor_args",
+        "plain_tensor_args_descs",
+        "maybe_subclass_meta",
+    ],
 )
 
 
@@ -1000,7 +1033,10 @@ class AOTState:
     #
     # (By the way, this is NEVER the joint inputs!  Those only ever go in
     # AOTGraphCapture)
-    flat_args: list[Any]
+    flat_args: list[FxValue]
+
+    # The descriptor for each argument in flat_args.
+    flat_args_descs: list[AOTInput]
 
     # This contains view and mutation information about the function, which we
     # detected by doing an initial trace when we created this state.
@@ -1023,6 +1059,9 @@ class AOTState:
     # TODO: We potentially could offer a resumable context manager, where you
     # can cancel it and reenable it later when you need it.
     stack: contextlib.ExitStack
+
+
+FxValue = Union[Tensor, int, SymInt]
 
 
 class CompilerWrapper:
@@ -1055,11 +1094,12 @@ class CompilerWrapper:
     def pre_compile(
         self,
         flat_fn,
-        flat_args: list[Tensor],
+        flat_args: list[FxValue],
+        flat_args_descs: list[AOTInput],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
         Args:
@@ -1068,7 +1108,7 @@ class CompilerWrapper:
         aot_config: AOTConfig passed in at compile time
         fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
         """
-        return flat_fn, flat_args, fw_metadata
+        return flat_fn, flat_args, flat_args_descs, fw_metadata
 
     def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
         """
@@ -1166,6 +1206,10 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # a plain list.
     updated_flat_args: Union[list[Any], tuple[list[Any], list[Any]]]
 
+    updated_flat_args_descs: Union[
+        list[AOTInput], tuple[list[AOTInput], list[AOTInput]]
+    ]
+
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any
 
@@ -1173,7 +1217,7 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
 
 
-TOutputCode = TypeVar("TOutputCode", bound=OutputCode)
+TOutputCode = TypeVar("TOutputCode", bound="OutputCode")
 
 
 class AOTDispatchCompiler(Protocol):
@@ -1211,3 +1255,32 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         example_inputs: Sequence[InputType],
     ) -> OutputCode:
         return self.compiler_fn(gm, example_inputs)
+
+
+# TODO: not sure if the variadic is right, we'll see when we get to joint
+
+
+class FlatFn(Protocol):
+    def __call__(self, *args: FxValue) -> list[FxValue]: ...
+
+
+class TraceFn(Protocol):
+    def __call__(self, *args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]: ...
+
+
+class PreppedForAutogradTraceFn(Protocol):
+    def __call__(
+        self,
+        *args: FxValue,
+    ) -> tuple[tuple[list[FxValue], list[bool]], list[AOTOutput]]: ...
+
+
+class JointTraceFn(Protocol):
+    handle: JointFnHandle
+
+    def __call__(
+        self, primals: list[FxValue], tangents: list[FxValue]
+    ) -> tuple[
+        tuple[list[FxValue], list[Optional[Tensor]]],
+        tuple[list[AOTOutput], list[Optional[AOTOutput]]],
+    ]: ...
