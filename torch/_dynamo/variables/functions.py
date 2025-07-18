@@ -152,7 +152,11 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
             ba[name] = wrap_bound_arg(tx, args[i])
         elif name in rem_kw:
             if name in spec.posonly_names:
-                raise TypeError(f"{name} is positional-only")
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[ConstantVariable.create(f"{name} is positional-only")],
+                )
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name in spec.pos_default_map:
             idx = spec.pos_default_map[name]
@@ -161,15 +165,29 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
                 default_source = DefaultsSource(fn_source, idx)
             ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
         else:
-            raise TypeError(f"Missing required positional argument: {name}")
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"Missing required positional argument: {name}"
+                    )
+                ],
+            )
 
     # 2) *args
     extra = args[len(spec.all_pos_names) :]
     if spec.varargs_name:
         ba[spec.varargs_name] = wrap_bound_arg(tx, tuple(extra))
     elif extra:
-        raise TypeError(
-            f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                ConstantVariable.create(
+                    f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
+                )
+            ],
         )
 
     # 3) Keyword-only
@@ -182,13 +200,27 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:
-            raise TypeError(f"Missing required keyword-only argument: {name}")
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"Missing required keyword-only argument: {name}"
+                    )
+                ],
+            )
 
     # 4) **kwargs
     if spec.varkw_name:
         ba[spec.varkw_name] = wrap_bound_arg(tx, rem_kw)
     elif rem_kw:
-        raise TypeError(f"Unexpected keyword arguments: {list(rem_kw)}")
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                ConstantVariable.create(f"Unexpected keyword arguments: {list(rem_kw)}")
+            ],
+        )
 
     return ba
 
