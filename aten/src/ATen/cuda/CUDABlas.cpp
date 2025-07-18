@@ -1847,8 +1847,12 @@ int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype, bool use_fa
   switch (scaling_type) {
     case ScalingType::BlockWise1x32:
       TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
-#if CUDA_VERSION >= 12080
+#if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 70000)
+#ifdef USE_ROCM
+      return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+#else
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+#endif // USE_ROCM
 #else
       TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales of 1x32 blocks is only supported for CUDA 12.8 and above");
 #endif // if CUDA_VERSION >= 12080
@@ -1951,6 +1955,19 @@ void scaled_gemm(
     matmulDescA = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
     matmulDescB = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
   }
+  else if (mat1_scale_dtype == kFloat8_e8m0fnu && mat2_scale_dtype == kFloat8_e8m0fnu) {
+  #if ROCM_VERSION >= 70000
+            if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
+                // TODO: add constraints based on hipblaslt internals
+                TORCH_CHECK((m % 32 == 0) && (n % 32 == 0) && (k % 32 == 0),
+                           "Matrix dimensions must be multiples of 32 for MX format. "
+                           "Got m=", m, ", n=", n, ", k=", k);
+            }
+  #endif
+  }
+#else
+  // rowwise isn't supported using cublaslt or older hipblaslt
+  TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with blaslt");
 #endif // if defined(USE_ROCM) && !defined(HIPBLASLT_OUTER_VEC) && defined(HIPBLASLT_VEC_EXT)
   computeDesc.setAttribute(matmulDescA, mat1_scale_ptr);
   computeDesc.setAttribute(matmulDescB, mat2_scale_ptr);
@@ -1995,7 +2012,7 @@ void scaled_gemm(
   // but we must invoke get_scale_mode anyways to trigger the version checks.
   [[maybe_unused]] int a_scale_mode = get_scale_mode(mat1_scaling_type, mat1_scale_dtype, use_fast_accum);
   [[maybe_unused]] int b_scale_mode = get_scale_mode(mat2_scaling_type, mat2_scale_dtype, use_fast_accum);
-#if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && defined(HIPBLASLT_OUTER_VEC))
+#if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && defined(HIPBLASLT_OUTER_VEC) && ROCM_VERSION >= 70000)
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, a_scale_mode);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, b_scale_mode);
 #endif
