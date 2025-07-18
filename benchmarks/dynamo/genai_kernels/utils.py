@@ -142,9 +142,7 @@ class BenchmarkKernel:
             self.check_accuracy(args, kwargs)
 
     def visualize(self) -> None:
-        visualize_latency_comparison(
-            self.profiling_results, output_path=f"{self.name}_bench"
-        )
+        visualize_comparison(self.profiling_results, output_path=f"{self.name}_bench")
         return
 
 
@@ -163,17 +161,15 @@ def get_backend_colors() -> dict[str, str]:
     }
 
 
-def visualize_latency_comparison(
+def visualize_comparison(
     profiling_results: dict[str, list[Performance]],
-    title: str = "Latency Comparison",
     output_path: Optional[str] = None,
 ) -> None:
     """
-    Create a single latency comparison plot from profiling results.
+    Create a single memory_bandwidth comparison plot from profiling results.
 
     Args:
         profiling_results: Dict mapping backend names to lists of Performance objects
-        title: Title for the plot
         output_path: Path to save the plot (optional)
     """
     # Get backend colors
@@ -196,7 +192,7 @@ def visualize_latency_comparison(
         for i, setting in enumerate(all_settings):
             if setting in perf_dict:
                 x_vals.append(i)
-                y_vals.append(perf_dict[setting].latency)
+                y_vals.append(perf_dict[setting].memory_bandwidth)
 
         if x_vals:  # Only plot if we have data
             color = backend_colors.get(backend, backend_colors["default"])
@@ -212,9 +208,8 @@ def visualize_latency_comparison(
             )
 
     # Configure the plot
-    ax.set_title(title, fontsize=16, fontweight="bold")
     ax.set_xlabel("Configuration", fontsize=12)
-    ax.set_ylabel("Latency (ms)", fontsize=12)
+    ax.set_ylabel("memory bandwidth (GB/s)", fontsize=12)
     ax.set_xticks(range(len(all_settings)))
     ax.set_xticklabels(
         [

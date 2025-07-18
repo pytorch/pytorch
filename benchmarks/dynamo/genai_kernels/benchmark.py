@@ -27,7 +27,7 @@ import torch
 
 torch._dynamo.config.automatic_dynamic_shapes = False
 # Needed since changing args to function causes recompiles
-torch._dynamo.config.recompile_limit = 1000
+torch._dynamo.config.recompile_limit = 1000000
 
 torch._inductor.config.force_disable_caches = True
 
@@ -42,6 +42,14 @@ BENCHMARK_REGISTRY: dict[str, type[BenchmarkKernel]] = {
     "layernorm_forward": LayerNormForward,
     "layernorm_backward": LayerNormBackward,
 }
+
+
+def show_environment_info():
+    """Show environment information."""
+    print("Environment information:")
+    print(f"  Python version: {sys.version}")
+    print(f"  PyTorch version: {torch.__version__}")
+    print(f"  CUDA version: {torch.version.cuda}")
 
 
 def list_benchmarks():
@@ -83,6 +91,8 @@ def run_all_benchmarks(should_visualize: bool = False):
 
 
 def main():
+    show_environment_info()
+
     parser = argparse.ArgumentParser(
         description="Benchmark runner for kernel implementations",
         formatter_class=argparse.RawDescriptionHelpFormatter,

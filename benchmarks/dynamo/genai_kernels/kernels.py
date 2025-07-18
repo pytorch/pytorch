@@ -69,6 +69,7 @@ class CrossEntropyForward(BenchmarkKernel):
     def benchmark(self):
         for M, N in self.get_shapes():
             print(f"\n Tensor dimensions: [{M}, {N}]")
+            # quack requires cutlass dtype
             torch_dtype = cutlass_torch.dtype(cutlass.BFloat16)
             x = 0.1 * torch.randn(M, N, device="cuda", dtype=torch_dtype)
             target = torch.randint(0, N, (M,), device="cuda", dtype=torch.int64)
