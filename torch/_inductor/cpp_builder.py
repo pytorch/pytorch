@@ -1074,6 +1074,19 @@ def _get_openmp_args(
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
 
+def _get_libstdcxx_args(cpp_compiler: str) -> tuple[list[str], list[str]]:
+    """
+    For fbcode, we should link stdc++ instead assuming the binary where dlopen is executed is built with dynamic stdc++.
+    """
+    lib_dir_paths: list[str] = []
+    libs: list[str] = []
+    if config.is_fbcode():
+        lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
+        libs.append("stdc++")
+
+    return lib_dir_paths, libs
+
+
 def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
     macros = []
     if use_mmap_weights:
@@ -1089,6 +1102,15 @@ def get_cpp_torch_options(
     use_relative_path: bool,
     use_mmap_weights: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """
+    This function is used to get the build args of torch related build options.
+    1. Torch include_directories, libraries, libraries_directories.
+    2. Python include_directories, libraries, libraries_directories.
+    3. OpenMP related.
+    4. Torch MACROs.
+    5. MISC
+    6. Return the build args
+    """
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -1125,6 +1147,11 @@ def get_cpp_torch_options(
         omp_passthrough_args,
     ) = _get_openmp_args(cpp_compiler)
 
+    (
+        stdcxx_lib_dir_paths,
+        stdcxx_libs,
+    ) = _get_libstdcxx_args(cpp_compiler)
+
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
@@ -1144,8 +1171,13 @@ def get_cpp_torch_options(
     )
     cflags = sys_libs_cflags + omp_cflags
     ldflags = omp_ldflags
-    libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
-    libraries = torch_libraries + omp_lib
+    libraries_dirs = (
+        python_libraries_dirs
+        + torch_libraries_dirs
+        + omp_lib_dir_paths
+        + stdcxx_lib_dir_paths
+    )
+    libraries = torch_libraries + omp_lib + stdcxx_libs
     passthrough_args = (
         sys_libs_passthrough_args + isa_ps_args_build_flags + omp_passthrough_args
     )
