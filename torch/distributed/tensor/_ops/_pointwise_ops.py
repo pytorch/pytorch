@@ -500,9 +500,9 @@ def common_pointwise_strategy(
             2: the N-ary operation supports multiplicative linearity, where it requires
                 the primary operand to be partial, and the other operands to be replicate,
                 output propagates partial.
-            3: the N-ary operation supports value comparison linearity, this is similar to
-                linearity=1 but only supports Partial('sum'). Note in this case, user must
-                make sure all args related in the comparison supports Partial('sum'). One
+            3: the N-ary operation supports value comparison linearity, which is similar to
+                linearity=1 but only supports Partial('sum'). Note that in this case, the user must
+                make sure all args related in the comparison support Partial('sum'). One
                 special case is `clamp`. If input `min/max` are pure values, Partial('sum')
                 will not scale the pure value.
         scalar_tensor_idx: Index of the Replicate scalar tensor for which we allow the mesh

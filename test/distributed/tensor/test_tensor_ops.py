@@ -800,7 +800,13 @@ class DistTensorOpsTest(DTensorTestBase):
             torch.randn((), device=self.device_type, dtype=torch.float32),
             torch.randn((), device=self.device_type, dtype=torch.float32).item(),
         ]
-        placement_choice = [Shard(0), Shard(1), Replicate(), Partial("sum"), Partial("avg")]
+        placement_choice = [
+            Shard(0),
+            Shard(1),
+            Replicate(),
+            Partial("sum"),
+            Partial("avg"),
+        ]
         placement_comb = itertools.product(
             placement_choice, placement_choice, placement_choice
         )
