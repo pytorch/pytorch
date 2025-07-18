@@ -77,6 +77,7 @@ if TYPE_CHECKING:
 
 
 def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
+    print('initialize lazy')
     """
     Fairly coupled helper used by NNModuleVariable and UnspecializedNNModuleVariable.
 
@@ -101,7 +102,17 @@ def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
         proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
         fake_args = [convert_to_fake(arg) for arg in proxy_args]
         fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
-        mod._infer_parameters(mod, fake_args, fake_kwargs)
+        print('b4 infer params')
+        try:
+            mod._infer_parameters(mod, fake_args, fake_kwargs)
+        except AttributeError as e:
+            print('caught')
+            print(e)
+            raise
+            raise_observed_exception(
+                AttributeError,
+                tx,
+            )
 
 
 @contextmanager
@@ -424,6 +435,7 @@ class NNModuleVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        print('Called function')
         mod = tx.output.get_submodule(self.module_key)
 
         with record_nn_module_stack(
