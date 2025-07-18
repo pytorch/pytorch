@@ -6353,6 +6353,7 @@ class ShapeEnv:
         # expression when creating contiguous strides.
         if not size_oblivious:
             min_max_replacements = {}
+            axioms = dict(self.axioms)
             for atom in expr.atoms(Max):  # type: ignore[has-type]
                 if len(atom.args) > 2:
                     continue
@@ -6360,9 +6361,9 @@ class ShapeEnv:
                 if b == 1 or b == 0:
                     a, b = b, a
 
-                if a == 1 and self._maybe_evaluate_static(sympy.Ge(b, 1)):
+                if a == 1 and self._maybe_evaluate_static(sympy.Ge(b, 1), axioms=axioms):
                     min_max_replacements[atom] = b
-                if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0)):
+                if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0), axioms=axioms):
                     min_max_replacements[atom] = b
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
