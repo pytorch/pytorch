@@ -248,13 +248,13 @@ class _PipelineSchedule(ABC):
         logger.info("Using %s", self.__class__.__name__)
 
     def _maybe_compute_loss(self, stage, output, target_mbs, mb_index):
-        if stage.is_last and self._has_backward:
+        if stage.is_last and self._loss_fn is not None:
             loss = self._compute_loss(output, target_mbs[mb_index])  # type: ignore[index]
             self._internal_losses.append(loss)
 
     def _maybe_get_loss(self, stage, mb_index):
         valid_index = 0 <= mb_index < len(self._internal_losses)
-        if stage.is_last and self._has_backward and valid_index:
+        if stage.is_last and self._loss_fn is not None and valid_index:
             return self._internal_losses[mb_index]
         elif len(self._internal_losses) != 0 and not valid_index:
             raise RuntimeError(
@@ -318,6 +318,26 @@ class _PipelineSchedule(ABC):
         losses: a list to store the losses for each microbatch.
         """
         raise NotImplementedError
+
+    def eval(self, *args, target=None, losses: Optional[list] = None, **kwargs):
+        """
+        Run one iteration of the pipeline schedule with *whole-batch* input.
+        Will chunk the input into microbatches automatically, and go through the
+        microbatches, calling forward only.
+
+        args: positional arguments to the model (as in non-pipeline case).
+        kwargs: keyword arguments to the model (as in non-pipeline case).
+        target: target values for the loss function.
+        losses: a list to store the losses for each microbatch.
+        """
+        # Save the original has_backward state
+        original_has_backward = self._has_backward
+        try:
+            self._has_backward = False
+            return self.step(*args, target=target, losses=losses, **kwargs)
+        finally:
+            # Restore the original state
+            self._has_backward = original_has_backward
 
     def _check_inputs(
         self,
@@ -475,8 +495,6 @@ class PipelineScheduleSingle(_PipelineSchedule):
         # Self attributes
         self._stage = stage
         self._num_stages = stage.num_stages
-        # Set the same has_backward flag for stage object
-        self._stage.has_backward = self._has_backward
         self._stage_initialized = False
 
         if n_microbatches < self._num_stages:
@@ -506,6 +524,15 @@ or equal to the number of stages ({self._num_stages})."
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
+        if not torch.is_grad_enabled():
+            raise RuntimeError(
+                "step() requires gradients to be enabled for backward computation; "
+                "it should not be used under torch.no_grad() context. "
+                "Please call eval() instead."
+            )
+
+        # Set the same has_backward flag for stage object
+        self._stage.has_backward = self._has_backward
 
         # Clean per iteration
         self._stage.clear_runtime_states()
@@ -650,10 +677,6 @@ class ScheduleGPipe(PipelineScheduleSingle):
         for work in fwd_sends_to_wait:
             _wait_batch_p2p(work)
 
-        # No loss function, no need to run backward
-        if not self._has_backward:
-            return
-
         # Run backward
         # Delay send waits
         bwd_sends_to_wait: list[list[dist.Work]] = []
@@ -681,12 +704,12 @@ class ScheduleGPipe(PipelineScheduleSingle):
             grad_scale_factor=self._n_microbatches if self.scale_grads else 1
         )
 
-        # Return losses if there is a container passed in
-        self._update_losses(self._stage, losses)
-
         # Wait for all backward sends to finish
         for work in bwd_sends_to_wait:
             _wait_batch_p2p(work)
+
+        # Update losses if there is a container passed in
+        self._update_losses(self._stage, losses)
 
     def _get_pipeline_order(self) -> Optional[dict[int, list[Optional[_Action]]]]:
         """
@@ -1264,9 +1287,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
         for stage in self._stages:
             stage.stage_index_to_group_rank = self.stage_index_to_group_rank
 
-        # Set the same has_backward flag for stage object
-        for stage in self._stages:
-            stage.has_backward = self._has_backward
         self._stages_initialized = False
 
         # avoid putting a reference to 'self' inside the lambda, it creates a ref cycle
@@ -1349,6 +1369,17 @@ class PipelineScheduleMulti(_PipelineSchedule):
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
+        if not torch.is_grad_enabled():
+            raise RuntimeError(
+                "step() requires gradients to be enabled for backward computation; "
+                "it should not be used under torch.no_grad() context. "
+                "Please call eval() instead."
+            )
+
+        # Set the same has_backward flag for stage object
+        for stage in self._stages:
+            stage.has_backward = self._has_backward
+
         # Clean per iteration
         for stage in self._stages:
             stage.clear_runtime_states()
