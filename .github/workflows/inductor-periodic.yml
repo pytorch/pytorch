@@ -125,7 +125,7 @@ jobs:
         { include: [
           { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
-      build-additional-packages: "vision audio text fbgemm torchao"
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc9-inductor-smoke-test:

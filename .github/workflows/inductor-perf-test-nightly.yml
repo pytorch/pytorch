@@ -114,7 +114,7 @@ jobs:
           { config: "cachebench", shard: 2, num_shards: 2, runner: "linux.aws.a100" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
-      build-additional-packages: "vision audio text fbgemm torchao"
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
   test-nightly:

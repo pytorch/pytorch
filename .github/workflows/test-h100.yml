@@ -45,7 +45,7 @@ jobs:
         { include: [
           { config: "smoke", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
         ]}
-      build-additional-packages: "vision audio text fbgemm torchao"
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc11-sm90-test:
