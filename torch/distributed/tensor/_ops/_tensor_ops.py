@@ -16,6 +16,7 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops import _pointwise_ops
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
 from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
 from torch.distributed.tensor._ops.utils import (
@@ -1140,3 +1141,73 @@ def split_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     return OpStrategy(all_strategies)
+
+
+@register_op_strategy(
+    [
+        aten.clamp.default,
+        aten.clamp.Tensor,
+        aten.clamp.out,
+        aten.clamp_.default,
+        aten.clamp_.Tensor,
+        aten.clamp_min.default,
+        aten.clamp_min.Tensor,
+        aten.clamp_min_.default,
+        aten.clamp_min_.Tensor,
+        aten.clamp_max.default,
+        aten.clamp_max.Tensor,
+        aten.clamp_max_.default,
+        aten.clamp_max_.Tensor,
+    ],
+)
+def clamp_strategy(op_schema: OpSchema) -> OpStrategy:
+    # Op clamp is kind of special in the input args. Arg `min` and `max` can be
+    # either Number or Tensor (but both should be the same type), which results
+    # in different number of input_specs/redistribute_cost in output strategy.
+    # When `min` and `max` are of type Tensor, they can be either be the shape
+    # of the input, or be a scalar tensor.
+    self_strategy = op_schema.args_schema[0]
+    assert isinstance(self_strategy, OpStrategy)
+    min_strategy, max_strategy = None, None
+    if len(op_schema.args_schema) > 1:
+        min_strategy = op_schema.args_schema[1]
+    if len(op_schema.args_schema) > 2:
+        max_strategy = op_schema.args_schema[2]
+
+    is_same_shape_tensor = False
+    is_scalar_tensor = False
+    self_shape = self_strategy.strategies[0].output_spec.ndim
+    bound_shape = None
+    for bound_strat in [min_strategy, max_strategy]:
+        if isinstance(bound_strat, OpStrategy):
+            bound_shape = bound_strat.strategies[0].output_spec.ndim
+            if bound_shape == self_shape:
+                # this case input and min/max tensor can follow each other's placement
+                is_same_shape_tensor = True
+            else:
+                # case 2. min/max are scalar tensor
+                is_scalar_tensor = True
+    is_value = not is_same_shape_tensor and not is_scalar_tensor
+
+    all_strategy = OpStrategy([])
+    if is_value:
+        # min/max are value, no input strategies from them
+        return cast(OpStrategy, propagate_single_input_strategy(op_schema))
+    elif (
+        is_scalar_tensor
+    ):  # input and min/max tensor shape mismatch, and min/max are single value tensor
+        return _pointwise_ops.common_pointwise_strategy(
+            op_schema.args_schema, cast(OpStrategy, op_schema.args_schema[0]), 0, 1
+        )
+
+    else:  # is_same_shape_tensor
+        for idx, strat in enumerate([self_strategy, min_strategy, max_strategy]):
+            # Pretty sure this can create duplicated strategies. Maybe leave it
+            # for now since it won't impact correctness
+            if strat:
+                all_strategy.strategies.extend(
+                    _pointwise_ops.common_pointwise_strategy(
+                        op_schema.args_schema, cast(OpStrategy, strat), idx, 1
+                    ).strategies
+                )
+        return all_strategy

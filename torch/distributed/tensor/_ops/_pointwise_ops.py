@@ -133,9 +133,6 @@ pointwise_ops = [
     aten.ceil.default,
     aten.ceil.out,
     aten.ceil_.default,
-    aten.clamp.default,
-    aten.clamp.out,
-    aten.clamp_.default,
     aten.clip.default,
     aten.clip.out,
     aten.clip_.default,
@@ -498,9 +495,9 @@ def common_pointwise_strategy(
         linearity: depending on the operator, we support different types of linearity
             -1: the operation does not support linearity
             0: the unary operation that supports linearity, output propagates partial.
-            1: the binary operation supports add linearity, where it requires every operand
+            1: the N-ary operation supports add linearity, where it requires every operand
                 to be partial, output propagates partial.
-            2: the binary operation supports multiplicative linearity, where it requires
+            2: the N-ary operation supports multiplicative linearity, where it requires
                 the primary operand to be partial, and the other operands to be replicate,
                 output propagates partial.
         scalar_tensor_idx: Index of the Replicate scalar tensor for which we allow the mesh
