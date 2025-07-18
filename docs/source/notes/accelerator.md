@@ -132,7 +132,7 @@ PyTorch also provides some Dispatcher-related environment variables that can hel
         :linenos:
     ```
 
-    This registers the `wrapper_empty_memory_format` implementation for the new device to the `aten::emtpy.memory_format` operator on the `PrivateUse1 DispatchKey`.
+    This registers the `wrapper_empty_memory_format` implementation for the new device to the `aten::empty.memory_format` operator on the `PrivateUse1 DispatchKey`.
 
 2. Scenario Two
 
