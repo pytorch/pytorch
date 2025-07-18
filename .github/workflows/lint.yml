@@ -26,9 +26,15 @@ jobs:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
+
+  get-changed-files:
+    if: github.repository_owner == 'pytorch'
+    name: Get changed files
+    uses: ./.github/workflows/_get-changed-files.yml
+
   lintrunner-clang:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
-    needs: get-label-type
+    needs: [get-label-type, get-changed-files]
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -39,13 +45,20 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        if [ "$CHANGED_FILES" = "*" ]; then
+          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
+        else
+          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
+        fi
         export CLANG=1
         .github/scripts/lintrunner.sh
 
-  lintrunner-noclang:
+  # NOTE: mypy needs its own job because it depends on --all-files, without assessing all files it sometimes
+  #       fails to find types when it should
+  lintrunner-mypy:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
-    needs: get-label-type
+    needs: [get-label-type, get-changed-files]
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -56,8 +69,30 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT --all-files"
-        .github/scripts/lintrunner.sh
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        echo "Running mypy"
+        ADDITIONAL_LINTRUNNER_ARGS="--take MYPY --all-files" .github/scripts/lintrunner.sh
+
+  lintrunner-noclang:
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: [get-label-type, get-changed-files]
+    with:
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: ci-image:pytorch-linux-jammy-linter
+      # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
+      # to run git rev-parse HEAD~:.ci/docker when a new image is needed
+      fetch-depth: 0
+      submodules: true
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        echo "Running all other linters"
+        if [ "$CHANGED_FILES" = '*' ]; then
+          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT,MYPY --all-files" .github/scripts/lintrunner.sh
+        else
+          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT,MYPY ${CHANGED_FILES}" .github/scripts/lintrunner.sh
+        fi
 
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
