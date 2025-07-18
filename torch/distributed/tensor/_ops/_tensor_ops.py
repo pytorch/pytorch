@@ -1166,41 +1166,19 @@ def clamp_strategy(op_schema: OpSchema) -> OpStrategy:
     # number of input_specs/redistribute_cost in output strategy. When `min` and
     # `max` are of type Tensor, they can be broadcasted to match input tensor
     # shape.
-    self_strategy = op_schema.args_schema[0]
-    assert isinstance(self_strategy, OpStrategy)
     min_strategy, max_strategy = None, None
     if len(op_schema.args_schema) > 1:
         min_strategy = op_schema.args_schema[1]
     if len(op_schema.args_schema) > 2:
         max_strategy = op_schema.args_schema[2]
 
-    is_same_shape_tensor = False
-    is_scalar_tensor = False
-    self_shape = self_strategy.strategies[0].output_spec.ndim
-    bound_shape = None
+    is_value = True
     for bound_strat in [min_strategy, max_strategy]:
         if isinstance(bound_strat, OpStrategy):
-            bound_shape = bound_strat.strategies[0].output_spec.ndim
-            if bound_shape == self_shape:
-                # this case input and min/max tensor can follow each other's placement
-                is_same_shape_tensor = True
-            else:
-                # case 2. min/max are scalar tensor
-                is_scalar_tensor = True
-    is_value = not is_same_shape_tensor and not is_scalar_tensor
+            is_value = False
 
-    all_strategy = OpStrategy([])
     if is_value:
         # min/max are value, no input strategies from them
         return cast(OpStrategy, propagate_single_input_strategy(op_schema))
     else:
-        for idx, strat in enumerate([self_strategy, min_strategy, max_strategy]):
-            # Pretty sure this can create duplicated strategies. Maybe leave it
-            # for now since it won't impact correctness
-            if strat:
-                all_strategy.strategies.extend(
-                    _pointwise_ops.common_pointwise_strategy(
-                        op_schema.args_schema, cast(OpStrategy, strat), idx, 1
-                    ).strategies
-                )
-        return all_strategy
+        return _pointwise_ops.pointwise_strategy(op_schema, 1)
