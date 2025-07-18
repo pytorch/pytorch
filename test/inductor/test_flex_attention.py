@@ -4242,6 +4242,7 @@ class GraphModule(torch.nn.Module):
         import torch.nn.attention.flex_attention as fa
 
         original_flag = fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG
+        original_warnings_shown = fa._WARNINGS_SHOWN.copy()
 
         try:
             B, H, S, D = 1, 1, 128, 64
@@ -4252,41 +4253,34 @@ class GraphModule(torch.nn.Module):
             def simple_score_mod(score, b, h, q_idx, kv_idx):
                 return score
 
+            # Test with debug flag False - should warn
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
+            fa._WARNINGS_SHOWN.clear()
+
+            with self.assertWarns(UserWarning) as cm:
                 out_compiled = fa.flex_attention(
                     query, key, value, score_mod=simple_score_mod
                 )
-                # Should not produce debug warning
-                debug_warnings = [
-                    warn
-                    for warn in w
-                    if "_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG" in str(warn.message)
-                ]
-                self.assertEqual(len(debug_warnings), 0)
 
+            self.assertIn(
+                "flex_attention called without torch.compile", str(cm.warning)
+            )
+
+            # Test with debug flag True - should NOT warn
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
+
+            # Should not error
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
                 out_debug = fa.flex_attention(
                     query, key, value, score_mod=simple_score_mod
                 )
-                # Should produce debug warning
-                debug_warnings = [
-                    warn
-                    for warn in w
-                    if "_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG" in str(warn.message)
-                ]
-                self.assertEqual(len(debug_warnings), 1)
-                self.assertIn("bypasses required", str(debug_warnings[0].message))
 
-            # Results should be functionally equivalent
             torch.testing.assert_close(out_compiled, out_debug, rtol=1e-4, atol=1e-4)
 
         finally:
-            # Restore original flag value
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
+            fa._WARNINGS_SHOWN = original_warnings_shown
 
 
 class TestBlockMask(InductorTestCase):
