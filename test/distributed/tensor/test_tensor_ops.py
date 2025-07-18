@@ -787,13 +787,16 @@ class DistTensorOpsTest(DTensorTestBase):
         min_choice = [
             # test on regular tensor
             torch.randn(8, 16, device=self.device_type, dtype=torch.float32),
-            # test on scalar tensor
+            # test on broadcast tensor
+            torch.randn(16, device=self.device_type, dtype=torch.float32),
+            # test on broadcast scalar tensor
             torch.randn((), device=self.device_type, dtype=torch.float32),
             # test on value
             torch.randn((), device=self.device_type, dtype=torch.float32).item(),
         ]
         max_choice = [
             torch.randn(8, 16, device=self.device_type, dtype=torch.float32),
+            torch.randn(16, device=self.device_type, dtype=torch.float32),
             torch.randn((), device=self.device_type, dtype=torch.float32),
             torch.randn((), device=self.device_type, dtype=torch.float32).item(),
         ]

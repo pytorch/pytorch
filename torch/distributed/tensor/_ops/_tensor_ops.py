@@ -1193,14 +1193,7 @@ def clamp_strategy(op_schema: OpSchema) -> OpStrategy:
     if is_value:
         # min/max are value, no input strategies from them
         return cast(OpStrategy, propagate_single_input_strategy(op_schema))
-    elif (
-        is_scalar_tensor
-    ):  # input and min/max tensor shape mismatch, and min/max are single value tensor
-        return _pointwise_ops.common_pointwise_strategy(
-            op_schema.args_schema, cast(OpStrategy, op_schema.args_schema[0]), 0, 1
-        )
-
-    else:  # is_same_shape_tensor
+    else:
         for idx, strat in enumerate([self_strategy, min_strategy, max_strategy]):
             # Pretty sure this can create duplicated strategies. Maybe leave it
             # for now since it won't impact correctness
