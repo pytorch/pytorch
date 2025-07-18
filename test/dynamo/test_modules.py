@@ -698,6 +698,25 @@ class LazyModuleKwArgs(LazyModuleMixin, torch.nn.Module):
     def forward(self, x, y):
         return self.layer(x, y=y)
 
+class LazyModuleBadInferParams(LazyModuleMixin, torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def initialize_parameters(self):
+        with torch.no_grad():
+            self.layer = LazyLayerWithInputs()
+
+        print('DEBUG SHOULD THROW')
+        try:
+            self.foo += 1
+        except AttributeError as e:
+            print(type(e), e)
+            raise
+        print('Debug didnt throw?')
+
+    def forward(self, x, y):
+        return self.layer(x, y=y)
+
 
 class LazyParentModule(LazyModuleMixin, torch.nn.Module):
     def __init__(self) -> None:
@@ -1653,6 +1672,15 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         exp_res = m(x, y)
         self.assertTrue(torch.allclose(exp_res, opt_m(x, y)))
+
+    #@torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    def test_lazy_module_bad_params(self):
+        m = LazyModuleBadInferParams()
+        x = [torch.rand([5, 5])] * 3
+        y = [torch.rand([5, 5])] * 2
+        opt_m = torch.compile(fullgraph=True)(m)
+        with self.assertRaises(AttributeError):
+            exp_res = opt_m(x, y)
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
