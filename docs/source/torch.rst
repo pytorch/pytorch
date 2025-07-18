@@ -123,6 +123,7 @@ Indexing, Slicing, Joining, Mutating Ops
     scatter_add
     scatter_reduce
     segment_reduce
+    split
     functional.split
     squeeze
     stack
@@ -135,6 +136,7 @@ Indexing, Slicing, Joining, Mutating Ops
     tile
     transpose
     unbind
+    unravel_index
     functional.unravel_index
     unsqueeze
     vsplit
@@ -462,6 +464,7 @@ Reduction Ops
     median
     nanmedian
     mode
+    norm
     functional.norm
     nansum
     prod
@@ -470,7 +473,9 @@ Reduction Ops
     std
     std_mean
     sum
+    unique
     functional.unique
+    unique_consecutive
     functional.unique_consecutive
     var
     var_mean
@@ -520,6 +525,7 @@ Spectral Ops
     :toctree: generated
     :nosignatures:
 
+    stft
     functional.stft
     istft
     bartlett_window
@@ -536,17 +542,26 @@ Other Operations
     :toctree: generated
     :nosignatures:
 
+    atleast_1d
+    atleast_2d
+    atleast_3d
     functional.atleast_1d
     functional.atleast_2d
     functional.atleast_3d
     bincount
+    block_diag
     functional.block_diag
+    broadcast_tensors
     functional.broadcast_tensors
     broadcast_to
+    broadcast_shapes
     functional.broadcast_shapes
     bucketize
+    cartesian_prod
     functional.cartesian_prod
+    cdist
     functional.cdist
+    chain_matmul
     functional.chain_matmul
     clone
     combinations
@@ -562,6 +577,7 @@ Other Operations
     diagflat
     diagonal
     diff
+    einsum
     functional.einsum
     flatten
     flip
@@ -573,6 +589,7 @@ Other Operations
     histc
     histogram
     histogramdd
+    meshgrid
     functional.meshgrid
     lcm
     logcumsumexp
@@ -581,6 +598,7 @@ Other Operations
     repeat_interleave
     roll
     searchsorted
+    tensordot
     functional.tensordot
     trace
     tril
@@ -619,6 +637,7 @@ BLAS and LAPACK Operations
     det
     logdet
     slogdet
+    lu
     functional.lu
     lu_solve
     lu_unpack
