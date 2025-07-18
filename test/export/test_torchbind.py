@@ -1378,7 +1378,7 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
 
         class TestMod(torch.nn.Module):
             def forward(self, obj, x):
-                return obj.get() + x + obj.get().size(1)
+                return obj.get() + x
 
         mod = TestMod()
 
