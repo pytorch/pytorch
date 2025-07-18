@@ -93,6 +93,22 @@ std::string create_temp_dir() {
   return temp_dir;
 #endif
 }
+
+const char* object_file_ext() {
+#ifdef _WIN32
+  return ".obj";
+#else
+  return ".o";
+#endif
+}
+
+const char* extension_file_ext() {
+#ifdef _WIN32
+  return ".pyd";
+#else
+  return ".so";
+#endif
+}
 } // namespace
 
 namespace torch::inductor {
@@ -515,9 +531,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         std::string filename_extension = output_path_str.substr(extension_idx);
         if (filename_extension == ".cpp") {
           cpp_filename = output_path_str;
-        } else if (filename_extension == ".o") {
+        } else if (filename_extension == object_file_ext()) {
           obj_filenames.push_back(output_path_str);
-        } else if (filename_extension == ".so") {
+        } else if (filename_extension == extension_file_ext()) {
           so_filename = output_path_str;
         }
       }
