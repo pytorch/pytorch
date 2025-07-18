@@ -475,7 +475,7 @@ compute_flex_attention = r"""
     {%- if USE_TMA %}
     q = tl.load_tensor_descriptor(
         desc_q,
-        [(q_start * BLOCK_M).to(tl.int32), 0],
+        [(q_start * BLOCK_M).to(tl.int64), 0],
     )
     {%- else %}
         q = load_checked_block(Q_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
@@ -700,7 +700,7 @@ def forward_block_mn(
     {%- if USE_TMA %}
     k = tl.load_tensor_descriptor(  # load in row major
             desc_k,
-            [start_n.to(tl.int32) , kv_start],
+            [start_n.to(tl.int64) , kv_start],
     )
     {%- else %}
     k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
@@ -774,7 +774,7 @@ def forward_block_mn(
     {%- if USE_TMA %}
     v = tl.load_tensor_descriptor(
         desc_v,
-        [kv_start.to(tl.int32) + start_n.to(tl.int32),0],
+        [kv_start.to(tl.int64) + start_n.to(tl.int64),0],
     )
     {%- else %}
     v = load_checked_block(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
