@@ -315,10 +315,6 @@ else
         install_torchaudio
       fi
 
-      if [[ "${BUILD_ADDITIONAL_PACKAGES}" == *text* ]]; then
-        install_torchtext
-      fi
-
       if [[ "${BUILD_ADDITIONAL_PACKAGES}" == *torchrec* || "${BUILD_ADDITIONAL_PACKAGES}" == *fbgemm* ]]; then
         install_torchrec_and_fbgemm
       fi
