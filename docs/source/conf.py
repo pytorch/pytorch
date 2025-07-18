@@ -82,6 +82,10 @@ sitemap_excludes = [
 ]
 sitemap_url_scheme = "{link}"
 
+html_additional_pages = {
+    "404": "404.html",
+}
+
 # build the templated autosummary files
 autosummary_generate = True
 numpydoc_show_class_members = False
