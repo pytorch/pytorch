@@ -24,8 +24,8 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
-    skip_but_pass_in_sandcastle_if,
     TEST_SKIPS,
+    requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -577,10 +577,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         self.assertEqual(y, expected)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_but_pass_in_sandcastle_if(
-        not c10d.is_nccl_available() and not c10d.is_xccl_available(),
-        "c10d was not compiled with the accelerator backend",
-    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @with_comms()
     def test_tracing(self, device):
         def allreduce(t, pg):
@@ -607,10 +604,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         dist.destroy_process_group()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_but_pass_in_sandcastle_if(
-        not c10d.is_nccl_available() and not c10d.is_xccl_available(),
-        "c10d was not compiled with the accelerator backend",
-    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @with_comms()
     def test_tracing_with_dce_code(self, device):
         if self.world_size > 2:

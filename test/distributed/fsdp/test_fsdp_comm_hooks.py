@@ -13,10 +13,10 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecis
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import (
-    requires_nccl_or,
-    requires_nccl_version_or,
+    requires_nccl_version,
     skip_but_pass_in_sandcastle_if,
     skip_if_lt_x_gpu,
+    requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -35,12 +35,9 @@ device_type = (
 )
 
 # bfloat16 is only supported by CUDA 11+ or XPU
-BFLOAT16_AVAILABLE = (torch.cuda.is_available() or torch.xpu.is_available()) and (
-    torch.version.cuda is not None
-    or torch.version.hip is not None
-    or torch.version.xpu is not None
-)
-
+BFLOAT16_AVAILABLE = ( torch.cuda.is_available() and (
+    torch.version.cuda is not None or torch.version.hip is not None
+) ) or torch.xpu.is_available()
 
 class Net(nn.Module):
     def __init__(self, has_wrapping, sharding_strategy, mixed_precision=None):
@@ -140,7 +137,7 @@ class TestCommunicationHooks(FSDPTest):
         """
         out_dim = self.world_size
         net = torch.nn.Linear(1, out_dim, bias=False)
-        inpt = torch.tensor([self.rank]).float().to(device_type + ":" + str(self.rank))
+        inpt = torch.tensor([self.rank]).float().to(self.rank)
 
         net_default_hook = FSDP(
             net,
@@ -384,11 +381,7 @@ class TestCommunicationHooks(FSDPTest):
         ):
             self.assertEqual(hook_param.grad, mp_param.grad)
 
-    @requires_nccl_or(
-        [
-            "xccl",
-        ]
-    )
+    @requires_accelerator_dist_backend(['nccl', 'xccl'])        
     @skip_if_lt_x_gpu(2)
     @parametrize("has_wrapping", [True, False])
     @parametrize(
@@ -409,17 +402,10 @@ class TestCommunicationHooks(FSDPTest):
             state, hook, sharding_strategy, torch.float16, has_wrapping
         )
 
-    @requires_nccl_or(
-        [
-            "xccl",
-        ]
-    )
-    @requires_nccl_version_or(
+    @requires_accelerator_dist_backend(['nccl', 'xccl']) 
+    @requires_nccl_version(
         (2, 10),
-        "Need NCCL 2.10+ for BF16_COMPRESS",
-        [
-            "xccl",
-        ],
+        "Need NCCL 2.10+ for BF16_COMPRESS"
     )
     @skip_but_pass_in_sandcastle_if(
         not BFLOAT16_AVAILABLE,
