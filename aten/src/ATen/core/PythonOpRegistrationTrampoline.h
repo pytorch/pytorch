@@ -7,12 +7,14 @@
 
 namespace at::impl {
 
+// Simplified version that only supports a single Python interpreter
+// since torch deploy/multipy is no longer used
 class TORCH_API PythonOpRegistrationTrampoline final {
-  static std::atomic<c10::impl::PyInterpreter*> interpreter_;
+  static c10::impl::PyInterpreter* interpreter_;
 
 public:
-  //  Returns true if you successfully registered yourself (that means
-  //  you are in the hot seat for doing the operator registrations!)
+  // Register the single Python interpreter
+  // Returns true on first registration, false if already registered
   static bool registerInterpreter(c10::impl::PyInterpreter*);
 
   // Returns nullptr if no interpreter has been registered yet.

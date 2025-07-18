@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/PyInterpreterHooks.h>
 #include <c10/util/python_stub.h>
