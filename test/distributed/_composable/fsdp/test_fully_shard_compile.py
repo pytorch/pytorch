@@ -548,8 +548,7 @@ Unsupported Tensor.backward() call
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
 
   Developer debug context: call_method TensorVariable() backward () {}
-
- For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0123""",  # noqa: B950
+""",  # noqa: B950
                     )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
