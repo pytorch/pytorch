@@ -327,7 +327,7 @@ std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, boo
         if (exclude_shape) {
           fmt::format_to(buf_iterator, "-1");
         } else {
-          fmt::format_to(buf_iterator, getArrayRefString(tensor.sizes()));
+          fmt::format_to(buf_iterator, "{}", getArrayRefString(tensor.sizes()));
         }
       }
       fmt::format_to(buf_iterator, "]");
