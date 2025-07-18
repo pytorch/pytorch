@@ -148,7 +148,7 @@ class CapabilityBasedPartitioner:
 
             # merge the smaller partition into the larger.
             merge_id, removed_id = self_id, other_id
-            if len(self_nodes) <= len(other_nodes):
+            if len(self_nodes) < len(other_nodes):
                 merge_id, removed_id = removed_id, merge_id
             # no cyclic dependency found, move forward with the merge
             # updating partition nodes
