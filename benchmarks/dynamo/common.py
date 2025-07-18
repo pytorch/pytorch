@@ -3756,8 +3756,8 @@ def run(runner, args, original_dir=None):
             args.use_eval_mode = True
         inductor_config.fallback_random = True
         if (
-            args.only is not None 
-            and not torch.version.hip 
+            args.only is not None
+            and not torch.version.hip
             and args.only not in {
                 "alexnet",
                 "Background_Matting",
