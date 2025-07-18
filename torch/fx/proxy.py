@@ -209,43 +209,52 @@ class TracerBase:
             node.meta["nn_module_stack"] = copy.copy(self.module_stack)
 
         if self.record_stack_traces and not node.stack_trace:
-            from torch.fx.experimental.symbolic_shapes import uninteresting_files
-
-            user_frame_summary = CapturedTraceback.extract().summary()
-            if user_frame_summary:
-                if self._record_forward_stack_traces_only:
-                    user_frame_summary = [
-                        frame
-                        for frame in user_frame_summary
-                        if (
-                            frame.name == "forward"
-                            or frame.filename.endswith("torch/__init__.py")
-                        )
-                    ]
-                else:
-                    first_forward = -1
-                    for i, frame in enumerate(user_frame_summary):
-                        if frame.name == "forward":
-                            user_frame_summary = user_frame_summary[i:]
-                            first_forward = i
-                            break
-
-                    # Not having a "forward" call in the stacktrace implies the
-                    # stacktrace will probably be irrelevant
-                    if first_forward == -1:
-                        user_frame_summary = []
-
-                stack_trace = [
-                    frame
-                    for frame in user_frame_summary
-                    if frame.filename not in uninteresting_files()
-                ]
-                if stack_trace:
-                    stack_trace = traceback.StackSummary.from_list(stack_trace)
-                    node.stack_trace = "".join(stack_trace.format()).strip()
+            user_stack_summary = CapturedTraceback.extract().summary()
+            if user_stack_summary:
+                user_stack_summary = self._filter_traceback_frames(user_stack_summary)
+                if user_stack_summary:
+                    node.stack_trace = "".join(user_stack_summary.format()).strip()
 
         log.debug("create_node %s", node)
         return node
+
+    def _filter_traceback_frames(
+        self, user_stack_summary: traceback.StackSummary
+    ) -> traceback.StackSummary:
+        # This method can be overridden to customize the frame filtering logic
+        # for the recorded stack trace
+        user_frames = []
+        if self._record_forward_stack_traces_only:
+            user_frames = [
+                frame
+                for frame in user_stack_summary
+                if (
+                    frame.name == "forward"
+                    or frame.filename.endswith("torch/__init__.py")
+                )
+            ]
+        else:
+            first_forward = -1
+            for i, frame in enumerate(user_stack_summary):
+                if frame.name == "forward":
+                    user_frames = user_stack_summary[i:]
+                    first_forward = i
+                    break
+
+            # Not having a "forward" call in the stacktrace implies the
+            # stacktrace will probably be irrelevant
+            if first_forward == -1:
+                user_frames = []
+
+        from torch.fx.experimental.symbolic_shapes import uninteresting_files
+
+        user_frames = [
+            frame
+            for frame in user_frames
+            if frame.filename not in uninteresting_files()
+        ]
+
+        return traceback.StackSummary.from_list(user_frames)
 
     @compatibility(is_backward_compatible=True)
     def proxy(self, node: Node) -> "Proxy":
