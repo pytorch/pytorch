@@ -54,6 +54,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     export SYSROOT_DEP="sysroot_linux-64=2.17"
   fi
 
+  # Please see: https://github.com/pytorch/pytorch/pull/158370#issuecomment-3084705725
+  export CONDA_PLUGINS_AUTO_ACCEPT_TOS="yes"
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
