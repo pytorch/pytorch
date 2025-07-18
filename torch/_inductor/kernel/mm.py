@@ -108,13 +108,16 @@ mm_template = TritonTemplate(
     tl.assume(pid_m >= 0)
     tl.assume(pid_n >= 0)
 
-    m_idx = pid_m * BLOCK_M
-    n_idx = pid_n * BLOCK_N
-    rm = m_idx + tl.arange(0, BLOCK_M)
-    rn = n_idx + tl.arange(0, BLOCK_N)
-    offs_a_m = rm % M
-    offs_b_n = rn % N
-
+    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    if ((stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1)) and (M >= BLOCK_M and K > 1):
+        offs_a_m = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+    else:
+        offs_a_m = rm % M
+    if ((stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1)) and (N >= BLOCK_N and K > 1):
+        offs_b_n = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    else:
+        offs_b_n = rn % N
     offs_k = tl.arange(0, BLOCK_K)
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
