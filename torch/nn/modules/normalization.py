@@ -60,9 +60,15 @@ class LocalResponseNorm(Module):
         self.k = k
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.local_response_norm(input, self.size, self.alpha, self.beta, self.k)
 
     def extra_repr(self):
+        """
+        Return the extra representation of the module.
+        """
         return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
@@ -82,9 +88,15 @@ class CrossMapLRN2d(Module):
         self.k = k
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return _cross_map_lrn2d.apply(input, self.size, self.alpha, self.beta, self.k)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
@@ -397,13 +409,13 @@ class RMSNorm(Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Runs forward pass.
+        Runs the forward pass.
         """
         return F.rms_norm(x, self.normalized_shape, self.weight, self.eps)
 
     def extra_repr(self) -> str:
         """
-        Extra information about the module.
+        Return the extra representation of the module.
         """
         return (
             "{normalized_shape}, eps={eps}, "

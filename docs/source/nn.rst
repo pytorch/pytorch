@@ -1,10 +1,15 @@
 .. role:: hidden
     :class: hidden-section
 
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+
+   nn.aliases.rst
+
 torch.nn
 ===================================
 .. automodule:: torch.nn
-.. automodule:: torch.nn.modules
 
 These are the basic building blocks for graphs:
 
@@ -511,8 +516,8 @@ Utility functions in other modules
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.Flatten
-    nn.Unflatten
+    nn.modules.flatten.Flatten
+    nn.modules.flatten.Unflatten
 
 Quantized Functions
 --------------------
@@ -531,18 +536,6 @@ Lazy Modules Initialization
 
     nn.modules.lazy.LazyModuleMixin
 
-Aliases
-_______
-
-The following are aliases to their counterparts in ``torch.nn``:
-
-.. currentmodule:: torch
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    nn.modules.normalization.RMSNorm
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
