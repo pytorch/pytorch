@@ -2,7 +2,6 @@
 # ruff: noqa: F841
 
 import copy
-import unittest
 
 import torch
 import torch.utils._pytree as pytree
@@ -407,10 +406,7 @@ def forward(self, token, x, cc):
             F1(), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
         )
 
-    # TODO(pianpwk): look into this
-    @unittest.expectedFailure
-    @parametrize("pre_dispatch", [True, False])
-    def test_torchbind_input_and_alias(self, pre_dispatch):
+    def test_torchbind_register_attr_at_runtime_error(self):
         # alias as model attribute
         class F3(torch.nn.Module):
             def forward(self, x, foo):
@@ -418,8 +414,25 @@ def forward(self, token, x, cc):
                 return x + self.foo.add_tensor(x)
 
         foo = torch.classes._TorchScriptTesting._Foo(10, 20)
+        with self.assertRaisesRegex(
+            ValueError, "following attrs were created in the model"
+        ):
+            torch.export.export(F3(), (torch.ones(2, 3), foo))
+
+    @parametrize("pre_dispatch", [True, False])
+    def test_torchbind_input_and_alias(self, pre_dispatch):
+        # alias as model attribute
+        class F3(torch.nn.Module):
+            def __init__(self, foo):
+                super().__init__()
+                self.foo = foo
+
+            def forward(self, x):
+                return x + self.foo.add_tensor(x)
+
+        foo = torch.classes._TorchScriptTesting._Foo(10, 20)
         self._test_export_same_as_eager(
-            F3(), (torch.ones(2, 3), foo), strict=False, pre_dispatch=pre_dispatch
+            F3(foo), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
         )
 
     @parametrize("pre_dispatch", [True, False])
