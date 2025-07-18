@@ -1741,7 +1741,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
             self.assertEqual(str(remote_device_after.device()), "cpu")
 
-        # ensure metdata also get changed to CPU
+        # ensure metadata also get changed to CPU
         metas = new_st.metadata().shards_metadata
         for meta in metas:
             self.assertEqual(str(meta.placement.device()), "cpu")
@@ -1772,7 +1772,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
             self.assertEqual(str(remote_device_after.device()), "cpu")
 
-        # ensure metdata also get changed to CPU
+        # ensure metadata also get changed to CPU
         metas = new_st.metadata().shards_metadata
         for meta in metas:
             self.assertEqual(str(meta.placement.device()), "cpu")
@@ -1829,7 +1829,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(str(remote_device_before.device().type), "cpu")
             self.assertEqual(str(remote_device_after.device().type), DEVICE_TYPE)
 
-        # ensure metdata also get changed to GPU
+        # ensure metadata also get changed to GPU
         metas = new_st_gpu.metadata().shards_metadata
         for meta in metas:
             self.assertEqual(str(meta.placement.device().type), DEVICE_TYPE)

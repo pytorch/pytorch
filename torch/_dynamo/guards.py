@@ -126,6 +126,7 @@ from .source import (
     ShapeEnvSource,
     SubclassAttrListSource,
     TorchFunctionModeStackSource,
+    TorchSource,
     TupleIteratorGetItemSource,
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
@@ -699,6 +700,9 @@ class GuardBuilder(GuardBuilderBase):
         ] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
         self.serialization_mode = serialization_mode
+        self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
+            "pytorch/compiler:guard_nn_modules"
+        )
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -1058,6 +1062,13 @@ class GuardBuilder(GuardBuilderBase):
         ):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager
+        elif istype(source, TorchSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=lambda _: torch,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, TorchFunctionModeStackSource):
             out = root_guard_manager.lambda_manager(
                 python_lambda=lambda _: get_torch_function_mode_stack_at(
@@ -1833,7 +1844,9 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         if hasattr(val, "training"):
             assert istype(val.training, bool)
-            self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
+            if not self.guard_nn_modules:
+                # If guard_nn_modules is true, we will guard on the right set of guards
+                self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
         else:
             exc.unimplemented_v2(
                 gb_type="Attempted to guard on uninitialized nn.Module",
