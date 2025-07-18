@@ -9,8 +9,8 @@ from distutils.command.clean import clean
 from setuptools import Extension, find_packages, setup
 
 
-PACKAGE_NAME = "torch_openreg"
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
+RUN_BUILD_DEPS = any(arg in {"clean", "dist_info"} for arg in sys.argv)
 
 
 def get_pytorch_dir():
@@ -49,7 +49,7 @@ def build_deps():
 
 class BuildClean(clean):
     def run(self):
-        for i in ["build", "install", "torch_openreg.egg-info", "torch_openreg/lib"]:
+        for i in ["build", "install", "torch_openreg/lib"]:
             dirs = os.path.join(BASE_DIR, i)
             if os.path.exists(dirs) and os.path.isdir(dirs):
                 shutil.rmtree(dirs)
@@ -60,9 +60,6 @@ class BuildClean(clean):
                     os.remove(os.path.join(dirpath, filename))
 
 
-RUN_BUILD_DEPS = any(arg == "clean" for arg in sys.argv)
-
-
 def main():
     if not RUN_BUILD_DEPS:
         build_deps()
@@ -71,6 +68,7 @@ def main():
         Extension(
             name="torch_openreg._C",
             sources=["torch_openreg/csrc/stub.c"],
+            language="c",
             extra_compile_args=["-g", "-Wall", "-Werror"],
             libraries=["torch_bindings"],
             library_dirs=[os.path.join(BASE_DIR, "torch_openreg/lib")],
@@ -78,20 +76,12 @@ def main():
         )
     ]
 
-    package_data = {PACKAGE_NAME: ["lib/*.so*"]}
+    package_data = {"torch_openreg": ["lib/*.so*"]}
 
     setup(
-        name=PACKAGE_NAME,
-        version="0.0.1",
-        author="PyTorch Core Team",
-        description="Example for PyTorch out of tree registration",
-        packages=find_packages(exclude=("test",)),
+        packages=find_packages(),
         package_data=package_data,
-        install_requires=[
-            "torch",
-        ],
         ext_modules=ext_modules,
-        python_requires=">=3.8",
         cmdclass={
             "clean": BuildClean,  # type: ignore[misc]
         },

@@ -47,6 +47,7 @@ torch_openreg/
 │       ├── OpenRegHostAllocator.cpp
 │       ├── OpenRegHostAllocator.h
 │       └── ...
+├── pyproject.toml
 ├── README.md
 ├── setup.py
 ├── third_party
@@ -144,9 +145,8 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 ### Installation
 
 ```python
-pip3 install -r requirements.txt
-
-python setup.py develop/install
+pip3 install --no-build-isolation -e . # for develop
+pip3 install --no-build-isolation . # for install
 ```
 
 ### Usage Example
