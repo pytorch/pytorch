@@ -27,7 +27,7 @@ import shutil
 import sys
 import textwrap
 from importlib import import_module
-from typing import Union
+from typing import Optional, Union
 
 import torch
 import torch.fx as fx
@@ -79,7 +79,7 @@ def _accuracy_fails(gm, example_inputs, compiler_fn):
 
 
 class WrapBackendDebug:
-    def __init__(self, unconfigured_compiler_fn, compiler_name: str) -> None:
+    def __init__(self, unconfigured_compiler_fn, compiler_name: Optional[str]) -> None:
         functools.wraps(unconfigured_compiler_fn)(self)
         self._torchdynamo_orig_backend = unconfigured_compiler_fn  # type: ignore[attr-defined]
         self._compiler_name = compiler_name
@@ -152,7 +152,7 @@ class WrapBackendDebug:
         return compiled_gm
 
 
-def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
+def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: Optional[str]):
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
     As opposed to wrap_compiler_debug, this wrapper intercepts at the
@@ -455,7 +455,7 @@ def repro_run(options, mod, load_args):
 
     if options.accuracy != "":
         mod.eval()
-        opt_mod.eval()
+        opt_mod.eval()  # type: ignore[union-attr]
 
         with torch.amp.autocast("cuda", enabled=options.autocast):
             # TODO: disable clone
