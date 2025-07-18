@@ -89,7 +89,11 @@ from .subclass_utils import (
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
-from .utils import maybe_to_fresh_input, without_output_descs
+from .utils import (
+    call_and_expect_output_descs,
+    maybe_to_fresh_input,
+    without_output_descs,
+)
 
 
 # This function returns a new function that returns mutated inputs as outputs.
@@ -103,7 +107,7 @@ def fn_input_mutations_to_outputs(
 ) -> Any:
     @wraps(fn)
     def inner_fn(*args):
-        outs, outs_descs = fn(*args)
+        outs, outs_descs = call_and_expect_output_descs(fn, args)
         assert len(meta.output_info) == len(outs)
         # The compiled fw will return mutated input tensors, *including* metadata-only mutation.
         # However, if keep_data_input_mutations is set, the compiled fw only needs to return metadata-mutated inputs.
@@ -162,7 +166,7 @@ def fn_prepped_for_autograd(
             maybe_to_fresh_input(i, t, meta) for i, t in enumerate(args)
         ]
 
-        outs, outs_descs = fn(*args_maybe_cloned)
+        outs, outs_descs = call_and_expect_output_descs(fn, args_maybe_cloned)
         assert isinstance(outs, (tuple, list))
         outs = list(outs)
         assert len(meta.output_info) == len(outs)
@@ -281,7 +285,7 @@ def create_joint(
             outs, tangent_mask = fn(*primals)
             assert not pytree.tree_any(lambda x: isinstance(x, AOTOutput), tangent_mask)
         else:
-            (outs, tangent_mask), outs_descs = fn(*primals)
+            (outs, tangent_mask), outs_descs = call_and_expect_output_descs(fn, primals)
 
         # TODO: I think this hook can also be eliminated now
         if joint_fn_handle and joint_fn_handle.post_forward:
@@ -448,8 +452,10 @@ def create_functionalized_rng_ops_wrapper(
                     (*outs[0], PhiloxStateTracker.get_updated_fwd_offset()),
                     (*outs[1], PhiloxStateTracker.get_updated_bwd_offset()),
                 ),
-                (*outs_descs[0], PhiloxUpdatedForwardOffsetAOTOutput()),
-                (*outs_descs[1], PhiloxUpdatedBackwardOffsetAOTOutput()),
+                (
+                    (*outs_descs[0], PhiloxUpdatedForwardOffsetAOTOutput()),
+                    (*outs_descs[1], PhiloxUpdatedBackwardOffsetAOTOutput()),
+                ),
             )
         else:
             # outs signature before: Tuple(fwd_outputs)
@@ -782,7 +788,7 @@ def create_functionalized_fn(
                     joint_fn_handle.post_forward = _post_forward
 
                 # Run the joint
-                f_outs, f_outs_descs = fn(*f_args)
+                f_outs, f_outs_descs = call_and_expect_output_descs(fn, f_args)
 
             if trace_joint:
                 # We support a limited amount of mutation of graph inputs during the backward pass.
@@ -1076,7 +1082,7 @@ def handle_effect_tokens_fn(
                 functional_tensor_mode._tokens[k] = f_tokens[i]
 
             # Run the joint
-            outs, outs_descs = fn(*args)
+            outs, outs_descs = call_and_expect_output_descs(fn, args)
 
         # Return both the tokens and the outputs
         # See Note [Side-Effectful Tokens in AOTAutograd]
@@ -1172,7 +1178,7 @@ def aot_dispatch_subclass(
         )
 
         # Step 2: call the inner function, with our (maybe subclass) inputs
-        wrapped_outs, wrapped_outs_descs = fn(*all_args)
+        wrapped_outs, wrapped_outs_descs = call_and_expect_output_descs(fn, all_args)
 
         if use_trace_joint:
             # See Note: [Computing Subclass Metadata about grad_inputs]

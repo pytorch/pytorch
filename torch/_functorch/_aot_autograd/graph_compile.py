@@ -124,9 +124,12 @@ def aot_stage1_graph_capture(
     # augment the output to return a tuple[list[Tensor], list[AOTOutput]] and
     # then preserve this convention through the rest of the passes.
 
+    from functools import wraps
+
     # TODO: We could test for consistency with fw_metadata, but this is not a
     # big deal
-    def flat_fn(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
+    @wraps(orig_flat_fn)
+    def orig_flat_fn2(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
         out = orig_flat_fn(*args)
         out_descs: list[AOTOutput] = [OutputAOTOutput(i) for i in range(len(out))]
         return out, out_descs
@@ -137,7 +140,7 @@ def aot_stage1_graph_capture(
     flat_fn, aot_state.flat_args, aot_state.flat_args_descs, aot_state.fw_metadata = (
         pre_compile(
             wrappers,
-            flat_fn,
+            orig_flat_fn2,
             aot_state.flat_args,
             aot_state.flat_args_descs,
             aot_config,

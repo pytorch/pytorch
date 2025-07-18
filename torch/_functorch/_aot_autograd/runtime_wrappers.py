@@ -83,6 +83,7 @@ from .subclass_utils import (
     wrap_tensor_subclasses,
 )
 from .utils import (
+    call_and_expect_output_descs,
     call_func_at_runtime_with_args,
     make_boxed_func,
     partial_flatten_asdict,
@@ -969,7 +970,9 @@ class AOTDedupeWrapper(CompilerWrapper):
         def wrapped_flat_fn(
             *args: FxValue,
         ) -> tuple[list[FxValue], list[AOTOutput]]:
-            outs, out_descs = flat_fn(*self.add_dupe_args(args))
+            outs, out_descs = call_and_expect_output_descs(
+                flat_fn, self.add_dupe_args(args)
+            )
             return outs, out_descs
 
         if config.debug_assert:
@@ -1169,7 +1172,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 for i, x in enumerate(unpacked_args)
                 if i in self.aliased_arg_idx_with_metadata_mutations
             ]
-            out, out_descs = flat_fn(*unpacked_args)
+            out, out_descs = call_and_expect_output_descs(flat_fn, unpacked_args)
             if len(aliased_args_with_metadata_mutations) > 0:
                 # TODO: record more detailed desc information here
                 return (*out, *aliased_args_with_metadata_mutations), (

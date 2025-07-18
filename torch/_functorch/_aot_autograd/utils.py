@@ -19,6 +19,8 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
+from .descriptors import AOTOutput
+
 
 KNOWN_TYPES = [
     torch.Tensor,
@@ -521,3 +523,18 @@ def without_output_descs(f):
         return f(*args, **kwargs)[0]
 
     return inner
+
+
+def call_and_expect_output_descs(fn, args):
+    outs_pair = fn(*args)
+    assert isinstance(outs_pair, tuple) and len(outs_pair) == 2, (fn, outs_pair)
+    outs, outs_descs = outs_pair
+    # The Tensor tests protects against the test when there are no outputs
+    assert pytree.tree_any(
+        lambda x: isinstance(x, AOTOutput), outs_descs
+    ) or not pytree.tree_any(lambda x: isinstance(x, torch.Tensor), outs), (
+        fn,
+        outs,
+        outs_descs,
+    )
+    return outs_pair

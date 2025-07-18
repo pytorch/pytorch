@@ -34,6 +34,7 @@ from .graph_capture_wrappers import (
 )
 from .schemas import AOTConfig, FxValue, SubclassMeta, TraceFn, ViewAndMutationMeta
 from .utils import (
+    call_and_expect_output_descs,
     copy_fwd_metadata_to_bw_nodes,
     register_buffer_assignment_hook,
     root_module_when_exporting_non_strict,
@@ -64,7 +65,7 @@ def _create_graph(
         @functools.wraps(f)
         def inner_f(*args):
             nonlocal out_descs
-            out, out_descs = f(*args)
+            out, out_descs = call_and_expect_output_descs(f, args)
             return out
 
     # TODO: save args_descs/out_descs to the produced FX graph
