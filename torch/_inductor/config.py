@@ -1836,7 +1836,8 @@ class test_configs:
 
     graphsafe_rng_func_ignores_fallback_random = False
 
-    # If set,
+    # If set to True, AOTI-generated CMakelists.txt will still use libtorch
+    # for unit testing
     testing_aot_inductor_compile_standalone = False
 
 
