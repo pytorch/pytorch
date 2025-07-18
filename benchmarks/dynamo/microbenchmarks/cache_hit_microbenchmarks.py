@@ -3,7 +3,7 @@ import timeit
 
 import torch.fx
 from torch._dynamo.utils import counters
-from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
+from torch._inductor.utils import clear_caches, fresh_cache
 
 
 N = 10000
@@ -20,7 +20,7 @@ def main():
     torch._inductor.config.fx_graph_cache = True
     torch._inductor.config.fx_graph_remote_cache = False
 
-    with fresh_inductor_cache():
+    with fresh_cache():
         a = torch.randn(4).cuda()
         compiled_fn = torch.compile(huge_graph, backend="inductor")
 
@@ -30,7 +30,7 @@ def main():
 
         def setup():
             torch._dynamo.reset()
-            clear_inductor_caches()
+            clear_caches()
             for m in torch._inductor.codecache.PyCodeCache.cache.values():
                 os.remove(m.__file__)
             counters.clear()

@@ -143,6 +143,8 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.bfloat16: ScalarType.BFLOAT16,
     torch.float8_e4m3fn: ScalarType.FLOAT8E4M3FN,
     torch.float8_e5m2: ScalarType.FLOAT8E5M2,
+    torch.float8_e4m3fnuz: ScalarType.FLOAT8E4M3FNUZ,
+    torch.float8_e5m2fnuz: ScalarType.FLOAT8E5M2FNUZ,
 }
 
 
@@ -322,9 +324,9 @@ def _reconstruct_fake_tensor(
     json_tensor_meta = json.loads(serialized_tensor_meta.decode("utf-8"))
     tensor_meta = _dict_to_dataclass(TensorMeta, json_tensor_meta)
     # Find the current fake mode
-    assert (
-        _CURRENT_DESERIALIZER is not None
-    ), "Need access to current deserializer state"
+    assert _CURRENT_DESERIALIZER is not None, (
+        "Need access to current deserializer state"
+    )
     fake_tensor = _CURRENT_DESERIALIZER.deserialize_tensor_meta(tensor_meta)
     if is_parameter:
         fake_tensor = torch.nn.Parameter(fake_tensor)  # type: ignore[assignment]
@@ -337,9 +339,9 @@ def serialize_torch_artifact(
     if artifact is None:
         return b""
 
-    assert (
-        FakeTensor not in copyreg.dispatch_table
-    ), "Refusing to stomp on existing FakeTensor reducer"
+    assert FakeTensor not in copyreg.dispatch_table, (
+        "Refusing to stomp on existing FakeTensor reducer"
+    )
     try:
         copyreg.pickle(FakeTensor, _reduce_fake_tensor)
         buffer = io.BytesIO()
@@ -356,7 +358,7 @@ def serialize_torch_artifact(
 
 
 def deserialize_torch_artifact(
-    serialized: Union[dict[str, Any], tuple[Any, ...], bytes]
+    serialized: Union[dict[str, Any], tuple[Any, ...], bytes],
 ):
     if isinstance(serialized, (dict, tuple)):
         return serialized
@@ -415,7 +417,7 @@ def _symbol_index(sym: sympy.Symbol, sym_type: SymT):
 
 
 def serialize_range_constraints(
-    range_constraints: dict[sympy.Symbol, ValueRanges]
+    range_constraints: dict[sympy.Symbol, ValueRanges],
 ) -> dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
@@ -499,9 +501,9 @@ class GraphModuleSerializer(metaclass=Final):
             graph_input = Argument.create(
                 as_custom_obj=CustomObjArgument(name=node.name, class_fqn=class_fqn)
             )
-            self.graph_state.custom_obj_values[
-                node.name
-            ] = self.serialize_script_obj_meta(val)
+            self.graph_state.custom_obj_values[node.name] = (
+                self.serialize_script_obj_meta(val)
+            )
         else:
             raise AssertionError(f"Unimplemented graph input type: {node.meta['val']}")
         self.graph_state.inputs.append(graph_input)
@@ -627,9 +629,9 @@ class GraphModuleSerializer(metaclass=Final):
                 )
         elif type(node.target) in _serialization_registry:
             # Sanity check for unhandled serialization.
-            assert (
-                type(node.target) in _serialization_registry
-            ), f"{type(node.target)} is not supported in export serialization."
+            assert type(node.target) in _serialization_registry, (
+                f"{type(node.target)} is not supported in export serialization."
+            )
 
             handler = _serialization_registry[type(node.target)]
             namespace = handler.namespace()
@@ -1295,9 +1297,9 @@ class GraphModuleSerializer(metaclass=Final):
                             f"but somehow previously was found to have field names {field_names}."
                         )
                 else:
-                    self.treespec_namedtuple_fields[
-                        serialized_type_name
-                    ] = NamedTupleDef(field_names=ts.context._fields)
+                    self.treespec_namedtuple_fields[serialized_type_name] = (
+                        NamedTupleDef(field_names=ts.context._fields)
+                    )
 
             for child in ts.children_specs:
                 store_namedtuple_fields(child)
@@ -1408,7 +1410,7 @@ class GraphModuleSerializer(metaclass=Final):
                 assert isinstance(
                     return_schema.real_type, (torch.OptionalType, torch.TensorType)
                 )
-                # When the return type is annoated as Tensor type, the op can also return an
+                # When the return type is annotated as Tensor type, the op can also return an
                 # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=True))
             elif isinstance(meta, FakeTensor):
@@ -1516,9 +1518,9 @@ class GraphModuleSerializer(metaclass=Final):
 
         idx_to_name = {}
         for user in node.users:
-            assert (
-                user.target is operator.getitem
-            ), f"User node {user} of {node} is incorrect"
+            assert user.target is operator.getitem, (
+                f"User node {user} of {node} is incorrect"
+            )
             idx_to_name[user.args[1]] = user.name
 
         for idx, _ in enumerate(meta_val):
@@ -2057,7 +2059,7 @@ class GraphModuleDeserializer(metaclass=Final):
             _additional_msg = (
                 (
                     f"We failed to resolve {target} to an operator. "
-                    + "If it's a custom op/custom triton op, this is usally because the custom op is not registered"
+                    + "If it's a custom op/custom triton op, this is usually because the custom op is not registered"
                     + " when deserializing. Please import the custom op to register it before deserializing."
                     + " Otherwise, please file an issue on github."
                 )
@@ -2498,6 +2500,7 @@ class GraphModuleDeserializer(metaclass=Final):
             len(serialized_node.outputs) == 1
             and "torch.ops.higher_order" in serialized_node.target
             and not getattr(serialized_node, "is_hop_single_tensor_return", True)
+            and serialized_node.outputs[0].type != "as_none"
         ):
 
             def _deserialize_hop_with_single_return(serialized_node, fx_node):
@@ -2886,7 +2889,7 @@ def _dataclass_to_dict(obj):
             return "Infinity"
         elif obj == -math.inf:
             return "-Infinity"
-        elif obj == math.nan:
+        elif math.isnan(obj):
             return "NaN"
         else:
             return obj
@@ -3528,9 +3531,9 @@ def register_extension(
     extension_handler: type[ExtensionHandler],
 ):
     """Register custom de/serialization method for a node with non-standard type."""
-    assert issubclass(
-        extension_handler, ExtensionHandler
-    ), f"Expected ExtensionHandler, got {extension_handler}."
+    assert issubclass(extension_handler, ExtensionHandler), (
+        f"Expected ExtensionHandler, got {extension_handler}."
+    )
     assert op_type not in _serialization_registry, f"{op_type} is already registered."
     assert isinstance(op_type, type)  # Maybe a good idea to enforce this first.
     assert not (

@@ -64,8 +64,8 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose"
 # manage to eliminate all float compute, this ends up being equivalent, but
 # there is a critical difference when some floats cannot be eliminated: when
 # we call item() on them, what should it's SymFloat be? Ideally, it would
-# be the same backed SymFloat we had before. But without symbolic expresssion
-# propogation on tensor quantities, repropagating would instead give you an
+# be the same backed SymFloat we had before. But without symbolic expression
+# propagation on tensor quantities, repropagating would instead give you an
 # unbacked SymFloat. Maybe it is a good idea to implement symbolic propagation
 # on 0d scalar tensors, but I decided to go for something simpler to start.
 #
@@ -190,6 +190,7 @@ def tensorify_python_scalars(
 
         return expr_to_tensor_proxy[expr]
 
+    failed_tensorify_ops: set[str] = set()
     nodes = list(graph.nodes)
     for i, node in enumerate(nodes[:-1]):
         with graph.inserting_before(
@@ -302,8 +303,15 @@ def tensorify_python_scalars(
                         metrics_context.set(
                             "tensorify_float_success", True, overwrite=True
                         )
-
-    failed_tensorify_ops: set[str] = set()
+            else:
+                for a in node.args:
+                    if (
+                        isinstance(a, fx.Node)
+                        and "val" in a.meta
+                        and isinstance(zf := a.meta["val"], torch.SymFloat)
+                    ):
+                        failed_tensorify_ops.update(str(node.target))
+                        log.info("Failed to tensorify %s", str(node.target))
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
@@ -332,15 +340,13 @@ def tensorify_python_scalars(
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
 
-                    failed_tensorify_ops.update(str(key) for key in node.users.keys())
-
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
     # Sometimes by the time we get to tensorify, there have already been
     # specializations, eg. in python_arg_parser.h. In these cases,
     # placeholder nodes no longer have a reference to their original
-    # symfloat and thus we need to deduce specializations have happend
+    # symfloat and thus we need to deduce specializations have happened
     # via shape_env.replacements. NB: there's an important invariant here
     # that symfloats keep consistent names across restarts.
     for k, v in shape_env.var_to_val.items():

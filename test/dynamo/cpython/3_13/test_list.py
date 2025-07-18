@@ -4,6 +4,9 @@
 # ruff: noqa
 # flake8: noqa
 
+# Test copied from
+# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_list.py
+
 import sys
 import torch
 import torch._dynamo.test_case
@@ -373,7 +376,7 @@ class ListTest(list_tests.CommonTest):
             a.append(4)
             self.assertEqual(list(it), [])
 
-    @unittest.expectedFailure
+    @unittest.skip("Fails on python <=3.13.2 and passes on >=3.13.3")
     def test_deopt_from_append_list(self):
         # gh-132011: it used to crash, because
         # of `CALL_LIST_APPEND` specialization failure.

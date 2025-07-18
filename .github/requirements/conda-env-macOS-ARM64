@@ -2,5 +2,4 @@
 certifi
 pip=23.2.1
 pkg-config=0.29.2
-setuptools=72.1.0
 wheel=0.37.1

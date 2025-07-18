@@ -199,12 +199,12 @@ class DeviceGuard:
 
 
 class CudaInterface(DeviceInterface):
-    device = torch.cuda.device
+    device = torch.cuda.device  # type: ignore[assignment]
 
     # register Event and Stream class into the backend interface
     # make sure Event and Stream are implemented and inherited from the torch.Event and torch.Stream
-    Event = torch.cuda.Event
-    Stream = torch.cuda.Stream
+    Event = torch.cuda.Event  # type: ignore[assignment]
+    Stream = torch.cuda.Stream  # type: ignore[assignment]
 
     class Worker:
         @staticmethod
@@ -247,8 +247,8 @@ class CudaInterface(DeviceInterface):
     synchronize = staticmethod(torch.cuda.synchronize)
     get_device_properties = staticmethod(torch.cuda.get_device_properties)  # type: ignore[assignment]
     get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[assignment, arg-type]
-    exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type]
-    maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type]
+    exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type, has-type]
+    maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.cuda.memory_allocated)
     is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)  # type: ignore[arg-type]
 
@@ -297,9 +297,9 @@ else:
 
 
 class XpuInterface(DeviceInterface):
-    device = torch.xpu.device
-    Event = torch.xpu.Event
-    Stream = torch.xpu.Stream
+    device = torch.xpu.device  # type: ignore[assignment]
+    Event = torch.xpu.Event  # type: ignore[assignment]
+    Stream = torch.xpu.Stream  # type: ignore[assignment]
 
     class Worker:
         @staticmethod

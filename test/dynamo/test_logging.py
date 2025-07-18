@@ -23,9 +23,10 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
     skipIfTorchDynamo,
-    xfailIfS390X,
+    TEST_XPU,
+    xfailIf,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
     make_logging_test,
@@ -34,39 +35,29 @@ from torch.testing._internal.logging_utils import (
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_gpu = unittest.skipUnless(HAS_CUDA or HAS_XPU, "requires cuda or xpu")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
 
 def munge_shape_guards(s: str) -> str:
-    SHAPE_GUARD = (
-        "SYMBOLIC_SHAPE_GUARD"
-        if torch._dynamo.config.enable_cpp_symbolic_shape_guards
-        else "LAMBDA_GUARD"
-    )
     SHAPE_GUARD_REGEX = (
-        r"[| ]* \+- SYMBOLIC_SHAPE_GUARD"
+        r"[| ]* \+- SYMBOLIC_SHAPE_GUARD:"
         if torch._dynamo.config.enable_cpp_symbolic_shape_guards
-        else r"\+- LAMBDA_GUARD"
+        else r"^\+- LAMBDA_GUARD:"
     )
 
     def munge(s):
-        return re.sub(
-            SHAPE_GUARD_REGEX,
-            "+- __SHAPE_GUARD__",
-            re.sub(r"[^ ]+:\d+ in [^ ]+", "#:# in #", s),
-        )
+        s = re.sub(r"[^ ]+:\d+ in [^ ]+", "#:# in #", s)
+        return re.subn(SHAPE_GUARD_REGEX, "+- __SHAPE_GUARD__:", s)
 
-    lines = [munge(l) for l in s.splitlines() if SHAPE_GUARD in l]
-
-    if torch._dynamo.config.enable_cpp_symbolic_shape_guards:
-        # Since we can have multiple guard accessors for one guard, the shape guard
-        # printing will have just SYMBOLIC_SHAPE_GUARD in one line for the second
-        # guard accessor and onwards. We remove those lines
-        lines = [line for line in lines if "__SHAPE_GUARD__:" in line]
-
-    return "\n".join(lines)
+    lines = [munge(l) for l in s.splitlines()]
+    return "\n".join([line for line, nsubs in lines if nsubs > 0])
 
 
 def example_fn(a):
@@ -87,7 +78,7 @@ def inductor_error_fn(a):
 
 
 def inductor_schedule_fn(a):
-    output = a.add(torch.ones(1000, 1000, device="cuda"))
+    output = a.add(torch.ones(1000, 1000, device=device_type))
     return output
 
 
@@ -124,19 +115,19 @@ class LoggingTests(LoggingTestCase):
     test_output_code = multi_record_test(3, output_code=True)
     test_aot_graphs = multi_record_test(3, aot_graphs=True)
 
-    @requires_cuda
+    @requires_gpu
     @make_logging_test(schedule=True)
     def test_schedule(self, records):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
 
-    @requires_cuda
+    @requires_gpu
     @make_logging_test(fusion=True)
     def test_fusion(self, records):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
@@ -144,7 +135,7 @@ class LoggingTests(LoggingTestCase):
     @make_logging_test(cudagraphs=True)
     def test_cudagraphs(self, records):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
@@ -168,6 +159,22 @@ class LoggingTests(LoggingTestCase):
         fn_opt(torch.ones(1000, 1000))
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
         self.assertEqual(len([r for r in records if ".__output_code" in r.name]), 0)
+
+    @make_logging_test(hierarchical_compile=True)
+    def test_hierarchical_compile(self, records):
+        from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+
+        @mark_compile_region
+        def gn(x):
+            return x * 2
+
+        def fn(x):
+            return gn(x)
+
+        fn_opt = torch.compile(fn, backend="inductor")
+        fn_opt(torch.ones(1000, 1000))
+        fn_opt(torch.ones(1000, 1000))
+        self.assertGreater(len(records), 0)
 
     @make_logging_test()
     def test_dynamo_error(self, records):
@@ -710,7 +717,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-| +- __SHAPE_GUARD__: torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None  # #:# in #
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
 +- __SHAPE_GUARD__: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
 +- __SHAPE_GUARD__: ((2*L['z'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
@@ -729,7 +735,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-| +- __SHAPE_GUARD__: torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None  # #:# in #
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # #:# in #
 +- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
@@ -749,7 +754,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-| +- __SHAPE_GUARD__: torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == None  # #:# in #
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
 +- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
         )
@@ -766,10 +770,11 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 4)
 
+    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/157778
     @make_logging_test(perf_hints=True)
-    @requires_cuda
+    @requires_gpu
     def test_optimizer_non_static_param(self, records):
-        params = [torch.randn(10, 10, device="cuda") for _ in range(2)]
+        params = [torch.randn(10, 10, device=device_type) for _ in range(2)]
         for param in params:
             param.grad = torch.zeros_like(param)
         opt = torch.optim.Adam(params)
@@ -779,16 +784,19 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertLess(len(records), 3)
 
     @make_logging_test(autotuning=True)
-    @requires_cuda
+    @requires_gpu
     @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
     def test_autotuning(self, records):
-        with torch._inductor.utils.fresh_inductor_cache():
+        with torch._inductor.utils.fresh_cache():
 
             def f(a, b):
                 return torch.mm(a, b)
 
             f = torch.compile(f, mode="max-autotune-no-cudagraphs")
-            f(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+            f(
+                torch.randn(10, 10, device=device_type),
+                torch.randn(10, 10, device=device_type),
+            )
             self.assertGreater(len(records), 0)
             self.assertLess(len(records), 40)
 
@@ -838,8 +846,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
-    # there are some additional deprecation warnings in stderr, probably due to newer dependencies used on s390x
-    @xfailIfS390X
     def test_logs_out(self):
         import tempfile
 
@@ -957,8 +963,11 @@ exclusions = {
     "cudagraph_static_inputs",
     "benchmarking",
     "loop_ordering",
+    "loop_tiling",
     "autotuning",
     "graph_region_expansion",
+    "hierarchical_compile",
+    "compute_dependencies",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

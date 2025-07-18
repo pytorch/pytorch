@@ -29,7 +29,10 @@ __all__ = [
 # FB-internal note: you do NOT have to specify this explicitly specify this if
 # you run on MAST, we will automatically default this to
 # mast:MAST_JOB_NAME:MAST_JOB_VERSION.
-job_id: Optional[str] = Config(env_name_default="TORCH_COMPILE_JOB_ID", default=None)
+job_id: Optional[str] = Config(
+    env_name_default=["TORCH_COMPILE_JOB_ID", "TORCH_COMPILE_STICKY_PGO_KEY"],
+    default=None,
+)
 """
 Semantically, this should be an identifier that uniquely identifies, e.g., a
 training job.  You might have multiple attempts of the same job, e.g., if it was
@@ -63,6 +66,18 @@ Tag to be included in the cache key generation for all torch compile caching.
 A common use case for such a tag is to break caches.
 """
 
+force_disable_caches: bool = Config(
+    justknob="pytorch/remote_cache:force_disable_caches",
+    env_name_force=[
+        "TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+        "TORCH_COMPILE_FORCE_DISABLE_CACHES",
+    ],
+    default=False,
+)
+"""
+Force disables all caching -- This will take precedence over and override any other caching flag
+"""
+
 dynamic_sources: str = Config(
     env_name_default="TORCH_COMPILE_DYNAMIC_SOURCES", default=""
 )
@@ -72,15 +87,6 @@ models with graph breaks where you need intermediate tensors and ints to be mark
 
 This whitelist is dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
 and force_parameter_static_shapes.
-"""
-
-sticky_pgo_key: str = Config(
-    env_name_default="TORCH_COMPILE_STICKY_PGO_KEY", default=""
-)
-"""
-If you want to share PGO profiles across different jobs (and not just attempts), you can set
-this to a string that identifies the shared profile. This is useful if you want to share PGO profiles
-for models that are not identical, but are similar enough to share PGO profiles.
 """
 
 unbacked_sources: str = Config(

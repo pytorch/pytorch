@@ -6,13 +6,14 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 3. handle functionalized randomness
 4. deduplicate inputs and consolidate views into their bases (see input_output_analysis)
 """
+
 import builtins
 import collections
 import contextlib
 import copy
 import itertools
 import pprint
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
@@ -20,6 +21,8 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dynamo import config as dynamo_config
+from torch._dynamo.callback import callback_handler, CallbackTrigger
 from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
 from torch._guards import (
     compile_context,
@@ -46,6 +49,7 @@ from .input_output_analysis import (
 from .logging_utils import describe_input, format_guard_bug_msg, track_graph_compiling
 from .schemas import (
     AOTConfig,
+    CompilerWrapper,
     InputAliasInfo,
     MemoryFormatMeta,
     MutationType,
@@ -75,54 +79,6 @@ if TYPE_CHECKING:
 
 
 zip = strict_zip
-
-
-class CompilerWrapper:
-    """
-    A wrapper around the inputs and outputs to the compiler_fn. We separate these into two parts:
-
-    1. The prologue, which edits the input to the compiler_fn(flat_fn, flat_args, etc)
-    2. The epilogue, which edits the outputs of the compiler_fn (compiled_fn, real arguments)
-
-    Each wrapper below should be implemented as a CompilerWrapper, so that we can facilitate
-    caching on the compiled output, and re-wrapping the output via epilogues.
-    Extra metadata that is needed to compute pre or post compile can be passed in via attributes.
-    """
-
-    def pre_compile(
-        self,
-        flat_fn,
-        flat_args: list[Tensor],
-        aot_config: AOTConfig,
-        *,
-        fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
-        """
-        Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
-        Args:
-        flat_fn: The function to compile
-        flat_args: Metadata from example inputs of the function to compile
-        aot_config: AOTConfig passed in at compile time
-        fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
-        """
-        return flat_fn, flat_args, fw_metadata
-
-    def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
-        """
-        Given an output of the compiler, wrap it with information received from prologue.
-        Args:
-        compiled_fn: Callable after calling compiler_fn
-        aot_config: AOTConfig after calling prologue
-        runtime_metadata: ViewAndMutationMeta after calling all wrappers's pre_compile steps.
-        Example:
-
-        def wrapped_compiled_fn(args):
-            # do something with args, aot_config, fw_metadata
-            return compiled_fn(args)
-
-        return wrapped_compiled_fn
-        """
-        return compiled_fn
 
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
@@ -316,7 +272,30 @@ def _create_runtime_wrapper(
             for info in runtime_metadata.output_info
         )
 
+    def record_runtime_wrapper_prologue_enter() -> Optional[
+        AbstractContextManager[None]
+    ]:
+        if (
+            torch.autograd.profiler._is_profiler_enabled
+            and dynamo_config.record_runtime_overhead
+        ):
+            cm = torch._C._profiler._RecordFunctionFast(
+                "AOTDispatcher Runtime Wrapper Prologue"
+            )
+            cm.__enter__()
+            return cm
+        return None
+
+    def record_runtime_wrapper_prologue_exit(
+        cm: Optional[AbstractContextManager[None]],
+    ) -> None:
+        if cm is not None:
+            cm.__exit__(None, None, None)
+
     def runtime_wrapper(args: list[Any]):
+        # Create context manager for profiler
+        cm = record_runtime_wrapper_prologue_enter()
+
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
@@ -337,9 +316,11 @@ def _create_runtime_wrapper(
             # It's possible to have trace_joint inside user specified with no_grad() region,
             # if there is a nested with enable_grad(), that forces some outputs to require gradients.
             # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
-            with torch.autograd._force_original_view_tracking(
-                True
-            ), torch.enable_grad():
+            with (
+                torch.autograd._force_original_view_tracking(True),
+                torch.enable_grad(),
+            ):
+                record_runtime_wrapper_prologue_exit(cm)
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
@@ -353,6 +334,7 @@ def _create_runtime_wrapper(
             try:
                 if grad_enabled:
                     torch._C._set_grad_enabled(False)
+                record_runtime_wrapper_prologue_exit(cm)
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args, disable_amp=disable_amp, steal_args=True
                 )
@@ -922,9 +904,9 @@ class AOTDedupeWrapper(CompilerWrapper):
             keep_arg_mask.append(True)
             add_dupe_map.append(j)
             j += 1
-        assert (
-            len(add_dupe_map) == duped_arg_len
-        ), f"Expects add_dupe_map to have length {duped_arg_len} but got {len(add_dupe_map)}"
+        assert len(add_dupe_map) == duped_arg_len, (
+            f"Expects add_dupe_map to have length {duped_arg_len} but got {len(add_dupe_map)}"
+        )
 
         self.keep_arg_mask = keep_arg_mask
         self.add_dupe_map = add_dupe_map
@@ -968,9 +950,9 @@ class AOTDedupeWrapper(CompilerWrapper):
                 keep_input_mutations=fw_metadata.keep_input_mutations,
                 is_train=fw_metadata.is_train,
             )(*deduped_flat_args)
-            assert (
-                ref_fw_metadata == updated_fw_metadata
-            ), f"ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}"
+            assert ref_fw_metadata == updated_fw_metadata, (
+                f"ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}"
+            )
 
         return wrapped_flat_fn, deduped_flat_args, updated_fw_metadata
 
@@ -1369,14 +1351,14 @@ def merge_view_inputs(
             # The "inputs that are aliased but have different differentiable bases" case
             # is more complicated and hopefully pretty rare. Not currently handled.
             if not is_inference:
-                assert _are_differentiable_views(
-                    view1, view2
-                ), "aot_autograd() does not yet handle non-differentiable view input mutations."
+                assert _are_differentiable_views(view1, view2), (
+                    "aot_autograd() does not yet handle non-differentiable view input mutations."
+                )
             # Regenerating views when reinterpreting complex / real tensors seems non-trivial,
             # not handling for now
-            assert _same_dtype_views(
-                view1, view2
-            ), "aot_autograd() does not yet handle input mutations on views with different dtypes."
+            assert _same_dtype_views(view1, view2), (
+                "aot_autograd() does not yet handle input mutations on views with different dtypes."
+            )
         non_none_bases = [
             fwd_inputs[i]._base
             for i in aliased_input_indices
@@ -1411,7 +1393,7 @@ def merge_view_inputs(
             # to have incorrect sizes.
             example_idx = aliased_input_indices[0]
             example_alias = fwd_inputs[example_idx]
-            # Note that this function is re-used at both trace time and runtime.
+            # Note that this function is reused at both trace time and runtime.
             # At trace time, we're under a FakeMode so synthetic_base becomes a FakeTensor.
             synthetic_base = torch.empty(
                 (0,), dtype=example_alias.dtype, device=example_alias.device
@@ -1423,13 +1405,13 @@ def merge_view_inputs(
             # Case where all of the aliases require gradients, and have the same _base.
             synthetic_base = non_none_bases[0]
             for other_base in non_none_bases[1:]:
-                assert (
-                    other_base is synthetic_base
-                ), "aot_autograd() does not yet handle non-differentiable view input mutations."
+                assert other_base is synthetic_base, (
+                    "aot_autograd() does not yet handle non-differentiable view input mutations."
+                )
             for alias in aliases_with_none_bases:
-                assert (
-                    alias is synthetic_base
-                ), "aot_autograd() does not yet handle non-differentiable view input mutations."
+                assert alias is synthetic_base, (
+                    "aot_autograd() does not yet handle non-differentiable view input mutations."
+                )
         base_args.append(synthetic_base)
         for curr_view_idx in aliased_input_indices:
             curr_view = fwd_inputs[curr_view_idx]
@@ -1490,7 +1472,7 @@ def merge_view_inputs(
 # unless we suspect that inductor might specialize and insert additional guards. When we do lazy
 # lowering, we stash the AOT backward graph (bw_module) in this class.
 #
-# Lowering passes are performed on a deepcopy of this bw_module due to compatbility
+# Lowering passes are performed on a deepcopy of this bw_module due to compatibility
 # with compiled autograd. See: https://github.com/pytorch/pytorch/pull/149229#discussion_r2002122645.
 @dataclass
 class AutogradLazyBackwardCompileInfo:
@@ -1498,6 +1480,14 @@ class AutogradLazyBackwardCompileInfo:
     placeholder_list: list[Any]
     saved_context: Optional[TracingContext]
     saved_compile_context: Optional[CompileContext]
+
+
+# On an AOT Autograd cache hit, we already have a lowered backward, so there is usually
+# no need to keep information around for a new lazy compilation. Except for compiled autograd,
+# which wants to retrace this backward into a larger graph, and it needs the graph module to do so.
+@dataclass
+class CachedAutogradLazyBackwardCompileInfo:
+    bw_module_fn: Callable
 
 
 def _raise_if_functorch_active():
@@ -1805,7 +1795,7 @@ def coerce_to_expected_memory_format(x: torch.Tensor, memory_format: MemoryForma
         return x
 
     # Empty_strided creates a raw Tensor.
-    # We are guranteed that only raw Tensors has expected size and stride.
+    # We are guaranteed that only raw Tensors has expected size and stride.
     # Subclasses have only expected memory_format.
     restrided = torch.empty_strided(
         size=expected_size,
@@ -1948,7 +1938,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         backward_state_indices: list[int],
         disable_amp: bool,
         indices_of_inps_to_detach: list[int],
-        lazy_backward_info: Optional[AutogradLazyBackwardCompileInfo],
+        lazy_backward_info: Optional[
+            Union[
+                AutogradLazyBackwardCompileInfo,
+                CachedAutogradLazyBackwardCompileInfo,
+            ]
+        ],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
@@ -2244,10 +2239,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def _backward_impl(ctx, all_args):
+                from torch._inductor.async_compile import async_compile_pool_manager
+
                 # compiled autograd reimplements this function at proxy_call_aot_backward
-                assert (
-                    not backward_state_indices
-                ), "BackwardState requires CompiledAutograd"
+                assert not backward_state_indices, (
+                    "BackwardState requires CompiledAutograd"
+                )
                 ctx.maybe_clear_saved_tensors()
 
                 saved_tensors_use_once = (
@@ -2256,6 +2253,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 if CompiledFunction.compiled_bw is None:
                     assert lazy_backward_info is not None
+                    assert isinstance(
+                        lazy_backward_info, AutogradLazyBackwardCompileInfo
+                    )
 
                     if not saved_tensors_use_once:
                         fw_metadata.bw_donated_idxs = []
@@ -2279,17 +2279,25 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     metrics_context = get_metrics_context()
-                    with tracing(saved_context), compile_context(
-                        saved_compile_context
-                    ), context(), track_graph_compiling(
-                        aot_config, "backward"
-                    ), metrics_context, dynamo_timed(
-                        "backward._backward_impl",
-                        phase_name="entire_backward_compile",
-                        log_pt2_compile_event=True,
-                        dynamo_compile_column_us="backward_cumulative_compile_time_us",
-                        log_waitcounter=True,
-                        waitcounter_name_override="entire_backward_compile",
+                    with (
+                        tracing(saved_context),
+                        compile_context(saved_compile_context),
+                        async_compile_pool_manager(),
+                        context(),
+                        track_graph_compiling(aot_config, "backward"),
+                        metrics_context,
+                        dynamo_timed(
+                            "backward._backward_impl",
+                            phase_name="entire_backward_compile",
+                            log_pt2_compile_event=True,
+                            dynamo_compile_column_us="backward_cumulative_compile_time_us",
+                            log_waitcounter=True,
+                            waitcounter_name_override="entire_backward_compile",
+                        ),
+                        callback_handler.install_callbacks(
+                            CallbackTrigger.LAZY_BACKWARD,
+                            str(CompileContext.current_compile_id()),
+                        ),
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
                         # See Note: [Backward graph lazy lowering]
@@ -2300,6 +2308,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         if try_save_cache_entry is not None:
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
+                                bw_module,
                                 fw_metadata,
                                 aot_config,
                             )

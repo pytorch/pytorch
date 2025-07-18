@@ -251,9 +251,12 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  bool alloc_block(AllocParams& p) {
+  bool alloc_block(AllocParams& p, bool isRetry) {
     auto size = p.alloc_size;
     auto device = p.device();
+    if (isRetry) {
+      stats.num_alloc_retries += 1;
+    }
     void* ptr = sycl::aligned_alloc_device(
         kDeviceAlignment,
         size,
@@ -425,8 +428,8 @@ class DeviceCachingAllocator {
     bool block_found = get_free_block(params);
     // Can't reuse an existing block, try to get a new one.
     if (!block_found) {
-      block_found = alloc_block(params) ||
-          (release_cached_blocks() && alloc_block(params));
+      block_found = alloc_block(params, false) ||
+          (release_cached_blocks() && alloc_block(params, true));
     }
     if (!block_found) {
       c10::xpu::DeviceProp device_prop;
@@ -519,6 +522,7 @@ class DeviceCachingAllocator {
       stats.active_bytes[statType].reset_accumulated();
       stats.requested_bytes[statType].reset_accumulated();
     }
+    stats.num_alloc_retries = 0;
   }
 
   void resetPeakStats() {
@@ -536,7 +540,7 @@ class DeviceCachingAllocator {
 
 static void local_raw_delete(void* ptr);
 
-class XPUAllocator : public Allocator {
+class XPUAllocator : public DeviceAllocator {
  private:
   std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
@@ -570,6 +574,10 @@ class XPUAllocator : public Allocator {
         device_allocators[i] = std::make_unique<DeviceCachingAllocator>(i);
       }
     }
+  }
+
+  bool initialized() override {
+    return !device_allocators.empty();
   }
 
   void malloc(
@@ -606,13 +614,13 @@ class XPUAllocator : public Allocator {
     }
   }
 
-  void emptyCache() {
+  void emptyCache(MempoolId_t mempool_id [[maybe_unused]] = {0, 0}) override {
     for (auto& da : device_allocators) {
       da->emptyCache();
     }
   }
 
-  void recordStream(const DataPtr& ptr, XPUStream stream) {
+  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
     if (!ptr.get()) {
       return;
     }
@@ -622,7 +630,8 @@ class XPUAllocator : public Allocator {
 
     Block* block = get_allocated_block(ptr.get());
     TORCH_CHECK(block, "No allocated block can be found.");
-    device_allocators[block->device]->recordStream(block, stream);
+    c10::xpu::XPUStream xpu_stream{stream};
+    device_allocators[block->device]->recordStream(block, xpu_stream);
   }
 
   DataPtr allocate(size_t size) override {
@@ -675,17 +684,17 @@ class XPUAllocator : public Allocator {
         ": did you call init?");
   }
 
-  DeviceStats getDeviceStats(DeviceIndex device) {
+  DeviceStats getDeviceStats(DeviceIndex device) override {
     assertValidDevice(device);
     return device_allocators[device]->getStats();
   }
 
-  void resetPeakStats(DeviceIndex device) {
+  void resetPeakStats(DeviceIndex device) override {
     assertValidDevice(device);
     device_allocators[device]->resetPeakStats();
   }
 
-  void resetAccumulatedStats(DeviceIndex device) {
+  void resetAccumulatedStats(DeviceIndex device) override {
     assertValidDevice(device);
     device_allocators[device]->resetAccumulatedStats();
   }

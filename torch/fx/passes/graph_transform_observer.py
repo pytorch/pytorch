@@ -42,13 +42,13 @@ class GraphTransformObserver:
 
         self.log_url = log_url
 
-        self.active = trace.enabled or self.log_url is not None
+        self.active = trace.provenance_tracking or self.log_url is not None
 
         if self.active:
             self.erased_nodes: set[str] = set()
             self.created_nodes: set[str] = set()
             self.name_to_node: dict[str, Node] = {}
-            # record graph modules deepcopied from self.gm, so we can remove hoooks on them when exiting the context
+            # record graph modules deepcopied from self.gm, so we can remove hooks on them when exiting the context
             self.copied_gms: list[GraphModule] = []
 
             self._node_creation_hook = self.get_node_creation_hook()

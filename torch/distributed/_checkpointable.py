@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Protocol, runtime_checkable
+from typing_extensions import Protocol, runtime_checkable
 
 import torch
 

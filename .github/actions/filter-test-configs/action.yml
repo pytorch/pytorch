@@ -125,7 +125,7 @@ runs:
         TAG: ${{ steps.parse-ref.outputs.tag }}
         EVENT_NAME: ${{ github.event_name }}
         SCHEDULE: ${{ github.event.schedule }}
-        HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        HEAD_BRANCH: ${{ steps.parse-ref.outputs.branch }}
       id: filter
       run: |
         echo "Workflow: ${GITHUB_WORKFLOW}"
@@ -157,4 +157,4 @@ runs:
         echo "Is keep-going label set? ${{ steps.filter.outputs.keep-going }}"
 
         echo
-        echo "Renabled issues? ${{ steps.filter.outputs.reenabled-issues }}"
+        echo "Reenabled issues? ${{ steps.filter.outputs.reenabled-issues }}"
