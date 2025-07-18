@@ -164,9 +164,7 @@ class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
         dist.barrier()
 
         if self.rank == 0:
-            file_path = os.path.join(
-                checkpoint_dir, "model-00001-of-00001.safetensors"
-            )
+            file_path = os.path.join(checkpoint_dir, "model-00001-of-00001.safetensors")
             loaded_dict = safetensors.torch.load_file(file_path)
             self.assertEqual(loaded_dict.keys(), {"dtensor"})
             self.assertTrue(torch.equal(loaded_dict["dtensor"], global_tensor))
