@@ -793,6 +793,215 @@ bool can_use_kleidiai(
 }
 #endif
 
+static inline size_t roundup(size_t a, size_t b) {
+    return ((a + b - 1) / b) * b;
+}
+
+static inline float kai_cast_f32_bf16(uint16_t bf16_val) {
+    uint32_t val = ((uint32_t)bf16_val) << 16;
+    float result;
+    std::memcpy(&result, &val, sizeof(result));
+    return result;
+}
+
+static inline uint16_t kai_cast_bf16_f32(float val) {
+    uint32_t bits;
+    std::memcpy(&bits, &val, sizeof(bits));
+    return static_cast<uint16_t>(bits >> 16);
+}
+
+
+static void ref_matmul_mxn_mxk_nxk_bf16_qa8dx_qs4cx(
+    size_t m, size_t n, size_t k, const int8_t* lhs_qa8dx, const uint8_t* rhs_qs4cx, const float* rhs_scales_f32,
+    uint16_t* dst_bf16, float scalar_min, float scalar_max) {
+    const size_t lhs_stride = k * sizeof(int8_t) + sizeof(float) + sizeof(int32_t);
+    const size_t rhs_qs4cx_stride = (roundup(k, 2) / 2);  // Ensure proper rounding
+
+    for (size_t m_idx = 0; m_idx < m; ++m_idx) {
+        const int8_t* lhs_ptr_start = lhs_qa8dx + m_idx * lhs_stride;
+        for (size_t n_idx = 0; n_idx < n; ++n_idx) {
+            // Main f32 accumulator.
+            int32_t iacc = 0;
+
+            const int8_t* lhs_ptr = lhs_ptr_start;
+            const uint8_t* rhs_ptr = rhs_qs4cx + n_idx * rhs_qs4cx_stride;
+
+            // Read LHS quantization parameters stored at the beginning of each row.
+            const float lhs_scale = *(reinterpret_cast<const float*>(lhs_ptr));
+            lhs_ptr += sizeof(float);
+            const int32_t lhs_offset = *(reinterpret_cast<const int32_t*>(lhs_ptr));
+            lhs_ptr += sizeof(int32_t);
+
+            // Compute accumulation over the k dimension.
+            for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+                // Get the LHS values.
+                const int32_t lhs_v0 = static_cast<int32_t>(lhs_ptr[0]);
+
+                // Get the RHS values.
+                const uint8_t rhs_byte = rhs_ptr[0];
+
+                // Unpack the RHS values.
+                int32_t rhs_v0 = 0;
+                if ((k_idx % 2) == 0) {
+                    rhs_v0 = (static_cast<int32_t>(rhs_byte & 0x0F)) - 8;
+                } else {
+                    rhs_v0 = (static_cast<int32_t>(rhs_byte >> 4)) - 8;
+                }
+
+                iacc += lhs_v0 * rhs_v0;
+                iacc += lhs_offset * rhs_v0;
+
+                lhs_ptr += 1;
+                // For this layout the pointer to the RHS only increments after each pair.
+                rhs_ptr += (k_idx % 2);
+            }
+
+            // Get the RHS scale.
+            const float rhs_scale = rhs_scales_f32[n_idx];
+
+            // Compute the final accumulator.
+            float main_acc = static_cast<float>(iacc) * rhs_scale * lhs_scale;
+
+            // Clamp the output.
+            main_acc = std::max(main_acc, scalar_min);
+            main_acc = std::min(main_acc, scalar_max);
+
+            // Convert float32 to bfloat16 and write to destination.
+            *dst_bf16++ = kai_cast_bf16_f32(main_acc);
+        }
+    }
+}
+
+static void ref_quant_qa8dx_bf16(size_t m, size_t k, const uint16_t* lhs_native_mtx_bf16, int8_t* lhs_ref_mtx_qa8dx) {
+    const size_t dst_stride = (k * sizeof(int8_t) + sizeof(float) + sizeof(int32_t));
+
+    // The stride for the input matrix is k elements per row.
+    const size_t lhs_stride = k;
+
+    for (size_t m_idx = 0; m_idx < m; ++m_idx) {
+        // Pointer to the beginning of the current row in the bfloat16 input matrix.
+        const uint16_t* src_ptr = lhs_native_mtx_bf16 + m_idx * lhs_stride;
+
+        // Initialize min/max values.
+        float max0 = -FLT_MAX;
+        float min0 = FLT_MAX;
+
+        // First pass: compute the min and max values for this row.
+        for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+            // Convert bfloat16 to float32
+            float src_val = kai_cast_f32_bf16((src_ptr[k_idx]));
+            max0 = std::max(src_val, max0);
+            min0 = std::min(src_val, min0);
+        }
+
+        // Define the quantization range for int8.
+        const float qmin = static_cast<float>(INT8_MIN);
+        const float qmax = static_cast<float>(INT8_MAX);
+
+        // Adjust the min and max to include zero.
+        const float rmin0 = std::min(0.0f, min0);
+        const float rmax0 = std::max(0.0f, max0);
+
+        // Compute the scaling factor. (If rmin0 == rmax0, scale is set to 1 to avoid division by zero.)
+        const float scale0 = (rmin0 == rmax0) ? 1.f : (qmax - qmin) / (rmax0 - rmin0);
+        // Reciprocal of scale0 for dequantizing (used here for storage in the header).
+        const float recip_scale0 = scale0 ? 1.0f / scale0 : 0.0f;
+
+        // Compute the "descaled" min and max.
+        const float descaled_min0 = rmin0 * scale0;
+        const float descaled_max0 = rmax0 * scale0;
+
+        // Compute errors when aligning the zero point.
+        const float zero_point_from_min_error0 = qmin + descaled_min0;
+        const float zero_point_from_max_error0 = qmax + descaled_max0;
+
+        // Choose the zero point based on which error is smaller.
+        float zero_point0 =
+            (zero_point_from_min_error0 + zero_point_from_max_error0) > 0 ? qmin - descaled_min0 : qmax - descaled_max0;
+
+        // Clamp the zero point to the quantized range.
+        zero_point0 = std::max(zero_point0, qmin);
+        zero_point0 = std::min(zero_point0, qmax);
+
+        // Round the zero point to the nearest integer.
+        const int32_t nudged_zero_point0 = lrintf(zero_point0);
+
+        // Pointer to the current row in the output quantized matrix.
+        int8_t* dst_ptr = lhs_ref_mtx_qa8dx + m_idx * dst_stride;
+
+        // Store the reciprocal of the scale as a float.
+        *((float*)(dst_ptr)) = recip_scale0;
+        dst_ptr += sizeof(float);
+
+        // Store the negative of the nudged zero point as a 32-bit integer.
+        *((int32_t*)(dst_ptr)) = -nudged_zero_point0;
+        dst_ptr += sizeof(int32_t);
+
+        // Second pass: quantize each element.
+        for (size_t k_idx = 0; k_idx < k; ++k_idx) {
+            // Convert from bfloat16 to float32.
+            float src_val = kai_cast_f32_bf16(src_ptr[k_idx]);
+
+            // Scale and round the value.
+            int32_t v0_s32 = static_cast<int32_t>(round(src_val * scale0));
+            v0_s32 = v0_s32 + nudged_zero_point0;
+
+            // Clamp the quantized value to int8 range.
+            v0_s32 = std::max(v0_s32, static_cast<int32_t>(INT8_MIN));
+            v0_s32 = std::min(v0_s32, static_cast<int32_t>(INT8_MAX));
+
+            // Store the quantized int8_t value.
+            dst_ptr[0] = static_cast<int8_t>(v0_s32);
+            dst_ptr += sizeof(int8_t);
+        }
+    }
+}
+
+static void ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
+    size_t m, size_t n, size_t k,
+    const uint16_t* lhs_bf16,
+    const uint8_t* rhs_qs4cx,
+    const float* rhs_scales,
+    uint16_t* dst_bf16,
+    float scalar_min,
+    float scalar_max) {
+
+  std::unique_ptr<int8_t[]> lhs_quantized(new int8_t[m * (k + sizeof(float) + sizeof(int32_t))]);
+  ref_quant_qa8dx_bf16(m, k, lhs_bf16, lhs_quantized.get());
+
+  ref_matmul_mxn_mxk_nxk_bf16_qa8dx_qs4cx(
+      m, n, k,
+      lhs_quantized.get(),
+      rhs_qs4cx,
+      rhs_scales,
+      dst_bf16,
+      scalar_min,
+      scalar_max);
+}
+
+static void ref_dyn_quant_matmul_4bit_groupwise_kernel_bf16(
+    size_t m, size_t n, size_t k, size_t block_size,
+    const uint16_t* lhs_bf16,
+    const uint8_t* rhs_qs4cx,
+    const float* rhs_scales,
+    uint16_t* dst_bf16,
+    float scalar_min,
+    float scalar_max) {
+
+  std::unique_ptr<int8_t[]> lhs_quantized(new int8_t[m * (k + sizeof(float) + sizeof(int32_t))]);
+  ref_quant_qa8dx_bf16(m, k, lhs_bf16, lhs_quantized.get());
+
+  ref_matmul_mxn_mxk_nxk_bf16_qa8dx_qs4cx(
+      m, n, k,
+      lhs_quantized.get(),
+      rhs_qs4cx,
+      rhs_scales,
+      dst_bf16,
+      scalar_min,
+      scalar_max);
+}
+
+
 /**
  * The Int4 quantized weights must be represented as a uint8 tensor
  * For matrix multiplication with a weight shape of (N x K)
@@ -1171,60 +1380,64 @@ void dyn_quant_matmul_4bit_kernel(
 #endif
   {
     float* lhs_f32 = reinterpret_cast<float*>(inp.data_ptr());
-    const auto weights_size = N * K / 2;
-    // The weights needs to be in uint8_t data type after quantization
-    auto extracted_weights =
-        (packed_weights.narrow(0, 0, weights_size)).to(kByte);
-    auto float32_scales =
-        (packed_weights.narrow(
-             0, weights_size, packed_weights.size(0) - weights_size))
-            .to(kFloat);
-    uint8_t* rhs_4bit =
-        reinterpret_cast<uint8_t*>(extracted_weights.data_ptr());
-    float* rhs_scales_f32 = reinterpret_cast<float*>(float32_scales.data_ptr());
-    // Ensure tensor is float32 before accessing data_ptr<float>()
-    at::Tensor output_f32;
-    if (output.scalar_type() != at::kFloat) {
-        output_f32 = output.to(at::kFloat);  // creates a new tensor (copy)
-    } else {
-        output_f32 = output;  // alias original
-    }
-// Safe reinterpretation after type guarantee
-float* dst_f32 = output_f32.data_ptr<float>();    if (block_size == K) {
-      ref_dyn_quant_matmul_4bit_channelwise_kernel(
-          M,
-          N,
-          K,
-          lhs_f32,
-          rhs_4bit,
-          rhs_scales_f32,
-          dst_f32,
-          -FLT_MAX,
-          FLT_MAX);
-    } else if (!(block_size % 32) && !(K % block_size)) {
-      ref_dyn_quant_matmul_4bit_groupwise_kernel(
-          M,
-          N,
-          K,
-          block_size,
-          lhs_f32,
-          rhs_4bit,
-          rhs_scales_f32,
-          dst_f32,
-          -FLT_MAX,
-          FLT_MAX);
-    } else {
-      TORCH_CHECK(
-          block_size == K || (!(block_size % 32) && !(K % block_size)),
-          __func__,
-          ": Group size should be multiple 32 or in_features [",
-          K,
-          "]. Provided ",
-          block_size);
-    }
+bool is_bf16 = inp.scalar_type() == at::kBFloat16;
+
+const auto weights_size = N * K / 2;
+auto extracted_weights = (packed_weights.narrow(0, 0, weights_size)).to(kByte);
+auto float32_scales = (packed_weights.narrow(0, weights_size, packed_weights.size(0) - weights_size)).to(kFloat);
+
+uint8_t* rhs_4bit = reinterpret_cast<uint8_t*>(extracted_weights.data_ptr());
+float* rhs_scales_f32 = reinterpret_cast<float*>(float32_scales.data_ptr());
+
+at::Tensor output_f32;
+float* dst_f32 = nullptr;
+
+if (output.scalar_type() != at::kFloat && !is_bf16) {
+    output_f32 = output.to(at::kFloat);
+        dst_f32 = output_f32.data_ptr<float>();
+
+} else {
+    output_f32 = output;
+        dst_f32 = output.data_ptr<float>();
+
+}
+constexpr float BF16_MAX = std::ldexp(254.0f, 120);  // ≈ 3.38953139e+38
+constexpr float BF16_MIN = -BF16_MAX;
+
+if (is_bf16) {
+  uint16_t* lhs_bf16 = reinterpret_cast<uint16_t*>(inp.data_ptr());
+  uint16_t* dst_bf16 = reinterpret_cast<uint16_t*>(output.data_ptr());
+  if (block_size == K) {
+    ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
+        M, N, K,
+        lhs_bf16, rhs_4bit, rhs_scales_f32,
+        dst_bf16, BF16_MIN, BF16_MAX);
+  } else if (!(block_size % 32) && !(K % block_size)) {
+    ref_dyn_quant_matmul_4bit_groupwise_kernel_bf16(
+        M, N, K, block_size,
+        lhs_bf16, rhs_4bit, rhs_scales_f32,
+        dst_bf16, BF16_MIN, BF16_MAX);
+  } else {
+    TORCH_CHECK(false, "Unsupported block size for BF16 fallback");
+  }
+} else {
+  if (block_size == K) {
+    ref_dyn_quant_matmul_4bit_channelwise_kernel(
+        M, N, K,
+        lhs_f32, rhs_4bit, rhs_scales_f32,
+        dst_f32, -FLT_MAX, FLT_MAX);
+  } else if (!(block_size % 32) && !(K % block_size)) {
+    ref_dyn_quant_matmul_4bit_groupwise_kernel(
+        M, N, K, block_size,
+        lhs_f32, rhs_4bit, rhs_scales_f32,
+        dst_f32, -FLT_MAX, FLT_MAX);
+  } else {
+    TORCH_CHECK(false, "Unsupported block size for FP32 fallback");
   }
 }
+}
 
+}
 } // anonymous namespace
 
 ALSO_REGISTER_AVX512_DISPATCH(weight_to_int4pack_stub, &weight_to_int4pack_kernel)
