@@ -3,16 +3,20 @@ import contextlib
 import functools
 from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, overload, TypeVar, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
+from torch._higher_order_ops.schema import HopSchema
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._subclasses.functional_tensor import disable_functional_mode
+from torch._subclasses.functional_tensor import (
+    disable_functional_mode,
+    FunctionalTensor,
+)
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
@@ -111,9 +115,9 @@ def reenter_make_fx(fn):
 
     @functools.wraps(fn)
     def wrapped(*args):
-        assert (
-            _CURRENT_MAKE_FX_TRACER is not None
-        ), "Cannot reenter make_fx when we're not under a make_fx tracing session"
+        assert _CURRENT_MAKE_FX_TRACER is not None, (
+            "Cannot reenter make_fx when we're not under a make_fx tracing session"
+        )
         return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args
         )
@@ -319,20 +323,22 @@ def analyze_potential_input_alias_or_mutation(name, aliases, input_mutations):
 
 def _has_potential_branch_input_mutation(gm, inputs, pre_dispatch=False):
     (
-        _,
-        _,
-        _,
-    ), inp_mutation = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
+        (_, _, _),
+        inp_mutation,
+    ) = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
 
     return len(inp_mutation) > 0
 
 
 def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     (
-        inp_inp_alias_map,
-        inp_out_alias_map,
-        out_out_alias_map,
-    ), inp_mutation = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
+        (
+            inp_inp_alias_map,
+            inp_out_alias_map,
+            out_out_alias_map,
+        ),
+        inp_mutation,
+    ) = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
     return (
         any(
             (
@@ -388,9 +394,7 @@ def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
         graph_module, inputs_fake, pre_dispatch=pre_dispatch
     )
     if aliases:
-        raise RuntimeError(
-            f"{name} might be aliasing the input or the output!"
-        )  # noqa: F541
+        raise RuntimeError(f"{name} might be aliasing the input or the output!")  # noqa: F541
     if inp_mutation:
         raise RuntimeError(f"{name} might be modifying the input!")  # noqa: F541
 
@@ -419,7 +423,6 @@ def unique_graph_name_with_root(
 
 def _from_fun(t):
     from torch._functorch.aot_autograd import from_fun
-    from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, torch.Tensor):
         if t.dtype != torch.bool:
@@ -501,9 +504,9 @@ def prepare_fw_with_masks_all_requires_grad(fn):
 # replaced with an all-zero tensor for better optimization
 def unmask_none_gradients(grads, operands):
     allowed_types = (torch.Tensor, int, torch.SymInt)
-    assert all(
-        isinstance(o, allowed_types) for o in operands
-    ), f"operands can only be of {allowed_types} but got {[type(o) for o in operands]}"
+    assert all(isinstance(o, allowed_types) for o in operands), (
+        f"operands can only be of {allowed_types} but got {[type(o) for o in operands]}"
+    )
 
     unmasked_grads = []
     for g, o in zip(grads, operands):
@@ -529,6 +532,24 @@ def _maybe_fake_prop_ignore_unbacked(fn, args):
                     fake_mode.shape_env.ignore_fresh_unbacked_symbols()
                 )
         return fn(*args)
+
+
+def redirect_to_mode(hop: OperatorBase, mode):
+    """Utility for redispatching HOP to underlying mode
+
+    Args:
+        hop: The HOP to redispatch
+        mode: The mode to redispatch to
+
+    Returns:
+        A decorated function that implements the HOP for the given mode
+    """
+
+    @hop.py_impl(mode)
+    def impl(mode, *args, **kwargs):
+        return mode.__torch_dispatch__(hop, [], args, kwargs)
+
+    return impl
 
 
 # TODO: The parameter use_output_and_grad_bw is required because some operations
@@ -741,7 +762,9 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
     allowed_types = (torch.Tensor, int, torch.SymInt)
     assert all(
         isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
-    ), f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
+    ), (
+        f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
+    )
 
 
 # TODO: Return a more detailed information as to which node
@@ -755,11 +778,11 @@ def check_input_alias_and_mutation(
         inp_out_alias_map,
         out_out_alias_map,
         mutated_inputs,
-    ) = check_input_alias_and_mutation_return_ouputs(gm, fake_args)[:-1]
+    ) = check_input_alias_and_mutation_return_outputs(gm, fake_args)[:-1]
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
-def check_input_alias_and_mutation_return_ouputs(
+def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
     fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
 ) -> tuple[
@@ -769,6 +792,29 @@ def check_input_alias_and_mutation_return_ouputs(
     list[int],
     Union[tuple[Any, ...], list[Any]],
 ]:
+    # This function can be called under autograd, functional, proxy and fake tensor mode.
+    # We need to return either a fake tensor or a real tensor depending on the mode.
+    # to detect the input mutation/aliasing.
+    with (
+        disable_proxy_modes_tracing(),
+        disable_functional_mode(),
+        suspend_functionalization(),
+    ):
+
+        def _from_functional_tensor(t: torch.Tensor) -> torch.Tensor:
+            if isinstance(t, FunctionalTensor) or torch._is_functional_tensor(t):
+                return torch.empty_strided(
+                    t.size(),
+                    t.stride(),
+                    dtype=t.dtype,
+                    requires_grad=t.requires_grad,
+                    device=t.device,
+                )
+            return t
+
+        fake_args = pytree.tree_map_only(
+            torch.Tensor, _from_functional_tensor, fake_args
+        )
     # We want to disable active functional, proxy and fake modes if any.
     # to create a encapsulated environment for fake tensor prop
     with torch.utils._python_dispatch._disable_current_modes():
@@ -780,7 +826,8 @@ def check_input_alias_and_mutation_return_ouputs(
 
         def _tensor_version(t) -> Optional[int]:
             if isinstance(t, torch.Tensor):
-                assert isinstance(t, FakeTensor), "Only fake tensor is allowed"
+                if not isinstance(t, FakeTensor):
+                    raise RuntimeError("Only fake tensor is allowed")
                 return t._version
             return None
 
@@ -798,17 +845,14 @@ def check_input_alias_and_mutation_return_ouputs(
             if len(fake_args) == 0:
                 return torch.fx.experimental.symbolic_shapes.ShapeEnv()
 
-            prev_fake_mode = None
             for arg in fake_args:
-                if isinstance(arg, torch.Tensor):
-                    assert isinstance(arg, FakeTensor)
-                    prev_fake_mode = arg.fake_mode
-            assert prev_fake_mode is not None
-            return prev_fake_mode.shape_env
+                if isinstance(arg, FakeTensor):
+                    return arg.fake_mode.shape_env
+            return None
 
         # Clone the fake args to avoid mutating the original fake args
         with ExitStack() as ctx_stack:
-            # We need to re-use prev_fake_mode's shape env to resolve
+            # We need to reuse prev_fake_mode's shape env to resolve
             # the runtime assertions for unbacked symbols.
             new_fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=_get_shape_env(fake_args),
@@ -886,6 +930,17 @@ def check_input_alias_and_mutation_return_ouputs(
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
 
 
+F = TypeVar("F", bound=Callable)
+
+
+@overload
+def register_fake(hop, fn: None = None) -> Callable[[F], F]: ...
+
+
+@overload
+def register_fake(hop, fn: F) -> F: ...
+
+
 def register_fake(hop, fn=None):
     """
     Register a fake function for a HOP. This is conceptually equivalent of the
@@ -894,13 +949,10 @@ def register_fake(hop, fn=None):
     """
     assert hop not in registered_hop_fake_fns
 
-    def register(func):
+    def register(func: F) -> F:
         from torch._subclasses.fake_tensor import FakeTensorMode
 
-        # Redirect the hop to the fake tensor mode implementation.
-        @hop.py_impl(FakeTensorMode)
-        def _(mode, *args, **kwargs):
-            return mode.__torch_dispatch__(hop, [], args, kwargs)
+        redirect_to_mode(hop, FakeTensorMode)
 
         registered_hop_fake_fns[hop] = func
         return func
@@ -947,7 +999,7 @@ class FunctionalizeCtxWrapper:
 
 # A wrapper over HigherOrderOperator that also carries its schema
 class HopInstance:
-    def __init__(self, op: HigherOrderOperator, schema: torch.FunctionSchema):
+    def __init__(self, op: HigherOrderOperator, schema: HopSchema):
         assert isinstance(op, HigherOrderOperator), op
         self._op = op
         # Using "_" to be consistent with how we access _schema of OpOverload
@@ -956,7 +1008,14 @@ class HopInstance:
     def __call__(self, *args, **kwargs):
         return self._op(*args, **kwargs)
 
+    @staticmethod
+    def create(hop: HigherOrderOperator, *args, **kwargs):
+        return HopInstance(hop, hop.gen_schema(*args, **kwargs))
 
+
+# This call_op can be used to call a HopInstance with
+# flat args and kwargs. We need to make use of the hop's schema's tree_spec
+# to unflatten the args and kwargs before calling the hop.
 def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
     if isinstance(op, OpOverload):
         return op(*args, **kwargs)
@@ -972,7 +1031,14 @@ def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
             bound_args.append(val)
         else:
             bound_kwargs[arg.name] = val
-    return op(*bound_args, **bound_kwargs)
+
+    if schema.tree_spec is not None:
+        assert len(bound_args) == len(schema.arguments) and len(bound_kwargs) == 0
+        args, kwargs = pytree.tree_unflatten(bound_args, schema.tree_spec)
+        return op(*args, **kwargs)
+    else:
+        assert len(bound_args) + len(bound_kwargs) == len(schema.arguments)
+        return op(*bound_args, **bound_kwargs)
 
 
 def materialize_as_graph(
@@ -992,13 +1058,13 @@ def materialize_as_graph(
         with suspend_functionalization(), disable_functional_mode():
             with disable_proxy_modes_tracing():
                 unfunc_t = [_from_fun(arg) for arg in args]
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(
-                torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
-            )
-            if force_enable_grad:
-                stack.enter_context(torch.enable_grad())
-            return _maybe_reenter_make_fx(fn)(*unfunc_t)
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
+                )
+                if force_enable_grad:
+                    stack.enter_context(torch.enable_grad())
+                return _maybe_reenter_make_fx(fn)(*unfunc_t)
 
     gm = _materialize_as_graph_inner()
     assert gm is not None
@@ -1036,3 +1102,37 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
             materialized_args.append(flat_args[i])
 
     return pytree.tree_unflatten(materialized_args, flat_spec)
+
+
+def has_user_subclass(args, allowed_subclasses):
+    """Check if any tensor arguments are user subclasses.
+
+    This is used to determine if tensor subclasses should get a chance to run
+    their own implementation first before falling back to the default implementation.
+
+    Args:
+        args: Arguments to check (will be flattened with pytree)
+        allowed_subclasses: Tuple of allowed subclass types
+
+    Returns:
+        True if user tensor subclasses are found, False otherwise
+    """
+    flat_args, _ = pytree.tree_flatten(args)
+
+    val = any(
+        isinstance(a, torch.Tensor)
+        and type(a) is not torch.Tensor
+        and not isinstance(a, allowed_subclasses)
+        for a in flat_args
+    )
+    return val
+
+
+def _has_gen_schema(op: HigherOrderOperator):
+    # There is an InvokeQuant argument we cannot gen_schema.
+    if op is torch.ops.higher_order.invoke_quant_packed:
+        return False
+    method = "gen_schema"
+    return hasattr(type(op), method) and getattr(type(op), method) is not getattr(
+        HigherOrderOperator, method
+    )

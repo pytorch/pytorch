@@ -107,9 +107,9 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
         - body_fn and cond_fn must not in-place mutate the carried_inputs. A clone before the mutation is required.
 
-        - body_fn and cond_fn must not mutate python varialbles (e.g. list/dict) created outside of the body_fn.
+        - body_fn and cond_fn must not mutate python variables (e.g. list/dict) created outside of the body_fn.
 
-        - body_fn and cond_fn's output cannot aliase any of the inputs. A clone is required.
+        - body_fn and cond_fn's output cannot alias any of the inputs. A clone is required.
 
     .. warning::
         Temporal Limitations:
@@ -202,12 +202,12 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
     while pred := cond_fn(*carried_vals, *additional_inputs):
         _validate_cond_output(pred)
         out = body_fn(*carried_vals, *additional_inputs)
-        assert isinstance(
-            out, tuple
-        ), f"body_fn should return a tuple but got {type(out)}"
-        assert len(out) == len(
-            carried_inputs
-        ), "body_fn should return the same number of elements as carried_inputs"
+        assert isinstance(out, tuple), (
+            f"body_fn should return a tuple but got {type(out)}"
+        )
+        assert len(out) == len(carried_inputs), (
+            "body_fn should return the same number of elements as carried_inputs"
+        )
         carried_vals = out
     return carried_vals
 
@@ -230,9 +230,9 @@ def _find_or_create_fake_mode() -> FakeTensorMode:
 def _create_unbacked_symint(
     fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
 ) -> torch.SymInt:
-    assert (
-        fake_mode is not None and fake_mode.shape_env is not None
-    ), "Must provide a fake_mode with shape_env."
+    assert fake_mode is not None and fake_mode.shape_env is not None, (
+        "Must provide a fake_mode with shape_env."
+    )
     ctx = (
         contextlib.nullcontext()
         if not ignore_fresh_unbacked_symbols
@@ -279,8 +279,8 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         #   For this reason, we treat int, symint outputs in the same way:
         #   - they can match against any of int, symint carry
         #   - we unspecialize them with new unbacked symints in fake while_loop
-        #   Similarly, we could do some analysis to refine the output ranges but it's eaiser to start with
-        #   fresh unbacked symints. One suprising case can be: an input unbacked symint is constrained by
+        #   Similarly, we could do some analysis to refine the output ranges but it's easier to start with
+        #   fresh unbacked symints. One surprising case can be: an input unbacked symint is constrained by
         #   users to be >= 0 (either before while_loop or inside body_fn) and it increments by 1 in each
         #   iteration. Ideally, we should know that the final output is >= 0 but we didn't constrain the
         #   unbacked symint output of subgraph as of today because this requires a smart range analysis.

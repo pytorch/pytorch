@@ -2,6 +2,7 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/core/IMPSAllocator.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/core/alignment.h>
 #include <c10/core/impl/COWDeleter.h>
@@ -71,7 +72,7 @@ static void check_clone_between_devices(
       "Can only lazy clone or materialize between two different devices if they ",
       "both have the same device type or one of them is CPU. Got source '",
       src_device_type,
-      "' and destionation '",
+      "' and destination '",
       dst_device_type,
       "'.");
 }
@@ -181,13 +182,19 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
     if (src_device_type == c10::kCPU && dst_device.type() == c10::kMPS) {
       // If the source was CPU, its data pointer is in CPU address space, so
       // need to translate it to MPS address space.
-      TORCH_INTERNAL_ASSERT(allocator.has_unified_memory());
-      ptr_value = allocator.get_device_ptr_from_cpu_ptr(ptr_value);
+      IMPSAllocator* allocator_ = dynamic_cast<IMPSAllocator*>(&allocator);
+      // IMPSAllocator* allocator_ =
+      // reinterpret_cast<IMPSAllocator*>(&allocator);
+      TORCH_INTERNAL_ASSERT(allocator_);
+      ptr_value = allocator_->get_device_ptr_from_cpu_ptr(ptr_value);
     } else if (src_device_type == c10::kMPS && dst_device.type() == c10::kCPU) {
       // If the source was MPS, its data pointer is in MPS address space, so
       // need to translate it to CPU address space.
-      TORCH_INTERNAL_ASSERT(allocator.has_unified_memory());
-      ptr_value = allocator.get_cpu_ptr_from_device_ptr(ptr_value);
+      IMPSAllocator* allocator_ = dynamic_cast<IMPSAllocator*>(&allocator);
+      // IMPSAllocator* allocator_ =
+      // reinterpret_cast<IMPSAllocator*>(&allocator);
+      TORCH_INTERNAL_ASSERT(allocator_);
+      ptr_value = allocator_->get_cpu_ptr_from_device_ptr(ptr_value);
     }
 
     new_data_ptr_opt =

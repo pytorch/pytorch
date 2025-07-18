@@ -3,12 +3,15 @@ import functools
 import logging
 import random
 from dataclasses import asdict, dataclass
+from typing import Any
 
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_tile_template import CKTileTemplate
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
+from torch._inductor.codegen.rocm.rocm_template import ArgInfo
 from torch._inductor.ir import Buffer, Layout
+from torch.utils._ordered_set import OrderedSet
 
 from ...utils import IndentedBuffer
 
@@ -92,7 +95,7 @@ class CKTileGemmOperation:
         return asdict(self).items()
 
 
-@functools.lru_cache(None)
+@functools.cache
 def ops():
     """
     Generate the supported instance dataclasses
@@ -216,7 +219,9 @@ def ops():
         for epilogue in ["Default", "CShuffle"]
     ]
 
-    return itertools.chain(compute_v3_instances, compute_v4_instances, mem_instances)
+    return list(
+        itertools.chain(compute_v3_instances, compute_v4_instances, mem_instances)
+    )
 
 
 class CKTileGemmTemplate(CKTileTemplate):
@@ -231,23 +236,26 @@ class CKTileGemmTemplate(CKTileTemplate):
     extern "C" {
     PT_EXPORT {{kernel_definition}} {
 
-        constexpr int32_t kBatch = {{k_batch}};
-
         using {{instance_namespace}}::BaseGemmPipeline;
         using {{instance_namespace}}::TilePartitioner;
 
         constexpr auto TileK = {{instance_namespace}}::TileK;
         constexpr auto kPrefetchStages = BaseGemmPipeline::PrefetchStages;
 
-        auto kargs = ck_tile::GemmKernelArgs {
+        const auto BiasTerms = std::array<const void*, 0> ();
+        const auto BiasStrides = std::array<int32_t, 0> ();
+
+        auto kargs = ck_tile::GemmKernelArgs<0> {
            X,
            W,
+           BiasTerms,
            Y,
            M,
            N,
            K,
            LDA,
            LDB,
+           BiasStrides,
            LDC,
            kBatch
         };
@@ -297,7 +305,6 @@ class CKTileGemmTemplate(CKTileTemplate):
             input_nodes=input_nodes,
             layout=layout,
         )
-        self.k_batch = 1
 
     def header(self) -> IndentedBuffer:
         res = super().header()
@@ -437,8 +444,8 @@ class CKTileGemmTemplate(CKTileTemplate):
             return True
 
         if op.layout_a == "Row":
-            if not check(K, op.tile_k * self.k_batch, op.k_is_padded):
-                return False
+            # handle in kBatch check
+            return True
         elif op.layout_a == "Col":
             if not check(M, op.tile_m, op.m_is_padded):
                 return False
@@ -449,8 +456,8 @@ class CKTileGemmTemplate(CKTileTemplate):
             if not check(N, op.tile_n, op.n_is_padded):
                 return False
         elif op.layout_b == "Col":
-            if not check(K, op.tile_k * self.k_batch, op.k_is_padded):
-                return False
+            # handle in kBatch check
+            return True
         else:
             raise AssertionError(f"Invalid {op.layout_b=}")
 
@@ -686,11 +693,18 @@ class CKTileGemmTemplate(CKTileTemplate):
             elif epilogue_type == "CShuffle":
                 return r"""
             constexpr auto kMemoryOperation = ck_tile::memory_operation_enum::set;
+            using DsDataType = ck_tile::tuple<>; // no bias terms for vanilla GEMM
+            using DsLayout = ck_tile::tuple<>;
+            constexpr auto ELayout = CLayout;
+            using CDEElementWise = ck_tile::element_wise::PassThrough; // no-op
             using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
                                                                      BDataType,
+                                                                     DsDataType,
                                                                      AccDataType,
                                                                      CDataType,
-                                                                     CLayout,
+                                                                     DsLayout,
+                                                                     ELayout,
+                                                                     CDEElementWise,
                                                                      GemmPipelineProblem::kBlockSize,
                                                                      TileM,
                                                                      TileN,
@@ -847,7 +861,6 @@ class CKTileGemmTemplate(CKTileTemplate):
             instance_namespace=op.name(),
             version_comment=version_comment,
             rendered_dispatch=render_dispatch(op.pipeline, op.name()),
-            k_batch=self.k_batch,
         )
 
     def gen_ops(self):
@@ -858,7 +871,13 @@ class CKTileGemmTemplate(CKTileTemplate):
         An instance may invalidate the GEMM configuration at runtime.
         Such instances will be assigned +inf runtime by the autotune process.
         """
-        filtered_instances = list(filter(self.filter_op, ops()))
+        instances = ops()
+        if not instances:
+            raise AssertionError(
+                "No Composable Kernel Universal GEMM instances found. "
+                "Please check if the library is installed."
+            )
+        filtered_instances = list(filter(self.filter_op, instances))
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
@@ -871,7 +890,7 @@ class CKTileGemmTemplate(CKTileTemplate):
             else filtered_instances
         )
         log.debug(
-            "generated %d ck instances after filter: %s",
+            "generated %d ck instances after sample: %s",
             len(chosen_instances),
             chosen_instances,
         )
@@ -892,10 +911,43 @@ class CKTileGemmTemplate(CKTileTemplate):
         )
         ops = template.gen_ops()
         for op in ops:
-            template.maybe_append_choice(
-                choices,
-                op=op,
+            for k_batch in template.k_batch_choices(op):
+                template.maybe_append_choice(
+                    choices,
+                    op=op,
+                    kBatch=k_batch,
+                )
+
+    def k_batch_choices(self, op: "CKTileGemmOperation") -> tuple[int, ...]:
+        """
+        Returns a list of k_batch choices for the template.
+        """
+        default_choices = (1, 2, 4, 8, 16, 32)
+
+        def check(dim_size, tile_size, is_padded):
+            if (
+                is_static_int(dim_size)
+                and dim_size % tile_size != 0
+                and is_padded == "false"
+            ):
+                return False
+            return True
+
+        _, _, K, _, _, _ = self.size_args()
+        if op.layout_a == "Row" or op.layout_b == "Col":
+            choices = tuple(
+                filter(
+                    lambda k_batch: check(K, op.tile_k * k_batch, op.k_is_padded),
+                    default_choices,
+                )
             )
+        else:
+            choices = default_choices
+
+        if op.epilogue == "Default":
+            choices = (1,)
+
+        return choices
 
     def size_args(self):
         """
@@ -913,3 +965,15 @@ class CKTileGemmTemplate(CKTileTemplate):
         LDC = Y.get_stride()[0 if Y.get_stride()[1] == 1 else 1]
 
         return M, N, K, LDA, LDB, LDC
+
+    def get_runtime_arg_info(self) -> list[ArgInfo]:
+        return [ArgInfo("kBatch", "int32_t")]
+
+    def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
+        # maybe_append_choice kwarg for k_batch must match the name of the argument
+        arg_names = OrderedSet([arg.name for arg in self.get_runtime_arg_info()])
+        if not arg_names.issubset(kwargs):
+            raise ValueError(
+                "Missing runtime arguments: " + ", ".join(arg_names - kwargs.keys())
+            )
+        return [kwargs[k] for k in arg_names]

@@ -140,7 +140,6 @@ Tensor _lazy_clone(Tensor const& self, std::optional<c10::Device> device_opt) {
       // the regular CPU allocator.
       allocator = at::globalContext().getPinnedMemoryAllocator(c10::kMPS);
       TORCH_INTERNAL_ASSERT(allocator != nullptr);
-      TORCH_INTERNAL_ASSERT(allocator->has_unified_memory());
     } else {
       allocator = at::empty({}, at::TensorOptions().device(dst_device)).storage().allocator();
       TORCH_INTERNAL_ASSERT(allocator != nullptr);
@@ -150,7 +149,6 @@ Tensor _lazy_clone(Tensor const& self, std::optional<c10::Device> device_opt) {
       TORCH_CHECK(self.is_pinned(),
         "It is only possible to lazy clone a CPU tensor to MPS if the tensor ",
         "is pinned.");
-      TORCH_INTERNAL_ASSERT(self.storage().allocator()->has_unified_memory());
     }
     storage = c10::impl::cow::lazy_clone_storage(*self_storage, device_opt.value(), *allocator);
   } else {
@@ -171,10 +169,10 @@ Tensor _lazy_clone(Tensor const& self, std::optional<c10::Device> device_opt) {
   tensor->set_sizes_and_strides(self.sym_sizes(),
                                 self.sym_strides(),
                                 self.sym_storage_offset());
-  // If the devices differ, need to synchronize the source device before this
-  // function returns the lazy cloned tensor. The device may have pending write
-  // operations on the source tensor's data, and we must force them to finish
-  // before trying to read it from the destination device.
+  // When cloning from MPS to CPU, need to synchronize the source device before
+  // this function returns the lazy cloned tensor. The MPS device may have
+  // pending write operations on the source tensor's data, and we must force
+  // them to finish before trying to read it from the CPU.
   if (device_opt.has_value() && device_opt.value() != self.device()) {
     if (self.device().type() == c10::kMPS) {
       at::detail::getMPSHooks().deviceSynchronize();

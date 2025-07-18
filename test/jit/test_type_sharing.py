@@ -10,16 +10,11 @@ import torch
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.common_utils import suppress_warnings
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    suppress_warnings,
+)
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestTypeSharing(JitTestCase):
@@ -626,3 +621,7 @@ class TestTypeSharing(JitTestCase):
         # of A, __jit_ignored_attributes__ was modified before scripting s2,
         # so the set of ignored attributes is different between s1 and s2.
         self.assertDifferentType(s1, s2)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

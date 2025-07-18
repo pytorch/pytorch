@@ -51,6 +51,7 @@ from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
+    _aot_export_function,
     aot_export_joint_simple,
     aot_export_module,
     SerializableAOTDispatchCompiler,
@@ -689,6 +690,80 @@ def forward(self, primals_1):
             torch.zeros(3, 9, requires_grad=False),
         ]
         self.verify_aot_autograd(f, inp, keep_inp_mutations=True)
+
+    def _compile_autocast(self, device, *, forward_autocast):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor x) -> Tensor")
+            m.impl("foo", torch.clone, "CompositeExplicitAutograd")
+
+            def autocast(x):
+                return x + 1
+
+            m.impl("foo", autocast, "AutocastCPU")
+            m.impl("foo", autocast, "AutocastCUDA")
+
+            foo = torch.ops.mylib.foo.default
+
+            class Foo(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return foo(x)
+
+                @staticmethod
+                def backward(ctx, grad):
+                    (x,) = ctx.saved_tensors
+                    return grad * foo(x)
+
+            def fn(x):
+                with torch.amp.autocast(device, enabled=False):
+                    return Foo.apply(x)
+
+            x = torch.tensor(0.0, device=device, requires_grad=True)
+            if forward_autocast:
+                with (
+                    torch.amp.autocast(device),
+                    torch._dynamo.config.patch(recompile_limit=999),
+                ):
+                    out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+            else:
+                with torch._dynamo.config.patch(recompile_limit=999):
+                    out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+            (grad,) = torch.autograd.grad(out, x)
+            return out, grad
+
+    @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
+    def test_backward_pass_autocast_on(self):
+        devices = ["cpu"]
+        if torch.cuda.is_available():
+            devices.append("cuda")
+        for device in devices:
+            out, grad = self._compile_autocast(device, forward_autocast=True)
+            self.assertEqual(out, torch.zeros_like(out))
+            self.assertEqual(grad, torch.ones_like(grad))
+
+    @torch._functorch.config.patch(backward_pass_autocast="off")
+    def test_backward_pass_autocast_off(self):
+        devices = ["cpu"]
+        if torch.cuda.is_available():
+            devices.append("cuda")
+        for device in devices:
+            out, grad = self._compile_autocast(device, forward_autocast=True)
+            self.assertEqual(out, torch.zeros_like(out))
+            self.assertEqual(grad, torch.zeros_like(grad))
+
+    @torch._functorch.config.patch(backward_pass_autocast="off")
+    def test_backward_pass_autocast_custom(self):
+        devices = ["cpu"]
+        if torch.cuda.is_available():
+            devices.append("cuda")
+        for device in devices:
+            with torch._functorch.config.patch(
+                backward_pass_autocast=[{"device_type": device}]
+            ):
+                out, grad = self._compile_autocast(device, forward_autocast=False)
+                self.assertEqual(out, torch.zeros_like(out))
+                self.assertEqual(grad, torch.ones_like(grad))
 
     @skipIfDynamoInput(
         "Test doesn't make sense with dynamo, which changes order of mutations"
@@ -2297,7 +2372,7 @@ def forward(self, arg0_1, arg1_1):
             return a.mul(3), b.mul(4)
 
         inp = [
-            # First inp doesnt require grad, but we switch it on
+            # First inp doesn't require grad, but we switch it on
             torch.ones(3, 3, requires_grad=False),
             torch.ones(3, 3, requires_grad=True),
         ]
@@ -2568,8 +2643,9 @@ def forward(self, primals_1, primals_2):
         def fn(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
             return torch.ops._test._clone_create_graph(x, x1)
 
-        inp_x, inp_x1 = torch.randn(3, requires_grad=True), torch.randn(
-            3, requires_grad=True
+        inp_x, inp_x1 = (
+            torch.randn(3, requires_grad=True),
+            torch.randn(3, requires_grad=True),
         )
 
         ref_x, ref_x1 = inp_x.clone(), inp_x1.clone()
@@ -5283,11 +5359,12 @@ def forward(self, arg0_1):
 
         mod = TestMod(fn)
         inp = torch.randn(2)
-        with patch(
-            "functorch.compile.config.functionalize_rng_ops", True
-        ), self.assertRaisesRegex(
-            RuntimeError,
-            "Functionalized RNG is not currently supported in the aot_export",
+        with (
+            patch("functorch.compile.config.functionalize_rng_ops", True),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Functionalized RNG is not currently supported in the aot_export",
+            ),
         ):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False)
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
@@ -5311,6 +5388,37 @@ def forward(self):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(full);  full = None
     full_1 = torch.ops.aten.full.default([_local_scalar_dense], 0, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return (full_1,)""",  # noqa: B950
+        )
+
+    def test_aot_export_input_mutation(self):
+        def f(x, buf):
+            buf.add_(1)
+            return buf * x
+
+        x = torch.randn(2, requires_grad=True)
+        buf = torch.zeros(2, requires_grad=False)
+
+        gm, _, _, _ = _aot_export_function(
+            f,
+            (x, buf),
+            decompositions={},
+            num_params_buffers=1,
+            no_tangents=False,
+            pre_dispatch=False,
+            dynamic_shapes=False,
+            keep_input_mutations=True,
+            kwargs={},
+        )
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, primals, tangents):
+    primals_1, primals_2, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
+    add = torch.ops.aten.add.Tensor(primals_2, 1)
+    mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, add);  tangents_1 = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = add = copy_ = None
+    return pytree.tree_unflatten([mul, mul_1, None], self._out_spec)""",
         )
 
 
@@ -5389,6 +5497,32 @@ class TestPartitioning(AOTTestCase):
         )
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 6))
         self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_raise_getitems(self):
+        def f(x):
+            y = torch.split(x, x.size(0) // 2, dim=0)
+            a = y[0].sin()
+            b = y[1].cos()
+            return a + b
+
+        _, bw_graph = get_fw_bw_graph(f, [torch.randn(4, 4, requires_grad=True)])
+
+        self.assertExpectedInline(
+            bw_graph.code.strip(),
+            """\
+def forward(self, primals_1, tangents_1):
+    split = torch.ops.aten.split.Tensor(primals_1, 2);  primals_1 = None
+    getitem_1 = split[1]
+    getitem = split[0];  split = None
+    sin_1 = torch.ops.aten.sin.default(getitem_1);  getitem_1 = None
+    neg = torch.ops.aten.neg.default(sin_1);  sin_1 = None
+    mul = torch.ops.aten.mul.Tensor(tangents_1, neg);  neg = None
+    cos_1 = torch.ops.aten.cos.default(getitem);  getitem = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, cos_1);  tangents_1 = cos_1 = None
+    cat = torch.ops.aten.cat.default([mul_1, mul]);  mul_1 = mul = None
+    return (cat,)""",
+        )
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_save_shape(self):
@@ -5536,7 +5670,7 @@ class TestPartitioning(AOTTestCase):
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
-            # then 4 tensors (transposes of matricies used for mm) are saved
+            # then 4 tensors (transposes of matrices used for mm) are saved
             # finally 3 symints are saved
             [False, True, True, False, False] + [False] * 4 + [True] * 3,
             [is_sym_node(n) for n in fw_graph_out_nodes],
@@ -5866,7 +6000,7 @@ metadata incorrectly.
         self.assertEqual(b_test.a, b_ref.a)
         self.assertEqual(b_test.b, b_ref.b)
 
-        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile teh backward.
+        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile the backward.
         (b_ref * out_ref).sum().backward()
         (b_test * out_test).sum().backward()
         # Both grad_inputs are TwoTensor
@@ -7778,6 +7912,90 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         optout = run(optf)
 
         self.assertEqual(out, optout)
+
+    def test_mutations_in_bw_detached_from_tangent(self):
+        class AF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, dummy, inplace_tensor):
+                ctx.inplace_tensor = inplace_tensor
+                return dummy.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                inplace_tensor = ctx.inplace_tensor
+                gradient_attachment = grad_output * 0 + 1
+                inplace_tensor.add_(1 * gradient_attachment)
+                return grad_output, None, None
+
+        def fn(dummy, inplace_tensor):
+            return AF.apply(dummy, inplace_tensor)
+
+        def _inps():
+            dummy = torch.zeros((2,), requires_grad=True)
+            inplace_tensor = torch.zeros((2,), requires_grad=False)
+            return dummy, inplace_tensor
+
+        inps = _inps()
+        out = fn(*inps)
+        ref_inps_after_fw = [x.clone().detach() for x in inps]
+        out.sum().backward()
+        ref_inps_after_bw = [x.clone().detach() for x in inps]
+
+        inps = _inps()
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(*inps)
+        inps_after_fw = [x.clone().detach() for x in inps]
+        out.sum().backward()
+        inps_after_bw = [x.clone().detach() for x in inps]
+
+        self.assertEqual(ref_inps_after_fw, inps_after_fw)
+        self.assertEqual(ref_inps_after_bw, inps_after_bw)
+
+    def test_mutation_of_input_in_fw_and_bw(self):
+        class AF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, dummy, inplace_tensor):
+                inplace_tensor.add_(1)
+
+                ctx.inplace_tensor = inplace_tensor
+                return dummy.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                inplace_tensor = ctx.inplace_tensor
+                inplace_tensor.add_(1)
+                return grad_output, None, None
+
+        def fn(dummy, inplace_tensor):
+            return AF.apply(dummy, inplace_tensor)
+
+        def inps():
+            dummy = torch.randn((2,), requires_grad=True)
+            inplace_tensor = torch.zeros((2,), requires_grad=False)
+            return dummy, inplace_tensor
+
+        def sc_inps():
+            dummy = TwoTensor(
+                torch.randn((2,), requires_grad=True),
+                torch.randn((2,), requires_grad=True),
+            )
+            inplace_tensor = TwoTensor(
+                torch.zeros((2,), requires_grad=False),
+                torch.zeros((2,), requires_grad=False),
+            )
+            return dummy, inplace_tensor
+
+        for _inps in [inps, sc_inps]:
+            dummy, inplace = _inps()
+            y = fn(dummy, inplace)
+            ref0 = inplace.clone().detach()
+            y.sum().backward()
+            ref = inplace.clone().detach()
+
+            dummy, inplace = _inps()
+            y = torch.compile(fn, backend="aot_eager", fullgraph=True)(dummy, inplace)
+            self.assertEqual(ref0, inplace)
+            y.sum().backward()
+            self.assertEqual(ref, inplace)
 
 
 class MockFXGraphCache:

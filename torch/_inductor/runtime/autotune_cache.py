@@ -1,3 +1,28 @@
+"""
+PyTorch Inductor Autotuning Cache System
+
+This module implements a caching system for autotuning configurations in PyTorch's Inductor compiler.
+It provides mechanisms to store and retrieve optimal kernel configurations both locally and remotely,
+which significantly speeds up compilation by reusing previously discovered optimal parameters.
+
+The caching system includes:
+- Local filesystem caching for individual machine reuse
+- Remote caching for sharing optimizations across machines
+- Bundled caching to efficiently store multiple related configurations
+- Cache invalidation based on PyTorch versions and backend changes
+- Serialization/deserialization support for worker processes
+
+Key components:
+- AutotuneCache: Main class for managing cache access and storage
+- AutotuneCacheBundler: Bundles multiple cache entries for efficient storage
+- LocalAutotuneCache: Handles filesystem-based caching
+- _LocalAutotuneCacheBackend: Low-level file operations for cache storage
+- AutotuneCacheArtifact: Integration with PyTorch's artifact system
+
+This caching system is critical for performance as it eliminates the need to re-run
+expensive autotuning operations when the same kernels are compiled multiple times.
+"""
+
 from __future__ import annotations
 
 import dataclasses

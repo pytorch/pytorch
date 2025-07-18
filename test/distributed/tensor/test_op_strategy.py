@@ -6,7 +6,7 @@ import torch
 from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._op_schema import OpSchema, OpStrategy, PlacementStrategy
+from torch.distributed.tensor._op_schema import OpSchema, OpSpec, OpStrategy
 from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
@@ -65,7 +65,7 @@ class TestEinsumDims(TestCase):
         self.assertEqual(edims.lhs_out_only_dims, ["c"])
         self.assertEqual(edims.rhs_out_only_dims, [])
 
-        equation = "abd,bf->abfd"
+        equation = "abd,bf->abfd"  # codespell:ignore
         input_dims, output_dim = EinsumDims.parse_equation(equation)
         edims = EinsumDims.parse_dims(input_dims, output_dim)
 
@@ -97,6 +97,16 @@ class TestEinsumStrategies(DTensorOpTestBase):
 
         all_strats = gen_einsum_strategies("bmk,bkn->bmn", mesh)
         self.assertEqual(len(all_strats.strategies), 5)
+
+    def test_bmm_diffinndim_2d_mesh(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
+        all_strats = gen_einsum_strategies("bmk,kn->bmn", mesh)
+        self.assertEqual(len(all_strats.strategies), 25)
+
+    def test_bmm_diffoutndim_2d_mesh(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
+        all_strats = gen_einsum_strategies("bmk,k->bm", mesh)
+        self.assertEqual(len(all_strats.strategies), 16)
 
     def test_bmm_2d_mesh(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
@@ -184,9 +194,9 @@ class TestCostModel(DTensorOpTestBase):
         op_schema = OpSchema(
             torch.ops.aten.addmm.default,
             (
-                OpStrategy([PlacementStrategy(shard0_spec)]),
-                OpStrategy([PlacementStrategy(partial_spec)]),
-                OpStrategy([PlacementStrategy(shard1_spec)]),
+                OpStrategy([OpSpec(shard0_spec)]),
+                OpStrategy([OpSpec(partial_spec)]),
+                OpStrategy([OpSpec(shard1_spec)]),
             ),
             {},
         )
@@ -261,8 +271,8 @@ class TestCostModel(DTensorOpTestBase):
             op_schema = OpSchema(
                 torch.ops.aten.mm.default,
                 (
-                    OpStrategy([PlacementStrategy(lhs_spec)]),
-                    OpStrategy([PlacementStrategy(rhs_spec)]),
+                    OpStrategy([OpSpec(lhs_spec)]),
+                    OpStrategy([OpSpec(rhs_spec)]),
                 ),
                 {},
             )
@@ -308,8 +318,8 @@ class TestCostModel(DTensorOpTestBase):
             op_schema = OpSchema(
                 torch.ops.aten.bmm.default,
                 (
-                    OpStrategy([PlacementStrategy(lhs_spec)]),
-                    OpStrategy([PlacementStrategy(rhs_spec)]),
+                    OpStrategy([OpSpec(lhs_spec)]),
+                    OpStrategy([OpSpec(rhs_spec)]),
                 ),
                 {},
             )
