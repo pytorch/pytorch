@@ -14,6 +14,7 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
 from torch import nn
+from torch._prims_common import DeviceLikeType
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import (
     distribute_module,
@@ -23,6 +24,11 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.parallel.style import ParallelStyle
+from torch.nn.attention.flex_attention import (
+    _mask_mod_signature,
+    BlockMask,
+    create_block_mask,
+)
 from torch.overrides import TorchFunctionMode
 
 
@@ -371,9 +377,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(group, dist.ProcessGroup), (
-        "process group must be single dimension"
-    )
+    assert isinstance(
+        group, dist.ProcessGroup
+    ), "process group must be single dimension"
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -1117,6 +1123,108 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
 
         return tuple(new_outputs)
 
+    def unshard(x: torch.Tensor, mesh: DeviceMesh, shard_dim: int) -> torch.Tensor:
+        x = x.contiguous()
+        all_xs = [torch.empty_like(x) for _ in range(mesh.size())]
+        ft_c.all_gather_inplace(all_xs, x, mesh)
+        return torch.cat(all_xs, dim=shard_dim)
+
+    def rewrite_context_parallel_block_mask(
+        block_mask: BlockMask, device_mesh: DeviceMesh
+    ) -> BlockMask:
+        def _rewrite_mask_mod(
+            mask_mod: _mask_mod_signature,
+            rank: int,
+            world_size: int,
+            block_size: int,
+            local_q_size: int,
+        ) -> _mask_mod_signature:
+            def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
+                # calculate local block_idx and block_offset
+                local_blk_idx, local_blk_offset = (
+                    local_q_idx // block_size,
+                    local_q_idx % block_size,
+                )
+                # NOTE: load balancing is not used
+                local_num_blocks = local_q_size // block_size
+                blk_idx = local_num_blocks * rank + local_blk_idx
+                return blk_idx * block_size + local_blk_offset
+
+            return lambda b, h, q_idx, kv_idx: mask_mod(
+                b, h, local_q_idx_to_q_idx(q_idx), kv_idx
+            )
+
+        def _create_block_mask(
+            mask_mod: _mask_mod_signature,
+            B: int,
+            H: int,
+            M: int,
+            N: int,
+            device: DeviceLikeType,
+            BLOCK_SIZE: Union[int, tuple[int, int]],
+        ) -> BlockMask:
+            return create_block_mask(
+                mask_mod, B, H, M, N, device=device, BLOCK_SIZE=BLOCK_SIZE
+            )
+
+        Q_LEN, KV_LEN = block_mask.seq_lengths
+        Q_BLOCK_SIZE, KV_BLOCK_SIZE = block_mask.BLOCK_SIZE
+        # TODO: support other KV block sizes
+        assert Q_BLOCK_SIZE == KV_BLOCK_SIZE
+        mask_mod = block_mask.mask_mod
+
+        # resolve CP device mesh info
+        assert device_mesh.ndim == 1
+        cp_rank = device_mesh.get_local_rank()
+        cp_group_size = device_mesh.size()
+        device_type = device_mesh.device_type
+
+        # rewrite block_mask's mask_mod
+        cp_mask_mod = _rewrite_mask_mod(
+            mask_mod, cp_rank, cp_group_size, Q_BLOCK_SIZE, Q_LEN
+        )
+
+        return _create_block_mask(
+            cp_mask_mod,
+            B=1,
+            H=1,
+            M=Q_LEN // cp_group_size,
+            N=KV_LEN,
+            device=device_type,
+            BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
+        )
+
+    class CPFlexAttentionPreOp(torch.autograd.Function):
+        @staticmethod
+        def forward(
+            ctx: Any,
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            score_mod: Callable,
+            block_mask_t: tuple[Any, ...],
+            device_mesh: DeviceMesh,
+        ) -> tuple[Any, ...]:
+            # all-gather KV
+            global_key = unshard(key, device_mesh, 2)  # TODO: change the shard_dim
+            global_value = unshard(value, device_mesh, 2)
+            q_len, kv_len = block_mask_t[0], block_mask_t[1]
+            block_size_q, block_size_kv = block_mask_t[-3], block_mask_t[-2]
+            block_mask = BlockMask(
+                (q_len, kv_len),  # seq_lengths
+                *block_mask_t[2:-3],
+                (block_size_q, block_size_kv),  # block_sizes
+                block_mask_t[-1],
+            )
+            cp_block_mask = rewrite_context_parallel_block_mask(block_mask, device_mesh)
+
+            return global_key, global_value, cp_block_mask
+
+        @staticmethod
+        def backward(ctx, *args, **kwargs):
+            # raise NotImplementedError()
+            return torch._higher_order_ops.flex_attention_backward(*args, **kwargs)
+
     class DistributeFunction(TorchFunctionMode):
         def __init__(
             self,
@@ -1138,6 +1246,33 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             kwargs: Optional[dict[str, Any]] = None,
         ) -> Any:
             kwargs = kwargs or {}
+
+            # special handler for flex_attention
+            if func == torch._higher_order_ops.flex_attention:
+                query, key, value, score_mod, block_mask = args[:5]
+                assert isinstance(query, torch.Tensor)
+                assert isinstance(key, torch.Tensor)
+                assert isinstance(value, torch.Tensor)
+                assert isinstance(score_mod, Callable)
+                assert isinstance(block_mask, tuple)
+
+                global_key, global_value, cp_block_mask = CPFlexAttentionPreOp.apply(
+                    query,
+                    key,
+                    value,
+                    score_mod,
+                    block_mask,
+                    self._device_mesh,
+                )
+                return func(
+                    query,
+                    global_key,
+                    global_value,
+                    score_mod,
+                    cp_block_mask.as_tuple(),
+                    *args[5:],
+                    **kwargs,
+                )
 
             if func != self._fn:
                 return func(*args, **kwargs)
