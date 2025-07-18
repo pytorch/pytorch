@@ -15,7 +15,7 @@ from torch._ops import OpOverload
 aten = torch.ops.aten
 
 _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS: dict[OpOverload, OpOverload] = {
-    aten.sym_constrain_range.default: aten._functional_sym_constrain_range,
+    aten.sym_constrain_range.default: aten._functional_sym_constrain_range.default,
     aten._assert_async.msg: aten._functional_assert_async.msg,
 }
 

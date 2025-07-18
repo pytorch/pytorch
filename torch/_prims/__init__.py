@@ -2174,7 +2174,7 @@ def _resize_aten(a: Tensor, shape: ShapeType) -> Tensor:
 _resize_doc = """
   Gives a tensor with no elements a new shape, returning the modified tensor.
 
-  The tensor's strides are contiguous and its values are unitialized.
+  The tensor's strides are contiguous and its values are uninitialized.
   """
 
 # TODO: review support arbitrary resizes
@@ -2513,7 +2513,11 @@ def _full_aten(
 ) -> Tensor:
     # Note that Mypy thinks torch.full can't accept a complex fill_value
     return torch.full(
-        shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
+        shape,
+        fill_value,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,  # type: ignore[arg-type]
     )
 
 
@@ -2556,7 +2560,11 @@ def _full_like_aten(
 ) -> Tensor:
     # Note that Mypy thinks torch.full can't accept a complex fill_value
     return torch.full_like(
-        a, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
+        a,
+        fill_value,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,  # type: ignore[arg-type]
     )
 
 

@@ -67,7 +67,7 @@ struct TORCH_API Method : public torch::IMethod {
  private:
   void setArgumentNames(std::vector<std::string>&) const override;
 
-  // Methods are uniqued onwed by a single module. This raw pointer allows
+  // Methods are uniqued owned by a single module. This raw pointer allows
   // looking up the module.
   ObjectPtr owner_;
 

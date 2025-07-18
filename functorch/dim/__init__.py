@@ -58,7 +58,7 @@ TensorLike = (_Tensor, torch.Tensor)
 
 
 class Dim(_C.Dim, _Tensor):
-    # note that _C.Dim comes before tensor because we want the Dim API for things like size to take precendence.
+    # note that _C.Dim comes before tensor because we want the Dim API for things like size to take precedence.
     # Tensor defines format, but we want to print Dims with special formatting
     __format__ = object.__format__
 
