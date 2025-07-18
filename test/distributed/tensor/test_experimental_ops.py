@@ -24,7 +24,7 @@ class DistOtherOpsTest(DTensorTestBase):
 
     @with_comms
     def test_slice(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Replicate()]
 
         input_list = torch.rand(ITER_TIME, 1024, 10)
@@ -76,7 +76,7 @@ class DistOtherOpsTest(DTensorTestBase):
     @with_comms
     def test_bernoulli(self):
         rank = dist.get_rank()
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Replicate()]
 
         input_list = torch.rand(ITER_TIME, 1024, 10)
@@ -138,7 +138,7 @@ class DistOtherOpsTest(DTensorTestBase):
 
     @with_comms
     def test_nll(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Replicate()]
 
         pred_list = torch.rand(ITER_TIME, 1024, 10)

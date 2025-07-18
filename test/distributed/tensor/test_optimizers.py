@@ -89,7 +89,7 @@ class TestDTensorOptimizer(DTensorTestBase):
 
     @with_comms
     def test_adam_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         # lr as a Tensor is not supported for capturable=False and foreach=True
         adam_float_lr_configs = [
@@ -148,7 +148,7 @@ class TestDTensorOptimizer(DTensorTestBase):
 
     @with_comms
     def test_adamw_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         # lr as a Tensor is not supported for capturable=False and foreach=True
         adamw_float_lr_configs = [
@@ -224,7 +224,7 @@ class TestDTensorOptimizer(DTensorTestBase):
 
     @with_comms
     def test_sgd_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         sgd_configs = [
             {"lr": 0.1, "foreach": False},
@@ -264,7 +264,7 @@ class TestDTensorOptimizer(DTensorTestBase):
 
     @with_comms
     def test_adagrad_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         adagrad_configs = [
             {"lr": 0.1, "foreach": False},
@@ -320,7 +320,7 @@ class TestDTensorOptimizer(DTensorTestBase):
 
     @with_comms
     def test_RMSprop_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         RMSprop_configs = [
             {"lr": 0.1, "foreach": False},
@@ -387,7 +387,7 @@ class TestDTensorOptimizer(DTensorTestBase):
 
     @with_comms
     def test_adadelta_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         adadelta_configs = [
             {"lr": 0.1, "foreach": False},
@@ -431,7 +431,7 @@ class TestDTensorOptimizer(DTensorTestBase):
 
     @with_comms
     def test_nadam_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         nadam_configs = [
             {"lr": 0.1, "foreach": False},
@@ -468,7 +468,7 @@ class TestDTensorOptimizer(DTensorTestBase):
 
     @with_comms
     def test_radam_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         radam_configs = [
             {"lr": 0.1, "foreach": False},
@@ -508,7 +508,7 @@ class TestDTensorOptimizer(DTensorTestBase):
 
     @with_comms
     def test_adamax_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         adamax_configs = [
             {"lr": 0.1, "foreach": False},
@@ -552,7 +552,7 @@ class TestDTensorOptimizer(DTensorTestBase):
 
     @with_comms
     def test_asgd_1d_sharding(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
 
         asgd_configs = [
             {"lr": 0.1, "foreach": False},

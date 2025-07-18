@@ -48,7 +48,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
 
     @with_comms
     def test_downsampling_convolution(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(3)]
 
         input_list = torch.rand(ITER_TIME, 7, 3, 512, 1024)
@@ -118,7 +118,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_depthwise_convolution(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(3)]
 
         input_list = torch.rand(ITER_TIME, 7, 256, 128, 256)

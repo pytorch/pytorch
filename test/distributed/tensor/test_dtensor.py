@@ -61,7 +61,7 @@ class DummyMLP(torch.nn.Module):
 class DTensorTest(DTensorTestBase):
     @with_comms
     def test_dtensor_constructor(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3, requires_grad=True)
 
@@ -149,7 +149,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_stride(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard0_spec = [Shard(0)]
         local_tensor = torch.randn(4, 8)
         dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard0_spec)
@@ -172,7 +172,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_from_local(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3)
         sharded_tensor = DTensor.from_local(local_tensor, device_mesh, placements)
@@ -270,7 +270,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_from_local_negative_dim(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = [Shard(-1)]
         local_tensor = torch.randn(3, 3)
         sharded_tensor = DTensor.from_local(local_tensor, device_mesh, placements)
@@ -278,7 +278,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_to_local(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = (Shard(0),)
         local_tensor_with_grad = torch.randn(
             3, 3, device=self.device_type, requires_grad=True
@@ -338,7 +338,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_to_local_grad_hint(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = (Shard(0),)
         global_tensor = torch.ones(8, 3, requires_grad=True)
 
@@ -363,7 +363,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_full_tensor_sync(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = (Shard(0),)
         global_tensor = torch.ones(8, 3, requires_grad=True)
 
@@ -374,7 +374,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_full_tensor_grad_hint(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = (Shard(0),)
         global_tensor = torch.ones(8, 3, requires_grad=True)
 
@@ -453,7 +453,7 @@ class DTensorTest(DTensorTestBase):
     @with_comms
     def test_from_local_then_to_local(self):
         # this test ensure end to end from torch.Tensor -> dist tensor -> torch.Tensor works
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = [Shard(0)]
 
         # step 1. construct from construct local tensor
@@ -485,7 +485,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_spec_read_only_after_set(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3)
         sharded_tensor = DTensor.from_local(local_tensor, device_mesh, placements)
@@ -497,7 +497,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_spec_hash(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3)
         local_tensor2 = torch.randn(3, 3)
@@ -517,7 +517,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_properties(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3)
         sharded_tensor = DTensor.from_local(local_tensor, device_mesh, placements)
@@ -634,14 +634,14 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_api_device_mesh_context_manager(self):
-        with DeviceMesh(self.device_type, list(range(self.world_size))) as mesh:
+        with self.build_device_mesh() as mesh:
             placements = [Shard(0)]
             local_tensor = torch.randn(3, 3)
             sharded_tensor = DTensor.from_local(
                 local_tensor, device_mesh=mesh, placements=placements
             )
 
-        with DeviceMesh(self.device_type, list(range(self.world_size))):
+        with self.build_device_mesh():
             placements = [Shard(0)]
             local_tensor = torch.randn(3, 3)
             sharded_tensor = DTensor.from_local(local_tensor, placements=placements)
@@ -879,7 +879,7 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_metadata_consistency_check(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements = [Shard(0)]
 
         # Create a local tensor with specific metadata and check dtype change

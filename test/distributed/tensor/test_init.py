@@ -37,7 +37,7 @@ class DTensorConstructorTest(DTensorTestBase):
 
     def _run_init_op(self, init_op, dist_init_op, eq_op, *args, **kwargs):
         # 1d mesh test
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         placements_list = [[Shard(0)], [Shard(1)], [Shard(2)], [Replicate()]]
 
         # even sharding
