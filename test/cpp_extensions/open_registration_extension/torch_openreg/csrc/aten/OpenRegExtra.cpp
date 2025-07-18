@@ -7,6 +7,7 @@
 
 namespace at::openreg {
 
+// START my snippet
 at::Tensor wrapper_quantize_per_tensor(
     const at::Tensor& self,
     double scale,
@@ -15,6 +16,7 @@ at::Tensor wrapper_quantize_per_tensor(
   return at::native::quantize_per_tensor_openreg(
       self, scale, zero_point, dtype);
 }
+// END my snippet
 
 int64_t wrapper__fused_sdp_choice(
     const at::Tensor& query,
@@ -112,6 +114,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
 
 } // namespace at::openreg
 
+// LITERALINCLUDE START: TORCH.AUTOGRAD.FUNCTION
 namespace at::openreg {
 TORCH_LIBRARY(openreg, m) {
   m.def("custom_autograd_fn_returns_self(Tensor input)-> Tensor");
@@ -126,7 +129,9 @@ TORCH_LIBRARY_IMPL(openreg, AutogradPrivateUse1, m) {
       "custom_autograd_fn_aliasing", &at::native::custom_autograd_fn_aliasing);
 }
 } // namespace at::openreg
+// LITERALINCLUDE END: TORCH.AUTOGRAD.FUNCTION
 
+// LITERALINCLUDE START: STUB
 namespace at::native {
 REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &abs_kernel_openreg);
 REGISTER_PRIVATEUSE1_DISPATCH(
@@ -136,3 +141,4 @@ REGISTER_PRIVATEUSE1_DISPATCH(
     _fused_sdp_choice_stub,
     &_fused_sdp_choice_openreg);
 } // namespace at::native
+// LITERALINCLUDE END: STUB

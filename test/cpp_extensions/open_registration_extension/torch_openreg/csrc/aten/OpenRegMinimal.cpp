@@ -7,6 +7,7 @@
 
 namespace at::openreg {
 
+// LITERALINCLUDE START: EMPTY.MEMORY_FORMAT
 at::Tensor wrapper_empty_memory_format(
     c10::IntArrayRef size,
     std::optional<c10::ScalarType> dtype_opt,
@@ -22,6 +23,7 @@ at::Tensor wrapper_empty_memory_format(
       pin_memory_opt,
       memory_format_opt);
 }
+// LITERALINCLUDE END: EMPTY.MEMORY_FORMAT
 
 at::Tensor wrapper_empty_strided(
     c10::IntArrayRef size,
@@ -97,6 +99,7 @@ at::Tensor wrapper_view(const at::Tensor& self, c10::SymIntArrayRef size) {
   return at::native::view_openreg(self, size);
 }
 
+// LITERALINCLUDE START: TORCH_LIBRARY_IMPL
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty.memory_format", wrapper_empty_memory_format);
   m.impl("empty_strided", wrapper_empty_strided);
@@ -113,7 +116,9 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
       wrapper_set_source_Storage_storage_offsetset_);
   m.impl("view", wrapper_view);
 }
+// LITERALINCLUDE END: TORCH_LIBRARY_IMPL
 
+// LITERALINCLUDE START: FALLBACK GLOBAL
 void wrapper_cpu_fallback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
@@ -124,5 +129,6 @@ TORCH_LIBRARY_IMPL(_, PrivateUse1, m) {
   m.fallback(
       torch::CppFunction::makeFromBoxedFunction<&wrapper_cpu_fallback>());
 }
+// LITERALINCLUDE END: FALLBACK GLOBAL
 
 } // namespace at::openreg
