@@ -142,7 +142,11 @@ class BenchmarkKernel:
             self.check_accuracy(args, kwargs)
 
     def visualize(self) -> None:
-        visualize_comparison(self.profiling_results, output_path=f"{self.name}_bench")
+        visualize_comparison(
+            self.profiling_results,
+            title=f"{self.name}",
+            output_path=f"{self.name}_bench",
+        )
         return
 
 
@@ -163,6 +167,7 @@ def get_backend_colors() -> dict[str, str]:
 
 def visualize_comparison(
     profiling_results: dict[str, list[Performance]],
+    title: Optional[str] = None,
     output_path: Optional[str] = None,
 ) -> None:
     """
@@ -208,6 +213,7 @@ def visualize_comparison(
             )
 
     # Configure the plot
+    ax.set_title(title or "Memory Bandwidth Comparison", fontsize=16)
     ax.set_xlabel("Configuration", fontsize=12)
     ax.set_ylabel("memory bandwidth (GB/s)", fontsize=12)
     ax.set_xticks(range(len(all_settings)))

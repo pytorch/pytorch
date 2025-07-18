@@ -1,6 +1,6 @@
 # GenAI Kernel Benchmark
 
-This direcory contains benchmarks for the GenAI kernels. It compares pytorch eager, pytorch compiler, quack, and liger.
+This directory contains benchmarks for the GenAI kernels. It compares pytorch eager, pytorch compiler, quack, and liger.
 
 
 ## Setup
