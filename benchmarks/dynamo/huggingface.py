@@ -106,6 +106,11 @@ finally:
 # on A100 GPUs - 40 GB.
 BATCH_SIZE_KNOWN_MODELS = {}
 
+# Run only this selected group of models, leave this empty to run everything
+TORCHBENCH_ONLY_MODELS = [
+    m.strip() for m in os.getenv("TORCHBENCH_ONLY_MODELS", "").split(",") if m.strip()
+]
+
 
 # TODO(sdym): use batch-size-file parameter of common.main, like torchbench.py
 # Get the list of models and their batch sizes
@@ -116,6 +121,8 @@ with open(MODELS_FILENAME) as fh:
     lines = [line.rstrip() for line in lines]
     for line in lines:
         model_name, batch_size = line.split(",")
+        if TORCHBENCH_ONLY_MODELS and model_name not in TORCHBENCH_ONLY_MODELS:
+            continue
         batch_size = int(batch_size)
         BATCH_SIZE_KNOWN_MODELS[model_name] = batch_size
 assert len(BATCH_SIZE_KNOWN_MODELS)
