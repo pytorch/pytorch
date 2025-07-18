@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from typing import Any
 
 import torch
 from torch._C import _disabled_torch_function_impl
@@ -174,7 +175,13 @@ class UninitializedTensorMixin:
         )
 
 
-def is_lazy(param):
+def is_lazy(param: Any) -> bool:
+    """
+    Returns whether ``param`` is an ``UninitializedParameter`` or ``UninitializedBuffer``.
+
+    Args:
+        param (Any): the input to check.
+    """
     return isinstance(param, UninitializedTensorMixin)
 
 
