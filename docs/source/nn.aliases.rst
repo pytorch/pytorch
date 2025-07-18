@@ -301,9 +301,20 @@ torch.nn.utils
 
 The following are aliases to their counterparts in ``torch.nn.utils`` in nested namespaces.
 
-Utility functions to flatten and unflatten Module parameters to and from a single vector.
+Utility functions to clip parameter gradients.
 
 .. currentmodule:: torch.nn.utils
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    clip_grad.clip_grad_norm_
+    clip_grad.clip_grad_norm
+    clip_grad.clip_grad_value_
+
+
+Utility functions to flatten and unflatten Module parameters to and from a single vector.
+
 .. autosummary::
     :toctree: generated
     :nosignatures:

@@ -258,7 +258,7 @@ def invert_permutation(permutation: Optional[Tensor]) -> Optional[Tensor]:
     """Returns the inverse of ``permutation``.
 
     This is useful for converting between sorted and unsorted indices in
-    an :class:`~nn.utils.rnn.PackedSequence`.
+    a :class:`~nn.utils.rnn.PackedSequence`.
 
     Args:
         permutation (Tensor, optional): a 1-D tensor of indices to invert

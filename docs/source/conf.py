@@ -1253,12 +1253,12 @@ coverage_ignore_functions = [
     "max_pool3d_with_indices",  # documented as max_pool3d
     "multi_head_attention_forward",
     # torch.nn.grad
-    "conv1d_input",  # very legacy, documenting seems useless
-    "conv1d_weight",  # very legacy, documenting seems useless
-    "conv2d_input",  # very legacy, documenting seems useless
-    "conv2d_weight",  # very legacy, documenting seems useless
-    "conv3d_input",  # very legacy, documenting seems useless
-    "conv3d_weight",  # very legacy, documenting seems useless
+    "conv1d_input",  # legacy helper for gradient computation
+    "conv1d_weight",  # legacy helper for gradient computation
+    "conv2d_input",  # legacy helper for gradient computation
+    "conv2d_weight",  # legacy helper for gradient computation
+    "conv3d_input",  # legacy helper for gradient computation
+    "conv3d_weight",  # legacy helper for gradient computation
     # torch.nn.init
     "constant",  # deprecated
     "dirac",  # deprecated
@@ -2909,11 +2909,11 @@ coverage_ignore_classes = [
     "ModuleWrapper",
     "OrderedDictWrapper",
     # torch.nn.modules.container
-    "Container",
+    "Container",  # deprecated
     # torch.nn.modules.linear
     "NonDynamicallyQuantizableLinear",
     # torch.nn.modules.loss
-    "NLLLoss2d",
+    "NLLLoss2d",  # deprecated
     # torch.nn.modules.normalization
     "CrossMapLRN2d",
     # torch.nn.parallel.data_parallel
