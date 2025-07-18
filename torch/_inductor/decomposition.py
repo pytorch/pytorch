@@ -1150,3 +1150,19 @@ def rrelu_with_noise_functional(
     else:
         negative_slope = (lower + upper) / 2
         return aten.leaky_relu(self, negative_slope), torch.Tensor()
+
+
+@register_decomposition(aten.repeat_interleave.Tensor)
+def repeast_interleave_Tensor(
+    repeat: torch.Tensor,
+    output_size: Optional[int] = None,
+) -> torch.Tensor:
+    if output_size is None or type(output_size) is not int:
+        return NotImplemented
+    assert repeat.dtype in [torch.int32, torch.int64]
+    assert repeat.ndim == 1
+    cumsum = repeat.cumsum(0)
+    pos = torch.arange(output_size, device=repeat.device)
+    return torch.searchsorted(
+        cumsum, pos, out_int32=(repeat.dtype == torch.int32), right=True
+    )
