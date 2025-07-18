@@ -58,9 +58,9 @@
 /// }
 /// ```
 
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/op_registration/op_allowlist.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/DispatchKey.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
@@ -89,9 +89,6 @@ struct NoInferSchemaTag {};
 
 #define HAS_PT2_COMPLIANT_TAG
 
-// For multipy/torchdeploy use case  // codespell:ignore multipy
-enum class _RegisterOrVerify { REGISTER, VERIFY };
-
 template <class CurClass>
 class class_;
 
@@ -119,8 +116,8 @@ class TORCH_API CppFunction final {
       : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f)),
         cpp_signature_(c10::impl::CppSignature::make<Func>()),
         schema_(
-            c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Func>>())
-        {}
+            c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Func>>()) {
+  }
 
   /// This overload accepts compile time function pointers, e.g.,
   /// `CppFunction(TORCH_FN(add_impl))`
@@ -134,8 +131,7 @@ class TORCH_API CppFunction final {
         cpp_signature_(
             c10::impl::CppSignature::make<typename FuncPtr::FuncType>()),
         schema_(c10::detail::inferFunctionSchemaFromFunctor<
-                typename FuncPtr::FuncType>())
-        {}
+                typename FuncPtr::FuncType>()) {}
 
   /// This overload accepts lambdas, e.g., `CppFunction([](const Tensor& self) {
   /// ... })`
@@ -149,8 +145,7 @@ class TORCH_API CppFunction final {
             std::forward<Lambda>(f))),
         cpp_signature_(c10::impl::CppSignature::make<Lambda>()),
         schema_(c10::detail::inferFunctionSchemaFromFunctor<
-                std::decay_t<Lambda>>())
-        {}
+                std::decay_t<Lambda>>()) {}
 
 #if defined C10_MOBILE
   /// This overload accepts function pointers, e.g., `CppFunction(&add_impl,
@@ -409,8 +404,12 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
 /// ```
 ///
 /// \ingroup torch-schema-overloads
-inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k, bool allow_typevars=false) {
-  c10::FunctionSchema s = torch::jit::parseSchema(str, /*allow_typevars*/allow_typevars);
+inline c10::FunctionSchema schema(
+    const char* str,
+    c10::AliasAnalysisKind k,
+    bool allow_typevars = false) {
+  c10::FunctionSchema s =
+      torch::jit::parseSchema(str, /*allow_typevars*/ allow_typevars);
   s.setAliasAnalysis(k);
   return s;
 }
@@ -418,7 +417,7 @@ inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k, boo
 /// Function schemas can be directly constructed from string literals.
 ///
 /// \ingroup torch-schema-overloads
-inline c10::FunctionSchema schema(const char* s, bool allow_typevars=false) {
+inline c10::FunctionSchema schema(const char* s, bool allow_typevars = false) {
   return schema(s, c10::AliasAnalysisKind::FROM_SCHEMA, allow_typevars);
 }
 
@@ -434,12 +433,12 @@ inline c10::FunctionSchema&& schema(c10::FunctionSchema&& s) {
 
 namespace detail {
 
-inline std::variant<c10::OperatorName, c10::FunctionSchema> constructSchemaOrName(
-    c10::FunctionSchema&& s) {
+inline std::variant<c10::OperatorName, c10::FunctionSchema>
+constructSchemaOrName(c10::FunctionSchema&& s) {
   return std::move(s);
 }
-inline std::variant<c10::OperatorName, c10::FunctionSchema> constructSchemaOrName(
-    c10::OperatorName&& n) {
+inline std::variant<c10::OperatorName, c10::FunctionSchema>
+constructSchemaOrName(c10::OperatorName&& n) {
   return std::move(n);
 }
 inline std::variant<c10::OperatorName, c10::FunctionSchema>
@@ -607,16 +606,14 @@ class TORCH_API Library final {
 
   Library& def(
       c10::FunctionSchema&& s,
-      const std::vector<at::Tag>& tags = {},
-      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
-    return _def(std::move(s), nullptr, tags, rv);
+      const std::vector<at::Tag>& tags = {}) & {
+    return _def(std::move(s), nullptr, tags);
   }
 
   Library& def(
       const char* raw_schema,
-      const std::vector<at::Tag>& tags = {},
-      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
-    return _def(schema(raw_schema), nullptr, tags, rv);
+      const std::vector<at::Tag>& tags = {}) & {
+    return _def(schema(raw_schema), nullptr, tags);
   }
 
   /// Declares that for all operators that are subsequently def'ed, their
@@ -633,7 +630,9 @@ class TORCH_API Library final {
   }
 
   /// Deprecated; use set_python_module instead
-  Library& impl_abstract_pystub(const char* pymodule, const char* context = "") {
+  Library& impl_abstract_pystub(
+      const char* pymodule,
+      const char* context = "") {
     return set_python_module(pymodule, context);
   }
 
@@ -659,13 +658,16 @@ class TORCH_API Library final {
   /// }
   /// ```
   template <typename NameOrSchema, typename Func>
-  Library& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f,
+  Library& def(
+      NameOrSchema&& raw_name_or_schema,
+      Func&& raw_f,
       const std::vector<at::Tag>& tags = {}) & {
     CppFunction f(std::forward<Func>(raw_f));
     return _def(
         detail::constructSchemaOrName(
             ::std::forward<NameOrSchema>(raw_name_or_schema)),
-        ::std::move(f), tags);
+        ::std::move(f),
+        tags);
   }
 
   /// Register an implementation for an operator.  You may register multiple
@@ -688,10 +690,7 @@ class TORCH_API Library final {
   /// }
   /// ```
   template <typename Name, typename Func>
-  Library& impl(
-      Name name,
-      Func&& raw_f,
-      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
+  Library& impl(Name name, Func&& raw_f) & {
     // TODO: need to raise an error when you impl a function that has a
     // catch all def
 #if defined C10_MOBILE
@@ -699,7 +698,7 @@ class TORCH_API Library final {
 #else
     CppFunction f(std::forward<Func>(raw_f));
 #endif
-    return _impl(name, std::move(f), rv);
+    return _impl(name, std::move(f));
   }
 
 #if defined C10_MOBILE
@@ -746,20 +745,32 @@ class TORCH_API Library final {
   // These overloads cover cases when a SelectiveStr (see Note [Selective
   // build]) has been disabled at compile time.  In that case, don't generate
   // any code referencing the passed in functions at all.
-  Library& def(detail::SelectiveStr<false>, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
+  Library& def(
+      detail::SelectiveStr<false>,
+      const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
     return *this;
   }
-  Library& def(detail::SelectiveStr<true> raw_schema, const std::vector<at::Tag>& tags = {}) & {
+  Library& def(
+      detail::SelectiveStr<true> raw_schema,
+      const std::vector<at::Tag>& tags = {}) & {
     return def(raw_schema.operator const char*(), tags);
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
+  Library& def(
+      detail::SelectiveStr<false>,
+      Func&& /*raw_f*/,
+      const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
     return *this;
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f, const std::vector<at::Tag>& tags = {}) & {
+  Library& def(
+      detail::SelectiveStr<true> raw_name_or_schema,
+      Func&& raw_f,
+      const std::vector<at::Tag>& tags = {}) & {
     return def(
-        raw_name_or_schema.operator const char*(), std::forward<Func>(raw_f), tags);
+        raw_name_or_schema.operator const char*(),
+        std::forward<Func>(raw_f),
+        tags);
   }
 
   template <typename Func>
@@ -874,16 +885,12 @@ class TORCH_API Library final {
   Library& _def(
       c10::FunctionSchema&& schema,
       c10::OperatorName* out_name = nullptr,
-      const std::vector<at::Tag>& tags = {},
-      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) &;
+      const std::vector<at::Tag>& tags = {}) &;
   Library& _def(
       std::variant<c10::OperatorName, c10::FunctionSchema>&&,
       CppFunction&& f,
       const std::vector<at::Tag>& tags = {}) &;
-  Library& _impl(
-      const char* name,
-      CppFunction&& f,
-      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) &;
+  Library& _impl(const char* name, CppFunction&& f) &;
   Library& _fallback(CppFunction&& f) &;
 
   at::OperatorName _parseNameForLib(const char* name_str) const;
@@ -904,31 +911,32 @@ namespace detail {
 // containing TORCH_LIBRARY initializers are loaded in a thread safe manner.
 extern std::vector<TorchLibraryInit*> torch_library_initializers;
 class TorchLibraryInit final {
-    private:
-      using InitFn = void(Library&);
-      Library::Kind kind;
-      InitFn* init_function;
-      const char* ns;
-      std::optional<c10::DispatchKey> key;
-      const char* file;
-      uint32_t line;
-      std::unique_ptr<Library> lib = nullptr;
+ private:
+  using InitFn = void(Library&);
+  Library::Kind kind;
+  InitFn* init_function;
+  const char* ns;
+  std::optional<c10::DispatchKey> key;
+  const char* file;
+  uint32_t line;
+  std::unique_ptr<Library> lib = nullptr;
 
-    public:
-      TorchLibraryInit(
-            Library::Kind kind,
-            InitFn* fn,
-            const char* ns,
-            std::optional<c10::DispatchKey> k,
-            const char* file,
-            uint32_t line) : kind(kind), init_function(fn), ns(ns), key(k), file(file), line(line) {
-              torch_library_initializers.push_back(this);
-            }
+ public:
+  TorchLibraryInit(
+      Library::Kind kind,
+      InitFn* fn,
+      const char* ns,
+      std::optional<c10::DispatchKey> k,
+      const char* file,
+      uint32_t line)
+      : kind(kind), init_function(fn), ns(ns), key(k), file(file), line(line) {
+    torch_library_initializers.push_back(this);
+  }
 
-      void initialize() {
-        lib = std::unique_ptr<Library>(new Library(kind, ns, key, file, line));
-        init_function(*lib);
-      }
+  void initialize() {
+    lib = std::unique_ptr<Library>(new Library(kind, ns, key, file, line));
+    init_function(*lib);
+  }
 };
 #else
 class TorchLibraryInit final {
@@ -1067,18 +1075,18 @@ class TorchLibraryInit final {
 /// variable name collisions. This can happen if TORCH_LIBRARY_IMPL is called
 /// multiple times with the same namespace and dispatch key in the same
 /// translation unit.
-#define _TORCH_LIBRARY_IMPL(ns, k, m, uid)                                \
-  static void C10_CONCATENATE(                                            \
-      TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid)(torch::Library&);       \
-  static const torch::detail::TorchLibraryInit C10_CONCATENATE(           \
-      TORCH_LIBRARY_IMPL_static_init_##ns##_##k##_, uid)(                 \
-      torch::Library::IMPL,                                               \
-      &C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid),       \
-      #ns,                                                                \
-      std::make_optional(c10::DispatchKey::k),                            \
-      __FILE__,                                                           \
-      __LINE__);                                                          \
-  void C10_CONCATENATE(                                                   \
+#define _TORCH_LIBRARY_IMPL(ns, k, m, uid)                          \
+  static void C10_CONCATENATE(                                      \
+      TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid)(torch::Library&); \
+  static const torch::detail::TorchLibraryInit C10_CONCATENATE(     \
+      TORCH_LIBRARY_IMPL_static_init_##ns##_##k##_, uid)(           \
+      torch::Library::IMPL,                                         \
+      &C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid), \
+      #ns,                                                          \
+      std::make_optional(c10::DispatchKey::k),                      \
+      __FILE__,                                                     \
+      __LINE__);                                                    \
+  void C10_CONCATENATE(                                             \
       TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid)(torch::Library & m)
 
 // These are variants of the macros above which are to be used for testing (they

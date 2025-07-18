@@ -354,7 +354,6 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   TORCH_INTERNAL_ASSERT(
       pyobj,
       "Trying to preserve a Python tensor whose PyObjectSlot does not have a PyObject");
-
   tensor_impl->pyobj_slot()->set_owns_pyobj(true);
 
   // Resurrect the Python object.  This is something CPython does
