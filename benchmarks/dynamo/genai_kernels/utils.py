@@ -1,6 +1,7 @@
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
-from collections import defaultdict
+
 import matplotlib.pyplot as plt
 
 import torch
@@ -52,7 +53,7 @@ class BenchmarkKernel:
         self.available_backends: list[str] = []
 
         # mapping from backend to list of performance results
-        self.profiling_results: defaultdict[str, list[Performance]] = defaultdict(lambda: [])
+        self.profiling_results: defaultdict[str, list[Performance]] = defaultdict(list)
 
     def get_memory_bytes(self, args, kwargs) -> int:
         # Get the necessary memory access in bytes for the kernelßß
@@ -151,7 +152,9 @@ class BenchmarkKernel:
             self.check_accuracy(args, kwargs)
 
     def visualize(self) -> None:
-        visualize_latency_comparison(self.profiling_results, output_path=f"{self.name}_bench")
+        visualize_latency_comparison(
+            self.profiling_results, output_path=f"{self.name}_bench"
+        )
         return
 
 
