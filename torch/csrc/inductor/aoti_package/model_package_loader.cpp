@@ -41,6 +41,18 @@ namespace {
 const std::string k_separator = "/";
 
 std::string normalize_path_separator(const std::string& orig_path) {
+  /*
+  On Windows and Linux have different separator:
+  On Windows use "\", and the path like: C:\Users\Test\file.txt
+  On Linux use "/", and the path like: /home/user/file.txt
+
+  In order to simplify the path operation, we can use this function to
+  normalize path separator. It will convert Windows separator to Linux
+  separator, and re-use the common code to handle both Windows and Linux
+  path.
+  On Windows, when we input: "C:\Users\Test\file.txt", the output should be:
+  "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
+  */
 #ifdef _WIN32
   const bool _IS_WINDOWS = true;
 #else
