@@ -358,6 +358,7 @@ class RMSNorm(Module):
         >>> rms_norm(input)
 
     """
+
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: tuple[int, ...]
     eps: Optional[float]

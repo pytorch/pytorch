@@ -21,6 +21,7 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_utils import gradcheck, TEST_XPU
 from torch.utils.cpp_extension import (
+    _get_cuda_arch_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
     CUDA_HOME,
@@ -118,47 +119,81 @@ class TestCppExtensionJIT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
-    def _test_jit_xpu_extension(self):
-        name = "torch_test_xpu_extension_"
-        # randomizing name for the case when we test building few extensions
-        # in a row using this function
-        name += "".join(random.sample(string.ascii_letters, 5))
-        module = torch.utils.cpp_extension.load(
-            name=name,
-            sources=[
-                "cpp_extensions/xpu_extension.sycl",
-            ],
-            verbose=True,
-            keep_intermediates=False,
-        )
+    def _test_jit_xpu_extension(self, extra_sycl_cflags):
+        # randomizing extension name and names of extension methods
+        # for the case when we test building few extensions in a row
+        # using this function
+        rand = "".join(random.sample(string.ascii_letters, 5))
+        name = f"torch_test_xpu_extension_{rand}"
+        temp_dir = tempfile.mkdtemp()
+        try:
+            with open("cpp_extensions/xpu_extension.sycl") as f:
+                text = f.read()
+                for fn in ["sigmoid_add", "SigmoidAddKernel"]:
+                    text = text.replace(fn, f"{fn}_{rand}")
 
-        x = torch.zeros(100, device="xpu", dtype=torch.float32)
-        y = torch.zeros(100, device="xpu", dtype=torch.float32)
+            sycl_file = f"{temp_dir}/xpu_extension.sycl"
+            with open(sycl_file, "w") as f:
+                f.write(text)
 
-        z = module.sigmoid_add(x, y).cpu()
+            module = torch.utils.cpp_extension.load(
+                name=name,
+                sources=[sycl_file],
+                extra_sycl_cflags=extra_sycl_cflags,
+                verbose=True,
+                keep_intermediates=True,
+                build_directory=temp_dir,
+            )
 
-        # 2 * sigmoid(0) = 2 * 0.5 = 1
-        self.assertEqual(z, torch.ones_like(z))
+            x = torch.zeros(100, device="xpu", dtype=torch.float32)
+            y = torch.zeros(100, device="xpu", dtype=torch.float32)
+
+            method = f"sigmoid_add_{rand}"
+            self.assertTrue(hasattr(module, method))
+            z = getattr(module, method)(x, y).cpu()
+
+            # 2 * sigmoid(0) = 2 * 0.5 = 1
+            self.assertEqual(z, torch.ones_like(z))
+        finally:
+            shutil.rmtree(temp_dir)
 
     @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_extension(self):
         # NOTE: this test can be affected by setting TORCH_XPU_ARCH_LIST
-        self._test_jit_xpu_extension()
+        self._test_jit_xpu_extension(extra_sycl_cflags=[])
 
     @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_archlists(self):
         # NOTE: in this test we explicitly test few different options
         # for TORCH_XPU_ARCH_LIST. Setting TORCH_XPU_ARCH_LIST in the
         # environment before the test won't affect it.
-        archlists = [
-            "",  # expecting JIT compilation
-            ",".join(torch.xpu.get_arch_list()),
+        cases = [
+            {
+                # Testing JIT compilation
+                "archlist": "",
+                "extra_sycl_cflags": [],
+            },
+            {
+                # Testing JIT + AOT (full torch AOT arch list)
+                # NOTE: default cpp extension AOT arch list might be reduced
+                # from the full list
+                "archlist": ",".join(torch.xpu.get_arch_list()),
+                "extra_sycl_cflags": [],
+            },
+            {
+                # Testing AOT (full torch AOT arch list)
+                # NOTE: default cpp extension AOT arch list might be reduced
+                # from the full list
+                "archlist": ",".join(torch.xpu.get_arch_list()),
+                # below excludes spir64 target responsible for JIT
+                "extra_sycl_cflags": ["-fsycl-targets=spir64_gen"],
+            },
         ]
         old_envvar = os.environ.get("TORCH_XPU_ARCH_LIST", None)
         try:
-            for al in archlists:
-                os.environ["TORCH_XPU_ARCH_LIST"] = al
-                self._test_jit_xpu_extension()
+            for c in cases:
+                os.environ["TORCH_XPU_ARCH_LIST"] = c["archlist"]
+                self._test_jit_xpu_extension(extra_sycl_cflags=c["extra_sycl_cflags"])
         finally:
             if old_envvar is None:
                 os.environ.pop("TORCH_XPU_ARCH_LIST")
@@ -312,6 +347,35 @@ class TestCppExtensionJIT(common.TestCase):
                 # Ignore any error, e.g. unsupported PTX code on current device
                 # to avoid errors from here leaking into other tests
                 pass
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_non_default_gencode(self):
+        user_arch_flags = ["-gencode=arch=compute_86,code=sm_86"]
+        result = _get_cuda_arch_flags(user_arch_flags)
+
+        self.assertEqual(
+            len(result),
+            0,
+            f"User arch flags should prevent default generation. "
+            f"Expected: [], Got: {result}",
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_default_gencode(self):
+        default_flags = _get_cuda_arch_flags()
+        self.assertGreater(
+            len(default_flags), 0, "No args should generate default flags"
+        )
+
+        non_arch_flags = _get_cuda_arch_flags(["-O2", "--use-fast-math"])
+        self.assertGreater(
+            len(non_arch_flags), 0, "Non-arch flags should still generate defaults"
+        )
+
+        empty_flags = _get_cuda_arch_flags([])
+        self.assertGreater(
+            len(empty_flags), 0, "Empty list should generate default flags"
+        )
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
@@ -967,7 +1031,7 @@ class TestCppExtensionJIT(common.TestCase):
         t = torch.rand(2).double()
         cpp_tensor_name = r"CPUDoubleType"
 
-        # Without error handling, the warnings cannot be catched
+        # Without error handling, the warnings cannot be caught
         warn_mod = torch.utils.cpp_extension.load_inline(
             name="warn_mod",
             cpp_sources=[source],
@@ -1001,23 +1065,23 @@ class TestCppExtensionJIT(common.TestCase):
         )
 
         with warnings.catch_warnings(record=True) as w:
-            # Catched with no error should be detected
+            # Caught with no error should be detected
             warn_mod.foo(t, 0)
             self.assertEqual(len(w), 1)
 
-            # Catched with cpp error should also be detected
+            # Caught with cpp error should also be detected
             with self.assertRaisesRegex(TypeError, t.type()):
                 warn_mod.foo(t, 1)
             self.assertEqual(len(w), 2)
 
-            # Catched with python error should also be detected
+            # Caught with python error should also be detected
             with self.assertRaisesRegex(
                 SystemError, "bad argument to internal function"
             ):
                 warn_mod.foo(t, 2)
             self.assertEqual(len(w), 3)
 
-            # Catched with pybind error should also be detected
+            # Caught with pybind error should also be detected
             # Note that there is no type name translation for pybind errors
             with self.assertRaisesRegex(KeyError, cpp_tensor_name):
                 warn_mod.foo(t, 3)

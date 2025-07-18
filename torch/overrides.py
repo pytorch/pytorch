@@ -98,7 +98,7 @@ def _disable_user_warnings(
     return wrapper
 
 
-@functools.lru_cache(None)
+@functools.cache
 @_disable_user_warnings
 def get_ignored_functions() -> set[Callable]:
     """
@@ -378,7 +378,7 @@ def get_ignored_functions() -> set[Callable]:
     }
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_default_nowrap_functions() -> set[Callable]:
     """
     Return public functions that do not wrap in a subclass when invoked by
@@ -404,7 +404,7 @@ def get_default_nowrap_functions() -> set[Callable]:
     }
 
 
-@functools.lru_cache(None)
+@functools.cache
 @_disable_user_warnings
 def get_testing_overrides() -> dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
@@ -424,7 +424,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
     >>> inspect.signature(my_add)
     <Signature (input, other, out=None)>
     """
-    # Every function in the PyTorchAPI that can be overriden needs an entry
+    # Every function in the PyTorchAPI that can be overridden needs an entry
     # in this dict.
     #
     # Optimally we would use inspect to get the function signature and define
@@ -1511,7 +1511,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
-        Tensor.__dlpack__: lambda self, stream=None: -1,
+        Tensor.__dlpack__: lambda self, stream=None, max_version=None: -1,
         Tensor.__dlpack_device__: lambda self: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }  # fmt: skip
@@ -1808,7 +1808,7 @@ has_torch_function_variadic = _add_docstr(
 )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _get_overridable_functions() -> tuple[
     dict[Any, list[Callable]], dict[Callable, str]
 ]:
@@ -1881,7 +1881,7 @@ def _get_overridable_functions() -> tuple[
             if ignore:
                 continue
 
-            # cannot be overriden by __torch_function__
+            # cannot be overridden by __torch_function__
             if func in get_ignored_functions():
                 msg = (
                     "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
@@ -1929,7 +1929,7 @@ def resolve_name(f):
     return _get_overridable_functions()[1].get(f)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _get_tensor_methods() -> set[Callable]:
     """Returns a set of the overridable methods on ``torch.Tensor``"""
     overridable_funcs = get_overridable_functions()
@@ -2003,7 +2003,7 @@ def is_tensor_like(inp):
 class TorchFunctionMode:
     """
     A ``TorchFunctionMode`` allows you to override the meaning of all
-    ``__torch_function__`` overrideable functions within a dynamic scope,
+    ``__torch_function__`` overridable functions within a dynamic scope,
     without having to actually create a tensor subclass or manually
     monkey-patch functions in the PyTorch API.  Some common situations
     where you should use a mode:

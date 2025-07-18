@@ -1293,11 +1293,12 @@ class TestConvolutionNNDeviceType(NNTestCase):
             torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []
         )
     )
-    def test_Conv2d_deterministic_cudnn(self, device, dtype):
-        inputs = torch.randn(2, 3, 5, 5, device=device, dtype=dtype, requires_grad=True)
+    @parametrize_test("dilation", [1, 2, 3])
+    def test_Conv2d_deterministic_cudnn(self, device, dtype, dilation):
+        inputs = torch.randn(2, 3, 7, 7, device=device, dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
-            conv1 = torch.nn.Conv2d(3, 3, 3).to(device, dtype)
-            conv2 = torch.nn.Conv2d(3, 3, 3).to(device, dtype)
+            conv1 = torch.nn.Conv2d(3, 3, 3, dilation=dilation).to(device, dtype)
+            conv2 = torch.nn.Conv2d(3, 3, 3, dilation=dilation).to(device, dtype)
             conv2.bias.data.copy_(conv1.bias.data)
             conv2.weight.data.copy_(conv1.weight.data)
             out1 = conv1(inputs)

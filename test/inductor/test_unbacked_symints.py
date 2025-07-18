@@ -489,6 +489,30 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_sdpfa(self, device):
+        if device == "cpu":
+            raise unittest.SkipTest(
+                "scaled_dot_product_flash_attention has no CPU backend"
+            )
+
+        def fn(x):
+            B, H, d_h = 2, 4, 8
+            nz = torch.nonzero(x)
+            seq_len = nz.size(0)
+
+            q = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            k = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            v = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+
+            result = torch.ops.aten._scaled_dot_product_flash_attention.default(
+                q, k, v, dropout_p=0.0, is_causal=False, scale=None
+            )
+            return result
+
+        x = torch.tensor([1.0, 0.0, 1.0, 0.0], device=device)
+        torch.compile(fn, fullgraph=True)(x)
     @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_unbacked_linear_layer_norm_input(self, device):

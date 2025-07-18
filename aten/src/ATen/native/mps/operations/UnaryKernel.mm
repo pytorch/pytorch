@@ -14,6 +14,7 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/UnaryKernel_metallib.h>
 #endif
 
+// KURT: call site of `exec_unary_kernel`
 #define REGISTER_UNARY_TI_DISPATCH(NAME)                    \
   static void NAME##_kernel_mps(TensorIteratorBase& iter) { \
     lib.exec_unary_kernel(iter, #NAME);                     \
@@ -21,16 +22,25 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
   REGISTER_DISPATCH(NAME##_stub, NAME##_kernel_mps)
 
 static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
-  lib.exec_unary_kernel(iter, "round_decimals", decimals);
+  lib.exec_unary_kernel(iter, "round_decimals", Scalar(decimals), ScalarType::Long);
 }
 
 REGISTER_UNARY_TI_DISPATCH(exp);
+REGISTER_UNARY_TI_DISPATCH(expm1);
+REGISTER_UNARY_TI_DISPATCH(erf);
+REGISTER_UNARY_TI_DISPATCH(erfc);
 REGISTER_UNARY_TI_DISPATCH(erfinv);
 REGISTER_UNARY_TI_DISPATCH(sinc);
+REGISTER_UNARY_TI_DISPATCH(sinh);
+REGISTER_UNARY_TI_DISPATCH(cosh);
 REGISTER_UNARY_TI_DISPATCH(tanh);
+REGISTER_UNARY_TI_DISPATCH(abs);
 REGISTER_UNARY_TI_DISPATCH(sin);
 REGISTER_UNARY_TI_DISPATCH(cos);
 REGISTER_UNARY_TI_DISPATCH(tan);
+REGISTER_UNARY_TI_DISPATCH(asin);
+REGISTER_UNARY_TI_DISPATCH(acos);
+REGISTER_UNARY_TI_DISPATCH(atan);
 REGISTER_UNARY_TI_DISPATCH(sqrt);
 REGISTER_UNARY_TI_DISPATCH(rsqrt);
 REGISTER_UNARY_TI_DISPATCH(neg);

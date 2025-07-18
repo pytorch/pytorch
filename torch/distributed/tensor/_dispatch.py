@@ -13,13 +13,7 @@ import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._op_schema import (
-    _is_inplace_op,
-    _is_out_variant_op,
-    OpInfo,
-    OpSchema,
-    OutputSpecType,
-)
+from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
 from torch.distributed.tensor._random import is_rng_supported_mesh
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
@@ -260,13 +254,13 @@ class OpDispatcher:
                 # perform reduce on the collection with AND op
                 local_results = functools.reduce(operator.and_, obj_list, True)
 
-        if _is_inplace_op(op_call):
+        if op_info.schema.is_inplace_op():
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
                 return args[0]
             else:
                 return None
-        elif _is_out_variant_op(op_call):
+        elif op_info.schema.is_out_variant_op():
             # out variant could possibly have multiple out args (i.e. lu_unpack.out)
             output_specs = (
                 (output_sharding.output_spec,)

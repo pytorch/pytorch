@@ -80,7 +80,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
 
     if memory_format.memory_format is not None:
         was = out
-        out = torch._refs.contiguous(out, memory_format=memory_format.memory_format)
+        out = out.contiguous(memory_format=memory_format.memory_format)
         updated = was is not out
 
     # For subclass we keep memory format of outer strides at the beggining of the list
@@ -571,9 +571,9 @@ from a multi-output view call"
                             output_type = (
                                 OutputType.alias_of_intermediate_save_as_output
                             )
-                            intermediate_base_tensor_id_to_output_idx[
-                                id(o._base)
-                            ] = new_out_idx
+                            intermediate_base_tensor_id_to_output_idx[id(o._base)] = (
+                                new_out_idx
+                            )
                             intermediate_bases.append(o._base)
             elif (
                 # See https://github.com/pytorch/pytorch/issues/100348 for this case.

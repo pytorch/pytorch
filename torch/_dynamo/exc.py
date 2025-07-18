@@ -70,6 +70,10 @@ class InternalTorchDynamoError(TorchDynamoException):
     pass
 
 
+class ResumePrologueTracingError(TorchDynamoException):
+    pass
+
+
 class RestartAnalysis(TorchDynamoException):
     restart_reason: Optional[str]
 
@@ -367,7 +371,7 @@ def raise_observed_exception(
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.set_current_exception(exception_vt)
-    raise observed_exception_map[exc_type]
+    raise get_dynamo_observed_exception(exc_type)
 
 
 def handle_observed_exception(tx: Any) -> None:
@@ -404,6 +408,7 @@ exceptions_allowed_to_be_fallback = (
     torch._subclasses.fake_tensor.DynamicOutputShapeException,
     torch._subclasses.fake_tensor.UnsupportedOperatorException,
     torch._subclasses.fake_tensor.UnsupportedFakeTensorException,
+    torch._subclasses.fake_tensor.UnsupportedMutationAliasingException,
 )
 
 
@@ -514,6 +519,12 @@ def unimplemented_v2(
     """
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
+
+    # Temporarily disabling the generation of the weblinks in error message
+
+    # documentation_link = get_gbid_documentation_link(gb_type)
+    # msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:

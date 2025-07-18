@@ -47,10 +47,44 @@ __global__ void prepare_grouped_gemm_data(
   if (offs != nullptr) {
     int32_t start = tid == 0 ? 0 : offs[tid - 1];
     delta = offs[tid] - start;
-    int align = 16 / sizeof(DtypeA);
-    CUDA_KERNEL_ASSERT(
-        delta >=0 && delta % align == 0 &&
-        "expected dynamic dimension byte size to be non-negative multiple of 16 \n");
+    if (K < 0) {
+      if (!a_row_major && b_row_major) {
+        CUDA_KERNEL_ASSERT(delta >=0 && "expected ofsets to be greater or equal 0\n");
+      } else  {
+        // CUTLASS cannot handle delta=0 here.
+        CUDA_KERNEL_ASSERT(delta >0 && "expected ofsets to be greater than 0\n");
+      }
+    }
+
+    // TMA transfers require global memory tensor addresses to be
+    // aligned to 16 bytes.
+    if (tid < blockDim.x - 1) {
+      // Check this requirement for input tensors, in case group
+      // addresses are increased along the dynamic dimension.
+      if ((K < 0 && a_row_major) ||       // 2D/2D: check along K dimension
+          (M < 0 && !a_row_major)) {      // 3D/2D: check along N dimension
+        int align = 128 / cutlass::sizeof_bits<DtypeA>::value;
+        CUDA_KERNEL_ASSERT(
+                           delta % align == 0 &&
+                           "expected input tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+      }
+      if ((K < 0 && !b_row_major) ||      // 2D/2D: check along K dimension
+          (N < 0 && b_row_major)) {       // 3D/2D: check along N dimension
+        int align = 128 / cutlass::sizeof_bits<DtypeB>::value;
+        CUDA_KERNEL_ASSERT(
+                           delta % align == 0 &&
+                           "expected input tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+      }
+
+      // Check the same requirement for output tensor (that is always
+      // contiguous, and in row-major layout).
+      if (N < 0) {
+        int align = 128 / cutlass::sizeof_bits<DtypeOutput>::value;
+        CUDA_KERNEL_ASSERT(
+                           delta % align == 0 &&
+                           "expected output tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+      }
+    }
   }
   int64_t lda, ldb, ldoutput;
   if (M < 0) {
@@ -81,7 +115,6 @@ __global__ void prepare_grouped_gemm_data(
   } else if (K < 0) {
     // A, B is 2d, output is 3d
     K = delta;
-    CUDA_KERNEL_ASSERT(delta > 0 && "can't handle K=0");
     lda = a_row_major ? tensor_StrideA[0] : tensor_StrideA[1];
     ldb = b_row_major ? tensor_StrideB[0] : tensor_StrideB[1];
     ldoutput = tensor_StrideOutput[1];
