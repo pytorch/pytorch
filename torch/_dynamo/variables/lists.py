@@ -100,6 +100,11 @@ class BaseListVariable(VariableTracker):
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
 
+    def call_obj_hasattr(self, tx, name):
+        if name in self.python_type().__dict__:
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
+
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         from .tensor import SymNodeVariable
 
@@ -415,15 +420,9 @@ class RangeVariable(BaseListVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         fields = ["start", "stop", "step"]
-        if name not in fields:
-            unimplemented_v2(
-                gb_type="Unsupported attribute for range() object",
-                context=f"var_getattr {self} {name}",
-                explanation=f"Expected attribute to be one of {','.join(fields)} "
-                f"but got {name}",
-                hints=[*graph_break_hints.USER_ERROR],
-            )
-        return self.items[fields.index(name)]
+        if name in fields:
+            return self.items[fields.index(name)]
+        return super().var_getattr(tx, name)
 
 
 class CommonListMethodsVariable(BaseListVariable):
