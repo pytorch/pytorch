@@ -3879,6 +3879,13 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    // NOTE for future guard optimization developers - We tried saving the dict
+    // pointer and weakref of the original object to avoid calling
+    // PyObject_GenericGetDict on a fast path, but this did not lead any
+    // meaningful speedups because of 2 reasons
+    // 1) Once __dict__ is generated, accessing it the second time is fast.
+    // 2) Getting the object from weakref, from 3.13 onwards, requires
+    // Py_DECREF, which further eats into the benefit.
     PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
     if (x == nullptr) {
       // Attribute absent, clear the exception and return false.
@@ -5521,6 +5528,7 @@ void install_storage_overlapping_guard(
       /* overlapping= */ false);
 }
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-volatile")
 char flush_cache_by_eviction() {
   constexpr size_t evict_size = 32 * 1024 * 1024;
   std::vector<char> buffer(evict_size, 1);
@@ -5531,6 +5539,7 @@ char flush_cache_by_eviction() {
   }
   return sink;
 }
+C10_DIAGNOSTIC_POP()
 
 double profile_guard_manager(
     RootGuardManager* root,
