@@ -2036,8 +2036,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             ref0 = fn(x)
             ref1 = fn(x)
 
-            random.seed(0)
             opt_fn = torch.compile(fn, backend="eager")
+            # Especially for internal usage, there are many calls to random functions
+            # on first compile, e.g., from various library initializations. Run once
+            # to get that out of the way before resetting the seed:
+            opt_fn(x)
+
+            random.seed(0)
             res0 = opt_fn(x)
             res1 = opt_fn(x)
 
@@ -7568,6 +7573,25 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         with mock.patch("torch.cuda.is_initialized", lambda: False):
             self.assertEqual(f(inp), inp + 2)
+
+    def test_named_tuple_vt_clone(self):
+        # https://github.com/pytorch/pytorch/issues/157945
+        class SVDCompressor(nn.Module):
+            def __init__(self, k=10):
+                super().__init__()
+                self.k = k
+
+            def forward(self, x):
+                U, S = torch.linalg.svd(x)[:2]
+                reduced = U[:, :, : self.k] @ torch.diag_embed(S[:, : self.k])
+                return reduced
+
+        input = torch.randn(4, 8, 6)
+        model = SVDCompressor(k=5)
+
+        out1 = model(input.clone())
+        out2 = torch.compile(model, backend="eager")(input.clone())
+        self.assertEqual(out1, out2)
 
 
 instantiate_parametrized_tests(ReproTests)
