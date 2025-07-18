@@ -7,8 +7,15 @@ namespace at {
 /**
    Computes ceil(a / b)
 */
-template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
-C10_ALWAYS_INLINE C10_HOST_DEVICE T ceil_div(T a, T b) {
+template <
+    typename Res = void,
+    typename T,
+    typename U,
+    typename = std::enable_if_t<
+        std::conjunction_v<std::is_integral<T>, std::is_integral<U>>>>
+C10_ALWAYS_INLINE C10_HOST_DEVICE
+    std::conditional_t<std::is_same_v<Res, void>, std::common_type_t<T, U>, Res>
+    ceil_div(T a, U b) {
   return (a + b - 1) / b;
 }
 
@@ -16,8 +23,10 @@ C10_ALWAYS_INLINE C10_HOST_DEVICE T ceil_div(T a, T b) {
    Computes ceil(a / b) * b; i.e., rounds up `a` to the next highest
    multiple of b
 */
-template <typename T>
-C10_ALWAYS_INLINE C10_HOST_DEVICE T round_up(T a, T b) {
+template <typename Res = void, typename T, typename U>
+C10_ALWAYS_INLINE C10_HOST_DEVICE
+    std::conditional_t<std::is_same_v<Res, void>, std::common_type_t<T, U>, Res>
+    round_up(T a, U b) {
   return ceil_div(a, b) * b;
 }
 
