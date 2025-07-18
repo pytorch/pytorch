@@ -272,12 +272,10 @@ def _rename_without_collisions(
     is_placeholder: if the node is a placeholder, avoid detecting suffix
     """
     match = re.match(r"(.*)_(\d+)", name)
-    if match:
-        prefix, n = match.group(1), match.group(2)
+    key = name
 
-    if is_placeholder or not match:
-        key = name
-    else:
+    if match and not is_placeholder:
+        prefix, n = match.group(1), match.group(2)
         key = prefix
 
     new_name = name
@@ -921,8 +919,8 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     # propagate names
     for subgraph, hoo_phs in subgraph_ph_tuples:
         name_map: dict[str, str] = {}
-        find_available = defaultdict(int)
-        used_names = set()
+        find_available: dict[str, int] = defaultdict(int)
+        used_names: set[str] = set()
         for i, node in enumerate(subgraph.graph.nodes):
             if i < len(hoo_phs):  # placeholder, retain name
                 name_map[node.name] = hoo_phs[i].name
@@ -991,8 +989,8 @@ def placeholder_naming_pass(
             raise RuntimeError(f"Pytree key of type {type(x)} not handled for {x}")
 
     name_map: dict[str, str] = {}
-    find_available = defaultdict(int)
-    used_names = set()
+    find_available: dict[str, int] = defaultdict(int)
+    used_names: set[str] = set()
 
     # map user input names with mod.forward() signature
     combined_args = _bind_signature_to_inputs(mod, fake_args, fake_kwargs)

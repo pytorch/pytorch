@@ -620,8 +620,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     # handle name collisions with newly decomposed graph nodes
     name_map = {}
-    find_available = defaultdict(int)
-    used_names = set()
+    find_available: dict[str, int] = defaultdict(int)
+    used_names: set[str] = set()
     for ph in new_placeholders:
         name_map[ph.name] = ph.name
         _build_cache(ph.name, find_available, used_names)
