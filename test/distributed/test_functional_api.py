@@ -24,8 +24,8 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
-    TEST_SKIPS,
     requires_accelerator_dist_backend,
+    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

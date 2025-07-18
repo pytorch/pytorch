@@ -750,11 +750,13 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         torch.accelerator.set_device_index(self.rank)
 
         context = (
-            self.assertRaisesRegex(ValueError, f"{device_type}:{self.rank} vs {device_type}:0")
+            self.assertRaisesRegex(
+                ValueError, f"{device_type}:{self.rank} vs {device_type}:0"
+            )
             if self.rank != 0
             else nullcontext()
         )
-        
+
         with context:
             NestedWrappedModule.init(
                 self.process_group,
