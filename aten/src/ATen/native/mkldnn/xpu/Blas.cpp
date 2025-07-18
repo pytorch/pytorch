@@ -491,11 +491,11 @@ Tensor& _int_mm_out_xpu(
 
   TORCH_CHECK(
       self.dtype() == at::kChar,
-      ": Expected self dtype to be of type int8 but got ",
+      "Expected self dtype to be of type int8 but got ",
       self.dtype());
   TORCH_CHECK(
       mat2.dtype() == at::kChar,
-      ": Expected mat2 dtype to be of type int8 but got ",
+      "Expected mat2 dtype to be of type int8 but got ",
       mat2.dtype());
   TORCH_CHECK(
       result.dtype() == at::kInt,
@@ -527,7 +527,7 @@ Tensor& _int_mm_out_xpu(
 
   Tensor bias = at::Tensor();
   Tensor mat2_scales = at::ones({1}, mat2.options().dtype(at::kFloat));
-  Tensor mat2_zero_points = at::zeros({1}, mat2.options().dtype(at::kInt));
+  Tensor mat2_zero_points = at::Tensor();
   auto post_op_args = torch::List<std::optional<at::Scalar>>();
 
   at::native::onednn::quantized_matmul(
