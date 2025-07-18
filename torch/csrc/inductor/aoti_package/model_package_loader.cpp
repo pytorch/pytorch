@@ -9,6 +9,7 @@
 #include <fmt/format.h>
 #include <miniz.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <regex>
@@ -36,6 +37,23 @@ namespace fs = std::filesystem;
 #endif
 
 namespace {
+
+const std::string k_separator = "/";
+
+std::string normalize_path_separator(const std::string& orig_path) {
+#ifdef _WIN32
+  const bool _IS_WINDOWS = true;
+#else
+  const bool _IS_WINDOWS = false;
+#endif
+  if (_IS_WINDOWS) {
+    std::string normalized_path = orig_path;
+    std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
+    return normalized_path;
+  }
+  return orig_path;
+}
+
 bool file_exists(const std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
@@ -67,12 +85,6 @@ std::string create_temp_dir() {
   return temp_dir;
 #endif
 }
-
-#ifdef _WIN32
-const std::string k_separator = "\\";
-#else
-const std::string k_separator = "/";
-#endif
 } // namespace
 
 namespace torch::inductor {
@@ -92,11 +104,12 @@ const nlohmann::json& load_json_file(const std::string& json_path) {
 }
 
 std::tuple<std::string, std::string> get_cpp_compile_command(
-    const std::string& filename,
+    const std::string& arg_filename,
     const std::vector<std::string>& sources,
     const nlohmann::json& compile_options,
     const std::string& output_dir = "") {
   // Construct the cpp command
+  auto filename = normalize_path_separator(arg_filename);
 
   std::string compiler = compile_options["compiler"].get<std::string>();
   bool compile_only = compile_options["compile_only"].get<bool>();
@@ -156,7 +169,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string compile_only_arg = compile_only ? "-c" : "";
 
-  std::string cmd = fmt::format(
+  std::string cmd = normalize_path_separator(fmt::format(
       "{} {} {} {} {} {} {} {} {} {} -o {}",
       compiler,
       source_args,
@@ -168,7 +181,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
       libraries_args,
       libraries_dirs_args,
       compile_only_arg,
-      target_file);
+      target_file));
 
   return std::make_tuple(cmd, target_file);
 }
@@ -338,8 +351,6 @@ std::unordered_set<std::string> find_model_names(
 
   // Escape the separator if it's backslash (needed for regex)
   std::string sep = k_separator;
-  if (sep == "\\")
-    sep = "\\\\";
 
   std::string pattern =
       "data" + sep + "aotinductor" + sep + "([^" + sep + "]+)" + sep;
@@ -412,7 +423,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             &zip_archive, i, filename_str.data(), filename_len)) {
       throw std::runtime_error("Failed to read filename");
     }
-    found_filenames.push_back(filename_str);
+    found_filenames.push_back(normalize_path_separator(filename_str));
   }
 
   if (found_filenames.empty()) {
