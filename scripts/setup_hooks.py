@@ -65,7 +65,9 @@ def ensure_uv() -> None:
     )
 
 
-def ensure_tool_installed(tool: str, force_update: bool = False, python_ver: Tuple[int, int] = None) -> None:
+def ensure_tool_installed(
+    tool: str, force_update: bool = False, python_ver: Tuple[int, int] = None
+) -> None:
     """
     Checks to see if the tool is available and if not (or if force update requested) then
     it reinstalls it.
