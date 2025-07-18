@@ -29,6 +29,8 @@
 
 namespace at::cuda::tunable {
 
+using at::cuda::blas::ScalingType;
+
 enum class BlasOp {
   N = 0,
   T = 1
@@ -598,7 +600,8 @@ struct ScaledGemmParams : OpParams {
     //
     // In TunableOp, we must distinguish in param signature these two cases: with and without a bias vector.
     return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d_bias_%s",
-      transa, transb, m, n, k, lda, ldb, ldc, use_rowwise,
+      transa, transb, m, n, k, lda, ldb, ldc,
+      a_scaling_type == ScalingType::RowWise && b_scaling_type == ScalingType::RowWise,
       bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
   }
 
@@ -673,11 +676,13 @@ struct ScaledGemmParams : OpParams {
   int64_t lda{};
   ScalarType a_dtype{};
   ScalarType a_scale_dtype{};
+  ScalingType a_scaling_type{};
   const void* b{};
   const void* b_scale_ptr{};
   int64_t ldb{};
   ScalarType b_dtype{};
   ScalarType b_scale_dtype{};
+  ScalingType b_scaling_type{};
   const void* bias_ptr{};
   ScalarType bias_dtype{};
   void* c{};
@@ -686,7 +691,6 @@ struct ScaledGemmParams : OpParams {
   ScalarType c_dtype{};
   void* amax_ptr{};
   bool use_fast_accum{};
-  bool use_rowwise{};
 private:
   bool duplicate_inputs_{false};
 };
