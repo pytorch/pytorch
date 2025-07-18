@@ -87,18 +87,11 @@ from .utils import (
     make_boxed_func,
     partial_flatten_asdict,
     strict_zip,
+    without_output_descs,
 )
 
 
 zip = strict_zip
-
-
-def without_output_descs(f):
-    @wraps(f)
-    def inner(*args, **kwargs):
-        return f(*args, **kwargs)[0]
-
-    return inner
 
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic

@@ -513,3 +513,11 @@ def saved_tensors_hooks_are_inlineable(hooks) -> bool:
     return isinstance(pack, torch.fx.GraphModule) and isinstance(
         unpack, torch.fx.GraphModule
     )
+
+
+def without_output_descs(f):
+    @wraps(f)
+    def inner(*args, **kwargs):
+        return f(*args, **kwargs)[0]
+
+    return inner

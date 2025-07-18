@@ -8,7 +8,8 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 import collections
 import typing
 from collections.abc import Iterable
-from typing import Any, Callable, Optional, TypeGuard, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import TypeGuard
 
 import torch
 import torch.utils._pytree as pytree
@@ -321,10 +322,10 @@ def runtime_unwrap_tensor_subclasses(
 
 
 def unwrap_tensor_subclasses_with_indices_to_original(wrapped_args):
-    ret_unwrapped: list[Any] = []
+    ret_unwrapped = []
     ret_indices_to_original = []
     for i, a in enumerate(wrapped_args):
-        a_unwrapped = unwrap_tensor_subclasses(
+        a_unwrapped, _ = unwrap_tensor_subclasses(
             [a], [DummyAOTInput(9999)], append_symints=False
         )
         ret_unwrapped.extend(a_unwrapped)

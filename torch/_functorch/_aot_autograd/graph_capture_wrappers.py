@@ -50,7 +50,6 @@ from .descriptors import (
     GradAOTOutput,
     InputMutationAOTOutput,
     IntermediateBaseAOTOutput,
-    OutputAOTOutput,
     PhiloxBackwardBaseOffsetAOTInput,
     PhiloxBackwardSeedAOTInput,
     PhiloxForwardBaseOffsetAOTInput,
@@ -90,7 +89,7 @@ from .subclass_utils import (
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
-from .utils import maybe_to_fresh_input
+from .utils import maybe_to_fresh_input, without_output_descs
 
 
 # This function returns a new function that returns mutated inputs as outputs.
@@ -277,7 +276,12 @@ def create_joint(
         tuple[list[FxValue], list[Optional[Tensor]]],
         tuple[list[AOTOutput], list[Optional[AOTOutput]]],
     ]:
-        (outs, tangent_mask), outs_descs = fn(*primals)
+        outs_descs = None
+        if primals_descs is None:
+            outs, tangent_mask = fn(*primals)
+            assert not pytree.tree_any(lambda x: isinstance(x, AOTOutput), tangent_mask)
+        else:
+            (outs, tangent_mask), outs_descs = fn(*primals)
 
         # TODO: I think this hook can also be eliminated now
         if joint_fn_handle and joint_fn_handle.post_forward:
@@ -392,6 +396,7 @@ def create_joint(
         )
         if primals_descs is None:
             return final_outs  # type: ignore[return-value]
+        assert outs_descs is not None
         return final_outs, (
             outs_descs,
             [
@@ -1218,28 +1223,33 @@ def aot_dispatch_subclass(
         @wraps(fw_only)
         def inner_fw_only(*args):
             out = fw_only(*args)
+            # I suppose this can potentially false positive if there are no
+            # outputs
+            assert pytree.tree_any(
+                lambda x: isinstance(x, AOTOutput), out
+            ) or not pytree.tree_any(lambda x: isinstance(x, torch.Tensor), out), out
             # The descs here don't matter, I think!
-            return (out, [OutputAOTOutput(i) for i in range(len(out))])
+            return out
 
-        return inner_fn(inner_fw_only, primals, use_trace_joint=False)[0]
+        return inner_fn(inner_fw_only, primals, use_trace_joint=False)
 
     if is_joint_structure:
         # Add extra symints (size/strides) as input to the forward graph
-        primals_unwrapped = unwrap_tensor_subclasses(
+        primals_unwrapped_pair = unwrap_tensor_subclasses(
             args[0],  # type: ignore[arg-type]
             args_descs[0],  # type: ignore[arg-type]
             append_symints=True,
         )
         # We pass append_symints=False here because the partitioner will
         # capture and add any extra argument
-        tangents_unwrapped = unwrap_tensor_subclasses(
+        tangents_unwrapped_pair = unwrap_tensor_subclasses(
             args[1],  # type: ignore[arg-type]
             args_descs[1],  # type: ignore[arg-type]
             append_symints=False,
         )
 
-        args_unwrapped = (primals_unwrapped[0], tangents_unwrapped[0])
-        args_descs_unwrapped = (primals_unwrapped[1], tangents_unwrapped[1])
+        args_unwrapped = (primals_unwrapped_pair[0], tangents_unwrapped_pair[0])
+        args_descs_unwrapped = (primals_unwrapped_pair[1], tangents_unwrapped_pair[1])
     else:
         args_unwrapped, args_descs_unwrapped = unwrap_tensor_subclasses(  # type: ignore[assignment]
             args,  # type: ignore[arg-type]
@@ -1277,7 +1287,7 @@ def aot_dispatch_subclass(
     # and plumb it back up to the partitioner.
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
-        metadata_fn,
+        without_output_descs(metadata_fn),
         flat_args_descs=primals_unwrapped_descs,
         static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,

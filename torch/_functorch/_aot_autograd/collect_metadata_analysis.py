@@ -30,6 +30,7 @@ from torch.utils._python_dispatch import (
 
 from .descriptors import (
     AOTInput,
+    AOTOutput,
     InputMutationTangentAOTInput,
     OutputAOTOutput,
     OutputIntermediateBaseTangentAOTInput,
@@ -205,6 +206,17 @@ def run_functionalized_fw_and_collect_metadata(
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
             flat_f_outs = f(*flat_f_args)
+
+            # Assert that f does NOT have an AOTOutputs in it, easy mistake to
+            # make!  You need to drop the second output before calling this
+            # function
+            assert not pytree.tree_any(
+                lambda x: isinstance(x, AOTOutput), flat_f_outs
+            ), (
+                f"{f} returned AOTOutput when it shouldn't. Did you remember to wrap the "
+                "function with without_output_descs before passing it here?"
+            )
+
             # NB: this is just to setup the input descriptors, we will
             # recreate these descriptors (with the same convention!) when we
             # actually do the trace

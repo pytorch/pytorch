@@ -604,7 +604,7 @@ def create_aot_state(
                 if req_subclass_dispatch:
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
                         flat_fn,
-                        flat_args_descs,
+                        flat_args_descs=flat_args_descs,
                         keep_input_mutations=aot_config.keep_inference_input_mutations,
                         is_train=False,
                         pre_dispatch=aot_config.pre_dispatch,
@@ -889,7 +889,7 @@ def prepare_aot_module_simplified(
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),
     }
-    params_flat, params_spec = list(params.values()), list(params.values())
+    params_flat, params_spec = list(params.values()), list(params.keys())
     params_len = len(params_flat)
 
     full_args, full_args_descs = [], []
