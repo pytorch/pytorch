@@ -121,7 +121,7 @@ numba==0.60.0 ; python_version == "3.12"
 
 #numpy
 #Description: Provides N-dimensional arrays and linear algebra
-#Pinned versions: 1.26.2
+#Pinned versions: 2.0.2
 #test that import: test_view_ops.py, test_unary_ufuncs.py, test_type_promotion.py,
 #test_type_info.py, test_torch.py, test_tensorexpr_pybind.py, test_tensorexpr.py,
 #test_tensorboard.py, test_tensor_creation_ops.py, test_static_runtime.py,
@@ -131,9 +131,8 @@ numba==0.60.0 ; python_version == "3.12"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
-numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
-numpy==2.1.2; python_version >= "3.13"
+numpy==2.0.2; python_version < "3.13"
+numpy==2.1.3; python_version >= "3.13"
 
 pandas==2.0.3; python_version < "3.13"
 pandas==2.2.3; python_version >= "3.13"
@@ -318,11 +317,10 @@ tensorboard==2.18.0 ; python_version >= "3.13"
 #Pinned versions:
 #test that import: test_tensorboard
 
-pywavelets==1.4.1 ; python_version < "3.12"
-pywavelets==1.7.0 ; python_version >= "3.12"
+pywavelets==1.6.0 ; python_version == "3.9"
+pywavelets==1.7.0 ; python_version >= "3.10"
 #Description: This is a requirement of scikit-image, we need to pin
-# it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
-#Pinned versions: 1.4.1
+#Pinned versions: 1.6.0
 #test that import:
 
 lxml==5.3.0

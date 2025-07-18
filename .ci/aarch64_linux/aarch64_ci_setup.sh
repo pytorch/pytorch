@@ -6,7 +6,7 @@ set -eux -o pipefail
 
 NUMPY_VERSION=2.0.2
 if [[ "$DESIRED_PYTHON"  == "3.13" || "$DESIRED_PYTHON" == "3.13t" ]]; then
-    NUMPY_VERSION=2.1.2
+    NUMPY_VERSION=2.1.3
 fi
 
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P )"

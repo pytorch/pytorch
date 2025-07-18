@@ -9,7 +9,7 @@ mpmath==1.3.0
 networkx==2.8.7
 ninja==1.10.2.4
 numba==0.59.0
-numpy==1.26.4
+numpy==2.0.2
 opt-einsum>=3.3
 optree==0.13.0
 packaging==25.0
