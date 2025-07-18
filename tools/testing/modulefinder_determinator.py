@@ -23,7 +23,6 @@ TARGET_DET_LIST = [
     "test_cpp_extensions_aot_ninja",
     "test_cpp_extensions_aot_no_ninja",
     "test_cpp_extensions_jit",
-    "test_cpp_extensions_open_device_registration",
     "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
     "test_cuda",
