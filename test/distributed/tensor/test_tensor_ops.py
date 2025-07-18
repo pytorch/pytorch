@@ -783,30 +783,39 @@ class DistTensorOpsTest(DTensorTestBase):
         import itertools
 
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        global_tensor = torch.randn(8, 16, device=self.device_type, dtype=torch.float32)
+        global_tensor = torch.randn(2, 4, device=self.device_type, dtype=torch.float32)
         min_choice = [
             # test on regular tensor
-            torch.randn(8, 16, device=self.device_type, dtype=torch.float32),
+            torch.randn(2, 4, device=self.device_type, dtype=torch.float32),
             # test on broadcast tensor
-            torch.randn(16, device=self.device_type, dtype=torch.float32),
+            torch.randn(4, device=self.device_type, dtype=torch.float32),
             # test on broadcast scalar tensor
             torch.randn((), device=self.device_type, dtype=torch.float32),
             # test on value
             torch.randn((), device=self.device_type, dtype=torch.float32).item(),
         ]
         max_choice = [
-            torch.randn(8, 16, device=self.device_type, dtype=torch.float32),
-            torch.randn(16, device=self.device_type, dtype=torch.float32),
+            torch.randn(2, 4, device=self.device_type, dtype=torch.float32),
+            torch.randn(4, device=self.device_type, dtype=torch.float32),
             torch.randn((), device=self.device_type, dtype=torch.float32),
             torch.randn((), device=self.device_type, dtype=torch.float32).item(),
         ]
-        placement_choice = [Shard(0), Shard(1), Replicate()]
+        placement_choice = [Shard(0), Shard(1), Replicate(), Partial("sum")]
         placement_comb = itertools.product(
             placement_choice, placement_choice, placement_choice
         )
 
         for output_placement, min_placement, max_placement in placement_comb:
-            sharded_dtensor = distribute_tensor(global_tensor, mesh, [output_placement])
+            if isinstance(output_placement, Partial):
+                sharded_dtensor = DTensor.from_local(
+                    local_tensor=global_tensor,
+                    device_mesh=mesh,
+                    placements=[output_placement],
+                )
+            else:
+                sharded_dtensor = distribute_tensor(
+                    global_tensor, mesh, [output_placement]
+                )
             for min, max in zip(min_choice, max_choice):
                 min_dt, max_dt = min, max
                 if isinstance(min, torch.Tensor):
@@ -814,20 +823,39 @@ class DistTensorOpsTest(DTensorTestBase):
                     if min_placement.is_shard():
                         if not is_tensor_shardable(min.shape, spec):
                             continue
-                    min_dt = distribute_tensor(min, mesh, [min_placement])
+                        min_dt = distribute_tensor(min, mesh, [min_placement])
+                    elif min_placement.is_partial():
+                        if type(min) is not torch.Tensor:
+                            continue
+                        min_dt = DTensor.from_local(
+                            local_tensor=min,
+                            device_mesh=mesh,
+                            placements=[min_placement],
+                        )
+                    else:
+                        min_dt = distribute_tensor(max, mesh, [min_placement])
                 else:
-                    if min_placement.is_shard():
+                    if not min_placement.is_replicate():
                         continue
                 if isinstance(max, torch.Tensor):
                     spec = DTensorSpec(mesh, (max_placement,))
                     if max_placement.is_shard():
                         if not is_tensor_shardable(max.shape, spec):
                             continue
-                    max_dt = distribute_tensor(max, mesh, [max_placement])
+                        max_dt = distribute_tensor(max, mesh, [max_placement])
+                    elif max_placement.is_partial():
+                        if type(max) is not torch.Tensor:
+                            continue
+                        max_dt = DTensor.from_local(
+                            local_tensor=max,
+                            device_mesh=mesh,
+                            placements=[max_placement],
+                        )
+                    else:
+                        max_dt = distribute_tensor(max, mesh, [max_placement])
                 else:
-                    if max_placement.is_shard():
+                    if not max_placement.is_replicate():
                         continue
-
                 self._test_op_on_dtensor(torch.clamp, sharded_dtensor, min=min_dt)
                 self._test_op_on_dtensor(
                     torch.clamp, sharded_dtensor, min=min_dt, max=max_dt

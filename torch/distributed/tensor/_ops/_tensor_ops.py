@@ -1166,19 +1166,13 @@ def clamp_strategy(op_schema: OpSchema) -> OpStrategy:
     # number of input_specs/redistribute_cost in output strategy. When `min` and
     # `max` are of type Tensor, they can be broadcasted to match input tensor
     # shape.
-    min_strategy, max_strategy = None, None
-    if len(op_schema.args_schema) > 1:
-        min_strategy = op_schema.args_schema[1]
-    if len(op_schema.args_schema) > 2:
-        max_strategy = op_schema.args_schema[2]
-
     is_value = True
-    for bound_strat in [min_strategy, max_strategy]:
-        if isinstance(bound_strat, OpStrategy):
+    for bound_strat in op_schema.args_schema[1:]:
+        if isinstance(bound_strat, DTensorSpec):
             is_value = False
 
     if is_value:
-        # min/max are value, no input strategies from them
-        return cast(OpStrategy, propagate_single_input_strategy(op_schema))
+        # pure value can't be Partial()
+        return _pointwise_ops.pointwise_strategy(op_schema, -1)
     else:
-        return _pointwise_ops.pointwise_strategy(op_schema, 1)
+        return _pointwise_ops.pointwise_strategy(op_schema, 3)
