@@ -21,7 +21,7 @@ from .optimizer import (
 )
 
 
-__all__: list[str] = ["Adagrad", "adagrad"]
+__all__ = ["Adagrad", "adagrad"]
 
 
 class Adagrad(Optimizer):
