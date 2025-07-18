@@ -52,11 +52,13 @@ if __name__ == "__main__":
         stream=sys.stderr,
     )
 
-    uv_available = (
-        any(prefix in sys.base_prefix for prefix in ["uv/python", "uv\\python"])
-        and shutil.which("uv") is not None
-    )
+    uv_installed = shutil.which("uv") is not None
+    uv_python = any(prefix in sys.base_prefix for prefix in ["uv/python", "uv\\python"])
 
+    in_conda = os.environ.get("CONDA_PREFIX") is not None
+    in_virtualenv = os.environ.get("VIRTUAL_ENV") is not None
+
+    uv_available = uv_installed and (uv_python or in_virtualenv)
     if uv_available:
         pip_args = ["uv", "pip", "install"]
     elif sys.executable:
@@ -70,8 +72,6 @@ if __name__ == "__main__":
     # However, `pip install --user` interacts poorly with virtualenvs (see:
     # https://bit.ly/3vD4kvl) and conda (see: https://bit.ly/3KG7ZfU). So in
     # these cases perform a regular installation.
-    in_conda = os.environ.get("CONDA_PREFIX") is not None
-    in_virtualenv = os.environ.get("VIRTUAL_ENV") is not None
     if not in_conda and not in_virtualenv:
         pip_args.append("--user")
 
