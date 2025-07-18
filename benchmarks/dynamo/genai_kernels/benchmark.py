@@ -29,7 +29,6 @@ torch._dynamo.config.automatic_dynamic_shapes = False
 # Needed since changing args to function causes recompiles
 torch._dynamo.config.recompile_limit = 1000000
 
-torch._inductor.config.force_disable_caches = True
 
 # Registry of all available benchmarks
 BENCHMARK_REGISTRY: dict[str, type[BenchmarkKernel]] = {

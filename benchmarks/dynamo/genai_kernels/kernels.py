@@ -43,6 +43,11 @@ class CrossEntropyForward(BenchmarkKernel):
     def compiled(self, args, kwargs=None) -> Any:
         assert kwargs is None
         x, target = args
+
+        # Mark batch size as dynamic for realistic workload
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(target, 0)
+
         # Need `lambda` otherwise torch.compile will not trace the function.
         # More discussion: https://github.com/pytorch/pytorch/issues/158455
         compiled_cross_entropy = torch.compile(
@@ -219,6 +224,10 @@ class SoftmaxForward(BenchmarkKernel):
     def compiled(self, args, kwargs=None) -> Any:
         assert kwargs is None
         (x,) = args
+
+        # Mark batch size as dynamic for realistic workload
+        torch._dynamo.mark_dynamic(x, 0)
+
         compiled_softmax = torch.compile(
             lambda x: F.softmax(x, dim=-1), mode="max-autotune-no-cudagraphs"
         )
@@ -358,6 +367,10 @@ class RMSNormForward(BenchmarkKernel):
     def compiled(self, args, kwargs=None) -> Any:
         assert kwargs is None
         x, w = args
+
+        # Mark batch size as dynamic for realistic workload
+        torch._dynamo.mark_dynamic(x, 0)
+
         compiled_rms_norm = torch.compile(
             self.rms_norm_ref, mode="max-autotune-no-cudagraphs"
         )
@@ -508,6 +521,10 @@ class LayerNormForward(BenchmarkKernel):
     def compiled(self, args, kwargs=None) -> Any:
         assert kwargs is None
         x, w = args
+
+        # Mark batch size as dynamic for realistic workload
+        torch._dynamo.mark_dynamic(x, 0)
+
         compiled_layernorm = torch.compile(
             self.layernorm_ref, mode="max-autotune-no-cudagraphs"
         )

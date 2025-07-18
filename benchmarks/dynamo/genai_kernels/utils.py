@@ -1,3 +1,4 @@
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
@@ -214,7 +215,7 @@ def visualize_comparison(
 
     # Configure the plot
     ax.set_title(title or "Memory Bandwidth Comparison", fontsize=16)
-    ax.set_xlabel("Configuration", fontsize=12)
+    ax.set_xlabel("Shape", fontsize=12)
     ax.set_ylabel("memory bandwidth (GB/s)", fontsize=12)
     ax.set_xticks(range(len(all_settings)))
     ax.set_xticklabels(
@@ -233,6 +234,8 @@ def visualize_comparison(
     # Save the plot if output path is provided
     if output_path:
         # Save as PNG
-        plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white")
+        os.makedirs("pics", exist_ok=True)
+        full_path = os.path.join("pics", output_path + ".png")
+        plt.savefig(full_path, dpi=300, bbox_inches="tight", facecolor="white")
 
     plt.close()
