@@ -81,15 +81,7 @@ if TYPE_CHECKING:
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .ir import (
-        Buffer,
-        ExternKernel,
-        ExternKernelOut,
-        IRNode,
-        Layout,
-        Operation,
-        ReinterpretView,
-    )
+    from .ir import Buffer, ExternKernel, IRNode, Layout, Operation, ReinterpretView
     from .output_code import CompiledFxGraph
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
@@ -3129,42 +3121,6 @@ def get_donated_idxs() -> Optional[list[int]]:
     if tracing_context is not None and tracing_context.fw_metadata:
         return tracing_context.fw_metadata.bw_donated_idxs
     return None
-
-
-def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
-    kernel_name: str,
-    is_extern: bool = False,
-) -> None:
-    from .codegen.simd_kernel_features import DisableReduction, EnableReduction
-    from .ir import ExternKernelOut
-    from .virtualized import V
-
-    if is_extern:
-        assert isinstance(node_schedule, ExternKernelOut)
-        curr_node_info = (
-            V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
-                kernel_name, []
-            )
-        )
-        curr_node_info.extend(
-            origin.name
-            for origin in node_schedule.origins
-            if origin.name not in curr_node_info
-        )
-    else:
-        assert isinstance(node_schedule, list)
-        for snode in node_schedule:
-            if snode not in (EnableReduction, DisableReduction):
-                if snode.node is not None:
-                    curr_node_info = V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
-                        kernel_name, []
-                    )
-                    curr_node_info.extend(
-                        origin.name
-                        for origin in snode.node.origins
-                        if origin.name not in curr_node_info
-                    )
 
 
 class TritonAttrsDescriptorVersion(enum.Enum):
