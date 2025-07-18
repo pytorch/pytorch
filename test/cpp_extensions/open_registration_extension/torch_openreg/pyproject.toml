@@ -12,26 +12,11 @@ name = "torch_openreg"
 version = "0.0.1"
 description = "A minimal reference implementation of an out-of-tree backend"
 readme = "README.md"
-requires-python = ">=3.9,<3.14"
+requires-python = ">=3.9"
 license = { text = "BSD-3-Clause" }
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 dependencies = [
     "torch",
-]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Intended Audience :: Education",
-    "Topic :: Software Development",
-    "Topic :: Software Development :: Libraries",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Programming Language :: C++",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
 ]
 
 [project.urls]
