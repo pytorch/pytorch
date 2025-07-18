@@ -143,11 +143,19 @@ def maybe_to_fake_obj(
 
     _check_valid_flat_script_obj(flat_x)
 
-    fake_flattened = pytree.tree_map_only(
-        torch.Tensor,
-        lambda t: fake_mode.from_tensor(t),
-        flat_x,
-    )
+    with fake_mode:
+        fake_flattened = pytree.tree_map_only(
+            torch.Tensor,
+            lambda t: torch.empty_strided(
+                t.size(),
+                t.stride(),
+                device=t.device,
+                dtype=t.dtype,
+                requires_grad=t.requires_grad,
+                layout=t.layout,
+            ),
+            flat_x,
+        )
 
     fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)
 
