@@ -19,7 +19,28 @@ function install_timm() {
   conda_run pip uninstall -y torch torchvision triton
 }
 
+function install_torchbench() {
+  local commit
+  commit=$(get_pinned_commit torchbench)
+  git clone https://github.com/pytorch/benchmark torchbench
+  pushd torchbench
+  git checkout "$commit"
+
+  # Stable packages are ok here, just to satify TorchBench check
+  pip_install torch torchvision torchaudio
+  python install.py --continue_on_fail
+
+  # TODO (huydhn): transformers-4.44.2 added by https://github.com/pytorch/benchmark/pull/2488
+  # is regressing speedup metric. This needs to be investigated further
+  pip install transformers==4.38.1
+
+  echo "Print all dependencies after TorchBench is installed"
+  python -mpip freeze
+  popd
+}
+
 # Pango is needed for weasyprint which is needed for doctr
 conda_install pango
 install_huggingface
 install_timm
+install_torchbench
