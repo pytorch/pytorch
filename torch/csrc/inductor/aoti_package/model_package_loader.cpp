@@ -48,22 +48,18 @@ std::string normalize_path_separator(const std::string& orig_path) {
 
   In order to simplify the path operation, we can use this function to
   normalize path separator. It will convert Windows separator to Linux
-  separator, and re-use the common code to handle both Windows and Linux
+  separator, and reuse the common code to handle both Windows and Linux
   path.
   On Windows, when we input: "C:\Users\Test\file.txt", the output should be:
   "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
   */
 #ifdef _WIN32
-  const bool _IS_WINDOWS = true;
+  std::string normalized_path = orig_path;
+  std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
+  return normalized_path;
 #else
-  const bool _IS_WINDOWS = false;
-#endif
-  if (_IS_WINDOWS) {
-    std::string normalized_path = orig_path;
-    std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
-    return normalized_path;
-  }
   return orig_path;
+#endif
 }
 
 bool file_exists(const std::string& path) {
