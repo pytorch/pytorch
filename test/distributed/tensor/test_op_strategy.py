@@ -1,10 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 
-import functools
 import itertools
 import random
 from contextlib import contextmanager
-from copy import deepcopy
 from itertools import chain
 from unittest.mock import patch
 
@@ -17,7 +15,6 @@ from torch.distributed.tensor import (
     DTensor,
     init_device_mesh,
     Partial,
-    Placement,
     Replicate,
     Shard,
 )
@@ -28,17 +25,16 @@ from torch.distributed.tensor._op_schema import (
     OpSpec,
     OpStrategy,
     RuntimeSchemaInfo,
-    StrategyType,
 )
 from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
 from torch.distributed.tensor._ops.utils import (
-    generate_redistribute_costs,
     register_op_strategy,
     replicate_op_strategy,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorOpTestBase,
@@ -446,37 +442,6 @@ torch.library.register_autograd(
 )
 
 
-def manual_strategy(
-    op_schema: OpSchema, output_placement: list[Placement]
-) -> StrategyType:
-    select_strategy_x = op_schema.args_schema[0]
-    select_strategy_y = op_schema.args_schema[1]
-    assert isinstance(select_strategy_x, OpStrategy)
-    assert isinstance(select_strategy_y, OpStrategy)
-    new_placement = output_placement
-    new_input_specs = DTensorSpec(
-        mesh=select_strategy_x.mesh,
-        placements=tuple(new_placement),
-        tensor_meta=select_strategy_x.strategies[0].output_spec.tensor_meta,
-    )
-    output_spec = DTensorSpec(
-        mesh=select_strategy_x.mesh,
-        placements=tuple(new_placement),
-    )
-    output_strategy = OpStrategy([])
-    output_strategy.strategies.append(
-        OpSpec(
-            output_specs=output_spec,
-            input_specs=[new_input_specs, new_input_specs],
-            redistribute_cost=[
-                generate_redistribute_costs(select_strategy_x, new_input_specs),
-                generate_redistribute_costs(select_strategy_y, new_input_specs),
-            ],
-        )
-    )
-    return output_strategy
-
-
 @contextmanager
 def op_strategy_context(op_overload, strategy_func, schema_info=None):
     """
@@ -551,42 +516,11 @@ def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
 
 class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
     @with_comms
-    def test_replicate_strategy_placement(self):
-        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
-        test_op = torch.ops.mylib.numpy_sin
-        with op_strategy_context(test_op.default, replicate_op_strategy):
-            input_x = torch.randn([8, 16, 32], device=self.device_type)
-            input_y = torch.randn([8, 16, 32], device=self.device_type)
-            output = test_op(input_x, input_y)
-            input_x_dt = distribute_tensor(input_x, mesh, [Shard(0), Shard(1)])
-            input_y_dt = distribute_tensor(input_y, mesh, [Shard(0), Shard(1)])
-            output_dt = test_op(input_x_dt, input_y_dt)
-            self.assertEqual(output_dt.full_tensor(), output)
-            self.assertEqual(output_dt.placements, [Replicate(), Replicate()])
-
-    @with_comms
-    def test_no_identical_strategies(self):
-        # Test if there are any identical OpSpecs in the output strategy.
-        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
-        test_op = torch.ops.mylib.numpy_sin
-        x = torch.randn([8, 16, 8], device=self.device_type)
-        y = torch.randn([8, 16, 8], device=self.device_type)
-        self.assertTrue(
-            detect_exists_identical_opspec(
-                x,
-                y,
-                op=test_op.default,
-                mesh=mesh,
-                strategy_function=replicate_op_strategy,
-            )
-        )
-
-    @with_comms
     @patch(
         "torch.distributed.tensor._sharding_prop.ShardingPropagator._select_strategy"
     )
-    def test_replicate_strategy_cost(self, mock_select_strategy):
-        costs_from__select_strategy: list[float] = []
+    def test_replicate_strategy_placement(self, mock_select_strategy):
+        costs_from__select_strategy = []
 
         def mock_select_func(strategy):
             """function copied from _select_strategy but with cost capturing"""
@@ -607,32 +541,46 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
 
         mock_select_strategy.side_effect = mock_select_func
         mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        comm_mode = CommDebugMode()
         test_op = torch.ops.mylib.numpy_sin
-        input_x = torch.randn([8, 16, 8], device=self.device_type)
-        input_y = torch.randn([8, 16, 8], device=self.device_type)
-        # manual write the strategy to force replicate placement
-        manual_replicated_strategy = functools.partial(
-            manual_strategy, output_placement=[Replicate(), Replicate()]
+        input_x = torch.randn([8, 16, 32], device=self.device_type)
+        input_y = torch.randn([8, 16, 32], device=self.device_type)
+        output = test_op(input_x, input_y)
+        input_x_dt = distribute_tensor(input_x, mesh, [Shard(0), Shard(1)])
+        input_y_dt = distribute_tensor(input_y, mesh, [Shard(0), Shard(1)])
+        x_spec = DTensorSpec(mesh, input_x_dt.placements, extract_tensor_meta(input_x))
+        new_x_spec = DTensorSpec(
+            mesh, (Replicate(), Replicate()), extract_tensor_meta(input_x)
         )
-        placement_choice_pool = [Replicate(), Shard(0), Shard(1)]
-        for shard_a in placement_choice_pool:
-            for shard_b in placement_choice_pool:
-                input_x_dt = distribute_tensor(input_x, mesh, [shard_a, shard_b])
-                input_y_dt = distribute_tensor(input_y, mesh, [shard_b, shard_a])
-                # generate expected cost from manual strategy:
-                costs_from__select_strategy.clear()
-                with op_strategy_context(test_op.default, manual_replicated_strategy):
-                    expect_output = test_op(input_x_dt, input_y_dt)
-                    expected_cost = deepcopy(costs_from__select_strategy)
-                # generate cost from default fallback strategy:
-                costs_from__select_strategy.clear()
-                with op_strategy_context(test_op.default, replicate_op_strategy):
-                    fallback_output = test_op(input_x_dt, input_y_dt)
-                    fallback_cost = deepcopy(costs_from__select_strategy)
+        y_spec = DTensorSpec(mesh, input_y_dt.placements, extract_tensor_meta(input_y))
+        new_y_spec = DTensorSpec(
+            mesh, (Replicate(), Replicate()), extract_tensor_meta(input_y)
+        )
+        with comm_mode:
+            with op_strategy_context(test_op.default, replicate_op_strategy):
+                output_dt = test_op(input_x_dt, input_y_dt)
                 self.assertEqual(
-                    expect_output.full_tensor(), fallback_output.full_tensor()
+                    comm_mode.get_comm_counts(),
+                    {
+                        torch.ops.c10d_functional.all_gather_into_tensor: 4,
+                    },
                 )
-                self.assertEqual(expected_cost, fallback_cost)
+                expected_cost = [
+                    [redistribute_cost(x_spec, new_x_spec)],
+                    [redistribute_cost(y_spec, new_y_spec)],
+                ]
+                self.assertEqual(expected_cost, costs_from__select_strategy)
+                self.assertEqual(output_dt.full_tensor(), output)
+                self.assertEqual(output_dt.placements, [Replicate(), Replicate()])
+                self.assertTrue(
+                    detect_exists_identical_opspec(
+                        input_x,
+                        input_y,
+                        op=test_op.default,
+                        mesh=mesh,
+                        strategy_function=replicate_op_strategy,
+                    )
+                )
 
     @with_comms
     def test_tuple_replicate_strategy_placement(self):
