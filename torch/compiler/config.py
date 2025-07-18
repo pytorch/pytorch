@@ -100,4 +100,12 @@ This whitelist is dominant over all other flags dynamic=False, force_nn_module_p
 and force_parameter_static_shapes.
 """
 
+# force a python GC before recording cudagraphs
+force_cudagraph_gc: bool = Config(env_name_default="TORCH_CUDAGRAPH_GC", default=True)
+"""
+If True (the backward-compatible behavior) then gc.collect() before recording
+any cudagraph.
+"""
+
+
 install_config_module(sys.modules[__name__])
