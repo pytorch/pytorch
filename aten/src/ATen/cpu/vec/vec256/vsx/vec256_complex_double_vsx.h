@@ -478,7 +478,7 @@ class Vectorized<ComplexDbl> {
     this->store(tmp1);
     b.store(tmp2);
 
-    for (const auto i : c10::irange(Vectorized<c10::complex<float>>::size())) {
+    for (const auto i : c10::irange(Vectorized<c10::complex<double>>::size())) {
       out[i] = tmp1[i] / tmp2[i];
     }
     return loadu(out);

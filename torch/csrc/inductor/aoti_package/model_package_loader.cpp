@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
+#include <regex>
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -46,7 +47,16 @@ bool file_exists(const std::string& path) {
 
 std::string create_temp_dir() {
 #ifdef _WIN32
-  throw std::runtime_error("Not implemented");
+  try {
+    fs::path temp_dir = fs::temp_directory_path();
+    return temp_dir.string();
+  } catch (const fs::filesystem_error& e) {
+    throw std::runtime_error(
+        "Failed to get temporary directory: " + std::string(e.what()));
+  } catch (...) {
+    throw std::runtime_error(
+        "Unknown error occurred while getting temporary directory");
+  }
 #else
   std::string temp_dir = "/tmp/XXXXXX";
   if (mkdtemp(temp_dir.data()) == nullptr) {
@@ -135,15 +145,12 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
   }
 
   std::string passthrough_parameters_args;
+  std::regex script_regex(R"(--script=[^,]*script\.ld)");
+  std::string replacement =
+      "--script=" + target_dir + k_separator + "script.ld";
   for (auto& arg : compile_options["passthrough_args"]) {
-    std::string arg_str = arg.get<std::string>();
-    std::string target = "script.ld";
-    std::string replacement = target_dir;
-    replacement.append(k_separator).append(target);
-    size_t pos = arg_str.find(target);
-    if (pos != std::string::npos) {
-      arg_str.replace(pos, target.length(), replacement);
-    }
+    std::string arg_str =
+        std::regex_replace(arg.get<std::string>(), script_regex, replacement);
     passthrough_parameters_args += arg_str + " ";
   }
 
@@ -324,6 +331,30 @@ std::string compile_so(
 
   return output_so;
 }
+
+std::unordered_set<std::string> find_model_names(
+    const std::vector<std::string>& paths) {
+  std::unordered_set<std::string> model_names;
+
+  // Escape the separator if it's backslash (needed for regex)
+  std::string sep = k_separator;
+  if (sep == "\\")
+    sep = "\\\\";
+
+  std::string pattern =
+      "data" + sep + "aotinductor" + sep + "([^" + sep + "]+)" + sep;
+  std::regex re(pattern);
+
+  for (const auto& path : paths) {
+    std::smatch match;
+    if (std::regex_search(path, match, re) && match.size() > 1) {
+      model_names.insert(match[1].str());
+    }
+  }
+
+  return model_names;
+}
+
 } // namespace
 
 void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
@@ -487,8 +518,21 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     for (const std::string& filename : found_filenames) {
       found_filenames_str += filename + "\n";
     }
+    std::string model_names_str;
+    for (const std::string& model_name_tmp :
+         find_model_names(found_filenames)) {
+      model_names_str += model_name_tmp + "\n";
+    }
+
     throw std::runtime_error(
-        "No AOTInductor generate cpp file or so file found in zip archive. Loaded the following:\n" +
+        "Failed to find a generated cpp file or so file for model '" +
+        model_name +
+        "' in the zip archive.\n\n"
+        "Available models in the archive:\n" +
+        model_names_str +
+        "\n\n"
+        "To load a specific model, please provide its name using the `model_name` parameter when calling AOTIModelPackageLoader() or torch._inductor.package.load_package.\n\n"
+        "The following files were loaded from the archive:\n" +
         found_filenames_str);
   }
 

@@ -6873,7 +6873,7 @@ class DistributedTest:
         def _test_ddp_profiling(self, profiler_ctx, profiler_ctx2=None):
             """Runs DDP based model training and captures profiles.
             This test will do two profiler runs.
-            1. An inital basic run to check if profiler events are correctly captured.
+            1. An initial basic run to check if profiler events are correctly captured.
             2. A second profiling pass after running some iterations of DDP, to check robustness of thread local state.
 
             args
@@ -6996,7 +6996,7 @@ class DistributedTest:
 
         def _validate_execution_trace_nccl(self, et_file: str) -> None:
             """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
-            We test for basic fields in theese nodes in the Execution Trace.
+            We test for basic fields in these nodes in the Execution Trace.
             """
             with open(et_file) as f:
                 et = json.load(f)

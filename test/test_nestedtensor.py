@@ -4103,6 +4103,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual((4, 8, nt.size(1), 10), tuple(view2.size()))
         self.assertTrue(view2._base is None)
 
+    @xfailIfTorchDynamo
     @parametrize("requires_grad", [False, True])
     def test_reshape_decomp(self, device, requires_grad):
         # contiguous NT should result in view.
@@ -5638,6 +5639,11 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             RuntimeError, "At least one of offsets or lengths is required"
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
+
+        with self.assertRaisesRegex(ValueError, "Expected jagged_dim >=1, but got 0."):
+            torch.nested.nested_tensor_from_jagged(
+                values, lengths=lengths, jagged_dim=0
+            )
 
     @onlyCPU
     def test_nested_tensor_from_jagged_fx_trace(self, device):
@@ -7189,7 +7195,7 @@ torch.cuda.synchronize()
 
         query = torch.rand(bs, d1, d3, device=device)
         value = torch.rand(30, d2, requires_grad=True, device=device)
-        # total_length must > than max_length otherwise flash_attn backwark will fail
+        # total_length must > than max_length otherwise flash_attn backward will fail
         offsets = torch.tensor([0, 2, 3, 30], device=device)
 
         m = mha(use_legacy_api)

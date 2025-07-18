@@ -110,6 +110,7 @@ from ..source import (
     is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
+    NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
@@ -167,6 +168,7 @@ from .ctx_manager import (
     EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
+    SetFullgraphVariable,
     StreamContextVariable,
     StreamVariable,
 )
@@ -276,6 +278,7 @@ from .user_defined import (
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
 
@@ -442,8 +445,18 @@ class VariableBuilder:
         if vt.source is None:
             vt.source = self.source
 
+        def _is_deduplicable_sym_variable(value, vt):
+            # Constants like 0, 1, 2, etc. can be unspecialized as SymNodeVariables sometimes, but we
+            # should NOT track them. If we use a single SymNodeVariable instance to track them
+            # across multiple uses, then guards created for one usage will incorrectly apply to
+            # all other usages of that constant, leading to unnecessary recompilations.
+            return is_torch_sym(value) and isinstance(vt, SymNodeVariable)
+
         if (
-            self._can_lift_attrs_to_inputs(vt)
+            (
+                self._can_lift_attrs_to_inputs(vt)
+                or _is_deduplicable_sym_variable(value, vt)
+            )
             and value not in self.tx.output.side_effects
             and not is_wrapper_or_member_descriptor(value)
         ):
@@ -613,7 +626,10 @@ class VariableBuilder:
             has_triton_tensor_descriptor_host_tma,
         )
 
-        from ..decorators import DynamoConfigPatchProxy
+        from ..decorators import (
+            DynamoConfigPatchProxy,
+            SetFullgraphDecoratorContextManager,
+        )
 
         if has_triton():
             from triton.runtime.autotuner import Autotuner
@@ -713,7 +729,7 @@ class VariableBuilder:
                 # 2) For non-constant objects, we also have to guard on the keys
                 # (like TENSOR_MATCH on tensor). We might also have guards on
                 # the attributes of the keys (like tensor.grad). To make this
-                # work in tree strucutre is complicated.
+                # work in tree structure is complicated.
                 #
                 # So, instead we guard on the key order. While guarding on key
                 # order, we just save the indices and use it to access keys and
@@ -768,6 +784,38 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
+        elif istype(value, set):
+            if any(isinstance(x, torch.Tensor) for x in value):
+                unimplemented_v2(
+                    gb_type="Attempted to wrap a set with tensors",
+                    context="Python set containing torch.Tensor elements",
+                    explanation=(
+                        "Dynamo cannot trace sets of tensors. To get a stable ordering, "
+                        "Dynamo needs to convert the set into a list and the order might not be "
+                        "stable if the set contains tensors."
+                    ),
+                    hints=[
+                        "Use a dictionary where the keys are tensors.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # The list gives a ordering for the set items. The ordering is based
+            # on the Python hash and it is not related to object ordering inside
+            # the set object. The order being incorrect at runtime will lead to
+            # a recompilation.
+            L = list(value)
+            items = [
+                LazyVariableTracker.create(
+                    v, source=NonSerializableSetGetItemSource(self.source, i)
+                )
+                for i, v in enumerate(L)
+            ]
+            result = SetVariable(items, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.
@@ -941,6 +989,8 @@ class VariableBuilder:
             )
         elif isinstance(value, DynamoConfigPatchProxy):
             return DynamoConfigPatchVariable(value.changes)
+        elif isinstance(value, SetFullgraphDecoratorContextManager):
+            return SetFullgraphVariable(value.fullgraph)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -954,7 +1004,7 @@ class VariableBuilder:
                 unimplemented_v2(
                     gb_type="Attempted to wrap torch._higher_order_ops.invoke_subgraph",
                     context="",
-                    explanation="Directly using invoke_subgraph is not supported. Use mark_compile_region",
+                    explanation="Directly using invoke_subgraph is not supported. Use nested_compile_region",
                     hints=[],
                 )
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
@@ -1050,7 +1100,7 @@ class VariableBuilder:
             return ItertoolsVariable(value, source=self.source)
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
-            # For SymBool input, we re-use the infra for SymInt by simulating SymBool with a SymInt in dynamo.
+            # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.
 
             # Concretely,
             # 1. We create a SymInt in dynamo's shape_env, whose source is constructed as ConvertIntSource(self.source).
@@ -1297,7 +1347,7 @@ class VariableBuilder:
                 )
 
                 # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
-                # seting example to be real value because these example values will be used
+                # setting example to be real value because these example values will be used
                 # as example_inputs for user compiler.
                 proxy.node.meta["grapharg"] = GraphArg(
                     self.source, value, False, None, False, value
@@ -1342,7 +1392,7 @@ class VariableBuilder:
             )
 
             # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
-            # seting example to be real value because these example values will be used
+            # setting example to be real value because these example values will be used
             # as example_inputs for user compiler.
             proxy.node.meta["grapharg"] = GraphArg(
                 self.source, value, False, None, False, fake_script_obj
@@ -1438,6 +1488,24 @@ class VariableBuilder:
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
             result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, (set, frozenset)):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            L = list(dict.fromkeys(value))
+            output = [
+                LazyVariableTracker.create(
+                    list.__getitem__(L, i),
+                    source=NonSerializableSetGetItemSource(self.get_source(), i),
+                )
+                for i in range(list.__len__(L))
+            ]
+            set_vt_cls = SetVariable if isinstance(value, set) else FrozensetVariable
+            set_vt = set_vt_cls(
+                output, source=self.source, mutation_type=ValueMutationExisting()
+            )
+            result = UserDefinedSetVariable(value, set_vt=set_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -1574,6 +1642,8 @@ class VariableBuilder:
                 source=source,
             )
 
+            # Apply relevant logic from `VariableTracker.build(value[i])`
+            # (except for the `create_graph_input` stuff).
             guards = []
             for i, tensor_variable in enumerate(list_variable.items):
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
@@ -1582,7 +1652,6 @@ class VariableBuilder:
                 tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
                     value[i]
                 )
-
                 guard = functools.partial(
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
                 )
@@ -1598,6 +1667,27 @@ class VariableBuilder:
                 is_tensor=False,
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
+
+            # The following is very important for maintaining the "python object
+            # <==> variable tracker" 1-to-1 mapping, which is mainly handled via
+            # `side_effects`. Note that constructing `tensor_variable` above
+            # already adds it to graph arg, but we never registered it with
+            # `side_effects`. The preemptive `realize` calls here basically
+            # does that registration (at the end of `self.__call__`).
+            #
+            # A slightly cleaner alternative is to register the
+            # `tensor_variable`s above with `side_effects` directly, and just
+            # return the `list_variable`, but that breaks some tensor-subclass
+            # related tests like `test_inputs_aliasing_bytecode_stack_restore`,
+            # because `tensor_variable` is constructed via
+            # `handle_traced_output`, which doesn't really expect/handle tensor
+            # subclass.
+            #
+            # Eventually, we expect to fix remove all of these by having Dynamo
+            # auto-boxing inputs to the compiled graph, see
+            # https://github.com/pytorch/pytorch/issues/153701.
+            for vt in output:
+                vt.realize()
 
         result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
         if istype(value, (list, collections.deque)):
@@ -1829,7 +1919,7 @@ class VariableBuilder:
                     ):
                         # This means that it is an integer from a NN module.
                         # Dynamo considers nn module int attributes to be static
-                        # (a good heursitic). But a user might want to mark the
+                        # (a good heuristic). But a user might want to mark the
                         # int attribute to be a symint, so track this integer
                         # for recompilation later.
                         recompile_hint = (
@@ -1839,6 +1929,12 @@ class VariableBuilder:
                             "integer into a tensor."
                         )
 
+                    process_automatic_dynamic(
+                        self.tx,
+                        self.source.name(),
+                        FrameStateSizeEntry.make_scalar(value),
+                        is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+                    )
                     self.install_guards(
                         functools.partial(
                             GuardBuilder.EQUALS_MATCH, recompile_hint=recompile_hint
@@ -1998,7 +2094,7 @@ class VariableBuilder:
         ):
             # A hot fix for sparse tensors + torch.compile. Support for
             # export + sparsity is being added but we need to create
-            # SPARSE_TENSOR_GUARDS for guards to work propertly.
+            # SPARSE_TENSOR_GUARDS for guards to work properly.
             unimplemented_v2(
                 gb_type="Attempted to wrap sparse Tensor",
                 context="",
@@ -3242,12 +3338,10 @@ def _automatic_dynamic(
         if is_dynamic_source(name):
             log.debug("%s marked dynamic via source whitelist", name)
             automatic_dynamic_size = True
-            automatic_dynamic_stride = True
 
         if is_unbacked_source(name):
             log.debug("%s marked unbacked via source whitelist", name)
             automatic_dynamic_size = True
-            automatic_dynamic_stride = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 
