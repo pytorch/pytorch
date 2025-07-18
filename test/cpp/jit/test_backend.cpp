@@ -789,7 +789,7 @@ TEST(
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto c_loaded = _load_for_mobile(ss);
   /*
-   * Erro stack trace will look like this:
+   * Error stack trace will look like this:
    * Module hierarchy:top(C).A0(backend_with_compiler_demoLoweredModule).AA0(AA)
    * Traceback of TorchScript (most recent call last):
    *  File "<string>", line 3, in FunctionName_UNKNOWN
