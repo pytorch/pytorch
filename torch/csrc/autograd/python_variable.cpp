@@ -263,34 +263,29 @@ PyObject* THPVariable_Wrap(const at::TensorBase& var) {
     return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var);
   }
 
-  std::optional<PyObject*> mb_obj =
-      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
-  if (mb_obj.has_value()) {
-    auto obj = *mb_obj;
-    if (obj) {
-      if (var.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
-        // C++ owns the Python object; this implies there weren't any other
-        // owning references to the Python object.  Since we're making the
-        // object "live" again on Python side, let's flip back the ownership
-        // (Python owns C++) as it would now be unsound to deallocate the C++
-        // object if all C++ references go to zero
-        var.unsafeGetTensorImpl()->pyobj_slot()->set_owns_pyobj(false);
-        reinterpret_cast<THPVariable*>(obj)->cdata =
-            MaybeOwned<Variable>::owned(Variable(var));
-        // NB: incref is not necessary, because we are "stealing" the previous
-        // ownership from the Variable to return it here for the wrap
-        return obj;
-      }
-      Py_INCREF(obj);
+  PyObject* obj = var.unsafeGetTensorImpl()->pyobj_slot()->get_pyobj();
+  if (obj) {
+    if (var.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
+      // C++ owns the Python object; this implies there weren't any other
+      // owning references to the Python object.  Since we're making the
+      // object "live" again on Python side, let's flip back the ownership
+      // (Python owns C++) as it would now be unsound to deallocate the C++
+      // object if all C++ references go to zero
+      var.unsafeGetTensorImpl()->pyobj_slot()->set_owns_pyobj(false);
+      reinterpret_cast<THPVariable*>(obj)->cdata =
+          MaybeOwned<Variable>::owned(Variable(var));
+      // NB: incref is not necessary, because we are "stealing" the previous
+      // ownership from the Variable to return it here for the wrap
       return obj;
     }
-    // TODO: a better invariant is that if we tagged, we MUST have a valid
-    // PyObject.  That's PyObject preservation
-    // (https://github.com/pytorch/pytorch/pull/56017).  Prior to this PR
-    // being a thing, the PyObject field will get cleared when all references
-    // to the Python object are removed.
+    Py_INCREF(obj);
+    return obj;
   }
+  // TODO: a better invariant is that if we tagged, we MUST have a valid
+  // PyObject.  That's PyObject preservation
+  // (https://github.com/pytorch/pytorch/pull/56017).  Prior to this PR
+  // being a thing, the PyObject field will get cleared when all references
+  // to the Python object are removed.
 
   if (C10_LIKELY(var.device().type() != c10::kXLA)) {
     return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var);
@@ -328,8 +323,8 @@ static bool isResurrectable(THPVariable* self) {
     return false;
   }
   // Check if this is hermetic. If it is, no resurrection.
-  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false) != (PyObject*)self) {
+  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->get_pyobj() !=
+      (PyObject*)self) {
     return false;
   }
   return true;
@@ -354,11 +349,10 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
       !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj());
 
   c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-  auto maybe_pyobj = tensor_impl->pyobj_slot()->check_pyobj(
-      /*ignore_hermetic_tls=*/false);
+  auto pyobj = tensor_impl->pyobj_slot()->get_pyobj();
 
   TORCH_INTERNAL_ASSERT(
-      maybe_pyobj.has_value(),
+      pyobj,
       "Trying to preserve a Python tensor whose PyObjectSlot does not have a PyObject");
 
   tensor_impl->pyobj_slot()->set_owns_pyobj(true);
@@ -1846,8 +1840,8 @@ static int THPVariable_subclass_clear(THPVariable* self) {
     //        because Tensor asked us to (it's already destructing).
 
     if (!self->cdata.unsafeIsBorrowed() &&
-        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-            /*ignore_hermetic_tls=*/false) == (PyObject*)self) {
+        tensor.unsafeGetTensorImpl()->pyobj_slot()->get_pyobj() ==
+            (PyObject*)self) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -2032,8 +2026,7 @@ static PyObject* THPVariable_NewWithVar(
 
   // This function overwrite the Tensor's pyobj field without extra checks
   // Make sure it is not set otherwise we would leak memory
-  auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-      /*ignore_hermetic_tls=*/false);
+  auto pyobj = _var.unsafeGetTensorImpl()->pyobj_slot()->get_pyobj();
 
   // Under some circumstances, we may attempt to create a new Python
   // object for a variable that already has a Python object.  The most common
@@ -2064,30 +2057,29 @@ static PyObject* THPVariable_NewWithVar(
   // it's valid for us to return it in place of a Tensor.  So this is what we
   // do.
 
-  if (mb_obj.has_value() && mb_obj.value()) {
+  if (pyobj) {
     TORCH_CHECK(
         allow_preexisting_pyobj,
         "Creating a new Tensor subclass ",
         type->tp_name,
         " but the raw Tensor object is already associated to a python object ",
         "of type ",
-        mb_obj.value()->ob_type->tp_name);
+        pyobj->ob_type->tp_name);
     // Even if we allow pre-existing PyObject, we don't allow completely
     // ignoring the requested type.  Check that we fulfilled a subtype
     // relation here.  In the common case the requested type is Tensor and
     // this always succeeds.
-    PyObject* obj = *mb_obj;
     // Check if it's OK to just directly return the Python object without
     // allocating a new variable.  We just check that the existing Python
     // object is a subclass of the requested type.
-    PyTypeObject* obj_type = Py_TYPE(obj);
+    PyTypeObject* obj_type = Py_TYPE(pyobj);
     TORCH_CHECK(
         obj_type == type || PyType_IsSubtype(obj_type, type),
         "Creating a new Tensor subclass ",
         type->tp_name,
         " but the raw Tensor object is already associated to a python object ",
         "of type ",
-        mb_obj.value()->ob_type->tp_name,
+        pyobj->ob_type->tp_name,
         " which is not a subclass of the "
         "requested type");
     // We may (in fact, we typically will) need to resurrect this

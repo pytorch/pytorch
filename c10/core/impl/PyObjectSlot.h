@@ -37,36 +37,10 @@ struct C10_API PyObjectSlot {
 
   PyObject* _unchecked_untagged_pyobj() const;
 
-  // Test the interpreter tag.  If tagged for the current interpreter, return
-  // a non-nullopt (but possibly null) PyObject.  If (possibly) untagged,
-  // returns a nullopt.  If it is definitely invalid, raises an error.
-  //
-  // If `ignore_hermetic_tls` is false and this function is called from a
-  // hermetic context (ie, `HermeticPyObjectTLS::get_state()` is true), then
-  // nullopt is returned. If `ignore_hermetic_tls` is true, then the hermetic
-  // context is ignored, allowing you to check the interpreter tag of a
-  // nonhermetic PyObject from within a hermetic context. This is necessary
-  // because there are some cases where the deallocator function of a
-  // nonhermetic PyObject is called from within a hermetic context, so it must
-  // be properly treated as a nonhermetic PyObject.
-  //
-  // NB: this lives in header so that we can avoid actually creating the
-  // std::optional
-
-  // @todo alban: I'm not too sure what's going on here, we can probably delete
-  // it but it's worthwhile making sure
-  std::optional<PyObject*> check_pyobj(bool ignore_hermetic_tls = false) const {
-    impl::PyInterpreter* interpreter =
-        pyobj_interpreter_.load(std::memory_order_acquire);
-    if (interpreter == nullptr) {
-      return std::nullopt;
-    }
-
-    if (!ignore_hermetic_tls && c10::impl::HermeticPyObjectTLS::get_state()) {
-      return std::nullopt;
-    } else {
-      return _unchecked_untagged_pyobj();
-    }
+  PyObject* get_pyobj() const {
+    // Note that PyObject* can be a nullptr, so please check before
+    // using it.
+    return _unchecked_untagged_pyobj();
   }
 
   PyInterpreter& load_pyobj_interpreter() const;
@@ -115,9 +89,8 @@ struct C10_API PyObjectSlot {
   // However, sometimes this ownership flips.  To track who owns
   // who, this has a single pointer tag indicating whether or not the
   // C++ object owns the PyObject (the common case, zero, means PyObject
-  // owns the C++ object); see _unchecked_untagged_pyobj for raw access
-  // or check_pyobj for checked access.  See references to PyObject
-  // resurrection in torch/csrc/autograd/python_variable.cpp
+  // owns the C++ object); see get_pyobj() for access.  See references to
+  // PyObject resurrection in torch/csrc/autograd/python_variable.cpp
   PyObject* pyobj_;
 };
 
