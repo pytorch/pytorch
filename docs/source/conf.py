@@ -62,7 +62,7 @@ extensions = [
     "sphinxcontrib.katex",
     "sphinx_copybutton",
     "sphinx_design",
-    "myst_parser",
+    "myst_nb",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
@@ -1082,7 +1082,6 @@ coverage_ignore_functions = [
     "z3op",
     "z3str",
     # torch.fx.graph_module
-    "reduce_deploy_graph_module",
     "reduce_graph_module",
     "reduce_package_graph_module",
     # torch.fx.node
