@@ -36,6 +36,36 @@ from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import tree_map_only
 
 
+# Private debug flag to disable internal compilation wrapping for debugging purposes.
+# WARNING: This is intended ONLY for debugging score_mod and mask_mod functions.
+# When enabled, this bypasses the required internal compilation that ensures correctness
+# and performance. Only use this temporarily when you need to set breakpoints
+# in your score_mod/mask_mod functions during development.
+#
+# This flag only affects the internal compilation when flex_attention is called directly.
+# If you have already wrapped flex_attention in torch.compile(), this flag has no effect
+# and the user's compilation will still occur.
+#
+# Usage:
+#   import torch.nn.attention.flex_attention as fa
+#   fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
+#   # Now you can set breakpoints in your score_mod/mask_mod
+#   output = fa.flex_attention(q, k, v, score_mod=my_score_mod)
+#
+_FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
+
+_WARNINGS_SHOWN: set[str] = set()
+
+
+def _warn_once(
+    warning_id: str, message: str, category: type[Warning] = UserWarning
+) -> None:
+    """Helper to ensure each warning is shown only once per process."""
+    if warning_id not in _WARNINGS_SHOWN:
+        warnings.warn(message, category, stacklevel=3)
+        _WARNINGS_SHOWN.add(warning_id)
+
+
 __all__ = [
     "BlockMask",
     "flex_attention",
@@ -1548,6 +1578,17 @@ def flex_attention(
         else:
             return out
 
+    if not _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+        _warn_once(
+            "flex_attention_performance",
+            "flex_attention called without torch.compile() - this will use an unrolled vmap "
+            "implementation that materializes the full attention matrix instead of generating "
+            "a fused kernels. Use torch.compile(flex_attention)(...). "
+            "If you need to debug your score_mod/mask_mod functions with breakpoints, you can set "
+            "torch.nn.attention.flex_attention._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG=True, but note "
+            "this is not guaranteed to work with all score/mask mods and may produce incorrect results.",
+        )
+
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
@@ -1570,9 +1611,15 @@ def flex_attention(
                         )
                     else:
                         backend = "eager"
-                    out, lse = torch.compile(
-                        _flex_attention_hop_wrapper, backend=backend, fullgraph=True
-                    )(
+
+                    if _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG:
+                        flex_fn = _flex_attention_hop_wrapper
+                    else:
+                        flex_fn = torch.compile(
+                            _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+                        )
+
+                    out, lse = flex_fn(
                         query,
                         key,
                         value,
@@ -1581,7 +1628,7 @@ def flex_attention(
                         scale,
                         kernel_options,
                     )
-                    if return_lse:
-                        return out, lse * math.log(2)
-                    else:
-                        return out
+    if return_lse:
+        return out, lse * math.log(2)
+    else:
+        return out
