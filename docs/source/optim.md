@@ -2,6 +2,7 @@
 
 ```{eval-rst}
 .. automodule:: torch.optim
+.. currentmodule:: torch.optim
 ```
 
 ## How to use an optimizer
@@ -688,9 +689,6 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 <!-- This module needs to be documented. Adding here in the meantime
 for tracking purposes -->
 ```{eval-rst}
-.. py:module:: torch.optim.adadelta
-.. py:module:: torch.optim.adagrad
-.. py:module:: torch.optim.adam
 .. py:module:: torch.optim.adamax
 .. py:module:: torch.optim.adamw
 .. py:module:: torch.optim.asgd
@@ -704,4 +702,11 @@ for tracking purposes -->
 .. py:module:: torch.optim.sgd
 .. py:module:: torch.optim.sparse_adam
 .. py:module:: torch.optim.swa_utils
+```
+
+```{eval-rst}
+.. toctree::
+    :hidden:
+
+    optim.aliases.md
 ```

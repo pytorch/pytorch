@@ -1837,8 +1837,6 @@ coverage_ignore_functions = [
     "check_export_model_diff",
     "verify",
     "verify_aten_graph",
-    # torch.optim.adam
-    "adam",
     # torch.optim.adamax
     "adamax",
     # torch.optim.adamw
@@ -3105,8 +3103,6 @@ coverage_ignore_classes = [
     # torch.onnx.verification
     "OnnxBackend",
     "OnnxTestCaseRepro",
-    # torch.optim.adam
-    "Adam",
     # torch.optim.adamax
     "Adamax",
     # torch.optim.adamw
