@@ -5075,6 +5075,7 @@ def scaled_dot_product_flash_attention_for_cpu(
         is_causal=is_causal,
         dropout_mask=None,
         scale=scale,
+        enable_gqa=query.size(1) != key.size(1),
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
