@@ -10,8 +10,8 @@ set "PATH=%CD%\Python\Lib\site-packages\cmake\data\bin;%CD%\Python\Scripts;%CD%\
 
 %PYTHON_EXEC% -m pip install "setuptools>=77.0.0" "packaging>=24.2"
 
-if "%DESIRED_PYTHON%" == "3.13t" %PYTHON_EXEC% -m pip install numpy==2.2.1 cmake
-if "%DESIRED_PYTHON%" == "3.13" %PYTHON_EXEC% -m pip install numpy==2.1.2 cmake
+if "%DESIRED_PYTHON%" == "3.13t" %PYTHON_EXEC% -m pip install numpy==2.2.6 cmake
+if "%DESIRED_PYTHON%" == "3.13" %PYTHON_EXEC% -m pip install numpy==2.1.3 cmake
 if "%DESIRED_PYTHON%" == "3.12" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
 if "%DESIRED_PYTHON%" == "3.11" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
 if "%DESIRED_PYTHON%" == "3.10" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake

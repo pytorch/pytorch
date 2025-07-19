@@ -137,7 +137,7 @@ case $desired_python in
         echo "Using 3.13 deps"
         SETUPTOOLS_PINNED_VERSION=">=77.0.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
-        NUMPY_PINNED_VERSION="=2.1.0"
+        NUMPY_PINNED_VERSION="==2.1.0"
         CONDA_ENV_CREATE_FLAGS="python-freethreading"
         EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
         desired_python="3.13"
@@ -147,35 +147,35 @@ case $desired_python in
         echo "Using 3.13 deps"
         SETUPTOOLS_PINNED_VERSION=">=77.0.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
-        NUMPY_PINNED_VERSION="=2.1.0"
+        NUMPY_PINNED_VERSION="==2.1.0"
         ;;
     3.12)
         echo "Using 3.12 deps"
         SETUPTOOLS_PINNED_VERSION=">=77.0.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
-        NUMPY_PINNED_VERSION="=2.0.2"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.11)
         echo "Using 3.11 deps"
         SETUPTOOLS_PINNED_VERSION=">=77.0.0"
         PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="=2.0.2"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.10)
         echo "Using 3.10 deps"
         SETUPTOOLS_PINNED_VERSION=">=77.0.0"
         PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="=2.0.2"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     3.9)
         echo "Using 3.9 deps"
         SETUPTOOLS_PINNED_VERSION=">=77.0.0"
         PYYAML_PINNED_VERSION=">=5.3"
-        NUMPY_PINNED_VERSION="=2.0.2"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
     *)
         echo "Using default deps"
-        NUMPY_PINNED_VERSION="=1.11.3"
+        NUMPY_PINNED_VERSION="==2.0.2"
         ;;
 esac
 
@@ -185,7 +185,7 @@ conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_p
 source activate "$tmp_env_name"
 
 retry pip install -r "${pytorch_rootdir}/requirements-build.txt"
-pip install "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing-extensions
+pip install "numpy${NUMPY_PINNED_VERSION}" "pyyaml${PYYAML_PINNED_VERSION}" requests ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing-extensions
 retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
 retry brew install libomp
 
