@@ -4,19 +4,28 @@ The various dataclasses, Enums, namedtuples etc used in AOTAutograd. This includ
 input/output types, metadata, config, function signatures etc.
 """
 
+from __future__ import annotations
+
 import collections
 import dataclasses
 import functools
 import itertools
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, NewType, Optional, Union
+from typing import (
+    Any,
+    Callable,
+    NewType,
+    Optional,
+    Protocol,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree
-from torch._guards import Source
-from torch._ops import OpOverload
+from torch import Tensor
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -27,6 +36,16 @@ from .functional_utils import (
     FunctionalTensorMetadataEq,
 )
 from .utils import strict_zip
+
+
+if TYPE_CHECKING:
+    import contextlib
+    from collections.abc import Iterable, Sequence
+
+    from torch._guards import Source
+    from torch._inductor.output_code import OutputCode
+    from torch._inductor.utils import InputType
+    from torch._ops import OpOverload
 
 
 zip = strict_zip
@@ -166,7 +185,7 @@ class MemoryFormatMeta:
     memory_format: Optional[torch.memory_format] = None
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> Optional["MemoryFormatMeta"]:
+    def from_tensor(t: torch.Tensor) -> Optional[MemoryFormatMeta]:
         # We only memorize expected memory format for
         # 1. Traceable wrapper subclasses
         # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
@@ -232,7 +251,7 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: dict[str, Union["SubclassCreationMeta", PlainTensorMeta]]
+    attrs: dict[str, Union[SubclassCreationMeta, PlainTensorMeta]]
     outer_size: Iterable[Union[None, int, torch.SymInt]]
     outer_stride: Iterable[Union[None, int, torch.SymInt]]
     meta: Any
@@ -828,7 +847,7 @@ class GraphSignature:
         num_user_outputs: int,
         loss_index: Optional[int],
         backward_signature: Optional[BackwardSignature],
-    ) -> "GraphSignature":
+    ) -> GraphSignature:
         graph_inputs = graph_input_names
         graph_outputs = graph_output_names
         parameters = list(named_parameters)
@@ -966,3 +985,174 @@ SubclassTracingInfo = collections.namedtuple(
     "SubclassTracingInfo",
     ["plain_tensor_trace_fn", "plain_tensor_args", "maybe_subclass_meta"],
 )
+
+
+@dataclass
+class AOTState:
+    """
+    When we run AOTAutograd, this class encapsulates the state in the compiler which
+    must be preserved across stages.  This is state in the traditional sense (not an
+    environment) because some values in this structure change as we progress through
+    pipelines in AOTAutograd.
+    """
+
+    # Whether or not we need to handle autograd when doing graph capture and
+    # compilation.  Although the calling convention for non-autograd graph
+    # capture in AOTAutograd is simple and can be relied upon, the autograph
+    # capture calling convention is quite complicated and in general you are
+    # only expected to pass to aot_stage2_compile to process.
+    needs_autograd: bool
+
+    # The FAKE flat arguments which we will do tracing with.  Although you
+    # might naively expect this to be immutable, it's not: when we perform
+    # tracing, we may execute code that modifies the metadata of inputs,
+    # causing the args to become "invalid".  It's also nontrivial to have a
+    # "golden" set of fake values and deepcopy them just in time when you
+    # might destructively mutate them (Voz and I tried very hard to do this).
+    # So we just periodically renew this field.  Don't worry too much about
+    # this unless you're specifically trying to track down an input metadata
+    # mutation bug.
+    #
+    # (By the way, this is NEVER the joint inputs!  Those only ever go in
+    # AOTGraphCapture)
+    flat_args: list[Any]
+
+    # This contains view and mutation information about the function, which we
+    # detected by doing an initial trace when we created this state.
+    fw_metadata: ViewAndMutationMeta
+
+    # Top-level configuration
+    # This is morally immutable but sometimes we are naughty and mutate it.
+    aot_config: AOTConfig
+
+    # When performing AOTAutograd traces and other passes, we typically
+    # require a lot of active context managers; most typically these either
+    # (1) ensure we are faithfully replicating the original PyTorch context
+    # managers or (2) toggle some behaviors in PyTorch to make it more
+    # suitable for tracing.  When you use AOTState, you're expected to have
+    # created an ExitStack, entered it; then while we are running AOTAutograd
+    # we will add things onto the stack as necessary.  When you're all done
+    # with processing AOTAutograd, you can exit this stack.  All functions
+    # that take AOTState expect the ExitStack to not have been exited yet.
+    #
+    # TODO: We potentially could offer a resumable context manager, where you
+    # can cancel it and reenable it later when you need it.
+    stack: contextlib.ExitStack
+
+
+class CompilerWrapper:
+    """
+    A wrapper around the inputs and outputs to the compiler_fn. We separate these into two parts:
+
+    1. The prologue, which edits the input to the compiler_fn(flat_fn, flat_args, etc)
+    2. The epilogue, which edits the outputs of the compiler_fn (compiled_fn, real arguments)
+
+    Each wrapper below should be implemented as a CompilerWrapper, so that we can facilitate
+    caching on the compiled output, and re-wrapping the output via epilogues.
+    Extra metadata that is needed to compute pre or post compile can be passed in via attributes.
+    """
+
+    def pre_compile(
+        self,
+        flat_fn,
+        flat_args: list[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
+        """
+        Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
+        Args:
+        flat_fn: The function to compile
+        flat_args: Metadata from example inputs of the function to compile
+        aot_config: AOTConfig passed in at compile time
+        fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
+        """
+        return flat_fn, flat_args, fw_metadata
+
+    def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
+        """
+        Given an output of the compiler, wrap it with information received from prologue.
+        Args:
+        compiled_fn: Callable after calling compiler_fn
+        aot_config: AOTConfig after calling prologue
+        runtime_metadata: ViewAndMutationMeta after calling all wrappers's pre_compile steps.
+        Example:
+
+        def wrapped_compiled_fn(args):
+            # do something with args, aot_config, fw_metadata
+            return compiled_fn(args)
+
+        return wrapped_compiled_fn
+        """
+        return compiled_fn
+
+
+@dataclass
+class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
+    # AOTAutograd typically operates by taking complicated graphs and
+    # desugaring them into simpler graphs that use PyTorch features.  These
+    # wrappers establish invariants so that when we actually do tracing we can
+    # assume these invariants hold, leading to a simpler tracing
+    # implementation.  However, this means that we have to keep track of how
+    # to enter/exit these wrappers when passing inputs into the compiled
+    # graph, among other things!
+    wrappers: list[CompilerWrapper]
+
+    # The actual captured graph.  In some circumstances (export) this graph
+    # has a specific calling convention that can be relied upon by external
+    # callers.  In other situations, the calling convention is unspecified and
+    # only aot_stage2_compile knows how to deal with them.
+    graph: torch.fx.GraphModule
+
+    # When compiling with autograd support, this is the joint_inputs, which is
+    # larger than the original flat_args as all tangents get inputs.  The
+    # tuple organizes into primals and tangents.  When not autograd it's just
+    # a plain list.
+    updated_flat_args: Union[list[Any], tuple[list[Any], list[Any]]]
+
+    # Metadata about subclass inputs/outputs in the graph trace.
+    maybe_subclass_meta: Any
+
+
+FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
+
+
+TOutputCode = TypeVar("TOutputCode", bound="OutputCode")
+
+
+class AOTDispatchCompiler(Protocol):
+    """
+    Represents a fw or bw_compiler passed to AOTAutograd.
+    """
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+    ) -> Any: ...
+
+
+# TODO: bikeshed on this name
+class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
+    """
+    Represents an AOTDispatchCompiler that returns an OutputCode, and is
+    therefore cacheable. SerializableAOTDispatchCompiler always return an OutputCode.
+    A _CompileFxCallable usually gets converted into an AOTDispatchCompiler after binding all of
+    the kwargs in _CompileFxKwargs.
+    """
+
+    def __init__(
+        self,
+        output_code_ty: type[TOutputCode],
+        compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
+    ):
+        self.output_code_ty = output_code_ty
+        self.compiler_fn = compiler_fn
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+    ) -> OutputCode:
+        return self.compiler_fn(gm, example_inputs)
