@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.utils.dlpack import from_dlpack, to_dlpack
+from torch.utils.dlpack import DLDeviceType, from_dlpack, to_dlpack
 
 
 # Wraps a tensor, exposing only DLPack methods:
@@ -304,21 +304,21 @@ class TestTorchDlPack(TestCase):
     @skipMeta
     def test_dlpack_export_requires_grad(self):
         x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, r"require gradient"):
+        with self.assertRaisesRegex(BufferError, r"require gradient"):
             x.__dlpack__()
 
     @skipMeta
     def test_dlpack_export_is_conj(self):
         x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
         y = torch.conj(x)
-        with self.assertRaisesRegex(RuntimeError, r"conjugate bit"):
+        with self.assertRaisesRegex(BufferError, r"conjugate bit"):
             y.__dlpack__()
 
     @skipMeta
     def test_dlpack_export_non_strided(self):
         x = torch.sparse_coo_tensor([[0]], [1], size=(1,))
         y = torch.conj(x)
-        with self.assertRaisesRegex(RuntimeError, r"strided"):
+        with self.assertRaisesRegex(BufferError, r"strided"):
             y.__dlpack__()
 
     @skipMeta
@@ -458,6 +458,29 @@ class TestTorchDlPack(TestCase):
     def test_needs_copy_error(self, device):
         with self.assertRaisesRegex(ValueError, r"cannot move .* tensor from .*"):
             self._test_from_dlpack(device, out_device="cpu", copy=False)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    def test_unsupported_device_error(self, device):
+        inp = make_tensor((5,), dtype=torch.float32, device=device)
+        dl_device_type = DLDeviceType.kDLHexagon
+
+        with self.assertRaisesRegex(
+            BufferError, f"Unsupported device_type: {int(dl_device_type)}"
+        ):
+            inp.__dlpack__(max_version=(1, 0), dl_device=(dl_device_type, 0))
+
+    @skipMeta
+    @onlyCPU
+    def test_dlpack_unsupported_dtype_error(self, device):
+        inp = make_tensor((5,), dtype=torch.float32, device=device).to(
+            torch.float8_e4m3fn
+        )
+
+        with self.assertRaisesRegex(
+            BufferError, ".* types are not supported by dlpack"
+        ):
+            from_dlpack(inp)
 
 
 instantiate_device_type_tests(TestTorchDlPack, globals())
