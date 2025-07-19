@@ -3550,14 +3550,15 @@ class TestDynamicQuantizedOps(TestCase):
             (2, 4),         # batch_size
             (4, 5),     # input_channels
             (4, 7),      # output_channels
+            (True, False),         # bias None or not
         )
-        for batch_size, input_channels, output_channels in options:
+        for batch_size, input_channels, output_channels, bias_is_none in options:
             pack_op = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16
             linear_op = torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight
 
             x = torch.randn(batch_size, input_channels)
             w = torch.randn(output_channels, input_channels)
-            bias = torch.randn(output_channels)
+            bias = torch.randn(output_channels) if not bias_is_none else None
 
             w_packed = pack_op(w)
             out = linear_op(x, w_packed, bias, output_channels)
@@ -3590,6 +3591,18 @@ class TestDynamicQuantizedOps(TestCase):
         compiled_out = compiled(x, w, b)
 
         self.assertEqual(ref_out, compiled_out)
+
+        def func(X, W):
+            packed_W = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16(W)
+            return torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight(X, packed_W, None, W.size(0))
+
+        ref_out = func(x, w)
+
+        compiled = torch.compile(func)
+        compiled_out = compiled(x, w)
+
+        self.assertEqual(ref_out, compiled_out)
+
 
     """Tests the correctness of the dynamic quantized lstm/gru."""
 
