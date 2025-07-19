@@ -3,11 +3,13 @@
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     dtypes,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
+    skipCUDAIfNotRocm,
     skipCUDAIfRocm,
     skipMeta,
 )
@@ -241,6 +243,62 @@ class TestTorchDlPack(TestCase):
         with self.assertRaises(TypeError):
             x = make_tensor((5,), dtype=dtype, device=device)
             x.__dlpack__(stream=object())
+
+    @skipMeta
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_dlpack_cuda_per_thread_stream(self, device):
+        # Test whether we raise an error if we are trying to use per-thread default
+        # stream, which is currently not supported by PyTorch.
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(
+            BufferError, "per-thread default stream is not supported"
+        ):
+            x.__dlpack__(stream=2)
+
+    @skipMeta
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_dlpack_invalid_rocm_streams(self, device):
+        # Test that we correctly raise errors on unsupported ROCm streams.
+        def test(x, stream):
+            with self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on ROCm: \d"
+            ):
+                x.__dlpack__(stream=stream)
+
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        test(x, stream=1)
+        test(x, stream=2)
+
+    @skipMeta
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_dlpack_invalid_cuda_streams(self, device):
+        x = make_tensor((5,), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(AssertionError, r"unsupported stream on CUDA: \d"):
+            x.__dlpack__(stream=0)
+
+    @skipMeta
+    def test_dlpack_invalid_cpu_stream(self):
+        x = make_tensor((5,), dtype=torch.float32, device="cpu")
+        with self.assertRaisesRegex(AssertionError, r"stream should be None on cpu."):
+            x.__dlpack__(stream=0)
+
+    @skipMeta
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_dlpack_tensor_on_different_device(self, devices):
+        dev0, dev1 = devices[:2]
+
+        with torch.device(dev0):
+            x = make_tensor((5,), dtype=torch.float32, device=dev0)
+
+        with self.assertRaisesRegex(
+            BufferError, r"Can't export tensors on a different CUDA device"
+        ):
+            with torch.device(dev1):
+                x.__dlpack__()
 
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
     @skipMeta
