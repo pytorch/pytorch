@@ -266,6 +266,7 @@ def aot_stage2_inference(
             include_stride=True,
             include_device=True,
             fast_sympy_print=True,
+            expanded_def=True,
         )
 
     fakified_out_wrapper = FakifiedOutWrapper()
@@ -877,7 +878,10 @@ def maybe_log_graph(
 
     def gm_str_fn() -> str:
         return gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            expanded_def=True,
         )
 
     if out_structured_logs is not None:
@@ -1347,7 +1351,10 @@ def aot_stage2_autograd(
             ),
         )
         joint_graph_str = fx_g.print_readable(
-            print_output=False, include_stride=True, include_device=True
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            expanded_def=True,
         )
         trace_structured(
             "aot_joint_graph",
@@ -1596,10 +1603,16 @@ def aot_stage2_autograd(
                 ),
             )
             fw_module_str = fw_module.print_readable(
-                print_output=False, include_stride=True, include_device=True
+                print_output=False,
+                include_stride=True,
+                include_device=True,
+                expanded_def=True,
             )
             bw_module_str = bw_module.print_readable(
-                print_output=False, include_stride=True, include_device=True
+                print_output=False,
+                include_stride=True,
+                include_device=True,
+                expanded_def=True,
             )
 
             trace_structured(
