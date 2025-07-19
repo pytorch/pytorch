@@ -6556,7 +6556,7 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     input (Tensor): the input tensor.
-    dim (int): the dimension to reduce. If None, all dimensions are reduced.
+    dim (int, optional): the dimension to reduce. If None, all dimensions are reduced.
     keepdim (bool, optional): whether the output tensor has `dim` retained or not. Default: `False`.
 
 Keyword args:
