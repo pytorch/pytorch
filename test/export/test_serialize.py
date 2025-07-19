@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+from torch._export.serde.serialize import deserialize_torch_artifact
 
 
 def get_filtered_export_db_tests():
@@ -1598,6 +1599,17 @@ class TestSaveLoad(TestCase):
 
         inp = (torch.tensor(1),)
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
+
+    def test_deserialize_torch_artifact_dict(self):
+        data = {"Key": torch.tensor([1, 2, 3])}
+        buf = io.BytesIO()
+        torch.save(data, buf)
+        serialized = buf.getvalue()
+
+        result = deserialize_torch_artifact(serialized)
+        self.assertIsInstance(result, dict)
+        self.assertTrue(torch.equal(result["Key"], torch.tensor([1, 2, 3])))
+
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
