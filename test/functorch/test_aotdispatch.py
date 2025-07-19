@@ -7469,7 +7469,7 @@ metadata incorrectly.
             "pack_hash",
             "unpack_hash",
         )
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         class SAF(torch.autograd.Function):
             @staticmethod
