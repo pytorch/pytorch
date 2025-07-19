@@ -315,21 +315,6 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-py3-clang18-mobile-build:
-    name: linux-jammy-py3-clang18-mobile-build
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3-clang12-mobile-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3-clang18-asan
-      build-generates-artifacts: false
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
-    secrets: inherit
-
   linux-jammy-cuda12_8-cudnn9-py3_9-clang12-build:
     name: linux-jammy-cuda12.8-cudnn9-py3.9-clang12
     uses: ./.github/workflows/_linux-build.yml
