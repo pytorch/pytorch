@@ -2075,6 +2075,8 @@ class AOTInductorTestsTemplate:
             "a": {0: dim0_ab, 1: None},
             "b": {0: dim0_ab, 1: None},
         }
+        inps = prepend_counters(inputs, num_counters=2)
+        breakpoint()
         self.check_model_with_multiple_inputs(
             WhileLoopModels.Nested(),
             prepend_counters(inputs, num_counters=2),
@@ -6753,16 +6755,9 @@ MPS_TEST_FAILURES = {
     # unsupported operator: aten._scaled_dot_product_attention_math_for_mps.default
     "test_issue_140766": fail_mps(),
     # Compilation Error
-    "test_fallback_kernel_with_symexpr_output": fail_mps(),
-    "test_while_loop_with_mixed_device": fail_mps(),
-    "test_while_loop_nested": fail_mps(),
-    "test_index_put_with_none_index": fail_mps(),
-    "test_size_from_multi_ouptut": fail_mps(),
-    "test_simple_embed_kernel_binary_False": fail_mps(),
-    "test_simple_embed_cubin_False": fail_mps(is_skip=True),
-    "test_simple_embed_cubin_True": fail_mps(is_skip=True),
-    "test_simple_embed_kernel_binary_True": fail_mps(),
-    "test_missing_cubin": fail_mps(),
+    # "test_fallback_kernel_with_symexpr_output": fail_mps(),
+    # "test_while_loop_nested": fail_mps(),
+    # "test_index_put_with_none_index": fail_mps(),
     # Dynamism
     "test_shifted_constraint_ranges": fail_mps(),
     "test_while_loop_with_sym_expr_cond_dynamic_True": fail_mps(),
