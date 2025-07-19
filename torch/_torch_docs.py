@@ -6555,9 +6555,9 @@ in the output tensors having 1 fewer dimension than ``input``.
           the indices of the first maximal value are returned.
 
 Args:
-    input (Tensor): the input tensor.
-    dim (int, optional): the dimension to reduce. If None, all dimensions are reduced.
-    keepdim (bool, optional): whether the output tensor has `dim` retained or not. Default: `False`.
+    {input}
+    {opt_dim_without_none}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (max, max_indices)
