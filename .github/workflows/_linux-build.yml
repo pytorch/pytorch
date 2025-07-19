@@ -288,8 +288,7 @@ jobs:
           TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
 
           if [[ ${BUILD_ENVIRONMENT} == *"riscv64"* ]]; then
-            docker run --rm --privileged tonistiigi/binfmt:latest
-            docker run --rm --privileged tonistiigi/binfmt:latest --install riscv64
+            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
           fi
 
           # detached container should get cleaned up by teardown_ec2_linux

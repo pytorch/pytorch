@@ -148,6 +148,7 @@ RUN source /opt/riscv-cross-env/bin/activate \
 
 # Set default environment variables for PyTorch build
 ENV Python_ROOT_DIR=${SYSROOT}
+ENV OPENSSL_ROOT_DIR=${SYSROOT}
 
 USER jenkins
 CMD ["bash"]
