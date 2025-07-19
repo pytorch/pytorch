@@ -64,7 +64,7 @@ Tensor TensorMaker::make_tensor() {
    if (strides_) {
      auto storage_size = detail::computeStorageNbytes(sizes_, *strides_, itemsize);
      if (storage_offset_) {
-       storage_size += storage_offset_.value();
+       storage_size += storage_offset_.value() * itemsize;
      }
      return storage_size;
    }
