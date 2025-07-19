@@ -174,7 +174,12 @@ function install_torchvision() {
     echo 'char* dlerror(void) { return "";}'|gcc -fpic -shared -o "${HOME}/dlerror.so" -x c -
     LD_PRELOAD=${orig_preload}:${HOME}/dlerror.so
   fi
+
+  if [[ -n "${TORCH_CUDA_ARCH_LIST}" ]]; then
+    export WITH_CUDA=1
+  fi
   pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
+
   if [ -n "${LD_PRELOAD}" ]; then
     LD_PRELOAD=${orig_preload}
   fi
