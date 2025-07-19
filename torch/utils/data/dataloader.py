@@ -77,14 +77,14 @@ class _DatasetKind:
     Iterable = 1
 
     @staticmethod
-    def create_fetcher(kind, dataset, auto_collation, collate_fn, drop_last):
+    def create_fetcher(kind, dataset, auto_collation, collate_fn, drop_last, num_threads=1):
         if kind == _DatasetKind.Map:
             return _utils.fetch._MapDatasetFetcher(
-                dataset, auto_collation, collate_fn, drop_last
+                dataset, auto_collation, collate_fn, drop_last, num_threads
             )
         else:
             return _utils.fetch._IterableDatasetFetcher(
-                dataset, auto_collation, collate_fn, drop_last
+                dataset, auto_collation, collate_fn, drop_last, num_threads
             )
 
 
@@ -195,7 +195,7 @@ class DataLoader(Generic[_T_co]):
             default. This argument is discouraged and subject to deprecated.
         in_order (bool, optional): If ``False``, the data loader will not enforce that batches
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
-
+        num_threads (int, optional): Number of threads per worker to use for data loading. (default: ``1``)
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
                  cannot be an unpicklable object, e.g., a lambda function. See
@@ -238,6 +238,7 @@ class DataLoader(Generic[_T_co]):
     prefetch_factor: Optional[int]
     _iterator: Optional[_BaseDataLoaderIter]
     __initialized = False
+    num_threads: int = 1
 
     def __init__(
         self,
@@ -259,6 +260,7 @@ class DataLoader(Generic[_T_co]):
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
+        num_threads: int = 1,
     ) -> None:
         torch._C._log_api_usage_once("python.data_loader")
 
@@ -286,6 +288,7 @@ class DataLoader(Generic[_T_co]):
 
         self.dataset = dataset
         self.num_workers = num_workers
+        self.num_threads = num_threads
         self.prefetch_factor = prefetch_factor
         self.pin_memory = pin_memory
         self.pin_memory_device = pin_memory_device
@@ -651,6 +654,7 @@ class _BaseDataLoaderIter:
         self._drop_last = loader.drop_last
         self._index_sampler = loader._index_sampler
         self._num_workers = loader.num_workers
+        self._num_threads = loader.num_threads
         ws, rank = _get_distributed_settings()
         self._world_size = ws
         self._rank = rank
@@ -783,6 +787,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
             self._auto_collation,
             self._collate_fn,
             self._drop_last,
+            self._num_threads,
         )
 
     def _next_data(self):
@@ -1160,6 +1165,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._num_workers,
                     self._persistent_workers,
                     self._shared_seed,
+                    self._num_threads,
                 ),
             )
             w.daemon = True
