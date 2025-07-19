@@ -68,8 +68,6 @@ def _create_graph(
             out, out_descs = call_and_expect_output_descs(f, args)
             return out
 
-    # TODO: save args_descs/out_descs to the produced FX graph
-
     with (
         enable_python_dispatcher(),
         FunctionalTensorMode(
@@ -85,6 +83,18 @@ def _create_graph(
             record_module_stack=True,
             pre_dispatch=aot_config.pre_dispatch,
         )(*args)
+
+        if args_descs is not None:
+            flat_args_descs, _ = pytree.tree_flatten(args_descs)
+            flat_out_descs, _ = pytree.tree_flatten(out_descs)
+
+            i = 0
+            for n in fx_g.graph.nodes:
+                if n.op == "placeholder":
+                    n.meta["desc"] = flat_args_descs[i]
+                    i += 1
+                elif n.op == "output":
+                    n.meta["desc"] = flat_out_descs
 
     return fx_g
 
@@ -276,7 +286,10 @@ def aot_dispatch_base_graph(
         trace_structured(
             "aot_inference_graph",
             payload_fn=lambda: fw_module.print_readable(
-                print_output=False, include_stride=True, include_device=True
+                print_output=False,
+                include_stride=True,
+                include_device=True,
+                expanded_def=True,
             ),
         )
 
