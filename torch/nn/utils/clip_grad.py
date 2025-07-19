@@ -128,6 +128,7 @@ def _clip_grads_with_norm_(
         grad = grad * \frac{max\_norm}{total\_norm + 1e-6}
 
     Gradients are modified in-place.
+    
     This function is equivalent to :func:`torch.nn.utils.clip_grad_norm_` with a pre-calculated
     total norm.
 
