@@ -66,6 +66,12 @@ from torch.testing._internal.inductor_utils import (
 from torch.testing._internal.triton_utils import requires_cuda
 
 
+try:
+    from . import custom_inductor_config
+except ImportError:
+    import custom_inductor_config
+
+
 if HAS_TRITON:
     import triton  # @manual
 
@@ -2462,6 +2468,50 @@ class TestFxGraphCacheHashing(TestCase):
                 pickler.dumps(details1),
                 pickler.dumps(details3),
             )
+
+    def test_hash_custom_backend_config(self):
+        """
+        Test cache correctness when a custom inductor codegen config
+        is installed
+        """
+        with patch_inductor_backend(
+            "cpu", custom_backend_config=custom_inductor_config
+        ):
+            gm = torch.fx.GraphModule({}, torch.fx.Graph())
+            pickler = FxGraphCachePickler(gm)
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+            self.assertEqual(pickler.dumps(details1), pickler.dumps(details2))
+
+            custom_inductor_config.enable_optimisation = True
+            details3 = FxGraphHashDetails(None, [], {}, [])
+            self.assertNotEqual(pickler.dumps(details2), pickler.dumps(details3))
+
+            torch._dynamo.reset()
+            counters.clear()
+
+            custom_inductor_config.enable_optimisation = False
+            x = torch.zeros(32)
+            y = torch.zeros(32)
+            compiled_fn = torch.compile(torch.add)
+
+            compiled_fn(x, y)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            torch._dynamo.reset()
+            counters.clear()
+
+            compiled_fn(x, y)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            torch._dynamo.reset()
+            counters.clear()
+
+            # Changing the custom config should trigger a recompilation
+            custom_inductor_config.enable_optimisation = True
+            compiled_fn(x, y)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
     def test_bypass_unsupported(self):
         """
