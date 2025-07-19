@@ -6750,6 +6750,8 @@ MPS_TEST_FAILURES = {
     # MPS doesn't support float8
     "test_fp8": fail_mps(),
     "test_fp8_view_of_param": fail_mps(),
+    # unsupported operator: aten._scaled_dot_product_attention_math_for_mps.default
+    "test_issue_140766": fail_mps(),
     # Compilation Error
     "test_fallback_kernel_with_symexpr_output": fail_mps(),
     "test_while_loop_with_mixed_device": fail_mps(),
@@ -6770,29 +6772,12 @@ MPS_TEST_FAILURES = {
     "test_cond_non_tensor_predicates_dynamic_True": fail_mps(),
     "test_zero_grid_with_unbacked_symbols": fail_mps(),
     "test_reuse_kernel_dynamic": fail_mps(is_skip=True),
-    "test_while_loop_with_parameters": fail_mps(is_skip=True),
     "test_cond_with_parameters": fail_mps(is_skip=True),
     "test_cond_share_predicte": fail_mps(is_skip=True),
-    # SetStorage incorrect
-    "test_small_constant": fail_mps(is_skip=True),
-    "test_free_inactive_buffer": fail_mps(is_skip=True),
-    "test_extract_constants_map": fail_mps(is_skip=True),
-    "test_linear_freezing": fail_mps(is_skip=True),
-    "test_model_modified_weights": fail_mps(is_skip=True),
     # Error device may not be nil
     "test_zero_size_weight": fail_mps(is_skip=True),
-    # Constants update (segfault)
-    "test_update_inactive_constant_buffer": fail_mps(is_skip=True),
-    "test_update_constant_buffer": fail_mps(is_skip=True),
-    "test_so_without_weight": fail_mps(is_skip=True),
-    "test_constant_folding_with_update": fail_mps(is_skip=True),
-    "test_nested_tensor_from_jagged": fail_mps(is_skip=True),
-    "test_issue_140766": fail_mps(is_skip=True),
-    "test_buffer_mutation_and_force_mmap_weights": fail_mps(is_skip=True),
+    # RuntimeError: Cannot compare two tensors on different devices. Got: cpu and mps:0
     "test_aoti_constant_tensor_name_collision": fail_mps(is_skip=True),
-    "test_large_mmaped_weights": fail_mps(is_skip=True),
-    "test_subclasses": fail_mps(is_skip=True),
-    "test_autotune_with_constant_folding": fail_mps(is_skip=True),
     # MPS doesn't support triton
     "test_autotuning_args_reuse": fail_mps(),
     "test_triton_autotuning": fail_mps(),

@@ -474,6 +474,7 @@ class AOTInductorModelContainer {
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(tensor, &stride));
       AOTI_TORCH_ERROR_CODE_CHECK(
           aoti_torch_get_storage_offset(tensor, &offset));
+      auto dtype = models_[0]->constant_dtype(idx);
 
 #ifdef USE_XPU
       sycl::queue* queue_ptr = nullptr;
@@ -483,13 +484,17 @@ class AOTInductorModelContainer {
           .wait();
 #elif USE_MPS
       internal_constants_ptr = constants_blob_ptr;
-      offset = constants_internal_offset_[idx];
       aoti_torch_mps_copy_buffer(
           constants_blob_ptr,
           constants_internal_offset_[idx],
-          0,
+          offset,
           constant_size,
           user_constant_ptr);
+      // For mps tensors, all constants are stored in one buffer, with the
+      // offset being where the constant starts. So we want to change the
+      // constant tensor's offset to point to constants_internal_offset_[idx]
+      offset = constants_internal_offset_[idx] /
+          aoti_torch_dtype_element_size(dtype);
 #elif USE_CUDA
       AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
           internal_constants_ptr,
@@ -511,7 +516,7 @@ class AOTInductorModelContainer {
           models_[0]->constant_shape(idx),
           stride,
           offset,
-          models_[0]->constant_dtype(idx),
+          dtype,
           device_type,
           device_idx,
           &tensor_handle));
