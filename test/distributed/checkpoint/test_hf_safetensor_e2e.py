@@ -151,8 +151,6 @@ class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
 
         checkpoint_dir = self.temp_dir
-        consolidated_output_dir = os.path.join(checkpoint_dir, "consolidated")
-        os.makedirs(consolidated_output_dir, exist_ok=True)
 
         state_dict_to_save = {"dtensor": dtensor}
         dist_cp.save(
@@ -160,15 +158,13 @@ class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
             storage_writer=dist_cp.HuggingFaceStorageWriter(
                 path=checkpoint_dir,
                 save_distributed=True,
-                consolidated_output_path=consolidated_output_dir,
+                enable_consolidation=True,
             ),
         )
         dist.barrier()
 
         if self.rank == 0:
-            file_path = os.path.join(
-                consolidated_output_dir, "model-00001-of-00001.safetensors"
-            )
+            file_path = os.path.join(checkpoint_dir, "model-00001-of-00001.safetensors")
             loaded_dict = safetensors.torch.load_file(file_path)
             self.assertEqual(loaded_dict.keys(), {"dtensor"})
             self.assertTrue(torch.equal(loaded_dict["dtensor"], global_tensor))
