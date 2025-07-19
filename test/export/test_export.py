@@ -7635,6 +7635,42 @@ def forward(self, x):
             ]:
                 self.assertFalse(hasattr(tensor, attr))
 
+    @testing.expectedFailureCppRuntime
+    def test_while_loop_assert_separation(self):
+        from torch._higher_order_ops import while_loop
+
+        class Bar(torch.nn.Module):
+            def forward(self, idx, x):
+                i = idx.item()
+                def cond_fn(idx, x):
+                    i = idx.item()
+                    torch._check(i != 5)
+                    return i <= 9
+
+                def body_fn(idx, x):
+                    i = idx.item()
+                    torch._check(i % 2 == 0)
+                    return idx + 2, x + i
+
+                return while_loop(cond_fn, body_fn, [idx, x + i])
+
+        inps = (torch.tensor([0]), torch.zeros(1))
+        ep = export(Bar(), inps, strict=False)
+        i, out = ep.module()(*inps)
+        self.assertEqual(i, 10)
+        self.assertEqual(out.item(), 20)
+        # check assertions are separate for each subgraph
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Ne\(u[\d]+, 5\).*"
+        ):
+            ep.graph_module.while_loop_cond_graph_0(torch.tensor([5]), torch.zeros(1))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Eq\(PythonMod\(u[\d]+, 2\), 0\).*"
+        ):
+            ep.graph_module.while_loop_body_graph_0(torch.tensor([5]), torch.zeros(1))
+
     def test_constrain_decomp(self) -> None:
         class M(torch.nn.Module):
             def __init__(self) -> None:

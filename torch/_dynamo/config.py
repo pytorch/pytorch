@@ -624,6 +624,9 @@ record_runtime_overhead = True
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
+# Disable memoization for data-dependent ops like item(), nonzero(), unique()
+disable_unbacked_memo = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

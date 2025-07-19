@@ -245,6 +245,7 @@ def _create_unbacked_symint(
 
 @while_loop_op.py_impl(ProxyTorchDispatchMode)
 def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
+    @torch._dynamo.config.patch(disable_unbacked_memo=True)
     def _trace_while_loop(
         proxy_mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
     ):

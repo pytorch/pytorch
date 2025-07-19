@@ -294,7 +294,8 @@ def _unique(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
+    if not torch._dynamo.config.disable_unbacked_memo:
+        nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
 
     # Do not use a memo for unique_dim
     if dim is not None or nnz is None:
@@ -326,10 +327,11 @@ def _unique(
             _constrain_range_for_size(nnz, max=maxval)
 
         if dim is None:
-            if unique_consecutive:
-                arg.unique_consecutive_memo = nnz
-            else:
-                arg.unique_memo = nnz
+            if not torch._dynamo.config.disable_unbacked_memo:
+                if unique_consecutive:
+                    arg.unique_consecutive_memo = nnz
+                else:
+                    arg.unique_memo = nnz
 
     if dim is None:
         ret = [arg.new_empty((nnz,))]
@@ -411,7 +413,9 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
 @register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
-    if (r := arg.item_memo) is not None:
+    if (
+        r := arg.item_memo
+    ) is not None and not torch._dynamo.config.disable_unbacked_memo:
         return r
     if fake_mode.shape_env is None or (
         not fake_mode.shape_env.allow_scalar_outputs
@@ -427,7 +431,8 @@ def local_scalar_dense(fake_mode, func, arg):
         r = fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
-    arg.item_memo = r
+    if not torch._dynamo.config.disable_unbacked_memo:
+        arg.item_memo = r
     return r
 
 
@@ -445,7 +450,7 @@ def nonzero(fake_mode, func, arg):
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if (nnz := arg.nonzero_memo) is None:
+    if (nnz := arg.nonzero_memo) is None or torch._dynamo.config.disable_unbacked_memo:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -483,7 +488,8 @@ def nonzero(fake_mode, func, arg):
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.nonzero_memo = nnz
+        if not torch._dynamo.config.disable_unbacked_memo:
+            arg.nonzero_memo = nnz
 
     return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)
 
