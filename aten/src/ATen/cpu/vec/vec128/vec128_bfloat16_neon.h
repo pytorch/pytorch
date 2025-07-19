@@ -553,12 +553,30 @@ Vectorized<c10::BFloat16> inline fmadd(
 }
 
 template <>
+Vectorized<c10::BFloat16> inline fnmadd(
+    const Vectorized<c10::BFloat16>& a,
+    const Vectorized<c10::BFloat16>& b,
+    const Vectorized<c10::BFloat16>& c) {
+  // See NOTE [BF16 FMA] above.
+  return -a * b + c;
+}
+
+template <>
 Vectorized<c10::BFloat16> inline fmsub(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
   // See NOTE [BF16 FMA] above.
   return a * b - c;
+}
+
+template <>
+Vectorized<c10::BFloat16> inline fnmsub(
+    const Vectorized<c10::BFloat16>& a,
+    const Vectorized<c10::BFloat16>& b,
+    const Vectorized<c10::BFloat16>& c) {
+  // See NOTE [BF16 FMA] above.
+  return -a * b - c;
 }
 
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)

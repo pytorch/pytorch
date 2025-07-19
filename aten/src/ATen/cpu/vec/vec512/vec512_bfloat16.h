@@ -192,7 +192,9 @@ class Vectorized16 {
   static constexpr size_type size() {
     return 32;
   }
-  Vectorized16() {}
+  Vectorized16() {
+    values = _mm512_setzero_si512();
+  }
   Vectorized16(__m512i v) : values(v) {}
   Vectorized16(T val) {
     value_type uw = val.x;
