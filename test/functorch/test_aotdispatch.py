@@ -2372,7 +2372,7 @@ def forward(self, arg0_1, arg1_1):
             return a.mul(3), b.mul(4)
 
         inp = [
-            # First inp doesn't require grad, but we switch it on
+            # First inp doesnt require grad, but we switch it on
             torch.ones(3, 3, requires_grad=False),
             torch.ones(3, 3, requires_grad=True),
         ]
@@ -5670,7 +5670,7 @@ def forward(self, primals_1, tangents_1):
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
-            # then 4 tensors (transposes of matrices used for mm) are saved
+            # then 4 tensors (transposes of matricies used for mm) are saved
             # finally 3 symints are saved
             [False, True, True, False, False] + [False] * 4 + [True] * 3,
             [is_sym_node(n) for n in fw_graph_out_nodes],
@@ -6000,7 +6000,7 @@ metadata incorrectly.
         self.assertEqual(b_test.a, b_ref.a)
         self.assertEqual(b_test.b, b_ref.b)
 
-        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile the backward.
+        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile teh backward.
         (b_ref * out_ref).sum().backward()
         (b_test * out_test).sum().backward()
         # Both grad_inputs are TwoTensor
@@ -7539,8 +7539,6 @@ aot_autograd_failures = {
     skip("nn.functional.binary_cross_entropy_with_logits"),  # seems to fail sometimes?
     skip("nn.functional.margin_ranking_loss"),  # seems flaky
     skip("linalg.lu_solve"),  # flaky
-    decorate("matmul", decorator=unittest.skipIf(IS_ARM64, "flaky")),
-    decorate("__rmatmul__", decorator=unittest.skipIf(IS_ARM64, "flaky")),
     # overrides atol=1e-4, rtol=1e-5 would do as well
     decorate(
         "svd_lowrank",
@@ -7560,8 +7558,8 @@ aot_autograd_failures = {
         "bicubic",
         decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)}),
     ),
-    # conv2d sometimes nondeterministic in this config?
-    decorate("nn.functional.conv2d", decorator=unittest.skipIf(IS_ARM64, "flaky")),
+
+ 
 }
 
 if not TEST_MKL:
