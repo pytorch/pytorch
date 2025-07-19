@@ -297,8 +297,20 @@ class UniformValueConstantFolder(ConstantFolder):
             else:
                 env[n] = self.unknown_value
 
+    def _run_node_on_cpu(self, n: torch.fx.Node):
+        with self._set_current_node(n):
+            args, kwargs = self.fetch_args_kwargs_from_env(n)
+            assert isinstance(args, tuple)
+            assert isinstance(kwargs, dict)
+
+            if 'device' in kwargs:
+                kwargs['device'] = torch.device('cpu')
+
+            return getattr(self, n.op)(n.target, args, kwargs)
+
     def _deduce_value(self, node: torch.fx.Node):
         # deduce value for full-like nodes
+        # do on cpu to avoid syncs
         # 1. for constructors, substitute value is a tensor of size [1]
         # 2. for view ops/indexing, substitute value is the same as the input
         # 3. for pointwise ops, run node to get the substitute value
@@ -306,14 +318,13 @@ class UniformValueConstantFolder(ConstantFolder):
         # otherwise, stop deduce value and return unknown value
 
         # TODO: cat, more indexing
-        # TODO - do on cpu to avoid syncs
 
         # single-elem attrs
         if node.op == "get_attr" or (
             node.op == "call_function"
             and node.target == torch.ops.aten.lift_fresh_copy.default
         ):
-            out = super(ConstantFolder, self).run_node(node)
+            out = self._run_node_on_cpu(node)
             if isinstance(out, torch.Tensor) and out.numel() == 1:
                 return out
 
@@ -332,11 +343,13 @@ class UniformValueConstantFolder(ConstantFolder):
             # Don't specialize symbolic value.
             if not isinstance(value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                 new_args = [[1], value]
-                return aten.full.default(*new_args, **node.kwargs)
+                if 'device' in kwargs:
+                    kwargs['device'] = torch.device('cpu')
+                return aten.full.default(*new_args, **kwargs)
 
         # handle before view ops because this changes value
         if node.target == aten.view.dtype:
-            return super(ConstantFolder, self).run_node(node)
+            return self._run_node_on_cpu(node)
 
         # view ops, return input tensor, the first argument
         if hasattr(node.target, "overloadpacket") and (
@@ -367,6 +380,8 @@ class UniformValueConstantFolder(ConstantFolder):
             # we run the ops with dim 1, so remove memory_format to avoid error
             kwargs = dict(kwargs)
             kwargs.pop("memory_format", None)
+            if 'device' in kwargs:
+                kwargs['device'] = torch.device('cpu')
 
             return node.target(*args, **kwargs)
 
