@@ -889,6 +889,11 @@ class FakeTensor(Tensor):
             aten._foreach_copy.default,
         )
 
+        # list of ops not using zero dim cpu tensor logic to align with the eager mode.
+        bypass_zero_dim_cpu_tensor_check_ops = ordered_set(
+            aten.nextafter.default,
+        )
+
         def check_cpu_device(device: torch.device) -> bool:
             return device.type == "cpu"
 
@@ -912,13 +917,17 @@ class FakeTensor(Tensor):
                     is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
 
+            is_bypass_zero_dim_cpu_tensor_check_op = (
+                func in bypass_zero_dim_cpu_tensor_check_ops
+            )
+
             # mismatching devices !
             # if current tensor is cpu 0 dim, defer to existing device
-            if t_is_cpu_zero_dim:
+            if t_is_cpu_zero_dim and not is_bypass_zero_dim_cpu_tensor_check_op:
                 return
 
             # current device is from cpu 0 dim tensor, overwrite
-            if is_cpu_zero_dim:
+            if is_cpu_zero_dim and not is_bypass_zero_dim_cpu_tensor_check_op:
                 common_device = t.device
                 is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
