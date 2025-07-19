@@ -2073,7 +2073,6 @@ class Scheduler:
                 *V.graph.torchbind_constants.keys(),
             ]
         )
-
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
