@@ -18,7 +18,7 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C
@@ -1667,9 +1667,6 @@ class _WrappedTritonKernel:
 
 
 def _register_triton_kernels():
-    if torch._running_with_deploy():
-        return
-
     @_WrappedTritonKernel
     def kernel_impl(*args, **kwargs):
         from torch.sparse._triton_ops import bsr_dense_mm
@@ -1775,6 +1772,9 @@ def _compile_kernel(
 
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
+
+
+_POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 
 
 __all__ = [

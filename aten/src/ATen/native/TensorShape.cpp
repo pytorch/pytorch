@@ -384,7 +384,7 @@ Tensor& set_storage_cpu_(
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
   at::OptionalIntArrayRef stride_opt =
       stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : std::nullopt;
-  // We can re-use this kernel for the meta device.
+  // We can reuse this kernel for the meta device.
   // We just need to make sure we don't actually try to resize the (null)
   // storage.
   at::native::resize_impl_cpu_(
@@ -505,7 +505,7 @@ Tensor& set_cpu_(Tensor& result) {
   return result;
 }
 
-// We can't re-use the cpu kernel here because we don't want to use the cpu
+// We can't reuse the cpu kernel here because we don't want to use the cpu
 // allocator.
 Tensor& set_meta_(Tensor& result) {
   caffe2::TypeMeta dtype = result.dtype();
@@ -1904,7 +1904,7 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
 }
 
 Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
-  // If self.size() > len(reps), reps is promoted to self.size() by pre-pending
+  // If self.size() > len(reps), reps is promoted to self.size() by prepending
   // 1’s to it to keep the same behaviour as `numpy.tile`.
   // Thus for a tensor of shape (2, 3, 4, 5), a dims of (2, 2) is treated
   // as (1, 1, 2, 2).
@@ -2428,7 +2428,7 @@ Tensor index_select_sparse_cpu(
     const auto dim_indices = indices[dim].contiguous();
 
     // If nnz is smaller than size, then either indices[dim] or index gets
-    // sorted, then this is followed by a binary search to find interesections.
+    // sorted, then this is followed by a binary search to find intersections.
     const auto get_selected_indices_small_nnz_large_size =
         [&]() -> std::tuple<Tensor, Tensor> {
       const auto grain_size = at::internal::GRAIN_SIZE;
@@ -3934,7 +3934,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
         quantizer->scalar_type());
   }
   // TODO: quantized Tensor support for SymInt needs to be added but basic
-  // building blocs are missing for now.
+  // building blocks are missing for now.
   auto result = make_qtensor(
       self,
       C10_AS_INTARRAYREF_SLOW(sizes),
