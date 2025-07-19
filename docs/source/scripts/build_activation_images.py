@@ -44,6 +44,7 @@ functions = [
     torch.nn.Softplus(),
     torch.nn.Softshrink(),
     torch.nn.Softsign(),
+    torch.nn.SwiGLU(),
     torch.nn.Tanh(),
     torch.nn.Tanhshrink(),
     torch.nn.Threshold(0, 0.5),

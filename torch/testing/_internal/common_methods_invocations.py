@@ -16163,6 +16163,15 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
+    OpInfo('nn.functional.swiglu',
+           aten_name='swiglu',
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
+           sample_inputs_func=sample_inputs_glu,
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.elu',
         aten_backward_name='elu_backward',
