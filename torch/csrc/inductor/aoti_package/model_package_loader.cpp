@@ -435,19 +435,21 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
   std::vector<std::string> found_filenames;
   for (uint32_t i = 0; i < zip_archive.m_total_files; i++) {
-    uint32_t filename_len =
+    uint32_t zip_filename_len =
         mz_zip_reader_get_filename(&zip_archive, i, nullptr, 0);
-    if (filename_len == 0) {
+    if (zip_filename_len == 0) {
       throw std::runtime_error("Failed to read filename");
     }
-    // filename_len returned by mz_zip_reader_get_filename includes the null
-    // terminator, so we need to subtract 1 here
-    std::string filename_str(filename_len - 1, '\0');
+    // zip_filename_len returned by mz_zip_reader_get_filename includes the null
+    // terminator, so we need to subtract 1 here.
+    std::string zip_filename_str(zip_filename_len - 1, '\0');
+    // zip_filename_str can't be normalize_path_separator, because it should be
+    // as index for mz_zip_reader_extract_file_to_file.
     if (!mz_zip_reader_get_filename(
-            &zip_archive, i, filename_str.data(), filename_len)) {
+            &zip_archive, i, zip_filename_str.data(), zip_filename_len)) {
       throw std::runtime_error("Failed to read filename");
     }
-    found_filenames.push_back(normalize_path_separator(filename_str));
+    found_filenames.push_back(zip_filename_str);
   }
 
   if (found_filenames.empty()) {
