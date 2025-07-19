@@ -1854,6 +1854,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"autograd_cache_normalize_inputs": True})
     def test_split_module(self):
         class Mod(torch.nn.Module):
             def forward(self, x, a0, a1, b0, b1, c0, c1):
@@ -1900,6 +1901,14 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         y = ca0(a0, x, a1)
         y = ca1(b0, y, b1)
         y = ca2(c0, y, c1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+        # TODO: split_module causes ca1 and ca2 to have different type annotations
+        # for the parameter x, so we can only AOTAutogradCache cache hit once instead of twice
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
         expected = Mod()(*example_inputs)
         self.assertEqual(y, expected)
