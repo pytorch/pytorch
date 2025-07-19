@@ -86,6 +86,11 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      # Use a bigger runner here because CUDA_ARCH 9.0 is only built for H100
+      # or newer GPUs, so it doesn't benefit much from existing compiler cache
+      # from trunk. Also use a memory-intensive runner here because memory is
+      # usually the bottleneck
+      runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm90
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '9.0'
