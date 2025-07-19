@@ -176,6 +176,8 @@ function install_torchvision() {
   fi
 
   if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    # Not sure if both are needed, but why not
+    export FORCE_CUDA=1
     export WITH_CUDA=1
   fi
   pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
