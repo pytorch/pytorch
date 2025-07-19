@@ -118,6 +118,13 @@ COPY --from=triton-builder /opt/triton /opt/triton
 RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
 RUN rm -rf /opt/triton
 
+ARG VLLM
+COPY ./common/setup_vllm.sh  setup_vllm.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/vllm.txt vllm.txt
+RUN if [ -n "${VLLM}" ]; then bash ./setup_vllm.sh; fi
+RUN rm setup_vllm.sh common_utils.sh vllm.txt
+
 ARG EXECUTORCH
 # Build and install executorch
 COPY ./common/install_executorch.sh install_executorch.sh
