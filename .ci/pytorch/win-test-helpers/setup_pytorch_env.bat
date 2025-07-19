@@ -3,19 +3,6 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 :: Install Miniconda3
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
-:: Miniconda has been installed as part of the Windows AMI with all the dependencies.
-:: We just need to activate it here
-call %INSTALLER_DIR%\activate_miniconda3.bat
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
-
-:: PyTorch is now installed using the standard wheel on Windows into the conda environment.
-:: However, the test scripts are still frequently referring to the workspace temp directory
-:: build\torch. Rather than changing all these references, making a copy of torch folder
-:: from conda to the current workspace is easier. The workspace will be cleaned up after
-:: the job anyway
-xcopy /s %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %TMP_DIR_WIN%\build\torch\
-
 pushd .
 if "%VC_VERSION%" == "" (
     call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64
