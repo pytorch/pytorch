@@ -225,7 +225,7 @@ jobs:
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
           mkdir -p ../../usage_logs
-          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
+          python3 -m pip install psutil==5.9.8 dataclasses_json==0.6.7
           python3 -m tools.stats.monitor \
           --log-interval "$MONITOR_LOG_INTERVAL" \
           --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" \
@@ -321,6 +321,11 @@ jobs:
             "${USED_IMAGE}" \
             ${DOCKER_SHELL_CMD}
           )
+
+          if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
+            docker exec -t "${container_name}" sh -c "python3 -m pip install -r requirements.txt"
+          fi
+
           docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
           END_TIME=$(date +%s)

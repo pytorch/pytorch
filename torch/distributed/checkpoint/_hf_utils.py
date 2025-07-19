@@ -43,8 +43,6 @@ FORMAT_VALUE = "pt"
 
 NUM_BYTES_FOR_HEADER_LEN = 8
 
-SHARDED_DIR_NAME = "sharded"
-
 
 @dataclass
 class _HFStorageInfo:

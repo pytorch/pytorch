@@ -269,6 +269,9 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
     tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   fi
 else
+  # install build-system requirements before running setup.py commands
+  python -m pip install -r requirements-build.txt
+
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
   ( ! get_exit_code python setup.py bad_argument )
@@ -306,22 +309,20 @@ else
     fi
     pip_install_whl "$(echo dist/*.whl)"
 
-    if [[ -n "${BUILD_ADDITIONAL_PACKAGES}" ]]; then
-      if [[ "${BUILD_ADDITIONAL_PACKAGES}" == *vision* ]]; then
-        install_torchvision
-      fi
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
+      install_torchvision
+    fi
 
-      if [[ "${BUILD_ADDITIONAL_PACKAGES}" == *audio* ]]; then
-        install_torchaudio
-      fi
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *audio* ]]; then
+      install_torchaudio
+    fi
 
-      if [[ "${BUILD_ADDITIONAL_PACKAGES}" == *torchrec* || "${BUILD_ADDITIONAL_PACKAGES}" == *fbgemm* ]]; then
-        install_torchrec_and_fbgemm
-      fi
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchrec* || "${BUILD_ADDITIONAL_PACKAGES:-}" == *fbgemm* ]]; then
+      install_torchrec_and_fbgemm
+    fi
 
-      if [[ "${BUILD_ADDITIONAL_PACKAGES}" == *torchao* ]]; then
-        install_torchao
-      fi
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchao* ]]; then
+      install_torchao
     fi
 
     if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
