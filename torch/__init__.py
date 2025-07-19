@@ -1393,7 +1393,7 @@ def use_deterministic_algorithms(
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
-        * :func:`torch.Tensor.resize_` when called with a quantized tensor
+        * :meth:`torch.Tensor.resize_` when called with a quantized tensor
 
     In addition, several operations fill uninitialized memory when this setting
     is turned on and when
