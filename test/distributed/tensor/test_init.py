@@ -132,7 +132,7 @@ class DTensorConstructorTest(DTensorTestBase):
     @with_comms
     def test_zeros_full_mesh(self):
         # construct a cuda device 1d mesh
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()         
         placements = [Shard(0)]
         size = [32, 3]
         dist_tensor = zeros(size, device_mesh=mesh, placements=placements)

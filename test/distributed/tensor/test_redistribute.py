@@ -491,7 +491,7 @@ class RedistributeTest(DTensorTestBase):
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_redistribute_shard_dim_change(self, dtype):
         # test 1d device mesh
-        mesh_1d = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh_1d = self.build_device_mesh()
         data_to_test = [
             # evenly sharded case
             torch.randn((8, 8), device=self.device_type, dtype=dtype),

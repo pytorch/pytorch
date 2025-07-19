@@ -5,7 +5,6 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch.distributed.tensor import (
-    DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
