@@ -125,8 +125,10 @@ def _get_main_cpp_file(
                     [
                         f"auto constants_map{i + 1} = std::make_shared<ConstantMap>();",
                         f"auto constants_array{i + 1} = std::make_shared<std::vector<ConstantHandle>>();",
-                        f"auto model{i + 1} = AOTInductorModel{model_name}::Create(",
-                        f"    constants_map{i + 1}, constants_array{i + 1}, device_str,",
+                        f"auto model{i + 1} = std::make_unique<AOTInductorModel{model_name}>(",
+                        f"    std::move(constants_map{i + 1}),",
+                        f"    std::move(constants_array{i + 1}),",
+                        f"    device_str,",
                         f'    "{package_name}/data/aotinductor/{model_name}/");',
                         f"model{i + 1}->load_constants();",
                     ]
@@ -174,7 +176,7 @@ def _get_main_cpp_file(
     return ib.getvalue()
 
 
-def _get_make_file(package_name: str, model_names: list[str], cuda: bool) -> str:
+def _get_make_file(package_name: str, model_names: list[str], cuda: bool, use_mmap_weights: bool = True) -> str:
     ib = IndentedBuffer()
 
     ib.writelines(
@@ -200,6 +202,9 @@ def _get_make_file(package_name: str, model_names: list[str], cuda: bool) -> str
 
     model_libs = " ".join(model_names)
     ib.writeline(f"target_link_libraries(main PRIVATE torch {model_libs})")
+
+    if use_mmap_weights:
+        ib.writeline("target_compile_definitions(main PRIVATE USE_MMAP_SELF)")
     if cuda:
         ib.writeline("target_link_libraries(main PRIVATE cuda ${CUDA_LIBRARIES})")
 

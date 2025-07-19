@@ -2264,6 +2264,9 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                         f_weights.write(struct.pack("q", magic_number))
 
                     generated_files.append(weight_file)
+                    if config.aot_inductor.compile_standalone:
+                        generated_files.append(consts_o)
+                        so_builder.save_src_to_cmake(cmake_path, consts_o)
                 else:
                     # TODO: unify to always use mmap_weights
                     generated_files.append(consts_o)

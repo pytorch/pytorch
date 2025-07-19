@@ -354,6 +354,7 @@ class _ExportPackage:
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
             "aot_inductor.compile_standalone": standalone,
+            "aot_inductor.force_mmap_weights": True,
         }
         aoti_files_map = {}
         model_names = []

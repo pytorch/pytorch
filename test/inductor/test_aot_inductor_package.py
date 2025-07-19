@@ -151,7 +151,10 @@ class TestAOTInductorPackage(TestCase):
             env=custom_env,
             check=True,
         )
+        print(base_dir)
+        breakpoint()
         subprocess.run(["make"], cwd=build_path, check=True)
+
         result = subprocess.run(
             ["./build/main"],
             cwd=base_dir,
@@ -471,6 +474,54 @@ class TestAOTInductorPackage(TestCase):
                             "output_tensor1 2  2  2\n 2  2  2\n 2  2  2\n[ CPUFloatType{3,3} ]\noutput_tensor2 0  0  0\n"
                             " 0  0  0\n 0  0  0\n[ CPUFloatType{3,3} ]\n",
                         )
+
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
+    @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @skipIfRocm  # doesn't support multi-arch binary
+    @skipIfXpu  # doesn't support multi-arch binary
+    def test_compile_with_exporter_weights(self):
+        self.check_package_cpp_only()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(3, 3)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.relu(x)
+                return x
+
+
+        def default(*args, **kwargs):
+            return None
+
+        example_inputs = (
+            torch.ones(3, 3).to(self.device),
+        )
+
+        package = _ExportPackage()
+        m1 = Model().to(self.device)
+        exporter1 = package._exporter("Model", m1)._define_overload("default", default)
+        exporter1(*example_inputs)
+
+        for package_example_inputs in [True]: # , False
+            with (
+                tempfile.TemporaryDirectory() as tmp_dir,
+            ):
+                package._compiled_and_package(
+                    tmp_dir + "/package.pt2", True, package_example_inputs
+                )
+
+                # Test compiling generated files
+                result = self.cmake_compile_and_run(tmp_dir)
+
+                # TODO; need to set include_weights=True
+                # TODO:  weights_offset must be aligned to 16K boundary error
+                
 
     def test_metadata(self):
         class Model(torch.nn.Module):

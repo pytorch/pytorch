@@ -1783,6 +1783,7 @@ class CppBuilder:
             add_library({self._target_name} {target_library_type})
 
             # Add macro definitions
+            # TODO: change this to INTERFACE for library
             target_compile_definitions({self._target_name} PRIVATE {definitions})
 
             # Add compile flags

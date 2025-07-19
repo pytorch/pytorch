@@ -43,6 +43,8 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor);
 
+  // DO NOT use this static method to create the model if you're using standalone AOTInductor.
+  // There will be vtable corruption issues. 
   static std::unique_ptr<AOTInductorModel> Create(
       std::shared_ptr<ConstantMap> constants_map,
       std::shared_ptr<std::vector<ConstantHandle>> constants_array,

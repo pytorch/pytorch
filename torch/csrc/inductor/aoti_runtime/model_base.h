@@ -724,6 +724,8 @@ class AOTInductorModelBase {
 #endif
 
   // Generated model uses this device index to create CUDA guards.
+  // I have to put this as the first member for it to be correct after initialization.
+  // Or I need to initialize the derived class not in heap
   int32_t device_type_{};
   int32_t device_idx_{};
 };
