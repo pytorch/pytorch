@@ -1047,8 +1047,13 @@ class OutputGraph(OutputGraphGuardsState):
 
             def register_leaf_name(leaf_name):
                 assert self.param_name_to_source is not None
-                new_source = ParamBufferSource(source, leaf_name)
                 new_name = f"{name}.{leaf_name}"
+                # If source is None we are installing a subgraph and
+                # propagating existing parameters to the new nn module
+                if source:
+                    new_source = ParamBufferSource(source, leaf_name)  # type: ignore[assignment]
+                else:
+                    new_source = self.param_name_to_source[leaf_name]  # type: ignore[assignment]
                 self.param_name_to_source[new_name] = new_source
                 if isinstance(source, LocalSource):
                     self.dynamo_flat_name_to_original_fqn[
