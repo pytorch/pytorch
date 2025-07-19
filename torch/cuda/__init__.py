@@ -244,25 +244,21 @@ def _extract_arch_version(arch_string: str) -> int:
 
 
 def _check_capability():
-    incompatible_gpu_warn = """
-    Found GPU%d %s which is of cuda capability %d.%d.
-    Minimum and Maximum cuda capability supported by this version of PyTorch is
-    (%d.%d) - (%d.%d)
-    """
-    matched_cuda_warn = """
-    Please install PyTorch with a following CUDA
-    configurations: {} following instructions at
-    https://pytorch.org/get-started/locally/
-    """
+    incorrect_binary_warn = """
+    Found GPU%d %s which requires CUDA_VERSION >= %d to
+     work properly, but your PyTorch was compiled
+     with CUDA_VERSION %d. Please install the correct PyTorch binary
+     using instructions from https://pytorch.org
+    """  # noqa: F841
 
-    # Binary CUDA_ARCHES SUPPORTED by PyTorch
-    CUDA_ARCHES_SUPPORTED = {
-        "12.6": {"min": 50, "max": 90},
-        "12.8": {"min": 70, "max": 120},
-        "12.9": {"min": 70, "max": 120},
-    }
+    old_gpu_warn = """
+    Found GPU%d %s which is of cuda capability %d.%d.
+    PyTorch no longer supports this GPU because it is too old.
+    The minimum cuda capability supported by this library is %d.%d.
+    """
 
     if torch.version.cuda is not None:  # on ROCm we don't want this check
+        CUDA_VERSION = torch._C._cuda_getCompiledVersion()  # noqa: F841
         for d in range(device_count()):
             capability = get_device_capability(d)
             major = capability[0]
@@ -271,35 +267,13 @@ def _check_capability():
             current_arch = major * 10 + minor
             min_arch = min(
                 (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
-                default=50,
+                default=35,
             )
-            max_arch = max(
-                (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
-                default=50,
-            )
-            if current_arch < min_arch or current_arch > max_arch:
+            if current_arch < min_arch:
                 warnings.warn(
-                    incompatible_gpu_warn
-                    % (
-                        d,
-                        name,
-                        major,
-                        minor,
-                        min_arch // 10,
-                        min_arch % 10,
-                        max_arch // 10,
-                        max_arch % 10,
-                    )
+                    old_gpu_warn
+                    % (d, name, major, minor, min_arch // 10, min_arch % 10)
                 )
-                matched_arches = ""
-                for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
-                    if (
-                        current_arch >= arch_info["min"]
-                        and current_arch <= arch_info["max"]
-                    ):
-                        matched_arches += f" {arch}"
-                if matched_arches != "":
-                    warnings.warn(matched_cuda_warn.format(matched_arches))
 
 
 def _check_cubins():
