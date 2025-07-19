@@ -438,7 +438,7 @@ make -f docker.Makefile
 ### Building the Documentation
 
 To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org)
-and the pytorch_sphinx_theme2.
+and the [pytorch_sphinx_theme](https://pypi.org/project/pytorch-sphinx-theme/).
 
 Before you build the documentation locally, ensure `torch` is
 installed in your environment. For small fixes, you can install the
