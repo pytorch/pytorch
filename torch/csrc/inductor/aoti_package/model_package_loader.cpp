@@ -93,6 +93,22 @@ std::string create_temp_dir() {
   return temp_dir;
 #endif
 }
+
+const char* object_file_ext() {
+#ifdef _WIN32
+  return ".obj";
+#else
+  return ".o";
+#endif
+}
+
+const char* extension_file_ext() {
+#ifdef _WIN32
+  return ".pyd";
+#else
+  return ".so";
+#endif
+}
 } // namespace
 
 namespace torch::inductor {
@@ -455,7 +471,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         << found_filenames[1];
   }
 
-  temp_dir_ = create_temp_dir();
+  temp_dir_ = normalize_path_separator(create_temp_dir());
 
   std::string so_filename;
   std::string cpp_filename;
@@ -488,6 +504,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             .append(filename);
       }
 
+      output_path_str = normalize_path_separator(output_path_str);
+
       LOG(INFO) << "Extract file: " << filename_str << " to "
                 << output_path_str;
 
@@ -506,8 +524,12 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       }
 
       // Extracts file to the temp directory
-      mz_zip_reader_extract_file_to_file(
+      mz_bool b_extract = mz_zip_reader_extract_file_to_file(
           &zip_archive, filename_str.c_str(), output_path_str.c_str(), 0);
+      if (b_extract == MZ_FALSE) {
+        throw std::runtime_error(fmt::format(
+            "Failed to extract file {} to {}", filename_str, output_path_str));
+      }
 
       // Save the file for bookkeeping
       size_t extension_idx = output_path_str.find_last_of('.');
@@ -515,9 +537,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         std::string filename_extension = output_path_str.substr(extension_idx);
         if (filename_extension == ".cpp") {
           cpp_filename = output_path_str;
-        } else if (filename_extension == ".o") {
+        } else if (filename_extension == object_file_ext()) {
           obj_filenames.push_back(output_path_str);
-        } else if (filename_extension == ".so") {
+        } else if (filename_extension == extension_file_ext()) {
           so_filename = output_path_str;
         }
       }
