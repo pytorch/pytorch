@@ -1,6 +1,6 @@
 ARG UBUNTU_VERSION
 
-FROM ubuntu:${UBUNTU_VERSION} as base
+FROM ubuntu:${UBUNTU_VERSION} as base1
 
 ARG UBUNTU_VERSION
 
@@ -48,8 +48,9 @@ RUN bash ./install_gcc.sh && rm install_gcc.sh
 COPY ./common/install_lcov.sh install_lcov.sh
 RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
-# Install cuda and cudnn
 ARG CUDA_VERSION
+FROM base1 as cuda
+# Install cuda and cudnn
 COPY ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
 COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
@@ -62,6 +63,9 @@ ENV USE_SYSTEM_NCCL=1
 ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
 ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
+FROM base1 as base2
+COPY --from=cuda /usr/local/cuda /usr/local/cuda
+COPY --from=cuda /usr/local/nvidia /usr/local/nvidia
 
 # (optional) Install UCC
 ARG UCX_COMMIT
@@ -106,14 +110,14 @@ ARG TRITON_CPU
 
 # Create a separate stage for building Triton and Triton-CPU.  install_triton
 # will check for the presence of env vars
-FROM base as triton-builder
+FROM base2 as triton-builder
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
 COPY ci_commit_pins/triton-cpu.txt triton-cpu.txt
 RUN bash ./install_triton.sh
 
-FROM base as final
+FROM base2 as final
 COPY --from=triton-builder /opt/triton /opt/triton
 RUN if [ -n "${TRITON}" ] || [ -n "${TRITON_CPU}" ]; then pip install /opt/triton/*.whl; chown -R jenkins:jenkins /opt/conda; fi
 RUN rm -rf /opt/triton

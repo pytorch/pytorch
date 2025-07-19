@@ -212,6 +212,9 @@ function install_128 {
   ldconfig
 }
 
+mkdir -p /usr/local/cuda
+mkdir -p /usr/local/nvidia
+
 # idiomatic parameter and option handling in sh
 while test $# -gt 0
 do
