@@ -175,7 +175,7 @@ function install_torchvision() {
     LD_PRELOAD=${orig_preload}:${HOME}/dlerror.so
   fi
 
-  if [[ -n "${TORCH_CUDA_ARCH_LIST}" ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
     export WITH_CUDA=1
   fi
   pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
