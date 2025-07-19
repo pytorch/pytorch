@@ -155,6 +155,18 @@ def populate_builtin_to_tensor_fn_map():
     inp1 = torch.ones(1)
     inp0_int = torch.ones(1, dtype=torch.int32)
     inp1_int = torch.ones(1, dtype=torch.int32)
+    if inp0.device.type == 'mps':
+        # Workaround for MPS backend incompatibility with placeholder tensor allocation.
+        # When `torch.set_default_device("mps")` is used before importing torch._dynamo,
+        # these test tensors will be allocated on MPS and may trigger:
+        # RuntimeError: Placeholder storage has not been allocated on MPS device!
+        # See: https://github.com/pytorch/pytorch/issues/149184
+        # Force these tensors onto CPU to avoid lazy allocation errors on MPS.
+        cpu_device = torch.device("cpu")
+        inp0 = inp0.to(cpu_device)
+        inp1 = inp1.to(cpu_device)
+        inp0_int = inp0_int.to(cpu_device)
+        inp1_int = inp1_int.to(cpu_device)
     with GetMethodMode():
         setups_and_oplists = [
             (lambda o: o(inp0), un_ops),
