@@ -593,6 +593,7 @@ class TestAutograd(TestCase):
         y = a.exp()
         y.grad_fn._raw_saved_result.register_hooks(lambda x: x, lambda x: x)
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_saved_tensor_hooks_extra_enter_during_bw_no_leak(self):
         # This usage of saved tensor is not supported, but should not leak
         def scope():
