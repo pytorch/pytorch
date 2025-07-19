@@ -1303,16 +1303,16 @@ def _initCrashHandler() -> None: ...
 def _to_dlpack(
     data: Tensor,
     dl_device: tuple[IntEnum, _int] | None = None,
-    copy: _bool | None = None
+    copy: _bool | None = None,
 ) -> Any: ...  # THPModule_toDLPack
 def _to_dlpack_versioned(
     data: Tensor,
     dl_device: tuple[IntEnum, _int] | None = None,
-    copy: _bool | None = None
+    copy: _bool | None = None,
 ) -> Any: ...  # THPModule_toDLPackVersioned
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
 def _torchDeviceToDLDevice(
-    device: torch.device
+    device: torch.device,
 ) -> tuple[_int, _int]: ...  # THPModule_torchDeviceToDLDevice
 def _get_cpp_backtrace(
     frames_to_skip: _int,
