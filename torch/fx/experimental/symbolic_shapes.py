@@ -6263,7 +6263,7 @@ class ShapeEnv:
                 return
             self._resimplify_floor_div_axioms = False
             new_items = {}
-            for k, v in axioms.items():
+            for k, v in list(axioms.items()):
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
                 # to the shapeEnv. This handles such issue but its not ideal. This is the only expression
                 # simplification that depends on the global state of shape env.
