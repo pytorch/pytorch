@@ -483,7 +483,14 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 fi
 
 if [ -n "$GCC_VERSION" ]; then
-  if !(drun gcc --version 2>&1 | grep -q " $GCC_VERSION\\W"); then
+  if [[ "$image" == *riscv* ]]; then
+    # Check RISC-V cross-compilation toolchain version
+    if !(drun riscv64-linux-gnu-gcc-${GCC_VERSION} --version 2>&1 | grep -q " $GCC_VERSION\\W"); then
+      echo "RISC-V GCC_VERSION=$GCC_VERSION, but:"
+      drun riscv64-linux-gnu-gcc-${GCC_VERSION} --version
+      exit 1
+    fi
+  elif !(drun gcc --version 2>&1 | grep -q " $GCC_VERSION\\W"); then
     echo "GCC_VERSION=$GCC_VERSION, but:"
     drun gcc --version
     exit 1
