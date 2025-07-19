@@ -44,7 +44,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
     to_process.pop_back();
     // ensure we only scan each pointer value once, otherwise this
     // can become exponential (and if we allow recursive data in the future,
-    // it would not terminiate).
+    // it would not terminate).
     if (w.value.isPtrType()) {
       const void* key = w.value.internalToPointer();
       auto it = scanned.find(key);
@@ -490,7 +490,7 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.size(),
           " and start index is ",
           start,
-          ", but stack_ is iterated by two elemenst at a time");
+          ", but stack_ is iterated by two elements at a time");
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
       }

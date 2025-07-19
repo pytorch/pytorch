@@ -55,7 +55,7 @@ from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, g
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
-from torch.testing._internal.common_mkldnn import bf32_on_and_off
+from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
@@ -2013,7 +2013,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 eval_out0 = wrapped_m(input)
                 # assert eval gives same result as last training iteration
                 self.assertEqual(eval_out0, last_train_out)
-                # assert doing more iteartion in eval don't change things
+                # assert doing more iteration in eval don't change things
                 self.assertEqual(eval_out0, wrapped_m(input))
                 self.assertEqual(last_train_u, m.weight_u)
                 self.assertEqual(last_train_v, m.weight_v)
@@ -7405,10 +7405,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 ln_out_cuda = ln_cuda(x_cuda)
                 ln_out.backward(grad_output)
                 ln_out_cuda.backward(grad_output_cuda)
+                atol = 1e-4
+                rtol = 1e-5
+                if m > 64 * 1024:
+                    atol = 1e-3
+                    rtol = 1e-3
                 if elementwise_affine:
-                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=1e-4, atol=1e-4)
+                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
                 if bias and elementwise_affine:
-                    self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
+                    self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
 
     @largeTensorTest("40GB", device="cuda")
     def test_layer_norm_large_tensor(self):
@@ -8273,7 +8278,7 @@ class TestNNDeviceType(NNTestCase):
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off()
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_affine_2d_rotate0(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8314,7 +8319,7 @@ class TestNNDeviceType(NNTestCase):
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.001)
-    @bf32_on_and_off(0.001)
+    @reduced_f32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8364,7 +8369,7 @@ class TestNNDeviceType(NNTestCase):
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.005)
+    @reduced_f32_on_and_off(0.005)
     def test_affine_2d_rotate45(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8442,7 +8447,7 @@ class TestNNDeviceType(NNTestCase):
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
-    @bf32_on_and_off(0.005)
+    @reduced_f32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8495,7 +8500,7 @@ class TestNNDeviceType(NNTestCase):
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # aten::grid_sampler_3d not implemented https://github.com/pytorch/pytorch/issues/77764
     @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
-    @bf32_on_and_off(0.005)
+    @reduced_f32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8906,7 +8911,7 @@ class TestNNDeviceType(NNTestCase):
         # Should raise error when negative padding results in negative output shape
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (-3, -2), mode='circular'))
 
-        # assert that relfection padding errors when pad >= input size
+        # assert that reflection padding errors when pad >= input size
         expected_err_msg = r"Padding size should be less than the corresponding input dimension"
         inputs = torch.randn(1, 1, 2, 3, device=device, dtype=dtype)
         self.assertRaisesRegex(RuntimeError, expected_err_msg,
@@ -9298,6 +9303,13 @@ class TestNNDeviceType(NNTestCase):
             l = loss(out, targets)
             l.backward()
         self.assertTrue(len(f.getvalue()) == 0)
+
+    @onlyCUDA
+    def test_mse_loss_error(self, device):
+        i = torch.randn((10, 1), device=device)
+        t = torch.randn((10,))
+        with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
+            F.mse_loss(i, t)
 
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
@@ -11006,7 +11018,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.double)
     def test_lstmcell_backward_only_one_output_grad(self, device, dtype):
-        # checks that undefined gradients doen't hamper the backward
+        # checks that undefined gradients doesn't hamper the backward
         # see #11872
         l = torch.nn.LSTMCell(2, 3).to(device).to(dtype=dtype)
         s = torch.randn(1, 2, device=device, dtype=dtype, requires_grad=True)
@@ -11955,7 +11967,7 @@ class TestNNDeviceType(NNTestCase):
     def test_softmax_bfloat16(self, device):
         for dim in [0, 1, 2, 3]:
             _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=1e-2)
-            # test softmax with large input value which casues exp() to overflow
+            # test softmax with large input value which causes exp() to overflow
             _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=0.05, scale_factor=1000.0)
 
     def test_nll_loss_mismatched_batch(self, device):
@@ -12286,7 +12298,7 @@ if __name__ == '__main__':
             input = torch.randn(N, C, *other_dims, device=device, requires_grad=True)
             target = torch.empty(N, *other_dims, dtype=torch.long, device=device).random_(0, C)
 
-            # construct target probablity that should have the same result as label_smoothing
+            # construct target probability that should have the same result as label_smoothing
             target_proba = F.one_hot(target, num_classes=C)
             # Need to put the C dim at index 1.
             target_proba = target_proba.permute(0, -1, *range(1, target_proba.dim() - 1))

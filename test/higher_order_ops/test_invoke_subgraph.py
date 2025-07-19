@@ -1079,7 +1079,7 @@ class GraphModule(torch.nn.Module):
 
         fake_prop_count = 0
 
-        def _mock_invoke_subgraph(mode, subgraph, identifer, *operands):
+        def _mock_invoke_subgraph(mode, subgraph, identifier, *operands):
             nonlocal fake_prop_count
             fake_prop_count += 1
             return (operands[0].clone(),)
@@ -1786,6 +1786,43 @@ class GraphModule(torch.nn.Module):
         res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone)
         self.assertEqual(ref, res)
 
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_ac_rng(self):
+        def fn1(x):
+            return torch.cos(torch.nn.functional.dropout(x, p=0.5))
+
+        @nested_compile_region
+        def fn1_checkpoint(x):
+            return torch.utils.checkpoint.checkpoint(fn1, x, use_reentrant=False)
+
+        def fn(x):
+            return fn1_checkpoint(x) + fn1_checkpoint(x)
+
+        x = torch.randn(8, requires_grad=True)
+        torch.manual_seed(0)
+        ref = fn(x)
+        ref.sum().backward()
+
+        x_clone = x.clone().detach().requires_grad_(True)
+        backend = AotEagerAndRecordGraphs()
+
+        torch.manual_seed(0)
+        res = torch.compile(fn, backend=backend, fullgraph=True)(x_clone)
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
+        # Check that the Dynamo and AOT graphs have just one subgraph module
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+
+        torch.manual_seed(0)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone)
+        self.assertEqual(ref, res)
+        res.sum().backward()
+
     def test_fake_tensor_checking(self):
         @nested_compile_region
         def gn(x):
@@ -2040,7 +2077,7 @@ class GraphModule(torch.nn.Module):
 
         # NOTE THAT THIS TEST DOES NOT REALLY WORK
         # We wanted one invoke_subgraph called twice, but because of
-        # constant_args_idx changing in the grpah, the graph equivalence fails
+        # constant_args_idx changing in the graph, the graph equivalence fails
 
         if not TEST_WITH_CROSSREF:
             self.assertExpectedInline(

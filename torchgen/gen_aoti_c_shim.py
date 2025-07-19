@@ -54,7 +54,7 @@ base_type_to_aten_type = {
     BaseTy.SymInt: "c10::SymInt",
     BaseTy.Scalar: "c10::Scalar",
     BaseTy.float: "double",
-    BaseTy.str: "std::string_view",
+    BaseTy.str: "::std::string_view",
     BaseTy.DeviceIndex: "c10::DeviceIndex",
     BaseTy.Layout: "c10::Layout",
     BaseTy.MemoryFormat: "c10::MemoryFormat",
@@ -249,13 +249,19 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
 
     ret_pointer_can_be_null = False
     unambiguous_name = schema.name.unambiguous_name()
-    for name in [
-        "_scaled_dot_product_flash_attention",
-        "_scaled_dot_product_efficient_attention",
+    for name in (
+        "_functional_sym_constrain_range",
         "_scaled_dot_product_cudnn_attention",
+        "_scaled_dot_product_efficient_attention_backward",
+        "_scaled_dot_product_efficient_attention",
+        "_scaled_dot_product_flash_attention",
         "_scaled_dot_product_fused_attention_overrideable",
+        "_thhn_fused_lstm_cell_backward_impl",
         "convolution_backward",
-    ]:
+        "grid_sampler_2d_backward",
+        "grid_sampler_3d_backward",
+        "linear_backward",
+    ):
         if name in unambiguous_name:
             ret_pointer_can_be_null = True
             break
