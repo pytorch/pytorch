@@ -74,9 +74,14 @@ RUN echo "--- Building bzip2 ---" \
     && wget -c https://sourceware.org/pub/bzip2/bzip2-${BZ2_VERSION}.tar.gz \
     && tar -xf bzip2-${BZ2_VERSION}.tar.gz --no-same-permissions --no-same-owner \
     && cd bzip2-${BZ2_VERSION}/ \
-    && make CC=riscv64-linux-gnu-gcc-${RISCV_GCC_VERSION} \
+    && make CC=riscv64-linux-gnu-gcc-${RISCV_GCC_VERSION} bzip2 bzip2recover libbz2.a \
+    && make CC=riscv64-linux-gnu-gcc-${RISCV_GCC_VERSION} -f Makefile-libbz2_so \
     && make install PREFIX=${SYSROOT} \
-    && cd ..
+    && cp libbz2.so.${BZ2_VERSION} ${SYSROOT}/lib/ \
+    && cd ${SYSROOT}/lib/ \
+    && ln -sf libbz2.so.${BZ2_VERSION} libbz2.so.1.0 \
+    && ln -sf libbz2.so.1.0 libbz2.so \
+    && cd /opt/
 
 # Build xz (for lzma module)
 RUN echo "--- Building xz ---" \
