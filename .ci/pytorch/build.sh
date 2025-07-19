@@ -55,8 +55,8 @@ if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
 fi
 
 # Enable LLVM dependency for TensorExpr testing
-export USE_LLVM=/opt/llvm
-export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+export USE_LLVM=/usr
+export LLVM_DIR=/usr/lib/cmake/llvm
 
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
