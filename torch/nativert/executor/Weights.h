@@ -21,11 +21,8 @@ using WeightVersion = int;
  */
 class Weights {
  public:
-  explicit Weights(
-      const Graph* graph,
-      const std::optional<std::unordered_map<std::string, c10::IValue>>&
-          stateDict = std::nullopt,
-      Placement placement = Placement());
+  // Constructor for testing purpose
+  explicit Weights(const Graph* graph);
 
   // Arguments
   // - pytorchStreamReader: the reader for the model archive
@@ -61,9 +58,6 @@ class Weights {
   std::unordered_map<std::string, at::Tensor> buffers() const;
 
   std::unordered_map<std::string, at::Tensor> attributes() const;
-
-  void loadStateDict(
-      const std::unordered_map<std::string, c10::IValue>& stateDict);
 
   /*
    * Replace the value stored at the weight with name "name".

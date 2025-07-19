@@ -22,19 +22,11 @@ namespace torch::nativert {
 
 WeightVersion Weights::globalVersion_ = 0;
 
-Weights::Weights(
-    const Graph* graph,
-    const std::optional<std::unordered_map<std::string, c10::IValue>>&
-        stateDict,
-    Placement placement)
+Weights::Weights(const Graph* graph)
     : graph_(graph),
       weightsMeta_(graph->weightsMeta()),
-      placement_(std::move(placement)),
-      version_(globalVersion_++) {
-  if (stateDict.has_value()) {
-    loadStateDict(stateDict.value());
-  }
-}
+      placement_(Placement()),
+      version_(globalVersion_++) {}
 
 Weights::Weights(
     const Graph* graph,
@@ -291,39 +283,6 @@ c10::IValue Weights::getCustomObjByFileName(const std::string& name) const {
       " not found in Weights");
   const std::string obj_name = it->second;
   return getCustomObj(obj_name);
-}
-
-void Weights::loadStateDict(
-    const std::unordered_map<std::string, c10::IValue>& stateDict) {
-  auto validateAndInsert = [&](const std::string& name) {
-    auto stateDictIt = stateDict.find(name);
-    TORCH_CHECK(
-        stateDictIt != stateDict.end(),
-        "Couldn't find ",
-        name,
-        " in stateDict");
-
-    // Verify that the tensor matches the tensorMeta
-    auto it = weightsMeta_.find(name);
-    TORCH_CHECK(
-        it != weightsMeta_.end(), "Couldn't find ", name, " in weightsMeta");
-
-    auto targetDevice = placement_.getMappedDevice(it->second.device());
-    auto tensor = stateDictIt->second.toTensor().to(targetDevice);
-
-    TORCH_CHECK(tensor.sizes() == it->second.sizes());
-    TORCH_CHECK(tensor.dtype() == it->second.dtype());
-
-    allValues_.emplace(name, tensor);
-  };
-
-  for (const auto& name : graph_->signature().parameters()) {
-    validateAndInsert(std::string(name));
-  }
-  for (const auto& name : graph_->signature().buffers()) {
-    validateAndInsert(std::string(name));
-  }
-  // TensorConstants_ not filled !!
 }
 
 void Weights::validateValue(const std::string& name, const at::Tensor& newValue)
