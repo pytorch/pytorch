@@ -1818,7 +1818,12 @@ def use_ck_template(layout: Layout) -> bool:
         config.rocm.ck_dir = ck_package_dirname
 
     if not config.rocm.ck_dir:
-        log.warning("Please set TORCHINDUCTOR_CK_DIR env variable")
+        config.rocm.ck_dir = ck_package_dirname
+        log.warning(
+            "TORCHINDUCTOR_CK_DIR env variable was not set.\n\
+            Using: %s",
+            ck_package_dirname,
+        )
         return False
 
     if ck_package_dirname != config.rocm.ck_dir:
