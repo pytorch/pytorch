@@ -30,7 +30,7 @@ void c10_cuda_check_implementation(
   check_message.append("CUDA error: ");
   const char* error_string = cudaGetErrorString(cuda_error);
   check_message.append(error_string);
-  check_message.append(c10::cuda::get_cuda_error_help(error_string));
+  check_message.append(c10::cuda::get_cuda_error_help(cuda_error));
   check_message.append(c10::cuda::get_cuda_check_suffix());
   check_message.append("\n");
   if (include_device_assertions) {
