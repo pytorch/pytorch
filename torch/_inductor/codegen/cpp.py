@@ -2986,11 +2986,17 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
-        dtype = (
-            (out_dtype if out_dtype == torch.double else torch.float)
-            if out_dtype.is_floating_point
-            else torch.int64
-        )
+        if out_dtype.is_floating_point:
+            if out_dtype == torch.double:
+                dtype = out_dtype
+            else:
+                dtype = torch.float
+        else:
+            if out_dtype == torch.int32:
+                dtype = out_dtype
+            # ToDo Hardcoding the data type to torch.int64 may not be a good practice.
+            else:
+                dtype = torch.int64
         out_num_vectors = V.kernel._get_num_vectors(out_dtype)
         src_num_vectors = V.kernel._get_num_vectors(dtype)
         code = IndentedBuffer()
