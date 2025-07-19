@@ -337,7 +337,7 @@ endmacro()
 # Usage:
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
-  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 17)
+  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 20)
 
   # until they can be unified, keep these lists synced with setup.py
   if(MSVC)
@@ -392,9 +392,12 @@ function(torch_compile_options libname)
       )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       list(APPEND private_compile_options -Wredundant-move)
+      list(APPEND private_compile_options -Wno-error=deprecated-declarations -Wno-error=redundant-move)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       list(APPEND private_compile_options -Wextra-semi -Wno-error=extra-semi -Wmove)
+      list(APPEND private_compile_options -Wno-return-std-move)
+      list(APPEND private_compile_options -Wno-deprecated-enum-enum-conversion -Wno-ambiguous-reversed-operator)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
