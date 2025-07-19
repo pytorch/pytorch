@@ -8331,9 +8331,6 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    # unbacked symint inputs are created during non-strict export,
-    # which causes a graph break
-    @unittest.expectedFailure
     def test_cond_unbacked_symint_closure(self):
         from torch.export import Dim
 

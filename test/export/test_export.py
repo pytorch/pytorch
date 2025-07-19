@@ -1588,42 +1588,6 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(m(*args), ep.module()(*args))
 
-    @testing.expectedFailureCppSerDes  #  AssertionError: 0 not in VR[2, int_oo]
-    @testing.expectedFailureSerDer  #  AssertionError: 0 not in VR[2, int_oo]
-    @testing.expectedFailureSerDerNonStrict  #  AssertionError: 0 not in VR[2, int_oo]
-    def test_cond_access_identical_symint_closure(self):
-        class Example2(torch.nn.Module):
-            def forward(self, x, trigger, target):
-                return torch.cond(
-                    trigger == 1,
-                    lambda: x + target,
-                    lambda: x * target,
-                    (),
-                )
-
-        m = Example2()
-        x = torch.randn(2)
-        trigger = 0
-        target = 2
-        args = (x, trigger, target)
-        ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
-        if is_training_ir_strict_test(self._testMethodName):
-            # In strict mode export's result capturing compiler, we create
-            # 2 new symints when re-fakifying the symint inputs.
-            # Then in run_decompositions, ep.range_constraints was updated
-            # where it checks the var_to_range and put the two newly added ones into the range_constraints.
-            self.assertExpectedInline(
-                str(tuple(ep.range_constraints.values())),
-                """(VR[0, int_oo], VR[0, int_oo], VR[-int_oo, int_oo], VR[-int_oo, int_oo])""",
-            )
-        else:
-            self.assertExpectedInline(
-                str(tuple(ep.range_constraints.values())),
-                """(VR[0, int_oo], VR[0, int_oo])""",
-            )
-
-        self.assertEqual(m(*args), ep.module()(*args))
-
     def test_cond_branches_return_same_int(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -11141,6 +11105,80 @@ graph():
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
 
+    @testing.expectedFailureCppRuntimeNonStrict
+    def test_symint_inputs_with_cond(self):
+        class Example1(torch.nn.Module):
+            def forward(self, x, trigger):
+                return torch.cond(
+                    trigger == 1,
+                    lambda: x + 1,
+                    lambda: x * 2,
+                    (),
+                )
+
+        m = Example1()
+        x = torch.randn(2)
+        trigger = 0
+        ep = export(m, (x, trigger), dynamic_shapes=(None, Dim.DYNAMIC))
+        em = ep.module()
+        self.assertTrue(torch.allclose(em(x, trigger), x * 2))
+        trigger = 1
+        self.assertTrue(torch.allclose(em(x, trigger), x + 1))
+        trigger = 0
+        self.assertTrue(torch.allclose(em(x, trigger), x * 2))
+
+        class Example2(torch.nn.Module):
+            def forward(self, x, trigger, target):
+                return torch.cond(
+                    trigger == 1,
+                    lambda: x + target,
+                    lambda: x * target,
+                    (),
+                )
+
+        m = Example2()
+        x = torch.randn(2)
+        trigger = 0
+        target = 2
+        ep = export(
+            m, (x, trigger, target), dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC)
+        )
+        em = ep.module()
+        self.assertTrue(torch.allclose(em(x, trigger, target), x * 2))
+        trigger = 1
+        target = 1
+        self.assertTrue(torch.allclose(em(x, trigger, target), x + 1))
+        trigger = 0
+        target = 2
+        self.assertTrue(torch.allclose(em(x, trigger, target), x * 2))
+
+        class Example3(torch.nn.Module):
+            def forward(self, x, trigger):
+                target = torch.cond(
+                    trigger == 1,
+                    lambda: 1,
+                    lambda: 2,
+                    (),
+                )
+
+                return torch.cond(
+                    trigger == 1,
+                    lambda: x + target,
+                    lambda: x * target,
+                    (),
+                )
+
+        m = Example3()
+        x = torch.randn(2)
+        trigger = 0
+        ep = export(m, (x, trigger), dynamic_shapes=(None, Dim.DYNAMIC))
+        em = ep.module()
+        self.assertTrue(torch.allclose(em(x, trigger), x * 2))
+        trigger = 1
+        self.assertTrue(torch.allclose(em(x, trigger), x + 1))
+        trigger = 0
+        self.assertTrue(torch.allclose(em(x, trigger), x * 2))
+
     def test_dynamic_shapes_bounds(self):
         class M(torch.nn.Module):
             """
@@ -13570,9 +13608,6 @@ graph():
         ):
             ep.module()(torch.randn(10), torch.tensor(2))
 
-    @testing.expectedFailureCppSerDes  # TODO: When we deserialize we somehow hardcode sympy.lower to 2
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureSerDer
     @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_baddbmm(self):
         class M(torch.nn.Module):

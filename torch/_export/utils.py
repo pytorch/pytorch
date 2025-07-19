@@ -901,6 +901,14 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
             if i < len(hoo_phs):  # placeholder, retain name
                 name_map[node.name] = hoo_phs[i].name
                 node.name = node.target = hoo_phs[i].name
+                # placeholder: retaining names might be OK long term but currently
+                # there's a bug where HOO operands might duplicate closed variables;
+                # therefore need to check for collisions, because placeholders with
+                # duplicates will error at run time
+
+                # node.name = node.target = _rename_without_collisions(
+                #     name_map, node.name, hoo_phs[i].name, is_placeholder=True
+                # )
             else:  # non-placeholder, check for collisions
                 node.name = _rename_without_collisions(name_map, node.name, node.name)
 
