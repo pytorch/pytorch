@@ -1548,44 +1548,99 @@ namespace {
     }
   }
 
-  void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
-    if (mat.dim() == 2) {
+  void check_input_and_scale_size(const Tensor& mat_a, const Tensor& mat_b, const Tensor& scale_a, const Tensor& scale_b, const std::optional<at::Tensor>& offs) {
+    cuda::detail::GroupCountInfo info = at::cuda::detail::get_group_count(mat_a, mat_b, offs);
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    if (dprops->major == 9) {
+        TORCH_CHECK(
+          mat_a.size(-1) % 16 == 0,
+          "Expected trailing dimension of mat_a to be divisible by 16 ",
+          "but got mat1 shape: (",
+          mat_a.sizes(),
+          ").");
+        TORCH_CHECK(mat_b.size(-2) % 16 == 0 && mat_b.size(-1) % 16 == 0,
+          "Expected mat_b shape to be divisible by 16 ",
+          "but got mat_b shape: (",
+          mat_b.sizes(),
+          ").");
+
+      auto check_scale_for_mat = [&](const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx) {
+        if (mat.dim() == 2) {
+          TORCH_CHECK(
+              scale.dim() == 1, "scale must be a 1D tensor, but got ", scale.dim(), "D, arg ", arg_idx);
+          TORCH_CHECK(
+              scale.is_contiguous(), "scale must be contiguous for arg ", arg_idx);
+          TORCH_CHECK(
+              scale.size(0) == mat.size(dim) * ( (info.input_matrix_type == at::cuda::detail::GroupMMInputMatrixType::GroupMMInputMatrixType_MatrixA_2D_MatrixB_2D) ? info.group_count : 1), "scale must have the same length as mat for arg ", arg_idx);
+        } else {
+          TORCH_CHECK(
+              scale.dim() == 2,
+              "scale must be a 2D tensor, but got ", scale.dim(), "D for arg ", arg_idx);
+          TORCH_CHECK(
+              scale.stride(1) == 1,
+              "scale must be contiguous in the last dimension for arg ", arg_idx);
+          TORCH_CHECK(
+              scale.size(0) == mat.size(0),
+              "scale must have the same batch dimension as mat for arg ", arg_idx);
+          TORCH_CHECK(
+              scale.size(1) == mat.size(1 + dim),
+              "scale must have the same first dimension as mat for arg ", arg_idx);
+        }
+      };
+
+      check_scale_for_mat(mat_a, scale_a, 0, 0);
+      check_scale_for_mat(mat_b, scale_b, 1, 1);
+    } else if (dprops->major >= 10) {
+
       TORCH_CHECK(
-          scale.dim() == 1,
-          "scale must be a 1D tensor, but got ",
-          scale.dim(),
-          "D, arg ",
-          arg_idx);
+        mat_a.size(-1) % 128 == 0,
+        "Expected trailing dimension of mat_a (K) to be divisible by 128 ",
+        "but got mat1 shape: (",
+        mat_a.sizes(),
+        ").");
+      TORCH_CHECK(mat_b.size(-2) % 128 == 0 && mat_b.size(-1) % 128 == 0,
+        "Expected mat_b shape (N, K) to be divisible by 128 ",
+        "but got mat_b shape: (",
+        mat_b.sizes(),
+        ").");
+
+      const int m_scale_group_size = 1;
+      const int n_scale_group_size = 128;
+      const int k_scale_group_size = 128;
+
       TORCH_CHECK(
-          scale.is_contiguous(), "scale must be contiguous for arg ", arg_idx);
+          scale_a.dim() == 3,
+          "scale_a must be a 3D tensor, but got ", scale_a.dim(), "D");
       TORCH_CHECK(
-          scale.size(0) == mat.size(dim) * scale_multiplier,
-          "scale must have the same length as mat for arg ",
-          arg_idx);
+          scale_a.size(0) == info.group_count,
+          "scale_a must describe the group count");
+      TORCH_CHECK(
+          scale_a.size(1) == info.M / m_scale_group_size,
+          "scale_a.size(1) must be the size ", info.M , " / " , m_scale_group_size, " = ", info.M / m_scale_group_size);
+      TORCH_CHECK(
+          scale_a.size(2) == info.K / k_scale_group_size,
+          "scale_a.size(2) must be the size ", info.K , " / " , k_scale_group_size, " = ", info.K / k_scale_group_size);
+
+      TORCH_CHECK(
+          scale_b.dim() == 3,
+          "scale_b must be a 3D tensor, but got ", scale_b.dim(), "D");
+      TORCH_CHECK(
+          scale_b.size(0) == info.group_count,
+          "scale_b must describe the group count");
+      TORCH_CHECK(
+          scale_b.size(1) == info.N / n_scale_group_size,
+          "scale_b.size(1) must be the size ", info.N , " / " , n_scale_group_size, " = ", info.N / n_scale_group_size);
+      TORCH_CHECK(
+          scale_b.size(2) == info.K / k_scale_group_size,
+          "scale_b.size(2) must be the size ", info.K , " / " , k_scale_group_size, " = ", info.K / k_scale_group_size);
+
     } else {
-      TORCH_CHECK(
-          scale.dim() == 2,
-          "scale must be a 2D tensor, but got ",
-          scale.dim(),
-          "D for arg ",
-          arg_idx);
-      TORCH_CHECK(
-          scale.stride(1) == 1,
-          "scale must be contiguous in the last dimension for arg ",
-          arg_idx);
-      TORCH_CHECK(
-          scale.size(0) == mat.size(0),
-          "scale must have the same batch dimension as mat for arg ",
-          arg_idx);
-      TORCH_CHECK(
-          scale.size(1) == mat.size(1 + dim),
-          "scale must have the same first dimension as mat for arg ",
-          arg_idx);
+      TORCH_CHECK(false, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability >= 9.0");
     }
-}
 
+  }
 
-}
+} // anonymous namespace
 
 Tensor
 _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
@@ -1610,8 +1665,8 @@ const std::optional<at::Tensor>& scale_result,
 std::optional<c10::ScalarType> out_dtype,
 bool use_fast_accum) {
 #ifndef USE_ROCM
-  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
-  TORCH_CHECK(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = 9.0");
+  bool allowed_device = _scaled_mm_allowed_device();
+  TORCH_CHECK(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability >= 9.0");
 
   TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
   TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
@@ -1621,18 +1676,6 @@ bool use_fast_accum) {
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
-  TORCH_CHECK(
-    mat_a.size(-1) % 16 == 0,
-    "Expected trailing dimension of mat_a to be divisible by 16 ",
-    "but got mat1 shape: (",
-    mat_a.sizes(),
-    ").");
-  TORCH_CHECK(mat_b.size(-2) % 16 == 0 && mat_b.size(-1) % 16 == 0,
-    "Expected mat_b shape to be divisible by 16 ",
-    "but got mat_b shape: (",
-    mat_b.sizes(),
-    ").");
-
 
   TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
   TORCH_CHECK(!scale_result.has_value(), "Scale result not supported yet");
@@ -1648,9 +1691,7 @@ bool use_fast_accum) {
       scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
       "Both scale_a and scale_b must be float (fp32) tensors.");
 
-  const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
-  check_scale(mat_a, scale_a, 0 ,0, scale_multiplier);
-  check_scale(mat_b, scale_b, 1, 1, scale_multiplier);
+  check_input_and_scale_size(mat_a, mat_b, scale_a, scale_b, offs);
 
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
 
@@ -1664,9 +1705,6 @@ bool use_fast_accum) {
       use_fast_accum,
       out);
     return out;
-
-
-
 
 #else
   TORCH_CHECK(false, "grouped gemm is not supported on ROCM")

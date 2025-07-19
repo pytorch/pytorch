@@ -10,6 +10,7 @@
 // Two warninngs in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
@@ -22,9 +23,11 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
 
+#include <ATen/ops/empty.h>
 #include <ATen/native/cuda/GroupMMCommon.cuh>
 
 #include <cute/tensor.hpp>
+#include <cutlass/arch/arch.h>
 #include <cutlass/core_io.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm.h>
@@ -41,15 +44,86 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 #include <cute/atom/mma_atom.hpp>
 #include <cutlass/gemm/dispatch_policy.hpp>
+#include <cutlass/gemm/group_array_problem_shape.hpp>
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
+// Added for SM100 support
+#include <cutlass/epilogue/collective/default_epilogue.hpp>
+#include <cutlass/epilogue/thread/activation.h>
+#include <cutlass/epilogue/thread/linear_combination.h>
+#include <cutlass/gemm/kernel/tile_scheduler_params.h>
+#include <cutlass/tensor_ref.h>
+
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12080) && \
+    (defined(CUTLASS_ARCH_MMA_SM100A_SUPPORTED) ||      \
+     defined(CUTLASS_ARCH_MMA_SM100_SUPPORTED))
+#define BUILD_SM100_KERNEL
+#endif
+
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
+
+namespace at::cuda::detail {
+
+GroupCountInfo get_group_count(
+    at::Tensor mat_a,
+    at::Tensor mat_b,
+    std::optional<at::Tensor> offs) {
+  int M = mat_a.size(-2);
+  int K = mat_a.size(-1);
+  int N = mat_b.size(-1);
+  int group_count = 0;
+  GroupMMInputMatrixType type{};
+
+  if (mat_a.dim() == 2 && mat_b.dim() == 2) {
+    // if both inputs are ragged, K is dynamic, M and N come from inputs
+    group_count = offs->size(0);
+    type = GroupMMInputMatrixType::GroupMMInputMatrixType_MatrixA_2D_MatrixB_2D;
+
+    // stack on the K dimension
+    K = K / group_count;
+  } else if (mat_a.dim() == 2) {
+    group_count = mat_b.size(0);
+    type = GroupMMInputMatrixType::GroupMMInputMatrixType_MatrixA_2D_MatrixB_3D;
+    // stack on the M dimension
+    M = M / group_count;
+  } else if (mat_b.dim() == 2) {
+    group_count = mat_a.size(0);
+    type = GroupMMInputMatrixType::GroupMMInputMatrixType_MatrixA_3D_MatrixB_2D;
+    // stack on the N dimension
+    N = N / group_count;
+  } else {
+    // regular bmm
+    group_count = mat_a.size(0);
+    type = GroupMMInputMatrixType::GroupMMInputMatrixType_MatrixA_3D_MatrixB_3D;
+  }
+
+  return GroupCountInfo{M, N, K, group_count, type};
+}
+
+} // namespace at::cuda::detail
 
 namespace {
 
 using Strides = at::cuda::detail::Strides;
+
+int ceildiv(int a, int b) {
+  return (a + b - 1) / b;
+}
+
+int round_up_to_nearest_multiple(int a, int b) {
+  return ceildiv(a, b) * b;
+}
+
+Strides make_strides(at::IntArrayRef strides) {
+  Strides out;
+  std::copy(strides.begin(), strides.end(), out.begin());
+  return out;
+};
+
+namespace sm90_detail {
 
 using DtypeScale = float;
 using DtypeAccum = float;
@@ -108,14 +182,6 @@ struct Schedule {
   using TileShape = cute::Shape<TB_M, TB_N, TB_K>;
   using ClusterShape = cute::Shape<cute::_2, cute::_2, cute::_1>;
 };
-
-int ceildiv(int a, int b) {
-  return (a + b - 1) / b;
-}
-
-int round_up_to_nearest_multiple(int a, int b) {
-  return ceildiv(a, b) * b;
-}
 
 template <
     typename FastAccum,
@@ -224,26 +290,9 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   using StrideB = typename Gemm::GemmKernel::InternalStrideB;
   using StrideOutput = typename Gemm::GemmKernel::InternalStrideD;
 
-  int32_t M, N, K, group_count;
-
-  M = mat_a.size(-2);
-  K = mat_a.size(-1);
-  N = mat_b.size(-1);
-
-  if (mat_a.dim() == 2 && mat_b.dim() == 2) {
-    // if both inputs are ragged, K is dynamic, M and N come from inputs
-    group_count = offs->size(0);
-    K = -1;
-  } else if (mat_a.dim() == 2) {
-    group_count = mat_b.size(0);
-    M = -1;
-  } else if (mat_b.dim() == 2) {
-    group_count = mat_a.size(0);
-    N = -1;
-  } else {
-    // regular bmm
-    group_count = mat_a.size(0);
-  }
+  int32_t group_count;
+  auto group_count_info = at::cuda::detail::get_group_count(mat_a, mat_b, offs);
+  group_count = group_count_info.group_count;
 
   TORCH_CHECK(group_count < 1024, "Can't process more than 1024 groups");
 
@@ -287,12 +336,6 @@ void f8f8bf16_grouped_gemm_impl_sm90(
 
   auto stream = at::cuda::getCurrentCUDAStream().stream();
 
-  auto make_strides = [](at::IntArrayRef strides) -> Strides {
-    Strides out;
-    std::copy(strides.begin(), strides.end(), out.begin());
-    return out;
-  };
-
   Strides tensor_StrideA = make_strides(mat_a.strides());
   Strides tensor_StrideB = make_strides(mat_b.strides());
   Strides tensor_StrideOutput = make_strides(out.strides());
@@ -317,9 +360,7 @@ void f8f8bf16_grouped_gemm_impl_sm90(
       stride_B,
       stride_output,
       offs.has_value() ? offs->const_data_ptr<int32_t>() : nullptr,
-      M,
-      N,
-      K,
+      group_count_info,
       tensor_StrideA,
       tensor_StrideB,
       tensor_StrideOutput,
@@ -327,54 +368,6 @@ void f8f8bf16_grouped_gemm_impl_sm90(
       b_scale_stride);
 
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-  //   auto buf_cpu = mat_a.new_empty(
-  //       input_args_size,
-  //       at::TensorOptions().dtype(at::kByte).device(at::kCPU));
-  //   AT_CUDA_CHECK(cudaMemcpy(
-  //       (char*)buf_cpu.data_ptr(),
-  //       buf_ptr,
-  //       input_args_size,
-  //       cudaMemcpyDeviceToHost));
-  //   char* buf_ptr_cpu = (char*)buf_cpu.data_ptr();
-  //   DtypeA** inputA_ptrs_h = reinterpret_cast<DtypeA**>(buf_ptr_cpu);
-  //   DtypeB** inputB_ptrs_h =
-  //       reinterpret_cast<DtypeB**>(inputA_ptrs_h + aligned_group_count);
-  //   DtypeOutput** output_ptrs_h =
-  //       reinterpret_cast<DtypeOutput**>(inputB_ptrs_h + aligned_group_count);
-  //   DtypeScale** inputA_scale_ptrs_h =
-  //       reinterpret_cast<DtypeScale**>(output_ptrs_h + aligned_group_count);
-  //   DtypeScale** inputB_scale_ptrs_h =
-  //       reinterpret_cast<DtypeScale**>(inputA_scale_ptrs_h +
-  //       aligned_group_count);
-  //   StrideA* stride_A_h =
-  //       reinterpret_cast<StrideA*>(inputB_scale_ptrs_h +
-  //       aligned_group_count);
-  //   StrideB* stride_B_h = reinterpret_cast<StrideB*>(stride_A_h +
-  //   group_count); StrideOutput* stride_output_h =
-  //       reinterpret_cast<StrideOutput*>(stride_B_h + group_count);
-  //   ProblemShape::UnderlyingProblemShape* problem_sizes_h =
-  //       reinterpret_cast<ProblemShape::UnderlyingProblemShape*>(
-  //           stride_output_h + group_count);
-
-  //   std::cout << "PTRS " << mat_a.data_ptr() << " " << mat_b.data_ptr() << "
-  //   "
-  //             << out.data_ptr() << " " << scale_a.data_ptr() << " "
-  //             << scale_b.data_ptr() << "\n";
-  //   for (int i = 0; i < group_count; i++) {
-  //     std::cout << "A " << (void*)inputA_ptrs_h[i] << "\n";
-  //     std::cout << "B " << (void*)inputB_ptrs_h[i] << "\n";
-  //     std::cout << "O " << (void*)output_ptrs_h[i] << "\n";
-  //     std::cout << "A_scale " << (void*)inputA_scale_ptrs_h[i] << "\n";
-  //     std::cout << "B_scale " << (void*)inputB_scale_ptrs_h[i] << "\n";
-  //     std::cout << "sizes " << problem_sizes_h[i] << "\n";
-  //     std::cout << "strideA" << stride_A_h[i] << "\n";
-  //     std::cout << "strideB" << stride_B_h[i] << "\n";
-  //     std::cout << "stride_output" << stride_output_h[i] << "\n";
-  //   }
-  //   int device_id = 0;
-  //   cutlass::KernelHardwareInfo kernel_hw_info =
-  //   cutlass::KernelHardwareInfo::make_kernel_hardware_info<Gemm::GemmKernel>(device_id);
 
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGrouped,
@@ -423,24 +416,9 @@ void dispatch_fp8_grouped_gemm_on_tile_size(
     std::optional<at::Tensor> bias, // BF16
     bool use_fast_accum,
     at::Tensor& out) {
-  int32_t M, N, K, group_count;
 
-  M = mat_a.size(-2);
-  K = mat_a.size(-1);
-  N = mat_b.size(-1);
+  auto [M, N, K, group_count, type] = at::cuda::detail::get_group_count(mat_a, mat_b, offs);
 
-  // below we assume that gemms are approx same size
-  if (mat_a.dim() == 2 && mat_b.dim() == 2) {
-    // if both inputs are ragged, K is dynamic, M and N come from inputs
-    group_count = offs->size(0);
-    K = K / group_count;
-  } else if (mat_a.dim() == 2) {
-    group_count = mat_b.size(0);
-    M = M / group_count;
-  } else if (mat_b.dim() == 2) {
-    group_count = mat_a.size(0);
-    N = N / group_count;
-  }
   bool large =
       ((M >= 2048 && K >= 2048) || (M >= 2048 && N >= 2048) ||
        (K >= 2048 && N >= 2048));
@@ -521,9 +499,294 @@ void dispatch_fp8_grouped_gemm_on_bias_dtype(
   }
 }
 
+} // namespace sm90_detail
+
+#if defined(BUILD_SM100_KERNEL)
+
+namespace sm100_detail {
+
+struct Sm100ConfigSmall {
+  using MmaTileShape = cute::Shape<cute::_64, cute::_128, cute::_128>;
+  using ClusterShape = cute::Shape<cute::_1, cute::_1, cute::_1>;
+  using KernelSchedule =
+      cutlass::gemm::KernelPtrArrayTmaWarpSpecializedBlockwise1SmSm100;
+  using EpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized1Sm;
+
+  using ScaleConfig = cutlass::detail::Sm100BlockwiseScaleConfig<
+      /*SFVecSizeM*/ 1,
+      /*SFVecSizeN*/ 128,
+      /*SFVecSizeK*/ 128,
+      /*majorSFA   */ cute::UMMA::Major::K,
+      /*majorSFB   */ cute::UMMA::Major::MN>;
+
+  using LayoutSFA = decltype(ScaleConfig::deduce_layoutSFA());
+  using LayoutSFB = decltype(ScaleConfig::deduce_layoutSFB());
+};
+
+struct Sm100ConfigLargeM {
+  using MmaTileShape = cute::Shape<cute::_128, cute::_128, cute::_128>;
+  using ClusterShape = cute::Shape<cute::_1, cute::_1, cute::_1>;
+  using KernelSchedule =
+      cutlass::gemm::KernelPtrArrayTmaWarpSpecializedBlockwise1SmSm100;
+  using EpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized1Sm;
+
+  using ScaleConfig = cutlass::detail::Sm100BlockwiseScaleConfig<
+      /*SFVecSizeM*/ 1,
+      /*SFVecSizeN*/ 128,
+      /*SFVecSizeK*/ 128,
+      /*majorSFA   */ cute::UMMA::Major::K,
+      /*majorSFB   */ cute::UMMA::Major::MN>;
+
+  using LayoutSFA = decltype(ScaleConfig::deduce_layoutSFA());
+  using LayoutSFB = decltype(ScaleConfig::deduce_layoutSFB());
+};
+
+using DtypeScale = float;
+using DtypeAccum = float;
+using DtypeEpilogue = float;
+using DtypeOutput = cutlass::bfloat16_t;
+
+template <typename Config, typename LayoutOutput>
+void launch_gemm_sm100(at::Tensor mat_a,   // FP8
+                       at::Tensor mat_b,   // FP8
+                       at::Tensor scale_a, // FP32
+                       at::Tensor scale_b, // FP32
+                       std::optional<at::Tensor> offs, at::Tensor &out,
+                       bool transpose = false) {
+  using DtypeA = cutlass::float_e4m3_t;
+  using DtypeB = cutlass::float_e4m3_t;
+  using DtypeOutput = cutlass::bfloat16_t;
+  using LayoutA = cutlass::layout::RowMajor;
+  using LayoutB = cutlass::layout::ColumnMajor;
+
+  static constexpr int AlignmentA = 128 / cutlass::sizeof_bits<DtypeA>::value;
+  static constexpr int AlignmentB = 128 / cutlass::sizeof_bits<DtypeB>::value;
+  static constexpr int AlignmentOutput =
+      128 / cutlass::sizeof_bits<DtypeOutput>::value;
+
+  using ArchTag = cutlass::arch::Sm100;
+  using OperatorClass = cutlass::arch::OpClassTensorOp;
+
+  using CollectiveEpilogue =
+      typename cutlass::epilogue::collective::CollectiveBuilder<
+          ArchTag, OperatorClass, typename Config::MmaTileShape,
+          typename Config::ClusterShape,
+          cutlass::epilogue::collective::EpilogueTileAuto, DtypeAccum,
+          DtypeAccum, DtypeOutput, LayoutOutput *, AlignmentOutput, DtypeOutput,
+          LayoutOutput *, AlignmentOutput,
+          typename Config::EpilogueSchedule>::CollectiveOp;
+
+  // Collective Mainloop
+  using CollectiveMainloop =
+      typename cutlass::gemm::collective::CollectiveBuilder<
+          ArchTag, OperatorClass, DtypeA,
+          cute::tuple<cutlass::layout::RowMajor *,
+                      typename Config::LayoutSFA *>,
+          AlignmentA, DtypeB,
+          cute::tuple<cutlass::layout::ColumnMajor *,
+                      typename Config::LayoutSFB *>,
+          AlignmentB, DtypeAccum, typename Config::MmaTileShape,
+          typename Config::ClusterShape,
+          cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
+              sizeof(typename CollectiveEpilogue::SharedStorage))>,
+          typename Config::KernelSchedule>::CollectiveOp;
+
+  using ProblemShape =
+      cutlass::gemm::GroupProblemShape<cute::Shape<int, int, int>>;
+
+  using GemmKernel =
+      cutlass::gemm::kernel::GemmUniversal<ProblemShape, CollectiveMainloop,
+                                           CollectiveEpilogue>;
+  using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
+
+  using StrideA = typename Gemm::GemmKernel::InternalStrideA;
+  using StrideB = typename Gemm::GemmKernel::InternalStrideB;
+  using StrideOutput = typename Gemm::GemmKernel::InternalStrideD;
+
+  using DtypeProblemShape = cutlass::gemm::GroupProblemShape<
+      cute::Shape<int, int, int>>::UnderlyingProblemShape;
+
+  auto group_count_info = at::cuda::detail::get_group_count(mat_a, mat_b, offs);
+  auto [M, N, K, group_count, type] = group_count_info;
+
+  int aligned_group_count =
+      round_up_to_nearest_multiple(group_count, 16 / int(sizeof(void *)));
+
+  auto ptr_opts = at::TensorOptions().device(mat_a.device()).dtype(at::kLong);
+  auto stride_opts =
+      at::TensorOptions().device(mat_a.device()).dtype(at::kLong);
+  auto shape_opts = at::TensorOptions().device(mat_a.device()).dtype(at::kInt);
+
+  at::Tensor inputA_ptrs = at::empty({aligned_group_count}, ptr_opts);
+  at::Tensor inputB_ptrs = at::empty({aligned_group_count}, ptr_opts);
+  at::Tensor output_ptrs = at::empty({aligned_group_count}, ptr_opts);
+  at::Tensor inputA_scale_ptrs = at::empty({aligned_group_count}, ptr_opts);
+  at::Tensor inputB_scale_ptrs = at::empty({aligned_group_count}, ptr_opts);
+
+  at::Tensor stride_A = at::empty({group_count}, stride_opts);
+  at::Tensor stride_B = at::empty({group_count}, stride_opts);
+  at::Tensor stride_output = at::empty({group_count}, stride_opts);
+  at::Tensor problem_sizes = at::empty({group_count, 3}, shape_opts);
+
+  int layout_bytes_as_int = static_cast<int>(sizeof(typename Config::LayoutSFA) / sizeof(int));
+
+  auto layout_sfa = at::empty({group_count, layout_bytes_as_int}, shape_opts);
+  auto layout_sfb = at::empty({group_count, layout_bytes_as_int}, shape_opts);
+
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
+
+  Strides tensor_StrideA = make_strides(mat_a.strides());
+  Strides tensor_StrideB = make_strides(mat_b.strides());
+  Strides tensor_StrideOutput = make_strides(out.strides());
+  Strides tensor_StrideSFA = make_strides(scale_a.strides());
+  Strides tensor_StrideSFB = make_strides(scale_b.strides());
+
+  at::cuda::detail::prepare_grouped_gemm_data_sm100<
+      DtypeA,
+      DtypeB,
+      DtypeOutput,
+      DtypeScale,
+      DtypeProblemShape,
+      StrideA,
+      StrideB,
+      StrideOutput,
+      typename Config::LayoutSFA,
+      typename Config::LayoutSFB,
+      typename Config::ScaleConfig>
+      <<<1, group_count, 0, stream>>>(
+      reinterpret_cast<DtypeA *>(mat_a.data_ptr()),
+      reinterpret_cast<DtypeB *>(mat_b.data_ptr()),
+      reinterpret_cast<DtypeOutput *>(out.data_ptr()),
+      scale_a.data_ptr<DtypeScale>(),
+      scale_b.data_ptr<DtypeScale>(),
+      reinterpret_cast<DtypeA **>(inputA_ptrs.data_ptr()),
+      reinterpret_cast<DtypeB **>(inputB_ptrs.data_ptr()),
+      reinterpret_cast<DtypeOutput **>(output_ptrs.data_ptr()),
+      reinterpret_cast<DtypeScale **>(inputA_scale_ptrs.data_ptr()),
+      reinterpret_cast<DtypeScale **>(inputB_scale_ptrs.data_ptr()),
+      reinterpret_cast<DtypeProblemShape *>(problem_sizes.data_ptr()),
+      // Strides for cutlass, cute::Stride
+      reinterpret_cast<StrideA *>(stride_A.data_ptr()),
+      reinterpret_cast<StrideB *>(stride_B.data_ptr()),
+      reinterpret_cast<StrideOutput *>(stride_output.data_ptr()),
+      offs.has_value() ? offs->const_data_ptr<int32_t>() : nullptr,
+      group_count_info,
+      // Original strides of the input tensors
+      tensor_StrideA,
+      tensor_StrideB,
+      tensor_StrideOutput,
+      tensor_StrideSFA,
+      tensor_StrideSFB,
+      reinterpret_cast<typename Config::LayoutSFA *>(layout_sfa.data_ptr()),
+      reinterpret_cast<typename Config::LayoutSFB *>(layout_sfb.data_ptr()),
+      transpose);
+
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  typename GemmKernel::MainloopArguments mainloop_args{
+      static_cast<const DtypeA**>(
+          inputA_ptrs.data_ptr()), // ArrayElementA const* ptr_A{nullptr};
+      static_cast<StrideA*>(stride_A.data_ptr()), // StrideA dA{};
+      static_cast<const DtypeB**>(
+          inputB_ptrs.data_ptr()), // ArrayElementB const* ptr_B{nullptr};
+      static_cast<StrideB*>(stride_B.data_ptr()), //  StrideB dB{};
+      static_cast<const DtypeScale**>(
+          inputA_scale_ptrs
+              .data_ptr()), // ElementAccumulator const* ptr_SFA{nullptr};
+      reinterpret_cast<typename Config::LayoutSFA*>(
+          layout_sfa.data_ptr()), // LayoutSFA layout_SFA{};
+      static_cast<const DtypeScale**>(
+          inputB_scale_ptrs
+              .data_ptr()), // ElementAccumulator const* ptr_SFB{nullptr};
+      reinterpret_cast<typename Config::LayoutSFB*>(
+          layout_sfb.data_ptr()), // LayoutSFB layout_SFB{};
+      {}, // RuntimeDataTypeA runtime_data_type_a{};
+      {}}; // RuntimeDataTypeB runtime_data_type_b{};
+
+  typename GemmKernel::EpilogueArguments epilogue_args{
+      {}, // typename FusionCallbacks::Arguments thread{}
+      {}, // ElementC const** ptr_C = nullptr;
+      {}, // StrideC dC{};
+      static_cast<DtypeOutput**>(
+          output_ptrs.data_ptr()), // ElementD** ptr_D = nullptr;
+      static_cast<StrideOutput*>(stride_output.data_ptr())}; // StrideD dD{};
+
+  cutlass::KernelHardwareInfo hw_info;
+  typename GemmKernel::Arguments arguments{
+      cutlass::gemm::GemmUniversalMode::kGrouped,
+      {group_count,
+       reinterpret_cast<DtypeProblemShape *>(problem_sizes.data_ptr()),
+       nullptr},
+      mainloop_args,
+      epilogue_args,
+      hw_info};
+
+  int sm_count =
+      at::cuda::getDeviceProperties(out.device().index())->multiProcessorCount;
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    sm_count -= at::globalContext()._SMCarveout_EXPERIMENTAL().value();
+  }
+  arguments.hw_info.sm_count = sm_count;
+
+  auto &allocator = *c10::cuda::CUDACachingAllocator::get();
+  size_t workspace_size = Gemm::get_workspace_size(arguments);
+  auto workspace = allocator.allocate(workspace_size);
+  Gemm gemm;
+  TORCH_CHECK(gemm.can_implement(arguments) == cutlass::Status::kSuccess,
+              "cutlass cannot implement");
+  TORCH_CHECK(gemm.initialize(arguments, workspace.get()) ==
+                  cutlass::Status::kSuccess,
+              "cutlass cannot initialize");
+  auto status = gemm(at::cuda::getCurrentCUDAStream());
+  TORCH_CHECK(status == cutlass::Status::kSuccess, "cutlass cannot run, error ",
+              int(status));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void dispatch_fp8_grouped_gemm_size_sm100(
+    at::Tensor mat_a,
+    at::Tensor mat_b,
+    at::Tensor scale_a,
+    at::Tensor scale_b,
+    std::optional<at::Tensor> offs,
+    at::Tensor& out) {
+  auto group_count_info = at::cuda::detail::get_group_count(mat_a, mat_b, offs);
+
+  if (group_count_info.M > 2048 && group_count_info.K >= 2048) {
+    launch_gemm_sm100<Sm100ConfigLargeM, cutlass::layout::RowMajor>(
+        mat_a, mat_b, scale_a, scale_b, offs, out, false);
+  } else {
+    launch_gemm_sm100<Sm100ConfigSmall, cutlass::layout::RowMajor>(
+        mat_a, mat_b, scale_a, scale_b, offs, out, false);
+  }
+}
+
+inline void dispatch_fp8_grouped_gemm_on_bias_dtype(
+    at::Tensor mat_a,
+    at::Tensor mat_b,
+    at::Tensor scale_a,
+    at::Tensor scale_b,
+    std::optional<at::Tensor> offs,
+    std::optional<at::Tensor> bias,
+    bool use_fast_accum, // This is ignored for SM100
+    at::Tensor& out) {
+  if (bias.has_value()) {
+    TORCH_CHECK(
+        false,
+        "Bias add is not yet supported for SM100 grouped GEMM (requested dtype: " +
+            std::string(bias->dtype().name()));
+  }
+  dispatch_fp8_grouped_gemm_size_sm100(
+      mat_a, mat_b, scale_a, scale_b, offs, out);
+}
+
+} // namespace sm100_detail
+
+#endif // SM100 support guard
+
 } // namespace
 
-#endif
+#endif // BUILD_ROWWISE_FP8_KERNEL guard
 
 namespace at::cuda::detail {
 void f8f8bf16_grouped_mm(
@@ -536,8 +799,25 @@ void f8f8bf16_grouped_mm(
     bool use_fast_accum,
     at::Tensor& out) {
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
-  dispatch_fp8_grouped_gemm_on_bias_dtype(
-      mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+
+  if (dprops->major >= 10) {
+#if defined(BUILD_SM100_KERNEL)
+    sm100_detail::dispatch_fp8_grouped_gemm_on_bias_dtype(
+        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
+#else
+    TORCH_CHECK(
+        false,
+        "Grouped MM for SM100+ requires supported device. Your build does not meet these requirements.");
+#endif
+  } else if (dprops->major >= 9) {
+    sm90_detail::dispatch_fp8_grouped_gemm_on_bias_dtype(
+        mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
+  } else {
+    TORCH_CHECK(
+        false,
+        "Grouped MM is only supported on SM90 and SM100+ architectures.");
+  }
 #else
   TORCH_CHECK(false, "grouped mm is not supported on your system");
 #endif
