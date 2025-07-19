@@ -41,6 +41,7 @@ class _NormBase(Module):
         eps: float = 1e-5,
         momentum: Optional[float] = 0.1,
         affine: bool = True,
+        bias: bool = True,
         track_running_stats: bool = True,
         device=None,
         dtype=None,
@@ -54,7 +55,10 @@ class _NormBase(Module):
         self.track_running_stats = track_running_stats
         if self.affine:
             self.weight = Parameter(torch.empty(num_features, **factory_kwargs))
-            self.bias = Parameter(torch.empty(num_features, **factory_kwargs))
+            if bias:
+                self.bias = Parameter(torch.empty(num_features, **factory_kwargs))
+            else:
+                self.register_parameter("bias", None)
         else:
             self.register_parameter("weight", None)
             self.register_parameter("bias", None)
@@ -94,7 +98,8 @@ class _NormBase(Module):
         self.reset_running_stats()
         if self.affine:
             init.ones_(self.weight)
-            init.zeros_(self.bias)
+            if self.bias is not None:
+                init.zeros_(self.bias)
 
     def _check_input_dim(self, input):
         raise NotImplementedError
@@ -147,13 +152,14 @@ class _BatchNorm(_NormBase):
         eps: float = 1e-5,
         momentum: Optional[float] = 0.1,
         affine: bool = True,
+        bias: bool = True,
         track_running_stats: bool = True,
         device=None,
         dtype=None,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(
-            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
+            num_features, eps, momentum, affine, bias, track_running_stats, **factory_kwargs
         )
 
     def forward(self, input: Tensor) -> Tensor:
@@ -214,6 +220,7 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
         eps=1e-5,
         momentum=0.1,
         affine=True,
+        bias=True,
         track_running_stats=True,
         device=None,
         dtype=None,
@@ -227,13 +234,15 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
             momentum,
             False,
             False,
+            False,
             **factory_kwargs,
         )
         self.affine = affine
         self.track_running_stats = track_running_stats
         if self.affine:
             self.weight = UninitializedParameter(**factory_kwargs)
-            self.bias = UninitializedParameter(**factory_kwargs)
+            if bias:
+                self.bias = UninitializedParameter(**factory_kwargs)
         if self.track_running_stats:
             self.running_mean = UninitializedBuffer(**factory_kwargs)
             self.running_var = UninitializedBuffer(**factory_kwargs)
@@ -252,9 +261,10 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
             self.num_features = input.shape[1]
             if self.affine:
                 assert isinstance(self.weight, UninitializedParameter)
-                assert isinstance(self.bias, UninitializedParameter)
                 self.weight.materialize((self.num_features,))
-                self.bias.materialize((self.num_features,))
+                if self.bias is not None:
+                    assert isinstance(self.bias, UninitializedParameter)
+                    self.bias.materialize((self.num_features,))
             if self.track_running_stats:
                 self.running_mean.materialize(  # type:ignore[union-attr]
                     (self.num_features,)
@@ -314,6 +324,8 @@ class BatchNorm1d(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
@@ -360,6 +372,8 @@ class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
@@ -426,6 +440,8 @@ class BatchNorm2d(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
@@ -471,6 +487,8 @@ class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
@@ -537,6 +555,8 @@ class BatchNorm3d(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
@@ -582,6 +602,8 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
@@ -653,6 +675,8 @@ class SyncBatchNorm(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
@@ -706,6 +730,7 @@ class SyncBatchNorm(_BatchNorm):
         eps: float = 1e-5,
         momentum: Optional[float] = 0.1,
         affine: bool = True,
+        bias: bool = True,
         track_running_stats: bool = True,
         process_group: Optional[Any] = None,
         device=None,
@@ -863,6 +888,7 @@ class SyncBatchNorm(_BatchNorm):
                 module.eps,
                 module.momentum,
                 module.affine,
+                module.bias is not None,
                 module.track_running_stats,
                 process_group,
             )

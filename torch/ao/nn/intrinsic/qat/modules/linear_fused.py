@@ -50,7 +50,7 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         assert qconfig, "qconfig must be provided for QAT module"
         self.qconfig = qconfig
         self.freeze_bn = freeze_bn if self.training else True
-        self.bn = nn.BatchNorm1d(out_features, eps, momentum, True, True)
+        self.bn = nn.BatchNorm1d(out_features, eps, momentum, True, True, True)
         self.weight_fake_quant = self.qconfig.weight()
         if bias:
             self.bias = Parameter(torch.empty(out_features))
