@@ -32,6 +32,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_memcpy(
     size_t data_size,
     uint8_t* constants_start);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_copy_buffer(
+    void* buffer,
+    size_t constant_offset,
+    size_t bytes_read,
+    size_t data_size,
+    void* constants_start);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
