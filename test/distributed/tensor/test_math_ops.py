@@ -572,6 +572,20 @@ class DistMathOpsTest(DTensorTestBase):
             f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
         )
 
+
+    @with_comms
+    def test_rms_norm_fwd(self):
+        ...
+
+    @with_comms
+    def test_rms_norm_bwd(self):
+        ...
+
+    @with_comms
+    def test_rms_norm_bwd_req_grad(self):
+        ...
+
+
     @with_comms
     def test_topk(self):
         device_mesh = self.build_device_mesh()
