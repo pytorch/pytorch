@@ -5,6 +5,29 @@
 using namespace metal;
 using namespace c10::metal;
 
+namespace c10 {
+namespace metal {
+// There are no atomic 64-bit add in Metal yet, but this implements a consistent
+// add I.e. if multiple threads are modify the same 64-bit value, results stored
+// at the address will eventually be equal to its original value plus sum of all
+// operands
+template <>
+struct AtomicType<long> {
+  using type = ::metal::atomic<uint>;
+  static inline void atomic_add(device type* data, long offset, long value) {
+    const auto value_bits = as_type<ulong>(value);
+    const uint low = static_cast<uint>(value_bits);
+    uint high = static_cast<uint>(value_bits >> 32);
+    auto ptr = data + (offset << 1);
+    auto old_low = atomic_fetch_add_explicit(ptr, low, memory_order_relaxed);
+    high += (old_low + low < old_low) ? 1 : 0;
+    atomic_fetch_add_explicit(ptr + 1, high, memory_order_relaxed);
+  }
+};
+
+} // namespace metal
+} // namespace c10
+
 struct IndexAB {
   constant int64_t* indexArray;
 };
@@ -211,7 +234,11 @@ REGISTER_INDEX_OP_ALL_DTYPES(put_serial);
 
 REGISTER_INDEX_OP(put_accumulate, float, float);
 REGISTER_INDEX_OP(put_accumulate, half, half);
+REGISTER_INDEX_OP(put_accumulate, long, long);
 REGISTER_INDEX_OP(put_accumulate, int, int);
+REGISTER_INDEX_OP(put_accumulate, short, short);
+REGISTER_INDEX_OP(put_accumulate, char, char);
+REGISTER_INDEX_OP(put_accumulate, uchar, uchar);
 REGISTER_INDEX_OP(put_accumulate, bool, bool);
 #if __METAL_VERSION__ >= 310
 REGISTER_INDEX_OP(put_accumulate, bfloat, bfloat);

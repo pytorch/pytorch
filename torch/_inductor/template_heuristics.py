@@ -707,6 +707,18 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
     def __init__(self) -> None:
         super().__init__()
 
+        self.b200_default_flex_config = {
+            (torch.float32, 64): FlexConfig(128, 32, 3, 4),
+            (torch.float32, 128): FlexConfig(32, 64, 3, 4),
+            (torch.float32, 256): FlexConfig(32, 32, 3, 4),
+            (torch.bfloat16, 64): FlexConfig(128, 128, 3, 4),
+            (torch.bfloat16, 128): FlexConfig(128, 64, 2, 8),
+            (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
+            (torch.float16, 64): FlexConfig(128, 128, 3, 4),
+            (torch.float16, 128): FlexConfig(128, 128, 3, 8),
+            (torch.float16, 256): FlexConfig(64, 32, 3, 4),
+        }
+
         self.h100_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 3, 4),
             (torch.float32, 128): FlexConfig(32, 64, 3, 4),
@@ -745,7 +757,11 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
                 default_config = FlexConfig(128, 64, 3, 4)
-            if capability >= (9, 0):
+            if capability >= (10, 0):
+                default_config = self.b200_default_flex_config.get(
+                    (dtype, head_dim), default_config
+                )
+            elif capability >= (9, 0):
                 default_config = self.h100_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
