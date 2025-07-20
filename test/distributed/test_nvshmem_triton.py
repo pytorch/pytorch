@@ -678,7 +678,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank, world_size = self.rank, self.world_size
         # configuration
@@ -922,7 +922,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         numel = 1
@@ -959,7 +959,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         world_size = dist.get_world_size()
         rank = self.rank
@@ -1007,7 +1007,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         # Configuration
@@ -1054,7 +1054,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         world_size = dist.get_world_size()
         rank = self.rank
@@ -1100,7 +1100,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         world_size = dist.get_world_size()
         rank = self.rank
