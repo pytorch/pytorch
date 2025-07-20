@@ -16,6 +16,7 @@ from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocmArch,
 )
 from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
@@ -34,7 +35,11 @@ f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
 
 
 def _fix_fp8_dtype_for_rocm(
-    dtype: Union[torch.dtype, list[torch.dtype], tuple[torch.dtype]], device
+    dtype: Union[torch.dtype,
+    list[torch.dtype],
+    tuple[torch.dtype]],
+    device,
+    _is_recursive_call: bool = False
 ) -> Union[torch.dtype, list[torch.dtype], tuple[torch.dtype]]:
     # This function is used to change FP8 data types
     # with MI300 supported FP8 types if device is GPU:
@@ -43,20 +48,28 @@ def _fix_fp8_dtype_for_rocm(
     # Supports single, tuple and list of dtypes
     # Keeps the same test name for CUDA and ROCm
     # Also it allows to enable FP8 inductor tests for CPU
-    if (
-        torch.version.hip
-        and ("cuda" in device)
-        and ("gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0])
-    ):
-        # MI300 uses different float8 dtypes
-        if isinstance(dtype, tuple):
-            return tuple(_fix_fp8_dtype_for_rocm(x, device) for x in dtype)
-        if isinstance(dtype, list):
-            return [_fix_fp8_dtype_for_rocm(x, device) for x in dtype]
-        if dtype == torch.float8_e4m3fn:
-            return torch.float8_e4m3fnuz
-        elif dtype == torch.float8_e5m2:
-            return torch.float8_e5m2fnuz
+    if torch.version.hip and "cuda" in device:
+        gfx_arch = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+        if "gfx94" in gfx_arch or "gfx120" in gfx_arch:
+            if isinstance(dtype, tuple):
+                return tuple(filter(None, (_fix_fp8_dtype_for_rocm(x, device, True) for x in dtype)))
+            if isinstance(dtype, list):
+                return list(filter(None, (_fix_fp8_dtype_for_rocm(x, device, True) for x in dtype)))
+
+            if "gfx94" in gfx_arch:
+                # MI300 uses different float8 dtypes
+                if dtype == torch.float8_e4m3fn:
+                    return torch.float8_e4m3fnuz
+                elif dtype == torch.float8_e5m2:
+                    return torch.float8_e5m2fnuz
+            if "gfx120" in gfx_arch:
+                # for gfx120 series, float8_e4m3fn is not supported.
+                if dtype == torch.float8_e4m3fn:
+                    if _is_recursive_call:
+                        return None
+                    raise unittest.SkipTest("e4m3fn is not supported on gfx120* architecture.")
+                elif dtype == torch.float8_e5m2:
+                    return torch.float8_e5m2
     return dtype
 
 
@@ -128,6 +141,7 @@ class TestFP8Types(TestCase):
         x = torch.rand(*x_shape, device=device, dtype=dtype).to(e4m3_type)
         y_fp8 = compiled_fp8_matmul(x)  # noqa: F841
 
+    @skipIfRocmArch(("gfx1200","gfx1201"))
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float))
     @parametrize("shape", ("15,3,13", "4,2048,4096"))
     @parametrize("dst_types", [(torch.float8_e4m3fn, torch.float8_e5m2)])
