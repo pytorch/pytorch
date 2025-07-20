@@ -1684,8 +1684,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchvision
   TORCH_CUDA_ARCH_LIST="8.0;8.6" install_torchao
   id=$((SHARD_NUMBER-1))
-  # https://github.com/opencv/opencv-python/issues/885
-  pip_install opencv-python==4.8.0.74
+  pip_install opencv-python==4.12.0.88
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf

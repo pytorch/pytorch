@@ -29,7 +29,7 @@ scipy==1.13.1
 setuptools==80.9.0
 sympy==1.13.3
 tlparse==0.3.30
-tensorboard==2.13.0
+tensorboard==2.20.0
 typing-extensions==4.12.2
 unittest-xml-reporting<=3.2.0,>=2.0.0
 xdoctest==1.1.0
