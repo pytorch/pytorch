@@ -520,7 +520,7 @@ on [our website](https://pytorch.org/get-started/previous-versions).
 
 ## Getting Started
 
-Three-pointers to get you started:
+Three pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
