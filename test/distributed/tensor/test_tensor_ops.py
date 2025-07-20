@@ -2,7 +2,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-import torch.distributed._functional_collectives as funcol
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -53,6 +52,46 @@ class DistTensorOpsTest(DTensorTestBase):
             cloned_mat = mat.clone()
             self.assertFalse(cloned_mat is mat)
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
+
+    @with_comms
+    def test_copy_(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # basic test
+        src_tensor = torch.randn((12, 12))
+        dst_tensor = torch.zeros(12, 12)
+        src_specs = [[Replicate()], [Shard(0)]]
+        dst_specs = [[Replicate()], [Shard(0)]]
+        for dst_spec, src_spec in zip(dst_specs, src_specs):
+            src_dtensor = distribute_tensor(src_tensor, device_mesh, dst_spec)
+            dst_dtensor = distribute_tensor(dst_tensor, device_mesh, src_spec)
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
+
+        # simple broadcasting
+        src_tensor = torch.randn((128,))
+        dst_tensor = torch.zeros(128, 128)
+        src_specs = [[Replicate()], [Shard(0)]]
+        dst_specs = [[Replicate()], [Shard(1)]]
+        for dst_spec, src_spec in zip(dst_specs, src_specs):
+            src_dtensor = distribute_tensor(src_tensor, device_mesh, src_spec)
+            dst_dtensor = distribute_tensor(dst_tensor, device_mesh, dst_spec)
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
+
+        # The src specs in this case are designed to not be compatible with the dst_specs, redistribute should happen
+        src_tensor = torch.randn((64, 1))
+        dst_tensor = torch.zeros(16, 32, 64, 128)
+        src_specs = [[Shard(1)], [Shard(1)], [Shard(1)], [Shard(1)]]
+        dst_specs = [[Replicate()], [Shard(0)], [Shard(1)], [Shard(2)]]
+        for dst_spec, src_spec in zip(dst_specs, src_specs):
+            src_dtensor = distribute_tensor(src_tensor, device_mesh, src_spec)
+            dst_dtensor = distribute_tensor(dst_tensor, device_mesh, dst_spec)
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
 
     @with_comms
     def test_contiguous(self):
@@ -725,24 +764,17 @@ class DistTensorOpsTest(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
         partial_tensor = torch.randn(8, 8, device=self.device_type)
-        replicate_tensor = partial_tensor.detach().clone()
-        replicate_tensor = funcol.all_reduce(
-            replicate_tensor, reduce_op, mesh
-        )  # all reduce to full tensor
-        replicate_tensor_list = replicate_tensor.split(split_size, dim=split_dim)
-
         partial_dt = DTensor.from_local(
             local_tensor=partial_tensor,
             device_mesh=mesh,
             placements=[Partial(reduce_op=reduce_op)],
         )
-        partial_dt_list = partial_dt.split(split_size, dim=split_dim)
-
-        replicate_dt_full_tensor_list = [dt.full_tensor() for dt in partial_dt_list]
-        for replicate_tensor, replicate_dt_full_tensor in zip(
-            replicate_tensor_list, replicate_dt_full_tensor_list
-        ):
-            self.assertEqual(replicate_tensor, replicate_dt_full_tensor)
+        self._test_op_on_dtensor(
+            torch.split,
+            partial_dt,
+            split_size,
+            dim=split_dim,
+        )
 
 
 if __name__ == "__main__":

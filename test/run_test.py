@@ -28,6 +28,7 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     retry_shell,
     set_cwd,
@@ -35,7 +36,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_SAVE_XML,
     TEST_WITH_ASAN,
-    TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
 )
@@ -913,8 +913,12 @@ def _test_autoload(test_directory, options, enable=True):
 
 
 def run_test_with_openreg(test_module, test_directory, options):
+    # TODO(FFFrog): Will remove this later when windows/macos are supported.
+    if not IS_LINUX:
+        return 0
+
     openreg_dir = os.path.join(
-        test_directory, "cpp_extensions", "open_registration_extension"
+        test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
     install_dir, return_code = install_cpp_extensions(openreg_dir)
     if return_code != 0:
@@ -1405,11 +1409,6 @@ def parse_args():
         action="store_true",
         help="Enables removing tests based on TD",
         default=IS_CI
-        and (
-            TEST_WITH_CROSSREF
-            or TEST_CONFIG == "distributed"
-            or TEST_CONFIG == "default"
-        )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
         and not IS_MACOS
@@ -1587,6 +1586,7 @@ def get_selected_tests(options) -> list[str]:
             "test_nn",
             "inductor/test_mps_basic",
             "inductor/test_torchinductor",
+            "inductor/test_aot_inductor",
         ]
     else:
         # Exclude all mps tests otherwise

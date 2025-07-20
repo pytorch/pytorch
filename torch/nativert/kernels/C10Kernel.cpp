@@ -49,8 +49,10 @@ void C10Kernel::computeInternal(ExecutionFrame& executionFrame) const {
   // these are named I don't think it will ever happen in practice. We need to
   // enforce it though.
   const auto& outputValues = node_->outputs();
-  TORCH_CHECK_EQ(outputValues.size(), stack.size())
-      << "Output size mismatch for " << node_->toString();
+  TORCH_CHECK(
+      outputValues.size() == stack.size(),
+      "Output size mismatch for ",
+      node_->toString());
   for (auto&& [i, actualOutput] : c10::enumerate(stack)) {
     executionFrame.setIValue(outputValues[i]->id(), std::move(actualOutput));
   }
