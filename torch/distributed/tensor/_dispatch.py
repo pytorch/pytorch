@@ -434,7 +434,7 @@ class OpDispatcher:
                 "Found a non-scalar tensor with numel=1 and ndim!=0, "
                 "we are implicitly creating a replicated DTensor for it. "
                 "However, please consider changing it to a scalar tensor "
-                "or explicitly create a DTensor under distributed enviroment."
+                "or explicitly create a DTensor under distributed environment."
             )
 
         if tensor_arg.numel() == 1 or self._allow_implicit_replication:

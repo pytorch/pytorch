@@ -41,6 +41,10 @@ c10::ScalarType convertJsonScalarType(
       return c10::ScalarType::Float8_e4m3fn;
     case torch::_export::ScalarType::FLOAT8E5M2:
       return c10::ScalarType::Float8_e5m2;
+    case torch::_export::ScalarType::FLOAT8E4M3FNUZ:
+      return c10::ScalarType::Float8_e4m3fnuz;
+    case torch::_export::ScalarType::FLOAT8E5M2FNUZ:
+      return c10::ScalarType::Float8_e5m2fnuz;
     default:
       TORCH_CHECK(false, "unknown scalar type", static_cast<int>(scalarType));
   }
