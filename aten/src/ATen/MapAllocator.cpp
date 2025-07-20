@@ -299,7 +299,7 @@ MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags,
             ::close(fd);
             TORCH_CHECK(false, "unable to stretch file <", filename_, "> to the right size: ", c10::utils::str_error(last_err), " (", last_err, ")");
           }
-/* on macOS write returns with errno 45 (Opperation not supported) when used
+/* on macOS write returns with errno 45 (Operation not supported) when used
  * with a file descriptor obtained via shm_open
  */
 #ifndef __APPLE__
