@@ -200,7 +200,8 @@ def sync_test_kernel(
         while i < n_pes:
             nvshmem.putmem_block(dst_ptr, src_ptr, numel, i)
             i += 1
-    # Synchronize all PEs (only local stores visibility, no remote guarantee)
+    # Synchronize all PEs (this is more lightweight than barrier_all() b/c it only ensures local store visibility
+    # and doesn't wait for remote ops to complete)
     nvshmem.sync_all()
     # Non-zero ranks increment the received value
     if my_pe != 0:
