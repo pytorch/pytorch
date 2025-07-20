@@ -32,9 +32,9 @@ from .descriptors import (
     AOTInput,
     AOTOutput,
     InputMutationTangentAOTInput,
-    OutputAOTOutput,
     OutputIntermediateBaseTangentAOTInput,
-    OutputTangentAOTInput,
+    PlainAOTOutput,
+    TangentAOTInput,
 )
 from .functional_utils import (
     are_all_mutations_hidden_from_autograd,
@@ -220,7 +220,7 @@ def run_functionalized_fw_and_collect_metadata(
             # NB: this is just to setup the input descriptors, we will
             # recreate these descriptors (with the same convention!) when we
             # actually do the trace
-            flat_f_outs_descs = [OutputAOTOutput(i) for i in range(len(flat_f_outs))]
+            flat_f_outs_descs = [PlainAOTOutput(i) for i in range(len(flat_f_outs))]
 
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
@@ -754,7 +754,7 @@ from a multi-output view call"
         )
 
         f_output_tangents_pairs = [
-            (o, OutputTangentAOTInput(desc))
+            (o, TangentAOTInput(desc))
             for o, info, desc in zip(flat_f_outs, output_info, flat_f_outs_descs)
             if info.output_type
             in [

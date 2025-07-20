@@ -43,7 +43,7 @@ from ._aot_autograd.autograd_cache import (  # noqa: F401
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
 )
-from ._aot_autograd.descriptors import AOTInput, InputAOTInput, ParamAOTInput
+from ._aot_autograd.descriptors import AOTInput, ParamAOTInput, PlainAOTInput
 from ._aot_autograd.frontend_utils import (
     _detect_attribute_assignment,
     _try_get_metadata_from_dynamo,
@@ -796,7 +796,7 @@ def aot_function(
             # TODO: We actually could use the pytree path to make better descs.
             # Also, the descs here are bad if you do aot_module.
             fake_flat_args_descs = [
-                InputAOTInput(i) for i in range(len(fake_flat_args))
+                PlainAOTInput(i) for i in range(len(fake_flat_args))
             ]
             with contextlib.ExitStack() as stack:
                 aot_state = create_aot_state(
@@ -908,7 +908,7 @@ def prepare_aot_module_simplified(
 
     # Next, the input args
     full_args.extend(args)
-    full_args_descs.extend(InputAOTInput(i) for i in range(len(args)))
+    full_args_descs.extend(PlainAOTInput(i) for i in range(len(args)))
 
     # TODO: Might be nice to hold on to the Dynamo source here in full_args_descs!
     (
@@ -1455,7 +1455,7 @@ def _aot_export_function(
         shape_env = fake_mode.shape_env
     fake_flat_args = process_inputs(flat_args, aot_config, fake_mode, shape_env)
     # TODO: Improve the descs here with pytree information
-    fake_flat_args_descs = [InputAOTInput(i) for i in range(len(fake_flat_args))]
+    fake_flat_args_descs = [PlainAOTInput(i) for i in range(len(fake_flat_args))]
 
     with contextlib.ExitStack() as stack:
         aot_state = create_aot_state(

@@ -55,7 +55,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from .descriptors import AOTOutput, OutputAOTOutput
+from .descriptors import AOTOutput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -131,7 +131,7 @@ def aot_stage1_graph_capture(
     @wraps(orig_flat_fn)
     def orig_flat_fn2(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
         out = orig_flat_fn(*args)
-        out_descs: list[AOTOutput] = [OutputAOTOutput(i) for i in range(len(out))]
+        out_descs: list[AOTOutput] = [PlainAOTOutput(i) for i in range(len(out))]
         return out, out_descs
 
     aot_config = aot_state.aot_config
