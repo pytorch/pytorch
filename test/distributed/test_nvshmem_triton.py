@@ -210,6 +210,16 @@ def sync_test_kernel(
         tl.store(p_dst, received + 1)
 
 
+@triton.jit
+def alltoall_kernel(
+    team_handle,
+    dest_ptr,
+    src_ptr,
+    nelems,
+):
+    nvshmem.alltoall(team_handle, dest_ptr, src_ptr, nelems)
+
+
 @instantiate_parametrized_tests
 @requires_nvshmem()
 class NVSHMEMTritonTest(MultiProcContinousTest):
@@ -830,6 +840,54 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             torch.testing.assert_close(
                 dst, torch.tensor([43], device=self.device, dtype=dtype)
             )
+
+    @skipIfRocm
+    @requires_triton()
+    def test_triton_alltoall(self) -> None:
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        nvshmem_lib = nvshmem.enable_triton()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+        world_size = dist.get_world_size()
+        rank = self.rank
+        # Each PE will send 2 int64 elements to every other PE
+        nelems_per_pe = 2
+        dtype = torch.int64
+        # Source buffer: contains data for all PEs
+        # Layout: [data_for_pe0, data_for_pe1, ...]
+        src_size = nelems_per_pe * world_size
+        src = symm_mem.empty(src_size, dtype=dtype, device=self.device)
+        # Fill source with rank-specific data
+        # Formula: rank * 100 + destination_pe
+        for i in range(world_size):
+            value = rank * 100 + i
+            src[i * nelems_per_pe : (i + 1) * nelems_per_pe] = value
+        # Destination buffer
+        dst = symm_mem.empty(src_size, dtype=dtype, device=self.device).fill_(-1)
+        src_hdl = symm_mem.rendezvous(src, group=group_name)
+        dst_hdl = symm_mem.rendezvous(dst, group=group_name)
+        # Synchronize before alltoall
+        dist.barrier()
+        team_handle = 0  # NVSHMEM_TEAM_WORLD handle is 0
+        # Launch the kernel
+        alltoall_kernel[(1,)](
+            team_handle,
+            dst_hdl.buffer_ptrs[rank],
+            src_hdl.buffer_ptrs[rank],
+            nelems_per_pe,
+            extern_libs=nvshmem_lib,
+            launch_cooperative_grid=True,
+        )
+        # Synchronize after alltoall
+        dist.barrier()
+        # Verify results
+        for i in range(world_size):
+            # After alltoall, we should receive data from PE i that was intended for us
+            # PE i sends (i * 100 + rank) to us
+            expected = i * 100 + rank
+            actual = dst[i * nelems_per_pe : (i + 1) * nelems_per_pe]
+            torch.testing.assert_close(actual, torch.full_like(actual, expected))
 
 
 if __name__ == "__main__":
