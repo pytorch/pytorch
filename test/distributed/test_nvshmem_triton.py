@@ -4,6 +4,8 @@
 # python test/distributed/test_nvshmem_triton.py
 
 
+import triton.language as tl
+
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
@@ -148,6 +150,37 @@ def put_with_quiet_kernel(
     nvshmem.putmem_block(flag_dst_ptr, flag_src_ptr, 1, peer)
 
 
+@triton.jit
+def barrier_test_kernel(
+    dst_ptr,
+    src_ptr,
+    numel,
+):
+    # Testing barrier_all() requires coordinated operations across PEs within
+    # the same kernel execution. Unlike other kernels that just wrap NVSHMEM
+    # primitives, this one implements the full test logic to properly verify
+    # device-side barrier synchronization.
+    my_pe = nvshmem.my_pe()
+    n_pes = nvshmem.n_pes()
+    # Rank 0 broadcasts its value to all other ranks
+    if my_pe == 0:
+        # Write initial value
+        p_src = src_ptr.to(tl.pointer_type(tl.int32))
+        tl.store(p_src, 42)
+        # Put to all other ranks
+        i = 1
+        while i < n_pes:
+            nvshmem.putmem_block(dst_ptr, src_ptr, numel, i)
+            i += 1
+    # Synchronize all PEs
+    nvshmem.barrier_all()
+    # Non-zero ranks increment the received value
+    if my_pe != 0:
+        p_dst = dst_ptr.to(tl.pointer_type(tl.int32))
+        received = tl.load(p_dst)
+        tl.store(p_dst, received + 1)
+
+
 @instantiate_parametrized_tests
 @requires_nvshmem()
 class NVSHMEMTritonTest(MultiProcContinousTest):
@@ -172,7 +205,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # Enable NVSHMEM for Triton
         nvshmem_lib = nvshmem.enable_triton()
 
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
 
@@ -211,7 +244,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         self._init_device()
 
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         msg_size_bytes = 8
@@ -249,7 +282,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         self._init_device()
 
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         world_size = dist.get_world_size()
@@ -292,7 +325,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
         nvshmem_lib = nvshmem.enable_triton()
 
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
 
@@ -357,7 +390,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
         nvshmem_lib = nvshmem.enable_triton()
 
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
 
@@ -419,7 +452,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         self._init_device()
 
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
         rank = self.rank
@@ -493,7 +526,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         self._init_device()
         # Enable NVSHMEM for Triton
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         peer = (self.world_size - 1) - rank
@@ -569,7 +602,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         peer = (self.world_size - 1) - rank
@@ -644,7 +677,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         self._init_device()
         # Enable NVSHMEM for Triton
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         msg_size_bytes = 8
@@ -692,6 +725,44 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 numel=numel,
                 peer=peer,
                 extern_libs=nvshmem_lib,
+            )
+
+    @skipIfRocm
+    @requires_triton()
+    def test_triton_barrier(self) -> None:
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        nvshmem_lib = nvshmem.enable_triton()
+        group_name = dist.distributed_c10d._get_default_group().group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+        rank = self.rank
+        numel = 1
+        dtype = torch.int32
+        # Create symmetric buffers
+        src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
+        dst = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
+        src_hdl = symm_mem.rendezvous(src, group=group_name)
+        dst_hdl = symm_mem.rendezvous(dst, group=group_name)
+        # Launch kernel with cooperative grid
+        barrier_test_kernel[(1,)](
+            dst_hdl.buffer_ptrs[rank],
+            src_hdl.buffer_ptrs[rank],
+            numel=numel,
+            extern_libs=nvshmem_lib,
+            launch_cooperative_grid=True,
+            num_ctas=1,
+        )
+        # Verify results
+        # Rank 0 should have 42, and then the rest should have incremented + 1 to 43
+        if rank == 0:
+            # Rank 0 should have its original value (42) in src
+            torch.testing.assert_close(
+                src, torch.tensor([42], device=self.device, dtype=dtype)
+            )
+        else:
+            # Other ranks should have received 42 and incremented to 43
+            torch.testing.assert_close(
+                dst, torch.tensor([43], device=self.device, dtype=dtype)
             )
 
 
