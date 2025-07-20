@@ -37,7 +37,7 @@ def max_memory_allocated(device: Optional[_device_t] = None) -> int:
 
 
 def memory_allocated(device: Optional[_device_t] = None) -> int:
-    r"""Return the current GPU memory occupied by tensors in bytes for a given device.
+    r"""Return the current MTIA memory occupied by tensors in bytes for a given device.
 
     Args:
         device (torch.device or int or str, optional): selected device. Returns

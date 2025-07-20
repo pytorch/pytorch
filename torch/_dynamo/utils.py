@@ -2572,6 +2572,10 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
+def dataclass_fields(cls):
+    return torch._dynamo.disable(dataclasses.fields)(cls)
+
+
 iter_next = next
 
 

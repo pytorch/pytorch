@@ -78,6 +78,34 @@ function pip_install_whl() {
   fi
 }
 
+function pip_build_and_install() {
+  local build_target=$1
+  local wheel_dir=$2
+
+  local found_whl=0
+  for file in "${wheel_dir}"/*.whl
+  do
+    if [[ -f "${file}" ]]; then
+      found_whl=1
+      break
+    fi
+  done
+
+  # Build the wheel if it doesn't exist
+  if [ "${found_whl}" == "0" ]; then
+    python3 -m pip wheel \
+      --no-build-isolation \
+      --no-deps \
+      --no-use-pep517 \
+      -w "${wheel_dir}" \
+      "${build_target}"
+  fi
+
+  for file in "${wheel_dir}"/*.whl
+  do
+    pip_install_whl "${file}"
+  done
+}
 
 function pip_install() {
   # retry 3 times
@@ -124,14 +152,7 @@ function get_pinned_commit() {
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
-  if [[ "$1" == "cuda" ]]; then
-    # TODO: This is better to be passed as a parameter from _linux-test workflow
-    # so that it can be consistent with what is set in build
-    TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install --no-use-pep517 "git+https://github.com/pytorch/audio.git@${commit}"
-  else
-    pip_install --no-use-pep517 "git+https://github.com/pytorch/audio.git@${commit}"
-  fi
-
+  pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/audio
 }
 
 function install_torchtext() {
@@ -139,8 +160,8 @@ function install_torchtext() {
   local text_commit
   data_commit=$(get_pinned_commit data)
   text_commit=$(get_pinned_commit text)
-  pip_install --no-use-pep517 "git+https://github.com/pytorch/data.git@${data_commit}"
-  pip_install --no-use-pep517 "git+https://github.com/pytorch/text.git@${text_commit}"
+  pip_build_and_install "git+https://github.com/pytorch/data.git@${data_commit}" dist/data
+  pip_build_and_install "git+https://github.com/pytorch/text.git@${text_commit}" dist/text
 }
 
 function install_torchvision() {
@@ -153,7 +174,7 @@ function install_torchvision() {
     echo 'char* dlerror(void) { return "";}'|gcc -fpic -shared -o "${HOME}/dlerror.so" -x c -
     LD_PRELOAD=${orig_preload}:${HOME}/dlerror.so
   fi
-  pip_install --no-use-pep517 "git+https://github.com/pytorch/vision.git@${commit}"
+  pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
   if [ -n "${LD_PRELOAD}" ]; then
     LD_PRELOAD=${orig_preload}
   fi
@@ -173,25 +194,48 @@ function install_torchrec_and_fbgemm() {
 
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
     # install torchrec first because it installs fbgemm nightly on top of rocm fbgemm
-    pip_install --no-use-pep517 "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+    pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     pip_uninstall fbgemm-gpu-nightly
 
     pip_install tabulate  # needed for newer fbgemm
     pip_install patchelf  # needed for rocm fbgemm
-    git clone --recursive https://github.com/pytorch/fbgemm
-    pushd fbgemm/fbgemm_gpu
-    git checkout "${fbgemm_commit}"
-    python setup.py install \
-      --package_variant=rocm \
-      -DHIP_ROOT_DIR="${ROCM_PATH}" \
-      -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
-      -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
-    popd
+
+    local wheel_dir=dist/fbgemm_gpu
+    local found_whl=0
+    for file in "${wheel_dir}"/*.whl
+    do
+      if [[ -f "${file}" ]]; then
+        found_whl=1
+        break
+      fi
+    done
+
+    # Build the wheel if it doesn't exist
+    if [ "${found_whl}" == "0" ]; then
+      git clone --recursive https://github.com/pytorch/fbgemm
+      pushd fbgemm/fbgemm_gpu
+      git checkout "${fbgemm_commit}"
+      python setup.py bdist_wheel \
+        --package_variant=rocm \
+        -DHIP_ROOT_DIR="${ROCM_PATH}" \
+        -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
+        -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
+      popd
+
+      # Save the wheel before cleaning up
+      mkdir -p dist/fbgemm_gpu
+      cp fbgemm/fbgemm_gpu/dist/*.whl dist/fbgemm_gpu
+    fi
+
+    for file in "${wheel_dir}"/*.whl
+    do
+      pip_install_whl "${file}"
+    done
+
     rm -rf fbgemm
   else
-    # See https://github.com/pytorch/pytorch/issues/106971
-    CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
-    pip_install --no-use-pep517 "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+    pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
+    pip_build_and_install "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#subdirectory=fbgemm_gpu" dist/fbgemm_gpu
   fi
 }
 
@@ -234,7 +278,7 @@ function checkout_install_torchbench() {
 function install_torchao() {
   local commit
   commit=$(get_pinned_commit torchao)
-  pip_install --no-use-pep517 "git+https://github.com/pytorch/ao.git@${commit}"
+  pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
 }
 
 function print_sccache_stats() {

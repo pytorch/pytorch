@@ -364,9 +364,6 @@ class DeviceOpOverrides:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError
 
-    def import_device_specific_lib(self) -> str:
-        return ""
-
 
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 custom_backend_passes: dict[str, Optional[CustomGraphModulePass]] = {}
@@ -476,6 +473,7 @@ def init_backend_registration() -> None:
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .mps import MetalScheduling
+    from .python_wrapper_mtia import PythonWrapperMtia
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
 
@@ -527,7 +525,7 @@ def init_backend_registration() -> None:
         register_backend_for_device(
             "mtia",
             TritonScheduling,
-            PythonWrapperCodegen,
+            PythonWrapperMtia,
             CppWrapperGpu,
         )
 

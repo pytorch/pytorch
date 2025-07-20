@@ -4,9 +4,6 @@ from ..common import DeviceOpOverrides, register_device_op_overrides
 
 
 class MTIADeviceOpOverrides(DeviceOpOverrides):
-    def import_device_specific_lib(self) -> str:
-        return "import mtia.host_runtime.torch_mtia.dynamic_library"
-
     def import_get_raw_stream_as(self, name: str) -> str:
         return f"from torch._C import _mtia_getCurrentRawStream as {name}"
 
