@@ -82,8 +82,7 @@ class Executor {
       const std::shared_ptr<Weights>& weights,
       Placement placement = Placement(),
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
-          pytorchStreamReader = nullptr,
-      MakeProxyExecutorFn makeProxyExecutorFunc = nullptr);
+          pytorchStreamReader = nullptr);
 
   std::shared_ptr<Weights> getWeights() {
     std::shared_ptr<Weights> ret;
@@ -189,8 +188,6 @@ class Executor {
   std::vector<ConstFoldingExecution> constFoldingExecutions_;
 
   std::optional<ConstantFolder> constantFolder_;
-
-  MakeProxyExecutorFn makeProxyExecutorFunc_;
 
   c10::Semaphore sem_;
   torch::nativert::detail::MPMCQueue<std::unique_ptr<ExecutionFrame>>
