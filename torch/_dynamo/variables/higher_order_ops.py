@@ -1221,28 +1221,28 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
 
         with discard_graph_changes(tx):
-            # See NOTE [unspecialize int carry with unbacked symints]
             # Note: this must be run under discard graph changes.
-            def create_unbacked_sym_node_var(tx) -> SymNodeVariable:
-                example_value = _create_unbacked_symint(
-                    tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
-                )
-                proxy = tx.output.current_tracer.create_graph_input(
-                    "unbacked_symint", type(example_value), example_value
-                )
-                return SymNodeVariable.create(tx, proxy, example_value)
+            def unspecialize_carried_inputs(tx, carry) -> VariableTracker:
+                # See NOTE [unspecialize int carry with unbacked symints]
+                if (
+                    isinstance(carry, ConstantVariable) and carry.python_type() is int
+                ) or isinstance(carry, SymNodeVariable):
+                    example_value = _create_unbacked_symint(
+                        tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
+                    )
+                    proxy = tx.output.current_tracer.create_graph_input(
+                        "unbacked_symint", type(example_value), example_value
+                    )
+                    return SymNodeVariable.create(tx, proxy, example_value)
+                else:
+                    # See NOTE [unspecialize constant tensor carry]
+                    assert isinstance(carry, TensorVariable)
+                    cloned_carry = carry.clone()
+                    cloned_carry.proxy.node.meta["example_value"].constant = None
+                    return cloned_carry
 
             new_operands_seq = [
-                (
-                    create_unbacked_sym_node_var(tx)
-                    if (
-                        isinstance(carry, ConstantVariable)
-                        and carry.python_type() is int
-                    )
-                    or (isinstance(carry, SymNodeVariable))
-                    else carry
-                )
-                for carry in operands_seq
+                unspecialize_carried_inputs(tx, carry) for carry in operands_seq
             ]
 
         # create cond subgrpahs
