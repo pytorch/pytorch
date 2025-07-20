@@ -236,6 +236,7 @@ def check_meta_consistency(
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
+    _old_capture_scalar_outputs = torch._dynamo.config.capture_scalar_outputs
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
     # the top-level frame produces no graph, the default behavior is to fallback to eager.
     # Then when it encounters an inner function, it will try to trace that function again, which is unnecessary.
@@ -249,10 +250,12 @@ def _set_compilation_env():
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
         torch._dynamo.config.allow_empty_graphs = True
+        torch._dynamo.config.capture_scalar_outputs = True
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
         torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
+        torch._dynamo.config.capture_scalar_outputs = _old_capture_scalar_outputs
 
 
 # The invariant here is that we always trace the branch with fake tensor
