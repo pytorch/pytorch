@@ -18,7 +18,7 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C
@@ -379,8 +379,6 @@ def _lazy_init():
             )
         # This function throws if there's a driver initialization error, no GPUs
         # are found or any other error occurs
-        if "CUDA_MODULE_LOADING" not in os.environ:
-            os.environ["CUDA_MODULE_LOADING"] = "LAZY"
         torch._C._cuda_init()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
@@ -1667,9 +1665,6 @@ class _WrappedTritonKernel:
 
 
 def _register_triton_kernels():
-    if torch._running_with_deploy():
-        return
-
     @_WrappedTritonKernel
     def kernel_impl(*args, **kwargs):
         from torch.sparse._triton_ops import bsr_dense_mm
@@ -1775,6 +1770,9 @@ def _compile_kernel(
 
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
+
+
+_POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 
 
 __all__ = [
