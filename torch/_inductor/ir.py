@@ -541,12 +541,23 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
 
 
 class IRNode:
+    """Base class for all intermediate representation (IR) nodes in TorchInductor.
+
+    Note:
+        This is an abstract base class. Most methods raise NotImplementedError
+        and must be overridden by concrete subclasses.
+    """
+
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
+    # traces back to where the IRNode is created in Inductor
     traceback: Optional[list[str]] = dataclasses.field(init=False)
     origin_node: Optional[torch.fx.Node] = dataclasses.field(init=False)
+    # trace backs to user model code
+    # a single IRNode could correspond to multiple lines of code
+    stack_traces: dict[str, str] = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -578,11 +589,40 @@ class IRNode:
         object.__setattr__(self, attr, value)
 
     def __post_init__(self) -> None:
-        self._post_init_setattr("origins", OrderedSet(self._current_origins))
+        origins = OrderedSet(self._current_origins)
+        self._post_init_setattr("origins", origins)
         self._post_init_setattr(
             "traceback", traceback.format_stack() if config.debug_ir_traceback else None
         )
         self._post_init_setattr("origin_node", None)
+
+        # Group nodes by their stack traces to deduplicate
+        nodes_to_stack_trace = {}
+        if config.trace.provenance_tracking:
+            for node in origins:
+                if node.stack_trace:
+                    # nodes in the backward graph don't have mapping to pre_grad_graph
+                    nodes_to_stack_trace["post_grad+" + node.name] = node.stack_trace
+                else:
+                    if (
+                        "postToPre"
+                        not in torch._inductor.debug._inductor_post_to_pre_grad_nodes
+                    ):
+                        continue
+                    node_names = torch._inductor.debug._inductor_post_to_pre_grad_nodes[
+                        "postToPre"
+                    ].get(node.name, None)
+                    if node_names:
+                        for node_name in node_names:
+                            stack_trace = torch._inductor.debug._inductor_pre_grad_node_stack_trace.get(
+                                node_name, None
+                            )
+                            if stack_trace:
+                                nodes_to_stack_trace["pre_grad+" + node_name] = (
+                                    stack_trace
+                                )
+
+        self._post_init_setattr("stack_traces", nodes_to_stack_trace)
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -601,7 +641,15 @@ class IRNode:
         if shorten and len(origins) > 64:
             # this can get *very* long
             origins = f"{origins[:61]}..."
-        return [origins]
+        if not self.stack_traces:
+            return [origins]
+
+        stack_trace_str = []
+        for stack_trace in self.stack_traces.values():
+            stack_trace_str.append("stack_traces = {{")
+            stack_trace_str += stack_trace.split("\n")
+            stack_trace_str.append("}")
+        return [origins] + stack_trace_str
 
     def str_helper(
         self, lines: Sequence[object], shorten: bool = True, multiline: bool = True

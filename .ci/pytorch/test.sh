@@ -1666,23 +1666,19 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
-  install_torchaudio cuda
+  install_torchaudio
   install_torchvision
   checkout_install_torchbench nanogpt BERT_pytorch resnet50 hf_T5 llama moco
   PYTHONPATH=$(pwd)/torchbench test_cachebench
 elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
-  install_torchaudio cpu
+  install_torchaudio
   install_torchvision
   checkout_install_torchbench nanogpt
   PYTHONPATH=$(pwd)/torchbench test_verify_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
-  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    install_torchaudio cpu
-  else
-    install_torchaudio cuda
-  fi
+  install_torchaudio
   install_torchvision
-  TORCH_CUDA_ARCH_LIST="8.0;8.6" install_torchao
+  install_torchao
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
