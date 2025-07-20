@@ -1,5 +1,3 @@
-# mypy: allow-untyped-decorators
-
 """
 This module implements TorchDynamo's core frame conversion functionality, transforming Python
 frames into FX graphs. It handles:
@@ -495,6 +493,29 @@ def _is_error_on_graph_break(tx: Optional[InstructionTranslator]) -> bool:
     return tx.error_on_graph_break
 
 
+def get_compile_id(
+    frame_state: dict[str, Union[int, FrameStateSizeEntry]],
+) -> CompileId:
+    global FRAME_COUNTER
+    if "_id" not in frame_state:
+        frame_state["_id"] = FRAME_COUNTER
+        FRAME_COUNTER += 1
+    frame_id = frame_state["_id"]
+    assert isinstance(frame_id, int)
+
+    frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
+    FRAME_COMPILE_COUNTER[frame_id] += 1
+
+    compiled_autograd_id = None
+    if prior := CompileContext.current_compile_id():
+        compiled_autograd_id = prior.compiled_autograd_id
+    return CompileId(
+        compiled_autograd_id=compiled_autograd_id,
+        frame_id=frame_id,
+        frame_compile_id=frame_compile_id,
+    )
+
+
 class ConvertFrameAssert:
     def __init__(
         self,
@@ -610,24 +631,8 @@ class ConvertFrameAssert:
         global initial_global_state
         initial_global_state = GlobalStateGuard()
 
-        global FRAME_COUNTER
-        if "_id" not in frame_state:
-            frame_state["_id"] = FRAME_COUNTER
-            FRAME_COUNTER += 1
-        frame_id = frame_state["_id"]
-        assert isinstance(frame_id, int)
-
-        frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
-        FRAME_COMPILE_COUNTER[frame_id] += 1
-
-        compiled_autograd_id = None
-        if prior := CompileContext.current_compile_id():
-            compiled_autograd_id = prior.compiled_autograd_id
-        compile_id = CompileId(
-            compiled_autograd_id=compiled_autograd_id,
-            frame_id=frame_id,
-            frame_compile_id=frame_compile_id,
-        )
+        compile_id = get_compile_id(frame_state)
+        frame_id = compile_id.frame_id
 
         signpost_event(
             "dynamo",

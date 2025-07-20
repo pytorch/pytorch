@@ -19,6 +19,7 @@ from torch._dynamo.utils import same
 from torch._inductor.comms import (
     _reorder_communication_preserving_peak_memory_internal,
     ReorderInfo,
+    sink_waits_iterative,
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.scheduler import BaseSchedulerNode
@@ -1621,7 +1622,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         comm from moving due to data dependency.
         """
 
-        def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
+        def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
             # do some unrelated matmuls
             y = torch.mm(x, w)
 
@@ -1654,14 +1655,52 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             # wait op
             rs_0_out = torch.ops.c10d_functional.wait_tensor(rs_0_out)
             rs_1_out = torch.ops.c10d_functional.wait_tensor(rs_1_out)
+            y += torch.mm(2 * x, 2 * w)
 
-            return y, ag_0_out, ag_1_out, rs_0_out, rs_1_out
+            # cast the inputs
+            ag_2_cast = ag_2.to(torch.bfloat16)
+            ag_3_cast = ag_3.to(torch.bfloat16)
+            ag_2_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_2_cast, group_size, group_name
+            )
+            ag_3_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_3_cast, group_size, group_name
+            )
+
+            # wait op
+            ag_2_out = torch.ops.c10d_functional.wait_tensor(ag_2_out)
+            ag_3_out = torch.ops.c10d_functional.wait_tensor(ag_3_out)
+
+            #
+            rs_2_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_2_cast, "sum", group_size, group_name
+            )
+            rs_3_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_3_cast, "sum", group_size, group_name
+            )
+
+            # wait op
+            rs_2_out = torch.ops.c10d_functional.wait_tensor(rs_2_out)
+            rs_3_out = torch.ops.c10d_functional.wait_tensor(rs_3_out)
+            return (
+                y,
+                ag_0_out,
+                ag_1_out,
+                ag_2_out,
+                ag_3_out,
+                rs_0_out,
+                rs_1_out,
+                rs_2_out,
+                rs_3_out,
+            )
 
         x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
         w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_1 = torch.ones(512, device="cuda", dtype=torch.float32)
-        inputs = [x, w, ag_0, ag_1]
+        ag_0 = torch.ones(1024, 512, device="cuda", dtype=torch.float32)
+        ag_1 = torch.ones(512, 1024, device="cuda", dtype=torch.float32)
+        ag_2 = torch.ones(1024, 512, device="cuda", dtype=torch.float32)
+        ag_3 = torch.ones(512, 1024, device="cuda", dtype=torch.float32)
+        inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
 
         # get stats directly from the internal helper without affecting the real pass's signature
         node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
@@ -1679,11 +1718,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with torch._inductor.config.patch(
             {
                 "bucket_all_gathers_fx": "all",
+                "bucket_all_gathers_fx_bucket_size_determinator": lambda _: 2,
                 "bucket_reduce_scatters_fx": "all",
+                "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
+                    sink_waits_iterative,
                     _reorder_communication_preserving_peak_memory,
                 ],
+                "allow_buffer_reuse": False,
             }
         ):
             compiled = torch.compile(func)
@@ -1694,8 +1737,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             FileCheck()
             .check_count(
                 "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
-                count=1,
+                count=2,
                 exactly=True,
+            )
+            .check(
+                "extern_kernels.mm",
+            )
+            .check(
+                "extern_kernels.addmm",
             )
             .run(code)
         )
@@ -1703,21 +1752,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             FileCheck()
             .check_count(
                 "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
-                count=1,
+                count=2,
                 exactly=True,
-            )
-            .run(code)
-        )
-        (
-            FileCheck()
-            .check(
-                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
-            )
-            .check(
-                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
             )
             .check(
                 "extern_kernels.mm",
+            )
+            .check(
+                "extern_kernels.addmm",
             )
             .run(code)
         )
@@ -1726,7 +1768,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(out, correct), f"{out} va {correct}"
         assert node_stats is not None
         self.assertTrue(isinstance(node_stats, dict))
-        self.assertEqual(len(node_stats), 2)
+        self.assertEqual(len(node_stats), 4)
         it = iter(node_stats.values())
         node_stat0 = next(it)
         self.assertTrue(node_stat0.moves > 0)

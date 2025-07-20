@@ -9,6 +9,7 @@
 #include <fmt/format.h>
 #include <miniz.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <regex>
@@ -36,6 +37,31 @@ namespace fs = std::filesystem;
 #endif
 
 namespace {
+
+const std::string k_separator = "/";
+
+std::string normalize_path_separator(const std::string& orig_path) {
+  /*
+  On Windows and Linux have different separator:
+  On Windows use "\", and the path like: C:\Users\Test\file.txt
+  On Linux use "/", and the path like: /home/user/file.txt
+
+  In order to simplify the path operation, we can use this function to
+  normalize path separator. It will convert Windows separator to Linux
+  separator, and reuse the common code to handle both Windows and Linux
+  path.
+  On Windows, when we input: "C:\Users\Test\file.txt", the output should be:
+  "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
+  */
+#ifdef _WIN32
+  std::string normalized_path = orig_path;
+  std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
+  return normalized_path;
+#else
+  return orig_path;
+#endif
+}
+
 bool file_exists(const std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
@@ -47,7 +73,16 @@ bool file_exists(const std::string& path) {
 
 std::string create_temp_dir() {
 #ifdef _WIN32
-  throw std::runtime_error("Not implemented");
+  try {
+    fs::path temp_dir = fs::temp_directory_path();
+    return temp_dir.string();
+  } catch (const fs::filesystem_error& e) {
+    throw std::runtime_error(
+        "Failed to get temporary directory: " + std::string(e.what()));
+  } catch (...) {
+    throw std::runtime_error(
+        "Unknown error occurred while getting temporary directory");
+  }
 #else
   std::string temp_dir = "/tmp/XXXXXX";
   if (mkdtemp(temp_dir.data()) == nullptr) {
@@ -59,11 +94,21 @@ std::string create_temp_dir() {
 #endif
 }
 
+const char* object_file_ext() {
 #ifdef _WIN32
-const std::string k_separator = "\\";
+  return ".obj";
 #else
-const std::string k_separator = "/";
+  return ".o";
 #endif
+}
+
+const char* extension_file_ext() {
+#ifdef _WIN32
+  return ".pyd";
+#else
+  return ".so";
+#endif
+}
 } // namespace
 
 namespace torch::inductor {
@@ -83,11 +128,12 @@ const nlohmann::json& load_json_file(const std::string& json_path) {
 }
 
 std::tuple<std::string, std::string> get_cpp_compile_command(
-    const std::string& filename,
+    const std::string& arg_filename,
     const std::vector<std::string>& sources,
     const nlohmann::json& compile_options,
     const std::string& output_dir = "") {
   // Construct the cpp command
+  auto filename = normalize_path_separator(arg_filename);
 
   std::string compiler = compile_options["compiler"].get<std::string>();
   bool compile_only = compile_options["compile_only"].get<bool>();
@@ -136,21 +182,18 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
   }
 
   std::string passthrough_parameters_args;
+  std::regex script_regex(R"(--script=[^,]*script\.ld)");
+  std::string replacement =
+      "--script=" + target_dir + k_separator + "script.ld";
   for (auto& arg : compile_options["passthrough_args"]) {
-    std::string arg_str = arg.get<std::string>();
-    std::string target = "script.ld";
-    std::string replacement = target_dir;
-    replacement.append(k_separator).append(target);
-    size_t pos = arg_str.find(target);
-    if (pos != std::string::npos) {
-      arg_str.replace(pos, target.length(), replacement);
-    }
+    std::string arg_str =
+        std::regex_replace(arg.get<std::string>(), script_regex, replacement);
     passthrough_parameters_args += arg_str + " ";
   }
 
   std::string compile_only_arg = compile_only ? "-c" : "";
 
-  std::string cmd = fmt::format(
+  std::string cmd = normalize_path_separator(fmt::format(
       "{} {} {} {} {} {} {} {} {} {} -o {}",
       compiler,
       source_args,
@@ -162,7 +205,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
       libraries_args,
       libraries_dirs_args,
       compile_only_arg,
-      target_file);
+      target_file));
 
   return std::make_tuple(cmd, target_file);
 }
@@ -332,8 +375,6 @@ std::unordered_set<std::string> find_model_names(
 
   // Escape the separator if it's backslash (needed for regex)
   std::string sep = k_separator;
-  if (sep == "\\")
-    sep = "\\\\";
 
   std::string pattern =
       "data" + sep + "aotinductor" + sep + "([^" + sep + "]+)" + sep;
@@ -394,19 +435,21 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
   std::vector<std::string> found_filenames;
   for (uint32_t i = 0; i < zip_archive.m_total_files; i++) {
-    uint32_t filename_len =
+    uint32_t zip_filename_len =
         mz_zip_reader_get_filename(&zip_archive, i, nullptr, 0);
-    if (filename_len == 0) {
+    if (zip_filename_len == 0) {
       throw std::runtime_error("Failed to read filename");
     }
-    // filename_len returned by mz_zip_reader_get_filename includes the null
-    // terminator, so we need to subtract 1 here
-    std::string filename_str(filename_len - 1, '\0');
+    // zip_filename_len returned by mz_zip_reader_get_filename includes the null
+    // terminator, so we need to subtract 1 here.
+    std::string zip_filename_str(zip_filename_len - 1, '\0');
+    // zip_filename_str can't be normalize_path_separator, because it should be
+    // as index for mz_zip_reader_extract_file_to_file.
     if (!mz_zip_reader_get_filename(
-            &zip_archive, i, filename_str.data(), filename_len)) {
+            &zip_archive, i, zip_filename_str.data(), zip_filename_len)) {
       throw std::runtime_error("Failed to read filename");
     }
-    found_filenames.push_back(filename_str);
+    found_filenames.push_back(zip_filename_str);
   }
 
   if (found_filenames.empty()) {
@@ -430,7 +473,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         << found_filenames[1];
   }
 
-  temp_dir_ = create_temp_dir();
+  temp_dir_ = normalize_path_separator(create_temp_dir());
 
   std::string so_filename;
   std::string cpp_filename;
@@ -463,16 +506,17 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             .append(filename);
       }
 
+      std::string output_file_path = normalize_path_separator(output_path_str);
       LOG(INFO) << "Extract file: " << filename_str << " to "
-                << output_path_str;
+                << output_file_path;
 
       // Create the parent directory if it doesn't exist
-      size_t parent_path_idx = output_path_str.find_last_of(k_separator);
+      size_t parent_path_idx = output_file_path.find_last_of(k_separator);
       if (parent_path_idx == std::string::npos) {
         throw std::runtime_error(
-            "Failed to find parent path in " + output_path_str);
+            "Failed to find parent path in " + output_file_path);
       }
-      std::string parent_path = output_path_str.substr(0, parent_path_idx);
+      std::string parent_path = output_file_path.substr(0, parent_path_idx);
       if (!recursive_mkdir(parent_path)) {
         throw std::runtime_error(fmt::format(
             "Failed to create directory {}: {}",
@@ -481,19 +525,23 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       }
 
       // Extracts file to the temp directory
-      mz_zip_reader_extract_file_to_file(
-          &zip_archive, filename_str.c_str(), output_path_str.c_str(), 0);
+      mz_bool b_extract = mz_zip_reader_extract_file_to_file(
+          &zip_archive, filename_str.c_str(), output_file_path.c_str(), 0);
+      if (b_extract == MZ_FALSE) {
+        throw std::runtime_error(fmt::format(
+            "Failed to extract file {} to {}", filename_str, output_file_path));
+      }
 
       // Save the file for bookkeeping
-      size_t extension_idx = output_path_str.find_last_of('.');
+      size_t extension_idx = output_file_path.find_last_of('.');
       if (extension_idx != std::string::npos) {
-        std::string filename_extension = output_path_str.substr(extension_idx);
+        std::string filename_extension = output_file_path.substr(extension_idx);
         if (filename_extension == ".cpp") {
-          cpp_filename = output_path_str;
-        } else if (filename_extension == ".o") {
-          obj_filenames.push_back(output_path_str);
-        } else if (filename_extension == ".so") {
-          so_filename = output_path_str;
+          cpp_filename = output_file_path;
+        } else if (filename_extension == object_file_ext()) {
+          obj_filenames.push_back(output_file_path);
+        } else if (filename_extension == extension_file_ext()) {
+          so_filename = output_file_path;
         }
       }
     }
