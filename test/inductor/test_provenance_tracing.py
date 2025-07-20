@@ -10,7 +10,10 @@ from pathlib import Path
 
 import torch
 from torch._inductor import config
-from torch._inductor.debug import create_node_mapping
+from torch._inductor.debug import (
+    create_mapping_pre_post_grad_nodes,
+    create_node_mapping_kernel_to_post_grad,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda
@@ -386,11 +389,17 @@ class TestProvenanceTracingNodeMapping(TestCase):
             "triton_poi_fused_addmm_relu_sigmoid_0": ["relu", "add_tensor"]
         }
 
-        result = create_node_mapping(
+        result = create_mapping_pre_post_grad_nodes(
             pre_grad_graph_id,
             post_to_pre_grad_nodes_json,
-            triton_kernel_to_post_grad_json,
         )
+        result = {
+            **result,
+            **create_node_mapping_kernel_to_post_grad(
+                triton_kernel_to_post_grad_json,
+            ),
+        }
+
         self.assertEqual(
             result,
             {
