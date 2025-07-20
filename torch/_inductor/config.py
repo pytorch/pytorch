@@ -138,8 +138,12 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # None: Not set -- Off for OSS, JustKnobs based for internal
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
-# See torch.compiler.force_disable_caches
-force_disable_caches: bool = Config(alias="torch.compiler.config.force_disable_caches")
+# Force disabled all inductor level caching -- This will override any other caching flag
+force_disable_caches: bool = Config(
+    justknob="pytorch/remote_cache:force_disable_caches",
+    env_name_force="TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+    default=False,
+)
 
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
@@ -991,7 +995,7 @@ enable_linear_binary_folding = (
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
 # Enable caching codegen of triton templates.
-enable_caching_generated_triton_templates: bool = False
+enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
