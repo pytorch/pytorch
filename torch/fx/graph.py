@@ -744,10 +744,13 @@ class CodeGen:
             elif node.op == "output":
                 if node.type is not None:
                     maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
+                sig = inspect.signature(self.generate_output)
                 body.append(
                     self.generate_output(
                         node.args[0], descs=desc if expanded_def else None
                     )
+                    if "descs" in sig.parameters
+                    else self.generate_output(node.args[0])
                 )
                 return
             raise NotImplementedError(f"node: {node.op} {node.target}")
