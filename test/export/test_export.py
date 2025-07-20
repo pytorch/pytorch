@@ -36,6 +36,7 @@ from torch._export.utils import (
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.scan import scan
+from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
 from torch.export import (
@@ -1812,6 +1813,40 @@ class GraphModule(torch.nn.Module):
             "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
+
+    @testing.expectedFailureTrainingIRToRunDecomp  # Could not guard on data-dependent expression -u0 > 16 (unhinted: -u0 > 16)
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # Could not guard on data-dependent expression -u0 > 16 (unhinted: -u0 > 16)
+    @testing.expectedFailureRetraceability  # Could not guard on data-dependent expression -u0 > 16 (unhinted: -u0 > 16)
+    @testing.expectedFailureRetraceabilityNonStrict  # Could not guard on data-dependent expression -u0 > 16 (unhinted: -u0 > 16)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_while_loop_tensor_constant_idx(self):
+        def while_loop_decomp(x, y0):
+            out = torch.zeros_like(x)
+
+            def cond_fn(idx, out, y0):
+                return idx < out.size(0)
+
+            def body_fn(idx, out, y0):
+                i = idx.item()
+                torch._check_is_size(i, max=x.size(0) - 1)
+                y0 = x[i] + y0
+                out = out.clone()
+                out[i] = y0
+                return idx + 1, out, y0
+
+            cnt = torch.tensor(0)
+            _, out, _ = while_loop(cond_fn, body_fn, [cnt, out, y0])
+            return out
+
+        class TestModel(torch.nn.Module):
+            def forward(self, x, y0):
+                return while_loop_decomp(x, y0)
+
+        x, y0 = torch.randn(16, 8), torch.randn(8)
+        exp_out = TestModel()(x, y0)
+        ep = export(TestModel(), (x, y0))
+        out = ep.module()(x, y0)
+        self.assertEqual(exp_out, out)
 
     def test_malformed_fqn_from_source_name(self):
         # See https://github.com/pytorch/pytorch/issues/141939
