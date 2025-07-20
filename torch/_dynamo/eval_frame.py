@@ -1705,7 +1705,7 @@ def export(
     _log_export_usage: bool = True,
     constraints: Optional[list[Constraint]] = None,
     **extra_kwargs: Any,
-) -> Callable[[tuple[Any, Any]], ExportResult]:
+) -> Callable[..., ExportResult]:
     """
     Export an input function f to a format that can be executed outside of PyTorch using the FX graph.
 

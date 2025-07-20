@@ -254,7 +254,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # Enable NVSHMEM for Triton
         nvshmem_lib = nvshmem.enable_triton()
 
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
 
@@ -293,7 +293,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         self._init_device()
 
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         msg_size_bytes = 8
@@ -331,7 +331,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         self._init_device()
 
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         world_size = dist.get_world_size()
@@ -374,7 +374,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
         nvshmem_lib = nvshmem.enable_triton()
 
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
 
@@ -439,7 +439,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
         nvshmem_lib = nvshmem.enable_triton()
 
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
 
@@ -501,7 +501,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         self._init_device()
 
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
         rank = self.rank
@@ -575,7 +575,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         self._init_device()
         # Enable NVSHMEM for Triton
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         peer = (self.world_size - 1) - rank
@@ -651,7 +651,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         peer = (self.world_size - 1) - rank
@@ -726,7 +726,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         self._init_device()
         # Enable NVSHMEM for Triton
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         msg_size_bytes = 8
@@ -782,7 +782,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
-        group_name = dist.group.WORLD.group_name
+        group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         numel = 1
