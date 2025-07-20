@@ -324,7 +324,13 @@ class CodeGen:
         self._body_transformer: Optional[TransformCodeFunc] = None
         self._func_name: str = "forward"
 
-    def gen_fn_def(self, free_vars: list[str], maybe_return_annotation: str) -> str:
+    def gen_fn_def(
+        self,
+        free_vars: list[str],
+        maybe_return_annotation: str,
+        *,
+        expanded_def: bool = False,
+    ) -> str:
         """
         Given the free variables and a return annotation, generates the beginning of the FX function.
         By default, `gen_fn_def(['a', 'b'], '') == 'def {self._func_name}(a, b):'`
@@ -333,16 +339,45 @@ class CodeGen:
         # would have added it.
         if len(free_vars) == 0 or free_vars[0] != "self":
             free_vars.insert(0, "self")
-        return (
-            f"def {self._func_name}({', '.join(free_vars)}){maybe_return_annotation}:"
-        )
 
-    def generate_output(self, output_args: Argument) -> str:
+        if expanded_def:
+            return (
+                f"def {self._func_name}(\n"
+                + "".join(
+                    f"    {fv.split('#')[0].rstrip()},  # {fv.split('#')[1].lstrip()}\n"
+                    if "#" in fv
+                    else f"    {fv},\n"
+                    for fv in free_vars
+                )
+                + f"){maybe_return_annotation}:"
+            )
+        else:
+            return f"def {self._func_name}({', '.join(free_vars)}){maybe_return_annotation}:"
+
+    def generate_output(
+        self, output_args: Argument, *, descs: Optional[Any] = None
+    ) -> str:
         """
         Given the output arguments, generates the return statement of the FX function.
         Note: The returned statement should not be indented.
         """
-        return f"return {repr(output_args)}"
+        if descs is not None and isinstance(output_args, (list, tuple)):
+            ldelim = "(" if isinstance(output_args, tuple) else "["
+            rdelim = ")" if isinstance(output_args, tuple) else "]"
+            if descs is None:
+                maybe_desc_trailers = [""] * len(output_args)
+            else:
+                maybe_desc_trailers = [f"  # {d}" for d in descs]
+            return (
+                f"return {ldelim}\n"
+                + "".join(
+                    f"    {o},{mbd}\n"
+                    for o, mbd in zip(output_args, maybe_desc_trailers)
+                )
+                + f"{rdelim}"
+            )
+        else:
+            return f"return {repr(output_args)}"
 
     def process_inputs(self, *args: Any) -> Any:
         """
@@ -380,6 +415,8 @@ class CodeGen:
         include_stride: bool = False,
         include_device: bool = False,
         colored: bool = False,
+        # Render each argument on its own line
+        expanded_def: bool = False,
     ) -> PythonCode:
         free_vars: list[str] = []
         body: list[str] = []
@@ -586,6 +623,7 @@ class CodeGen:
             maybe_type_annotation = (
                 "" if node.type is None else f" : {type_repr(node.type)}"
             )
+            maybe_comment = ""
 
             if verbose:
                 # override annotation with more detailed information
@@ -617,13 +655,20 @@ class CodeGen:
                 elif isinstance(meta_val, TensorMetadata):
                     maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
 
+            desc = None
+            if expanded_def:
+                desc = node.meta.get("desc", None)
+                if desc is not None and node.op == "placeholder":
+                    maybe_comment += f"  # {desc}"
+                # output is handled specially
+
             if node.op == "placeholder":
                 assert isinstance(node.target, str)
                 maybe_default_arg = (
                     "" if not node.args else f" = {_get_repr(node.args[0])}"
                 )
                 free_vars.append(
-                    f"{node.target}{maybe_type_annotation}{maybe_default_arg}"
+                    f"{node.target}{maybe_type_annotation}{maybe_default_arg}{maybe_comment}"
                 )
                 raw_name = node.target.replace("*", "")
                 if raw_name != repr(node):
@@ -699,7 +744,14 @@ class CodeGen:
             elif node.op == "output":
                 if node.type is not None:
                     maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
-                body.append(self.generate_output(node.args[0]))
+                sig = inspect.signature(self.generate_output)
+                body.append(
+                    self.generate_output(
+                        node.args[0], descs=desc if expanded_def else None
+                    )
+                    if "descs" in sig.parameters
+                    else self.generate_output(node.args[0])
+                )
                 return
             raise NotImplementedError(f"node: {node.op} {node.target}")
 
@@ -733,7 +785,13 @@ class CodeGen:
         for name, value in self.additional_globals():
             add_global(name, value)
 
-        prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
+        sig = inspect.signature(self.gen_fn_def)
+        if "expanded_def" in sig.parameters:
+            prologue = self.gen_fn_def(
+                free_vars, maybe_return_annotation[0], expanded_def=expanded_def
+            )
+        else:
+            prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
 
         # remove counter and generate lineno to node index mapping
         lineno_map: dict[int, Optional[int]] = {}
@@ -782,7 +840,9 @@ class _PyTreeCodeGen(CodeGen):
         assert self.pytree_info.out_spec is not None
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
 
-    def gen_fn_def(self, free_vars, maybe_return_annotation):
+    def gen_fn_def(
+        self, free_vars, maybe_return_annotation, *, expanded_def: bool = False
+    ):
         # Given a user function/model:
         #   myargs = [myargs0, myargs1]
         #   mykwargs = {'mykwargs0': ..., 'mykwargs1': ...}
@@ -799,13 +859,17 @@ class _PyTreeCodeGen(CodeGen):
         # If the user function/model does not have keywords, the dict is suppressed from tree_flatten_spec
         #   e.g. tree_flatten_spec([mypos, myargs0, myargs1]), self._in_spec)
         if self.pytree_info is None:
-            return super().gen_fn_def(free_vars, maybe_return_annotation)
+            return super().gen_fn_def(
+                free_vars, maybe_return_annotation, expanded_def=expanded_def
+            )
 
         fn_args = self.pytree_info.orig_args
         has_orig_self = (fn_args[0] == "self") if len(fn_args) > 0 else False
         if has_orig_self:
             free_vars.insert(0, "self")
-        fn_definition = super().gen_fn_def(fn_args[:], maybe_return_annotation)
+        fn_definition = super().gen_fn_def(
+            fn_args[:], maybe_return_annotation, expanded_def=expanded_def
+        )
 
         if len(free_vars) > 0:  # pytree has placeholders in it
             # when kwargs is present, in_spec is tuple(args, kwargs)
@@ -837,17 +901,39 @@ class _PyTreeCodeGen(CodeGen):
             # we need to split it to two lines:
             # one for annotation: `var1: annotation1; var2: annotation2;` (note the semicolon)
             # one for code: `var1, var2, = function_call()`
-            without_annotation = [x.split(":")[0] for x in free_vars]
-            has_annotation = [x + "; " for x in free_vars if ":" in x]
-            if len(has_annotation) > 0:
-                fn_definition += "\n    " + "".join(has_annotation) + "\n"
+            without_annotation = [x.split(":")[0].split("#")[0] for x in free_vars]
+            if expanded_def:
+                has_annotation = [x for x in free_vars if ":" in x]
+                fn_definition += "\n    " + "\n    ".join(has_annotation)
+            else:
+                has_annotation = [x + "; " for x in free_vars if ":" in x]
+                if len(has_annotation) > 0:
+                    fn_definition += "\n    " + "".join(has_annotation) + "\n"
             fn_definition += f"""
     {", ".join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
         return fn_definition
 
-    def generate_output(self, output_args):
+    def generate_output(self, output_args, *, descs: Optional[Any] = None):
         if self.pytree_info and self.pytree_info.out_spec:
-            return f"return pytree.tree_unflatten({repr(output_args)}, self._out_spec)"
+            if descs is not None and isinstance(output_args, (list, tuple)):
+                ldelim = "(" if isinstance(output_args, tuple) else "["
+                rdelim = ")" if isinstance(output_args, tuple) else "]"
+                if descs is None:
+                    maybe_desc_trailers = [""] * len(output_args)
+                else:
+                    maybe_desc_trailers = [f"  # {d}" for d in descs]
+                return (
+                    f"return pytree.tree_unflatten({ldelim}\n"
+                    + "".join(
+                        f"    {o},{mbd}\n"
+                        for o, mbd in zip(output_args, maybe_desc_trailers)
+                    )
+                    + f"{rdelim}, self._out_spec)"
+                )
+            else:
+                return (
+                    f"return pytree.tree_unflatten({repr(output_args)}, self._out_spec)"
+                )
         else:
             return super().generate_output(output_args)
 
@@ -1534,6 +1620,7 @@ class Graph:
         include_stride: bool = False,
         include_device: bool = False,
         colored: bool = False,
+        expanded_def: bool = False,
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -1600,6 +1687,7 @@ class Graph:
                 include_stride=include_stride,
                 include_device=include_device,
                 colored=colored,
+                expanded_def=expanded_def,
             )
 
     def _python_code(
@@ -1611,6 +1699,7 @@ class Graph:
         include_stride: bool = False,
         include_device: bool = False,
         colored: bool = False,
+        expanded_def: bool = False,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes,
@@ -1620,6 +1709,7 @@ class Graph:
             include_stride=include_stride,
             include_device=include_device,
             colored=colored,
+            expanded_def=expanded_def,
         )
 
     def __str__(self) -> str:
