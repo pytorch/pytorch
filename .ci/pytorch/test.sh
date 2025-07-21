@@ -1606,7 +1606,13 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
 fi
 if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
   # Install numpy-2.0.2 and compatible scipy & numba versions
-  python -mpip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
+  # Force re-install of pandas to avoid error where pandas checks numpy version from initial install and fails upon import
+  TMP_PANDAS_VERSION=$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null)
+  if [ -n "$TMP_PANDAS_VERSION" ]; then
+    python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0 pandas=="$TMP_PANDAS_VERSION" --force-reinstall
+  else
+    python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
+  fi
   python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_numpy_interop.py test_tensor_creation_ops.py test_torch.py torch_np/test_basic.py
 elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
   test_linux_aarch64
@@ -1660,49 +1666,37 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
-  install_torchaudio cuda
+  install_torchaudio
   install_torchvision
-  checkout_install_torchbench nanogpt BERT_pytorch resnet50 hf_T5 llama moco
-  PYTHONPATH=$(pwd)/torchbench test_cachebench
+  PYTHONPATH=/torchbench test_cachebench
 elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
-  install_torchaudio cpu
+  install_torchaudio
   install_torchvision
-  checkout_install_torchbench nanogpt
-  PYTHONPATH=$(pwd)/torchbench test_verify_cachebench
+  PYTHONPATH=/torchbench test_verify_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
-  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    install_torchaudio cpu
-  else
-    install_torchaudio cuda
-  fi
+  install_torchaudio
   install_torchvision
-  TORCH_CUDA_ARCH_LIST="8.0;8.6" install_torchao
+  install_torchao
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
-    checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
-    PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
+    PYTHONPATH=/torchbench test_inductor_torchbench_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
-    checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_edgecnn \
-      llama_v2_7b_16h resnet50 timm_efficientnet mobilenet_v3_large timm_resnest \
-      functorch_maml_omniglot yolov3 mobilenet_v2 resnext50_32x4d densenet121 mnasnet1_0
-    PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
+    PYTHONPATH=/torchbench test_inductor_torchbench_cpu_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
-    checkout_install_torchbench
-    TORCHBENCHPATH=$(pwd)/torchbench test_torchbench_gcp_smoketest
+    TORCHBENCHPATH=/torchbench test_torchbench_gcp_smoketest
   else
-    checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
     if [[ "${TEST_CONFIG}" != *cpu* ]]; then
       install_torchrec_and_fbgemm
     fi
-    PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
+    PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
-  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
+  PYTHONPATH=/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
   if [[ "$SHARD_NUMBER" -eq "1" ]]; then
     test_inductor_aoti
   fi
