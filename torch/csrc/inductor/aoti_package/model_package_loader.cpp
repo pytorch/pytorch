@@ -109,6 +109,14 @@ const char* extension_file_ext() {
   return ".so";
 #endif
 }
+
+bool _is_windows_os() {
+#ifdef _WIN32
+  return true;
+#else
+  return false;
+#endif
+}
 } // namespace
 
 namespace torch::inductor {
@@ -143,7 +151,8 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     source_args += source + " ";
   }
 
-  std::string file_ext = compile_only ? ".o" : ".so";
+  std::string file_ext =
+      compile_only ? object_file_ext() : extension_file_ext();
   std::string target_file = output_dir + filename + file_ext;
   std::string target_dir = output_dir;
   if (target_dir.empty()) {
@@ -153,22 +162,24 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string cflags_args;
   for (auto& arg : compile_options["cflags"]) {
-    cflags_args += "-" + arg.get<std::string>() + " ";
+    cflags_args += _is_windows_os() ? "/" : "-" + arg.get<std::string>() + " ";
   }
 
   std::string definitions_args;
   for (auto& arg : compile_options["definitions"]) {
-    definitions_args += "-D " + arg.get<std::string>() + " ";
+    definitions_args +=
+        _is_windows_os() ? "/D" : "-D " + arg.get<std::string>() + " ";
   }
 
   std::string include_dirs_args;
   for (auto& arg : compile_options["include_dirs"]) {
-    include_dirs_args += "-I" + arg.get<std::string>() + " ";
+    include_dirs_args +=
+        _is_windows_os() ? "/I" : "-I" + arg.get<std::string>() + " ";
   }
 
   std::string ldflags_args;
   for (auto& arg : compile_options["ldflags"]) {
-    ldflags_args += "-" + arg.get<std::string>() + " ";
+    ldflags_args += _is_windows_os() ? "/" : "-" + arg.get<std::string>() + " ";
   }
 
   std::string libraries_dirs_args;
