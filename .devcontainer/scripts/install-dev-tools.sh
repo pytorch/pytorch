@@ -8,6 +8,6 @@ git submodule update --init --recursive
 make setup-lint
 
 # Add CMAKE_PREFIX_PATH to bashrc
-echo 'export CMAKE_PREFIX_PATH=/usr/local' >> ~/.bashrc
+echo 'export CMAKE_PREFIX_PATH=/usr/local' >>~/.bashrc
 # Add linker path so that cuda-related libraries can be found
-echo 'export LDFLAGS="-L/usr/local/cuda/lib64/ $LDFLAGS"' >> ~/.bashrc
+echo 'export LDFLAGS="-L/usr/local/cuda/lib64/ $LDFLAGS"' >>~/.bashrc

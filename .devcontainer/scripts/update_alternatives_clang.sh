@@ -4,23 +4,23 @@
 #
 
 update_alternatives() {
-    local version=${1}
-    local priority=${2}
-    local z=${3}
-    local slaves=${4}
-    local path=${5}
-    local cmdln
+  local version=${1}
+  local priority=${2}
+  local z=${3}
+  local slaves=${4}
+  local path=${5}
+  local cmdln
 
-    cmdln="--verbose --install ${path}${master} ${master} ${path}${master}-${version} ${priority}"
-    for slave in ${slaves}; do
-        cmdln="${cmdln} --slave ${path}${slave} ${slave} ${path}${slave}-${version}"
-    done
-    sudo update-alternatives ${cmdln}
+  cmdln="--verbose --install ${path}${master} ${master} ${path}${master}-${version} ${priority}"
+  for slave in ${slaves}; do
+    cmdln="${cmdln} --slave ${path}${slave} ${slave} ${path}${slave}-${version}"
+  done
+  sudo update-alternatives ${cmdln}
 }
 
 if [[ ${#} -ne 2 ]]; then
-    echo usage: "${0}" clang_version priority
-    exit 1
+  echo usage: "${0}" clang_version priority
+  exit 1
 fi
 
 version=${1}
