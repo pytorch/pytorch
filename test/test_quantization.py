@@ -38,13 +38,6 @@ from quantization.core.test_workflow_module import TestDistributed  # noqa: F401
 from quantization.core.test_workflow_module import TestFusedObsFakeQuantModule  # noqa: F401
 from quantization.core.test_backend_config import TestBackendConfig  # noqa: F401
 from quantization.core.test_utils import TestUtils  # noqa: F401
-log = logging.getLogger(__name__)
-try:
-    # This test has extra data dependencies, so in some environments, e.g. Meta internal
-    # Buck, it has its own test runner.
-    from quantization.core.test_docs import TestQuantizationDocs  # noqa: F401
-except ImportError as e:
-    log.warning(e)
 
 # Eager Mode Workflow. Tests for the functionality of APIs and different features implemented
 # using eager mode.
@@ -67,6 +60,7 @@ from quantization.eager.test_equalize_eager import TestEqualizeEager  # noqa: F4
 from quantization.eager.test_bias_correction_eager import TestBiasCorrectionEager  # noqa: F401
 
 
+log = logging.getLogger(__name__)
 # FX GraphModule Graph Mode Quantization. Tests for the functionality of APIs and different features implemented
 # using fx quantization.
 try:

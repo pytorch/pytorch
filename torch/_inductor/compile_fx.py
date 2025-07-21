@@ -22,7 +22,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch.fx
 import torch.utils._pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
@@ -355,7 +355,13 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
                 continue
             gm_target = attrgetter(target_name)(gm)
             model_target = attrgetter(target_name)(mod)
-            if (
+            if isinstance(gm_target, FakeScriptObject):
+                if (
+                    isinstance(model_target, FakeScriptObject)
+                    and gm_target.real_obj is model_target.real_obj
+                ):
+                    continue
+            elif (
                 torch.equal(gm_target, model_target)
                 and gm_target.dtype == model_target.dtype
             ):
@@ -903,10 +909,37 @@ def _compile_fx_inner(
             else:
                 log.debug("Failed to generate FX cache key")
 
+        if torch._functorch.config.bundled_autograd_cache:
+            assert mb_compiled_graph is None
+            assert cache_info is None
+            # When using bundled autograd cache, we still want
+            # to use the TritonBundler, but we don't want to save
+            # the results here. The results will get saved directly
+            # to AOTAutogradCache.
+            TritonBundler.begin_compile()
+            try:
+                mb_compiled_graph = fx_codegen_and_compile(
+                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                )
+                assert mb_compiled_graph is not None
+                (
+                    triton_bundle,
+                    triton_bundler_meta,
+                ) = TritonBundler.collect()
+                mb_compiled_graph.set_triton_bundle(triton_bundle)
+            except (ShortenTraceback, SkipFrame):
+                raise
+            except Exception as e:
+                raise InductorError(e, currentframe()).with_traceback(
+                    e.__traceback__
+                ) from None
+            finally:
+                TritonBundler.end_compile()
+
         # CACHE BYPASS: Compile the graph, don't save it to the cache
         # (this can happen either because cache was disabled, or we
         # determined the input is uncacheable)
-        if cache_info is None or cache_info["cache_state"] == "bypass":
+        elif cache_info is None or cache_info["cache_state"] == "bypass":
             assert mb_compiled_graph is None
             log.debug(
                 "FX cache bypass reason: %s",
@@ -1022,30 +1055,19 @@ def _compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
-    # Dump provenance artifacts for debugging trace
-    provenance_info = V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
-    # provenance_info might be None if config.trace.enabled is not set
-    if provenance_info:
-        (
-            debug_info,
-            node_mappings,
-        ) = provenance_info
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_generated_kernel_to_post_grad_nodes",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(debug_info),
-        )
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_provenance_tracking_node_mappings",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(node_mappings),
-        )
+    if config.trace.provenance_tracking:
+        # Dump provenance artifacts for debugging trace
+        provenance_info = torch._inductor.debug.dump_inductor_provenance_info()
+        # provenance_info might be None if trace.provenance_tracking is not set
+        if provenance_info:
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "inductor_provenance_tracking_node_mappings",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(provenance_info),
+            )
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
     if log.isEnabledFor(logging.INFO):
@@ -1288,7 +1310,7 @@ class _InProcessFxCompile(FxCompile):
                     },
                     payload_fn=lambda: inductor_post_grad_graph_str,
                 )
-                if config.trace.enabled:
+                if config.trace.provenance_tracking:
                     provenance_tracking_json = (
                         torch.fx.traceback.get_graph_provenance_json(gm.graph)
                     )
@@ -1300,8 +1322,13 @@ class _InProcessFxCompile(FxCompile):
                         },
                         payload_fn=lambda: json.dumps(provenance_tracking_json),
                     )
+                    from torch._inductor.debug import create_mapping_pre_post_grad_nodes
+
                     torch._inductor.debug._inductor_post_to_pre_grad_nodes = (
-                        provenance_tracking_json
+                        create_mapping_pre_post_grad_nodes(
+                            torch._inductor.debug._pre_grad_graph_id,
+                            provenance_tracking_json,
+                        )
                     )
 
                 metrics_context = get_metrics_context()
@@ -1812,7 +1839,7 @@ def compile_fx_aot(
     model_: GraphModule,
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
-    config_patches: Optional[dict[str, str]] = None,
+    config_patches: Optional[dict[str, Any]] = None,
 ) -> Union[list[Union[str, Weights]], str]:
     assert isinstance(model_, GraphModule), model_
 
@@ -1841,6 +1868,10 @@ def compile_fx_aot(
             **config_patches,
             "aot_inductor.output_path": code_hash(model_.code),
         }
+
+    from .utils import maybe_aoti_standalone_config
+
+    config_patches = maybe_aoti_standalone_config(config_patches)
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     saved_compile_id = model_.meta.get("dynamo_compile_id", None)
@@ -2031,6 +2062,12 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
+    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
+    if any(
+        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
+        for e in example_inputs_
+    ):
+        torch._inductor.async_compile.AsyncCompile.wakeup()
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
@@ -2131,7 +2168,8 @@ def compile_fx(
     with (
         _use_lazy_graph_module(dynamo_config.use_lazy_graph_module),
         enable_python_dispatcher(),
-        torch.fx.traceback.preserve_node_meta(config.trace.enabled),
+        torch.fx.traceback.preserve_node_meta(config.trace.provenance_tracking),
+        torch._inductor.debug.reset_provenance_globals(),
     ):
         # Pre-grad passes cannot be run if we weren't given a GraphModule.
         # Dynamo will always produce a GraphModule, but this handles cases
@@ -2163,6 +2201,13 @@ def compile_fx(
                 ),
             )
             torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
+
+            if config.trace.provenance_tracking:
+                for node in model_.graph.nodes:
+                    if node.stack_trace:
+                        torch._inductor.debug._inductor_pre_grad_node_stack_trace[
+                            node.name
+                        ] = node.stack_trace
 
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
             trace_structured(
@@ -2391,6 +2436,10 @@ def compile_fx(
         )
 
         if V.aot_compilation:
+            from .utils import is_valid_aoti_model_name
+
+            is_valid_aoti_model_name()
+
             with functorch_config.patch(unlift_effect_tokens=True):
                 gm, graph_signature = aot_export_module(
                     model_,
