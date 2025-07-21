@@ -185,6 +185,8 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
   std::string libraries_dirs_args;
   for (auto& arg : compile_options["libraries_dirs"]) {
     if (_is_windows_os()) {
+      libraries_dirs_args +=
+          fmt::format("/LIBPATH:\"{}\"", arg.get<std::string>()) + " ";
     } else {
       libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
     }
@@ -193,6 +195,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
   std::string libraries_args;
   for (auto& arg : compile_options["libraries"]) {
     if (_is_windows_os()) {
+      libraries_args += fmt::format("{}.lib", arg.get<std::string>()) + " ";
     } else {
       libraries_args += "-l" + arg.get<std::string>() + " ";
     }
