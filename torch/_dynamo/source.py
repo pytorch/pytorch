@@ -752,6 +752,22 @@ class TupleIteratorGetItemSource(GetItemSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class DataclassFieldsSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "dataclass_fields")
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"___dataclass_fields({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class TypeSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None
@@ -814,6 +830,33 @@ class FSDPNNModuleSource(NNModuleSource):
 class GlobalStateSource(Source):
     def name(self):
         return ""
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+
+@dataclasses.dataclass(frozen=True)
+class TorchSource(Source):
+    """Points to the actual `torch` module - used instead of GlobalSource
+    in case the user has overridden `torch` in their local namespace"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .guards import GuardBuilder, install_guard
+
+        install_guard(self.make_guard(GuardBuilder.ID_MATCH))
+
+    def name(self):
+        return "__import__('torch')"
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.extend_output(
+            [
+                codegen.create_load_const(0),  # level
+                create_instruction("BUILD_TUPLE", arg=0),  # fromlist
+                codegen.create_import_name("torch"),
+            ]
+        )
 
     def guard_source(self):
         return GuardSource.GLOBAL
