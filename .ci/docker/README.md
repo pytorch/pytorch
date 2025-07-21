@@ -74,12 +74,12 @@ As example of linux-test:
 - **`.ci/docker/ci_commit_pins/`**: Used for pinning dependency versions during base Docker image building:
 - **`.github/ci_commit_pins`**: Used for pinning dependency versions during PyTorch building and tests
 
-### Step by step
+### Step by step [Only for base image setup]
 
 #### Add pinned commit (if applies)
 We use pinned commits for test&build stability. The nightly.yaml file checks and updates pinned commits for certain repository dependencies daily.
 
-If the library you introduce needs to be installed from a specific pinned commit or built from scratch from a repository:
+If the library you introduce needs to be installed from a specific pinned commit or built from scratch from a repository in base docker image:
 
 1. Add the repository you want to watch in nightly.yml and merge-rules.yml
 2. Add initial pinned commit in .ci/docker/ci_commit_pins/. The txt filename should match the one defined in step 1
