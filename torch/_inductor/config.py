@@ -1340,11 +1340,15 @@ class triton:
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
     # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
-    num_decompose_k_splits = int(os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10"))
+    num_decompose_k_splits = int(
+        os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
+    )
 
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
     # it as an autotuning choice for all matmuls
-    decompose_k_threshold = int(os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32"))
+    decompose_k_threshold = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
+    )
 
 
 class aot_inductor:

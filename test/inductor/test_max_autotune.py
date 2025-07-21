@@ -50,7 +50,12 @@ from torch.utils._triton import has_triton_tma_device
 aten = torch.ops.aten
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache, get_k_splits, run_and_get_code, use_decompose_k_choice
+from torch._inductor.utils import (
+    fresh_cache,
+    get_k_splits,
+    run_and_get_code,
+    use_decompose_k_choice,
+)
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -1505,13 +1510,15 @@ class TestMaxAutotune(TestCase):
     )
     @parametrize("num_decompose_k_splits", (0, 5, 20))
     @parametrize("decompose_k_threshold", (8, 16))
-    def test_max_autotune_decompose_k_envvars(self, num_decompose_k_splits, decompose_k_threshold):
+    def test_max_autotune_decompose_k_envvars(
+        self, num_decompose_k_splits, decompose_k_threshold
+    ):
         shapes = [(32, 32, 32768), (32, 32, 256)]
         for M, N, K in shapes:
             get_k_splits.cache_clear()
             use_decompose_k_choice.cache_clear()
-            a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
-            b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
+            a = torch.randn(M, K, dtype=torch.float16, device="cuda")
+            b = torch.randn(K, N, dtype=torch.float16, device="cuda")
 
             with config.patch(
                 {
@@ -1527,10 +1534,15 @@ class TestMaxAutotune(TestCase):
                     if "benchmark_decompose_k_mm" in codegen:
                         decompose_count += 1
 
-                if K // M < decompose_k_threshold or K // N < decompose_k_threshold or num_decompose_k_splits == 0:
+                if (
+                    K // M < decompose_k_threshold
+                    or K // N < decompose_k_threshold
+                    or num_decompose_k_splits == 0
+                ):
                     self.assertEqual(decompose_count, 0)
                 else:
-                    self.assertTrue(decompose_count > 0 and decompose_count <= num_decompose_k_splits)
+                    self.assertTrue(decompose_count > 0)
+                    self.assertTrue(decompose_count <= num_decompose_k_splits)
 
 
     @skipIfXpu

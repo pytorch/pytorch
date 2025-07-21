@@ -1666,6 +1666,7 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 
 _IntLike: TypeAlias = Union[int, sympy.Expr]
 
+
 @functools.cache
 def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
