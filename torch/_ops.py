@@ -1483,10 +1483,7 @@ class _Ops(types.ModuleType):
             # Import the shared library into the process, thus running its
             # static (global) initialization code in order to register custom
             # operators with the JIT.
-            try:
-                ctypes.CDLL(path)
-            except Exception as e:
-                raise RuntimeError(f"Could not load this library: {path}") from e
+            ctypes.CDLL(path)
         self.loaded_libraries.add(path)
 
 
