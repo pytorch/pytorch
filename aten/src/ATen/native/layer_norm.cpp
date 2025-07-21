@@ -343,7 +343,7 @@ Tensor rms_norm_symint(
   if (weight_opt.has_value() && weight_opt.value().defined() && weight_opt.value().dtype() != input.dtype()) {
     TORCH_WARN_ONCE(
       "Mismatch dtype between input and module: input dtype = ", input.dtype(),
-      ", module dtype = ", weight_opt.value().dtype()
+      ", module dtype = ", weight_opt.value().dtype(), ", Can not dispatch to fused implementation"
     );
     return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
   }
