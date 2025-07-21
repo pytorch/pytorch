@@ -258,30 +258,6 @@ function clone_pytorch_xla() {
   fi
 }
 
-function checkout_install_torchbench() {
-  local commit
-  commit=$(get_pinned_commit torchbench)
-  git clone https://github.com/pytorch/benchmark torchbench
-  pushd torchbench
-  git checkout "$commit"
-
-  if [ "$1" ]; then
-    python install.py --continue_on_fail models "$@"
-  else
-    # Occasionally the installation may fail on one model but it is ok to continue
-    # to install and test other models
-    python install.py --continue_on_fail
-  fi
-
-  # TODO (huydhn): transformers-4.44.2 added by https://github.com/pytorch/benchmark/pull/2488
-  # is regressing speedup metric. This needs to be investigated further
-  pip install transformers==4.38.1
-
-  echo "Print all dependencies after TorchBench is installed"
-  python -mpip freeze
-  popd
-}
-
 function install_torchao() {
   local commit
   commit=$(get_pinned_commit torchao)
