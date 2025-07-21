@@ -1,8 +1,6 @@
 #include <ATen/native/kleidiai/kai_kernels.h>
 #include <ATen/native/kleidiai/kai_pack.h>
 #include <ATen/native/kleidiai/kai_ukernel_interface.h>
-#include <ATen/native/TensorConversions.h>
-#include <kai/kai_common.h>
 
 #include <ATen/Parallel.h>
 
@@ -14,19 +12,6 @@
 #include <cpuinfo.h>
 
 namespace at::native::kleidiai {
-
-at::Tensor kleidi_bf16_to_fp32(const at::Tensor& src) {
-    TORCH_CHECK(src.scalar_type() == at::kBFloat16, "Input must be bfloat16");
-    auto out = at::empty(src.sizes(), src.options().dtype(at::kFloat));
-    auto src_ptr = reinterpret_cast<const uint16_t*>(src.data_ptr<at::BFloat16>());
-    auto out_ptr = out.data_ptr<float>();
-    auto numel = src.numel();
-
-    for (int64_t i = 0; i < numel; ++i) {
-        out_ptr[i] = kai_cast_f32_bf16(src_ptr[i]);
-    }
-    return out;
-}
 
 void kai_pack_int4_rhs(
     const Tensor& weight_packed,
@@ -144,7 +129,6 @@ static void kai_quant_pack_lhs_int4_mm_groupwise(
       kernel_packet.kai_get_lhs_packed_size(m, k, mr, kr, sr);
   auto lhs_packed = std::make_unique<uint8_t[]>(lhs_packed_size);
   uint8_t* dst_act_mtx_f32 = reinterpret_cast<uint8_t*>(output.data_ptr());
-  TORCH_CHECK(input.scalar_type() == at::kFloat, "Input tensor must be float.");
   const uint8_t* lhs_native_mtx_f32 =
       reinterpret_cast<const uint8_t*>(input.data_ptr());
   const uint8_t* rhs_packed_mtx_qs4cx =
@@ -169,11 +153,6 @@ static void kai_quant_pack_lhs_int4_mm_groupwise(
     const int64_t vec_num = (thread_id == num_threads - 1)
         ? (m - vec_per_thread * thread_id)
         : vec_per_thread;
-    size_t offset = kai_get_lhs_packed_offset_lhs_quant_pack_qai8dxp_f32(m_idx, k, mr, kr, sr);
-    size_t write_size = kernel_packet.kai_get_lhs_packed_size(vec_num, k, mr, kr, sr);
-
-    TORCH_CHECK(offset + write_size <= lhs_packed_size,
-      "lhs_packed buffer overflow: offset + write_size > buffer size");
 
     kernel_packet.kai_run_lhs_quant_pack(
         vec_num,
@@ -186,6 +165,7 @@ static void kai_quant_pack_lhs_int4_mm_groupwise(
         lhs_stride,
         lhs_packed_ptr);
   };
+
   at::parallel_for(
       0, num_threads, /*grain_size=*/1, [&](int64_t begin, int64_t end) {
         for (int64_t thread_id = begin; thread_id < end; ++thread_id) {
@@ -238,16 +218,6 @@ static void kai_quant_pack_lhs_int4_mm_channelwise(
     const int64_t n,
     const int64_t k) {
 
-    at::Tensor input_fp32;
-
-    if (input.dtype() == at::kFloat) {
-        input_fp32 = input;
-    } else if (input.dtype() == at::kBFloat16) {
-        at::Tensor temp_fp32_output = at::empty(output.sizes(), output.options().dtype(at::kFloat));
-        at::Tensor input_fp32 = kleidi_bf16_to_fp32(input);
-    } else {
-        TORCH_CHECK(false, "Unsupported input dtype for kai_quant_pack_lhs_int4_mm_channelwise: must be FP32 or BF16");
-    }
   // Kernel IDs for GEMM and GEMV
   constexpr kai_kernel_id gemm_id =
       kai_kernel_id::matmul_clamp_f32_qai8dxp4x8_qsi4cxp8x8_8x8x32_neon_i8mm;
@@ -269,17 +239,13 @@ static void kai_quant_pack_lhs_int4_mm_channelwise(
 
   const size_t lhs_packed_size =
       kernel_packet.kai_get_lhs_packed_size(m, k, mr, kr, sr);
-  const size_t padding = 128;  // extra bytes
-  auto lhs_packed_tensor = at::empty({(int64_t)(lhs_packed_size + padding)}, at::kByte);
-
-  // auto lhs_packed_tensor = at::empty({(int64_t)lhs_packed_size}, at::kByte);
+  auto lhs_packed = std::make_unique<uint8_t[]>(lhs_packed_size);
   uint8_t* dst_act_mtx_f32 = reinterpret_cast<uint8_t*>(output.data_ptr());
-  TORCH_CHECK(input_fp32.scalar_type() == at::kFloat, "Input tensor must be float.");
-
-  const float* lhs_native_mtx_f32 = input_fp32.data_ptr<float>();
+  const uint8_t* lhs_native_mtx_f32 =
+      reinterpret_cast<const uint8_t*>(input.data_ptr());
   const uint8_t* rhs_packed_mtx_qs4cx =
       reinterpret_cast<const uint8_t*>(weight.data_ptr());
-  uint8_t* lhs_packed_base = lhs_packed_tensor.data_ptr<uint8_t>();
+  uint8_t* lhs_packed_base = lhs_packed.get();
 
   const size_t lhs_stride = k * sizeof(float);
   const size_t dst_stride = n * sizeof(float);
@@ -299,11 +265,6 @@ static void kai_quant_pack_lhs_int4_mm_channelwise(
     const int64_t vec_num = (thread_id == num_threads - 1)
         ? (m - vec_per_thread * thread_id)
         : vec_per_thread;
-    size_t offset = kai_get_lhs_packed_offset_lhs_quant_pack_qai8dxp_f32(m_idx, k, mr, kr, sr);
-    size_t write_size = kernel_packet.kai_get_lhs_packed_size(vec_num, k, mr, kr, sr);
-
-    TORCH_CHECK(offset + write_size <= lhs_packed_tensor.numel(),
-      "lhs_packed buffer overflow: offset + write_size > buffer size");
     kernel_packet.kai_run_lhs_quant_pack(
         vec_num,
         k,
@@ -487,8 +448,7 @@ void kai_quant_pack_lhs_int4_mm(
 
         if ((input_dtype == at::kBFloat16) )
         {
-            if (cpuinfo_has_arm_bf16())
-            {
+            if (cpuinfo_has_arm_bf16()){
                 kleidiai::kai_quant_pack_lhs_int4_mm_bf16_channelwise(
                     output, input, weight, m, n, k);
             } else {
