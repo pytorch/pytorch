@@ -46,10 +46,10 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 from .descriptors import (
-    AliasedArgWithMetadataMutationAOTOutput,
     AOTInput,
     AOTOutput,
     DummyAOTInput,
+    MetadataMutationAOTOutput,
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
@@ -1178,7 +1178,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 return (*out, *aliased_args_with_metadata_mutations), (
                     *out_descs,
                     *(
-                        [AliasedArgWithMetadataMutationAOTOutput()]
+                        [MetadataMutationAOTOutput()]
                         * len(self.aliased_arg_idx_with_metadata_mutations)
                     ),
                 )

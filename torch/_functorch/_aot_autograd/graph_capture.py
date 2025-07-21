@@ -36,6 +36,7 @@ from .schemas import AOTConfig, FxValue, SubclassMeta, TraceFn, ViewAndMutationM
 from .utils import (
     call_and_expect_output_descs,
     copy_fwd_metadata_to_bw_nodes,
+    fn_wrappers,
     register_buffer_assignment_hook,
     root_module_when_exporting_non_strict,
     unlift_tokens,
