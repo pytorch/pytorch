@@ -53,6 +53,7 @@ class CrossEntropyForward(BenchmarkKernel):
         compiled_cross_entropy = torch.compile(
             lambda x, target: F.cross_entropy(x, target, reduction="none"),
             mode=self.compile_mode,
+            fullgraph=True,
         )
         return lambda: compiled_cross_entropy(x, target)
 
@@ -150,6 +151,7 @@ class CrossEntropyBackward(BenchmarkKernel):
         compiled_cross_entropy = torch.compile(
             lambda x, target: F.cross_entropy(x, target, reduction="none"),
             mode=self.compile_mode,
+            fullgraph=True,
         )
         loss = compiled_cross_entropy(x, target)
         return lambda: torch.autograd.grad(
@@ -229,7 +231,7 @@ class SoftmaxForward(BenchmarkKernel):
         torch._dynamo.mark_dynamic(x, 0)
 
         compiled_softmax = torch.compile(
-            lambda x: F.softmax(x, dim=-1), mode=self.compile_mode
+            lambda x: F.softmax(x, dim=-1), mode=self.compile_mode, fullgraph=True
         )
         return lambda: compiled_softmax(x)
 
@@ -292,7 +294,7 @@ class SoftmaxBackward(BenchmarkKernel):
         assert kwargs is None
         x, dy = args
         compiled_softmax = torch.compile(
-            lambda x: F.softmax(x, dim=-1), mode=self.compile_mode
+            lambda x: F.softmax(x, dim=-1), mode=self.compile_mode, fullgraph=True
         )
         y = compiled_softmax(x)
         return lambda: torch.autograd.grad(y, x, grad_outputs=dy, retain_graph=True)
@@ -371,7 +373,9 @@ class RMSNormForward(BenchmarkKernel):
         # Mark batch size as dynamic for realistic workload
         torch._dynamo.mark_dynamic(x, 0)
 
-        compiled_rms_norm = torch.compile(self.rms_norm_ref, mode=self.compile_mode)
+        compiled_rms_norm = torch.compile(
+            self.rms_norm_ref, mode=self.compile_mode, fullgraph=True
+        )
         return lambda: compiled_rms_norm(x, w)
 
     def quack(self, args, kwargs=None) -> Any:
@@ -443,7 +447,9 @@ class RMSNormBackward(BenchmarkKernel):
     def compiled(self, args, kwargs=None) -> Any:
         assert kwargs is None
         x, w, dy = args
-        y = torch.compile(self.rms_norm_ref, mode=self.compile_mode)(x, w)
+        y = torch.compile(self.rms_norm_ref, mode=self.compile_mode, fullgraph=True)(
+            x, w
+        )
         return lambda: torch.autograd.grad(
             y, [x, w], grad_outputs=dy, retain_graph=True
         )
@@ -523,7 +529,9 @@ class LayerNormForward(BenchmarkKernel):
         # Mark batch size as dynamic for realistic workload
         torch._dynamo.mark_dynamic(x, 0)
 
-        compiled_layernorm = torch.compile(self.layernorm_ref, mode=self.compile_mode)
+        compiled_layernorm = torch.compile(
+            self.layernorm_ref, mode=self.compile_mode, fullgraph=True
+        )
         return lambda: compiled_layernorm(x, w, eps=1e-6)
 
     def quack(self, args, kwargs) -> Any:
@@ -598,7 +606,9 @@ class LayerNormBackward(BenchmarkKernel):
     def compiled(self, args, kwargs=None) -> Any:
         assert kwargs is None
         x, w, dy = args
-        compiled_layernorm = torch.compile(self.layernorm_ref, mode=self.compile_mode)
+        compiled_layernorm = torch.compile(
+            self.layernorm_ref, mode=self.compile_mode, fullgraph=True
+        )
         y = compiled_layernorm(x, w)
         return lambda: torch.autograd.grad(
             y, [x, w], grad_outputs=dy, retain_graph=True

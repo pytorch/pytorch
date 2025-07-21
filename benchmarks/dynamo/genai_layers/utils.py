@@ -13,7 +13,8 @@ def benchmark_kernel_in_milliseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
     for _ in range(5):
         func(*args, **kwargs)
-    return benchmarker.benchmark_gpu(lambda: func(*args, **kwargs))
+    with torch.compiler.set_stance("fail_on_recompile"):
+        return benchmarker.benchmark_gpu(lambda: func(*args, **kwargs))
 
 
 @dataclass

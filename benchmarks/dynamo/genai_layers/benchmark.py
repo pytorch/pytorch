@@ -133,7 +133,7 @@ Examples:
     parser.add_argument(
         "--compile-mode",
         choices=["default", "max-autotune-no-cudagraphs"],
-        default="default",
+        default="max-autotune-no-cudagraphs",
         help="Torch compile mode to use (default: default)",
     )
 
