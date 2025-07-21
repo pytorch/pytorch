@@ -3015,7 +3015,8 @@ class DeviceCachingAllocator {
   bool release_cached_blocks(
       const std::shared_ptr<GatheredContext>& context,
       MempoolId_t mempool_id) {
-    if (mempool_id.first == 0 && mempool_id.second == 0) {
+    if (mempool_id.first == 0 && mempool_id.second == 0 &&
+        captures_underway.empty()) {
       // If there is no active mempool, we work on releasing *all* blocks.
 
       // First ensure that all blocks that can't currently be allocated due to
@@ -4178,6 +4179,7 @@ struct BackendStaticInitializer {
 
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
+    at::SetAllocator(kCUDA, r, 0);
     allocator.store(r);
   }
 };
