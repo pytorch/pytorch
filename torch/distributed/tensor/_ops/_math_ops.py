@@ -1085,7 +1085,7 @@ def topk_strategy(op_schema: OpSchema) -> OpStrategy:
         if dim != topk_dim:
             dim_shardings: PlacementList = [Shard(dim)] * 3
             single_mesh_dim_strategies.append(dim_shardings)
-    # TODO: topk on sharded dim requries non-trival reduction, address it later
+    # TODO: topk on sharded dim requires non-trival reduction, address it later
 
     return expand_to_full_mesh_op_strategy(
         input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2

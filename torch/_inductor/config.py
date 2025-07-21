@@ -138,12 +138,8 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # None: Not set -- Off for OSS, JustKnobs based for internal
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
-# Force disabled all inductor level caching -- This will override any other caching flag
-force_disable_caches: bool = Config(
-    justknob="pytorch/remote_cache:force_disable_caches",
-    env_name_force="TORCHINDUCTOR_FORCE_DISABLE_CACHES",
-    default=False,
-)
+# See torch.compiler.force_disable_caches
+force_disable_caches: bool = Config(alias="torch.compiler.config.force_disable_caches")
 
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
