@@ -2404,6 +2404,14 @@ void add_relational_guard_resetter_to_cloned_root(
     RootGuardManager* root,
     std::shared_ptr<RelationalGuard> guard);
 
+void start_recording_dict_pointers(
+    RootGuardManager* root,
+    GuardManager* tag_safe_root);
+
+void stop_recording_dict_pointers(RootGuardManager* root, PyObject* value);
+bool is_recording_dict_pointers(RootGuardManager* root);
+void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer);
+
 /**
  * Base class representing a pair of accessor and the associated guard
  * manager. The accessor defines how to access the child value from the
@@ -2557,7 +2565,12 @@ class GuardManager {
         _is_dict(py::isinstance<py::dict>(example_value)) {
     if (_is_dict) {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
+      _is_empty_dict = PyDict_Size(example_value.ptr()) == 0;
     }
+    _is_immutable = is_immutable_object(example_value.ptr());
+
+    py::object torch_module_cls = py::module_::import("torch.nn").attr("Module");
+    _is_nn_module = py::isinstance(example_value, torch_module_cls);   // forwards to PyObject_IsInstance
   }
 
   GuardManager(const GuardManager& m) = delete;
@@ -2574,6 +2587,43 @@ class GuardManager {
 
   virtual void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
     _leaf_guards.emplace_back(std::move(leaf_guard));
+  }
+
+  bool is_guarded_value_immutable() {
+    return _is_immutable;
+  }
+
+  bool is_guarded_value_dict() {
+    return _is_dict;
+  }
+  
+  bool is_guarded_value_nn_module() {
+    return _is_nn_module;
+  }
+
+  void mark_tag_safe() {
+    _is_tag_safe = true;
+  }
+
+  void mark_tag_safe_root() {
+    if (!_is_tag_safe) {
+      throw std::runtime_error(
+          "Marking a node tag_safe_root when its not tag safe");
+    }
+
+    if (!_is_empty_dict) {
+      _is_tag_safe_root = true;
+    }
+  }
+
+  bool is_tag_safe() {
+    return _is_tag_safe;
+  }
+
+  void stash_dict_pointers(
+      PyObject* value,
+      std::unordered_map<PyObject*, uint64_t> dict_pointers) {
+    _dict_pointers[value] = dict_pointers;
   }
 
  public:
@@ -2657,7 +2707,6 @@ class GuardManager {
   // the code here.
   template <typename T>
   bool check_nopybind_template(T* value) { // borrowed ref
-
     if (!this->check_leaf_guards_nopybind(value)) {
       return false;
     }
@@ -2665,8 +2714,51 @@ class GuardManager {
     return this->check_accessors_nopybind(value);
   }
 
+  bool check_dict_pointer_tags(PyObject* value) {
+    for (auto& kv : _dict_pointers[value]) {
+      PyObject* dict_pointer = kv.first;
+      uint64_t old_tag = kv.second;
+      uint64_t new_tag = get_dict_version_unchecked(dict_pointer);
+      if (old_tag != new_tag) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   virtual bool check_nopybind(PyObject* value) {
-    return check_nopybind_template(value);
+    bool is_recording = false;
+
+    if (_is_tag_safe_root && !_disable_dict_tag_matching) {
+      //
+      if (_dict_pointers.find(value) != _dict_pointers.end()) {
+        if (check_dict_pointer_tags(value)) {
+          return true;
+        }
+        // Something changed, very likely there will be recompilations. Disable
+        // recursive dict tag checking.
+        _disable_dict_tag_matching = true;
+      } else  if (_dict_pointers.size() == 2) {
+        // Too many nn module instances on the same GuardManager. Its likely
+        // that the fast guard path will never be taken.
+        _disable_dict_tag_matching = true;
+      } else {
+        // start recording
+        _saved = value;
+        start_recording_dict_pointers(_root, this);
+        is_recording = true;
+      }
+    } else if (_is_tag_safe && _is_dict && is_recording_dict_pointers(_root)) {
+      record_dict_pointer(_root, value);
+    }
+    bool result = check_nopybind_template(value);
+    if (is_recording) {
+      stop_recording_dict_pointers(_root, value);
+    }
+    if (!result) {
+      _disable_dict_tag_matching = true;
+    }
+    return result;
   }
 
   virtual bool check_nopybind(FrameLocalsMapping* value) {
@@ -2868,6 +2960,11 @@ class GuardManager {
   // value. This is used only to pass on debugging information.
   std::string _source;
 
+  bool _is_tag_safe{false};
+  bool _is_tag_safe_root{false};
+  bool _disable_dict_tag_matching{false};
+  std::unordered_map<PyObject*, std::unordered_map<PyObject*, uint64_t>> _dict_pointers;
+
   // A map of which leaf guards are inserted. This is to prevent duplicate
   // guards like TYPE_MATCH.
   std::unordered_set<std::string> _inserted_leaf_guards;
@@ -2891,7 +2988,12 @@ class GuardManager {
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
   bool _is_dict;
+  bool _is_immutable{false};
+  bool _is_nn_module{false};
+  bool _is_empty_dict{false};
   uint64_t _dict_tag{0};
+
+  PyObject* _saved{nullptr};
 };
 
 GuardAccessor::GuardAccessor(
@@ -2949,6 +3051,27 @@ class RootGuardManager : public GuardManager {
     return check_nopybind(value.ptr());
   }
 
+  void start_recording_dict_pointers(GuardManager* tag_safe_root) {
+    _current_tag_safe_root = tag_safe_root;
+    _is_recording_dict_pointers = true;
+  }
+
+  void stop_recording_dict_pointers(PyObject* value) {
+    _is_recording_dict_pointers = false;
+    _current_tag_safe_root->stash_dict_pointers(value, _recorded_dict_pointers);
+    _current_tag_safe_root = nullptr;
+    _recorded_dict_pointers.clear();
+  }
+
+  bool is_recording_dict_pointers() {
+    return _is_recording_dict_pointers;
+  }
+
+  void record_dict_pointer(PyObject* dict_pointer) {
+    _recorded_dict_pointers[dict_pointer] =
+        get_dict_version_unchecked(dict_pointer);
+  }
+
   // Python visible API to check_verbose guard function.
   GuardDebugInfo check_verbose(py::handle value) {
     return check_verbose_nopybind(value.ptr());
@@ -2964,6 +3087,9 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
+    _is_recording_dict_pointers = false;
+    _current_tag_safe_root = nullptr;
+    _recorded_dict_pointers.clear();
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
       LocalState state;
@@ -3158,6 +3284,10 @@ class RootGuardManager : public GuardManager {
   // We init LocalState only when this flag it set. This flag is set during
   // TENSOR_MATCH guard init.
   bool _init_local_state = false;
+
+  bool _is_recording_dict_pointers{false};
+  GuardManager* _current_tag_safe_root{nullptr};
+  std::unordered_map<PyObject*, uint64_t> _recorded_dict_pointers;
 };
 
 /*
@@ -3176,7 +3306,7 @@ class DictGuardManager : public GuardManager {
       RootGuardManager* root,
       std::string source,
       py::handle example_value)
-      : GuardManager(root, std::move(source)),
+      : GuardManager(root, std::move(source), example_value),
         _size(PyDict_Size(example_value.ptr())),
         _expected_type(Py_TYPE(example_value.ptr())),
         _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {}
@@ -3534,7 +3664,25 @@ std::unique_ptr<GuardManager> make_guard_manager(
       throw py::type_error("Invalid guard manager enum");
     }
   }
-  return std::make_unique<GuardManager>(root, std::move(source));
+  return std::make_unique<GuardManager>(root, std::move(source), example_value);
+}
+
+void start_recording_dict_pointers(
+    RootGuardManager* root,
+    GuardManager* tag_safe_root) {
+  root->start_recording_dict_pointers(tag_safe_root);
+}
+
+void stop_recording_dict_pointers(RootGuardManager* root, PyObject* value) {
+  root->stop_recording_dict_pointers(value);
+}
+
+bool is_recording_dict_pointers(RootGuardManager* root) {
+  return root->is_recording_dict_pointers();
+}
+
+void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer) {
+  root->record_dict_pointer(dict_pointer);
 }
 
 class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
@@ -5922,6 +6070,12 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardManager, std::unique_ptr<GuardManager>>(py_m, "GuardManager")
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
+      .def("is_guarded_value_immutable", &GuardManager::is_guarded_value_immutable)
+      .def("is_guarded_value_dict", &GuardManager::is_guarded_value_dict)
+      .def("is_guarded_value_nn_module", &GuardManager::is_guarded_value_nn_module)
+      .def("mark_tag_safe", &GuardManager::mark_tag_safe)
+      .def("mark_tag_safe_root", &GuardManager::mark_tag_safe_root)
+      .def("is_tag_safe", &GuardManager::is_tag_safe)
       .def("fail_count", &GuardManager::fail_count)
       .def(
           "get_accessors",
