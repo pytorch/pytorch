@@ -24,7 +24,7 @@ if(NOT __AOTRITON_INCLUDED)
   set(__AOTRITON_SHA256_LIST
       "861cd9f7479eec943933c27cb86920247e5b5dd139bc7c1376c81808abb7d7fe"  # rocm6.3
       "acea7d811a2d3bbe718b6e07fc2a9f739e49eecd60b4b6a36fcb3fe8edf85d78"  # rocm6.4
-      "7e29c325d5bd33ba896ddb106f5d4fc7d715274dca7fe937f724fffa82017838"  # rocm7.0
+      "1e9b3dddf0c7fc07131c6f0f5266129e83ce2331f459fa2be8c63f4ae91b0f5b"  # rocm7.0
       )
   set(__AOTRITON_Z "gz")
 

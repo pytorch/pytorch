@@ -99,13 +99,22 @@ EOF
     rm -rf HIP clr
   fi
 
+  # Default url values
+  rocm_baseurl="http://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
+  amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/ubuntu"
+
+  # Special case for ROCM_VERSION == 7.0
+  if [[ $(ver "$ROCM_VERSION") -eq $(ver 7.0) ]]; then
+    rocm_baseurl="https://repo.radeon.com/rocm/apt/7.0_alpha2"
+    amdgpu_baseurl="https://repo.radeon.com/amdgpu/30.10_alpha2/ubuntu"
+  fi
+
   # Add amdgpu repository
   UBUNTU_VERSION_NAME=$(cat /etc/os-release | grep UBUNTU_CODENAME | awk -F= '{print $2}')
-  echo "deb [arch=amd64] https://repo.radeon.com/amdgpu/${ROCM_VERSION}/ubuntu ${UBUNTU_VERSION_NAME} main" >/etc/apt/sources.list.d/amdgpu.list
+  echo "deb [arch=amd64] ${amdgpu_baseurl} ${UBUNTU_VERSION_NAME} main" >/etc/apt/sources.list.d/amdgpu.list
 
   # Add rocm repository
   wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
-  local rocm_baseurl="http://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
   echo "deb [arch=amd64] ${rocm_baseurl} ${UBUNTU_VERSION_NAME} main" >/etc/apt/sources.list.d/rocm.list
   apt-get update --allow-insecure-repositories
 
@@ -162,6 +171,50 @@ EOF
     cmake .. -DPython3_EXECUTABLE=/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/bin/python3 -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
     make -j
     cp hipamd/lib/libamdhip64.so.${VER_STR}.* /opt/rocm/lib/libamdhip64.so.${VER_STR}.*
+    popd
+    rm -rf HIP clr
+  fi
+
+  # precompiled miopen kernels added in ROCm 3.5, renamed in ROCm 5.5
+  # search for all unversioned packages
+  # if search fails it will abort this script; use true to avoid case where search fails
+  MIOPENHIPGFX=$(apt-cache search --names-only miopen-hip-gfx | awk '{print $1}' | grep -F -v . || true)
+  if [[ "x${MIOPENHIPGFX}" = x ]]; then
+    echo "miopen-hip-gfx package not available" && exit 1
+  else
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENHIPGFX}
+  fi
+
+  # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
+  for kdb in /opt/rocm/share/miopen/db/*.kdb; do
+    sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
+  done
+
+  # ROCm 6.3 had a regression where initializing static code objects had significant overhead
+  # CI no longer builds for ROCm 6.3, but
+  # ROCm 6.4 did not yet fix the regression, also HIP branch names are different
+  if [[ $(ver $ROCM_VERSION) -ge $(ver 6.4) ]] && [[ $(ver $ROCM_VERSION) -lt $(ver 7.0) ]]; then
+    if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
+      HIP_BRANCH=release/rocm-rel-6.4
+      CLR_HASH=ca18eb3f77fa09292fcda62bc60c3e565d752ada # branch release/rocm-rel-6.4.1-statco-hotfix
+    elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
+      HIP_BRANCH=release/rocm-rel-6.4
+      CLR_HASH=600f5b0d2baed94d5121e2174a9de0851b040b0c # branch release/rocm-rel-6.4-statco-hotfix
+    fi
+    # clr build needs CppHeaderParser but can only find it using conda's python
+    python -m pip install CppHeaderParser
+    git clone https://github.com/ROCm/HIP -b $HIP_BRANCH
+    HIP_COMMON_DIR=$(readlink -f HIP)
+    git clone https://github.com/jeffdaily/clr
+    pushd clr
+    git checkout $CLR_HASH
+    popd
+    mkdir -p clr/build
+    pushd clr/build
+    # Need to point CMake to the correct python installation to find CppHeaderParser
+    cmake .. -DPython3_EXECUTABLE=/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/bin/python3 -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
+    make -j
+    cp hipamd/lib/libamdhip64.so.6.4.* /opt/rocm/lib/libamdhip64.so.6.4.*
     popd
     rm -rf HIP clr
   fi
