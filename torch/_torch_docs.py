@@ -5025,26 +5025,24 @@ hash_tensor(input, mode=0) -> Tensor
 
 Returns a hash of all elements in the :attr:`input` tensor.
 
-The input is always viewed as a ``torch.int64`` tensor before the
-operation. This means that the result dtype is always ``torch.int64``.
-
-Currently the modes supported are 0 and 1. Mode 0 is a reduction of all elements
-in the tensor via xor after a multiply and shift. Mode 1 is a reduction of all
-elements in the tensor via xor.
+Currently only mode=0 (reduction via xor) is supported. The output will always
+be of type ``torch.uint64``. The elements of ``input`` are upcasted to their
+64 bit float / integer equivalent and bitcasted to ``torch.uint64`` before
+reduction via xor.
 
 Args:
     {input}
 
 Keyword Args:
-    mode (int) : The hash to use. Default: 0 (multiply_shift_xor_sum)
+    mode (int) : The hash to use. Default: 0 (xor_reduction)
 
 Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    tensor([[ 0.9621,  1.0351, -0.3164]])
+    tensor([[ 1.1918, -1.1813,  0.3373]])
     >>> torch.hash_tensor(a)
-    tensor(4576923288683563884)
+    tensor(13822780554648485888, dtype=torch.uint64)
 
 .. function:: hash_tensor(input, dim, keepdim=False, mode=0) -> Tensor
    :noindex:
@@ -5061,16 +5059,16 @@ Args:
     {opt_keepdim}
 
 Keyword Args:
-    mode (int) : The hash to use. Default: 0 (multiply_shift_xor_sum)
+    mode (int) : The hash to use. Default: 0 (xor_reduction)
 
 Example::
 
     >>> a = torch.randn(2, 4)
     >>> a
-    tensor([[-0.9515,  0.0034,  1.5650,  0.5871],
-            [ 0.2504, -0.2171, -1.6204,  0.0122]])
+    tensor([[ 0.1317, -0.5554, -1.4724, -1.1391],
+            [ 0.0778, -0.6070,  0.6375,  0.1798]])
     >>> torch.hash_tensor(a, 1)
-    tensor([ 5003506567998551491, -4120349661412268358])
+    tensor([9233691267014066176, 9255993250844508160], dtype=torch.uint64)
 """.format(**multi_dim_common),
 )
 
@@ -5184,7 +5182,7 @@ For each N-dimensional point in input:
 If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the N sequences
 of bin edges. Each 1D tensor should contain a strictly increasing sequence with at
 least one element. A sequence of K bin edges defines K-1 bins, explicitly specifying
-the left and right edges of all bins. Every bin is exclusive of its left edge. Only
+the left and right edges of all bins. Every bin is inclusive of its left edge. Only
 the rightmost bin is inclusive of its right edge.
 
 If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width bins
@@ -12193,6 +12191,12 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
     nondeterministic behavior from using the data as an input to an operation.
     Floating point and complex tensors are filled with NaN, and integer tensors
     are filled with the maximum value.
+
+    When ``torch.preserve_format`` is used:
+    If the input tensor is dense (i.e., non-overlapping strided),
+    its memory format (including strides) is retained.
+    Otherwise (e.g., a non-dense view like a stepped slice),
+    the output is converted to the dense format.
 
 Args:
     {input}

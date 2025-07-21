@@ -6751,10 +6751,11 @@ torch.cuda.synchronize()
             and check_cudnn
             and (dtype == torch.float16 or dtype == torch.bfloat16)
         ):
-            with torch.nn.attention.sdpa_kernel(
-                torch.nn.attention.SDPBackend.CUDNN_ATTENTION
-            ):
-                check_forward_backward()
+            with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA Nested Tensor"):
+                with torch.nn.attention.sdpa_kernel(
+                    torch.nn.attention.SDPBackend.CUDNN_ATTENTION
+                ):
+                    check_forward_backward()
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")

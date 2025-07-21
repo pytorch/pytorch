@@ -77,6 +77,7 @@
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
   - .ci/docker/ci_commit_pins/triton.txt
+  - .ci/docker/ci_commit_pins/vllm.txt
   approved_by:
   - pytorchbot
   mandatory_checks_name:

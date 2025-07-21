@@ -394,13 +394,6 @@ Tensor det(const Tensor& self) {
 
 // Auxiliary function that returns the LU decomposition to use it in the backward
 TORCH_IMPL_FUNC(_linalg_slogdet_out)(const Tensor& A, const Tensor& sign, const Tensor& logabsdet, const Tensor& LU, const Tensor& pivots) {
-  // Handle empty matrices (0x0) - determinant is 1 by convention
-  if (A.size(-1) == 0 && A.size(-2) == 0) {
-    sign.fill_(1.0);
-    logabsdet.fill_(0.0);
-    return;
-  }
-
   // info is an aux tensor
   auto info = at::empty({0}, A.options().dtype(kInt));
   // Optimisation: lu_factor_ex requires the input to be F-contig, otherwise it copies
@@ -409,61 +402,11 @@ TORCH_IMPL_FUNC(_linalg_slogdet_out)(const Tensor& A, const Tensor& sign, const 
   at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A.is_contiguous() && !A.is_complex() ? A.mH() : A);
 
   auto diag_U = LU.diagonal(0, -2, -1);
+  // sign
+  at::mul_out(const_cast<Tensor&>(sign), diag_U.sgn().prod(-1), lu_det_P(pivots));
 
-  // Fix for PyTorch issue #154312: logdet returns incorrect finite values for singular matrices
-  //
-  // SOLUTION: Two-tier approach following NumPy's strategy:
-  // 1. Primary: Use LAPACK's built-in singularity detection (info > 0)
-  // 2. Backup: Heuristic threshold for detecting "effectively zero" diagonal elements
-  //
-  // References:
-  // - NumPy's slogdet uses LAPACK info parameter as primary detection:
-  //   https://github.com/numpy/numpy/blob/main/numpy/linalg/umath_linalg.cpp (lines 1010-1207)
-  //
-  // NOTE: The threshold formula is a heuristic designed for this specific issue where
-  // LU factorization produces tiny values (~1e-16) instead of exact zeros. We use
-  // n * ε * max_diagonal as a practical threshold, where n accounts for error accumulation
-  // and max_diagonal provides appropriate scaling.
-
-  auto abs_diag = diag_U.abs();
-
-  // Tier 1: Check LAPACK's built-in singularity detection (info > 0 means singular)
-  auto info_is_singular = at::zeros_like(sign, sign.options().dtype(at::kBool));
-  if (info.numel() > 0) {
-    info_is_singular = (info > 0);
-  }
-
-  // Tier 2: Standard numerical tolerance for detecting "effectively zero" diagonal elements
-  auto threshold_is_singular = at::zeros_like(sign, sign.options().dtype(at::kBool));
-  if (abs_diag.numel() > 0) {
-    // Use a simplified threshold approach that doesn't require extracting max values
-    // We'll check if any diagonal element is below an absolute threshold
-    auto eps_val = (A.scalar_type() == at::ScalarType::Float || A.scalar_type() == at::ScalarType::ComplexFloat)
-                   ? std::numeric_limits<float>::epsilon()
-                   : std::numeric_limits<double>::epsilon();
-
-    // Use a conservative absolute threshold: sqrt(eps) * n
-    // This catches truly small values without needing to compute relative thresholds
-    auto absolute_threshold = std::sqrt(eps_val) * A.size(-1);
-
-    // Check if any diagonal element is below the absolute threshold
-    threshold_is_singular = (abs_diag <= absolute_threshold).any(-1);
-  }
-
-  // Combine both singularity detection methods
-  auto is_singular = info_is_singular.logical_or(threshold_is_singular);
-
-  // Compute normal results
-  auto normal_sign = diag_U.sgn().prod(-1) * lu_det_P(pivots);
-  auto normal_logabsdet = abs_diag.log_().sum(-1);
-
-  // Create scalar singular results (at::where will broadcast)
-  auto singular_sign = at::zeros({}, normal_sign.options());
-  auto singular_logabsdet = at::full({}, -std::numeric_limits<double>::infinity(), normal_logabsdet.options());
-
-  // Select results based on singularity
-  sign.copy_(at::where(is_singular, singular_sign, normal_sign));
-  logabsdet.copy_(at::where(is_singular, singular_logabsdet, normal_logabsdet));
+  // logabsdet
+  at::sum_out(const_cast<Tensor&>(logabsdet), diag_U.abs().log_(), -1);
 }
 
 std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& A) {

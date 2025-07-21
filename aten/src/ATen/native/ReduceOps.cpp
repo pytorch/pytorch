@@ -407,12 +407,12 @@ TORCH_META_FUNC(hash_tensor)
 (const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode) {
   auto maybe_result = maybe_get_output();
   if (maybe_result.defined()){
-    TORCH_CHECK(maybe_result.scalar_type() == at::kLong, "Expected result to be of dtype long, but got ", maybe_result.scalar_type());
+    TORCH_CHECK(maybe_result.scalar_type() == at::kUInt64, "Expected result to be of dtype long, but got ", maybe_result.scalar_type());
   }
   if (self.sym_numel() == 0) {
     native::zero_numel_check_dims(self, dim, "hash_tensor");
   }
-  resize_reduction(*this, self, dim, keepdim, at::kLong);
+  resize_reduction(*this, self, dim, keepdim, at::kUInt64);
 }
 
 
@@ -2252,113 +2252,36 @@ Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
 }
 
-namespace {
-
-// Create a permutation vector to permute the dimensions in dim to the back of the tensor
-std::vector<int64_t> create_dim_backshift_permutation(IntArrayRef dim, int64_t ndim) {
-  std::vector<int64_t> permutation;
-  permutation.reserve(ndim);
-
-  std::vector<int64_t> normalized_dims;
-  normalized_dims.reserve(dim.size());
-  for (int64_t d : dim) {
-    normalized_dims.push_back(maybe_wrap_dim(d, ndim));
-  }
-
-  std::unordered_set<int64_t> dim_set(normalized_dims.begin(), normalized_dims.end());
-
-  for (int64_t i = 0; i < ndim; ++i) {
-    if (dim_set.find(i) == dim_set.end()) {
-      permutation.push_back(i);
-    }
-  }
-
-  for (int64_t d : normalized_dims) {
-    permutation.push_back(d);
-  }
-
-  return permutation;
-}
-
-} // anonymous namespace
-
-
-enum class HashMode { XOR_SUM_ORDERED = 0, XOR_SUM = 1 };
+enum class HashMode { XOR_SUM = 0 };
 
 TORCH_IMPL_FUNC(hash_tensor_out) (const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode, const Tensor& result)  {
 
-  if (self.numel() == 0) {
-    return;
+  auto result_view = result;
+  if (self.is_floating_point()){ // && !self.device().is_cpu()) {
+    result_view = result.view(at::kDouble);
   }
 
-  // Standardize non-standard bools (i.e. map bools with bits 2-255 --> 1)
-  // this function will do .view(int64), but standard/non-standard bools should hash to the same value
-  Tensor standardized_self = self;
-  if (self.scalar_type() == at::kBool) {
-    standardized_self = self | false;
-  }
+  // // FIXME: remove this branch for CPU
+  auto self_view = self;
+  // if (self.device().is_cpu()) {
+  //   if (self.is_floating_point()) {
+  //     self_view = self.to(at::kDouble).view(at::kUInt64);
+  //   } else {
+  //     self_view = self.to(at::kUInt64);
+  //   }
+  // }
 
-  // To satisfy the constraints for view.dtype, we
-  // (1) Permute reduction dims to the back of tensor and flatten them
-  // (2) Pad the reduction dimension to be divisible by the ratio between the element sizes of the dtypes
-  // (3) After calling .contiguous() on the result, we will have that
-  //     (a) self.stride(-1) == 1
-  //     (b) self.storage_offset() == 0 (divisible by the ratio between the element sizes of the dtypes)
-  //     (c) strides of all dimensions, except last, are divisible by the ratio between the element sizes of the dtypes
-
-  auto ndim = standardized_self.dim();
-  auto self_permuted = standardized_self;
-  if (ndim == 0) {
-    result.copy_(standardized_self.to(at::kLong));
-  } else {
-    std::vector<int64_t> permutation = create_dim_backshift_permutation(dim, ndim);
-    self_permuted = standardized_self.permute(permutation).flatten(-dim.size(), -1);
-
-    Tensor self_prepared_for_view;
-    if (self_permuted.element_size() < 8) {
-      auto ratio_between_dtype_sizes = 8 / self_permuted.element_size();
-      std::vector<int64_t> padding(2, 0);
-      auto modulo = self_permuted.size(-1) % ratio_between_dtype_sizes;
-      padding[1] = modulo == 0 ? modulo : ratio_between_dtype_sizes - modulo;
-      self_prepared_for_view = at::pad(self_permuted, padding, "constant", 0).contiguous();
-    } else {
-      self_prepared_for_view = self_permuted.contiguous();
-    }
-    auto self_view = self_prepared_for_view.view(at::kLong);
-
-    Tensor final_self, a, b;
-    switch (static_cast<HashMode>(mode)) {
-      case HashMode::XOR_SUM_ORDERED:
-        // multiply shift hash function, using arange for multiply and shift
-        a = at::arange(1, self_view.size(-1) + 1, self_view.options());
-        b = static_cast<int64_t>(self_view.size(-1)) - at::arange(0, self_view.size(-1), self_view.options());
-        final_self = a * self_view + b;
-        break;
-      case HashMode::XOR_SUM:
-        final_self = self_view;
-        break;
-      default:
-        TORCH_CHECK(false, "Unknown hash_tensor mode: ", mode);
-    }
-
-    // Since we moved reduction dims to the back above, result.squeeze(dim) will
-    // give a squeezed_result of the correct shape to pass the make_reduction
-    // This is a view of result, so the result returned will be of the correct shape.
-    auto squeezed_result = keepdim ? result.squeeze(dim) : result;
-
-    auto iter = meta::make_reduction(final_self, squeezed_result, -1, false, final_self.scalar_type());
-    switch (static_cast<HashMode>(mode)) {
-      case HashMode::XOR_SUM:
-      case HashMode::XOR_SUM_ORDERED:
-        if (iter.numel() == 0) {
-            result.fill_(0);
-        } else {
-          xor_sum_stub(iter.device_type(), iter);
-        }
-        break;
-      default:
-        TORCH_CHECK(false, "Unknown hash_tensor mode: ", mode);
-    }
+  auto iter = meta::make_reduction(self_view, result_view, dim, keepdim, self_view.scalar_type());
+  switch (static_cast<HashMode>(mode)) {
+    case HashMode::XOR_SUM:
+      if (iter.numel() == 0) {
+          result.fill_(0);
+      } else {
+        xor_sum_stub(iter.device_type(), iter);
+      }
+      return;
+    default:
+      TORCH_CHECK(false, "Unknown hash_tensor mode: ", mode);
   }
 }
 

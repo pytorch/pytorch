@@ -2456,7 +2456,7 @@ def error_inputs_cat(op_info, device, **kwargs):
 
     # error inputs for empty tensors
     yield ErrorInput(SampleInput([], kwargs={'dim': 1}),
-                     error_regex='non-empty list of Tensors')
+                     error_regex='non-empty list of Tensors', error_type=ValueError)
 
     # error inputs for different sizes
     yield ErrorInput(SampleInput([make_arg((S, S, L, L)), make_arg((S, 0, L - 1, L))], kwargs={'dim': 1}),
@@ -11595,44 +11595,22 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
         return np.stack(split_ret).reshape(orig_shape)
 
+def reference_hash_tensor(tensor, dim=(), keepdim=False, mode=0):
+    assert mode == 0, "Only mode=0 (xor_sum) is supported right now"
 
-def generate_hash_tensor_kwargs(t: torch.Tensor, **kwargs):
-    yield ((), {'mode': 0})
-    yield ((), {'mode': 1})
+    dtype = tensor.dtype
+    if dtype.kind == 'f':
+        tensor = tensor.astype(np.float64).view(np.uint64)
+    else:
+        tensor = tensor.astype(np.int64).view(np.uint64)
 
-def reference_hash_tensor(t, dim=(), keepdim=False, mode=0):
-    assert mode in [0, 1], f"Only mode=0 (xor_sum_order) and mode=1 (xor_sum) are supported got {mode}"
 
-    if t.ndim == 0:
-        return t.astype(np.int64)
-
-    if isinstance(dim, int):
-        dim = (dim,)
-    elif isinstance(dim, list):
-        dim = tuple(dim)
-    elif dim == ():
-        dim = tuple(range(0, t.ndim))
-
-    pre_permuted_tensor = np.moveaxis(t, dim, list(range(-len(dim), 0)))
-    permuted_tensor = pre_permuted_tensor.reshape(*pre_permuted_tensor.shape[:-len(dim)], -1)
-
-    ratio_between_dtype_size = 8 // permuted_tensor.itemsize
-    padding = [(0, 0)] * permuted_tensor.ndim
-    padding[-1] = (0, -permuted_tensor.shape[-1] % ratio_between_dtype_size)
-    padded_tensor = np.pad(permuted_tensor, pad_width=padding, mode='constant', constant_values=0)
-    prepared_tensor = np.ascontiguousarray(padded_tensor)
-    tensor_view = prepared_tensor.view(np.int64)
-
-    final_tensor = tensor_view
-    if mode == 0:
-        a = np.arange(1, tensor_view.shape[-1] + 1)
-        b = tensor_view.shape[-1] - np.arange(0, tensor_view.shape[-1])
-        final_tensor = a * tensor_view + b
-
-    result = np.bitwise_xor.reduce(final_tensor, axis=-1, keepdims=False)
-
-    if keepdim:
-        result = np.expand_dims(result, dim)
+    if dim == ():
+        result = np.bitwise_xor.reduce(tensor.flatten(), keepdims=keepdim)
+    else:
+        if isinstance(dim, list):
+            dim = tuple(dim)
+        result = np.bitwise_xor.reduce(tensor, axis=dim, keepdims=keepdim)
 
     return result
 
@@ -21406,10 +21384,10 @@ op_db: list[OpInfo] = [
     ),
     ReductionOpInfo(
         'hash_tensor',
-        generate_args_kwargs=generate_hash_tensor_kwargs,
-        result_dtype=torch.int64,
+        result_dtype=torch.uint64,
         supports_autograd=False,
-        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.complex64),
+        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_hash_tensor,
         skips=(
             # hash_tensor reduces all dimensions when dim=[] (as do sum, prod etc.)
