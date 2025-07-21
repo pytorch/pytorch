@@ -35,7 +35,7 @@ jobs:
     needs: get-label-type
     with:
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm86
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-build
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
