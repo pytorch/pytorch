@@ -223,7 +223,7 @@ def _aoti_compile_and_package_inner(
             not_strict_accuracy = check_accuracy == "accuracy"
             if not same_two_models(
                 gm,
-                compiled_model,
+                compiled_model,  # type: ignore[arg-type]
                 args,
                 only_fwd=True,
                 require_fp64=not_strict_accuracy,
