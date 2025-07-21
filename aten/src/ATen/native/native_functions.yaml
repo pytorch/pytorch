@@ -4143,6 +4143,7 @@
   dispatch:
     SparseCPU, SparseCUDA: _sparse_mm
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: _sparse_csr_mm
+    ZeroTensor: mm_zerotensor
   tags: core
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
