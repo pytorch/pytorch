@@ -426,7 +426,7 @@ class ElasticAgent(abc.ABC):
 
         Note that the worker group is a mutable object and hence in a
         multi-threaded/process environment it may change state.
-        Implementors are encouraged (but not required) to return
+        Implementers are encouraged (but not required) to return
         a defensive read-only copy.
         """
         raise NotImplementedError
@@ -462,7 +462,7 @@ class SimpleElasticAgent(ElasticAgent):
     def _stop_workers(self, worker_group: WorkerGroup) -> None:
         r"""Stop all workers in the given worker group.
 
-        Implementors must deal with workers in all states defined by
+        Implementers must deal with workers in all states defined by
         ``WorkerState``. That is, it must gracefully handle stopping
         non-existent workers, unhealthy (stuck) workers, etc.
         """
@@ -501,7 +501,7 @@ class SimpleElasticAgent(ElasticAgent):
         group_world_size = rdzv_info.world_size
 
         # master_addr/master_port could be explicitly overridden
-        # TODO: BC - specific to static rdzv and can be simplifed further
+        # TODO: BC - specific to static rdzv and can be simplified further
         master_addr = spec.master_addr or rdzv_info.bootstrap_store_info.master_addr
         master_port = spec.master_port or rdzv_info.bootstrap_store_info.master_port
 

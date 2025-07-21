@@ -1209,7 +1209,7 @@ def pipeline(
     Arguments
     ---------
     module:
-        The module to be splitted.
+        The module to be split.
     mb_args:
         Example positional inputs, in micro-batch form.
     mb_kwargs:

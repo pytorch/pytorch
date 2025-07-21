@@ -55,13 +55,11 @@ class DefaultGemmAndBiasOp : public Callable<GemmAndBiasParams<T>> {
           _transposeBoolFromChar(params->transb),
           params->m, params->n, params->k,
           params->alpha,
-          params->beta,
           params->a, params->lda,
           params->b, params->ldb,
           params->bias,
           params->c, params->ldc,
-          params->activation,
-          params->bias2d);
+          params->activation);
       return OK;
     }
 };

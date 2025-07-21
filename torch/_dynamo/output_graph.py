@@ -310,6 +310,8 @@ class OutputGraphGuardsState:
     dual_level: int
     functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
     current_device: Optional[torch.device]
+    global_state_guard: torch._C._dynamo.guards.GlobalStateGuard
+    name_of_builtins_dict_key_in_fglobals: Optional[str] = None
 
     export: bool = False
     export_constraints: bool = False
@@ -341,6 +343,26 @@ class StackLocalsMetadata:
     stack_ctx_args: list[tuple[int, tuple[Any, ...]]] = dc_field(default_factory=list)
     stack_ctx_idxes_orig: list[int] = dc_field(default_factory=list)
     locals_ctx_args: list[tuple[str, tuple[Any, ...]]] = dc_field(default_factory=list)
+
+
+def get_builtins_dict(global_scope):
+    # f_globals["__builtins__"] can be a dict or a module. This is an
+    # implementation detail -
+    # https://docs.python.org/3/library/builtins.html.
+
+    # This makes guarding on any builtin messy because the guard check_fn
+    # has to check if the __builtins__ is a module or dict, and then access
+    # by either using getattr or getitem respectively.
+
+    # To solve this problem, we insert a new entry in f_globals which points
+    # to the builtins __dict__ and then we guard any builtin on this dict.
+    # To avoid any collision with the pre-existing keys, we use the
+    # install_global to give us a unique dict key.
+
+    f_builtins = global_scope["__builtins__"]
+    if not isinstance(f_builtins, dict):
+        f_builtins = f_builtins.__dict__
+    return f_builtins
 
 
 class OutputGraph(OutputGraphGuardsState):
@@ -379,6 +401,9 @@ class OutputGraph(OutputGraphGuardsState):
             dual_level=torch.autograd.forward_ad._current_level,
             functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
             current_device=torch.utils._device.CURRENT_DEVICE,
+            # initial_global_state is only None during NopTest.
+            global_state_guard=torch._dynamo.convert_frame.initial_global_state
+            or torch._C._dynamo.guards.GlobalStateGuard(),
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -562,22 +587,7 @@ class OutputGraph(OutputGraphGuardsState):
         self.compiler_trace_stack.close()
 
     def install_builtins_dict_in_fglobals(self):
-        # f_globals["__builtins__"] can be a dict or a module. This is an
-        # implemenation detail -
-        # https://docs.python.org/3/library/builtins.html.
-
-        # This makes guarding on any builtin messy because the guard check_fn
-        # has to check if the __builtins__ is a module or dict, and then access
-        # by either using getattr or getitem respectively.
-
-        # To solve this problem, we insert a new entry in f_globals which points
-        # to the builtins __dict__ and then we guard any builtin on this dict.
-        # To avoid any collision with the pre-existing keys, we use the
-        # install_global to give us a unique dict key.
-
-        f_builtins = self.global_scope["__builtins__"]
-        if not isinstance(f_builtins, dict):
-            f_builtins = f_builtins.__dict__
+        f_builtins = get_builtins_dict(self.global_scope)
         return self.install_global("__builtins_dict__", f_builtins)
 
     def add_backward_state_hook(self, hook: VariableTracker, prefix="hook"):
@@ -675,6 +685,8 @@ class OutputGraph(OutputGraphGuardsState):
             dual_level=self.dual_level,
             functorch_layers=self.functorch_layers,
             current_device=self.current_device,
+            global_state_guard=self.global_state_guard,
+            name_of_builtins_dict_key_in_fglobals=self.name_of_builtins_dict_key_in_fglobals,
             export=self.export,
             export_constraints=self.export_constraints,
             _guards=self.guards,
@@ -1657,6 +1669,7 @@ class OutputGraph(OutputGraphGuardsState):
             for register_finalizer in self.register_finalizer_fns:
                 register_finalizer(gm)
 
+            gm._backend_id = name
             gm.compile_subgraph_reason = self.compile_subgraph_reason
             gm.meta["dynamo_flat_name_to_original_fqn"] = (
                 self.dynamo_flat_name_to_original_fqn.copy()
@@ -1732,7 +1745,10 @@ class OutputGraph(OutputGraphGuardsState):
                 for specialization in specializations:
                     source_index = sources.index(specialization.source)
                     check_fn_source = inspect.getsource(specialization.check_fn).strip()
+                    # Required because the LABDA_GUARD API requires a root guard manager
+                    unused_root_guard_manager = RootGuardManager()
                     check_fn = guards.LAMBDA_GUARD(  # type: ignore[attr-defined]
+                        unused_root_guard_manager,
                         specialization.check_fn,
                         [check_fn_source],
                     )
@@ -2318,11 +2334,16 @@ class SubgraphTracer(fx.Tracer):
         # True if this tracer is currently tracing into torch.utils.checkpoint
         # as part of speculate_subgraph.
         self.under_activation_checkpoint = False
-        # True if we want to allow side-effects (doesn't throw error on their existence)
+        # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
         # during this tracer's tracing of torch.utils.checkpoint (via speculate_subgraph).
         # Only safe if we know for sure that *NOT* replaying these side-effects during
         # backward recomputation of the checkpoint region doesn't affect its correctness.
         self.allow_side_effects_under_checkpoint = False
+        # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
+        # during this tracer's tracing. This is currently only used by experimental AC out-of-tree
+        # via torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer.
+        # Note: Externally visible side-effects are allowed if this flag OR the above flag is True.
+        self.unsafe_allow_externally_visible_side_effects = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False
@@ -2731,7 +2752,7 @@ class SubgraphTracer(fx.Tracer):
         ):
             return self.bound_symbols[example_value.node.expr]
 
-        # Proxys are associated with VariableTracker.
+        # Proxies are associated with VariableTracker.
         # It is possible that we've already lifted the Proxy to be an input.
         # If that is the case, just return the already lifted Proxy.
         if proxy in self.lifted_freevars:
@@ -2785,7 +2806,7 @@ class SubgraphTracer(fx.Tracer):
         self, example_value, e_proxy: Union[LazyProxy, torch.fx.Proxy]
     ):
         # When binding the symbols in an exmaple_value, we bind the symbols
-        # to the proxy's associatied Tracer instead of current tracer.
+        # to the proxy's associated Tracer instead of current tracer.
         # This is because:
         # 1. We may be calling wrap_tensors during speculate_subgraph because
         # the variables are lazily realized. The proxy are top-level phs but

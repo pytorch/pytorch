@@ -69,6 +69,7 @@ if torch.backends.mps.is_available():
             "flatten",
             "fill",
             "full",
+            "full_like",
             "H",
             "hsplit",
             "imag",
@@ -156,6 +157,8 @@ if torch.backends.mps.is_available():
             "tensor_split",
             "transpose",
             "transpose_copy",
+            "tril",
+            "triu",
             "true_divide",
             "T",
             "unbind",
@@ -282,8 +285,6 @@ if torch.backends.mps.is_available():
             "trace",
             "trapz",
             "trapezoid",
-            "tril",
-            "triu",
             "vstack",
             "where",
             "byte",
@@ -303,7 +304,7 @@ if torch.backends.mps.is_available():
             ],
             # test blow pass on macOS 12 as it falls back to cpu
             # Argsort case using duplicate indices (undefined behaviour):
-            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
             #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
             # Elements from index 30 and 5133 are both equal.
             # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
@@ -345,7 +346,7 @@ if torch.backends.mps.is_available():
             # 'nn.functional.pairwise_distance': [torch.float16],
             # test blow pass on macOS 12 as it falls back to cpu
             # Argsort case using duplicate indices (undefined behaviour):
-            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
             #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
             # Elements from index 30 and 5133 are both equal.
             # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
@@ -376,7 +377,6 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST = {
             # Failures due to lack of op implementation on MPS backend
-            "login": None,
             "logspace": None,
             "logspacetensor_overload": None,
             "linalg.eig": None,
@@ -386,8 +386,6 @@ if torch.backends.mps.is_available():
             "cauchy": None,
             "cholesky_inverse": None,
             "cholesky_solve": None,
-            "cummax": None,
-            "cummin": None,
             "frexp": None,
             "gcd": None,
             "geqrf": None,
@@ -418,7 +416,6 @@ if torch.backends.mps.is_available():
             "linalg.qr": None,
             "linalg.svdvals": None,
             "linalg.vecdot": None,
-            "logcumsumexp": None,
             "lu_solve": None,
             "masked.median": None,
             "matrix_exp": None,
@@ -431,14 +428,12 @@ if torch.backends.mps.is_available():
             "nn.functional.adaptive_max_pool3d": None,
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
-            "nn.functional.interpolatetrilinear": None,
             "nn.functional.max_unpool1dgrad": None,
             "nn.functional.max_unpool2dgrad": None,
             "nn.functional.max_unpool3dgrad": None,
             "nn.functional.avg_pool3d": None,
             "nn.functional.ctc_loss": None,
             "nn.functional.embedding_bag": None,
-            "nn.functional.max_pool3d": None,
             "nn.functional.max_unpool1d": None,
             "nn.functional.max_unpool2d": None,
             "nn.functional.max_unpool3d": None,
@@ -470,6 +465,7 @@ if torch.backends.mps.is_available():
             "special.airy_ai": None,
             "special.erfcx": None,
             "special.laguerre_polynomial_l": None,
+            "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
             "special.ndtri": None,
             "svd_lowrank": None,
@@ -492,7 +488,6 @@ if torch.backends.mps.is_available():
             "log_softmaxwith_dtype": None,
             "softmaxwith_dtype": None,
             "float_power": None,
-            "full_like": None,
             "linalg.matrix_rankhermitian": None,
             "linalg.pinvhermitian": None,
             "nonzero_static": None,
@@ -546,14 +541,6 @@ if torch.backends.mps.is_available():
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
-            # atomic operations not supported
-            "_unsafe_masked_index_put_accumulate": [
-                torch.bool,
-                torch.int8,
-                torch.uint8,
-                torch.int16,
-                torch.int64,
-            ],
         }
 
         if MACOS_VERSION < 14.0:
@@ -647,13 +634,6 @@ if torch.backends.mps.is_available():
                 torch.float32,
                 torch.float16,
                 torch.bfloat16,
-            ],
-            "index_put": [
-                torch.bool,
-                torch.uint8,
-                torch.int8,
-                torch.int16,
-                torch.int64,
             ],
             # zero to negative integer powers are undefined
             "__rpow__": [torch.int8, torch.int16, torch.int32, torch.int64],
@@ -997,8 +977,6 @@ if torch.backends.mps.is_available():
             "aminmax",
             # memory overlapping checks
             "index_select",
-            # unimplemented
-            "logcumsumexp",
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:

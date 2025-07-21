@@ -9,7 +9,7 @@ inputs:
   arch-for-build-env:
     description: |
       arch to pass to build environment.
-      This is currently different than the arch name we use elswhere, which
+      This is currently different than the arch name we use elsewhere, which
       should be fixed.
     required: true
   github-secret:
