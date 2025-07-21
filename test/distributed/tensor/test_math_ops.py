@@ -572,16 +572,14 @@ class DistMathOpsTest(DTensorTestBase):
             f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
         )
 
-
     @with_comms
-    def test_rms_norm_fwd(self):
+    def test_rms_norm_bwd(self):
         device_mesh = self.build_device_mesh()
 
-        # NLP example similar to layer norm test
+        # NLP example from pytorch docs
         batch, sentence_length, embedding_dim = 20, 5, 10
-        x = torch.rand(batch, sentence_length, embedding_dim, device=self.device_type)
-        norm_shape_idx_list = list(range(x.ndim))
-        shard_dims = [-1, 0, 1, 2]
+        norm_shape_idx_list = list(range(3))
+        shard_dims = [0, 1, 2]
         elementwise_affine_list = [False, True]
         test_config_list = list(
             itertools.product(shard_dims, norm_shape_idx_list, elementwise_affine_list)
@@ -589,6 +587,13 @@ class DistMathOpsTest(DTensorTestBase):
 
         # normalized shape is a torch.Size object
         for shard_dim, norm_idx, elementwise_affine in test_config_list:
+            x = torch.rand(
+                batch,
+                sentence_length,
+                embedding_dim,
+                device=self.device_type,
+                requires_grad=True,
+            )
             normalized_shape = x.shape[norm_idx:]
             rms_norm = torch.nn.RMSNorm(
                 normalized_shape,
@@ -599,7 +604,7 @@ class DistMathOpsTest(DTensorTestBase):
 
             def _replicate_fn(name, module, device_mesh):
                 for name, param in module.named_parameters():
-                    if name in ["weight"]:  # RMSNorm only has weight, no bias
+                    if name == "weight":
                         param_dist = torch.nn.Parameter(
                             distribute_tensor(param, device_mesh, [Replicate()])
                         )
@@ -607,37 +612,206 @@ class DistMathOpsTest(DTensorTestBase):
 
             rms_norm_dist = distribute_module(rms_norm, device_mesh, _replicate_fn)
 
-            x_local = x
+            if elementwise_affine:
+                self.assertEqual(
+                    rms_norm_local.weight, rms_norm_dist.weight.full_tensor()
+                )
+
+            x_local = x.detach().clone().requires_grad_(True)
             x_dist = distribute_tensor(x, device_mesh, [Shard(shard_dim)])
+            self.assertEqual(x_local, x_dist.full_tensor())
 
             y_local = rms_norm_local(x_local)
-            # make sure that forward rms norm does not introduce extra collectives
+            # make sure that backward rms norm does not introduce extra collectives
             comm_mode = CommDebugMode()
             with comm_mode:
                 y_dist = rms_norm_dist(x_dist)
+                y_dist.sum().backward()
 
-            self.assertLessEqual(
-                comm_mode.get_total_counts(),
-                1,  # TODO: This should be 0!
+            expected_fwd_comm = 0 if shard_dim < norm_idx else 1
+
+            self.assertEqual(
+                sum(comm_mode.comm_module_counts["Global"]["forward"].values()),
+                expected_fwd_comm,
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
-            from torch.distributed.tensor._dtensor_spec import TensorMeta
-
-            dtensor_meta = y_dist._spec.tensor_meta
-            assert isinstance(dtensor_meta, TensorMeta)
-            # make sure the right shape in sharding prop
-            self.assertEqual(y_local.shape, dtensor_meta.shape)
             self.assertEqual(y_local, y_dist.full_tensor())
 
-    @with_comms
-    def test_rms_norm_bwd(self):
-        ...
+            # backward step
+            y_local.sum().backward()
+
+            expected_bwd_comm = 0 if shard_dim < norm_idx else 1
+
+            self.assertEqual(
+                sum(comm_mode.comm_module_counts["Global"]["backward"].values()),
+                expected_bwd_comm,
+                f"comm count={comm_mode.get_total_counts()}, "
+                f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
+            )
+
+            if elementwise_affine:
+                # if input is sharded on any outer dimension, the gradient of weight
+                # should be Partial
+                dim_map = x_dist._spec.dim_map
+                outer_dims = range(norm_idx)
+                needs_reduction = any(dim_map[d] >= 0 for d in outer_dims)
+                self.assertEqual(
+                    is_tensor_partial(rms_norm_dist.weight.grad._spec),
+                    needs_reduction,
+                )
+                self.assertEqual(
+                    rms_norm_local.weight.grad,
+                    rms_norm_dist.weight.grad.full_tensor(),
+                )
+
+            self.assertEqual(x_local.grad, x_dist.grad.full_tensor())
 
     @with_comms
     def test_rms_norm_bwd_req_grad(self):
-        ...
+        device_mesh = self.build_device_mesh()
+        batch, seq_len, embedding_dim, vocab_size = 8, 8, 10, 32
+
+        # build our subtest configurations and filter out invalid ones
+        class SubTest(NamedTuple):
+            multidim_norm: bool
+            elementwise_affine: bool
+            emb_req_grad: bool
+            rn_req_grad: bool
+            out_req_grad: bool
+
+        subtest_fails = {}
+        valid_filter = (  # noqa: E731
+            lambda cfg: (
+                not (cfg.rn_req_grad and not cfg.elementwise_affine) and any(cfg[2:])
+            )
+        )
+        subtest_cfgs = list(
+            filter(
+                valid_filter,
+                [SubTest(*cfg) for cfg in itertools.product(*(((False, True),) * 5))],
+            )
+        )
+
+        for subtest_cfg in subtest_cfgs:
+            try:
+                (
+                    multidim_norm,
+                    elementwise_affine,
+                    emb_req_grad,
+                    rn_req_grad,
+                    out_req_grad,
+                ) = subtest_cfg
+                normalized_shape = (
+                    (seq_len, embedding_dim) if multidim_norm else (embedding_dim,)
+                )
+
+                # configure our local and parallelized models for this subtest
+                class RnTpBlock(torch.nn.Module):  # RMSNorm Tensor Parallel Block
+                    def __init__(self):
+                        super().__init__()
+                        self.prern_embeddings = torch.nn.Embedding(
+                            vocab_size, embedding_dim
+                        )
+                        self.rms_norm = torch.nn.RMSNorm(
+                            normalized_shape, elementwise_affine=elementwise_affine
+                        )
+                        self.postrn_linear = torch.nn.Linear(
+                            embedding_dim, embedding_dim
+                        )
+
+                    def forward(self, tokens):
+                        h = self.prern_embeddings(tokens)
+                        h = self.rms_norm(h)
+                        output = self.postrn_linear(h)
+                        return output
+
+                parallel_plan = {
+                    "prern_embeddings": RowwiseParallel(
+                        input_layouts=Replicate(), output_layouts=Shard(1)
+                    ),
+                    "rms_norm": SequenceParallel(),
+                    "postrn_linear": ColwiseParallel(
+                        input_layouts=Shard(1),
+                        output_layouts=Replicate(),
+                    ),
+                }
+
+                model = RnTpBlock()
+                model_local = copy.deepcopy(model).to(device=self.device_type)
+                model_dist = parallelize_module(model, device_mesh, parallel_plan)
+                req_grad_map = {
+                    "prern_embeddings": emb_req_grad,
+                    "postrn_linear": out_req_grad,
+                    "rms_norm": rn_req_grad,
+                }
+
+                # apply the relevant `requires_grad` mask for this subtest to both models
+                for target_model in [model_local, model_dist]:
+                    for n, p in target_model.named_parameters():
+                        if not req_grad_map.get(n.rpartition(".")[0], False):
+                            p.requires_grad_(False)
+                            assert not p.requires_grad
+                        else:
+                            assert p.requires_grad
+
+                # forward step for both local and distributed models
+                x = torch.randint(vocab_size, (batch, seq_len), device=self.device_type)
+                x_local = x.detach().clone()
+                output_local = model_local(x_local)
+
+                with CommDebugMode() as comm_mode:
+                    output_dist = model_dist(x)
+
+                self.assertEqual(output_local, output_dist)
+
+                # all requires_grad patterns should have the same forward comm counts
+                expected_fwd_comm = {
+                    funcol.reduce_scatter_tensor: 1,
+                    funcol.all_gather_into_tensor: 2,
+                }
+                self.assertDictEqual(
+                    comm_mode.comm_module_counts["Global"]["forward"], expected_fwd_comm
+                )
+
+                # backward step
+                output_local.sum().backward()
+
+                with CommDebugMode() as comm_mode:
+                    output_dist.sum().backward()
+
+                # ensure gradients (and parameters) remain equal between local and distributed models
+                self._check_module(model_local, model_dist, check_grad=True)
+
+                # different requires_grad patterns will have different bwd comm counts
+                if out_req_grad and not any((emb_req_grad, rn_req_grad)):
+                    expected_bwd_comm = {}
+                elif rn_req_grad and not any((emb_req_grad, multidim_norm)):
+                    expected_bwd_comm = {funcol.reduce_scatter_tensor: 1}
+                elif multidim_norm:
+                    expected_bwd_comm = {funcol.all_reduce: 1}
+                    expected_bwd_comm[funcol.all_gather_into_tensor] = (
+                        2 if emb_req_grad else 1
+                    )
+                else:
+                    expected_bwd_comm = {
+                        funcol.reduce_scatter_tensor: 1,
+                        funcol.all_gather_into_tensor: 1,
+                    }
+
+                self.assertDictEqual(
+                    comm_mode.comm_module_counts["Global"]["backward"],
+                    expected_bwd_comm,
+                )
+                self.assertEqual(output_local, output_dist)
+
+            except Exception as e:
+                subtest_fails[subtest_cfg] = e
+        # if any subtest fails, provide the failed subtests and report the overall failure
+        assert not subtest_fails, (
+            f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
+        )
 
 
     @with_comms
