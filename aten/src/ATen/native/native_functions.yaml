@@ -1067,6 +1067,7 @@
     CUDA: baddbmm_out_cuda
     MPS: baddbmm_out_mps
     XPU: baddbmm_out_xpu
+    MTIA: baddbmm_out_mtia
     SparseCsrCUDA: baddbmm_out_sparse_csr_cuda
 
 - func: baddbmm.dtype(Tensor self, Tensor batch1, Tensor batch2, ScalarType out_dtype, *, Scalar beta=1, Scalar alpha=1) -> Tensor
@@ -1376,6 +1377,7 @@
     CUDA: bmm_out_cuda
     MPS: bmm_out_mps
     XPU: bmm_out_xpu
+    MTIA: bmm_out_mtia
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
     SparseCsrCUDA: bmm_out_sparse_csr_cuda
@@ -7065,6 +7067,7 @@
     CUDA: addmm_out_cuda
     MPS: addmm_out_mps
     XPU: addmm_out_xpu
+    MTIA: addmm_out_mtia
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
     SparseCsrCPU: addmm_out_sparse_compressed_cpu
