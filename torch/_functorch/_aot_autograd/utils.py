@@ -8,7 +8,8 @@ import operator
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional, ParamSpec, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -526,10 +527,14 @@ def without_output_descs(f):
 
 
 _P = ParamSpec("_P")
+_P2 = ParamSpec("_P2")
 _R = TypeVar("_R")
+_R2 = TypeVar("_R2")
 
 
-def simple_wraps(f: Callable[_P, _R]) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+def simple_wraps(
+    f: Callable[_P, _R],
+) -> Callable[[Callable[_P2, _R2]], Callable[_P2, _R2]]:
     # NB: omit ('__module__', '__name__', '__qualname__') for ease of
     # debugging
     return wraps(f, assigned=("__doc__", "__annotations__", "__type_params__"))
