@@ -1823,7 +1823,7 @@ class CppBuilder:
                 """
             )
         else:
-            # When compile_standalone is True, use TorchStandalone insteade of Torch
+            # When compile_standalone is True, use TorchStandalone instead of Torch
             contents += textwrap.dedent(
                 """
                 find_package(TorchStandalone REQUIRED)
