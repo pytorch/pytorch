@@ -569,7 +569,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, buffer_if_can_stack_allocate=None, is_pinned=False
+        self,
+        name,
+        device,
+        dtype,
+        shape,
+        stride,
+        buffer_if_can_stack_allocate=None,
+        is_pinned=False,
     ):
         orig_stride = stride
         device_str = self.codegen_device(device)
