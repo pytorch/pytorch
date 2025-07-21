@@ -1,5 +1,3 @@
-# mypy: allow-untyped-decorators
-
 """
 This module implements TorchDynamo's core frame conversion functionality, transforming Python
 frames into FX graphs. It handles:
