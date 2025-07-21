@@ -1802,14 +1802,6 @@ class PythonWrapperCodegen(CodeGen):
         arg_name = node.input_name(0)
         self.writeline(MultiOutputLine(self, result_name, arg_name, node.indices))
 
-    def codegen_dynamic_select_index(self, node):
-        index_str = f"{node.index} + {node.size} if {node.index} < 0 else {node.index}"
-        self.writeline(
-            f"{node.unbacked_offset_symbol} = {node.base_offset} + {node.base_dim_stride} * ({index_str})"
-        )
-        # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
-        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
-
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
         if len(node.keypath) == 0:
