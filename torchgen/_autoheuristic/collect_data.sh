@@ -3,16 +3,16 @@
 # This script makes it easy to parallelize data collection across multiple GPUs
 
 # Check if tmux is installed
-if ! command -v tmux &> /dev/null; then
-    echo "tmux is not installed. Please install it and try again."
-    exit 1
+if ! command -v tmux &>/dev/null; then
+  echo "tmux is not installed. Please install it and try again."
+  exit 1
 fi
 
 # Check if the correct number of arguments is provided
 if [ "$#" -ne 5 ]; then
-    echo "Usage: $0 \"<python_command>\" <comma_separated_device_numbers> <num_samples to generate> <CONDA_ENV> <OUTPUT_DIR>"
-    echo "Example: $0 \"python run.py --a b --b c\" 1,4,5,3 1000 pytorch-3.10 a100"
-    exit 1
+  echo "Usage: $0 \"<python_command>\" <comma_separated_device_numbers> <num_samples to generate> <CONDA_ENV> <OUTPUT_DIR>"
+  echo "Example: $0 \"python run.py --a b --b c\" 1,4,5,3 1000 pytorch-3.10 a100"
+  exit 1
 fi
 
 PYTHON_COMMAND=$1
@@ -26,7 +26,7 @@ SESSION_NAME="parallel_run_$(date +%s)"
 tmux new-session -d -s "$SESSION_NAME"
 
 # Split the device numbers
-IFS=',' read -ra DEVICES <<< "$DEVICE_NUMBERS"
+IFS=',' read -ra DEVICES <<<"$DEVICE_NUMBERS"
 
 NUM_GPUS=${#DEVICES[@]}
 NUM_SAMPLES_PER_GPU=$((NUM_SAMPLES / NUM_GPUS))
@@ -35,14 +35,14 @@ echo "Each GPU will collect ${NUM_SAMPLES_PER_GPU}"
 
 # Function to create a new pane and run the script
 create_pane() {
-    local device=$1
-    tmux split-window -t "$SESSION_NAME"
-    tmux send-keys -t "$SESSION_NAME" "conda activate ${CONDA_ENV} && $PYTHON_COMMAND --device $device -o ${OUTPUT_DIR}/data_${device}.txt --num-samples ${NUM_SAMPLES_PER_GPU}" C-m
+  local device=$1
+  tmux split-window -t "$SESSION_NAME"
+  tmux send-keys -t "$SESSION_NAME" "conda activate ${CONDA_ENV} && $PYTHON_COMMAND --device $device -o ${OUTPUT_DIR}/data_${device}.txt --num-samples ${NUM_SAMPLES_PER_GPU}" C-m
 }
 
 # Create panes for each device number
 for device in "${DEVICES[@]}"; do
-    create_pane ${device}
+  create_pane ${device}
 done
 
 # Remove the first pane (empty one)

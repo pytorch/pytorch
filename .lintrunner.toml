@@ -1481,7 +1481,6 @@ exclude_patterns = [
     'third_party/**/*.sh',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
-    "**/*.sh",
     ".*/**/*.sh",
     ".ci/**/*.sh",
     ".github/**/*.sh",
