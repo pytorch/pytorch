@@ -126,6 +126,14 @@ COPY ci_commit_pins/executorch.txt executorch.txt
 RUN if [ -n "${EXECUTORCH}" ]; then bash ./install_executorch.sh; fi
 RUN rm install_executorch.sh common_utils.sh executorch.txt
 
+ARG VLLM
+# set up env for vllm with pinned commit
+COPY ./common/setup_vllm_env.sh  setup_vllm_env.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/vllm.txt pinned_vllm.txt
+RUN if [ -n "${VLLM}" ]; then bash ./setup_vllm_env.sh; fi
+RUN rm setup_vllm_env.sh common_utils.sh
+
 ARG HALIDE
 # Build and install halide
 COPY ./common/install_halide.sh install_halide.sh
@@ -178,6 +186,10 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 ARG SKIP_LLVM_SRC_BUILD_INSTALL
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 RUN if [ -n "${SKIP_LLVM_SRC_BUILD_INSTALL}" ]; then set -eu; rm -rf /opt/llvm; fi
+
+ARG EXECUTORCH
+# Build and install executorch
+COPY ./common/install_executorch.sh install_executorch.sh
 
 # AWS specific CUDA build guidance
 ENV TORCH_CUDA_ARCH_LIST Maxwell
