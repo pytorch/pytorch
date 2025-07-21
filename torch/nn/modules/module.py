@@ -1947,21 +1947,24 @@ class Module:
     # on `torch.nn.Module` and all its subclasses is largely disabled as a result. See:
     # https://github.com/pytorch/pytorch/pull/115074
     def __getattr__(self, name: str) -> Union[Tensor, "Module"]:
-        if "_parameters" in self.__dict__:
-            _parameters = self.__dict__["_parameters"]
-            if name in _parameters:
-                return _parameters[name]
-        if "_buffers" in self.__dict__:
-            _buffers = self.__dict__["_buffers"]
-            if name in _buffers:
-                return _buffers[name]
         if "_modules" in self.__dict__:
-            modules = self.__dict__["_modules"]
-            if name in modules:
-                return modules[name]
-        raise AttributeError(
-            f"'{type(self).__name__}' object has no attribute '{name}'"
-        )
+            if name in (d := self.__dict__["_modules"]):
+                return d[name]
+        class_ = type(self)
+        exception_msg = f"'{class_.__name__}' object has no attribute '{name}'"
+        if "_parameters" in self.__dict__:
+            if name in (d := self.__dict__["_parameters"]):
+                # Create readable/writeable property for _parameters[name] to speed-up access
+                setattr(class_, name,
+                    property(_parameter_getter(name, exception_msg), _parameter_setter(name)))
+                return d[name]
+        if "_buffers" in self.__dict__:
+            if name in (d := self.__dict__["_buffers"]):
+                # Create readable/writeable property for _buffers[name] to speed-up access
+                setattr(class_, name,
+                    property(_buffer_getter(name, exception_msg), _buffer_setter(name)))
+                return d[name]
+        raise AttributeError(exception_msg)
 
     def __setattr__(self, name: str, value: Union[Tensor, "Module"]) -> None:
         def remove_from(*dicts_or_sets):
@@ -3032,3 +3035,43 @@ class Module:
         See :func:`torch.compile` for details on the arguments for this function.
         """
         self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
+
+
+def _parameter_getter(name, exception_msg):
+    def call(obj):
+        try:
+            return obj._parameters[name]
+        except KeyError:
+            try:
+                # The object attribute was initialized before property creation
+                # with simple value like None.
+                # Move the value to obj._parameters dict to fast access via
+                # property next time
+                obj._parameters[name] = res = obj.__dict__.pop(name)
+                return res
+            except KeyError:
+                raise AttributeError(exception_msg)
+    return call
+def _parameter_setter(name):
+    def call(obj, val):
+        obj._parameters[name] = val
+    return call
+def _buffer_getter(name, exception_msg):
+    def call(obj):
+        try:
+            return obj._buffers[name]
+        except KeyError:
+            try:
+                # The object attribute was initialized before property creation
+                # with simple value like None.
+                # Move the value to obj._buffers dict to fast access via
+                # property next time
+                obj._buffers[name] = res = obj.__dict__.pop(name)
+                return res
+            except KeyError:
+                raise AttributeError(exception_msg)
+    return call
+def _buffer_setter(name):
+    def call(obj, val):
+        obj._buffers[name] = val
+    return call
