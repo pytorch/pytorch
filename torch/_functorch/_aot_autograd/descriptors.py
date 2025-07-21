@@ -207,6 +207,11 @@ handle them:
     - BackwardTokenAOTOutput
     - DummyAOTOutput
 
+For convenience, we also have DifferentiableAOTInput and
+DifferentiableAOTOutput to help you classify which inputs/outputs can be
+wrapped by GradAOTOutput/TangentAOTInput (respectively), which are essentially
+all tensor AOTInput/AOTOutput excluding the subclass descriptors.
+
 Implementation details
 ----------------------
 
@@ -484,9 +489,11 @@ class BackwardTokenAOTInput(AOTInput):
 
 # Technically the "output" here is redundant, tangents always correspond to
 # outputs
-# NB: not "differentiable" because we don't support double backwards
+# NB: this is marked differentiable as it /would/ be differentiable if we
+# support double backwards, but we never generate this today because we
+# don't support double backwards.
 @dataclasses.dataclass(frozen=True)
-class TangentAOTInput(AOTInput):
+class TangentAOTInput(DifferentiableAOTInput):
     """An input to the joint graph representing the tangent of an output."""
 
     output: "AOTOutput"
@@ -542,9 +549,11 @@ class MetadataMutationAOTOutput(DifferentiableAOTOutput):
         return "__aliased_arg_with_metadata_mutation"
 
 
-# NB: not differentiable because we don't support double backwards (yet)
+# NB: this is marked differentiable as it /would/ be differentiable if we
+# support double backwards, but we never generate this today because we
+# don't support double backwards.
 @dataclasses.dataclass(frozen=True)
-class GradAOTOutput(AOTOutput):
+class GradAOTOutput(DifferentiableAOTOutput):
     """An output representing the computed gradient for a differentiable input, in the joint graph"""
 
     grad_of: AOTInput
