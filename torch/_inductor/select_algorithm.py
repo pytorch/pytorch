@@ -167,10 +167,24 @@ class PartialRender:
     of replacements after the initial render.
     """
 
+    FINALIZED_HOOK: object = object()
+
     def __init__(self, code, replacement_hooks) -> None:
         super().__init__()
-        self.code = code
+        self._code = code
         self.replacement_hooks = replacement_hooks
+
+    @property
+    def code(self):
+        remaining_active_hooks = [
+            key
+            for key, fn in self.replacement_hooks.items()
+            if fn is not self.FINALIZED_HOOK
+        ]
+        assert len(remaining_active_hooks) == 0, (
+            f"The following hooks have not yet been finalized:\n {remaining_active_hooks=}"
+        )
+        return self._code
 
     def finalize_hook(self, hook_key: str, strict=True) -> None:
         if hook_key not in self.replacement_hooks:
@@ -180,15 +194,28 @@ class PartialRender:
                 )
             else:
                 return
-        assert self.replacement_hooks[hook_key] is not None, (
+        assert self.replacement_hooks[hook_key] is not self.FINALIZED_HOOK, (
             "hook_key can only be called once"
         )
-        self.code = self.code.replace(hook_key, self.replacement_hooks[hook_key]())
-        self.replacement_hooks[hook_key] = None
+        self._code = self._code.replace(hook_key, self.replacement_hooks[hook_key]())
+        self.replacement_hooks[hook_key] = self.FINALIZED_HOOK
+
+    def finalize_remaining(self) -> str:
+        """
+        Finalize the remaining active hooks. This function can be used in cases
+        where the caller uses `finalize_hook` rather than `finalize_all`.
+        Note: `finalize_all` errors if a hook that has already been finalized
+        is attempted to be called again. This function only attempts to
+        finalize active hooks.
+        """
+        for key, fn in self.replacement_hooks.items():
+            if fn is not self.FINALIZED_HOOK:
+                self.finalize_hook(key)
+        return self.code
 
     def finalize_all(self) -> str:
-        for key, fn in self.replacement_hooks.items():
-            self.code = self.code.replace(key, fn())
+        for key in self.replacement_hooks:
+            self.finalize_hook(key)
         return self.code
 
 
