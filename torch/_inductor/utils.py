@@ -81,15 +81,7 @@ if TYPE_CHECKING:
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .ir import (
-        Buffer,
-        ExternKernel,
-        ExternKernelOut,
-        IRNode,
-        Layout,
-        Operation,
-        ReinterpretView,
-    )
+    from .ir import Buffer, ExternKernel, IRNode, Layout, Operation, ReinterpretView
     from .output_code import CompiledFxGraph
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
@@ -1099,13 +1091,17 @@ def fresh_cache(
     """
     clear_caches()
 
-    inductor_cache_dir = tempfile.mkdtemp(dir=dir)
+    from torch._inductor.cpp_builder import normalize_path_separator
+
+    inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
-            triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
+            triton_cache_dir = normalize_path_separator(
+                os.path.join(inductor_cache_dir, "triton")
+            )
             with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
                 yield
                 if isinstance(cache_entries, dict):
@@ -1539,35 +1535,87 @@ def use_triton_template(
     )
 
 
-def use_triton_tma_template(*matrices: IRNode) -> bool:
+def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
+    """
+    Return True iff *all* supplied tensors satisfy the CUDA-12.9 TMA constraints
+    that Triton relies on today.
+    * https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TENSOR__MEMORY.html
+
+    A tensor is accepted when:
+      * 2 ≤ rank ≤ 5
+      * dtype ∈ {FP16, BF16, FP8-E4M3FN}
+      * Every logical size ≥ 2
+      * Base pointer 16-byte aligned
+      * All "outer" dims have 16-byte aligned strides
+      * The “inner” dim has stride 1 (contiguous)
+      * For FP8 tensors, inner dim ≥ 32
+    """
     from torch.utils._triton import has_triton_tma_device
 
     from .virtualized import V
 
+    def _aligned(expr_bytes: Union[int, sympy.Expr]) -> bool:
+        return V.graph.sizevars.statically_known_multiple_of(expr_bytes, TMA_ALIGNMENT)
+
     def _is_tma_compatible(x: IRNode) -> bool:
-        if len(x.get_size()) != 2:
+        sizes = x.get_size()
+        strides = x.get_stride()
+        rank = len(sizes)
+        dtype = x.get_dtype()
+        itemsize = dtype.itemsize
+
+        # 2 ≤ rank ≤ 5
+        if rank < 2 or rank > 5:
             return False
 
-        dtype = x.get_dtype()
+        # dtype ∈ {FP16, BF16, FP8-E4M3FN}
         if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn):
             return False
 
-        layout = x.get_layout()
-        transposed = layout.is_transposed()
-        if not (layout.is_contiguous() or transposed):
+        # Base pointer 16-byte aligned
+        if x.get_name() in V.graph.unaligned_buffers:
             return False
 
-        inner_dim = layout.size[1]
-        if transposed:
-            inner_dim = layout.size[0]
+        if add_guards:
+            sizes_i = V.graph.sizevars.guard_int_seq(sizes)
+            strides_i = V.graph.sizevars.guard_int_seq(strides)
+        else:
+            sizes_i = [V.graph.sizevars.symbolic_hint(s) for s in sizes]
+            strides_i = [V.graph.sizevars.symbolic_hint(st) for st in strides]
 
-        if dtype == torch.float8_e4m3fn and V.graph.sizevars.statically_known_lt(
+        # Every logical size ≥ 2
+        if any(not V.graph.sizevars.statically_known_geq(s, 2) for s in sizes_i):
+            return False
+
+        # Find the single contiguous (“inner”) dim
+        inner = [
+            i
+            for i, st in enumerate(strides_i)
+            if V.graph.sizevars.statically_known_equals(st, 1)
+        ]
+        if len(inner) != 1:
+            return False
+        inner_idx = inner[0]
+
+        # All "outer" dims must have 16-byte aligned strides
+        for i, st in enumerate(strides_i):
+            if i == inner_idx:
+                continue
+            if not _aligned(st * itemsize):
+                return False
+
+        # Inner dim byte width must still be a multiple of 16 B
+        inner_dim = sizes_i[inner_idx]
+        if not _aligned(inner_dim * itemsize):
+            return False
+
+        # FP8 special case: inner ≥ 32
+        if dtype == torch.float8_e4m3fn and not V.graph.sizevars.statically_known_geq(
             inner_dim, 32
         ):
             return False
 
-        inner_bytes = inner_dim * dtype.itemsize
-        return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
+        return True
 
     return (
         config.triton.enable_persistent_tma_matmul
@@ -2178,7 +2226,10 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
-    from torch.testing._internal.common_cuda import SM80OrLater
+    SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
+        8,
+        0,
+    )
 
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
 
@@ -3070,42 +3121,6 @@ def get_donated_idxs() -> Optional[list[int]]:
     if tracing_context is not None and tracing_context.fw_metadata:
         return tracing_context.fw_metadata.bw_donated_idxs
     return None
-
-
-def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
-    kernel_name: str,
-    is_extern: bool = False,
-) -> None:
-    from .codegen.simd_kernel_features import DisableReduction, EnableReduction
-    from .ir import ExternKernelOut
-    from .virtualized import V
-
-    if is_extern:
-        assert isinstance(node_schedule, ExternKernelOut)
-        curr_node_info = (
-            V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
-                kernel_name, []
-            )
-        )
-        curr_node_info.extend(
-            origin.name
-            for origin in node_schedule.origins
-            if origin.name not in curr_node_info
-        )
-    else:
-        assert isinstance(node_schedule, list)
-        for snode in node_schedule:
-            if snode not in (EnableReduction, DisableReduction):
-                if snode.node is not None:
-                    curr_node_info = V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
-                        kernel_name, []
-                    )
-                    curr_node_info.extend(
-                        origin.name
-                        for origin in snode.node.origins
-                        if origin.name not in curr_node_info
-                    )
 
 
 class TritonAttrsDescriptorVersion(enum.Enum):
