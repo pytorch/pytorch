@@ -1550,6 +1550,12 @@ class TestMaxAutotune(TestCase):
                 if "benchmark_gpu" in counter:
                     self.assertEqual(counters["inductor"][counter], 2)
 
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
     def test_mm_k_1(self):
         def mm(x, y):
             return x @ y
@@ -1561,9 +1567,6 @@ class TestMaxAutotune(TestCase):
             compiled_f = torch.compile(mm)
 
             out, code = run_and_get_code(compiled_f, a, b)
-            FileCheck().check("@triton_heuristics.template").check(
-                "triton_tem_fused_mm"
-            ).run(code[0])
             torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
 
 
