@@ -2576,6 +2576,7 @@ class GuardManager {
         _type_str(get_type_str(example_value)) {
     if (_is_dict) {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
+      _is_empty_dict = PyDict_Size(example_value.ptr()) == 0;
     }
   }
 
@@ -2609,6 +2610,10 @@ class GuardManager {
     return _is_dict;
   }
 
+  bool is_guarded_value_empty_dict() {
+    return _is_empty_dict;
+  }
+
   std::string type_of_guarded_value() {
     return _type_str;
   }
@@ -2619,12 +2624,14 @@ class GuardManager {
       RootGuardManager* root,
       std::string source,
       bool is_dict,
+      bool is_empty_dict,
       bool is_immutable,
       bool is_nn_module,
       std::string type_str)
       : _root(root),
         _source(std::move(source)),
         _is_dict(is_dict),
+        _is_empty_dict(is_empty_dict),
         _is_immutable(is_immutable),
         _is_nn_module(is_nn_module),
         _type_str(type_str) {}
@@ -2662,6 +2669,7 @@ class GuardManager {
         cloned_root,
         _source,
         _is_dict,
+        _is_empty_dict,
         _is_immutable,
         _is_nn_module,
         _type_str);
@@ -2945,6 +2953,7 @@ class GuardManager {
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
   bool _is_dict = false;
+  bool _is_empty_dict = false;
   bool _is_immutable = false;
   bool _is_nn_module = false;
   std::string _type_str;
@@ -3449,13 +3458,15 @@ class DictGuardManager : public GuardManager {
       PyTypeObject* expected_type,
       bool is_exact_dict_type,
       std::vector<Py_ssize_t> indices,
-      std::string type_of)
+      std::string type_of,
+      bool is_empty_dict)
       : GuardManager(
             cloned_root,
             std::move(source),
-            true,
-            false,
-            false,
+            true, // _is_dict
+            is_empty_dict,
+            false, // _is_nn_module
+            false, // _is_immutable
             type_of),
         _size(size),
         _expected_type(expected_type),
@@ -3476,7 +3487,8 @@ class DictGuardManager : public GuardManager {
         _expected_type,
         _is_exact_dict_type,
         _indices,
-        type_of_guarded_value());
+        type_of_guarded_value(),
+        is_guarded_value_empty_dict());
 
     clone_common(cloned_root, cloned_mgr, clone_filter_fn);
     for (auto index : _indices) {
@@ -5997,6 +6009,9 @@ PyObject* torch_c_dynamo_guards_init() {
           "is_guarded_value_nn_module",
           &GuardManager::is_guarded_value_nn_module)
       .def("is_guarded_value_dict", &GuardManager::is_guarded_value_dict)
+      .def(
+          "is_guarded_value_empty_dict",
+          &GuardManager::is_guarded_value_empty_dict)
       .def("type_of_guarded_value", &GuardManager::type_of_guarded_value)
       .def(
           "get_accessors",

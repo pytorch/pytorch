@@ -905,6 +905,7 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
             def __init__(self):
                 self.x = {"a": 2}
                 self.y = torch.randn(4)
+                self.z = {}
 
         foo = Foo()
 
@@ -940,6 +941,11 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
             foo_y_source = AttrSource(foo_source, "y")
             foo_y_mgr = builder.get_guard_manager_from_source(foo_y_source)
             self.assertTrue(foo_y_mgr.is_guarded_value_immutable())
+
+            # Check types of foo.z
+            foo_z_source = AttrSource(foo_source, "z")
+            foo_z_mgr = builder.get_guard_manager_from_source(foo_z_source)
+            self.assertTrue(foo_z_mgr.is_guarded_value_empty_dict())
 
             # Check types of mod
             mod_source = LocalSource("mod")
