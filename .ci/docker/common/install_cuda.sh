@@ -18,7 +18,7 @@ function install_cuda {
   major_minor=${version%.*}
   rm -rf /usr/local/cuda-${major_minor} /usr/local/cuda
   if [[ ${arch_path} == 'sbsa' ]]; then
-      runfile="${runfile}_sbsa"
+    runfile="${runfile}_sbsa"
   fi
   runfile="${runfile}.run"
   wget -q https://developer.download.nvidia.com/compute/cuda/${version}/local_installers/${runfile} -O ${runfile}
@@ -43,8 +43,8 @@ function install_cudnn {
 }
 
 function install_nvshmem {
-  cuda_major_version=$1      # e.g. "12"
-  nvshmem_version=$2         # e.g. "3.3.9"
+  cuda_major_version=$1 # e.g. "12"
+  nvshmem_version=$2    # e.g. "3.3.9"
 
   case "${arch_path}" in
     sbsa)
@@ -69,7 +69,7 @@ function install_nvshmem {
   wget -q "${url}"
   tar xf "${filename}.tar.gz"
   cp -a "libnvshmem/include/"* /usr/local/include/
-  cp -a "libnvshmem/lib/"*     /usr/local/lib/
+  cp -a "libnvshmem/lib/"* /usr/local/lib/
 
   # cleanup
   cd ..
@@ -138,16 +138,16 @@ function prune_124 {
   export GENCODE_CUDNN="-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_61,code=sm_61 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90"
 
   if [[ -n "$OVERRIDE_GENCODE" ]]; then
-      export GENCODE=$OVERRIDE_GENCODE
+    export GENCODE=$OVERRIDE_GENCODE
   fi
   if [[ -n "$OVERRIDE_GENCODE_CUDNN" ]]; then
-      export GENCODE_CUDNN=$OVERRIDE_GENCODE_CUDNN
+    export GENCODE_CUDNN=$OVERRIDE_GENCODE_CUDNN
   fi
 
   # all CUDA libs except CuDNN and CuBLAS
-  ls $CUDA_LIB_DIR/ | grep "\.a" | grep -v "culibos" | grep -v "cudart" | grep -v "cudnn" | grep -v "cublas" | grep -v "metis"  \
-      | xargs -I {} bash -c \
-                "echo {} && $NVPRUNE $GENCODE $CUDA_LIB_DIR/{} -o $CUDA_LIB_DIR/{}"
+  ls $CUDA_LIB_DIR/ | grep "\.a" | grep -v "culibos" | grep -v "cudart" | grep -v "cudnn" | grep -v "cublas" | grep -v "metis" |
+    xargs -I {} bash -c \
+      "echo {} && $NVPRUNE $GENCODE $CUDA_LIB_DIR/{} -o $CUDA_LIB_DIR/{}"
 
   # prune CuDNN and CuBLAS
   $NVPRUNE $GENCODE_CUDNN $CUDA_LIB_DIR/libcublas_static.a -o $CUDA_LIB_DIR/libcublas_static.a
@@ -172,16 +172,16 @@ function prune_126 {
   export GENCODE_CUDNN="-gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_61,code=sm_61 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90"
 
   if [[ -n "$OVERRIDE_GENCODE" ]]; then
-      export GENCODE=$OVERRIDE_GENCODE
+    export GENCODE=$OVERRIDE_GENCODE
   fi
   if [[ -n "$OVERRIDE_GENCODE_CUDNN" ]]; then
-      export GENCODE_CUDNN=$OVERRIDE_GENCODE_CUDNN
+    export GENCODE_CUDNN=$OVERRIDE_GENCODE_CUDNN
   fi
 
   # all CUDA libs except CuDNN and CuBLAS
-  ls $CUDA_LIB_DIR/ | grep "\.a" | grep -v "culibos" | grep -v "cudart" | grep -v "cudnn" | grep -v "cublas" | grep -v "metis"  \
-      | xargs -I {} bash -c \
-                "echo {} && $NVPRUNE $GENCODE $CUDA_LIB_DIR/{} -o $CUDA_LIB_DIR/{}"
+  ls $CUDA_LIB_DIR/ | grep "\.a" | grep -v "culibos" | grep -v "cudart" | grep -v "cudnn" | grep -v "cublas" | grep -v "metis" |
+    xargs -I {} bash -c \
+      "echo {} && $NVPRUNE $GENCODE $CUDA_LIB_DIR/{} -o $CUDA_LIB_DIR/{}"
 
   # prune CuDNN and CuBLAS
   $NVPRUNE $GENCODE_CUDNN $CUDA_LIB_DIR/libcublas_static.a -o $CUDA_LIB_DIR/libcublas_static.a
@@ -213,19 +213,26 @@ function install_128 {
 }
 
 # idiomatic parameter and option handling in sh
-while test $# -gt 0
-do
-    case "$1" in
-    12.4) install_124; prune_124
-        ;;
-    12.6|12.6.*) install_126; prune_126
-        ;;
-    12.8|12.8.*) install_128;
-        ;;
-    12.9|12.9.*) install_129;
-        ;;
-    *) echo "bad argument $1"; exit 1
-        ;;
-    esac
-    shift
+while test $# -gt 0; do
+  case "$1" in
+    12.4)
+      install_124
+      prune_124
+      ;;
+    12.6 | 12.6.*)
+      install_126
+      prune_126
+      ;;
+    12.8 | 12.8.*)
+      install_128
+      ;;
+    12.9 | 12.9.*)
+      install_129
+      ;;
+    *)
+      echo "bad argument $1"
+      exit 1
+      ;;
+  esac
+  shift
 done

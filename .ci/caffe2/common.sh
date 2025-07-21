@@ -13,17 +13,17 @@ if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
-    # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
-    unset HIP_PLATFORM
-    if which sccache > /dev/null; then
-        # Save sccache logs to file
-        sccache --stop-server || true
-        rm -f ~/sccache_error.log || true
-        SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
+  # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
+  unset HIP_PLATFORM
+  if which sccache >/dev/null; then
+    # Save sccache logs to file
+    sccache --stop-server || true
+    rm -f ~/sccache_error.log || true
+    SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
 
-        # Report sccache stats for easier debugging
-        sccache --zero-stats
-    fi
+    # Report sccache stats for easier debugging
+    sccache --zero-stats
+  fi
 fi
 
 # /usr/local/caffe2 is where the cpp bits are installed to in cmake-only

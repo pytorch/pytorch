@@ -144,7 +144,7 @@ wget https://ossci-linux.s3.amazonaws.com/valgrind-${VALGRIND_VERSION}.tar.bz2
 tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
 cd valgrind-${VALGRIND_VERSION}
 ./configure --prefix=/usr/local
-make -j$[$(nproc) - 2]
+make -j$(($(nproc) - 2))
 sudo make install
 cd ../../
 rm -rf valgrind_build

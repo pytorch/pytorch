@@ -7,10 +7,13 @@
 
 log() { printf '%s\n' "$*"; }
 error() { log "ERROR: $*" >&2; }
-fatal() { error "$@"; exit 1; }
+fatal() {
+  error "$@"
+  exit 1
+}
 
-retry () {
-    "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
+retry() {
+  "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
 }
 
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
@@ -20,19 +23,20 @@ retry () {
 # - remaining args:  names of traps to modify
 #
 trap_add() {
-    trap_add_cmd=$1; shift || fatal "${FUNCNAME[0]} usage error"
-    for trap_add_name in "$@"; do
-        trap -- "$(
-            # helper fn to get existing trap command from output
-            # of trap -p
-            extract_trap_cmd() { printf '%s\n' "$3"; }
-            # print existing trap command with newline
-            eval "extract_trap_cmd $(trap -p "${trap_add_name}")"
-            # print the new trap command
-            printf '%s\n' "${trap_add_cmd}"
-        )" "${trap_add_name}" \
-            || fatal "unable to add to trap ${trap_add_name}"
-    done
+  trap_add_cmd=$1
+  shift || fatal "${FUNCNAME[0]} usage error"
+  for trap_add_name in "$@"; do
+    trap -- "$(
+      # helper fn to get existing trap command from output
+      # of trap -p
+      extract_trap_cmd() { printf '%s\n' "$3"; }
+      # print existing trap command with newline
+      eval "extract_trap_cmd $(trap -p "${trap_add_name}")"
+      # print the new trap command
+      printf '%s\n' "${trap_add_cmd}"
+    )" "${trap_add_name}" ||
+      fatal "unable to add to trap ${trap_add_name}"
+  done
 }
 # set the trace attribute for the above function.  this is
 # required to modify DEBUG or RETURN traps because functions don't
@@ -40,17 +44,17 @@ trap_add() {
 declare -f -t trap_add
 
 function assert_git_not_dirty() {
-    # TODO: we should add an option to `build_amd.py` that reverts the repo to
-    #       an unmodified state.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] ; then
-        git_status=$(git status --porcelain | grep -v '?? third_party' || true)
-        if [[ $git_status ]]; then
-            echo "Build left local git repository checkout dirty"
-            echo "git status --porcelain:"
-            echo "${git_status}"
-            exit 1
-        fi
+  # TODO: we should add an option to `build_amd.py` that reverts the repo to
+  #       an unmodified state.
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]]; then
+    git_status=$(git status --porcelain | grep -v '?? third_party' || true)
+    if [[ $git_status ]]; then
+      echo "Build left local git repository checkout dirty"
+      echo "git status --porcelain:"
+      echo "${git_status}"
+      exit 1
     fi
+  fi
 }
 
 function pip_install_whl() {
@@ -63,7 +67,7 @@ function pip_install_whl() {
   # Check if the first argument contains multiple paths separated by spaces
   if [[ "${args[0]}" == *" "* ]]; then
     # Split the string by spaces into an array
-    IFS=' ' read -r -a paths <<< "${args[0]}"
+    IFS=' ' read -r -a paths <<<"${args[0]}"
     # Loop through each path and install individually
     for path in "${paths[@]}"; do
       echo "Installing $path"
@@ -83,8 +87,7 @@ function pip_build_and_install() {
   local wheel_dir=$2
 
   local found_whl=0
-  for file in "${wheel_dir}"/*.whl
-  do
+  for file in "${wheel_dir}"/*.whl; do
     if [[ -f "${file}" ]]; then
       found_whl=1
       break
@@ -101,8 +104,7 @@ function pip_build_and_install() {
       "${build_target}"
   fi
 
-  for file in "${wheel_dir}"/*.whl
-  do
+  for file in "${wheel_dir}"/*.whl; do
     pip_install_whl "${file}"
   done
 }
@@ -110,8 +112,8 @@ function pip_build_and_install() {
 function pip_install() {
   # retry 3 times
   pip_install_pkg="python3 -m pip install --progress-bar off"
-  ${pip_install_pkg} "$@" || \
-    ${pip_install_pkg} "$@" || \
+  ${pip_install_pkg} "$@" ||
+    ${pip_install_pkg} "$@" ||
     ${pip_install_pkg} "$@"
 }
 
@@ -144,7 +146,6 @@ function install_monkeytype {
   pip_install MonkeyType
 }
 
-
 function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
@@ -171,7 +172,7 @@ function install_torchvision() {
   orig_preload=${LD_PRELOAD}
   if [ -n "${LD_PRELOAD}" ]; then
     # Silence dlerror to work-around glibc ASAN bug, see https://sourceware.org/bugzilla/show_bug.cgi?id=27653#c9
-    echo 'char* dlerror(void) { return "";}'|gcc -fpic -shared -o "${HOME}/dlerror.so" -x c -
+    echo 'char* dlerror(void) { return "";}' | gcc -fpic -shared -o "${HOME}/dlerror.so" -x c -
     LD_PRELOAD=${orig_preload}:${HOME}/dlerror.so
   fi
 
@@ -192,25 +193,24 @@ function install_torchrec_and_fbgemm() {
   torchrec_commit=$(get_pinned_commit torchrec)
   local fbgemm_commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
-  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
   fi
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
 
-  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     # install torchrec first because it installs fbgemm nightly on top of rocm fbgemm
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     pip_uninstall fbgemm-gpu-nightly
 
-    pip_install tabulate  # needed for newer fbgemm
-    pip_install patchelf  # needed for rocm fbgemm
+    pip_install tabulate # needed for newer fbgemm
+    pip_install patchelf # needed for rocm fbgemm
 
     local wheel_dir=dist/fbgemm_gpu
     local found_whl=0
-    for file in "${wheel_dir}"/*.whl
-    do
+    for file in "${wheel_dir}"/*.whl; do
       if [[ -f "${file}" ]]; then
         found_whl=1
         break
@@ -234,8 +234,7 @@ function install_torchrec_and_fbgemm() {
       cp fbgemm/fbgemm_gpu/dist/*.whl dist/fbgemm_gpu
     fi
 
-    for file in "${wheel_dir}"/*.whl
-    do
+    for file in "${wheel_dir}"/*.whl; do
       pip_install_whl "${file}"
     done
 
@@ -294,7 +293,7 @@ function print_sccache_stats() {
 
   if [[ -n "${OUR_GITHUB_JOB_ID}" ]]; then
     sccache --show-stats --stats-format json | jq .stats \
-      > "sccache-stats-${BUILD_ENVIRONMENT}-${OUR_GITHUB_JOB_ID}.json"
+      >"sccache-stats-${BUILD_ENVIRONMENT}-${OUR_GITHUB_JOB_ID}.json"
   else
     echo "env var OUR_GITHUB_JOB_ID not set, will not write sccache stats to json"
   fi

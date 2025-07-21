@@ -1,7 +1,7 @@
 #!/bin/bash
 set -ex -o pipefail
 
-SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+SCRIPT_PARENT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
@@ -56,31 +56,31 @@ python -m pip install pulp==2.9.0
 python -m pip install expecttest==0.3.0
 
 run_tests() {
-    # Run nvidia-smi if available
-    for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
-        if [[ -x "$path" ]]; then
-            "$path" || echo "true";
-            break
-        fi
-    done
-
-    if [[ $NUM_TEST_SHARDS -eq 1 ]]; then
-        "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
-        "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
-        "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-        "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
-    else
-        "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
-        if [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-            "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
-            if [[ "${USE_CUDA}" == "1" ]]; then
-              "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat
-            fi
-        elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
-            "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-            "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
-        fi
+  # Run nvidia-smi if available
+  for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
+    if [[ -x "$path" ]]; then
+      "$path" || echo "true"
+      break
     fi
+  done
+
+  if [[ $NUM_TEST_SHARDS -eq 1 ]]; then
+    "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
+    "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+    "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+    "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+  else
+    "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
+    if [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+      "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+      if [[ "${USE_CUDA}" == "1" ]]; then
+        "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat
+      fi
+    elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+      "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+      "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+    fi
+  fi
 }
 
 run_tests

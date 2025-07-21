@@ -106,10 +106,10 @@ if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
   POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
   # Add the Windows-specific JNI
   POSSIBLE_JAVA_HOMES+=("$PWD/.circleci/windows-jni/")
-  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
-    if [[ -e "$JH/include/jni.h" ]] ; then
+  for JH in "${POSSIBLE_JAVA_HOMES[@]}"; do
+    if [[ -e "$JH/include/jni.h" ]]; then
       # Skip if we're not on Windows but haven't found a JAVA_HOME
-      if [[ "$JH" == "$PWD/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]] ; then
+      if [[ "$JH" == "$PWD/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]]; then
         break
       fi
       echo "Found jni.h under $JH"
@@ -159,9 +159,9 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   if [[ -n "$CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
-      # Set ROCM_ARCH to gfx906 for CI builds, if user doesn't override.
-      echo "Limiting PYTORCH_ROCM_ARCH to gfx906 for CI builds"
-      export PYTORCH_ROCM_ARCH="gfx906"
+    # Set ROCM_ARCH to gfx906 for CI builds, if user doesn't override.
+    echo "Limiting PYTORCH_ROCM_ARCH to gfx906 for CI builds"
+    export PYTORCH_ROCM_ARCH="gfx906"
   fi
 
   # hipify sources
@@ -185,7 +185,7 @@ fi
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
 if [ -z "$MAX_JOBS" ]; then
-  if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; } && which sccache > /dev/null; then
+  if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; } && which sccache >/dev/null; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 fi
@@ -222,7 +222,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
-    export USE_PRECOMPILED_HEADERS=1
+  export USE_PRECOMPILED_HEADERS=1
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
@@ -271,17 +271,17 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
-  ( ! get_exit_code python setup.py bad_argument )
-  ( ! get_exit_code python setup.py clean] )
-  ( ! get_exit_code python setup.py clean bad_argument )
+  (! get_exit_code python setup.py bad_argument)
+  (! get_exit_code python setup.py clean])
+  (! get_exit_code python setup.py clean bad_argument)
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     # rocm builds fail when WERROR=1
     # XLA test build fails when WERROR=1
     # set only when building other architectures
     # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
-          "$BUILD_ENVIRONMENT" != *xla* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* &&
+      "$BUILD_ENVIRONMENT" != *xla* ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
       python -mpip install numpy==2.0.2
 
@@ -373,7 +373,7 @@ else
     mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
     cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+      -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
     assert_git_not_dirty
@@ -386,7 +386,7 @@ else
     mkdir -p "$JIT_HOOK_BUILD"
     pushd "$JIT_HOOK_BUILD"
     cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+      -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
     assert_git_not_dirty
@@ -398,7 +398,7 @@ else
     mkdir -p "$CUSTOM_BACKEND_BUILD"
     pushd "$CUSTOM_BACKEND_BUILD"
     cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+      -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
     assert_git_not_dirty

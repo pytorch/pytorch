@@ -276,7 +276,7 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-    pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
+  pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     VISION=yes
@@ -373,9 +373,9 @@ case "$tag" in
       extract_version_from_image_name rocm ROCM_VERSION
       NINJA_VERSION=1.9.0
       TRITON=yes
-      # To ensure that any ROCm config will build using conda cmake
-      # and thus have LAPACK/MKL enabled
-      fi
+    # To ensure that any ROCm config will build using conda cmake
+    # and thus have LAPACK/MKL enabled
+    fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2
     fi
@@ -391,7 +391,7 @@ case "$tag" in
     if [[ "$image" == *glibc* ]]; then
       extract_version_from_image_name glibc GLIBC_VERSION
     fi
-  ;;
+    ;;
 esac
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
@@ -406,46 +406,46 @@ fi
 
 # Build image
 docker build \
-       ${no_cache_flag} \
-       ${progress_flag} \
-       --build-arg "BUILD_ENVIRONMENT=${image}" \
-       --build-arg "LLVMDEV=${LLVMDEV:-}" \
-       --build-arg "VISION=${VISION:-}" \
-       --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
-       --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
-       --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
-       --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
-       --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
-       --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
-       --build-arg "GCC_VERSION=${GCC_VERSION}" \
-       --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
-       --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
-       --build-arg "TENSORRT_VERSION=${TENSORRT_VERSION}" \
-       --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \
-       --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
-       --build-arg "KATEX=${KATEX:-}" \
-       --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}" \
-       --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
-       --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
-       --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
-       --build-arg "TRITON=${TRITON}" \
-       --build-arg "TRITON_CPU=${TRITON_CPU}" \
-       --build-arg "ONNX=${ONNX}" \
-       --build-arg "DOCS=${DOCS}" \
-       --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
-       --build-arg "EXECUTORCH=${EXECUTORCH}" \
-       --build-arg "HALIDE=${HALIDE}" \
-       --build-arg "XPU_VERSION=${XPU_VERSION}" \
-       --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
-       --build-arg "ACL=${ACL:-}" \
-       --build-arg "OPENBLAS=${OPENBLAS:-}" \
-       --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
-       --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
-       -f $(dirname ${DOCKERFILE})/Dockerfile \
-       -t "$tmp_tag" \
-       "$@" \
-       .
+  ${no_cache_flag} \
+  ${progress_flag} \
+  --build-arg "BUILD_ENVIRONMENT=${image}" \
+  --build-arg "LLVMDEV=${LLVMDEV:-}" \
+  --build-arg "VISION=${VISION:-}" \
+  --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
+  --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
+  --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
+  --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
+  --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
+  --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
+  --build-arg "GCC_VERSION=${GCC_VERSION}" \
+  --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
+  --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
+  --build-arg "TENSORRT_VERSION=${TENSORRT_VERSION}" \
+  --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \
+  --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
+  --build-arg "KATEX=${KATEX:-}" \
+  --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
+  --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}" \
+  --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
+  --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
+  --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
+  --build-arg "TRITON=${TRITON}" \
+  --build-arg "TRITON_CPU=${TRITON_CPU}" \
+  --build-arg "ONNX=${ONNX}" \
+  --build-arg "DOCS=${DOCS}" \
+  --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
+  --build-arg "EXECUTORCH=${EXECUTORCH}" \
+  --build-arg "HALIDE=${HALIDE}" \
+  --build-arg "XPU_VERSION=${XPU_VERSION}" \
+  --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
+  --build-arg "ACL=${ACL:-}" \
+  --build-arg "OPENBLAS=${OPENBLAS:-}" \
+  --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
+  --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
+  -f $(dirname ${DOCKERFILE})/Dockerfile \
+  -t "$tmp_tag" \
+  "$@" \
+  .
 
 # NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
 # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
@@ -505,7 +505,7 @@ if [ -n "$KATEX" ]; then
   fi
 fi
 
-HAS_TRITON=$(drun python -c "import triton" > /dev/null 2>&1 && echo "yes" || echo "no")
+HAS_TRITON=$(drun python -c "import triton" >/dev/null 2>&1 && echo "yes" || echo "no")
 if [[ -n "$TRITON" || -n "$TRITON_CPU" ]]; then
   if [ "$HAS_TRITON" = "no" ]; then
     echo "expecting triton to be installed, but it is not"

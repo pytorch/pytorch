@@ -12,8 +12,8 @@ MAGMA_VERSION=a1625ff4d9bc362906bd01f805dbbe12612953f6
 # Folders for the build
 PACKAGE_FILES=${ROOT_DIR}/magma-rocm/package_files # metadata
 PACKAGE_DIR=${ROOT_DIR}/magma-rocm/${PACKAGE_NAME} # build workspace
-PACKAGE_OUTPUT=${ROOT_DIR}/magma-rocm/output # where tarballs are stored
-PACKAGE_BUILD=${PACKAGE_DIR} # where the content of the tarball is prepared
+PACKAGE_OUTPUT=${ROOT_DIR}/magma-rocm/output       # where tarballs are stored
+PACKAGE_BUILD=${PACKAGE_DIR}                       # where the content of the tarball is prepared
 PACKAGE_RECIPE=${PACKAGE_BUILD}/info/recipe
 PACKAGE_LICENSE=${PACKAGE_BUILD}/info/licenses
 mkdir -p ${PACKAGE_DIR} ${PACKAGE_OUTPUT}/linux-64 ${PACKAGE_BUILD} ${PACKAGE_RECIPE} ${PACKAGE_LICENSE}
