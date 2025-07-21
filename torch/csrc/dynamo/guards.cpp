@@ -2619,6 +2619,29 @@ class GuardManager {
   }
 
  public:
+  // tag safety related helpers
+  // Seen docstring in guards.py ``find_tag_safe_roots`` for full context
+  void mark_tag_safe() {
+    _is_tag_safe = true;
+  }
+
+  void mark_tag_safe_root() {
+    if (!_is_tag_safe) {
+      throw std::runtime_error(
+          "Marking a node tag_safe_root when its not tag safe");
+    }
+    _is_tag_safe_root = true;
+  }
+
+  bool is_tag_safe() {
+    return _is_tag_safe;
+  }
+
+  bool is_tag_safe_root() {
+    return _is_tag_safe_root;
+  }
+
+ public:
   // For cloning
   GuardManager(
       RootGuardManager* root,
@@ -2958,6 +2981,10 @@ class GuardManager {
   bool _is_nn_module = false;
   std::string _type_str;
   uint64_t _dict_tag{0};
+
+  // tag safe markers
+  bool _is_tag_safe = false;
+  bool _is_tag_safe_root = false;
 };
 
 GuardAccessor::GuardAccessor(
@@ -6012,6 +6039,10 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "is_guarded_value_empty_dict",
           &GuardManager::is_guarded_value_empty_dict)
+      .def("mark_tag_safe", &GuardManager::mark_tag_safe)
+      .def("mark_tag_safe_root", &GuardManager::mark_tag_safe_root)
+      .def("is_tag_safe", &GuardManager::is_tag_safe)
+      .def("is_tag_safe_root", &GuardManager::is_tag_safe_root)
       .def("type_of_guarded_value", &GuardManager::type_of_guarded_value)
       .def(
           "get_accessors",
