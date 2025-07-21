@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import os
+import unittest
 import unittest.mock as mock
 
 import numpy as np
@@ -398,14 +399,13 @@ class TestMMKernelPredictionModel(TestCase):
             args = mock_load.call_args[0]
             self.assertIn("custom_gpu_triton_mm.pt2", args[0])
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available")
     def test_get_model_function(self) -> None:
         """Test the get_model singleton function."""
-        # Test when CUDA is not available
         with mock.patch("torch.cuda.is_available", return_value=False):
             result = get_model()
             self.assertIsNone(result)
 
-        # Test when CUDA is available
         mock_model = NeuralNetwork(n_inputs=12, hidden_layer_widths=[64, 32])
         with (
             mock.patch("torch.cuda.is_available", return_value=True),
