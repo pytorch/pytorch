@@ -187,6 +187,12 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 
 
+def is_immutable_object(obj):
+    if istype(obj, tuple):
+        return all(is_immutable_object(x) for x in obj)
+    return isinstance(obj, (int, float, str, torch.Tensor))
+
+
 class GuardManagerWrapper:
     """
     A helper class that contains the root guard manager. An instance of this
@@ -274,9 +280,114 @@ class GuardManagerWrapper:
 
         return self.diff_guard_sources
 
-    def finalize(self):
+    def prepare_diff_guard_manager(self):
         self.collect_diff_guard_sources()
         self.populate_diff_guard_manager()
+
+    def find_tag_safe_roots(self):
+        """
+        Finds `tag_safe_node` and `tag_safe_root` guard manager.
+
+        A guard_manager is called `tag_safe_node` if
+        1) The value the manager is guarding on is considered immutable - check is_immutable_object.
+        2) The value the manager is guarding on is a dict and all its keys and values are `tag_safe_nodes`. When this rule is applied recursively, nested dicts can become `tag_safe_node`.
+        3) The value the manager is guarding on is a nn module and it has just accessor - GetGenericDictGuardAccessor, i.e., getting a __dict__ attribute.
+
+        The purpose of all finding these `tag_safe_node`s is to assist in
+        speeding up guard evaluation. For `tag_safe_node`, checking the dict
+        pointers of all the dicts in the subtree is enough for a fast guard
+        check.
+
+
+        `tag_safe_root` is a `tag_safe_node` whose parent is not a
+        `tag_safe_node`. `tag_safe_root` nodes represent nodes in the Guard tree
+        where the subtree guard evaluation can be sped up by dict tags.
+
+        Implementation wise, this is a post recursive algorithm. We start with
+        leaves and propagate the tag safeness up to the root.
+        """
+
+        def visit_dict_manager(node):
+            assert node.is_guarded_value_dict()
+
+            tag_safe_roots = []
+            is_subtree_tag_safe = True
+            for idx, (key_mgr, val_mgr) in sorted(
+                node.get_key_value_managers().items()
+            ):
+                if key_mgr:
+                    visit(key_mgr)
+                tag_safe_roots.extend(visit(val_mgr))
+
+            for idx, (key_mgr, val_mgr) in sorted(
+                node.get_key_value_managers().items()
+            ):
+                if key_mgr:
+                    is_subtree_tag_safe &= key_mgr.is_tag_safe()
+
+                is_subtree_tag_safe &= val_mgr.is_tag_safe()
+
+            if is_subtree_tag_safe:
+                node.mark_tag_safe()
+                return [
+                    node,
+                ]
+            return tag_safe_roots
+
+        def visit_manager(node):
+            assert not isinstance(node, DictGuardManager)
+
+            tag_safe_roots = []
+            for child_mgr in node.get_child_managers():
+                tag_safe_roots.extend(visit(child_mgr))
+
+            if node.is_guarded_value_immutable():
+                node.mark_tag_safe()
+                return []
+            elif node.is_guarded_value_dict():
+                accessors = node.get_accessors()
+                child_mgrs = node.get_child_managers()
+                is_subtree_tag_safe = all(
+                    isinstance(
+                        accessor, torch._C._dynamo.guards.DictGetItemGuardAccessor
+                    )
+                    and mgr.is_tag_safe()
+                    for accessor, mgr in zip(accessors, child_mgrs)
+                )
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+            elif node.is_guarded_value_nn_module():
+                accessors = node.get_accessors()
+                child_mgrs = node.get_child_managers()
+                is_subtree_tag_safe = all(
+                    isinstance(
+                        accessor, torch._C._dynamo.guards.GetGenericDictGuardAccessor
+                    )
+                    and mgr.is_tag_safe()
+                    for accessor, mgr in zip(accessors, child_mgrs)
+                )
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+                    return [
+                        node,
+                    ]
+            return tag_safe_roots
+
+        def visit(node):
+            if node is None:
+                return False
+            if isinstance(node, DictGuardManager):
+                return visit_dict_manager(node)
+            return visit_manager(node)
+
+        tag_safe_roots = visit(self.root)
+        for mgr in tag_safe_roots:
+            print(mgr)
+            mgr.mark_tag_safe_root()
+
+    def finalize(self):
+        self.find_tag_safe_roots()
+        self.prepare_diff_guard_manager()
 
     def populate_diff_guard_manager(self):
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
