@@ -1,0 +1,54 @@
+name: vllm
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      - ciflow/inductor/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-build:
+    name: cuda12.8-py3.12-gcc11-sm86
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-build
+      cuda-arch-list: '8.6'
+      test-matrix: |
+        { include: [
+          { config: "vllm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-test:
+    name: cuda12.8-py3.13-gcc9-sm86
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-build
+    with:
+      build-environment:linux-jammy-cuda12.8-py3.12-gcc11-sm86
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_13-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_13-gcc9-inductor-build.outputs.test-matrix }}
+    secrets: inherit
