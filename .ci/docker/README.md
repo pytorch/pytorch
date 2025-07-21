@@ -37,12 +37,12 @@ See `build.sh` for valid build environments (it's the giant switch).
 sudo bash -c 'TRITON=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
 ```
 
-## [Guidance] Add external lib for base docker image
+## [Guidance] Add new base docker image
 ### Background
 The base docker images built by the `docker-builds.yml` are used throughout the PyTorch CI/CD pipeline:
 
 1. **Rebuild**:
-   - The Docker image building process is triggered if any changes apply to .ci/docker/* to ensure images stay up-to-date
+   - The Docker image building process is triggered if any changes apply to `.ci/docker/*` to ensure images stay up-to-date
    - This includes updating pinned commits for dependencies
 
 2. **Image Reuse in Pytorch Build Workflows**:
