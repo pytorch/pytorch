@@ -3448,14 +3448,15 @@ class DictGuardManager : public GuardManager {
       Py_ssize_t size,
       PyTypeObject* expected_type,
       bool is_exact_dict_type,
-      std::vector<Py_ssize_t> indices)
+      std::vector<Py_ssize_t> indices,
+      std::string type_of)
       : GuardManager(
             cloned_root,
             std::move(source),
             true,
             false,
             false,
-            type_of_guarded_value()),
+            type_of),
         _size(size),
         _expected_type(expected_type),
         _is_exact_dict_type(is_exact_dict_type),
@@ -3474,7 +3475,8 @@ class DictGuardManager : public GuardManager {
         _size,
         _expected_type,
         _is_exact_dict_type,
-        _indices);
+        _indices,
+        type_of_guarded_value());
 
     clone_common(cloned_root, cloned_mgr, clone_filter_fn);
     for (auto index : _indices) {
