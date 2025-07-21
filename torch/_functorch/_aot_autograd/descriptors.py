@@ -20,8 +20,6 @@ Then the descriptor for input[i] to graph describes a function fin_i such that:
 
     fin_i(args) == in_transform(args)[i],
 
-TODO: output descriptor doesn't make sense
-
 and the descriptor for output[j] from graph describes a function fout_j such that:
 
     fout_j(out_transform(ret)) == ret[j]
@@ -80,7 +78,7 @@ class DummyAOTInput(AOTInput):
 
 
 @dataclasses.dataclass(frozen=True)
-class InputAOTInput(AOTInput):
+class PlainAOTInput(AOTInput):
     """The input is a plain input, corresponding to a particular positional index.
 
     Note that AOTInput is always relative to a function with a *flat* calling convention,
@@ -216,7 +214,7 @@ class InputMutationTangentAOTInput(AOTInput):
 # Technically the "output" here is redundant, tangents always correspond to
 # outputs
 @dataclasses.dataclass(frozen=True)
-class OutputTangentAOTInput(AOTInput):
+class TangentAOTInput(AOTInput):
     """An input to the joint graph representing the tangent of an output."""
 
     output: "AOTOutput"
@@ -245,7 +243,7 @@ class OutputIntermediateBaseTangentAOTInput(AOTInput):
 
 
 @dataclasses.dataclass(frozen=True)
-class OutputAOTOutput(AOTOutput):
+class PlainAOTOutput(AOTOutput):
     """A plain tensor output at position idx of the output tuple"""
 
     idx: int
