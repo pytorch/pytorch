@@ -44,6 +44,7 @@ aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
 _is_hip = None
+_CK_BACKEND = None
 
 
 class _DispatchMode(Enum):
@@ -449,6 +450,7 @@ def _templated_ring_attention(
             **kwargs,
         )
         global _is_hip
+        global _CK_BACKEND
         if _is_hip is None:  # Lazy Initialization
             _is_hip = hasattr(torch.version, "hip") and torch.version.hip is not None
             try:
@@ -465,7 +467,7 @@ def _templated_ring_attention(
                 _is_hip = False  # HIP is unavailable at runtime even if compiled
         if _is_hip:  # See: https://github.com/pytorch/pytorch/issues/156012
             need_scaling = True
-            # Note: it is possible that CK is seleted but not compiled in the binary.
+            # Note: it is possible that CK is selected but not compiled in the binary.
             if _is_ck_supported and _preferred_rocm_fa_library() == _CK_BACKEND:
                 # Unsure about CK's behavior, keep logsumexp untouched
                 need_scaling = False
