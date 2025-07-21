@@ -32,7 +32,7 @@ from .descriptors import (
     AOTInput,
     AOTOutput,
     InputMutationTangentAOTInput,
-    OutputIntermediateBaseTangentAOTInput,
+    IntermediateBaseTangentAOTInput,
     PlainAOTOutput,
     TangentAOTInput,
 )
@@ -603,7 +603,7 @@ from a multi-output view call"
                             )
                             intermediate_bases.append(o._base)
                             intermediate_bases_descs.append(
-                                OutputIntermediateBaseTangentAOTInput(desc)
+                                IntermediateBaseTangentAOTInput(desc)
                             )
             elif (
                 # See https://github.com/pytorch/pytorch/issues/100348 for this case.
