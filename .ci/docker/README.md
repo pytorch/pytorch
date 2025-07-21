@@ -65,7 +65,7 @@ As example of linux-test:
 #### `.ci/docker/build.sh` vs `.ci/pytorch/build.sh`
 - **`.ci/docker/build.sh`**: Used for building base Docker images. used by the `docker-builds.yml` workflow to pre-build Docker images for CI.
 
-- **`.ci/pytorch/build.sh`**: Used for building PyTorch inside a Docker containe, called by, for instance,`_linux-build.yml` after the Docker container is started to build pytorch wheels
+- **`.ci/pytorch/build.sh`**: Used for building PyTorch inside a Docker container, called by, for instance,`_linux-build.yml` after the Docker container is started to build pytorch wheels
 
 #### `.ci/docker/ci_commit_pins/` vs `.github/ci_commit_pins`
 - **`.ci/docker/ci_commit_pins/`**: Used for pinning dependency versions during base Docker image building
