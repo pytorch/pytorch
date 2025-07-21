@@ -77,7 +77,6 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     compare_equal_outs_and_grads,
     instantiate_parametrized_tests,
-    IS_ARM64,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -7558,8 +7557,6 @@ aot_autograd_failures = {
         "bicubic",
         decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)}),
     ),
-
- 
 }
 
 if not TEST_MKL:
