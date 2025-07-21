@@ -64,7 +64,7 @@ As example of linux-test:
 ### Step by step
 
 #### Add pinned commit (if applies)
-We use pinned commits for test stability. The nightly.yaml file checks and updates pinned commits for certain repository dependencies daily.
+We use pinned commits for test&build stability. The nightly.yaml file checks and updates pinned commits for certain repository dependencies daily.
 
 If the library you introduce needs to be installed from a specific pinned commit or built from scratch from a repository:
 1. Add the repository you want to watch in nightly.yml and merge-rules.yml: [example: pinned vllm](https://github.com/pytorch/pytorch/pull/158591/files#diff-0d5658b415099a82c11c03a06ca4ec765b4003a1f4b2f3f1943980a882cf8aa6)
