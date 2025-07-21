@@ -245,7 +245,7 @@ struct AttentionBackwardKernel {
   static constexpr int64_t kWarpSize = 32;
 
   // If this is true, we store and accumulate dK/dV in RF
-  // rather than going back to gmem everytime
+  // rather than going back to gmem every time
   static constexpr bool kIsHalf = cutlass::sizeof_bits<scalar_t>::value <= 16;
   static constexpr bool kOutputInRF = kIsHalf && kMaxK <= kBlockSizeI;
   static_assert(
