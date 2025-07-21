@@ -66,6 +66,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
     TestCase,
+    is_arch,
+    NAVI_ARCH,
 )
 
 
@@ -625,6 +627,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Rank 0 takes a snapshot before collective -- this snapshot should have
         # included rank 0's own context.
         if self.rank == 0:
+            # We need this extra sleep for NAVI_ARCH because rccl_init inside init_process_group
+            # is happening in a separate process and it is taking longer to finish on NAVI_ARCH.
+            # Sleeping here ensures that the init is competed successfully and mem_get_info can
+            # get stable numbers.
+            if is_arch(NAVI_ARCH):
+                time.sleep(5)
             free, total = torch.cuda.mem_get_info(device)
             used_before = float(total - free)
 
