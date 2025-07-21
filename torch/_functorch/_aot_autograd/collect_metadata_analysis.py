@@ -11,7 +11,6 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from functools import wraps
 from typing import Callable, Optional
 
 import torch
@@ -32,9 +31,9 @@ from .descriptors import (
     AOTInput,
     AOTOutput,
     InputMutationTangentAOTInput,
-    OutputAOTOutput,
     OutputIntermediateBaseTangentAOTInput,
-    OutputTangentAOTInput,
+    PlainAOTOutput,
+    TangentAOTInput,
 )
 from .functional_utils import (
     are_all_mutations_hidden_from_autograd,
@@ -56,7 +55,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import create_subclass_meta
-from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
+from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
 
 
 zip = strict_zip
@@ -69,7 +68,7 @@ static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_input
 # We assume tangents memory format to be similar to corresponding output's memory_format.
 # The idea is that we are technically making a guess about the strides of our tangents,
 # while we trace out the joint.
-# If runtime specfied tangents will not have the same memory format as predicted traced tangents,
+# If runtime specified tangents will not have the same memory format as predicted traced tangents,
 # we coerce them at runtime to traced tangents memory format.
 
 
@@ -91,7 +90,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
         out = out.contiguous(memory_format=memory_format.memory_format)
         updated = was is not out
 
-    # For subclass we keep memory format of outer strides at the beggining of the list
+    # For subclass we keep memory format of outer strides at the beginning of the list
     out_memory_format = [memory_format] if is_subclass else memory_format
 
     # Note [Tangents memory format, Part 2]
@@ -178,7 +177,7 @@ def run_functionalized_fw_and_collect_metadata(
         else:
             return t
 
-    @wraps(f)
+    @simple_wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
@@ -220,7 +219,7 @@ def run_functionalized_fw_and_collect_metadata(
             # NB: this is just to setup the input descriptors, we will
             # recreate these descriptors (with the same convention!) when we
             # actually do the trace
-            flat_f_outs_descs = [OutputAOTOutput(i) for i in range(len(flat_f_outs))]
+            flat_f_outs_descs = [PlainAOTOutput(i) for i in range(len(flat_f_outs))]
 
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
@@ -613,7 +612,7 @@ from a multi-output view call"
                 and not o.requires_grad
             ):
                 # In theory we could use any of these tensors to regenerate the aliased outputs from,
-                # since they all alias each other and have identical metatadata
+                # since they all alias each other and have identical metadata
                 out_alias = outs_with_identical_metadata_that_require_grad[0]
                 existing_out_idx = out_tensor_ids[id(out_alias)]
                 output_type = OutputType.alias_of_intermediate_base_is_user_output
@@ -732,7 +731,7 @@ from a multi-output view call"
             # (a * b).sum().backward()
             #
             # We can not deduce it easily now, so introducing a debug config to be able to turn off this for specific cases.
-            # NJT gurantees to have its tangent as NJT, because it has dedicated integration in Autograd
+            # NJT guarantees to have its tangent as NJT, because it has dedicated integration in Autograd
             # See torch/csrc/autograd/python_function.cpp, use_zeros_like.
             (
                 (
@@ -754,7 +753,7 @@ from a multi-output view call"
         )
 
         f_output_tangents_pairs = [
-            (o, OutputTangentAOTInput(desc))
+            (o, TangentAOTInput(desc))
             for o, info, desc in zip(flat_f_outs, output_info, flat_f_outs_descs)
             if info.output_type
             in [

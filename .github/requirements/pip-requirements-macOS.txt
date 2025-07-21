@@ -16,7 +16,7 @@ packaging==23.1
 parameterized==0.8.1
 pillow==10.3.0
 protobuf==5.29.4
-psutil==5.9.1
+psutil==5.9.8
 pygments==2.15.0
 pytest-cpp==2.3.0
 pytest-flakefinder==1.1.0
