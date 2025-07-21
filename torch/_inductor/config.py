@@ -425,8 +425,12 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
-# disable decomposek autotune choice for gemm
-disable_decompose_k = os.environ.get("TORCHINDUCTOR_DISABLE_DECOMPOSE_K") == "1"
+# specify number of splits to autotune on for decompose_k. 0 disables decompose_k
+num_decompose_k_splits = int(os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "0"))
+
+# specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
+# it as an autotuning choice for all matmuls
+decompose_k_threshold = int(os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32"))
 
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10

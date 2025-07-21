@@ -1664,19 +1664,13 @@ def _use_cutlass_for_op(op_name: str) -> bool:
     return op_name.upper() in [x.strip() for x in enabled_ops.split(",")]
 
 
-decompose_k_threshold = 32
-
-# To limit compile time
-k_splits_limit = 5
-
-# Hand-tuned
-default_k_splits = [16, 32, 64, 128, 256]
-
 _IntLike: TypeAlias = Union[int, sympy.Expr]
 
 
 def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
+
+    decompose_k_threshold = config.decompose_k_threshold
 
     return (
         not torch.version.hip
@@ -1688,15 +1682,21 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
         )
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         and not V.graph.cpp_wrapper
-        and not config.disable_decompose_k
     )
 
 
 @functools.cache
 def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
+    # To limit compile time
+    k_splits_limit = config.num_decompose_k_splits
+
+    # Hand-tuned
+    default_k_splits = [16, 32, 64, 128, 256]
     # If k is a sympy expression, we can't do any splitting
     if isinstance(k, sympy.Expr) and not k.is_number:
         return default_k_splits
+    elif k_splits_limit == 0:
+        return []
 
     if (isinstance(m, sympy.Expr) and not m.is_number) or (
         isinstance(n, sympy.Expr) and not n.is_number

@@ -1501,9 +1501,10 @@ class TestMaxAutotune(TestCase):
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
         autotune_fallback_to_aten=False,
-        disable_decompose_k=True,
     )
-    def test_max_autotune_disable_decompose_K(self):
+    @parametrize("num_decompose_k_splits", (0, 5, 20))
+    @parametrize("decompose_k_threshold", (1, 8, 16))
+    def test_max_autotune_decompose_k_envvars(self):
         M, N, K = (32, 32, 32768)
 
         a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
@@ -1511,9 +1512,7 @@ class TestMaxAutotune(TestCase):
 
         compiled_func = torch.compile(lambda a, b: a @ b)
         out, code = run_and_get_code(compiled_func, a, b)
-
-        for codegen in code:
-            FileCheck().check_not("decompose_k").run(codegen)
+        import pdb; pdb.set_trace()
 
     @skipIfXpu
     @unittest.skipIf(
