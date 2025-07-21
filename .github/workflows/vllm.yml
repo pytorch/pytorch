@@ -49,6 +49,6 @@ jobs:
     needs: linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-build
     with:
       build-environment:linux-jammy-cuda12.8-py3.12-gcc11-sm86
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_13-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_13-gcc9-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-build.outputs.test-matrix }}
     secrets: inherit
