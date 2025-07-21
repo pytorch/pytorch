@@ -1,8 +1,3 @@
-```{eval-rst}
-.. role:: hidden
-    :class: hidden-section
-```
-
 # Extending PyTorch with New Accelerators
 
 ## Backgrounp
