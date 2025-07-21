@@ -1233,9 +1233,9 @@ def main() -> None:
         "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
         "sympy>=1.13.3",
-        "networkx",
+        "networkx>=2.5.1",
         "jinja2",
-        "fsspec",
+        "fsspec>=0.8.5",
     ]
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
