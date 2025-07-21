@@ -702,7 +702,7 @@ class LazyModuleBadInferParams(LazyModuleMixin, torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-    def initialize_parameters(self):
+    def initialize_parameters(self, *args, **kwargs):
         with torch.no_grad():
             self.layer = LazyLayerWithInputs()
 
