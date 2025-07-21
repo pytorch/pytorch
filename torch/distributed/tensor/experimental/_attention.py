@@ -43,8 +43,8 @@ class _RotateMethod(Enum):
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
-_is_hip = None
-_CK_BACKEND = None
+_is_hip: bool | None = None
+_CK_BACKEND: str | None = None
 
 
 class _DispatchMode(Enum):
@@ -459,6 +459,7 @@ def _templated_ring_attention(
                 for arch in ["gfx942", "gfx950"]:
                     if arch in gcn_arch_name:
                         _is_ck_supported = True
+                # Check the function exists
                 _preferred_rocm_fa_library = (
                     torch.backends.cuda.preferred_rocm_fa_library
                 )
@@ -467,6 +468,7 @@ def _templated_ring_attention(
                 _is_hip = False  # HIP is unavailable at runtime even if compiled
         if _is_hip:  # See: https://github.com/pytorch/pytorch/issues/156012
             need_scaling = True
+            _preferred_rocm_fa_library = torch.backends.cuda.preferred_rocm_fa_library
             # Note: it is possible that CK is selected but not compiled in the binary.
             if _is_ck_supported and _preferred_rocm_fa_library() == _CK_BACKEND:
                 # Unsure about CK's behavior, keep logsumexp untouched
