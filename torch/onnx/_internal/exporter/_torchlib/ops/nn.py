@@ -77,7 +77,7 @@ def aten_scaled_dot_product_attention_23(
         1. https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
         2. https://onnx.ai/onnx/operators/onnx__Attention.html
 
-    Attempts to convert SDPA to Attention onnx op and fallbacks to an onnx graph equivivalent to the following PyTorch code::
+    Attempts to convert SDPA to Attention onnx op and fallbacks to an onnx graph equivalent to the following PyTorch code::
         scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
         attn_mask = (
             torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
@@ -120,7 +120,7 @@ def aten_scaled_dot_product_attention_23(
             )
 
         # NOTE: num_heads attributes (q_num_heads/kv_num_heads) should not be specified for 4D.
-        # They are not populated with 4D inputs because this information directy comes from input shapes:
+        # They are not populated with 4D inputs because this information directly comes from input shapes:
         # `q_num_heads=query.shape[1]` and `kv_num_heads=key.shape[1]`.
         # This dimension is usually static but it could not be dynamic if also given as an attribute.
         # num_heads attributes are needed for 3D attention inputs:

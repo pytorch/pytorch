@@ -87,7 +87,7 @@ _variant_ops = partial(
 # Get names of all the operators which have ref in their entry in OpInfo (testing infra)
 #   except for elementwise unary operators (separately implemented in test/test_unary_ufuncs.py),
 #   elementwise binary operators (separately implemented in test_binary_ufuncs.py),
-#   reduction operations (separately impelemented in test_reductions.py),
+#   reduction operations (separately implemented in test_reductions.py),
 #   and Spectral Functions (separately implemented for only 1D as of now, in test/test_spectral_ops.py)
 _ref_test_ops = tuple(
     filter(
@@ -373,7 +373,7 @@ class TestCommon(TestCase):
 
             # output_process_fn_grad has a very unfortunate name
             # We use this function in linalg extensively to postprocess the inputs of functions
-            # that are not completely well-defined. Think svd and muliplying the singular vectors by -1.
+            # that are not completely well-defined. Think svd and multiplying the singular vectors by -1.
             # CPU and CUDA implementations of the SVD can return valid SVDs that are different.
             # We use this function to compare them.
             cuda_results = sample.output_process_fn_grad(cuda_results)
@@ -580,7 +580,7 @@ class TestCommon(TestCase):
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
-    # namesapce are remapped to the refs namespace (torch.foo becomes refs.foo).
+    # namespace are remapped to the refs namespace (torch.foo becomes refs.foo).
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -759,7 +759,7 @@ class TestCommon(TestCase):
                 else tuple(n_inp) + n_args
             )
 
-            # Filter the elemnts that are tensors that require grad
+            # Filter the elements that are tensors that require grad
             t_input_tensors = [
                 t for t in t_inputs if isinstance(t, torch.Tensor) and t.requires_grad
             ]
@@ -1109,7 +1109,22 @@ class TestCommon(TestCase):
                 if op.is_factory_function and sample.kwargs.get("dtype", None) is None:
                     op_out(out=out)
                 else:
-                    with self.assertRaises(RuntimeError, msg=msg_fail):
+                    # TODO: Remove me when all ops will raise type error on mismatched types
+                    exc_type = (
+                        TypeError
+                        if op.name
+                        in [
+                            "_chunk_cat",
+                            "cat",
+                            "column_stack",
+                            "dstack",
+                            "hstack",
+                            "vstack",
+                            "stack",
+                        ]
+                        else RuntimeError
+                    )
+                    with self.assertRaises(exc_type, msg=msg_fail):
                         op_out(out=out)
 
     @ops(
@@ -2570,6 +2585,7 @@ fake_autocast_backward_xfails = {
 @unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
     def setUp(self):
+        super().setUp()
         # Turn on FakeTensor caching and cross-checking for these tests:
         cache_enabled = unittest.mock.patch(
             "torch._dynamo.config.fake_tensor_cache_enabled", True

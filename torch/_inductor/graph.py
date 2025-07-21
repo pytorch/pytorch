@@ -65,6 +65,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
+from .fx_utils import count_flops_fx
 from .ir import (
     Constant,
     DonatedBuffer,
@@ -122,6 +123,7 @@ if TYPE_CHECKING:
     from torch.fx.graph import Graph
 
     from .codegen.wrapper import PythonWrapperCodegen
+    from .dependencies import Dep
     from .scheduler import BaseSchedulerNode
 
     CompiledModule = Union[ModuleType, FileBackedGraphModule]
@@ -484,6 +486,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.bw_donated_idxs = get_donated_idxs()
 
+        # Cache for dep size hints to avoid expensive recomputation
+        self.dep_size_hint_cache: dict[Dep, int] = {}
+
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
 
@@ -568,6 +573,23 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> bool:
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
+
+    def get_dep_size_hint(self, dep: Dep) -> int:
+        """
+        Get the size hint for a dependency with caching to avoid expensive recomputation.
+        """
+        if dep not in self.dep_size_hint_cache:
+            res = 0
+            try:
+                if not dep.has_unbacked_symbols():
+                    res = dep.numbytes_hint()
+            except KeyError:
+                # In at least one test (test/inductor/test_torchbind.py) we
+                # create a StarDep that doesn't exist in the graph and calling
+                # `has_unbacked_symbols()` throws an error.
+                pass
+            self.dep_size_hint_cache[dep] = res
+        return self.dep_size_hint_cache[dep]
 
     def get_current_device_or_throw(self) -> torch.device:
         if device := self.current_device:
@@ -659,32 +681,24 @@ class GraphLowering(torch.fx.Interpreter):
 
         # only grouped convolutions benchmarked as slower in conv samples for inference only
         if is_inference:
-            from torch.utils.flop_counter import FlopCounterMode
-
             flop_counts: dict[str, float] = defaultdict(float)
             for node in conv_nodes:
-                success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(
-                    node
-                )
+                counted_flops = count_flops_fx(node)
+                if counted_flops is None:
+                    continue
 
-                if success:
-                    with FlopCounterMode(display=False) as flop_counter_mode:
-                        with V.fake_mode:
-                            node.target(*args, **kwargs)
-
-                    counted_flops = flop_counter_mode.get_total_flops()
-                    if is_grouped(node):
-                        node_type = "grouped"
-                    elif is_small_channel(node):
-                        node_type = "small"
-                    elif is_in_out_channel(node):
-                        node_type = "in_out"
-                    else:
-                        node_type = "default"
-
-                    flop_counts[node_type] += counted_flops
+                if is_grouped(node):
+                    node_type = "grouped"
+                elif is_small_channel(node):
+                    node_type = "small"
+                elif is_in_out_channel(node):
+                    node_type = "in_out"
                 else:
-                    log.debug("Conv inputs meta not found")
+                    node_type = "default"
+
+                flop_counts[node_type] += counted_flops
+            else:
+                log.debug("Conv inputs meta not found")
 
             # average benchmarked channels last speedup / slowdown, < 1 is speedup.
             # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/

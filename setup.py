@@ -244,6 +244,7 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
 import platform
 
 
+# Also update `project.requires-python` in pyproject.toml when changing this
 python_min_version = (3, 9, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
@@ -262,16 +263,40 @@ import json
 import shutil
 import subprocess
 import sysconfig
+import textwrap
 import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, ClassVar, IO
 
+import setuptools.command.bdist_wheel
 import setuptools.command.build_ext
 import setuptools.command.sdist
 import setuptools.errors
 from setuptools import Command, Extension, find_packages, setup
 from setuptools.dist import Distribution
+
+
+CWD = Path(__file__).absolute().parent
+
+# Add the current directory to the Python path so that we can import `tools`.
+# This is required when running this script with a PEP-517-enabled build backend.
+#
+# From the PEP-517 documentation: https://peps.python.org/pep-0517
+#
+# > When importing the module path, we do *not* look in the directory containing
+# > the source tree, unless that would be on `sys.path` anyway (e.g. because it
+# > is specified in `PYTHONPATH`).
+#
+sys.path.insert(0, str(CWD))  # this only affects the current process
+# Add the current directory to PYTHONPATH so that we can import `tools` in subprocesses
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    [
+        str(CWD),
+        os.getenv("PYTHONPATH", ""),
+    ]
+).rstrip(os.pathsep)
+
 from tools.build_pytorch_libs import build_pytorch
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake, CMakeValue
@@ -364,8 +389,8 @@ RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = str2bool(os.getenv("CMAKE_FRESH"))
-CMAKE_ONLY = str2bool(os.getenv("CMAKE_ONLY"))
+RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None))
+CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None))
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == "--cmake":
@@ -407,7 +432,6 @@ else:
     setuptools.distutils.log.warn = report  # type: ignore[attr-defined]
 
 # Constant known variables used throughout this file
-CWD = Path(__file__).absolute().parent
 TORCH_DIR = CWD / "torch"
 TORCH_LIB_DIR = TORCH_DIR / "lib"
 THIRD_PARTY_DIR = CWD / "third_party"
@@ -579,7 +603,7 @@ def build_deps() -> None:
         report(
             'Finished running cmake. Run "ccmake build" or '
             '"cmake-gui build" to adjust build options and '
-            '"python setup.py install" to build.'
+            '"python -m pip install --no-build-isolation -v ." to build.'
         )
         sys.exit()
 
@@ -935,38 +959,29 @@ class concat_license_files:
         self.f1.write_text(self.bsd_text, encoding="utf-8")
 
 
-try:
-    from wheel.bdist_wheel import bdist_wheel  # type: ignore[import-untyped]
-except ImportError:
-    # This is useful when wheel is not installed and bdist_wheel is not
-    # specified on the command line. If it _is_ specified, parsing the command
-    # line will fail before wheel_concatenate is needed
-    wheel_concatenate: type[Command] | None = None
-else:
-    # Need to create the proper LICENSE.txt for the wheel
-    class wheel_concatenate(bdist_wheel):  # type: ignore[no-redef]
-        """check submodules on sdist to prevent incomplete tarballs"""
+# Need to create the proper LICENSE.txt for the wheel
+class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
+    def run(self) -> None:
+        with concat_license_files(include_files=True):
+            super().run()
 
-        def run(self) -> None:
-            with concat_license_files(include_files=True):
-                super().run()
+    def write_wheelfile(self, *args: Any, **kwargs: Any) -> None:
+        super().write_wheelfile(*args, **kwargs)
 
-        def write_wheelfile(self, *args: Any, **kwargs: Any) -> None:
-            super().write_wheelfile(*args, **kwargs)
-
-            if BUILD_LIBTORCH_WHL:
-                bdist_dir = Path(self.bdist_dir)
-                # Remove extraneneous files in the libtorch wheel
-                for file in itertools.chain(
-                    bdist_dir.rglob("*.a"),
-                    bdist_dir.rglob("*.so"),
-                ):
-                    if (bdist_dir / file.name).is_file():
-                        file.unlink()
-                for file in bdist_dir.rglob("*.py"):
+        if BUILD_LIBTORCH_WHL:
+            assert self.bdist_dir is not None
+            bdist_dir = Path(self.bdist_dir)
+            # Remove extraneneous files in the libtorch wheel
+            for file in itertools.chain(
+                bdist_dir.rglob("*.a"),
+                bdist_dir.rglob("*.so"),
+            ):
+                if (bdist_dir / file.name).is_file():
                     file.unlink()
-                # need an __init__.py file otherwise we wouldn't have a package
-                (bdist_dir / "torch" / "__init__.py").touch()
+            for file in bdist_dir.rglob("*.py"):
+                file.unlink()
+            # need an __init__.py file otherwise we wouldn't have a package
+            (bdist_dir / "torch" / "__init__.py").touch()
 
 
 class clean(Command):
@@ -996,6 +1011,7 @@ class clean(Command):
                         shutil.rmtree(filename, ignore_errors=True)
 
 
+# Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
 class sdist(setuptools.command.sdist.sdist):
     def run(self) -> None:
         with concat_license_files():
@@ -1084,14 +1100,12 @@ def configure_extension_build() -> tuple[
 
     # pypi cuda package that requires installation of cuda runtime, cudnn and cublas
     # should be included in all wheels uploaded to pypi
-    pytorch_extra_install_requirements = os.getenv(
-        "PYTORCH_EXTRA_INSTALL_REQUIREMENTS", ""
-    )
-    if pytorch_extra_install_requirements:
-        report(
-            f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}"
+    pytorch_extra_install_requires = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS")
+    if pytorch_extra_install_requires:
+        report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requires}")
+        extra_install_requires.extend(
+            map(str.strip, pytorch_extra_install_requires.split("|"))
         )
-        extra_install_requires += pytorch_extra_install_requirements.split("|")
 
     # Cross-compile for M1
     if IS_DARWIN:
@@ -1127,10 +1141,15 @@ def configure_extension_build() -> tuple[
     ################################################################################
 
     ext_modules: list[Extension] = []
+    # packages that we want to install into site-packages and include them in wheels
+    includes = ["torch", "torch.*", "torchgen", "torchgen.*"]
+    # exclude folders that they look like Python packages but are not wanted in wheels
     excludes = ["tools", "tools.*", "caffe2", "caffe2.*"]
-    if not cmake_cache_vars["BUILD_FUNCTORCH"]:
+    if cmake_cache_vars["BUILD_FUNCTORCH"]:
+        includes.extend(["functorch", "functorch.*"])
+    else:
         excludes.extend(["functorch", "functorch.*"])
-    packages = find_packages(exclude=excludes)
+    packages = find_packages(include=includes, exclude=excludes)
     C = Extension(
         "torch._C",
         libraries=main_libraries,
@@ -1156,12 +1175,11 @@ def configure_extension_build() -> tuple[
         ext_modules.append(Extension(name="functorch._C", sources=[]))
 
     cmdclass = {
+        "bdist_wheel": bdist_wheel,
         "build_ext": build_ext,
         "clean": clean,
         "sdist": sdist,
     }
-    if wheel_concatenate is not None:
-        cmdclass["bdist_wheel"] = wheel_concatenate
 
     entry_points = {
         "console_scripts": [
@@ -1182,24 +1200,25 @@ def configure_extension_build() -> tuple[
 
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
-    It is no longer necessary to use the 'build' or 'rebuild' targets
+It is no longer necessary to use the 'build' or 'rebuild' targets
 
-    To install:
-      $ python setup.py install
-    To develop locally:
-      $ python setup.py develop
-    To force cmake to re-generate native build files (off by default):
-      $ CMAKE_FRESH=1 python setup.py develop
-"""
+To install:
+  $ python -m pip install --no-build-isolation -v .
+To develop locally:
+  $ python -m pip install --no-build-isolation -v -e .
+To force cmake to re-generate native build files (off by default):
+  $ CMAKE_FRESH=1 python -m pip install --no-build-isolation -v -e .
+""".strip()
 
 
 def print_box(msg: str) -> None:
-    lines = msg.split("\n")
-    size = max(len(l) + 1 for l in lines)
-    print("-" * (size + 2))
-    for l in lines:
-        print("|{}{}|".format(l, " " * (size - len(l))))
-    print("-" * (size + 2))
+    msg = textwrap.dedent(msg).strip()
+    lines = ["", *msg.split("\n"), ""]
+    max_width = max(len(l) for l in lines)
+    print("+" + "-" * (max_width + 4) + "+", file=sys.stderr, flush=True)
+    for line in lines:
+        print(f"|  {line:<{max_width}s}  |", file=sys.stderr, flush=True)
+    print("+" + "-" * (max_width + 4) + "+", file=sys.stderr, flush=True)
 
 
 def main() -> None:
@@ -1208,18 +1227,18 @@ def main() -> None:
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. "
             "Set one to 0 and rerun."
         )
+
     install_requires = [
         "filelock",
         "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
         "sympy>=1.13.3",
-        "networkx",
+        "networkx>=2.5.1",
         "jinja2",
-        "fsspec",
+        "fsspec>=0.8.5",
     ]
-
     if BUILD_PYTHON_ONLY:
-        install_requires.append(f"{LIBTORCH_PKG_NAME}=={get_torch_version()}")
+        install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
 
     if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
         gen_linker_script(
@@ -1249,7 +1268,7 @@ def main() -> None:
     try:
         dist.parse_command_line()
     except setuptools.errors.BaseError as e:
-        print(e)
+        print(e, file=sys.stderr)
         sys.exit(1)
 
     mirror_files_into_torchgen()
@@ -1265,16 +1284,6 @@ def main() -> None:
     ) = configure_extension_build()
     install_requires += extra_install_requires
 
-    extras_require = {
-        "optree": ["optree>=0.13.0"],
-        "opt-einsum": ["opt-einsum>=3.3"],
-        "pyyaml": ["pyyaml"],
-    }
-
-    # Read in README.md for our long_description
-    long_description = (CWD / "README.md").read_text(encoding="utf-8")
-
-    version_range_max = max(sys.version_info[1], 13) + 1
     torch_package_data = [
         "py.typed",
         "bin/*",
@@ -1293,7 +1302,9 @@ def main() -> None:
         "include/**/*.hpp",
         "include/*.cuh",
         "include/**/*.cuh",
+        "csrc/inductor/aoti_runtime/model.h",
         "_inductor/codegen/*.h",
+        "_inductor/codegen/aoti_runtime/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_inductor/script.ld",
         "_export/serde/*.yaml",
@@ -1317,22 +1328,18 @@ def main() -> None:
     ]
 
     if not BUILD_LIBTORCH_WHL:
-        torch_package_data.extend(
-            [
-                "lib/libtorch_python.so",
-                "lib/libtorch_python.dylib",
-                "lib/libtorch_python.dll",
-            ]
-        )
+        torch_package_data += [
+            "lib/libtorch_python.so",
+            "lib/libtorch_python.dylib",
+            "lib/libtorch_python.dll",
+        ]
     if not BUILD_PYTHON_ONLY:
-        torch_package_data.extend(
-            [
-                "lib/*.so*",
-                "lib/*.dylib*",
-                "lib/*.dll",
-                "lib/*.lib",
-            ]
-        )
+        torch_package_data += [
+            "lib/*.so*",
+            "lib/*.dylib*",
+            "lib/*.dll",
+            "lib/*.lib",
+        ]
         # XXX: Why not use wildcards ["lib/aotriton.images/*", "lib/aotriton.images/**/*"] here?
         aotriton_image_path = TORCH_DIR / "lib" / "aotriton.images"
         aks2_files = [
@@ -1342,19 +1349,15 @@ def main() -> None:
         ]
         torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
-        torch_package_data.extend(
-            [
-                "include/tensorpipe/*.h",
-                "include/tensorpipe/**/*.h",
-            ]
-        )
+        torch_package_data += [
+            "include/tensorpipe/*.h",
+            "include/tensorpipe/**/*.h",
+        ]
     if get_cmake_cache_vars()["USE_KINETO"]:
-        torch_package_data.extend(
-            [
-                "include/kineto/*.h",
-                "include/kineto/**/*.h",
-            ]
-        )
+        torch_package_data += [
+            "include/kineto/*.h",
+            "include/kineto/**/*.h",
+        ]
     torchgen_package_data = [
         "packaged/*",
         "packaged/**/*",
@@ -1362,9 +1365,11 @@ def main() -> None:
     package_data = {
         "torch": torch_package_data,
     }
+    exclude_package_data = {}
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
+        exclude_package_data["torchgen"] = ["*.py[co]"]
     else:
         # no extensions in BUILD_LIBTORCH_WHL mode
         ext_modules = []
@@ -1372,47 +1377,16 @@ def main() -> None:
     setup(
         name=TORCH_PACKAGE_NAME,
         version=TORCH_VERSION,
-        description=(
-            "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
-        ),
-        long_description=long_description,
-        long_description_content_type="text/markdown",
         ext_modules=ext_modules,
         cmdclass=cmdclass,
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
-        extras_require=extras_require,
         package_data=package_data,
-        # TODO fix later Manifest.IN file was previously ignored
-        include_package_data=False,  # defaults to True with pyproject.toml file
-        url="https://pytorch.org/",
-        download_url="https://github.com/pytorch/pytorch/tags",
-        author="PyTorch Team",
-        author_email="packages@pytorch.org",
-        python_requires=f">={python_min_version_str}",
-        # PyPI package information.
-        classifiers=[
-            "Development Status :: 5 - Production/Stable",
-            "Intended Audience :: Developers",
-            "Intended Audience :: Education",
-            "Intended Audience :: Science/Research",
-            "License :: OSI Approved :: BSD License",
-            "Topic :: Scientific/Engineering",
-            "Topic :: Scientific/Engineering :: Mathematics",
-            "Topic :: Scientific/Engineering :: Artificial Intelligence",
-            "Topic :: Software Development",
-            "Topic :: Software Development :: Libraries",
-            "Topic :: Software Development :: Libraries :: Python Modules",
-            "Programming Language :: C++",
-            "Programming Language :: Python :: 3",
-        ]
-        + [
-            f"Programming Language :: Python :: 3.{i}"
-            for i in range(python_min_version[1], version_range_max)
-        ],
-        license="BSD-3-Clause",
-        keywords="pytorch, machine learning",
+        exclude_package_data=exclude_package_data,
+        # Disable automatic inclusion of data files because we want to
+        # explicitly control with `package_data` above.
+        include_package_data=False,
     )
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)
