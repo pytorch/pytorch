@@ -5,7 +5,6 @@ import dataclasses
 import functools
 import threading
 import typing
-import warnings
 import weakref
 from abc import abstractmethod
 from contextlib import AbstractContextManager, contextmanager
@@ -81,8 +80,7 @@ def safe_is_leaf(t: Union[MetaTensorDesc, torch.Tensor]) -> bool:
 
 
 def safe_grad(t: _TensorLikeT) -> Optional[_TensorLikeT]:
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+    with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return t.grad
 
 
@@ -1643,7 +1641,7 @@ class MetaConverter(Generic[_TensorT]):
                                 with torch.enable_grad():
                                     r = view_from_base(base, t)
 
-                                # NB: We don't actaully faithfully replicate
+                                # NB: We don't actually faithfully replicate
                                 # autograd connectivity, but that doesn't matter
                                 # today. See following for more info:
                                 # https://gist.github.com/soulitzer/e03f015b314c3f5fcf80888c69390913
@@ -1668,6 +1666,8 @@ class MetaConverter(Generic[_TensorT]):
                         torch._C._dispatch_tls_set_dispatch_key_excluded(
                             torch._C.DispatchKey.ADInplaceOrView, old_exclude
                         )
+
+                    r.fake_device = t.device  # type: ignore[attr-defined]
 
                 else:
                     is_leaf = t.is_leaf

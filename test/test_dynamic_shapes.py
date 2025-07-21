@@ -3211,7 +3211,7 @@ class TestUbackedOps(TestCase):
             self.assertEqual(compiled_result, eager_result)
 
         log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
         with ctx():
             make_non_contiguous_tensor_and_test(4)
@@ -3246,7 +3246,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
         log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
         with ctx():
             compiled_result = compiled_func(x, torch.tensor([10]))
@@ -3286,7 +3286,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
     def test_unbacked_reshape2(self):
         cnt = CompileCounterWithBackend("inductor")
 
-        # This reshape requires a clone when the input is not contiguous and we cant compute strides.
+        # This reshape requires a clone when the input is not contiguous and we can't compute strides.
         # reshape (u2, u3) -> (u0, u1)
         def func(x, y):
             u0, u1 = y.tolist()
@@ -3305,7 +3305,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         torch._dynamo.decorators.mark_unbacked(x, 1)
 
         log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
         with ctx():
             result_eager = func(x, torch.tensor([5, 20]))
@@ -3355,7 +3355,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
         # Pass a contiguous tensor. A recompilation will happen due to 0/1 speciialization on stride.
         log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
         with ctx():
             # This used to hit could guard on data-dependent expression Eq(10, u3) x.stride[0]==10. and x.size()=[u2, u3].
@@ -3487,7 +3487,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
     def test_invalid_view_unbacked_view(self):
         cnt = CompileCounterWithBackend("inductor")
 
-        # This view (u2, u3) -> (u0, u1) cant happen in general unless we know that input is contigous or we have
+        # This view (u2, u3) -> (u0, u1) can't happen in general unless we know that input is contiguous or we have
         # hints to to compute strides.
         def func(x, y):
             u0, u1 = y.tolist()
@@ -3518,7 +3518,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
         func(torch.ones(5, 6, 7, 8))
         self.assertEqual(cnt.frame_count, 1)
-        # it can be dynamic in all dimentions except dim=2
+        # it can be dynamic in all dimensions except dim=2
         func(torch.ones(4, 9, 7, 10))
         self.assertEqual(cnt.frame_count, 1)
 

@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """
 Configuration module for TorchDynamo compiler and optimization settings.
 
@@ -450,7 +448,7 @@ allow_empty_graphs = False
 record_compile_time_instruction_count = False
 
 
-def default_debug_dir_root():
+def default_debug_dir_root() -> str:
     # [@compile_ignored: debug]
     DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
     if DEBUG_DIR_VAR_NAME in os.environ:
@@ -542,6 +540,10 @@ fake_tensor_cache_crosscheck_enabled = (
 # the inference_mode is still respected.
 fake_tensor_disable_inference_mode = True
 
+# Experimental feature for running automatic caching precompile.
+# Enables automatic DynamoCache save/load
+caching_precompile = False
+
 # Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
 # Note: AOTAutograd will still trace and partition an AOT backward graph local to that
 # compiled region. But AOTAutograd traces without knowledge of backward hooks which are
@@ -604,6 +606,9 @@ _unsafe_skip_fsdp_module_guards = (
     os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
 )
 
+# Common prefix to append to the id of each compile run to filter out data
+pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", None)
+
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
     default=True,
@@ -625,7 +630,7 @@ _custom_ops_profile: Optional[Any] = None
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-    def _make_closure_patcher(**changes): ...
+    def _make_closure_patcher(**changes: Any) -> Any: ...
 
 
 install_config_module(sys.modules[__name__])

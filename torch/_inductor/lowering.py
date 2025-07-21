@@ -2648,7 +2648,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
+        is_aligned_tensor = ir.is_aligned_realized_tensor_hint(arg, ALIGNMENT)
+        if is_aligned_tensor:
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
@@ -2656,7 +2657,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if (
             isinstance(arg, IRNode)
             and arg.maybe_get_stride() is not None
-            and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
+            and is_aligned_tensor
         ):
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
@@ -2700,7 +2701,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
             return ir.ExternKernel.require_exact_strides(arg, out_strides)
 
-        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
+        if is_aligned_tensor:
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
@@ -2708,7 +2709,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if (
             isinstance(arg, IRNode)
             and arg.maybe_get_stride() is not None
-            and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
+            and is_aligned_tensor
         ):
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
