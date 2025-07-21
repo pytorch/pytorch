@@ -909,10 +909,37 @@ def _compile_fx_inner(
             else:
                 log.debug("Failed to generate FX cache key")
 
+        if torch._functorch.config.bundled_autograd_cache:
+            assert mb_compiled_graph is None
+            assert cache_info is None
+            # When using bundled autograd cache, we still want
+            # to use the TritonBundler, but we don't want to save
+            # the results here. The results will get saved directly
+            # to AOTAutogradCache.
+            TritonBundler.begin_compile()
+            try:
+                mb_compiled_graph = fx_codegen_and_compile(
+                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                )
+                assert mb_compiled_graph is not None
+                (
+                    triton_bundle,
+                    triton_bundler_meta,
+                ) = TritonBundler.collect()
+                mb_compiled_graph.set_triton_bundle(triton_bundle)
+            except (ShortenTraceback, SkipFrame):
+                raise
+            except Exception as e:
+                raise InductorError(e, currentframe()).with_traceback(
+                    e.__traceback__
+                ) from None
+            finally:
+                TritonBundler.end_compile()
+
         # CACHE BYPASS: Compile the graph, don't save it to the cache
         # (this can happen either because cache was disabled, or we
         # determined the input is uncacheable)
-        if cache_info is None or cache_info["cache_state"] == "bypass":
+        elif cache_info is None or cache_info["cache_state"] == "bypass":
             assert mb_compiled_graph is None
             log.debug(
                 "FX cache bypass reason: %s",
@@ -1028,30 +1055,19 @@ def _compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
-    # Dump provenance artifacts for debugging trace
-    provenance_info = V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
-    # provenance_info might be None if config.trace.enabled is not set
-    if provenance_info:
-        (
-            debug_info,
-            node_mappings,
-        ) = provenance_info
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_generated_kernel_to_post_grad_nodes",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(debug_info),
-        )
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_provenance_tracking_node_mappings",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(node_mappings),
-        )
+    if config.trace.provenance_tracking:
+        # Dump provenance artifacts for debugging trace
+        provenance_info = torch._inductor.debug.dump_inductor_provenance_info()
+        # provenance_info might be None if trace.provenance_tracking is not set
+        if provenance_info:
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "inductor_provenance_tracking_node_mappings",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(provenance_info),
+            )
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
     if log.isEnabledFor(logging.INFO):
@@ -1294,7 +1310,7 @@ class _InProcessFxCompile(FxCompile):
                     },
                     payload_fn=lambda: inductor_post_grad_graph_str,
                 )
-                if config.trace.enabled:
+                if config.trace.provenance_tracking:
                     provenance_tracking_json = (
                         torch.fx.traceback.get_graph_provenance_json(gm.graph)
                     )
@@ -1306,8 +1322,13 @@ class _InProcessFxCompile(FxCompile):
                         },
                         payload_fn=lambda: json.dumps(provenance_tracking_json),
                     )
+                    from torch._inductor.debug import create_mapping_pre_post_grad_nodes
+
                     torch._inductor.debug._inductor_post_to_pre_grad_nodes = (
-                        provenance_tracking_json
+                        create_mapping_pre_post_grad_nodes(
+                            torch._inductor.debug._pre_grad_graph_id,
+                            provenance_tracking_json,
+                        )
                     )
 
                 metrics_context = get_metrics_context()
@@ -2147,7 +2168,8 @@ def compile_fx(
     with (
         _use_lazy_graph_module(dynamo_config.use_lazy_graph_module),
         enable_python_dispatcher(),
-        torch.fx.traceback.preserve_node_meta(config.trace.enabled),
+        torch.fx.traceback.preserve_node_meta(config.trace.provenance_tracking),
+        torch._inductor.debug.reset_provenance_globals(),
     ):
         # Pre-grad passes cannot be run if we weren't given a GraphModule.
         # Dynamo will always produce a GraphModule, but this handles cases
@@ -2179,6 +2201,13 @@ def compile_fx(
                 ),
             )
             torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
+
+            if config.trace.provenance_tracking:
+                for node in model_.graph.nodes:
+                    if node.stack_trace:
+                        torch._inductor.debug._inductor_pre_grad_node_stack_trace[
+                            node.name
+                        ] = node.stack_trace
 
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
             trace_structured(

@@ -496,7 +496,8 @@ class TestMatmulCuda(TestCase):
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major):
+    @parametrize("max_autotune", [False, True])
+    def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
         torch._dynamo.reset()
 
         device = "cuda"
@@ -506,12 +507,18 @@ class TestMatmulCuda(TestCase):
         align = 16 // dtype_AB.itemsize
 
         f_ref = torch._grouped_mm
+
+        options = {}
+        if max_autotune:
+            options.update(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                }
+            )
         f = torch.compile(
             f_ref,
-            options={
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            },
+            options=options,
         )
 
         if op == "2d/2d":
@@ -519,9 +526,9 @@ class TestMatmulCuda(TestCase):
             m_align = (m + align - 1) // align * align
             n_align = (n + align - 1) // align * align
             if not a_row_major and not b_row_major:
-                offs = torch.tensor([1, 3, 4, 6, 7], device=device, dtype=dtype_offset)
+                offs = torch.tensor([0, 1, 6, 6, 7], device=device, dtype=dtype_offset)
             else:
-                offs = torch.tensor([8, 16, 32, 37], device=device, dtype=dtype_offset)
+                offs = torch.tensor([0, 8, 16, 16, 27], device=device, dtype=dtype_offset)
             ngroups = offs.shape[0]
             k = offs[-1]
             k_align = (k + align - 1) // align * align
@@ -1299,8 +1306,16 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
-    @parametrize("base_dtype", [torch.bfloat16])
+    @parametrize("base_dtype", [torch.bfloat16, torch.float32])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
+        # Fp32 out_dtype is only supported by cuBLAS, which however only started
+        # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
+        if base_dtype is torch.float32:
+            if _get_torch_cuda_version() < (12, 9):
+                raise unittest.SkipTest("Need CUDA 12.9+ for row-wise fp8 w/ cuBLAS")
+            if torch.cuda.get_device_capability() < (9, 0):
+                raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
+
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
