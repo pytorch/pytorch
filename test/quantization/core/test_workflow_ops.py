@@ -1148,9 +1148,12 @@ class TestFusedObsFakeQuant(TestCase):
         self.assertEqual(out.shape, output_shape)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           symmetric_quant=st.booleans(), use_bool=st.booleans())
+           symmetric_quant=st.booleans(), 
+           use_bool=st.booleans(),
+           axis=[0, 1],
+           )
     @settings(deadline=None)
-    def test_fused_obs_fake_quant_moving_avg_per_channel(self, device, symmetric_quant, use_bool) -> None:
+    def test_fused_obs_fake_quant_moving_avg_per_channel(self, device, symmetric_quant, use_bool, axis) -> None:
         """
         Tests the case where we call the fused_obs_fake_quant op multiple times
         and update the running_min and max of the activation tensors.
@@ -1189,7 +1192,7 @@ class TestFusedObsFakeQuant(TestCase):
                     avg_const,
                     0,
                     255,
-                    0,
+                    axis,
                     True,  # per_channel_enabled
                     symmetric_quant,
                 )
@@ -1210,7 +1213,7 @@ class TestFusedObsFakeQuant(TestCase):
                             preserve_sparsity=symmetric_quant,
                         )
                     x_in = _fake_quantize_per_channel_affine_reference(
-                        x, x_scale, x_zero_point, 0, 0, 255
+                        x, x_scale, x_zero_point, axis, 0, 255
                     )
                     self.assertEqual(scale, x_scale)
                     self.assertEqual(zero_point, x_zero_point)
