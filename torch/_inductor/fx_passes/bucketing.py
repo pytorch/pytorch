@@ -258,7 +258,6 @@ def new_graph_call_function(  # type: ignore[no-untyped-def]
     type_expr: Optional[Any] = None,
 ) -> torch.fx.Node:
     from torch.utils._pytree import tree_map_only
-
     new_node = new_graph.call_function(target, args, kwargs)
     args_val = tree_map_only(torch.fx.Node, lambda x: x.meta["val"], args)
     kwargs_val = tree_map_only(torch.fx.Node, lambda x: x.meta["val"], kwargs)
@@ -482,24 +481,68 @@ def merge_all_gather(
                         "pin_memory": False,
                     },
                 )
-                all_gather_copy_in = new_graph_call_function(
+                # BEGIN
+                local_rank = rank_idx_dict[rank]
+                all_gather_input = new_graph_call_function(
                     new_graph,
-                    torch.ops.fsdp.all_gather_copy_in.default,
+                    torch.ops.aten.slice.Tensor,
                     (
-                        param_all_gather_inputs_flattened,
                         all_gather_output,
-                        inp_split_sizes,
-                        all_gather_input_numel,
-                        rank_idx_dict[rank],
+                        0,
+                        all_gather_input_numel * local_rank,
+                        all_gather_input_numel * (local_rank + 1),
                     ),
                     {},
                 )
-                all_gather_input = new_graph_call_function(
+                split_with_sizes = new_graph_call_function(
                     new_graph,
-                    operator.getitem,
-                    (all_gather_copy_in, 0),
+                    torch.ops.aten.split_with_sizes.default,
+                    (
+                        all_gather_input,
+                        inp_split_sizes,
+                    ),
                     {},
                 )
+                splits = [
+                    new_graph_call_function(
+                        new_graph,
+                        operator.getitem,
+                        (
+                            split_with_sizes,
+                            i,
+                        ),
+                        {},
+                    )
+                    for i in range(len(inp_split_sizes))
+                ]
+                new_graph_call_function(
+                    new_graph,
+                    torch.ops.aten._foreach_copy_.default,
+                    (
+                        splits,
+                        param_all_gather_inputs_flattened,
+                    ),
+                    {},
+                )
+                # END
+                # all_gather_copy_in = new_graph_call_function(
+                #     new_graph,
+                #     torch.ops.fsdp.all_gather_copy_in.default,
+                #     (
+                #         param_all_gather_inputs_flattened,
+                #         all_gather_output,
+                #         inp_split_sizes,
+                #         all_gather_input_numel,
+                #         rank_idx_dict[rank],
+                #     ),
+                #     {},
+                # )
+                # all_gather_input = new_graph_call_function(
+                #     new_graph,
+                #     operator.getitem,
+                #     (all_gather_copy_in, 0),
+                #     {},
+                # )
                 all_gather_into_tensor_out = new_graph_call_function(
                     new_graph,
                     torch.ops._c10d_functional.all_gather_into_tensor_out.default,
