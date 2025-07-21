@@ -211,12 +211,13 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     passthrough_parameters_args += arg_str + " ";
   }
 
-  std::string compile_only_arg = compile_only ? "-c" : "";
+  std::string compile_only_arg =
+      compile_only ? (_is_windows_os() ? "/c" : "-c") : "";
 
   std::string cmd;
   if (_is_windows_os()) {
     cmd = normalize_path_separator(fmt::format(
-        "{} {} {} {} {} {} /LD /Fe{} /link {} {} {}",
+        "{} {} {} {} {} {} /LD /Fe{} {} /link {} {} {}",
         compiler,
         include_dirs_args,
         definitions_args,
@@ -224,6 +225,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
         source_args,
         passthrough_parameters_args,
         target_file,
+        compile_only_arg,
         libraries_dirs_args,
         libraries_args,
         ldflags_args));
