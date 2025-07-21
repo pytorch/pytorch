@@ -1882,7 +1882,7 @@ void scaled_gemm(
 #if defined(USE_ROCM)
 #if defined(HIPBLASLT_OUTER_VEC)
   // this case is handled later as hipified CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F
-#elif defined(HIPBLASLT_VEC_EXT)
+#elif defined(HIPBLASLT_VEC_EXT) && ROCM_VERSION < 70000
   if (use_rowwise) {
     matmulDescA = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
     matmulDescB = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
