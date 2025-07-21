@@ -24,7 +24,7 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
-from .descriptors import AOTInput, InputMutationTangentAOTInput
+from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
 from .schemas import (
     BackwardSignature,
     GraphSignature,
@@ -250,7 +250,7 @@ def create_synthetic_base_metadata(
         # See Note [Tangents memory format]
         (
             coerce_tangent_and_suggest_memory_format(x),
-            InputMutationTangentAOTInput(x_desc),
+            TangentAOTInput(InputMutationAOTOutput(x_desc)),
         )
         for inner_idx, (x, x_desc) in enumerate(zip(inner_args, inner_args_desc))
         if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
