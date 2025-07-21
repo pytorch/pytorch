@@ -128,8 +128,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
     const torch::nativert::ExecutorConfig& executorConfig,
     const Placement& placement,
     const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
-        pytorchStreamReader,
-    const MakeProxyExecutorFn& makeProxyExecutorFunc) {
+        pytorchStreamReader) {
   std::vector<std::unique_ptr<OpKernel>> nodeKernels;
   std::vector<std::unique_ptr<DelegateExecutor>> delegateExecutors;
   std::vector<ConstFoldingExecution> constFoldingExecutions;
