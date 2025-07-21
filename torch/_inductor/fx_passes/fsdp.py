@@ -4,7 +4,7 @@ from typing import Callable
 import torch
 from torch._inductor.fx_passes.bucketing import (
     bucket_all_gather_by_mb,
-    merge_all_gather,
+    merge_all_gather_trace,
 )
 
 
@@ -57,7 +57,7 @@ def bucket_fsdp_all_gather(
     torch._inductor.config.post_grad_custom_post_pass = _bucket_all_gather
     ```
     """
-
+    print(f"XXX BEFORE_BUCKET_AG:{gm.graph}")
     ag_buckets = bucket_all_gather_by_mb(
         gm,
         all_gather_bucket_cap_mb_callback,
@@ -65,4 +65,5 @@ def bucket_fsdp_all_gather(
     )
     if len(ag_buckets) == 0:
         return
-    merge_all_gather(gm, ag_buckets)
+    merge_all_gather_trace(gm, ag_buckets)
+    print(f"XXX AFTER_BUCKET_AG:{gm.graph}")
