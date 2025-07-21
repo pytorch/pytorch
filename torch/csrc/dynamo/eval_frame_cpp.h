@@ -10,9 +10,6 @@ extern "C" {
 
 #endif
 
-void disable_monitoring_callables();
-void enable_monitoring_callables();
-
 PyObject* dynamo__custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
