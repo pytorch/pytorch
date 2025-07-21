@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
-from torch._dynamo.utils import compilation_time_metrics
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
 from torch._inductor.utils import clear_caches
 from torch.export import Dim
@@ -1557,15 +1556,17 @@ class TestCutlassBackend(TestCase):
             self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    def test_maybe_append_choice_caching_correctness(self):
+    def test_maybe_append_choice_caching(self):
         """
         Test if maybe_append_choice's caching leads to correct results and
         shorter maybe_append_choice time.
         """
 
+        NUM_ITERATIONS = 10
+
         class TestModule(torch.nn.Module):
             def forward(self, A, B):
-                for _ in range(10):
+                for _ in range(NUM_ITERATIONS):
                     A = A @ B / 32
                 return A
 
@@ -1575,26 +1576,156 @@ class TestCutlassBackend(TestCase):
 
         expected = model(A, B)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "fx_graph_cache": False,
-                "fx_graph_remote_cache": False,
-                "cuda.enable_caching_codegen": True,
-            }
-        ):
-            compiled_model = torch.compile(model, fullgraph=True)
-            actual = compiled_model(A, B)
+        # Track render calls
+        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+
+        original_render = CUTLASSGemmTemplate.render
+        render_call_count = 0
+
+        def counting_render(self, *args, **kwargs):
+            nonlocal render_call_count
+            render_call_count += 1
+            return original_render(self, *args, **kwargs)
+
+        with mock.patch.object(CUTLASSGemmTemplate, "render", counting_render):
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                    "cuda.enable_caching_codegen": True,
+                }
+            ):
+                compiled_model = torch.compile(model, fullgraph=True)
+                actual = compiled_model(A, B)
 
         torch.testing.assert_close(actual, expected)
 
-        time_spent: list[float] = compilation_time_metrics.get(
-            "CUTLASSGemmTemplate.maybe_append_choice", []
+        # Check render call count: render is called uniquely for each codegen
+        # and for each finalized codegen.
+        self.assertEqual(
+            render_call_count, NUM_ITERATIONS + DEFAULT_INST_LEVEL_MM_CONFIG
         )
-        total_time_spent = sum(time_spent)
-        self.assertGreater(total_time_spent, 0)
-        self.assertLess(total_time_spent, 3)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_multiple_mm(self):
+        """
+        Test multiple matrix multiplications with different shapes in a single nn.Module.
+        """
+
+        class MultipleMMModel(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                # First mm with shape (128, 64) @ (64, 32) -> (128, 32)
+                mm1 = a @ b
+                # Second mm with shape (256, 128) @ (128, 64) -> (256, 64)
+                mm2 = c @ d
+                return mm1, mm2
+
+        model = MultipleMMModel().cuda()
+
+        # Create tensors with different shapes
+        a = torch.randn(128, 64).cuda().half()
+        b = torch.randn(32, 64).cuda().half().t()
+        c = torch.randn(256, 128).cuda().half()
+        d = torch.randn(64, 128).cuda().half().t()
+
+        # Track render calls
+        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+
+        original_render = CUTLASSGemmTemplate.render
+        render_call_count = 0
+
+        def counting_render(self, *args, **kwargs):
+            nonlocal render_call_count
+            render_call_count += 1
+            return original_render(self, *args, **kwargs)
+
+        with mock.patch.object(CUTLASSGemmTemplate, "render", counting_render):
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cuda.cutlass_max_profiling_configs": 2,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                    "cuda.enable_caching_codegen": True,
+                }
+            ):
+                # Get expected results
+                expected = model(a, b, c, d)
+
+                # Compile and run
+                compiled_model = torch.compile(model)
+                actual = compiled_model(a, b, c, d)
+
+                # Verify results
+                torch.testing.assert_close(actual, expected)
+
+        num_matmuls = 2
+        self.assertEqual(render_call_count, num_matmuls + num_matmuls * 2)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_multiple_mm_with_dynamic_shape(self):
+        """
+        Test multiple matrix multiplications where one has dynamic shapes.
+        """
+
+        class MultipleMMDynamicModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.c = torch.randn(64, 256).cuda().half()
+                self.d = torch.randn(128, 256).cuda().half().t()
+
+            def forward(self, a, b):
+                # dynamic shape matmul
+                mm1 = a @ b
+                # static shape matmul
+                mm2 = self.c @ self.d
+                return mm1, mm2
+
+        model = MultipleMMDynamicModel().cuda()
+
+        # Create tensors with different shapes
+        a = torch.randn(128, 64).cuda().half()
+        b = torch.randn(32, 64).cuda().half().t()
+
+        # Track render calls
+        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+
+        original_render = CUTLASSGemmTemplate.render
+        render_call_count = 0
+
+        def counting_render(self, *args, **kwargs):
+            nonlocal render_call_count
+            render_call_count += 1
+            return original_render(self, *args, **kwargs)
+
+        with mock.patch.object(CUTLASSGemmTemplate, "render", counting_render):
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cuda.cutlass_max_profiling_configs": 2,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                    "cuda.enable_caching_codegen": True,
+                }
+            ):
+                # Get expected results
+                expected = model(a, b)
+
+                # Compile and run
+                compiled_model = torch.compile(model, dynamic=True)
+                actual = compiled_model(a, b)
+
+                # Verify results
+                torch.testing.assert_close(actual, expected)
+
+        num_matmuls = 2
+        self.assertEqual(render_call_count, num_matmuls + num_matmuls * 2)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})

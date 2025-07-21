@@ -995,7 +995,7 @@ enable_linear_binary_folding = (
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
 # Enable caching codegen of triton templates.
-enable_caching_generated_triton_templates: bool = False
+enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
@@ -1775,8 +1775,11 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
-    # Save mapping info from inductor generated triton kernel to post_grad fx nodes
-    log_inductor_triton_kernel_to_post_grad_node_info: bool = True
+    # Save mapping info from inductor generated triton kernel to post_grad fx nodes to pre_grad fx nodes
+    provenance_tracking = (
+        os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+        or os.environ.get("INDUCTOR_PROVENANCE", "0") == "1"
+    )
 
 
 _save_config_ignore: list[str] = [

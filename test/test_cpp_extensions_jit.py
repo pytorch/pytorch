@@ -328,7 +328,7 @@ class TestCppExtensionJIT(common.TestCase):
         if major < 12 or (major == 12 and minor <= 9):
             # Compute capability <= 7.0 is only supported up to CUDA 12.9
             archflags["Maxwell+Tegra;6.1"] = (["53", "61"], None)
-            archflags["Volta"] = ((["70"], ["70"]),)
+            archflags["Volta"] = (["70"], ["70"])
             archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
         if major < 12:
             # CUDA 12 drops compute capability < 5.0
