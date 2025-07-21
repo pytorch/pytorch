@@ -31,6 +31,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import itertools
 import random
 import sys
 import threading
@@ -58,6 +59,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
+    DataclassFieldsSource,
     GetItemSource,
     RandomValueSource,
     TypeSource,
@@ -292,6 +294,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(obj)
         elif isinstance(obj, enum.Enum):
             return EnumVariable(obj)
+        elif self.value is collections.OrderedDict:
+            return variables.GetAttrVariable(self, name)
         elif name in getattr(self.value, "__dict__", {}) or (
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
@@ -403,6 +407,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
+        elif issubclass(self.value, dict) and name != "__new__":
+            # __new__ is handled below
+            return variables.BuiltinVariable(dict).call_method(tx, name, args, kwargs)
         elif issubclass(self.value, (set, frozenset)) and name != "__new__":
             # __new__ is handled below
             return variables.BuiltinVariable(set).call_method(tx, name, args, kwargs)
@@ -619,11 +626,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return SizeVariable(tup.items)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)
+            fields_source = DataclassFieldsSource(self.source)
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
 
             default_kwargs = {}
-            for field, var_tracker in zip(fields, items):
+            for ind, field, var_tracker in zip(itertools.count(), fields, items):
                 if var_tracker is None:
                     if field.name in kwargs:
                         var_tracker = kwargs[field.name]
@@ -632,7 +640,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             continue
 
                         if field.default is not dataclasses.MISSING:
-                            var_tracker = VariableTracker.build(tx, field.default)
+                            var_tracker = VariableTracker.build(
+                                tx,
+                                field.default,
+                                source=AttrSource(
+                                    GetItemSource(fields_source, ind), "default"
+                                ),
+                            )
                         elif field.default_factory is not dataclasses.MISSING:
                             factory_fn = VariableTracker.build(
                                 tx, field.default_factory
@@ -1692,6 +1706,16 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._dict_vt)
+
+    @property
+    def items(self):
+        return self._dict_vt.items
+
+    def install_dict_keys_match_guard(self):
+        return self._dict_vt.install_dict_keys_match_guard()
+
+    def install_dict_contains_guard(self):
+        return self._dict_vt.install_dict_contains_guard()
 
 
 class UserDefinedSetVariable(UserDefinedObjectVariable):
