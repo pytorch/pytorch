@@ -3,6 +3,7 @@ import warnings
 import zipfile
 from collections.abc import Mapping
 from typing import Any, Callable, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 import torch.utils._pytree as pytree
@@ -52,6 +53,11 @@ from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
 
+@deprecated(
+    "`torch.export.export_for_training` is deprecated and will be removed in PyTorch 2.10. "
+    "Please use `torch.export.export` instead, which is functionally equivalent.",
+    category=FutureWarning,
+)
 def export_for_training(
     mod: torch.nn.Module,
     args: tuple[Any, ...],

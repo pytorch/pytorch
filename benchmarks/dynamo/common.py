@@ -1443,7 +1443,7 @@ class AOTInductorModelCache:
             if mode == "max-autotune":
                 inductor_configs["max_autotune"] = True
 
-            ep = torch.export.export_for_training(
+            ep = torch.export.export(
                 model_clone,
                 example_args,
                 example_kwargs,
@@ -1497,7 +1497,7 @@ def export(
     # NOTE: if args.export is ever enabled for --performance mode (rather than solely
     # --accuracy), we'll need to clone the model and subtract out extra memory usage, as
     # done in AOTInductorModelCache.
-    ep = torch.export.export_for_training(
+    ep = torch.export.export(
         model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
     )
     if config.training:
