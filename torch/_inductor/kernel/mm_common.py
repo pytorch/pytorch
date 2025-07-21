@@ -1,40 +1,18 @@
 # mypy: allow-untyped-defs
 import logging
-from collections.abc import Generator, Sequence
-from functools import partial
-from typing import Any, Optional
-
-import sympy
+from collections.abc import Sequence
+from typing import Any
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
 from torch._inductor.utils import sympy_product
 from torch._inductor.virtualized import V
 
-from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
-from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE
 
 
 log = logging.getLogger(__name__)
-
-
-def _is_large_block_for_cpu(
-    m: sympy.core.numbers.Integer,
-    n: sympy.core.numbers.Integer,
-    k: sympy.core.numbers.Integer,
-    method: str = "bmm",
-) -> bool:
-    """
-    Thresholds are experimentally determined to reduce Triton CPU compile times
-    """
-    if method in ("mm", "addmm", "int_mm"):
-        return m * n > 2**13
-    else:  # Default to bmm implementation for unknown methods
-        if m > 128 or n > 128 or k > 128:
-            return True
-        return m * n > 2**12
 
 
 @SymbolicGridFn
@@ -59,102 +37,6 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
 def persistent_grouped_mm_grid(*args):
     meta = args[-1]
     return (meta["NUM_SMS"], 1, 1)
-
-
-def acc_type(dtype):
-    if dtype in (torch.float16, torch.bfloat16):
-        return "tl.float32"
-    return f"tl.{dtype}".replace("torch.", "")
-
-
-def mm_options(config, sym_m, sym_n, sym_k, layout):
-    """
-    Common options to matmul triton templates.
-    """
-    even_k_symbolic = (
-        # it isn't worth guarding on this
-        sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
-    )
-    allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
-        not inductor_config.force_same_precision
-        or ((sym_m % 16) == 0 and (sym_n % 16) == 0 and (sym_k % 8) == 0)
-    )
-    options_dict = dict(
-        EVEN_K=even_k_symbolic,
-        ALLOW_TF32=allow_tf32,
-        USE_FAST_ACCUM=False,  # Option for _scaled_mm
-        ACC_TYPE=acc_type(layout.dtype),
-        num_stages=config.num_stages,
-        num_warps=config.num_warps,
-        **config.kwargs,
-    )
-
-    # If GROUP_M not specified then default to 8
-    if "GROUP_M" not in config.kwargs:
-        group_m = config.kwargs.get("GROUP_M", 8)
-        options_dict["GROUP_M"] = group_m
-
-    return options_dict
-
-
-def tma_options() -> dict[str, Any]:
-    from torch.utils._triton import has_triton_stable_tma_api
-
-    return {"TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api()}
-
-
-def persistent_mm_options(mat1, mat2):
-    res = {
-        "A_ROW_MAJOR": not mat1.layout.is_transposed(),
-        "B_ROW_MAJOR": not mat2.layout.is_transposed(),
-        "NUM_SMS": get_num_sms(),
-        "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
-    }
-    res.update(tma_options())
-    return res
-
-
-def scaled_mm_options(  # type: ignore[no-untyped-def]
-    config,  # triton.Config
-    sym_m: sympy.core.numbers.Integer,
-    sym_n: sympy.core.numbers.Integer,
-    sym_k: sympy.core.numbers.Integer,
-    layout: Layout,
-    scale_a,
-    scale_b,
-    use_fast_accum: bool,
-    device_tma: bool = False,
-) -> dict[str, Any]:
-    def are_compatible_scales(size_a, size_b) -> bool:
-        # Same sized scales are compatible
-        if len(size_a) == len(size_b):
-            return True
-
-        # Both need to be scalars or len(1) tensors
-        if len(size_a) <= 1 and len(size_b) <= 1:
-            return True
-
-        return False
-
-    size_a, size_b = scale_a.get_size(), scale_b.get_size()
-    assert are_compatible_scales(size_a, size_b), (
-        "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
-        f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
-    )
-
-    mm_template_options = mm_options(config, sym_m, sym_n, sym_k, layout)
-
-    mm_template_options["ACC_TYPE"] = "tl.float32"
-    mm_template_options["USE_FAST_ACCUM"] = use_fast_accum
-    mm_template_options["SCALING_ROWWISE"] = len(size_a) == 2
-
-    if device_tma:
-        mm_template_options["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE
-        mm_template_options["NUM_SMS"] = get_num_sms()
-
-    mm_template_options.update(tma_options())
-
-    return mm_template_options
 
 
 def mm_args(
@@ -197,20 +79,6 @@ def mm_args(
     others = [realize_inputs(expand(x, layout.size)) for x in others]
 
     return [m, n, k, layout, mat1, mat2, *others]
-
-
-def mm_config_kwargs(device, exclude_condition, dtype_size=None):
-    if device == "cpu":
-        return {
-            "scale": 0.5,
-            "exclude": exclude_condition,
-        }
-
-    if dtype_size and inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE":
-        return {
-            "dtype_size": dtype_size,
-        }
-    return {}
 
 
 def addmm_epilogue(dtype, alpha, beta):
@@ -318,90 +186,3 @@ def is_batch_stride_largest(mat1, mat2, layout) -> bool:
             return False
 
     return True
-
-
-def get_triton_mm_params(
-    input_nodes: list[Any],
-    name: str,
-    m: sympy.core.numbers.Integer,
-    n: sympy.core.numbers.Integer,
-    k: sympy.core.numbers.Integer,
-    layout: Layout,
-    device_type: Optional[str],
-    configs: partial[Generator[Any, None, None]],
-) -> Generator[dict[str, Any], None, None]:
-    """
-    Get generator of template parameters for Triton templates.
-
-    unified mm/bmm/addmm template parameter generator for Triton template
-
-    Args:
-        input_nodes: List of input tensor nodes
-        name: Template name for lookup table
-        m, n, k: Matrix dimensions
-        layout: Output layout
-        device_type: Device type (e.g., "cuda", "cpu")
-        configs: Generator for specific configs (e.g., mm_configs, bmm_configs)
-
-    Yields:
-        Template parameter dictionaries
-    """
-    dtype = input_nodes[0].get_dtype()
-
-    # Fallback to default configs if no lookup table exists
-    config_kwargs = mm_config_kwargs(
-        device_type,
-        _is_large_block_for_cpu(m, n, k, name),
-        dtype.itemsize,
-    )
-
-    for config in configs(m, n, k, **config_kwargs):
-        yield mm_options(config, m, n, k, layout)
-
-
-def get_triton_mm_tma_params(
-    input_nodes: list[Any],
-    name: str,
-    m: sympy.core.numbers.Integer,
-    n: sympy.core.numbers.Integer,
-    k: sympy.core.numbers.Integer,
-    layout: Layout,
-    device_type: Optional[str],
-    configs: partial[Generator[Any, None, None]],
-) -> Generator[dict[str, Any], None, None]:
-    """
-    Get generator of template parameters for TMA templates.
-
-    unified mm/bmm/addmm template parameter generator for Triton TMA template
-
-    Args:
-        input_nodes: List of input tensor nodes
-        name: Template name for lookup table
-        m, n, k: Matrix dimensions
-        layout: Output layout
-        device_type: Device type (e.g., "cuda", "cpu")
-        configs: Generator for specific configs (e.g., mm_configs, bmm_configs)
-
-    Yields:
-        Template parameter dictionaries
-    """
-    # Extract mat1, mat2 from input_nodes (handle addmm case with bias at index 0)
-    mat1 = input_nodes[-2]  # Second to last
-    mat2 = input_nodes[-1]  # Last
-
-    # Get persistent options
-    persistent_opts = persistent_mm_options(mat1, mat2)
-
-    # Use get_triton_template_params_iterator to get base template parameters
-    for triton_params in get_triton_mm_params(
-        input_nodes,
-        name,
-        m,
-        n,
-        k,
-        layout,
-        device_type,
-        configs,
-    ):
-        triton_params.update(persistent_opts)
-        yield triton_params
