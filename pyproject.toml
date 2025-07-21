@@ -2,20 +2,15 @@
 
 [build-system]
 requires = [
-    # After 75.8.2 dropped dep disttools API. Please fix
-    # API temporarily restored and shim used. Please fix
-    # Setuptools will drop support for setup.py past 80
-    # 62.3.0: min version for recursive glob package data support
     # 77.0.0: min version for SPDX expression support for project.license
-    "setuptools>=62.3.0,<80.0",
-    "wheel",
-    "astunparse",
+    "setuptools>=77.0.0,<80.0",
     "cmake>=3.27",
     "ninja",
     "numpy",
-    "packaging",
+    "packaging>=24.2",
     "pyyaml",
     "requests",
+    "six",  # dependency chain: NNPACK -> PeachPy -> six
     "typing-extensions>=4.10.0",
 ]
 build-backend = "setuptools.build_meta"
@@ -24,12 +19,8 @@ build-backend = "setuptools.build_meta"
 name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
-requires-python = ">=3.9"  # also update classifiers when changing this
-# TODO: change to `license = "BSD-3-Clause"` and enable PEP 639 after pinning setuptools>=77
-# FIXME: As of 2025.06.20, it is hard to ensure the minimum version of setuptools in our CI environment.
-# TOML-table-based license deprecated in setuptools>=77, and the deprecation warning will be changed
-# to an error on 2026.02.18. See also: https://github.com/pypa/setuptools/issues/4903
-license = { text = "BSD-3-Clause" }
+requires-python = ">=3.9,<3.14"
+license = "BSD-3-Clause"
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
 classifiers = [
@@ -133,6 +124,7 @@ ignore = [
     "E741",
     "EXE001",
     "F405",
+    "FURB122", # writelines
     # these ignores are from flake8-logging-format; please fix!
     "G101",
     # these ignores are from ruff NPY; please fix!
@@ -155,6 +147,7 @@ ignore = [
     "SIM117",
     "SIM118",
     "UP007", # keep-runtime-typing
+    "UP045", # keep-runtime-typing
     "TC006",
 ]
 select = [
@@ -235,6 +228,10 @@ select = [
     "UP",
     "YTT",
 ]
+
+[tool.ruff.lint.pyupgrade]
+# Preserve types, even if a file imports `from __future__ import annotations`.
+keep-runtime-typing = true
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = [

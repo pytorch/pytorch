@@ -878,6 +878,23 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         ):
             self._test_serialization("ID_MATCH", fn, torch.randn(3))
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_id_match_with_config(self):
+        def fn(x):
+            return x + id(x)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
+        def fn(x):
+            # usage of this context manager installs a FUNCTION_MATCH guard
+            with torch.no_grad():
+                y = x * 2
+            return y
+
+        ref, loaded = self._test_serialization("FUNCTION_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
     def test_dispatch_key_set_match(self):
         def fn(x, dks):
             if dks.has("CPU"):
@@ -1049,10 +1066,10 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return x + x_
 
         x = torch.randn(3, 2)
-        with self.assertRaisesRegex(
-            PackageError, "DUPLICATE_INPUT guard cannot be serialized"
-        ):
-            self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+        ref, loaded = self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+
+        self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
 
     def test_weakref_alive(self):
         mod = torch.nn.Linear(10, 10, bias=False)

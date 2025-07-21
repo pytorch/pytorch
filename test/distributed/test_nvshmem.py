@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 # To run:
-# TORCH_SYMMMEM=NVSHMEM python test/distributed/test_nvshmem.py
+# python test/distributed/test_nvshmem.py
 
 
 import torch
@@ -11,6 +11,7 @@ from torch.testing._internal.common_distributed import MultiProcContinousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
@@ -32,6 +33,7 @@ device_module = torch.get_device_module(device_type)
 
 @instantiate_parametrized_tests
 @requires_nvshmem()
+@requires_cuda_p2p_access()
 class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
@@ -230,7 +232,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         )
         out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
         # 3 rows: input splits, output splits, output offsets
-        # Initiallizing all values to -1 to check if they are updated
+        # Initializing all values to -1 to check if they are updated
         in_out_splits = symm_mem.empty(
             (3, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)

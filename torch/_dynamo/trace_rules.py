@@ -52,7 +52,13 @@ from torch.utils import _config_module
 
 from . import config
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
-from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
+from .utils import (
+    getfile,
+    hashable,
+    is_lru_cache_wrapped_function,
+    NP_SUPPORTED_MODULES,
+    unwrap_if_wrapper,
+)
 from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
@@ -170,7 +176,6 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
-    "torch.autograd._profiler_enabled": SkipFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
     # We graph break on RNG state setters or getters like
@@ -577,7 +582,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._dispatch_has_kernel",
         "torch._C._dispatch_is_alias_key",
         "torch._C._dispatch_is_included_in_alias",
-        "torch._C._dispatch_is_main_interpreter",
         "torch._C._dispatch_isTensorSubclassLike",
         "torch._C._dispatch_key_for_device",
         "torch._C._dispatch_key_name",
@@ -1938,6 +1942,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.geqrf",
         "torch.ger",
         "torch.get_device",
+        "torch.get_device_module",
         "torch.gradient",
         "torch.greater_equal",
         "torch.greater",
@@ -2402,7 +2407,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._lowrank.svd_lowrank",
         "torch._preload_cuda_deps",
         "torch._register_device_module",
-        "torch._running_with_deploy",
         "torch._utils._dummy_type",
         "torch._utils._flatten_dense_tensors",
         "torch._utils._unflatten_dense_tensors",
@@ -2427,6 +2431,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.atleast_3d",
         "torch.autograd._calculate_shape",
         "torch.autograd._is_checkpoint_valid",
+        "torch.autograd._profiler_enabled",
         "torch.autograd._make_grads",
         "torch.autograd._register_py_tensor_class_for_device",
         "torch.autograd._tensor_or_tensors_to_tuple",
@@ -2983,6 +2988,8 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
             else:
                 obj = _module_dir(torch) + k[len("torch/") :]
             if obj is not None:
+                if is_lru_cache_wrapped_function(obj):
+                    obj = obj.__wrapped__
                 if obj in d and d[obj] != v:
                     raise AssertionError(
                         f"Duplicate torch object {obj} with different rules: {v}, {d[obj]}"
@@ -3460,7 +3467,6 @@ MOD_SKIPLIST = [
     "torch._custom_op",
     "torch._custom_ops",
     "torch._decomp",
-    "torch._deploy",
     "torch._dispatch",
     "torch._dynamo",
     "torch._export",
