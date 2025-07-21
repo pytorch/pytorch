@@ -33,6 +33,13 @@ size_t roundUpToNearestTwoMiB(size_t size) {
   return ((size + TWO_MIB - 1) / TWO_MIB) * TWO_MIB;
 }
 
+constexpr std::size_t max_alignment(uintptr_t value) {
+  // This isolates the least significant bit that is set,
+  // which corresponds to the alignment the pointer can support.
+  return value ? value & ~(value - 1) : 0;
+}
+
+
 bool regions_intersect(void *ptr1, size_t size1,
                        void *ptr2, size_t size2)
 {
@@ -427,6 +434,7 @@ cudaGraph_t CUDAGraph::raw_cuda_graph() {
 }
 
 void CUDAGraph::reset() {
+  std::cout << "GALVEZ: reset()" << std::endl;
   // I'd prefer these checks throw exceptions, not print warnings,
   // but the destructor calls reset(), and at least one CI build
   // refuses to compile with a throwing destructor.
@@ -528,6 +536,35 @@ void CUDAGraph::add_host_memory_update(size_t alloc_idx, void **address_to_updat
   host_memory_updates_.push_back({alloc_idx, address_to_update, offset});
 }
 
+  std::vector<DynamicGraphAllocation> CUDAGraph::create_and_sort_allocations(const std::vector<std::pair<void*, size_t>>& dynamic_tensors) {
+    for (size_t i = 0; i < dynamic_tensors.size(); i++) {
+    auto const& [tensor_data_ptr, tensor_nbytes] = dynamic_tensors[i];
+    // TODO: Reconsider this requirement
+    // TORCH_CHECK(tensor.is_contiguous(), "Dynamic tensors must be contiguous");
+    allocations_.push_back(DynamicGraphAllocation{
+      .ptr = (char*) tensor_data_ptr,
+      .size = tensor_nbytes,
+      .alloc_idx = i, // record the original order, since the user will use that order again in replay_dynamic
+    });
+  }
+
+  std::vector<DynamicGraphAllocation> sorted_allocations = allocations_;
+  // copy since we're going to mess up allocation order, just for this function
+  // we will need to look up a bunch of pointers, and binary search can speed this up from linear to log time
+  // therefore:
+  std::sort(sorted_allocations.begin(), sorted_allocations.end(), [](auto& a, auto& b) {
+    return a.ptr < b.ptr;
+  });
+
+  for (size_t i = 1; i < sorted_allocations.size(); i++) {
+    auto prev = sorted_allocations[i - 1];
+    TORCH_CHECK(prev.ptr + prev.size <= sorted_allocations[i].ptr, "Dynamic tensors may not overlap");
+  }
+
+  return sorted_allocations;
+}
+
+
 
 // TODO: This will need to find the non dynamic tensors allocated by
 // this graph, and then give them real backing allocations.
@@ -538,17 +575,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
   TORCH_CHECK(has_graph_, "Must have already captured");
   TORCH_INTERNAL_ASSERT(!has_graph_exec_);
 
-  for (size_t i = 0; i < dynamic_tensors.size(); i++) {
-    auto const& [tensor_data_ptr, tensor_nbytes] = dynamic_tensors[i];
-    // TODO: Reconsider this requirement
-    // TORCH_CHECK(tensor.is_contiguous(), "Dynamic tensors must be contiguous");
-    allocations_.push_back(DynamicGraphAllocation{
-      .ptr = (char*) tensor_data_ptr,
-      .size = tensor_nbytes,
-      .alloc_idx = i, // record the original order, since the user will use that order again in replay_dynamic
-    });
-
-  }
+  auto sorted_allocations = create_and_sort_allocations(dynamic_tensors);
 
   for (auto &&[ptr, size]: unbacked_memory_) {
     // the following won't work unless I can guarantee that tensor_data_ptr is an appropriate 2 MiB boundary. 
@@ -567,28 +594,6 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
 
     C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)ptr, size_rounded_up_to_page /* can I use size? */, &desc, 1));
   }
-
-  std::vector<DynamicGraphAllocation> sorted_allocations = allocations_;
-  // copy since we're going to mess up allocation order, just for this function
-  // we will need to look up a bunch of pointers, and binary search can speed this up from linear to log time
-  // therefore:
-  std::sort(sorted_allocations.begin(), sorted_allocations.end(), [](auto& a, auto& b) {
-    return a.ptr < b.ptr;
-  });
-
-  for (size_t i = 1; i < sorted_allocations.size(); i++) {
-    auto prev = sorted_allocations[i - 1];
-    TORCH_CHECK(prev.ptr + prev.size <= sorted_allocations[i].ptr, "Dynamic tensors may not overlap");
-  }
-
-  // Iterate over all pointers made by this CUDAGraph. It is my
-  // responsibility to allocate them by unmapping the dummy TWO_MIB
-  // page, and then remapping physical memory of the same size as the
-  // virtual memory.
-
-  // TODO: Think about how this might interact with NCCL's
-  // NCCL_GRAPH_REGISTER config. Does registration get messed up when
-  // we delete the backing physical memory? I hope not.
 
   size_t num_nodes;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &num_nodes));
@@ -639,6 +644,17 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
       std::cout << func_name << std::endl;
       for (size_t param_index = 0;
            globalContext().getNVRTC().cuFuncGetParamInfo(func, param_index, &param_offset, &param_size) != CUDA_ERROR_INVALID_VALUE; param_index++) {
+
+        for (size_t address_start = 0; param_size - address_start >= 8;
+             address_start += 8) {
+          char** arg1_speculative_pointer =
+            (char**)driver_node_params.kernelParams[param_index];
+          void* arg1_value = arg1_speculative_pointer[address_start / 8];
+          std::cout << "GALVEZ: param_offset=" << std::hex << 352 + param_offset + address_start << std::dec << ", 8 byte value=" << arg1_value << std::endl;
+        }
+
+
+        
         if (type_info.members.empty()) {
           if (param_index == 0) {
             // TORCH_WARN("No type information for", func_name);
@@ -867,6 +883,8 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
     actualDataPtrs.push_back(dynamic_tensors[i].data_ptr());
     std::cout << "GALVEZ: replacing [" << (uintptr_t)allocations_[i].ptr << ", " << (uintptr_t)allocations_[i].ptr + allocations_[i].size <<
       ") with [" << (uintptr_t)dynamic_tensors[i].data_ptr() << ", " << (uintptr_t)dynamic_tensors[i].data_ptr() + dynamic_tensors[i].nbytes() << ")" << std::endl;
+    std::cout << "GALVEZ: alignment of old ptr: "<< max_alignment((uintptr_t)allocations_[i].ptr) << std::endl;
+    std::cout << "GALVEZ: alignment of new ptr: "<< max_alignment((uintptr_t)dynamic_tensors[i].data_ptr()) << std::endl;
     // nbytes is not actually the size of an allocation. It is the size of its view.
     // TORCH_CHECK(dynamic_tensors[i].nbytes() == allocations_[i].size, "Prefilled tensors must be same shape");
   }
@@ -993,7 +1011,7 @@ void printHex(const void* data, std::size_t n) {
 }
 
 
-bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2) {
+bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2, bool topological_and_non_pointer_equality_only) {
   TORCH_CHECK(graph1 != graph2);
 
   bool is_equal_var = true;
@@ -1040,28 +1058,42 @@ bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2) {
     }
 
     if (type1 == cudaGraphNodeTypeKernel) {
-      cudaKernelNodeParams nodeParams1, nodeParams2;
-      AT_CUDA_CHECK(cudaGraphKernelNodeGetParams(node1, &nodeParams1));
-      AT_CUDA_CHECK(cudaGraphKernelNodeGetParams(node2, &nodeParams2));
-      if (nodeParams1.func != nodeParams2.func) {
-        TORCH_WARN("graphs_equal: Kernel function mismatch at node index ", i,
-                   ": graph1 function pointer = ", nodeParams1.func,
-                   ", graph2 function pointer = ", nodeParams2.func);
-        return false;
-      }
-      cudaFunction_t func1;
-      AT_CUDA_CHECK(cudaGetFuncBySymbol(&func1, nodeParams1.func));
+      CUDA_KERNEL_NODE_PARAMS nodeParams1, nodeParams2;
+      AT_CUDA_DRIVER_CHECK(
+          globalContext().getNVRTC().cuGraphKernelNodeGetParams(
+              node1, &nodeParams1));
+      AT_CUDA_DRIVER_CHECK(
+          globalContext().getNVRTC().cuGraphKernelNodeGetParams(
+              node2, &nodeParams2));
 
       const char* func_name;
-      globalContext().getNVRTC().cuFuncGetName(&func_name, func1);
+      globalContext().getNVRTC().cuFuncGetName(&func_name, nodeParams1.func);
+
+      const char* func_name2;
+      globalContext().getNVRTC().cuFuncGetName(&func_name2, nodeParams2.func);
 
       // std::cout << "GALVEZ: kernel name=" << func_name << std::endl;
 
-      if (!dim3_equal(nodeParams1.gridDim, nodeParams2.gridDim)) {
+      if (nodeParams1.func != nodeParams2.func) {
+        TORCH_WARN("graphs_equal: Kernel function mismatch at node index ", i,
+                   ": graph1 function pointer = ", nodeParams1.func,
+                   ", graph2 function pointer = ", nodeParams2.func,
+                   " name1 = ", func_name,
+                   " name2 = ", func_name2
+                   );
+        return false;
+      }
+      cudaFunction_t func1 = nodeParams1.func;
+
+      if (nodeParams1.gridDimX != nodeParams2.gridDimX ||
+          nodeParams1.gridDimY != nodeParams2.gridDimY ||
+          nodeParams1.gridDimZ != nodeParams2.gridDimZ) {
         TORCH_WARN("graphs_equal: Kernel gridDim mismatch at node index ", i);
         return false;
       }
-      if (!dim3_equal(nodeParams1.blockDim, nodeParams2.blockDim)) {
+      if (nodeParams1.blockDimX != nodeParams2.blockDimX ||
+          nodeParams1.blockDimY != nodeParams2.blockDimY ||
+          nodeParams1.blockDimZ != nodeParams2.blockDimZ) {
         TORCH_WARN("graphs_equal: Kernel blockDim mismatch at node index ", i);
         return false;
       }
@@ -1070,6 +1102,10 @@ bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2) {
                    ": graph1 sharedMemBytes = ", nodeParams1.sharedMemBytes,
                    ", graph2 sharedMemBytes = ", nodeParams2.sharedMemBytes);
         return false;
+      }
+
+      if (topological_and_non_pointer_equality_only) {
+        continue;
       }
 
       size_t param_offset;
@@ -1120,6 +1156,9 @@ bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2) {
         }
       }
     } else if (type1 == cudaGraphNodeTypeMemcpy) {
+      if (topological_and_non_pointer_equality_only) {
+        continue;
+      }
       cudaMemcpy3DParms nodeParams1, nodeParams2;
       AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node1, &nodeParams1));
       AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node2, &nodeParams2));
@@ -1127,6 +1166,9 @@ bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2) {
         return false;
       }
     } else if (type1 == cudaGraphNodeTypeMemset) {
+      if (topological_and_non_pointer_equality_only) {
+        continue;
+      }
       cudaMemsetParams nodeParams1, nodeParams2;
       AT_CUDA_CHECK(cudaGraphMemsetNodeGetParams(node1, &nodeParams1));
       AT_CUDA_CHECK(cudaGraphMemsetNodeGetParams(node2, &nodeParams2));
@@ -1282,8 +1324,8 @@ bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2) {
 
 
 bool operator==(const CUDAGraph& left, const CUDAGraph& right) {
-    return graphs_equal(left.graph_, right.graph_);
-  }
+    return graphs_equal(left.graph_, right.graph_, false);
+}
 
 bool operator!=(const CUDAGraph& left, const CUDAGraph& right) {
     return !(left == right);
@@ -1368,14 +1410,148 @@ void DynamicCUDAGraphMemoryAllocator::cudagraph_free(void *ptr, size_t size, int
   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemAddressFree_((CUdeviceptr)ptr, size_rounded_up_to_page));
 }
 
+std::vector<std::unique_ptr<DynamicCUDAGraphMemoryAllocator>> allocators;
+std::vector<std::shared_ptr<c10::Allocator>> pluggable_allocators;
+
 // Create a `CUDAPluggableAllocator` that uses the above functions.
 std::shared_ptr<c10::Allocator> CUDAGraph::get_mem_allocator() {
-  this->allocator_ = std::make_unique<DynamicCUDAGraphMemoryAllocator>(this);
-  this->pluggable_allocator_ =
-    torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-                                                               std::bind(&DynamicCUDAGraphMemoryAllocator::cudagraph_malloc, this->allocator_.get(), std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
-                                                               std::bind(&DynamicCUDAGraphMemoryAllocator::cudagraph_free, this->allocator_.get(), std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-  return this->pluggable_allocator_;
+  // this->allocator_ = std::make_unique<DynamicCUDAGraphMemoryAllocator>(this);
+  allocators.push_back(std::make_unique<DynamicCUDAGraphMemoryAllocator>(this));
+  pluggable_allocators.push_back(torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+                                                                                            std::bind(&DynamicCUDAGraphMemoryAllocator::cudagraph_malloc, allocators.back().get(), std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
+                                                                                            std::bind(&DynamicCUDAGraphMemoryAllocator::cudagraph_free, allocators.back().get(), std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4)));
+  return pluggable_allocators.back();
+  // this->pluggable_allocator_ =
+  //   torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+  //                                                              std::bind(&DynamicCUDAGraphMemoryAllocator::cudagraph_malloc, this->allocator_.get(), std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
+  //                                                              std::bind(&DynamicCUDAGraphMemoryAllocator::cudagraph_free, this->allocator_.get(), std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+  // return this->pluggable_allocator_;
+}
+
+void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dynamic_tensors,
+                               CUDAGraph* graph2,
+                               const std::vector<std::pair<void*, size_t>>& graph2_dynamic_tensors) {
+  size_t num_nodes;
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &num_nodes));
+  size_t num_nodes2;
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph2->graph_, nullptr, &num_nodes2));
+  TORCH_CHECK_EQ(num_nodes, num_nodes2);
+
+  TORCH_CHECK(graphs_equal(graph_, graph2->graph_, true), "Graphs are not topologically identical");
+  
+  std::vector<cudaGraphNode_t> nodes(num_nodes);
+  std::vector<cudaGraphNode_t> nodes2(num_nodes2);
+  if (num_nodes != 0) {
+    AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nodes.data(), &num_nodes));
+    AT_CUDA_CHECK(cudaGraphGetNodes(graph2->graph_, nodes2.data(), &num_nodes));
+  }
+
+  auto sorted_allocations = create_and_sort_allocations(dynamic_tensors);
+  auto sorted_allocations2 = graph2->create_and_sort_allocations(graph2_dynamic_tensors);
+  
+  for (size_t i = 0; i < num_nodes; ++i) {
+    cudaGraphNode_t node = nodes[i];
+    cudaGraphNode_t node2 = nodes2[i];
+    std::cout << "GALVEZ: investigating node " << i << std::endl;
+
+    cudaGraphNodeType type;
+    AT_CUDA_CHECK(cudaGraphNodeGetType(node, &type));
+
+    if (type == cudaGraphNodeTypeKernel) {
+      CUDA_KERNEL_NODE_PARAMS driver_node_params;
+      AT_CUDA_DRIVER_CHECK(
+          globalContext().getNVRTC().cuGraphKernelNodeGetParams(
+              node, &driver_node_params));
+      cudaFunction_t func = driver_node_params.func;
+
+      CUDA_KERNEL_NODE_PARAMS driver_node_params2;
+      AT_CUDA_DRIVER_CHECK(
+          globalContext().getNVRTC().cuGraphKernelNodeGetParams(
+              node2, &driver_node_params2));
+      
+      const char* func_name;
+      AT_CUDA_DRIVER_CHECK(
+          globalContext().getNVRTC().cuFuncGetName(&func_name, func));
+
+      TORCH_CHECK(
+          driver_node_params.kernelParams && !driver_node_params.extra,
+          "Kernel launches that use `extra` instead of `kernelParams` are not supported");
+
+      size_t param_offset;
+      size_t param_size;
+
+      std::cout << func_name << std::endl;
+      for (size_t param_index = 0;
+           globalContext().getNVRTC().cuFuncGetParamInfo(func, param_index, &param_offset, &param_size) != CUDA_ERROR_INVALID_VALUE; param_index++) {
+        char** arg1_speculative_pointer =
+          (char**)driver_node_params.kernelParams[param_index];
+        char** arg2_speculative_pointer =
+          (char**)driver_node_params2.kernelParams[param_index];
+
+        // ABI guarantees that pointers have 8-byte alignment
+        for (size_t address_start = 0; param_size - address_start >= 8;
+             address_start += 8) {
+          char* arg1_value = arg1_speculative_pointer[address_start / 8];
+          char* arg2_value = arg2_speculative_pointer[address_start / 8];
+          auto graph1_result = checkAllocationWithinGraph(arg1_value, sorted_allocations);
+          auto graph2_result = checkAllocationWithinGraph(arg2_value, sorted_allocations2);
+          if (bool(graph1_result) && bool(graph2_result)) {
+            add_dynamic_update({std::get<0>(*graph1_result), std::get<1>(*graph1_result), address_start},
+                               node, param_offset);
+          } else if (bool(graph1_result) || bool(graph2_result)) {
+            std::cout << "GALVEZ: filtered out a false positive at param_index=" << param_index << " offset=" << address_start << " for potential address=" << (void*) arg1_value << std::endl;
+          }
+        }
+      }
+    } else if (type == cudaGraphNodeTypeMemcpy) {
+      TORCH_INTERNAL_ASSERT(false, "memcpy nodes should have been removed");
+    } else if (type == cudaGraphNodeTypeMemset) {
+      TORCH_INTERNAL_ASSERT(false, "memset nodes should have been removed");
+    } else if (type == cudaGraphNodeTypeGraph || type == cudaGraphNodeTypeConditional) {
+      throw std::runtime_error("horrible. please don't make me support these.");
+      assert(false);
+    } else if (
+      type == cudaGraphNodeTypeEmpty ||
+      type == cudaGraphNodeTypeWaitEvent ||
+      type == cudaGraphNodeTypeHost ||
+      type == cudaGraphNodeTypeEventRecord ||
+      type == cudaGraphNodeTypeExtSemaphoreSignal ||
+      type == cudaGraphNodeTypeExtSemaphoreWait ||
+      type == cudaGraphNodeTypeMemAlloc ||
+      type == cudaGraphNodeTypeMemFree
+    ) {
+      // this is fine
+    } else {
+      throw std::runtime_error("graph node type unknown");
+      assert(false);
+    }
+  }
+  AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, 0));
+
+  // We must call cudaGraphUpload() to allocate memory for the
+  // updatable device nodes. Otherwise, cudaGraphLaunch will
+  // fail.
+
+  // From
+  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ge546432e411b4495b93bdcbf2fc0b2bd:
+  // "[cudaGraphUpload] Uses memory cached by stream to back the allocations
+  // owned by graphExec."
+
+  // Normally, cudaGraphUpload() must be called on the stream for that
+  // will do cudaGraphLaunch(). However, here we can actually use any
+  // arbitrary stream (thus, the stream we caputred on works) for the
+  // memory backing device nodes. This differs from the usual case for
+  // graphs using memory allocation and free nodes. TODO: Figure out
+  // precisely why.
+
+  // Can this stream ever be deleted while still retain a reference to it?
+  // Yes, if an external stream is used. That is probably very rare.
+  // I suppose we know that torch streams will never be deallocated, so this is
+  // fine...
+  AT_CUDA_CHECK(cudaGraphUpload(graph_exec_, capture_stream_));
+  capture_stream_.synchronize();
+
+  has_graph_exec_ = true;
 }
 
 } // namespace at::cuda

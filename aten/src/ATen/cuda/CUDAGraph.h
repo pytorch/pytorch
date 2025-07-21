@@ -105,12 +105,14 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void debug_dump(const std::string& debug_path);
   cudaGraph_t raw_cuda_graph();
   void become_dynamic(const std::vector<std::pair<void*, size_t>>& dynamic_tensors);
+  void become_dynamic(const std::vector<std::pair<void*, size_t>>& dynamic_tensors, CUDAGraph* graph2, const std::vector<std::pair<void*, size_t>>& graph2_dynamic_tensors);
   void replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors);
 
   TORCH_CUDA_CPP_API friend bool operator==(const CUDAGraph& left, const CUDAGraph& right);
   TORCH_CUDA_CPP_API friend bool operator!=(const CUDAGraph& left, const CUDAGraph& right);
   std::shared_ptr<c10::Allocator> get_mem_allocator();
-  void release_physical_memory();
+ private:
+ std::vector<DynamicGraphAllocation> create_and_sort_allocations(const std::vector<std::pair<void*, size_t>>& dynamic_tensors);
 
  protected:
   void add_dynamic_update(const std::tuple<size_t, size_t, size_t>& result, cudaGraphNode_t node, size_t param_offset);

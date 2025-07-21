@@ -75,9 +75,7 @@ void THCPGraph_init(PyObject* module) {
       .def(
           "replay",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::replay))
-    .def(// "become_dynamic",
-         // torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::become_dynamic))
-          "become_dynamic",
+    .def("become_dynamic",
           [](::at::cuda::CUDAGraph& self, const std::vector<std::pair<uintptr_t, size_t>>& dynamic_tensors) {
             py::gil_scoped_release release;
 
@@ -92,6 +90,31 @@ void THCPGraph_init(PyObject* module) {
             self.become_dynamic(dynamic_tensors_ptrs);
           },
           py::arg("dynamic_tensors"))
+    .def("become_dynamic2",
+         [](::at::cuda::CUDAGraph& self, const std::vector<std::pair<uintptr_t, size_t>>& dynamic_tensors,
+            ::at::cuda::CUDAGraph* graph2, const std::vector<std::pair<uintptr_t, size_t>>& dynamic_tensors2) {
+            py::gil_scoped_release release;
+
+            std::vector<std::pair<void*, size_t>> dynamic_tensors_ptrs;
+            dynamic_tensors_ptrs.reserve(dynamic_tensors.size());
+            for (auto const& p : dynamic_tensors) {
+              void* ptr = reinterpret_cast<void*>(p.first);
+              dynamic_tensors_ptrs.emplace_back(ptr, p.second);
+            }
+
+            std::vector<std::pair<void*, size_t>> dynamic_tensors_ptrs2;
+            dynamic_tensors_ptrs.reserve(dynamic_tensors2.size());
+            for (auto const& p : dynamic_tensors2) {
+              void* ptr = reinterpret_cast<void*>(p.first);
+              dynamic_tensors_ptrs2.emplace_back(ptr, p.second);
+            }
+
+            self.become_dynamic(dynamic_tensors_ptrs, graph2, dynamic_tensors_ptrs2);
+          },
+         py::arg("dynamic_tensors"),
+         py::arg("graph2"),
+         py::arg("graph2_dynamic_tensors")
+         )
       .def(
           "replay_dynamic",
           [](::at::cuda::CUDAGraph& self, const std::vector<at::Tensor>& dynamic_tensors) {

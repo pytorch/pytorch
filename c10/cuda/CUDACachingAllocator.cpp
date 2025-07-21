@@ -1748,6 +1748,7 @@ class DeviceCachingAllocator {
       return;
     }
     block->stream_uses.insert(stream);
+    // if any stream capturing is happening at all, then we use this variable.
     if (C10_UNLIKELY(!captures_underway.empty())) {
       block_to_cudagraph_stream_uses[block].insert(stream);
     }
@@ -3041,8 +3042,12 @@ class DeviceCachingAllocator {
       release_blocks(small_blocks, context);
     }
 
+    std::cout << "GALVEZ:graph_pools_freeable.size()=" << graph_pools_freeable.size() << std::endl;
+
     for (auto it = graph_pools_freeable.begin();
          it != graph_pools_freeable.end();) {
+      std::cout << "GALVEZ:graph_pool: " << it->first.first << ", " << it->first.second << std::endl;
+      std::cout << "GALVEZ:mempool_id: " << mempool_id.first << ", " << mempool_id.second << std::endl;
       if (mempool_id.first != 0 || mempool_id.second != 0) {
         if (it->first == mempool_id) {
           // If there is an active mempool, we sync only the events
@@ -3054,10 +3059,12 @@ class DeviceCachingAllocator {
           continue;
         }
       }
+
       // See notifyCaptureDestroy for the strategy here.
       TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
       release_blocks(it->second->small_blocks, context);
       release_blocks(it->second->large_blocks, context);
+      std::cout << "GALVEZ:cudaMalloc_count=" << it->second->cudaMalloc_count << std::endl;
       if (it->second->cudaMalloc_count == 0) {
         auto erase_count = graph_pools.erase(it->first);
         TORCH_INTERNAL_ASSERT(erase_count == 1);
@@ -3293,6 +3300,8 @@ class DeviceCachingAllocator {
             block_to_cudagraph_stream_uses.end())) {
       stream_set streams(std::move(block->stream_uses));
       AT_ASSERT(block->stream_uses.empty());
+      // return only the streams that were not used during a stream
+      // capture.
       for (auto& stream : streams) {
         if (block_to_cudagraph_stream_uses[block].find(stream) ==
             block_to_cudagraph_stream_uses[block].end()) {
@@ -4245,6 +4254,7 @@ MemPool::MemPool(
   }
 }
 
+// this looks like a huge problem to me, ugh.
 MemPool::~MemPool() {
   // Problem: this isn't necessarily true if a torch.cuda.CUDAGraph()
   // is around and hasn't been deleted/reset. We need to figure out a
@@ -4253,6 +4263,7 @@ MemPool::~MemPool() {
   // to be fair, we don't *need* to call emptyCache() at this time. 
   // But I suppose it is reasonable to do that.
   // TORCH_INTERNAL_ASSERT(use_count() >= 1);
+  std::cout << "GALVEZ: mempool destructor" << id_.first << ", " <<id_.second << std::endl;
   CUDACachingAllocator::releasePool(device_, id_);
   c10::cuda::CUDACachingAllocator::emptyCache(id_);
 }

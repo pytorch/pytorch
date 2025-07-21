@@ -173,6 +173,7 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
 
 // TODO: We probably can use the opaque type trick to avoid creating duplicate
 // kernels for equivalent bit lengths
+  // the kernel is rom here
 void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
   if (isQIntType(dtype)) {
