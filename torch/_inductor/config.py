@@ -529,7 +529,7 @@ fast_autotune_model_directory: Optional[str] = os.environ.get(
 # This uses an ml model to predict the best config for a given kernel, then benchmarks this against aten.
 # The sweetspot for compile time cost vs performance somewhere between max_autotune and no max_autotune.
 # Equivalent to TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE == 1 with max autotune
-fast_autotune = os.environ.get("TORCHINDUCTOR_FAST_AUTOTUNE") == "1"
+fast_autotune = True
 
 # Specify the size of the search space for flex attention autotuning.
 # DEFAULT     - balance between compile time overhead and performance
