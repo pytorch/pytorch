@@ -130,9 +130,9 @@ ARG VLLM
 # set up env for vllm with pinned commit
 COPY ./common/setup_vllm_env.sh  setup_vllm_env.sh
 COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/vllm.txt pinned_vllm.txt
+COPY ci_commit_pins/vllm.txt vllm.txt
 RUN if [ -n "${VLLM}" ]; then bash ./setup_vllm_env.sh; fi
-RUN rm setup_vllm_env.sh common_utils.sh
+RUN rm setup_vllm_env.sh common_utils.sh vllm.txt
 
 ARG HALIDE
 # Build and install halide
