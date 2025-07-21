@@ -1456,6 +1456,22 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(self.device), example_inputs)
 
     @skipIfNoFBGEMM
+    def test_quantized_linear_bias_none(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+
+            def forward(self, x):
+                return torch.ops.quantized.linear_dynamic_fp16_unpacked_weight(
+                    x, self.weight, None
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
+    @skipIfNoFBGEMM
     def test_quanatized_int8_linear(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -6714,6 +6730,7 @@ GPU_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
+    "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
     # No scaled_dot_product_efficient_attention implementation for XPU yet.
     "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
     # No fft implementation for XPU yet.
