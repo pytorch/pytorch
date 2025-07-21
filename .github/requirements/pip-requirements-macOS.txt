@@ -8,8 +8,8 @@ librosa>=0.6.2
 mpmath==1.3.0
 networkx==2.8.7
 ninja==1.10.2.4
-numba==0.59.0
-numpy==1.26.4
+numba==0.60.0
+numpy==2.0.2
 opt-einsum>=3.3
 optree==0.13.0
 packaging==25.0
@@ -25,11 +25,11 @@ pytest-subtests==0.13.1
 pytest-xdist==3.3.1
 pytest==7.3.2
 pyyaml==6.0.2
-scipy==1.12.0
+scipy==1.13.1
 setuptools==80.9.0
 sympy==1.13.3
 tlparse==0.3.30
-tensorboard==2.13.0
+tensorboard==2.20.0
 typing-extensions==4.12.2
 unittest-xml-reporting<=3.2.0,>=2.0.0
 xdoctest==1.1.0

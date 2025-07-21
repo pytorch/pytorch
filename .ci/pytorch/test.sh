@@ -1609,9 +1609,9 @@ if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
   # Force re-install of pandas to avoid error where pandas checks numpy version from initial install and fails upon import
   TMP_PANDAS_VERSION=$(python -c "import pandas; print(pandas.__version__)" 2>/dev/null)
   if [ -n "$TMP_PANDAS_VERSION" ]; then
-    python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0 pandas=="$TMP_PANDAS_VERSION" --force-reinstall
+    python -m pip install numpy==2.0.2 scipy==1.13.1 numba==0.60.0 pandas=="$TMP_PANDAS_VERSION" --force-reinstall
   else
-    python -m pip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
+    python -m pip install numpy==2.0.2 scipy==1.13.1 numba==0.60.0
   fi
   python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_numpy_interop.py test_tensor_creation_ops.py test_torch.py torch_np/test_basic.py
 elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
@@ -1680,8 +1680,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchvision
   install_torchao
   id=$((SHARD_NUMBER-1))
-  # https://github.com/opencv/opencv-python/issues/885
-  pip_install opencv-python==4.8.0.74
+  pip_install opencv-python==4.12.0.88
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf

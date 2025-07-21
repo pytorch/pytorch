@@ -417,10 +417,10 @@ class TestOpenReg(TestCase):
             [
                 (
                     (
-                        np.core.multiarray._reconstruct,
-                        "numpy.core.multiarray._reconstruct",
+                        np._core.multiarray._reconstruct,
+                        "numpy._core.multiarray._reconstruct",
                     )
-                    if np.__version__ >= "2.1"
+                    if hasattr(np, "_core")
                     else np.core.multiarray._reconstruct
                 ),
                 np.ndarray,
