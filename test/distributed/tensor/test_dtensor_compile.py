@@ -298,7 +298,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         x = torch.randn(64, 32, requires_grad=True)
         spec = DTensorSpec(
             mesh,
-            (Replicate(), Shard(0)),
+            (Replicate(),),
             tensor_meta=TensorMeta(
                 shape=torch.Size([128, 32]), stride=(32, 1), dtype=x.dtype
             ),
