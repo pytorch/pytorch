@@ -3534,6 +3534,7 @@ class Layout(OutputSpec):
         size: Sequence[Expr],
         stride: Optional[Sequence[Expr]] = None,
         offset: Expr = Integer(0),
+        is_pinned: bool = False,
     ) -> None:
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
@@ -3544,6 +3545,9 @@ class Layout(OutputSpec):
         self.size = size
         self.stride = stride
         self.offset = offset
+        self.is_pinned = is_pinned
+        # is_pinned implies cpu
+        assert not self.is_pinned or self.device.type == "cpu"
 
     def __str__(self) -> str:
         offset = ""
@@ -3553,7 +3557,7 @@ class Layout(OutputSpec):
         device_index_str = "" if self.device.index is None else f":{self.device.index}"
         return (
             f"{type(self).__name__}('{self.device.type}{device_index_str}', {self.dtype}, "
-            f"size={self.size}, stride={self.stride}{offset})"
+            f"size={self.size}, stride={self.stride}{offset}, is_pinned={self.is_pinned})"
         )
 
     __repr__ = __str__
@@ -3568,6 +3572,7 @@ class Layout(OutputSpec):
                 convert_shape_to_symint(self.stride),
                 dtype=self.dtype,
                 device=self.device,
+                pin_memory=self.is_pinned,
             )
 
     def is_contiguous(self) -> bool:
@@ -3719,6 +3724,7 @@ class Layout(OutputSpec):
             self.size,
             self.stride,
             self.offset,
+            self.is_pinned,
         )
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
@@ -3735,6 +3741,7 @@ class Layout(OutputSpec):
             and self.size == other.size
             and self.stride == other.stride
             and self.offset == other.offset
+            and self.is_pinned == other.is_pinned
         )
 
     def storage_size(self) -> Expr:
@@ -3848,6 +3855,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def as_exact_strides(
@@ -3863,6 +3871,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def as_fill_order(self, order: Sequence[int]) -> FixedLayout:
@@ -3875,6 +3884,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def as_same_order(self, stride: Sequence[_IntLike]) -> FixedLayout:
@@ -3887,6 +3897,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def __init__(
@@ -3895,12 +3906,13 @@ class FlexibleLayout(Layout):
         dtype: torch.dtype,
         size: Sequence[Expr],
         stride_order: Optional[Sequence[Union[int, Integer]]] = None,
+        is_pinned: bool = False,
     ) -> None:
         if stride_order:
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
             strides = FlexibleLayout.contiguous_strides(size)
-        super().__init__(device, dtype, size, strides)
+        super().__init__(device, dtype, size, strides, is_pinned=is_pinned)
 
 
 class NonOwningLayout(Layout):
@@ -4139,6 +4151,9 @@ class Buffer(IRNode, CodegenSymbol):
 
     def get_storage_numel(self) -> int:
         return self.get_numel()
+
+    def get_is_pinned(self) -> bool:
+        return self.get_layout().is_pinned
 
     def freeze_layout(self) -> None:
         if isinstance(self.layout, Layout) and not isinstance(
@@ -5152,6 +5167,10 @@ class ConcatKernel(NopKernel):
         ):
             output_stride = make_channels_last_strides_for(new_size)
 
+        is_pinned = all(
+            is_storage_and_layout(x) and x.get_layout().is_pinned for x in inputs
+        )
+
         assert device is not None
         concat_kernel = ConcatKernel(
             name=None,
@@ -5160,6 +5179,7 @@ class ConcatKernel(NopKernel):
                 dtype=dtype,
                 size=new_size,
                 stride=output_stride,
+                is_pinned=is_pinned,
             ),
             inputs=[],
         )
@@ -6959,6 +6979,7 @@ class DeviceCopy(ExternKernelOut):
                 device=device,
                 dtype=x.get_dtype(),
                 size=x.get_size(),
+                is_pinned=non_blocking,
             ),
             [cls.realize_input(x)],
             constant_args,
