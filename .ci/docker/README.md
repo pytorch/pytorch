@@ -39,8 +39,7 @@ sudo bash -c 'TRITON=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:lat
 
 ## [Guidance] Add new base docker image
 ### Background
-The base docker images built by the `docker-builds.yml` are used throughout the PyTorch CI/CD pipeline. Only set base docker image if you have env or changes needed
-before building PyTorch on CI.
+The base docker images are built by the workflow `docker-builds.yml` are used throughout the PyTorch CI/CD pipeline. Only set base docker image if you have env or changes needed before building PyTorch on CI.
 
 1. **Rebuild**:
    - The Docker image building process is triggered if any changes apply to `.ci/docker/*` to ensure images stay up-to-date
