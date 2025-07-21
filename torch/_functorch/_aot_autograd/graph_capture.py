@@ -19,7 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .descriptors import AOTInput
+from .descriptors import AOTInput, BackwardTokenAOTInput
 from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
@@ -65,6 +65,7 @@ def _create_graph(
         @functools.wraps(f)
         def inner_f(*args):
             nonlocal out_descs
+            assert out_descs is None
             out, out_descs = call_and_expect_output_descs(f, args)
             return out
 
@@ -88,11 +89,40 @@ def _create_graph(
             flat_args_descs, _ = pytree.tree_flatten(args_descs)
             flat_out_descs, _ = pytree.tree_flatten(out_descs)
 
+            # Unfortunately, flat_args_descs is not guaranteed to match the
+            # number of actual arguments that show up on the FX graph.
+            # Speciifcally, allow_token_discovery=True means that we will
+            # silently add extra token arguments to the backwards graph.
+            #
+            # Although there are a few ways to detect what these tokens are,
+            # we are going to settle for something dodgy but simple to
+            # implement: match tangents_token placeholders specifically,
+            # as these are the only placeholders that are created by token
+            # discovery (NB: there is NO other code that treats this name
+            # as load bearing, so this is a bit naughty!)
+            #
+            # I originally wanted to detect tokens in exactly the same way
+            # that they are detected at normal runtime, but to be honest
+            # the normal runtime detection is pretty strange: it seems the
+            # backward tokens are not reliably at the end of the argument list
+            # but *precede* the RNG arguments (I don't understand why this is
+            # the case).  And in unlift_tokens, token arguments are detected
+            # by seeing if they feed into an effects call!  Dastardly.  Why
+            # didn't we just introduce a new type.
+
             i = 0
             for n in fx_g.graph.nodes:
                 if n.op == "placeholder":
-                    n.meta["desc"] = flat_args_descs[i]
-                    i += 1
+                    if n.name.startswith("tangents_token"):
+                        n.meta["desc"] = BackwardTokenAOTInput()
+                    else:
+                        assert i < len(flat_args_descs), (
+                            (fn_wrappers(inner_f)),
+                            [n for n in fx_g.graph.nodes if n.op == "placeholder"],
+                            flat_args_descs,
+                        )
+                        n.meta["desc"] = flat_args_descs[i]
+                        i += 1
                 elif n.op == "output":
                     n.meta["desc"] = flat_out_descs
 

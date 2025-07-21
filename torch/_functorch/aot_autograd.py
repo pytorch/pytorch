@@ -43,7 +43,7 @@ from ._aot_autograd.autograd_cache import (  # noqa: F401
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
 )
-from ._aot_autograd.descriptors import AOTInput, InputAOTInput, ParamAOTInput
+from ._aot_autograd.descriptors import AOTInput, ParamAOTInput, PlainAOTInput
 from ._aot_autograd.frontend_utils import (
     _detect_attribute_assignment,
     _try_get_metadata_from_dynamo,
@@ -371,7 +371,7 @@ AOT_COUNTER = itertools.count()
 #
 # We view every forward output when creating out tangent tensors to handle the problematic
 # case in which a subclass does extra aliasing between graph outputs/inputs in a way that
-# is not visible above the sublass.
+# is not visible above the subclass.
 #
 # Ordinarily, when constructing the joint function that we want to trace in AOTAutograd,
 # we're guaranteed that the tangent tensors that we pass
@@ -723,7 +723,7 @@ def aot_function(
         This API is experimental and likely to change.
 
     Args:
-        fn (Callable): A Python function that takes one ore more arguments. Must
+        fn (Callable): A Python function that takes one or more arguments. Must
             return one or more Tensors.
         fw_compiler (Callable): A Python function that accepts an Fx graph with
             Aten ops and input args, and returns a Callable that semantically is
@@ -796,7 +796,7 @@ def aot_function(
             # TODO: We actually could use the pytree path to make better descs.
             # Also, the descs here are bad if you do aot_module.
             fake_flat_args_descs = [
-                InputAOTInput(i) for i in range(len(fake_flat_args))
+                PlainAOTInput(i) for i in range(len(fake_flat_args))
             ]
             with contextlib.ExitStack() as stack:
                 aot_state = create_aot_state(
@@ -908,7 +908,7 @@ def prepare_aot_module_simplified(
 
     # Next, the input args
     full_args.extend(args)
-    full_args_descs.extend(InputAOTInput(i) for i in range(len(args)))
+    full_args_descs.extend(PlainAOTInput(i) for i in range(len(args)))
 
     # TODO: Might be nice to hold on to the Dynamo source here in full_args_descs!
     (
@@ -1089,7 +1089,7 @@ def aot_export_module(
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
     pre_dispatch: bool = False,
-    # If None, will be infered from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
+    # If None, will be inferred from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, GraphSignature]:
@@ -1290,7 +1290,7 @@ def aot_export_joint_simple(
     *,
     trace_joint: bool,
     # It looks like the main consequence of this API is that for dynamic shapes,
-    # it will assume that parms/buffers are static.
+    # it will assume that params/buffers are static.
     # With the new inferred dynamic shapes API, maybe this doesn't matter?
     num_params_buffers: int = 0,
     decompositions: Optional[dict] = None,
@@ -1401,7 +1401,7 @@ def _aot_export_function(
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
     pre_dispatch: bool = False,
-    # If None, `dynamic_shapes` will be infered from inputs, but the inferred result might be wrong.
+    # If None, `dynamic_shapes` will be inferred from inputs, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     keep_input_mutations: bool = False,
     kwargs=None,
@@ -1455,7 +1455,7 @@ def _aot_export_function(
         shape_env = fake_mode.shape_env
     fake_flat_args = process_inputs(flat_args, aot_config, fake_mode, shape_env)
     # TODO: Improve the descs here with pytree information
-    fake_flat_args_descs = [InputAOTInput(i) for i in range(len(fake_flat_args))]
+    fake_flat_args_descs = [PlainAOTInput(i) for i in range(len(fake_flat_args))]
 
     with contextlib.ExitStack() as stack:
         aot_state = create_aot_state(

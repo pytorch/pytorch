@@ -2372,7 +2372,7 @@ def forward(self, arg0_1, arg1_1):
             return a.mul(3), b.mul(4)
 
         inp = [
-            # First inp doesnt require grad, but we switch it on
+            # First inp doesn't require grad, but we switch it on
             torch.ones(3, 3, requires_grad=False),
             torch.ones(3, 3, requires_grad=True),
         ]
@@ -4737,8 +4737,8 @@ def forward(self, arg0_1):
 class <lambda>(torch.nn.Module):
     def forward(
         self,
-        arg0_1: "f32[2, 2]",  # InputAOTInput(idx=0)
-        arg1_1: "f32[2]",  # InputAOTInput(idx=1)
+        arg0_1: "f32[2, 2]",  # PlainAOTInput(idx=0)
+        arg1_1: "f32[2]",  # PlainAOTInput(idx=1)
     ):
         sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1)
         gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
@@ -4751,8 +4751,8 @@ class <lambda>(torch.nn.Module):
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem, 3)
         add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
         return (
-            add,  # OutputAOTOutput(idx=0)
-            add_1,  # OutputAOTOutput(idx=1)
+            add,  # PlainAOTOutput(idx=0)
+            add_1,  # PlainAOTOutput(idx=1)
         )
 
     class true_graph_0(torch.nn.Module):
@@ -4832,8 +4832,8 @@ class <lambda>(torch.nn.Module):
 class <lambda>(torch.nn.Module):
     def forward(
         self,
-        arg0_1: "f32[2, 2]",  # InputAOTInput(idx=0)
-        arg1_1: "f32[2]",  # InputAOTInput(idx=1)
+        arg0_1: "f32[2, 2]",  # PlainAOTInput(idx=0)
+        arg1_1: "f32[2]",  # PlainAOTInput(idx=1)
     ):
         cos: "f32[2, 2]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
 
@@ -4846,7 +4846,7 @@ class <lambda>(torch.nn.Module):
         sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
         return (
-            add,  # OutputAOTOutput(idx=0)
+            add,  # PlainAOTOutput(idx=0)
         )
 
     class body_graph_0(torch.nn.Module):
@@ -5106,14 +5106,14 @@ class <lambda>(torch.nn.Module):
 class <lambda>(torch.nn.Module):
     def forward(
         self,
-        arg0_1: "f32[3, 1, 1, 1]",  # InputAOTInput(idx=0)
-        arg1_1: "f32[3]",  # InputAOTInput(idx=1)
-        arg2_1: "f32[3]",  # InputAOTInput(idx=2)
-        arg3_1: "f32[3]",  # InputAOTInput(idx=3)
-        arg4_1: "f32[3]",  # InputAOTInput(idx=4)
-        arg5_1: "f32[3]",  # InputAOTInput(idx=5)
-        arg6_1: "i64[]",  # InputAOTInput(idx=6)
-        arg7_1: "f32[1, 1, 3, 3]",  # InputAOTInput(idx=7)
+        arg0_1: "f32[3, 1, 1, 1]",  # PlainAOTInput(idx=0)
+        arg1_1: "f32[3]",  # PlainAOTInput(idx=1)
+        arg2_1: "f32[3]",  # PlainAOTInput(idx=2)
+        arg3_1: "f32[3]",  # PlainAOTInput(idx=3)
+        arg4_1: "f32[3]",  # PlainAOTInput(idx=4)
+        arg5_1: "f32[3]",  # PlainAOTInput(idx=5)
+        arg6_1: "i64[]",  # PlainAOTInput(idx=6)
+        arg7_1: "f32[1, 1, 3, 3]",  # PlainAOTInput(idx=7)
     ):
         # No stacktrace found for following nodes
         convolution: "f32[1, 3, 3, 3]" = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg7_1 = arg0_1 = arg1_1 = None
@@ -5128,11 +5128,11 @@ class <lambda>(torch.nn.Module):
         detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach);  detach = None
         detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
         return (
-            getitem_3,  # InputMutationAOTOutput(mutated_input=InputAOTInput(idx=4))
-            getitem_4,  # InputMutationAOTOutput(mutated_input=InputAOTInput(idx=5))
-            add,  # InputMutationAOTOutput(mutated_input=InputAOTInput(idx=6))
-            sum_1,  # OutputAOTOutput(idx=0)
-            detach_2,  # OutputAOTOutput(idx=1)
+            getitem_3,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=4))
+            getitem_4,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=5))
+            add,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=6))
+            sum_1,  # PlainAOTOutput(idx=0)
+            detach_2,  # PlainAOTOutput(idx=1)
         )
         """,  # noqa: B950
         )
@@ -5709,7 +5709,7 @@ def forward(self, primals_1, tangents_1):
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
-            # then 4 tensors (transposes of matricies used for mm) are saved
+            # then 4 tensors (transposes of matrices used for mm) are saved
             # finally 3 symints are saved
             [False, True, True, False, False] + [False] * 4 + [True] * 3,
             [is_sym_node(n) for n in fw_graph_out_nodes],
@@ -6039,7 +6039,7 @@ metadata incorrectly.
         self.assertEqual(b_test.a, b_ref.a)
         self.assertEqual(b_test.b, b_ref.b)
 
-        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile teh backward.
+        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile the backward.
         (b_ref * out_ref).sum().backward()
         (b_test * out_test).sum().backward()
         # Both grad_inputs are TwoTensor

@@ -55,7 +55,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from .descriptors import AOTOutput, OutputAOTOutput
+from .descriptors import AOTOutput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -131,7 +131,7 @@ def aot_stage1_graph_capture(
     @wraps(orig_flat_fn)
     def orig_flat_fn2(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
         out = orig_flat_fn(*args)
-        out_descs: list[AOTOutput] = [OutputAOTOutput(i) for i in range(len(out))]
+        out_descs: list[AOTOutput] = [PlainAOTOutput(i) for i in range(len(out))]
         return out, out_descs
 
     aot_config = aot_state.aot_config
@@ -1118,7 +1118,7 @@ def maybe_inline_graph_saved_tensors_hooks(
                 fw_outs_bw_ins_node_names.append(new_node_name)
             else:
                 # We can not specify desired name in node_copy.
-                # Copying node manually to set specifc name,
+                # Copying node manually to set specific name,
                 # to have matching fw_outs, bw_inputs names.
                 new_node_name = _gen_unused_name(f"{saved.name}_hook_{out_idx}")
                 with fw_g.inserting_before(_n):
@@ -1523,7 +1523,7 @@ def aot_stage2_autograd(
         # It's possible to construct a case where eager may or may not have have tried to autograd through y,
         # depending on the actual grad_outputs that were passed in during the backward.
         # There is no easy fix for this: the simplest fix would be to run with `retain_graph=True`,
-        # allowing autograd to re-use the graph.
+        # allowing autograd to reuse the graph.
         #
         # An example of this case is:
         # def f(x):
