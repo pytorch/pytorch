@@ -5,8 +5,6 @@
 
 namespace at::native::kleidiai {
 
-at::Tensor kleidi_bf16_to_fp32(const at::Tensor& src);
-
 /**
  * @brief Rearranges the quantized weight to support kleidiai inference
  * @param bl Groupsize for quantization should be multiple of 32
