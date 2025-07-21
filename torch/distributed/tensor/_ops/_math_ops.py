@@ -904,6 +904,7 @@ def _common_norm_backward_strategy(
 
         # arg: mean
         if not rms_norm:
+            assert mean_strategy is not None  # mypy fix
             mean_src_spec = mean_strategy.strategies[idx].output_spec
             input_specs_list.append(mean_src_spec)
             redistribute_costs.append([0.0 for _ in mean_strategy.strategies])
