@@ -64,32 +64,29 @@ As example of linux-test:
 
 ### Which files to modify
 #### `.ci/docker/build.sh` vs `.ci/pytorch/build.sh`
-- **`.ci/docker/build.sh`**: Used for building base Docker images. This script:
-  - Is used by the `docker-builds.yml` workflow to pre-build Docker images for CI
+- **`.ci/docker/build.sh`**: Used for building base Docker images. used by the `docker-builds.yml` workflow to pre-build Docker images for CI.
 
-- **`.ci/pytorch/build.sh`**: Used for building PyTorch inside a Docker container. This script:
-  - Is called by `_linux-build.yml` after the Docker container is started
+- **`.ci/pytorch/build.sh`**: Used for building PyTorch inside a Docker containe, called by, for instance,`_linux-build.yml` after the Docker container is started to build pytorch wheels
 
 #### `.ci/docker/ci_commit_pins/` vs `.github/ci_commit_pins`
-- **`.ci/docker/ci_commit_pins/`**: Used for pinning dependency versions during base Docker image building:
+- **`.ci/docker/ci_commit_pins/`**: Used for pinning dependency versions during base Docker image building
 - **`.github/ci_commit_pins`**: Used for pinning dependency versions during PyTorch building and tests
 
-### Step by step [Only for base image setup]
+### New base docker image: Step by step
 
 #### Add pinned commit (if applies)
-We use pinned commits for test&build stability. The nightly.yaml file checks and updates pinned commits for certain repository dependencies daily.
+We use pinned commits for build stability. The nightly.yaml file checks and updates pinned commits for certain repository dependencies daily.
 
-If the library you introduce needs to be installed from a specific pinned commit or built from scratch from a repository in base docker image:
+If the library is needed for new base docker image for a specific pinned commit or built from scratch from a repository in base docker image:
 
 1. Add the repository you want to watch in nightly.yml and merge-rules.yml
 2. Add initial pinned commit in .ci/docker/ci_commit_pins/. The txt filename should match the one defined in step 1
 
 #### Add Base Docker Image
 1. **Add new Base Docker image configuration** (if applicable):
-
    Add the configuration in `.ci/docker/build.sh`. For example:
    ```bash
-   pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm)
+   pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-new1)
      CUDA_VERSION=12.8.1
      CUDNN_VERSION=9
      ANACONDA_PYTHON_VERSION=3.12
@@ -99,7 +96,6 @@ If the library you introduce needs to be installed from a specific pinned commit
      UCX_COMMIT=${_UCX_COMMIT}
      UCC_COMMIT=${_UCC_COMMIT}
      TRITON=yes
-     VLLM=yes
      NEW_ARG_1=yes
      ;;
    ```
