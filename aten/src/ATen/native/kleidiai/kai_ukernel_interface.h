@@ -21,18 +21,21 @@
 namespace at::native::kleidiai {
 
 enum class kai_kernel_id {
+  // FP32 inputs, 4-bit weights, FP32 output
   matmul_clamp_f32_qai8dxp1x8_qsi4c32p8x8_1x8x32_neon_dotprod =
-      0, // Groupwise 4 bit GEMV
+      0, // Groupwise 4-bit GEMV (per-group scales, NEON DOTPROD)
   matmul_clamp_f32_qai8dxp4x8_qsi4c32p4x8_4x8x32_neon_i8mm =
-      1, // Groupwise 4 bit GEMM
+      1, // Groupwise 4-bit GEMM (per-group scales, NEON I8MM)
   matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod =
-      2, // Channelwise 4 bit GEMV
+      2, // Channelwise 4-bit GEMV (per-channel scales, NEON DOTPROD)
   matmul_clamp_f32_qai8dxp4x8_qsi4cxp8x8_8x8x32_neon_i8mm =
-      3, // Channelwise 4 bit GEMM
+      3, // Channelwise 4-bit GEMM (per-channel scales, NEON I8MM)
+
+  // BF16 inputs, 4-bit weights, BF16 output
   matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod =
-      4, // Channelwise 4 bit GEMV
+      4, // Channelwise 4-bit GEMV with BF16 input/output
   matmul_clamp_bf16_qai8dxp4x8_qsi4cxp8x8_8x8_neon_i8mm =
-      5 // Channelwise 4 bit GEMM
+      5  // Channelwise 4-bit GEMM with BF16 input/output
 };
 
 // Channelwise Kernel mapping
