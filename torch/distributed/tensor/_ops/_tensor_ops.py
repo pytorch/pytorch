@@ -16,7 +16,6 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops import _pointwise_ops
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
 from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
 from torch.distributed.tensor._ops.utils import (
@@ -1141,38 +1140,3 @@ def split_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     return OpStrategy(all_strategies)
-
-
-@register_op_strategy(
-    [
-        aten.clamp.default,
-        aten.clamp.Tensor,
-        aten.clamp.out,
-        aten.clamp_.default,
-        aten.clamp_.Tensor,
-        aten.clamp_min.default,
-        aten.clamp_min.Tensor,
-        aten.clamp_min_.default,
-        aten.clamp_min_.Tensor,
-        aten.clamp_max.default,
-        aten.clamp_max.Tensor,
-        aten.clamp_max_.default,
-        aten.clamp_max_.Tensor,
-    ],
-)
-def clamp_strategy(op_schema: OpSchema) -> OpStrategy:
-    # Op clamp is kind of special in the input args. Arg `min` and `max` can be
-    # either Number or Tensor (Tensor can broadcast), which results in different
-    # number of input_specs/redistribute_cost in output strategy. When `min` and
-    # `max` are of type Tensor, they can be broadcasted to match input tensor
-    # shape.
-    is_value = True
-    for bound_strat in op_schema.args_schema[1:]:
-        if isinstance(bound_strat, DTensorSpec):
-            is_value = False
-
-    if is_value:
-        # pure value can't be Partial()
-        return _pointwise_ops.pointwise_strategy(op_schema, -1)
-    else:
-        return _pointwise_ops.pointwise_strategy(op_schema, 3)

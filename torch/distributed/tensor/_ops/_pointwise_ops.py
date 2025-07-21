@@ -133,6 +133,11 @@ pointwise_ops = [
     aten.ceil.default,
     aten.ceil.out,
     aten.ceil_.default,
+    aten.clamp.default,
+    aten.clamp.Tensor,
+    aten.clamp.out,
+    aten.clamp_.default,
+    aten.clamp_.Tensor,
     aten.clip.default,
     aten.clip.out,
     aten.clip_.default,
@@ -495,16 +500,11 @@ def common_pointwise_strategy(
         linearity: depending on the operator, we support different types of linearity
             -1: the operation does not support linearity
             0: the unary operation that supports linearity, output propagates partial.
-            1: the N-ary operation supports add linearity, where it requires every operand
+            1: the binary operation supports add linearity, where it requires every operand
                 to be partial, output propagates partial.
-            2: the N-ary operation supports multiplicative linearity, where it requires
+            2: the binary operation supports multiplicative linearity, where it requires
                 the primary operand to be partial, and the other operands to be replicate,
                 output propagates partial.
-            3: the N-ary operation supports value comparison linearity, which is similar to
-                linearity=1 but only supports Partial('sum'). Note that in this case, the user must
-                make sure all args related in the comparison support Partial('sum'). One
-                special case is `clamp`. If input `min/max` are pure values, Partial('sum')
-                will not scale the pure value.
         scalar_tensor_idx: Index of the Replicate scalar tensor for which we allow the mesh
             to be different from the mesh of followed_strategy
     """
@@ -525,15 +525,10 @@ def common_pointwise_strategy(
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
                 out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
-                if linearity == 3:
-                    # only partial-sum is supported and all args involved in the
-                    # comparison should be partial-sum
-                    partial_supports_linearity = placement.is_partial("sum")
-                else:
-                    # note that only partial-sum and partial-avg are supported for linearity
-                    partial_supports_linearity = placement.is_partial(
-                        "sum"
-                    ) or placement.is_partial("avg")
+                # note that only partial-sum and partial-avg are supported for linearity
+                partial_supports_linearity = placement.is_partial(
+                    "sum"
+                ) or placement.is_partial("avg")
                 if linearity > 0 and partial_supports_linearity:
                     # propagate the partial placement
                     out_placements.append(placement)
@@ -594,14 +589,7 @@ def common_pointwise_strategy(
                     input_arg_dims_map,
                     partial_to_replicate=should_convert_partial,
                 )
-                if linearity == 3:
-                    # convert all partial to partial('sum')
-                    input_target_placements = tuple(
-                        [
-                            Partial("sum") if p.is_partial() else p
-                            for p in input_target_placements
-                        ]
-                    )
+
                 input_arg_target_spec = DTensorSpec(
                     mesh=followed_strategy.mesh,
                     placements=input_target_placements,
