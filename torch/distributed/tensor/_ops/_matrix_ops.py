@@ -704,7 +704,7 @@ def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrate
         None,  # max_k
         None,  # philox_seed
         None,  # philox_offset
-        # NOTE: debug_attn_mask is not supproted by pytorch and is always an empty tensor
+        # NOTE: debug_attn_mask is not supported by pytorch and is always an empty tensor
         # https://github.com/pytorch/pytorch/blob/60205b0eb2602317856312a66d955c88334ade0b/aten/src/ATen/native/transformers/cuda/attention.cu#L839-L840
         debug_attn_mask_sharding,  # debug_attn_mask
         Replicate(),  # q
