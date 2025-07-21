@@ -1559,6 +1559,10 @@ test_linux_aarch64() {
         test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops test_cpp_extensions_open_device_registration \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
+  #functorch tests
+  python test/run_test.py --include functorch/test_aotdispatch.py \
+       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
+ 
   # Dynamo tests
   python test/run_test.py --include dynamo/test_compile dynamo/test_backends dynamo/test_comptime dynamo/test_config \
        dynamo/test_functions dynamo/test_fx_passes_pre_grad dynamo/test_interop dynamo/test_model_output dynamo/test_modules \
