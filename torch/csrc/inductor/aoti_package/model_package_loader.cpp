@@ -184,12 +184,18 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string libraries_dirs_args;
   for (auto& arg : compile_options["libraries_dirs"]) {
-    libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
+    if (_is_windows_os()) {
+    } else {
+      libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
+    }
   }
 
   std::string libraries_args;
   for (auto& arg : compile_options["libraries"]) {
-    libraries_args += "-l" + arg.get<std::string>() + " ";
+    if (_is_windows_os()) {
+    } else {
+      libraries_args += "-l" + arg.get<std::string>() + " ";
+    }
   }
 
   std::string passthrough_parameters_args;
