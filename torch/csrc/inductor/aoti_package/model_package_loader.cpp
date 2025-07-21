@@ -215,6 +215,18 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string cmd;
   if (_is_windows_os()) {
+    cmd = normalize_path_separator(fmt::format(
+        "{} {} {} {} {} {} /LD /Fe{} /link {} {} {}",
+        compiler,
+        include_dirs_args,
+        definitions_args,
+        cflags_args,
+        source_args,
+        passthrough_parameters_args,
+        target_file,
+        libraries_dirs_args,
+        libraries_args,
+        ldflags_args));
   } else {
     cmd = normalize_path_separator(fmt::format(
         "{} {} {} {} {} {} {} {} {} {} -o {}",
