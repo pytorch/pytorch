@@ -104,6 +104,7 @@ from .source import (
     ChainedSource,
     ConstantSource,
     ConstDictKeySource,
+    DataclassFieldsSource,
     DefaultsSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
@@ -146,6 +147,7 @@ from .types import (  # noqa: F401
 from .utils import (
     builtin_dict_keys,
     common_constant_types,
+    dataclass_fields,
     dict_keys,
     get_custom_getattr,
     get_torch_function_mode_stack,
@@ -451,6 +453,7 @@ def _get_closure_vars():
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
+            "___dataclass_fields": dataclass_fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
@@ -1324,6 +1327,14 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, CallFunctionNoArgsSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.call_function_no_args_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, DataclassFieldsSource):
+            assert base_guard_manager
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: dataclass_fields(x),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
