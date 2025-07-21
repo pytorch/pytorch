@@ -574,7 +574,6 @@ realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8
-realize_acc_reads_size_threshold = 3 * (1024**3)
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
@@ -996,7 +995,7 @@ enable_linear_binary_folding = (
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
 # Enable caching codegen of triton templates.
-enable_caching_generated_triton_templates: bool = False
+enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
@@ -1025,7 +1024,7 @@ class cpp:
     dynamic_threads = os.environ.get("TORCHINDUCTOR_CPP_DYNAMIC_THREADS", "0") == "1"
 
     simdlen: Optional[int] = None
-    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "4096"))
+    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "512"))
 
     cxx: tuple[Literal[None], str] = (
         None,  # download gcc12 from conda-forge if conda is installed
@@ -1773,8 +1772,11 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
-    # Save mapping info from inductor generated triton kernel to post_grad fx nodes
-    log_inductor_triton_kernel_to_post_grad_node_info: bool = True
+    # Save mapping info from inductor generated triton kernel to post_grad fx nodes to pre_grad fx nodes
+    provenance_tracking = (
+        os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+        or os.environ.get("INDUCTOR_PROVENANCE", "0") == "1"
+    )
 
 
 _save_config_ignore: list[str] = [
