@@ -130,8 +130,9 @@ def aot_stage1_graph_capture(
     @simple_wraps(orig_flat_fn)
     def orig_flat_fn2(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
         out = orig_flat_fn(*args)
-        out_descs: list[AOTOutput] = type(out)(
-            PlainAOTOutput(i) for i in range(len(out))
+        out_descs: list[AOTOutput] = type(out)(  # type: ignore[assignment]
+            PlainAOTOutput(i)
+            for i in range(len(out))  # type: ignore[misc]
         )
         return out, out_descs
 

@@ -1058,7 +1058,6 @@ def handle_effect_tokens_fn(
     trace_joint: bool,
 ) -> Any:
     num_tokens = len(meta.tokens)
-    orig_args = args
 
     @simple_wraps(fn)
     def inner_fn(*args):
