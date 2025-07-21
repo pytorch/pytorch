@@ -31,12 +31,6 @@ static PyObject* eval_frame_callback_get(void) {
 }
 
 void eval_frame_callback_set(PyObject* obj) {
-  // Disable sys.monitoring unless we run eagerly
-  if (obj == Py_None || obj == Py_False) {
-    enable_monitoring_callables();
-  } else {
-    disable_monitoring_callables();
-  }
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
@@ -596,6 +590,21 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
       "python enabled=%d and is run_only=%d",
       callback != Py_None,
       callback == Py_False);
+  // skip tracing sys.monitoring callables
+  if (callback != Py_None && callback != Py_False) {
+    PyInterpreterState* interp = PyThreadState_GET()->interp;
+    PyObject** monitoring_callables_flat =
+        (PyObject**)interp->monitoring_callables;
+    for (size_t i = 0; i < sys_monitoring_num_callables; ++i) {
+      PyObject* callable = monitoring_callables_flat[i];
+      if (callable != NULL && PyFunction_Check(callable)) {
+        PyFunctionObject* func = (PyFunctionObject*)callable;
+        if (func->func_code != NULL) {
+          skip_code_recursive((PyCodeObject*)func->func_code);
+        }
+      }
+    }
+  }
   return set_eval_frame(callback, PyThreadState_GET(), module);
 }
 
