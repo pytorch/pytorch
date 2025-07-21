@@ -87,6 +87,7 @@ from .utils import (
     call_func_at_runtime_with_args,
     make_boxed_func,
     partial_flatten_asdict,
+    simple_wraps,
     strict_zip,
     without_output_descs,
 )
@@ -966,7 +967,7 @@ class AOTDedupeWrapper(CompilerWrapper):
                         DuplicateInputs(kept_arg_source, dupe_arg_source)
                     )
 
-        @wraps(flat_fn)
+        @simple_wraps(flat_fn)
         def wrapped_flat_fn(
             *args: FxValue,
         ) -> tuple[list[FxValue], list[AOTOutput]]:
@@ -1151,7 +1152,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                     f_args_inner.append(view_arg)
             return f_args_inner
 
-        @wraps(flat_fn)
+        @simple_wraps(flat_fn)
         def wrapped_flat_fn(*args):
             unpacked_args = _unpack_synthetic_bases(args)
             # This is a bit subtle. The goal of this entire function (aot_dispatch_synthetic_bases)

@@ -11,7 +11,6 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from functools import wraps
 from typing import Callable, Optional
 
 import torch
@@ -56,7 +55,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import create_subclass_meta
-from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
+from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
 
 
 zip = strict_zip
@@ -178,7 +177,7 @@ def run_functionalized_fw_and_collect_metadata(
         else:
             return t
 
-    @wraps(f)
+    @simple_wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
