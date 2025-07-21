@@ -219,6 +219,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         decompose_map_to_while_loop
     )
 
+    collectives_bucketing: bool = False
     if config.bucket_reduce_scatters_fx != "none":
         from torch._inductor.fx_passes.bucketing import (
             bucket_reduce_scatter,
@@ -232,6 +233,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
             lambda graph: bucket_reduce_scatter(graph.owning_module, d)
         )
+        collectives_bucketing = True
 
     # Fx all_gather bucketing introduces mutation op
     # Keeping it in the end to keep invariant of functional graph for previous passes.
@@ -254,6 +256,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
             lambda graph: p(graph.owning_module, d)
         )
+        collectives_bucketing = True
+    if collectives_bucketing:
+        stable_topological_sort(gm.graph)
+
 
     gm.recompile()
     gm.graph.lint()

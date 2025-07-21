@@ -15,6 +15,7 @@ from torch.distributed.distributed_c10d import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._ordered_set import OrderedSet
+from torch._inductor.pattern_matcher import stable_topological_sort
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ def bucket_all_gather_by_mb(
     ag_buckets: list[list[torch.fx.Node]] = []
     for group_name, ag_nodes in group_name_ag_nodes.items():
         cur_bucket: list[torch.fx.Node] = []
+        cur_bucket_recursive_users: OrderedSet[torch.fx.Node] = OrderedSet()
         cur_bucket_size_bytes: int = 0
         cur_bucket_id: int = 0
         all_gather_bucket_size_bytes = int(
@@ -123,6 +125,9 @@ def bucket_all_gather_by_mb(
         )
         for ag_node in ag_nodes:
             assert is_all_gather_into_tensor(ag_node)
+            if ag_node in cur_bucket_recursive_users:
+                # We can not bucket successors with the node
+                continue
             assert "val" in ag_node.meta
             ag_output_size_bytes = (
                 ag_node.meta["val"].numel()
@@ -142,6 +147,7 @@ def bucket_all_gather_by_mb(
                 cur_bucket_id += 1
             cur_bucket_size_bytes += ag_output_size_bytes
             cur_bucket.append(ag_node)
+            find_recursive_users_of_fx_node(ag_node, cur_bucket_recursive_users)
         if len(cur_bucket) > 1:
             # add remaining nodes in the last bucket
             ag_buckets.append(cur_bucket)
@@ -667,15 +673,15 @@ def reduce_scatter_merge_fn_to_trace(
 def all_gather_merge_fn_to_trace(  # type: ignore[no-untyped-def]
     ag_ins, group_size: int, group_name: str, dtype: torch.dtype, local_rank
 ) -> list[torch.Tensor]:
-    inp_sizes = [ag_in.shape for ag_in in ag_ins]
-    inp_split_sizes = [ag_in.numel() for ag_in in ag_ins]
-    ag_input_numel = sum(inp_split_sizes)
+    ins_sizes = [ag_in.shape for ag_in in ag_ins]
+    ins_split_sizes = [ag_in.numel() for ag_in in ag_ins]
+    ag_input_numel = sum(ins_split_sizes)
     device = ag_ins[0].device
     new_ag_out = torch.empty(ag_input_numel * group_size, dtype=dtype, device=device)
-    foreach_copy_dsts = torch.split(new_ag_out, inp_split_sizes)
-    ag_ins_reshaped = [ag_in.reshape(-1) for ag_in in ag_ins]
-    torch._foreach_copy_(foreach_copy_dsts, ag_ins_reshaped)
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * local_rank, ag_input_numel)
+    foreach_copy_dsts = torch.split(new_ag_in, ins_split_sizes)
+    ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
+    torch._foreach_copy_(foreach_copy_dsts, ag_ins_flattened)
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.all_gather_into_tensor_out.default(
             new_ag_in, group_size, group_name, out=new_ag_out
@@ -684,10 +690,12 @@ def all_gather_merge_fn_to_trace(  # type: ignore[no-untyped-def]
     new_ag_out_reshaped = wait_tensor.reshape(group_size, -1)
     outs = torch.split_with_sizes(
         new_ag_out_reshaped,
-        inp_split_sizes,
+        ins_split_sizes,
         dim=1,
     )
-    outs_reshaped = [out.reshape(shape) for out, shape in zip(outs, inp_sizes)]
+    outs_reshaped = [
+        o.reshape((shape[0] * group_size,) + shape[1:]) for o, shape in zip(outs, ins_sizes)
+    ]
     return outs_reshaped
 
 
@@ -730,8 +738,6 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
 def merge_reduce_scatter_trace(
     gm: torch.fx.GraphModule, rs_buckets: list[list[torch.fx.Node]]
 ) -> None:
-    for i, rs_bucket in enumerate(rs_buckets):
-        print(f"XXX RS_BUCKET[{i}]:{rs_bucket}")
     n_buckets = len(rs_buckets)
     buckets_lens = [len(rs_bucket) for rs_bucket in rs_buckets]
     g = gm.graph
@@ -753,9 +759,6 @@ def merge_reduce_scatter_trace(
         rs_ins[bucket_idx].append(n.args[0])
         rs_ns[bucket_idx].append(n)
         rs_waits[bucket_idx].append(wait_n)
-        print(f"XXX {n} -> {bucket_idx}")
-        print(f"XXX len(rs_ns[{bucket_idx}])=={len(rs_ns[bucket_idx])}")
-        print(f"XXX buckets_lens[{bucket_idx}]=={buckets_lens[bucket_idx]}")
         if len(rs_ns[bucket_idx]) < buckets_lens[bucket_idx]:
             continue
 
@@ -766,9 +769,6 @@ def merge_reduce_scatter_trace(
         _rs_ins = rs_ins[bucket_idx]
         _rs_waits = rs_waits[bucket_idx]
         _rs_ns = rs_ns[bucket_idx]
-        print(f"XXX PROCESS {bucket_idx}")
-        print(f"XXX _rs_ns:{_rs_ns}")
-        print(f"XXX _rs_waits:{_rs_waits}")
 
         _insert_fn_trace_before_node(
             g,
@@ -1038,6 +1038,7 @@ def merge_all_gather_trace(
             if (
                 ag_node_in.op == "call_function"  # type: ignore[union-attr]
                 and ag_node_in.target == torch.ops.prims.convert_element_type.default  # type: ignore[union-attr]
+                and len(ag_node_in.users) == 1
             ):
                 ag_node_to_pre_nodes[ag_node].append(ag_node_in)
                 ag_node_in = ag_node_in.args[0]  # type: ignore[union-attr]
@@ -1063,7 +1064,7 @@ def merge_all_gather_trace(
         if ag_nodes_found[bucket_idx] < buckets_lens[bucket_idx]:
             continue
 
-        ag_nodes_ins, group_size, group_name, dtype, orig_wait_nodes = (
+        ag_ins, group_size, group_name, dtype, orig_wait_nodes = (
             bucket_idx_to_bucketed_op_info[bucket_idx]
         )
         rank_idx_dict = group_name_to_rank_idx_dict[group_name]
@@ -1074,14 +1075,14 @@ def merge_all_gather_trace(
             g,
             all_gather_merge_fn_to_trace,
             (
-                pytree.tree_map(lambda node: node.meta["val"], ag_nodes_ins),
+                pytree.tree_map(lambda node: node.meta["val"], ag_ins),
                 group_size,
                 group_name,
                 dtype,
                 local_rank,
             ),
             n.next,
-            ag_nodes_ins,
+            ag_ins,
             orig_wait_nodes,
         )
         # Erasing old nodes in reverse order
