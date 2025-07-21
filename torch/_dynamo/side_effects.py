@@ -304,6 +304,8 @@ class SideEffects:
         return inspect.getattr_static(cls, "__getattribute__", None) in (
             object.__getattribute__,
             dict.__getattribute__,
+            set.__getattribute__,
+            frozenset.__getattribute__,
             int.__getattribute__,
             str.__getattribute__,
             list.__getattribute__,
@@ -420,6 +422,8 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
             variable_cls = variables.UserDefinedDictVariable
+        elif issubclass(user_cls, (set, frozenset)):
+            variable_cls = variables.UserDefinedSetVariable
         elif issubclass(user_cls, tuple):
             variable_cls = variables.UserDefinedTupleVariable
         elif issubclass(user_cls, list):
@@ -532,7 +536,7 @@ class SideEffects:
         assert isinstance(ctx, variables.AutogradFunctionContextVariable)
         self.save_for_backward.append((ctx, args))
 
-    def track_tensor_variables_from_runahead_side_effects(self, other):
+    def track_runahead_tensor_and_symvar_side_effects(self, other):
         # In higher order ops we want to keep track of tensors seen in the
         # speculate_subgraph so that we don't lift them again as a new input in
         # other speculate_subgraph or in the root tracer.
@@ -540,7 +544,7 @@ class SideEffects:
             other_id = id(other_item)
             other_variable = other.id_to_variable[other_id]
             if other_id not in self.id_to_variable and isinstance(
-                other_variable, variables.TensorVariable
+                other_variable, (variables.TensorVariable, variables.SymNodeVariable)
             ):
                 self.track_object_existing(other_item, other_variable)
 
@@ -698,6 +702,7 @@ class SideEffects:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "object_new")
                     )
+                assert var.mutation_type.cls_source is not None
                 cg(var.mutation_type.cls_source)
 
                 # Generate the args to the __new__ method

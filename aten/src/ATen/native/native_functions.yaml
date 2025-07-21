@@ -941,9 +941,8 @@
 - func: as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)
   variants: function, method
   dispatch:
-    ZeroTensor, CPU, CUDA, MTIA: as_strided_tensorimpl
+    ZeroTensor, CPU, CUDA, MTIA, MPS: as_strided_tensorimpl
     Meta: as_strided_tensorimpl_meta_symint
-    MPS: as_strided_tensorimpl_mps
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
   device_check: NoCheck
   device_guard: False
@@ -3315,9 +3314,15 @@
   dispatch:
     CompositeImplicitAutograd: rms_norm_symint
 
-- func: _fused_rms_norm(Tensor input, int normalized_shape_ndim, Tensor weight, float eps) -> Tensor
+- func: _fused_rms_norm(Tensor input, int[] normalized_shape, Tensor? weight, float? eps) -> (Tensor, Tensor)
   dispatch:
+    CUDA: _fused_rms_norm_cuda
     MPS: _fused_rms_norm_mps
+    CompositeImplicitAutograd: rms_norm_composite
+
+- func: _fused_rms_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor rstd, Tensor? weight, bool[2] output_mask) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: _fused_rms_norm_backward_cuda
 
 - func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
   variants: function, method
@@ -3741,11 +3746,13 @@
   dispatch:
     CPU: _logcumsumexp_cpu
     CUDA: _logcumsumexp_cuda
+    MPS: _logcumsumexp_mps
 
 - func: _logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: _logcumsumexp_out_cpu
     CUDA: _logcumsumexp_out_cuda
+    MPS: _logcumsumexp_out_mps
 
 - func: logcumsumexp(Tensor self, int dim) -> Tensor
   variants: function, method
@@ -5066,8 +5073,9 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, MTIA: relu
+    CPU, CUDA: relu
     MPS: relu_mps
+    MTIA: relu_mtia
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: relu_quantized_cpu
     QuantizedCUDA: relu_quantized_cuda
@@ -5080,8 +5088,9 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, MTIA: relu_
+    CPU, CUDA: relu_
     MPS: relu_mps_
+    MTIA: relu_mtia_
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: relu_quantized_cpu_
     QuantizedCUDA: relu_quantized_cuda_
@@ -12440,12 +12449,14 @@
   dispatch:
     CPU: max_pool3d_with_indices_backward_out_cpu
     CUDA: max_pool3d_with_indices_backward_out_cuda
+    MPS: max_pool3d_with_indices_backward_out_mps
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
   python_module: nn
   dispatch:
     CPU: max_pool3d_with_indices_backward_cpu
     CUDA: max_pool3d_with_indices_backward_cuda
+    MPS: max_pool3d_with_indices_backward_mps
 
 - func: max_unpool2d.out(Tensor self, Tensor indices, SymInt[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
