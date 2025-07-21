@@ -111,7 +111,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str(
-            "Backend ", getBackendName(), " does not implement endCoalescing"));
+            "Backend ",
+            getBackendName(),
+            " does not implement getBackendOptions."));
   }
 
   virtual c10::intrusive_ptr<Work> broadcast(
