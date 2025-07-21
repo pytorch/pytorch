@@ -382,7 +382,10 @@ from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import elastic_launch, LaunchConfig
-from torch.distributed.numa_binding import AffinityMode, NumaOptions
+from torch.distributed.numa.binding import (
+    AffinityMode as _AffinityMode,  # Signify as private with _
+    NumaOptions as _NumaOptions,
+)
 from torch.utils.backend_registration import _get_custom_mod_func
 
 
@@ -621,13 +624,13 @@ def get_args_parser() -> ArgumentParser:
         "--numa-binding",
         "--numa_binding",
         type=str,
-        choices=list(mode.value for mode in AffinityMode),
+        choices=[mode.value for mode in _AffinityMode],
         default=None,
-        help=f"""
+        help="""
         If provided, we will affinitize the worker processes based on NUMA nodes
         for better performance. (E.g., preferring to allocate memory locally and run on CPUs on the
-        same NUMA node.) 
-        
+        same NUMA node.)
+
         NOTE: This is currently only supported for GPUs, and we assume
         that the LOCAL_RANK process corresponds to the GPU with index LOCAL_RANK. If this is not
         accurate for your workload, this feature may be a pessimization.
@@ -637,8 +640,8 @@ def get_args_parser() -> ArgumentParser:
           but other options may perform even slightly better in some cases.
           - socket: Processes are bound to cpu cores within a socket.
           - exclusive: Processes are bound to exclusive sets of cpu cores within a NUMA node.
-          - core-complex: Processes are bound to cpu cores in a core-complex. 
-          NOTE: The core-complex option might not achieve optimal performance on architectures 
+          - core-complex: Processes are bound to cpu cores in a core-complex.
+          NOTE: The core-complex option might not achieve optimal performance on architectures
           featuring a single L3 cache per socket.""",
     )
 
@@ -838,7 +841,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
     numa_options = (
         None
         if args.numa_binding is None
-        else NumaOptions(affinity_mode=AffinityMode(args.numa_binding))
+        else _NumaOptions(affinity_mode=_AffinityMode(args.numa_binding))
     )
 
     config = LaunchConfig(

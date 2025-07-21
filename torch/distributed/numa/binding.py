@@ -6,11 +6,18 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, TypeVar
+from typing import Callable, Optional, TypeVar
 
 import torch
 from torch._utils_internal import signpost_event
 from torch.distributed.elastic.utils.logging import get_logger
+
+
+__all__ = [
+    "maybe_wrap_with_numa_bindings",
+    "AffinityMode",
+    "NumaOptions",
+]
 
 
 _NUMACTL_COMMAND = "numactl"
@@ -48,7 +55,7 @@ def maybe_wrap_with_numa_bindings(
     *,
     entrypoint: str,
     local_rank_to_args: dict[int, tuple],
-    numa_options: None | NumaOptions,
+    numa_options: Optional[NumaOptions],
 ) -> tuple[str, dict[int, tuple]]:
     """
     Args:

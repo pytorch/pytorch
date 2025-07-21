@@ -37,7 +37,7 @@ from torch.distributed.elastic.multiprocessing.subprocess_handler import (
     SubprocessHandler,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
-from torch.distributed.numa_binding import maybe_wrap_with_numa_bindings, NumaOptions
+from torch.distributed.numa.binding import maybe_wrap_with_numa_bindings, NumaOptions
 
 
 IS_WINDOWS = sys.platform == "win32"

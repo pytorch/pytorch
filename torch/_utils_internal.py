@@ -4,12 +4,12 @@ import logging
 import os
 import sys
 import tempfile
+import typing_extensions
 from typing import Any, Callable, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
-import typing_extensions
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
-from typing_extensions import ParamSpec
 
 
 _T = TypeVar("_T")
@@ -339,5 +339,16 @@ def deprecated():
     return decorator
 
 
-def get_default_numa_affinity() -> None | str:
+def get_default_numa_options():
+    """
+    When using elastic agent, if no numa options are provided, we will use these
+    as the default.
+
+    For external use cases, we return None, i.e. no numa binding. If you would like
+    to use torch's automatic numa binding capabilities, you should provide
+    NumaOptions to your launch config directly or use the numa binding option
+    available in torchrun.
+
+    Must return None or NumaOptions, but not specifying to avoid circular import.
+    """
     return None

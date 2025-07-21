@@ -1,20 +1,23 @@
+# Owner(s): ["oncall: distributed"]
+
 from __future__ import annotations
 
+import subprocess
+import sys
 from dataclasses import dataclass
-from typing import Any
-from unittest import TestCase
+from typing import Any, Optional
+from unittest import skipIf, skipUnless
 from unittest.mock import mock_open, patch
 
 import torch
-from torch.distributed.elastic.agent.server.api import WorkerSpec
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, start_processes
-from torch.distributed.launcher.api import LaunchConfig
-from torch.distributed.numa_binding import (
+from torch.distributed.numa.binding import (
     _get_ranges_str_from_ints,
     _get_set_of_int_from_ranges_str,
     AffinityMode,
     NumaOptions,
 )
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,16 @@ class MockDeviceProperties:
     L2_cache_size: str
 
 
+_real_open = open
+
+
+@skipIf(
+    sys.platform == "win32",
+    "Windows is missing various os module attributes like sched_getaffinity",
+)
+@skipUnless(
+    torch.distributed.is_available(), "Need access to some distributed submodules"
+)
 class NumaBindingTest(TestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -48,6 +61,8 @@ class NumaBindingTest(TestCase):
             patch("builtins.open", new=self._mock_open),
             patch("os.listdir", new=self._mock_listdir),
             patch("os.sched_getaffinity", new=self._mock_sched_getaffinity),
+            patch("shutil.which", return_value="/usr/bin/numactl"),
+            patch("subprocess.run"),
         ]
 
         for context_manager in self._context_managers_to_apply_to_all_tests:
@@ -78,7 +93,8 @@ class NumaBindingTest(TestCase):
             ):
                 self._mock_file_contents(
                     file_path=f"/sys/devices/system/node/node{numa_node_index}/cpulist",
-                    contents=f"{self._mock_num_logical_cpus}-{self._mock_num_logical_cpus + num_l3_caches_per_numa_node * num_physical_core_per_l3_cache * 2 - 1}",
+                    contents=f"{self._mock_num_logical_cpus}-"
+                    + f"{self._mock_num_logical_cpus + num_l3_caches_per_numa_node * num_physical_core_per_l3_cache * 2 - 1}",
                 )
                 for gpu_index in range(
                     len(self._mock_device_properties),
@@ -164,14 +180,16 @@ class NumaBindingTest(TestCase):
             contents=f"0-{self._mock_num_numa_nodes - 1}",
         )
 
-    @staticmethod
-    def _mock_is_available() -> bool:
-        return torch.cuda.device_count() > 0
+    def _mock_is_available(self) -> bool:
+        return len(self._mock_device_properties) > 0
 
     def _get_corresponding_pci_numa_node_file_path(
         self, *, device_properties: MockDeviceProperties
     ) -> str:
-        pci_addr = f"{device_properties.pci_domain_id:04x}:{device_properties.pci_bus_id:02x}:{device_properties.pci_device_id:02x}.0"
+        pci_addr = (
+            f"{device_properties.pci_domain_id:04x}:"
+            + f"{device_properties.pci_bus_id:02x}:{device_properties.pci_device_id:02x}.0"
+        )
         return f"/sys/bus/pci/devices/{pci_addr}/numa_node"
 
     def _mock_file_contents(self, *, file_path: str, contents: str) -> None:
@@ -180,15 +198,17 @@ class NumaBindingTest(TestCase):
     def _mock_device_count(self) -> int:
         return len(self._mock_device_properties)
 
-    def _mock_get_device_properties(
-        self, index: int
-    ) -> torch.cuda._CudaDeviceProperties:
+    def _mock_get_device_properties(self, index: int) -> MockDeviceProperties:
         return self._mock_device_properties[index]
 
     def _mock_open(self, path: str, *args, **kwargs) -> Any:
         if path in self._mock_file_path_to_contents:
             return mock_open(read_data=self._mock_file_path_to_contents[path])()
-        raise FileNotFoundError(f"File {path} was not mocked.")
+        if path.startswith("/sys/"):
+            raise FileNotFoundError(f"File {path} was not mocked.")
+        # Looks like CI is calling open and intending to open an actual file in some places.
+        # Need this to make the CI pass.
+        return _real_open(path, *args, **kwargs)
 
     def _mock_listdir(self, target_path: str) -> set[str]:
         if not target_path.endswith("/"):
@@ -203,7 +223,7 @@ class NumaBindingTest(TestCase):
         return set(range(self._mock_num_logical_cpus))
 
     def _start_test_processes_and_get_command_args_for_local_rank(
-        self, *, numa_options: None | NumaOptions, local_rank: int
+        self, *, numa_options: Optional[NumaOptions], local_rank: int
     ) -> tuple[str, ...]:
         """
         Calls start_processes like elastic_launch ultimately would
@@ -218,10 +238,10 @@ class NumaBindingTest(TestCase):
                 name="test_process",
                 entrypoint="echo",
                 args=dict.fromkeys(
-                    range(torch.cuda.device_count()), ("Hello, world!",)
+                    range(self._mock_device_count()), ("Hello, world!",)
                 ),
                 envs={
-                    i: {"LOCAL_RANK": str(i)} for i in range(torch.cuda.device_count())
+                    i: {"LOCAL_RANK": str(i)} for i in range(self._mock_device_count())
                 },
                 logs_specs=DefaultLogsSpecs(),
                 numa_options=numa_options,
@@ -280,6 +300,9 @@ class NumaBindingTest(TestCase):
         )
 
     def test_default_numa_binding(self) -> None:
+        # Inner import to avoid crashing if not torch.distributed.is_available()
+        from torch.distributed.launcher.api import LaunchConfig
+
         self._add_mock_hardware(
             num_sockets=1,
             num_numa_nodes_per_socket=1,
@@ -289,13 +312,16 @@ class NumaBindingTest(TestCase):
         )
 
         with patch(
-            "torch.distributed.launcher.api.get_default_numa_affinity",
-            return_value="node",
+            "torch.distributed.launcher.api.get_default_numa_options",
+            return_value=NumaOptions(
+                affinity_mode=AffinityMode.NODE, should_fall_back_if_binding_fails=True
+            ),
         ):
             launch_config = LaunchConfig(
                 min_nodes=1,
                 max_nodes=1,
                 nproc_per_node=1,
+                # Don't provide numa_options
             )
         self.assertEqual(
             launch_config.numa_options,
@@ -314,11 +340,10 @@ class NumaBindingTest(TestCase):
         )
 
         with (
-            patch("torch.distributed.numa_binding.signpost_event") as signpost_patch,
+            patch("torch.distributed.numa.binding.signpost_event") as signpost_patch,
             patch(
-                "torch.distributed.numa_binding._get_node_numactl_options",
-                # Some arbitrary invalid numactl option
-                return_value=("--cpunodebHAHAHind=paulwuzhere",),
+                "subprocess.run",
+                side_effect=subprocess.CalledProcessError(1, "numactl"),
             ),
         ):
             command_args = (
@@ -344,9 +369,12 @@ class NumaBindingTest(TestCase):
         )
 
     def test_explicit_numa_options_overrides_default(self) -> None:
+        # Inner import to avoid crashing if not torch.distributed.is_available()
+        from torch.distributed.launcher.api import LaunchConfig
+
         with patch(
-            "torch.distributed.launcher.api.get_default_numa_affinity",
-            return_value="node",
+            "torch.distributed.launcher.api.get_default_numa_options",
+            return_value=NumaOptions(affinity_mode=AffinityMode.NODE),
         ):
             launch_config = LaunchConfig(
                 min_nodes=1,
@@ -574,6 +602,9 @@ class NumaBindingTest(TestCase):
     def test_raises_error_if_numa_options_provided_for_callable_entrypoint(
         self,
     ) -> None:
+        # Inner import to avoid crashing if not torch.distributed.is_available()
+        from torch.distributed.elastic.agent.server.api import WorkerSpec
+
         def mock_entrypoint() -> None:
             pass
 
@@ -614,7 +645,7 @@ class NumaBindingTest(TestCase):
             num_physical_core_per_l3_cache=1,
         )
 
-        device_0_properties = torch.cuda.get_device_properties(0)
+        device_0_properties = self._mock_get_device_properties(0)
         # Overwrite the existing mock file
         self._mock_file_contents(
             file_path=self._get_corresponding_pci_numa_node_file_path(
@@ -644,3 +675,7 @@ class NumaBindingTest(TestCase):
 
     def test_get_range_str_from_ints(self) -> None:
         self.assertEqual(_get_ranges_str_from_ints([7, 0, 1, 6, 2, 4]), "0-2,4,6-7")
+
+
+if __name__ == "__main__":
+    run_tests()

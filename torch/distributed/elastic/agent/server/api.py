@@ -27,7 +27,7 @@ from torch.distributed.elastic.metrics import prof, put_metric
 from torch.distributed.elastic.multiprocessing import ProcessFailure, SignalException
 from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.logging import get_logger
-from torch.distributed.numa_binding import NumaOptions
+from torch.distributed.numa.binding import NumaOptions
 
 
 __all__ = [

@@ -80,7 +80,7 @@ from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     to_map,
 )
 from torch.distributed.elastic.utils.logging import get_logger
-from torch.distributed.numa_binding import NumaOptions
+from torch.distributed.numa.binding import NumaOptions
 
 
 __all__ = [
