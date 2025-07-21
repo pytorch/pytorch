@@ -36,3 +36,20 @@ See `build.sh` for valid build environments (it's the giant switch).
 # Set flags (see build.sh) and build image
 sudo bash -c 'TRITON=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
 ```
+
+
+## [Guidance] Add external lib for build and testing
+To add external libs for the docker build, follow the steps below
+### Add pinned commit (if applies)
+We use pinned commit for test stabiblity, the nightly.yaml file check and update pinned commit for certain repo dependency daily.
+If the lib you introduce is needed to install for specicic pinned commit/ build from scratch from a repo
+1. add the repo you want to watch in nightly.yml and merge-rules.yml:[exmaple: pinned vllm](https://github.com/pytorch/pytorch/pull/158591/files#diff-0d5658b415099a82c11c03a06ca4ec765b4003a1f4b2f3f1943980a882cf8aa6)
+2. add initial pinned commit in .ci/docker/ci_commiy_pins/. the txt name should match the one defined in step 1
+
+### Add docker image and build logics
+
+.ci/docker/build.sh
+
+
+use linux as example:
+
