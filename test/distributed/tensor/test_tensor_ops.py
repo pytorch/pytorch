@@ -806,6 +806,7 @@ class DistTensorOpsTest(DTensorTestBase):
             Replicate(),
             Partial("sum"),
             Partial("avg"),
+            Partial("min"),
         ]
         placement_comb = itertools.product(
             placement_choice, placement_choice, placement_choice
