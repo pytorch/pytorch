@@ -2015,7 +2015,6 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
         # Skip all the actual compiling.
-        nonlocal save_output_code
         save_output_code(wrapper_code.value)
         if kernel_code:
             save_output_code(kernel_code.value)
