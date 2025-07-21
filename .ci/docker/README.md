@@ -64,7 +64,7 @@ The base docker images are built by the workflow `docker-builds.yml` are used th
 #### `.ci/docker/build.sh` vs `.ci/pytorch/build.sh`
 - **`.ci/docker/build.sh`**: Used for building base Docker images. used by the `docker-builds.yml` workflow to pre-build Docker images for CI.
 
-- **`.ci/pytorch/build.sh`**: Used for building PyTorch inside a Docker containerAs example of linux-test:, called by, for instance,`_linux-build.yml` after the Docker container is started to build pytorch wheels
+- **`.ci/pytorch/build.sh`**: Used for building PyTorch inside a Docker container. As example of linux-test:, called by, for instance,`_linux-build.yml` after the Docker container is started to build pytorch wheels
 
 #### `.ci/docker/ci_commit_pins/` vs `.github/ci_commit_pins`
 - **`.ci/docker/ci_commit_pins/`**: Used for pinning dependency versions during base Docker image building
@@ -73,6 +73,7 @@ The base docker images are built by the workflow `docker-builds.yml` are used th
 ### New base docker image: Step by step
 
 #### Add pinned commit (if applies)
+
 We use pinned commits for build stability. The nightly.yaml file checks and updates pinned commits for certain repository dependencies daily.
 
 If the library is needed for new base docker image for a specific pinned commit or built from scratch from a repository in base docker image:
@@ -82,6 +83,7 @@ If the library is needed for new base docker image for a specific pinned commit 
 
 #### Add Base Docker Image
 1. **Add new Base Docker image configuration** (if applicable):
+
    Add the configuration in `.ci/docker/build.sh`. For example:
    ```bash
    pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-new1)
