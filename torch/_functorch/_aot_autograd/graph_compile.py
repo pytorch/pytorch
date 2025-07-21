@@ -51,10 +51,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from .dispatch_and_compile_graph import (
-    aot_dispatch_autograd_graph,
-    aot_dispatch_base_graph,
-)
+from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
     AOTDedupeWrapper,
@@ -239,19 +236,11 @@ def aot_stage2_inference(
         )
 
     fakified_out_wrapper = FakifiedOutWrapper()
-    (
-        fw_module,
-        updated_flat_args,
-        fw_metadata,
-    ) = fakified_out_wrapper.pre_compile(
+    fakified_out_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
     )
     functionalized_rng_wrapper = FunctionalizedRngRuntimeWrapper()
-    (
-        fw_module,
-        updated_flat_args,
-        fw_metadata,
-    ) = functionalized_rng_wrapper.pre_compile(
+    functionalized_rng_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
     )
     assert isinstance(fw_module, GraphModule)
@@ -896,7 +885,7 @@ def create_wrap_fn(fn, args):
 
 
 def prepare_hook_gm(aot_config, fn, args):
-    from torch._functorch._aot_autograd.dispatch_and_compile_graph import _create_graph
+    from torch._functorch._aot_autograd.graph_capture import _create_graph
 
     fn, args = create_wrap_fn(fn, args)
     gm = _create_graph(fn, args, aot_config=aot_config)
@@ -1615,11 +1604,7 @@ def aot_stage2_autograd(
             adjusted_flat_args = joint_inputs[0]
 
             fakified_out_wrapper = FakifiedOutWrapper()
-            (
-                fw_module,
-                adjusted_flat_args,
-                fw_metadata,
-            ) = fakified_out_wrapper.pre_compile(
+            fakified_out_wrapper.pre_compile(
                 fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
             )
 
@@ -1636,11 +1621,7 @@ def aot_stage2_autograd(
                 ]
                 adjusted_flat_args.extend(rng_states)  # type: ignore[arg-type]
 
-            (
-                fw_module,
-                adjusted_flat_args,
-                fw_metadata,
-            ) = functionalized_rng_wrapper.pre_compile(
+            functionalized_rng_wrapper.pre_compile(
                 fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
             )
             if tracing_context := torch._guards.TracingContext.try_get():
