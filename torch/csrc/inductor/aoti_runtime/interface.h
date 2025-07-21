@@ -45,8 +45,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerCreate(
 // "cpu", "cuda", "cuda:0", etc. If the device index is not specified for CUDA
 // device, runtime will use the device index returned by
 // "cudaGetDevice(&device_idx)"
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerCreateWithDevice(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
     AOTInductorModelContainerHandle* container_handle,
     size_t num_models,
     const char* device_str,
@@ -71,8 +70,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerRun(
     AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Single-threaded variant of previous.
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerRunSingleThreaded(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
     AOTInductorModelContainerHandle container_handle,
     AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
                                      // are stolen; the array itself is borrowed
@@ -86,16 +84,14 @@ AOTInductorModelContainerRunSingleThreaded(
     AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Retrieves the number of constants for the model.
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerGetNumConstants(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
     AOTInductorModelContainerHandle container_handle,
     size_t* num_constants);
 
 // Retrieves a constant's name.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerGetConstantName(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantName(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     const char** name);
@@ -103,8 +99,7 @@ AOTInductorModelContainerGetConstantName(
 // Retrieves a constant's original FQN.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerGetConstantOriginalFQN(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     const char** original_fqn);
@@ -112,8 +107,7 @@ AOTInductorModelContainerGetConstantOriginalFQN(
 // Retrieves whether a constant is from folded.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerGetConstantFromFolded(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     bool* from_folded);
@@ -121,8 +115,7 @@ AOTInductorModelContainerGetConstantFromFolded(
 // Retrieves the inductor constant type.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerGetConstantType(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantType(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     int32_t* type);
@@ -130,8 +123,7 @@ AOTInductorModelContainerGetConstantType(
 // Retrieves a constant's dtype.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerGetConstantDtype(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     int32_t* dtype);
@@ -139,15 +131,13 @@ AOTInductorModelContainerGetConstantDtype(
 // Retrieves a constant's data size.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerGetConstantDataSize(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantDataSize(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     size_t* data_size);
 
 // Extract the constants that is being used in the container.
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerExtractConstantsMap(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
     bool use_inactive);
@@ -164,8 +154,7 @@ AOTInductorModelContainerUpdateUserManagedConstantBuffer(
 // Setup the constant buffer in model container with provided ConstantMap
 // use_inactive should be set as true if the inactive buffer is to be updated.
 // validate_full_update checks if all constants are included in the ConstantMap
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerUpdateConstantBuffer(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
     bool use_inactive,
@@ -173,27 +162,23 @@ AOTInductorModelContainerUpdateConstantBuffer(
 
 // Setup the inactive constant buffer in model container with provided
 // ConstantMap
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerUpdateInactiveConstantBuffer(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle);
 
 // Free the inactive constant buffer in model container.
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerFreeInactiveConstantBuffer(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle);
 
 // Run constant folding on constant buffer.
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerRunConstantFolding(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
     AOTInductorModelContainerHandle container_handle,
     bool use_inactive,
     AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Swap the constant buffer being used to the inactive one.
-AOTI_API AOTIRuntimeError
-AOTInductorModelContainerSwapConstantBuffer(
+AOTI_API AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
     AOTInductorModelContainerHandle container_handle);
 
 // Retrieves the number of inputs for the model.
