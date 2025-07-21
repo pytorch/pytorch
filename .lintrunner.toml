@@ -1479,9 +1479,6 @@ exclude_patterns = [
     'fb/**',
     '**/fb/**',
     'third_party/**/*.sh',
-    # These files are all grandfathered in, feel free to remove from this list
-    # as necessary
-    "scripts/**/*.sh",
 ]
 init_command = [
     'python3',

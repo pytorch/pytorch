@@ -7,7 +7,10 @@
 
 set -ex
 
-CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
+CAFFE2_ROOT="$(
+  cd "$(dirname "$0")"/..
+  pwd -P
+)"
 
 CMAKE_ARGS=()
 
@@ -61,20 +64,20 @@ else
   echo "Building Caffe2 in: $BUILD_ROOT"
 
   cmake "$CAFFE2_ROOT" \
-        -DCMAKE_BUILD_TYPE=Release \
-        "${CMAKE_ARGS[@]}" \
-        "$@"
+    -DCMAKE_BUILD_TYPE=Release \
+    "${CMAKE_ARGS[@]}" \
+    "$@"
 
   # Determine the number of CPUs to build with.
   # If the `CAFFE_MAKE_NCPUS` variable is not specified, use them all.
   if [ -n "${MAX_JOBS}" ]; then
-      CAFFE_MAKE_NCPUS="$MAX_JOBS"
+    CAFFE_MAKE_NCPUS="$MAX_JOBS"
   elif [ -n "${CAFFE_MAKE_NCPUS}" ]; then
-      CAFFE_MAKE_NCPUS="$CAFFE_MAKE_NCPUS"
+    CAFFE_MAKE_NCPUS="$CAFFE_MAKE_NCPUS"
   elif [ "$(uname)" == 'Darwin' ]; then
-      CAFFE_MAKE_NCPUS="$(sysctl -n hw.ncpu)"
+    CAFFE_MAKE_NCPUS="$(sysctl -n hw.ncpu)"
   else
-      CAFFE_MAKE_NCPUS="$(nproc)"
+    CAFFE_MAKE_NCPUS="$(nproc)"
   fi
 
   # Now, actually build the target.

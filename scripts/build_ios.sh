@@ -7,7 +7,10 @@
 # using ios-cmake. This is very similar to the android-cmake - see
 # build_android.sh for more details.
 
-CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
+CAFFE2_ROOT="$(
+  cd "$(dirname "$0")"/..
+  pwd -P
+)"
 
 if [ -z "$PYTHON" ]; then
   PYTHON=python
@@ -31,7 +34,10 @@ CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
 
 # custom build with selected ops
 if [ -n "${SELECTED_OP_LIST}" ]; then
-  SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
+  SELECTED_OP_LIST="$(
+    cd $(dirname $SELECTED_OP_LIST)
+    pwd -P
+  )/$(basename $SELECTED_OP_LIST)"
   echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
   if [ ! -r ${SELECTED_OP_LIST} ]; then
     echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
@@ -63,11 +69,11 @@ fi
 if [ -n "${IOS_PLATFORM:-}" ]; then
   CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
   if [ "${IOS_PLATFORM}" == "WATCHOS" ]; then
-      # enable bitcode by default for watchos
-      CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
-      CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
-      # disable the QNNPACK
-      CMAKE_ARGS+=("-DUSE_PYTORCH_QNNPACK=OFF")
+    # enable bitcode by default for watchos
+    CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
+    CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
+    # disable the QNNPACK
+    CMAKE_ARGS+=("-DUSE_PYTORCH_QNNPACK=OFF")
   fi
 else
   # IOS_PLATFORM is not set, default to OS, which builds iOS.
@@ -141,11 +147,11 @@ INSTALL_PREFIX=${BUILD_ROOT}/install
 mkdir -p $BUILD_ROOT
 cd $BUILD_ROOT
 cmake "$CAFFE2_ROOT" \
-    -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
-    -DCMAKE_BUILD_TYPE=MinSizeRel \
-    -DBUILD_SHARED_LIBS=OFF \
-    ${CMAKE_ARGS[@]} \
-    $@
+  -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
+  -DCMAKE_BUILD_TYPE=MinSizeRel \
+  -DBUILD_SHARED_LIBS=OFF \
+  ${CMAKE_ARGS[@]} \
+  $@
 
 cmake --build . -- "-j$(sysctl -n hw.ncpu)"
 
