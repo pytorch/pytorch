@@ -227,6 +227,8 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
         ) -> ConvertFrameReturn:
             if trace_rules.check(frame.f_code):
                 return ConvertFrameReturn()
+            if not convert_frame.has_tensor_in_frame(frame):
+                return ConvertFrameReturn()
 
             from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 
@@ -679,6 +681,15 @@ class _TorchDynamoContext:
 
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
+            # If there's no real callback to be called (False), we should just initialize
+            # one package in place.
+            if self.callback is False and self._package is None:
+                from .package import CompilePackage
+
+                self._package = CompilePackage(
+                    fn=None, dynamo=None, ignore_inlined_sources=False
+                )
+
             assert self._package is not None
             if not self._package.is_initialized():
                 result = DynamoCache.load(fn)
