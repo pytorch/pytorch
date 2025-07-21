@@ -55,7 +55,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from .descriptors import AOTOutput, OutputAOTOutput
+from .descriptors import AOTOutput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -89,6 +89,7 @@ from .utils import (
     contain_metadata_mutation_ops,
     get_cuda_generator_meta_val,
     make_boxed_func,
+    simple_wraps,
     strict_zip,
     unlift_tokens,
 )
@@ -124,14 +125,14 @@ def aot_stage1_graph_capture(
     # augment the output to return a tuple[list[Tensor], list[AOTOutput]] and
     # then preserve this convention through the rest of the passes.
 
-    from functools import wraps
-
     # TODO: We could test for consistency with fw_metadata, but this is not a
     # big deal
-    @wraps(orig_flat_fn)
+    @simple_wraps(orig_flat_fn)
     def orig_flat_fn2(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
         out = orig_flat_fn(*args)
-        out_descs: list[AOTOutput] = [OutputAOTOutput(i) for i in range(len(out))]
+        out_descs: list[AOTOutput] = type(out)(
+            PlainAOTOutput(i) for i in range(len(out))
+        )
         return out, out_descs
 
     aot_config = aot_state.aot_config
@@ -894,8 +895,6 @@ def maybe_log_graph(
 
 
 def create_wrap_fn(fn, args):
-    from functools import wraps
-
     from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
 
     from .functional_utils import from_fun, has_data_mutation, to_fun
@@ -905,7 +904,7 @@ def create_wrap_fn(fn, args):
             "Saved tensors hooks with inputs mutations are not allowed"
         )
 
-    @wraps(fn)
+    @simple_wraps(fn)
     def _wrapper(*args):
         with maybe_enable_thunkify():
             disable_above = torch._C._ExcludeDispatchKeyGuard(
@@ -1118,7 +1117,7 @@ def maybe_inline_graph_saved_tensors_hooks(
                 fw_outs_bw_ins_node_names.append(new_node_name)
             else:
                 # We can not specify desired name in node_copy.
-                # Copying node manually to set specifc name,
+                # Copying node manually to set specific name,
                 # to have matching fw_outs, bw_inputs names.
                 new_node_name = _gen_unused_name(f"{saved.name}_hook_{out_idx}")
                 with fw_g.inserting_before(_n):
@@ -1523,7 +1522,7 @@ def aot_stage2_autograd(
         # It's possible to construct a case where eager may or may not have have tried to autograd through y,
         # depending on the actual grad_outputs that were passed in during the backward.
         # There is no easy fix for this: the simplest fix would be to run with `retain_graph=True`,
-        # allowing autograd to re-use the graph.
+        # allowing autograd to reuse the graph.
         #
         # An example of this case is:
         # def f(x):

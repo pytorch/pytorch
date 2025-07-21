@@ -259,7 +259,7 @@ TEST(ITreeTest, NoContext) {
       c10::IValue(8),
       c10::IValue(9),
   };
-  ASSERT_DEATH({ itreeUnflatten(flats, spec); }, "Check failed");
+  EXPECT_THROW({ itreeUnflatten(flats, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, TooManyContext) {
@@ -304,7 +304,7 @@ TEST(ITreeTest, TooManyContext) {
       c10::IValue(8),
       c10::IValue(9),
   };
-  ASSERT_DEATH({ itreeUnflatten(flats, spec); }, "Check failed");
+  EXPECT_THROW({ itreeUnflatten(flats, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, DoubleRegister) {
@@ -375,7 +375,7 @@ TEST(ITreeTest, NotEnoughUnflatten) {
       c10::IValue(2),
       c10::IValue(7),
   };
-  ASSERT_DEATH({ itreeUnflatten(flats, spec); }, "Check failed");
+  EXPECT_THROW({ itreeUnflatten(flats, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, TooManyUnflatten) {
@@ -449,7 +449,7 @@ TEST(ITreeTest, TooManyUnflatten) {
       c10::IValue(2),
       c10::IValue(7),
   };
-  ASSERT_DEATH({ itreeUnflatten(flats, spec); }, "Check failed");
+  EXPECT_THROW({ itreeUnflatten(flats, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, Flatten) {
@@ -908,8 +908,8 @@ TEST(ITreeTest, UnmatchedDictFlatten) {
   list.push_back(std::move(tup));
   list.push_back(c10::IValue(2));
   list.push_back(std::move(dict));
-  ASSERT_DEATH(
-      { itreeFlatten(c10::IValue{std::move(list)}, spec); }, "Check failed");
+  EXPECT_THROW(
+      { itreeFlatten(c10::IValue{std::move(list)}, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, DictFlattenTest) {
@@ -1025,8 +1025,8 @@ TEST(ITreeTest, UnmatchedTupleFlatten) {
   list.push_back(std::move(tup));
   list.push_back(c10::IValue(2));
   list.push_back(std::move(dict));
-  ASSERT_DEATH(
-      { itreeFlatten(c10::IValue{std::move(list)}, spec); }, "Check failed");
+  EXPECT_THROW(
+      { itreeFlatten(c10::IValue{std::move(list)}, spec); }, c10::Error);
 }
 
 TEST(ITreeTest, ToAtenType) {
