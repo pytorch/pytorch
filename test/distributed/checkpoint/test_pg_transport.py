@@ -606,5 +606,6 @@ class TestPGTransportEdgeCases(TestCase):
         # Check that wait was called
         self.assertGreaterEqual(self.mock_work.wait.call_count, 4)
 
+
 if __name__ == "__main__":
     run_tests()
