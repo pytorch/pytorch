@@ -170,7 +170,6 @@ case "$tag" in
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
-    VLLM=yes
     ;;
   pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.6
@@ -447,7 +446,6 @@ docker build \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
-       --build-arg "VLLM=${VLLM}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "HALIDE=${HALIDE}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
