@@ -590,6 +590,7 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
       "python enabled=%d and is run_only=%d",
       callback != Py_None,
       callback == Py_False);
+#if IS_PYTHON_3_12_PLUS
   // skip tracing sys.monitoring callables
   if (callback != Py_None && callback != Py_False) {
     PyInterpreterState* interp = PyThreadState_GET()->interp;
@@ -605,6 +606,7 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
       }
     }
   }
+#endif
   return set_eval_frame(callback, PyThreadState_GET(), module);
 }
 
