@@ -263,7 +263,6 @@ function install_torchrec_and_fbgemm() {
       pip_install_whl "${file}"
     done
 
-    popd
     rm -rf fbgemm
     popd
   else
