@@ -16,6 +16,13 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
       m_garbage_collection_threshold(0),
       m_pinned_num_register_threads(1),
       m_expandable_segments(false),
+#if CUDA_VERSION >= 12030
+      m_expandable_segments_handle_type(
+          Expandable_Segments_Handle_Type::UNSPECIFIED),
+#else
+      m_expandable_segments_handle_type(
+          Expandable_Segments_Handle_Type::POSIX_FD),
+#endif
       m_release_lock_on_cudamalloc(false),
       m_pinned_use_cuda_host_register(false),
       m_pinned_use_background_threads(false) {
@@ -156,7 +163,7 @@ size_t CUDAAllocatorConfig::parseRoundUpPower2Divisions(
         }
         TORCH_CHECK(
             val2 == 0 || llvm::isPowerOf2_64(val2),
-            "For roundups, the divisons has to be power of 2 or 0 to disable roundup ",
+            "For roundups, the divisions has to be power of 2 or 0 to disable roundup ",
             "");
 
         if (std::string_view(val1) == ">") {
@@ -202,7 +209,7 @@ size_t CUDAAllocatorConfig::parseRoundUpPower2Divisions(
       size_t val1 = stoi(config[i]);
       TORCH_CHECK(
           llvm::isPowerOf2_64(val1),
-          "For roundups, the divisons has to be power of 2 ",
+          "For roundups, the divisions has to be power of 2 ",
           "");
       std::fill(
           m_roundup_power2_divisions.begin(),

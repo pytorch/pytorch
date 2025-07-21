@@ -18,13 +18,18 @@ import time
 import traceback
 from collections import defaultdict
 from contextlib import nullcontext
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import detect_fake_mode, dynamo_timed, lazy_format_graph_code
+from torch._dynamo.utils import (
+    CompileEventLogger,
+    detect_fake_mode,
+    dynamo_timed,
+    lazy_format_graph_code,
+)
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
@@ -40,7 +45,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .autograd_cache import AOTAutogradCache, should_use_remote_autograd_cache
+from .autograd_cache import (
+    AOTAutogradCache,
+    serialize_graph_module,
+    should_bundle_autograd_cache,
+    should_use_remote_autograd_cache,
+)
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
@@ -62,7 +72,13 @@ from .runtime_wrappers import (
     pre_compile,
     RuntimeWrapper,
 )
-from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
+from .schemas import (
+    AOTConfig,
+    AOTGraphCapture,
+    AOTState,
+    MutationType,
+    ViewAndMutationMeta,
+)
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
     _get_symint_hints,
@@ -87,6 +103,7 @@ aten = torch.ops.aten
 
 # Returns a Callable and a ViewAndMutationMeta.
 # Currently, only export needs the ViewAndMutationMeta after this function.
+# TODO: Refactor this
 DispatchReturn = tuple[Callable, ViewAndMutationMeta]
 
 
@@ -97,46 +114,68 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
     return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
 
 
-# Export's dispatching logic is unique in a few ways: it only needs the "graph"
-# bits of aot_autograd, and doesn't need to do any specific wrapping.
-def aot_dispatch_export(
+def aot_stage1_graph_capture(
+    aot_state: AOTState,
     flat_fn: Callable,
-    flat_args: list[Any],
-    aot_config: AOTConfig,
-    *,
-    fw_metadata: ViewAndMutationMeta,
-    needs_autograd: bool,
-) -> DispatchReturn:
-    wrappers = _create_wrappers_for_dispatch(needs_autograd)
-    flat_fn, flat_args, fw_metadata = pre_compile(
+) -> AOTGraphCapture:
+    aot_config = aot_state.aot_config
+
+    wrappers = _create_wrappers_for_dispatch(aot_state.needs_autograd)
+    flat_fn, aot_state.flat_args, aot_state.fw_metadata = pre_compile(
         wrappers,
         flat_fn,
-        flat_args,
+        aot_state.flat_args,
         aot_config,
-        fw_metadata=fw_metadata,
+        fw_metadata=aot_state.fw_metadata,
     )
-    if needs_autograd and not aot_config.pre_dispatch:
-        graph, _, _ = aot_dispatch_autograd_graph(
-            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-        )
+    # NB: This is currently only used for backwards, where fwd/bwd
+    # deterministic TLS can be different
+    aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
+    updated_flat_args: Union[list[Any], tuple[list[Any], list[Any]]]
+    if aot_state.needs_autograd and not aot_config.pre_dispatch:
+        # FYI: this being moved to trigger in export is new, seems fine!
+        with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
+            graph, updated_flat_args, maybe_subclass_meta = aot_dispatch_autograd_graph(
+                flat_fn,
+                aot_state.flat_args,
+                aot_config,
+                fw_metadata=aot_state.fw_metadata,
+            )
     else:
-        graph, _, _ = aot_dispatch_base_graph(
-            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
+        graph, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(
+            flat_fn, aot_state.flat_args, aot_config, fw_metadata=aot_state.fw_metadata
         )
+
+    return AOTGraphCapture(
+        wrappers=wrappers,
+        graph=graph,
+        updated_flat_args=updated_flat_args,
+        maybe_subclass_meta=maybe_subclass_meta,
+    )
+
+
+def aot_stage2_export(
+    aot_state: AOTState, aot_graph_capture: AOTGraphCapture
+) -> DispatchReturn:
+    graph = aot_graph_capture.graph
+    aot_config = aot_state.aot_config
+    wrappers = aot_graph_capture.wrappers
+
+    CompileEventLogger.try_add_pt2_compile("backend_compile", dispatch_mode="export")
 
     # NB: the wrappers that run in pre_compile for export are
     # either a no-op, because they're not needed, or will raise a runtime error,
     # since they don't support export.
     # We still run these wrappers to make sure that they're not needed pre compile,
     # but we technically don't need to run them post compile at all here.
-    compiled_fn, fw_metadata = post_compile(
-        wrappers, graph, aot_config, runtime_metadata=fw_metadata
+    compiled_fn, aot_state.fw_metadata = post_compile(
+        wrappers, graph, aot_config, runtime_metadata=aot_state.fw_metadata
     )
 
     # Therefore, since no wrapperes run, we don't get back a callable - we get back the raw fx graph
     # (either a joint or an inference-only graph)
     assert isinstance(compiled_fn, torch.fx.GraphModule)
-    return compiled_fn, fw_metadata
+    return compiled_fn, aot_state.fw_metadata
 
 
 def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
@@ -157,26 +196,37 @@ def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
         static_input_indices=input.static_input_indices,
         pre_dispatch=input.pre_dispatch,
         cache_info=None,
+        precompile_backend_id=input.precompile_backend_id,
     )
 
 
-def aot_dispatch_base(
-    flat_fn,
-    flat_args: list[Any],
-    aot_config: AOTConfig,
-    *,
-    fw_metadata: ViewAndMutationMeta,
+def aot_stage2_compile(
+    aot_state: AOTState,
+    aot_graph_capture: AOTGraphCapture,
+) -> DispatchReturn:
+    if aot_state.needs_autograd and not aot_state.aot_config.pre_dispatch:
+        return aot_stage2_autograd(aot_state, aot_graph_capture)
+    else:
+        return aot_stage2_inference(aot_state, aot_graph_capture)
+
+
+def aot_stage2_inference(
+    aot_state: AOTState,
+    aot_graph_capture: AOTGraphCapture,
 ) -> DispatchReturn:
     """
     Handles functions that don't need autograd. Runs wrappers and compiles with fw_compiler.
     """
-    wrappers = _create_wrappers_for_dispatch(needs_autograd=False)
-    flat_fn, flat_args, fw_metadata = pre_compile(
-        wrappers, flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-    )
-    fw_module, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(  # type: ignore[misc]
-        flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-    )
+
+    aot_config = aot_state.aot_config
+    fw_metadata = aot_state.fw_metadata
+    fw_module = aot_graph_capture.graph
+    wrappers = aot_graph_capture.wrappers
+    updated_flat_args = aot_graph_capture.updated_flat_args
+    maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
+
+    CompileEventLogger.try_add_pt2_compile("backend_compile", dispatch_mode="inference")
+
     # Save the forward_graph_str right after aot_dispatch_base_graph,
     # to save in the cache
     aot_forward_graph_str = None
@@ -255,8 +305,15 @@ def aot_dispatch_base(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
     cache_info = aot_config.cache_info
+
+    def should_save_cache():
+        if should_bundle_autograd_cache():
+            return True
+        else:
+            return hasattr(compiled_fw, "_fx_graph_cache_key")
+
     if cache_info is not None:
-        if hasattr(compiled_fw, "_fx_graph_cache_key"):
+        if should_save_cache():
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
             entry = AOTAutogradCache.make_entry(
@@ -276,6 +333,7 @@ def aot_dispatch_base(
                 guards_expr=guards_expr,
                 backward_state_indices=None,
                 num_symints_saved_for_bw=None,
+                serialized_bw_module=None,
             )
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
@@ -759,6 +817,11 @@ def run_joint_graph_passes_on_hops(
                 ),
             )
             propagate_meta_info(new_bw_hop_gm, new_bw_node, bw_node)
+            # Since the partitioner is run after the graph passes, we have lost
+            # the eager information and cannot faithfully extract the eager
+            # inputs for the new partitioned backward graph. For the forward
+            # graph, it was fine because the input signature remains same.
+            new_bw_node.meta.pop("eager_input_vals", None)
 
         bw_node.replace_all_uses_with(new_bw_node)
         joint_gm.graph.erase_node(bw_node)
@@ -812,9 +875,9 @@ def create_wrap_fn(fn, args):
     from .functional_utils import from_fun, has_data_mutation, to_fun
 
     def assert_no_mutation(t):
-        assert not has_data_mutation(
-            t
-        ), "Saved tensors hooks with inputs mutations are not allowed"
+        assert not has_data_mutation(t), (
+            "Saved tensors hooks with inputs mutations are not allowed"
+        )
 
     @wraps(fn)
     def _wrapper(*args):
@@ -1029,7 +1092,7 @@ def maybe_inline_graph_saved_tensors_hooks(
                 fw_outs_bw_ins_node_names.append(new_node_name)
             else:
                 # We can not specify desired name in node_copy.
-                # Copying node manually to set specifc name,
+                # Copying node manually to set specific name,
                 # to have matching fw_outs, bw_inputs names.
                 new_node_name = _gen_unused_name(f"{saved.name}_hook_{out_idx}")
                 with fw_g.inserting_before(_n):
@@ -1099,9 +1162,11 @@ def maybe_inline_graph_saved_tensors_hooks(
                     # Inserting packed sym scalars before first saved tensor input.
                     # Inserting packed tensors before last saved tensor input.
                     # Saved tensor inputs between them will be removed.
-                    with bw_g.inserting_before(
-                        bw_g_inputs[0]
-                    ) if is_sym else bw_g.inserting_before(bw_g_input):
+                    with (
+                        bw_g.inserting_before(bw_g_inputs[0])
+                        if is_sym
+                        else bw_g.inserting_before(bw_g_input)
+                    ):
                         new_n = bw_g.placeholder(new_node_name)
                         assert new_n.name == new_node_name
                     new_n.meta = copy.copy(out_n.meta)
@@ -1226,31 +1291,23 @@ def maybe_inline_graph_saved_tensors_hooks(
     bw_module.recompile()
 
 
-def aot_dispatch_autograd(
-    flat_fn,
-    flat_args: list[Any],
-    aot_config: AOTConfig,
-    *,
-    fw_metadata: ViewAndMutationMeta,
+def aot_stage2_autograd(
+    aot_state: AOTState, aot_graph_capture: AOTGraphCapture
 ) -> DispatchReturn:
     """
     Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
     and returns a wrapped torch.autograd.Function with a forward and backward.
     """
-    wrappers = _create_wrappers_for_dispatch(needs_autograd=True)
-    flat_fn, flat_args, fw_metadata = pre_compile(
-        wrappers,
-        flat_fn,
-        flat_args,
-        aot_config,
-        fw_metadata=fw_metadata,
-    )
 
-    fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
-    with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
-        fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
-            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
-        )
+    wrappers = aot_graph_capture.wrappers
+    fx_g = aot_graph_capture.graph
+    flat_args = aot_state.flat_args
+    joint_inputs = aot_graph_capture.updated_flat_args
+    maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
+    aot_config = aot_state.aot_config
+    fw_metadata = aot_state.fw_metadata
+
+    CompileEventLogger.try_add_pt2_compile("backend_compile", dispatch_mode="autograd")
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -1437,7 +1494,7 @@ def aot_dispatch_autograd(
         # It's possible to construct a case where eager may or may not have have tried to autograd through y,
         # depending on the actual grad_outputs that were passed in during the backward.
         # There is no easy fix for this: the simplest fix would be to run with `retain_graph=True`,
-        # allowing autograd to re-use the graph.
+        # allowing autograd to reuse the graph.
         #
         # An example of this case is:
         # def f(x):
@@ -1753,12 +1810,22 @@ def aot_dispatch_autograd(
         # close over aot_config.cache_info, since aot_config never changes.
         # But closing over random variables is confusing IMO, so I'm leaving it.
         def try_save_cache_entry(  # noqa: F811
-            compiled_bw_func, _fw_metadata, aot_config
+            compiled_bw_func: Callable,
+            bw_module: torch.fx.GraphModule,
+            _fw_metadata: ViewAndMutationMeta,
+            aot_config: AOTConfig,
         ):
-            fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
-            bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
             cache_info = aot_config.cache_info
-            if cache_info is not None and fw_key and bw_key:
+
+            def should_save_cache():
+                if should_bundle_autograd_cache():
+                    return True
+                else:
+                    return hasattr(compiled_fw_func, "_fx_graph_cache_key") and hasattr(
+                        compiled_bw_func, "_fx_graph_cache_key"
+                    )
+
+            if cache_info is not None and should_save_cache():
                 assert forward_time_taken_ns is not None
                 # TODO: technically, AOTAutograd does a *little* bit of post processing work
                 # in the backward that isn't measured here. But it's small enough that it's not worth
@@ -1775,7 +1842,7 @@ def aot_dispatch_autograd(
 
                 entry = AOTAutogradCache.make_entry(
                     compiled_fw_func,  # type: ignore[arg-type]
-                    compiled_bw_func,
+                    compiled_bw_func,  # type: ignore[arg-type]
                     aot_joint_graph_str,
                     aot_forward_graph_str,
                     aot_backward_graph_str,
@@ -1790,13 +1857,14 @@ def aot_dispatch_autograd(
                     guards_expr=guards_expr,
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
+                    serialized_bw_module=serialize_graph_module(bw_module),
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)
 
         if compiled_bw_func is not None:
-            # If we already compiled it we can just run it right now without waiting
-            try_save_cache_entry(compiled_bw_func, fw_metadata, aot_config)
+            # If we already compiled the backward, we save its cache entry now
+            try_save_cache_entry(compiled_bw_func, bw_module, fw_metadata, aot_config)
             try_save_cache_entry = None
 
     compiled_fn = AOTDispatchAutograd.post_compile(

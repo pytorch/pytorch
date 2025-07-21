@@ -7,6 +7,7 @@ import torch
 from torch._dynamo.callback import callback_handler, CallbackArgs, CallbackTrigger
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._guards import CompileId
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -25,9 +26,10 @@ class CallbackTests(TestCase):
     def test_callbacks_with_duplicate_prevention(self) -> None:
         trigger = CallbackTrigger.DYNAMO
         compile_id = CompileId(0, 0)
-        with callback_handler.install_callbacks(
-            trigger, compile_id
-        ), callback_handler.install_callbacks(trigger, compile_id):
+        with (
+            callback_handler.install_callbacks(trigger, compile_id),
+            callback_handler.install_callbacks(trigger, compile_id),
+        ):
             self._on_compile_start.assert_called_once()
         self._on_compile_end.assert_called_once()
 
@@ -56,6 +58,9 @@ class CallbackTests(TestCase):
             callback_handler._CompilationCallbackHandler__pending_callbacks_counter, 0
         )
 
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "ROCm outputs a different number of autotuning logs"
+    )
     @unittest.skipIf(not HAS_CUDA, "requires triton")
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_triggers(self) -> None:
@@ -101,12 +106,8 @@ start=CallbackArgs(callback_trigger=<CallbackTrigger.DYNAMO: 1>, compile_id='1/0
 end=CallbackArgs(callback_trigger=<CallbackTrigger.DYNAMO: 1>, compile_id='1/0')
 start=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='1/0')
 end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='1/0')
-start=CallbackArgs(callback_trigger=<CallbackTrigger.TRITON_AUTOTUNING: 3>, compile_id='1/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.TRITON_AUTOTUNING: 3>, compile_id='1/0')
 start=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='0/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='0/0')
-start=CallbackArgs(callback_trigger=<CallbackTrigger.TRITON_AUTOTUNING: 3>, compile_id='0/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.TRITON_AUTOTUNING: 3>, compile_id='0/0')""",  # noqa: B950
+end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='0/0')""",  # noqa: B950
         )
         order.clear()
 

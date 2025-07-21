@@ -62,7 +62,7 @@ extensions = [
     "sphinxcontrib.katex",
     "sphinx_copybutton",
     "sphinx_design",
-    "myst_parser",
+    "myst_nb",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
@@ -81,6 +81,10 @@ sitemap_excludes = [
     "genindex.html",
 ]
 sitemap_url_scheme = "{link}"
+
+html_additional_pages = {
+    "404": "404.html",
+}
 
 # build the templated autosummary files
 autosummary_generate = True
@@ -134,6 +138,7 @@ html_theme_options = {
         "json_url": "https://docs.pytorch.org/docs/pytorch-versions.json",
         "version_match": switcher_version,
     },
+    "show_toc_level": 2,
     "navigation_with_keys": False,
     "external_links": [
         {
@@ -515,34 +520,8 @@ coverage_ignore_functions = [
     "graph_pool_handle",
     "is_current_stream_capturing",
     "make_graphed_callables",
-    # torch.cuda.memory
-    "caching_allocator_alloc",
-    "caching_allocator_delete",
-    "change_current_allocator",
-    "empty_cache",
-    "get_allocator_backend",
-    "get_per_process_memory_fraction",
-    "list_gpu_processes",
-    "max_memory_allocated",
-    "max_memory_cached",
-    "max_memory_reserved",
-    "mem_get_info",
-    "memory_allocated",
-    "memory_cached",
-    "memory_reserved",
-    "memory_snapshot",
-    "memory_stats",
-    "memory_stats_as_nested_dict",
-    "host_memory_stats",
-    "host_memory_stats_as_nested_dict",
-    "memory_summary",
-    "reset_accumulated_memory_stats",
-    "reset_accumulated_host_memory_stats",
-    "reset_max_memory_allocated",
-    "reset_max_memory_cached",
+    # torch.mtia.memory
     "reset_peak_memory_stats",
-    "reset_peak_host_memory_stats",
-    "set_per_process_memory_fraction",
     # torch.cuda.nccl
     "all_gather",
     "all_reduce",
@@ -1107,7 +1086,6 @@ coverage_ignore_functions = [
     "z3op",
     "z3str",
     # torch.fx.graph_module
-    "reduce_deploy_graph_module",
     "reduce_graph_module",
     "reduce_package_graph_module",
     # torch.fx.node
@@ -1323,10 +1301,6 @@ coverage_ignore_functions = [
     "scatter_kwargs",
     # torch.nn.parameter
     "is_lazy",
-    # torch.nn.utils.clip_grad
-    "clip_grad_norm",
-    "clip_grad_norm_",
-    "clip_grad_value_",
     # torch.nn.utils.convert_parameters
     "parameters_to_vector",
     "vector_to_parameters",
@@ -1866,31 +1840,9 @@ coverage_ignore_functions = [
     "check_export_model_diff",
     "verify",
     "verify_aten_graph",
-    # torch.optim.adadelta
-    "adadelta",
-    # torch.optim.adagrad
-    "adagrad",
-    # torch.optim.adam
-    "adam",
-    # torch.optim.adamax
-    "adamax",
-    # torch.optim.adamw
-    "adamw",
-    # torch.optim.asgd
-    "asgd",
-    # torch.optim.nadam
-    "nadam",
     # torch.optim.optimizer
     "register_optimizer_step_post_hook",
     "register_optimizer_step_pre_hook",
-    # torch.optim.radam
-    "radam",
-    # torch.optim.rmsprop
-    "rmsprop",
-    # torch.optim.rprop
-    "rprop",
-    # torch.optim.sgd
-    "sgd",
     # torch.optim.swa_utils
     "get_ema_avg_fn",
     "get_ema_multi_avg_fn",
@@ -2282,7 +2234,6 @@ coverage_ignore_classes = [
     "UnsynchronizedAccessError",
     # torch.cuda.memory
     "MemPool",
-    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -2616,6 +2567,9 @@ coverage_ignore_classes = [
     # torch.distributed.checkpoint.filesystem
     "FileSystemReader",
     "FileSystemWriter",
+    # torch.distributed.checkpoint.hf_storage
+    "HuggingFaceStorageReader",
+    "HuggingFaceStorageWriter",
     # torch.distributed.checkpoint.metadata
     "BytesStorageMetadata",
     "ChunkStorageMetadata",
@@ -3136,12 +3090,6 @@ coverage_ignore_classes = [
     # torch.onnx.verification
     "OnnxBackend",
     "OnnxTestCaseRepro",
-    # torch.optim.adadelta
-    "Adadelta",
-    # torch.optim.adagrad
-    "Adagrad",
-    # torch.optim.adam
-    "Adam",
     # torch.optim.adamax
     "Adamax",
     # torch.optim.adamw
@@ -3167,23 +3115,8 @@ coverage_ignore_classes = [
     "ReduceLROnPlateau",
     "SequentialLR",
     "StepLR",
-    # torch.optim.nadam
-    "NAdam",
     # torch.optim.optimizer
     "Optimizer",
-    # torch.optim.radam
-    "RAdam",
-    # torch.optim.rmsprop
-    "RMSprop",
-    # torch.optim.rprop
-    "Rprop",
-    # torch.optim.sgd
-    "SGD",
-    # torch.optim.sparse_adam
-    "SparseAdam",
-    # torch.optim.swa_utils
-    "AveragedModel",
-    "SWALR",
     # torch.overrides
     "BaseTorchFunctionMode",
     "TorchFunctionMode",

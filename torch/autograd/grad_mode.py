@@ -196,6 +196,12 @@ class set_grad_enabled(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
+    def __str__(self) -> str:
+        return f"{torch.typename(self)}(mode={self.mode})"
+
+    def __repr__(self) -> str:
+        return str(self)
+
     def clone(self) -> "set_grad_enabled":
         r"""
         Create a copy of this class
@@ -236,7 +242,7 @@ class inference_mode(_DecoratorContextManager):
         ...     y = x * x
         >>> y.requires_grad
         False
-        >>> # xdoctest: +SKIP("want string isnt quite right")
+        >>> # xdoctest: +SKIP("want string isn't quite right")
         >>> y._version
         Traceback (most recent call last):
         File "<stdin>", line 1, in <module>
