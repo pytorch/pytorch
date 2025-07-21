@@ -239,16 +239,14 @@ Tensor aminmax_backward(
   if (grad_min.defined()) {
     auto grad_min_full =
         restore_reduced_dims(grad_min, dims, keepdim)
-            .expand_as(min_mask)          
-            .contiguous();
+            .expand_as(min_mask);          
     result = scale_grad_by_count(grad_min_full, min_mask, dims);
   }
 
   if (grad_max.defined()) {
     auto grad_max_full =
         restore_reduced_dims(grad_max, dims, keepdim)
-            .expand_as(max_mask)
-            .contiguous();
+            .expand_as(max_mask);          
     auto grad_max_res = scale_grad_by_count(grad_max_full, max_mask, dims);
     result = result.defined() ? result + grad_max_res
                               : grad_max_res;
