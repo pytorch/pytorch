@@ -1817,6 +1817,17 @@ class CppBuilder:
 
                 """
             )
+        else:
+            # When compile_standalone is True, use TorchStandalone insteade of Torch
+            contents += textwrap.dedent(
+                """
+                find_package(TorchStandalone REQUIRED)
+                # Set up include directories to find headers at the correct paths
+                target_include_directories(cos PRIVATE ${TorchStandalone_INCLUDE_DIRS})
+                target_include_directories(cos PRIVATE ${TorchStandalone_INCLUDE_DIRS}/standalone)
+
+                """
+            )
 
         if device_type == "cuda" and torch.version.hip is None:
             from torch._inductor.codecache import _nvcc_arch_as_compile_option
