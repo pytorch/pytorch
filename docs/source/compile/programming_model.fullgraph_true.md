@@ -132,46 +132,69 @@ f_rewritten(x)  # works
 Example: use [custom operators](programming_model.custom_ops) to create opaque functions w.r.t. to `torch.compile`
 
 ```{code-cell}
-from torchvision.transforms.functional import to_pil_image, pil_to_tensor
-import PIL
+from torch.utils.cpp_extension import load_inline
 
-def crop(pic, box):
-    img = to_pil_image(pic.cpu())
-    cropped_img = img.crop(box)
-    return pil_to_tensor(cropped_img).to(pic.device) / 255.
+# C++ source code for the square operation
+cpp_source = """
+torch::Tensor square_cpu(torch::Tensor input) {
+    // Check that input is a CPU tensor
+    TORCH_CHECK(input.device().is_cpu(), "Input must be a CPU tensor");
+
+    // Create output tensor with same shape and dtype as input
+    torch::Tensor output = torch::empty_like(input);
+
+    // Get data pointers
+    float* input_data = input.data_ptr<float>();
+    float* output_data = output.data_ptr<float>();
+
+    // Get total number of elements
+    int64_t numel = input.numel();
+
+    // For loop to compute square of each element
+    for (int64_t i = 0; i < numel; i++) {
+        output_data[i] = input_data[i] * input_data[i];
+    }
+
+    return output;
+}
+"""
+
+# Load the extension inline
+square_module = load_inline(
+    name="square_cpu_kernel",
+    cpp_sources=cpp_source,
+    functions=["square_cpu"],
+    verbose=True
+)
+
+def square(x):
+    return square_module.square_cpu(x)
 
 @torch.compile(fullgraph=True)
-def f(img):
-    return crop(img, (10, 10, 50, 50))
+def f(x):
+    return square(x)
 
-img = torch.randn(3, 64, 64)
 try:
-    cropped_img = f(img)  # graph break
+    f(torch.randn(3, 3))  # graph break
 except Exception as e:
     print(e)
 ```
 
 ```{code-cell}
-from typing import Sequence
-
 # Use torch.library.custom_op to define a new custom operator.
 # Custom operators are opaque with respect to torch.compile:
 # that is, torch.compile does not peek into them.
-@torch.library.custom_op("mylib::crop", mutates_args=())
-def crop(pic: torch.Tensor, box: Sequence[int]) -> torch.Tensor:
-    img = to_pil_image(pic.cpu())
-    cropped_img = img.crop(box)
-    return (pil_to_tensor(cropped_img) / 255.).to(pic.device, pic.dtype)
+
+@torch.library.custom_op("mylib::square", mutates_args=())
+def square(x: torch.Tensor) -> torch.Tensor:
+    return square_module.square_cpu(x)
 
 # Use register_fake to add a ``FakeTensor`` kernel for the operator
-@crop.register_fake
-def _(pic, box):
-    channels = pic.shape[0]
-    x0, y0, x1, y1 = box
-    return pic.new_empty(channels, y1 - y0, x1 - x0)
+@square.register_fake
+def _(x):
+    return x.new_empty(x.size())
 
-img = torch.randn(3, 64, 64)
-cropped_img = f(img)  # no graph-break
+print(f(torch.randn(3, 3)))  # no graph break
 ```
 
 For more information on `triton_op` for custom triton kernels, see the
