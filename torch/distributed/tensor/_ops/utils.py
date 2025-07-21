@@ -216,7 +216,7 @@ def map_placements_after_broadcast(
                 # the input shape shard dim before broadcasting,
                 # in this case it means implicit broadcasting happen
                 # in this dim, so we can just mark it as replicate
-                # and implict broadcast will broadcast automatically
+                # and implicit broadcast will broadcast automatically
                 # to the sharded shape
                 new_placements.append(Replicate())
 
@@ -226,6 +226,11 @@ def map_placements_after_broadcast(
 def generate_redistribute_costs(
     src_strategy: OpStrategy, dst_spec: DTensorSpec
 ) -> list[float]:
+    """Generates one row in the 'redistribute_costs' matrix in an OpSpec
+    The length of the returned list will match the number of strategies in 'src_strategy'.
+
+    Each value in the row is the cost of redistributing from a particular src_strategy to dst_spec.
+    """
     redistribute_costs: list[float] = [
         redistribute_cost(strat.output_spec, dst_spec)
         for strat in src_strategy.strategies
@@ -241,7 +246,36 @@ def expand_to_full_mesh_op_strategy(
     *,
     input_index: int = 1,
     inplace_op: bool = False,
+    is_valid_strategy_cb: Optional[
+        Callable[[list[DTensorSpec], tuple[Optional[DTensorSpec], ...]], bool]
+    ] = None,
 ) -> OpStrategy:
+    """
+    Convenience function to allow writing a sharding strategy considering only a single mesh dimension,
+    and have it expanded combinatorically to all mesh dimensions.
+
+    Args:
+        mesh (DeviceMesh): the device mesh to expand the strategy to
+        op_schema (OpSchema): the op schema
+        single_mesh_dim_strategies (list[PlacementList]): the sharding strategies to expand. The outer list is over
+            different strategies.  The inner PlacementList is over the outputs and inputs of the op. If input_index is 1,
+            a PlacementList looks like [output_placement, input_placement1, input_placement2, ...].
+        input_index: the number of outputs of the op, defaults to 1
+        inplace_op: whether the op is inplace or not, defaults to False
+        is_valid_strategy_cb: a callback function to filter out invalid sharding rules, defaults to None.
+
+    Example: Let's say `my_op(tensor_x, tensor_y) - > output_tensor`  can support sharding or replicating tensor_x,
+    but always requires tensor_y to be replicated.  We can specify these valid combinations ignoring mesh dims.
+    Then, we can rely on `expand_to_full_mesh_op_strategy` to create every possible combination of these shardings
+    over multiple mesh dimensions, filtering out any combinations that are invalid based on the actual mesh dim size.
+
+        single_mesh_dim_strategies = [
+            # first strategy: return output sharded on first dim, shard tensor_x on its first dim, replicate tensor_y
+            [Shard(0), Shard(0), Replicate()]
+            # second strategy: replicate output, and both inputs
+            [Replicate(), Replicate(), Replicate()]
+        ]
+    """
     # Expand the single_mesh_dim_strategies to full mesh dim strategies.
     all_mesh_dim_strategies = [single_mesh_dim_strategies] * mesh.ndim
 
@@ -252,6 +286,7 @@ def expand_to_full_mesh_op_strategy(
         spec_list: list[Optional[DTensorSpec]] = []
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
+                # TODO: we should fill in tensor_meta here.  If nothing else, it helps the filter strategy callback
                 spec_list.append(DTensorSpec(mesh, specs))
             else:
                 spec_list.append(None)
@@ -269,30 +304,36 @@ def expand_to_full_mesh_op_strategy(
             # input_spec matches the first argument's runtime sharding, otherwise we skip
             continue
 
-        # check inputs shardable
-        inputs_shardable = all(
+        output_specs: tuple[Optional[DTensorSpec], ...]
+        if input_index > 1:
+            output_specs = tuple(spec_list[:input_index])
+        else:
+            if spec_list[0] is not None:
+                output_specs = spec_list[0]  # type: ignore[assignment]
+            else:
+                raise RuntimeError("output spec is None")
+
+        # check all inputs are shardable
+        if not all(
             is_tensor_shardable(inp.shape, s)
             for inp, s in zip(input_args_strategy, input_specs)
+        ):
+            continue
+
+        # perform additional op-specific filtering
+        if is_valid_strategy_cb is not None:
+            if not is_valid_strategy_cb(input_specs, output_specs):
+                continue
+
+        redistribute_cost = [
+            generate_redistribute_costs(input_strategy, input_spec)
+            for input_strategy, input_spec in zip(input_args_strategy, input_specs)
+        ]
+
+        strategy = OpSpec(
+            output_specs=output_specs,
+            input_specs=input_specs,
+            redistribute_cost=redistribute_cost,
         )
-
-        # only add to the all_strategies list when all inputs are shardable
-        if inputs_shardable:
-            redistribute_cost = [
-                generate_redistribute_costs(input_strategy, input_spec)
-                for input_strategy, input_spec in zip(input_args_strategy, input_specs)
-            ]
-            if input_index > 1:
-                output_specs = tuple(spec_list[:input_index])
-            else:
-                if spec_list[0] is not None:
-                    output_specs = spec_list[0]  # type: ignore[assignment]
-                else:
-                    raise RuntimeError("output spec is None")
-            strategy = OpSpec(
-                output_specs=output_specs,
-                input_specs=input_specs,
-                redistribute_cost=redistribute_cost,
-            )
-            all_strategies.append(strategy)
-
+        all_strategies.append(strategy)
     return OpStrategy(all_strategies)

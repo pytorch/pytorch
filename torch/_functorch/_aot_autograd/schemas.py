@@ -4,23 +4,28 @@ The various dataclasses, Enums, namedtuples etc used in AOTAutograd. This includ
 input/output types, metadata, config, function signatures etc.
 """
 
+from __future__ import annotations
+
 import collections
-import contextlib
 import dataclasses
 import functools
 import itertools
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, NewType, Optional, Protocol, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    NewType,
+    Optional,
+    Protocol,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._guards import Source
-from torch._inductor.output_code import OutputCode
-from torch._inductor.utils import InputType
-from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -31,6 +36,16 @@ from .functional_utils import (
     FunctionalTensorMetadataEq,
 )
 from .utils import strict_zip
+
+
+if TYPE_CHECKING:
+    import contextlib
+    from collections.abc import Iterable, Sequence
+
+    from torch._guards import Source
+    from torch._inductor.output_code import OutputCode
+    from torch._inductor.utils import InputType
+    from torch._ops import OpOverload
 
 
 zip = strict_zip
@@ -170,7 +185,7 @@ class MemoryFormatMeta:
     memory_format: Optional[torch.memory_format] = None
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> Optional["MemoryFormatMeta"]:
+    def from_tensor(t: torch.Tensor) -> Optional[MemoryFormatMeta]:
         # We only memorize expected memory format for
         # 1. Traceable wrapper subclasses
         # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
@@ -228,7 +243,7 @@ class SubclassCreationMeta:
     # arg_count is inclusive of the arg_counts of any
     # inner tensor subclasses: If I have a TwoTensor and
     # both of its inner elements are TwoTensors, then the
-    # arg_count of the outer-most sublass will be 4
+    # arg_count of the outer-most subclass will be 4
     arg_count: int
     # Mark where or not symints were included. This flag is only used in one assertion
     # in "wrap_tensor_subclasses"
@@ -236,7 +251,7 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: dict[str, Union["SubclassCreationMeta", PlainTensorMeta]]
+    attrs: dict[str, Union[SubclassCreationMeta, PlainTensorMeta]]
     outer_size: Iterable[Union[None, int, torch.SymInt]]
     outer_stride: Iterable[Union[None, int, torch.SymInt]]
     meta: Any
@@ -388,7 +403,7 @@ class ViewAndMutationMeta:
     # metadata pass of the user's forward function.
     # Their only use today is to pass them as a best-guess for tangents when tracing the joint.
     # Stashing them as part of our "metadata" makes it simpler if we want to run our analysis
-    # pass once, and re-use the output throughout AOTAutograd
+    # pass once, and reuse the output throughout AOTAutograd
     traced_tangents: list[Any]
 
     # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
@@ -832,7 +847,7 @@ class GraphSignature:
         num_user_outputs: int,
         loss_index: Optional[int],
         backward_signature: Optional[BackwardSignature],
-    ) -> "GraphSignature":
+    ) -> GraphSignature:
         graph_inputs = graph_input_names
         graph_outputs = graph_output_names
         parameters = list(named_parameters)
@@ -1173,7 +1188,7 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
 
 
-TOutputCode = TypeVar("TOutputCode", bound=OutputCode)
+TOutputCode = TypeVar("TOutputCode", bound="OutputCode")
 
 
 class AOTDispatchCompiler(Protocol):
