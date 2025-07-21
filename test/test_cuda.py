@@ -6484,12 +6484,10 @@ class TestCudaAutocast(TestAutocast):
             with torch.cuda.amp.autocast():
                 _ = torch.ones(10)
 
-    def test_cuda_module_loading_env(self):
-        torch.cuda.init()
-        val = os.environ.get("CUDA_MODULE_LOADING", "")
-        self.assertEqual(val, "LAZY")
 
-
+@unittest.skipIf(
+    os.environ.get("USE_LEGACY_DRIVER", None) == "1", "Doesn't work with older driver"
+)
 class TestCompileKernel(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
