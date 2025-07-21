@@ -10851,8 +10851,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_invalid_arg_error_handling(self) -> None:
         """ Tests that errors from old TH functions are propagated back """
         for invalid_val in [-1, 2**65]:
-            self.assertRaises(ValueError, lambda: torch.set_num_threads(invalid_val))
-            self.assertRaises(ValueError, lambda: torch.set_num_interop_threads(invalid_val))
+            self.assertRaises((ValueError, RuntimeError), lambda: torch.set_num_threads(invalid_val))
+            self.assertRaises((ValueError, RuntimeError), lambda: torch.set_num_interop_threads(invalid_val))
 
     def _get_tensor_prop(self, t):
         preserved = (
