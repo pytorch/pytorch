@@ -8,6 +8,7 @@ sphinx==6.2.1
 # but it doesn't seem to work and hangs around idly. The initial thought that it is probably
 # something related to Docker setup. We can investigate this later.
 
+
 sphinxcontrib.katex==0.9.10
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 0.9.10
