@@ -11,7 +11,6 @@ from numpy.testing import assert_array_equal
 import torch
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -209,8 +208,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_from_local_uneven_sharding(self):
-        mesh_shape = (self.world_size,)
-        device_mesh = init_device_mesh(self.device_type, mesh_shape)
+        device_mesh = self.build_device_mesh()
 
         uneven_dim0_size = self.world_size + 1
         global_tensor = torch.randn(uneven_dim0_size, 2)
@@ -235,8 +233,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_from_local_uneven_sharding_raise_error(self):
-        mesh_shape = (self.world_size,)
-        device_mesh = init_device_mesh(self.device_type, mesh_shape)
+        device_mesh = self.build_device_mesh()
 
         uneven_dim0_size = self.world_size + 1
         global_tensor = torch.randn(uneven_dim0_size, 2)
@@ -387,7 +384,7 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_new_empty_strided(self):
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        device_mesh = self.build_device_mesh()
         local_tensor = torch.randn(8, 8, requires_grad=True, device=self.device_type)
         my_dtensor = distribute_tensor(local_tensor, device_mesh, [Shard(0)])
         new_strided_dtensor = my_dtensor.new_empty_strided(
@@ -413,7 +410,7 @@ class DTensorTest(DTensorTestBase):
         # Tests that if the output of some dtensor operations  isn't used in any compute,
         # the output should be an AsyncCollectiveTensor (representing the fact that
         # we haven't synced the collective yet).
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         def fn(dt):
             dt_out_redistribute = dt.redistribute(mesh, [Replicate()], async_op=True)
@@ -571,7 +568,7 @@ class DTensorTest(DTensorTestBase):
     @with_comms
     def test_shard_tensor(self):
         ws = self.world_size
-        device_mesh = DeviceMesh(self.device_type, list(range(ws)))
+        device_mesh = self.build_device_mesh()
         full_tensor = torch.arange(ws * ws).reshape(ws, ws)
 
         # Shard by row
@@ -622,7 +619,7 @@ class DTensorMeshTest(DTensorTestBase):
     @with_comms
     def test_dtensor_device_mesh_device_conversion(self):
         # construct a cuda device mesh
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
 
         # construct from a cpu local tensor with cuda device mesh
         # should automatically convert the dist tensor to cuda
@@ -651,7 +648,7 @@ class DTensorMeshTest(DTensorTestBase):
                 replica_tensor.size(), torch.Size([3 * self.world_size, 3])
             )
 
-        with DeviceMesh(self.device_type, torch.arange(self.world_size)):
+        with self.build_device_mesh():
             placements = [Shard(0)]
             global_shape = torch.Size([3 * self.world_size, 3])
             global_tensor = torch.randn(global_shape)
@@ -837,7 +834,7 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_implicit_replication(self):
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        mesh = self.build_device_mesh()
         local_tensor1 = torch.ones(4, 3)
         sharded_dtensor = DTensor.from_local(local_tensor1, mesh, [Shard(0)])
 
@@ -853,7 +850,7 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_auto_implicit_replication(self):
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        mesh = self.build_device_mesh()
 
         local_tensor = torch.ones(self.world_size, 3, device=self.device_type)
         sharded_dtensor = DTensor.from_local(local_tensor, mesh, [Shard(0)])
@@ -941,7 +938,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
 
     @with_comms
     def test_split_tensor_1D(self) -> None:
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = self.build_device_mesh()
         shard_placement = Shard(0)
 
         for size in range(8):

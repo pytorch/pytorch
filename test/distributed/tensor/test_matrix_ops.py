@@ -492,7 +492,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         """
         Create a simple test for Shampoo's use case.
         """
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = self.build_device_mesh()
 
         local_a = torch.randn(4, 4)
         local_b = torch.randn(4, 15)
@@ -545,7 +545,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     def test_grouped_mm(self, kwargs):
         # TODO: torch._grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
         # More tests need to be added.
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
         dtype = torch.bfloat16
         inp = torch.rand(

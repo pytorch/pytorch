@@ -721,7 +721,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     def _test_split_on_partial(self, reduce_op: str, split_size: int, split_dim: int):
         torch.manual_seed(self.rank)
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        mesh = self.build_device_mesh()
 
         partial_tensor = torch.randn(8, 8, device=self.device_type)
         partial_dt = DTensor.from_local(

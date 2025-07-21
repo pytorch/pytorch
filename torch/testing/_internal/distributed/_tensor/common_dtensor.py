@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from torch._utils import _get_device_module
 from torch.distributed.tensor import (
     DeviceMesh,
+    init_device_mesh
     distribute_tensor,
     DTensor,
     Placement,
@@ -352,7 +353,7 @@ class DTensorTestBase(MultiProcessTestCase):
         return backend
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(self.device_type, list(range(self.world_size)))
+        return init_device_mesh(self.device_type, (self.world_size,))
 
     def init_pg(self, eager_init) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
@@ -483,7 +484,7 @@ class DTensorOpTestBase(MultiThreadedTestCase):
         return DEVICE_TYPE
 
     def build_device_mesh(self):
-        return DeviceMesh(self.device_type, list(range(self.world_size)))
+        return init_device_mesh(self.device_type, (self.world_size,))
 
     def setUp(self) -> None:
         super().setUp()

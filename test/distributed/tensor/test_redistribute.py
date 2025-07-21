@@ -220,7 +220,7 @@ class RedistributeTest(DTensorTestBase):
 
     @with_comms
     def test_replicate_to_replicate_forward_backward_datatype_conversion(self):
-        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
 
         forward_datatypes = [
@@ -277,7 +277,7 @@ class RedistributeTest(DTensorTestBase):
 
     @with_comms
     def test_shard_to_replicate_forward_backward_datatype_conversion(self):
-        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+        device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
 
         shard_dim_and_input_sizes = [
