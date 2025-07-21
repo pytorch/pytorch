@@ -82,7 +82,15 @@ Example outputs:
 
 The full set of descriptors that are possible to annotate a graph can be
 understood by looking at the overall ordering of transformations in
-AOTAutograd.  At a high level, AOTAutograd is structured as a series of
+AOTAutograd.  First, we present a highly stylized account which is semantically
+equivalent to what AOTAutograd does, but doesn't follow the implementation.  Then,
+we describe how the implementation works.
+
+
+
+
+
+At a high level, AOTAutograd is structured as a series of
 wrappers on the original user function, which are composed together to form
 the final function to trace.  As a result of this, AOTAutograd ends up first
 building the full AOTInputs for a function to be traced, and then in reverse
@@ -103,18 +111,18 @@ Begin                       PlainAOTInput                       (n/a)
 
 Precompile dedupe           (remove dupes)                      (nothing)
 
-Precompile synthetic base   SyntheticBaseAOTInput               AliasedArgWithMetadataMutation...
+Precompile synthetic base   SyntheticBaseAOTInput               MetadataMutationAOTOutput
                             ViewBaseAOTInput
 
 Forward metadata trace      PlainAOTOutput                      (n/a)
-                            AliasedArgWithMetadataMutation...
+                            MetadataMutationAOTOutput
 
 Prepare for autograd        (nothing)                           InputMutationAOTOutput
                                                                 IntermediateBaseAOTOutput
 
 Create joint                TangentAOTInput                     GradAOTOutput
-                            IntermediateBaseTangentAOTInput
-                            InputMutationTangentAOTInput
+                            above w/ InputMutationAOTOutput
+                            above w/ IntermediateBaseAOTOutput
 
 Precompile subclass         SubclassGetAttrAOTInput et al.      SubclassGetAttrAOTOutput et al.
 
@@ -132,9 +140,10 @@ We can unroll the phases for ease of understanding the data flow:
   - [IN] Precompile synthetic base: SyntheticBaseAOTInput, ViewBaseAOTInput
   - Forward metadata trace (mini output desc propagation)
     - [OUT] Original output convention: PlainAOTOutput
-    - [OUT] Precompile synthetic base: AliasedArgWithMetadataMutationAOTOutput
+    - [OUT] Precompile synthetic base: MetadataMutationAOTOutput
   - [IN] Prepare for autograd: (nothing)
-  - [IN] Create joint: TangentAOTInput, IntermediateBaseTangentAOTInput, InputMutationTangentAOTInput
+  - [IN] Create joint: TangentAOTInput (potentially w/
+         IntermediateBaseAOTOutput, InputMutationAOTOutput)
   - [IN] Precompile subclass: SubclassGetAttrAOTInput et al.
   - [IN] Effect tokens: ForwardTokenAOTInput, BackwardTokenAOTInput
 - Trigger a trace with the modified inputs on the wrapper
@@ -144,7 +153,7 @@ We can unroll the phases for ease of understanding the data flow:
   - [OUT] Precompile subclass: SubclassGetAttrAOTOutput et al.
   - [OUT] Create joint: GradAOTOutput
   - [OUT] Prepare for autograd: InputMutationAOTOutput, IntermediateBaseAOTOutput
-  - [OUT] Precompile synthetic base: AliasedArgWithMetadataMutationAOTOutput
+  - [OUT] Precompile synthetic base: MetadataMutationAOTOutput
   - [OUT] Precompile dedupe: (nothing)
 
 The important thing to know about this list is that descriptors can only be
@@ -188,8 +197,6 @@ likely you need to handle them:
   - Less important, can be eliminated by cloning inputs of graph:
     - ViewBaseAOTInput
     - SyntheticBaseAOTInput
-    - InputMutationTangentAOTInput
-    - IntermediateBaseTangentAOTInput
   - Non-tensor, mostly just ignore them:
     - DummyAOTInput
     - PhiloxForwardSeedAOTInput
@@ -206,7 +213,7 @@ likely you need to handle them:
     - InputMutationAOTOutput
   - Less important, can be eliminated by cloning outputs of graph:
     - IntermediateBaseAOTOutput
-    - AliasedArgWithMetadataMutationAOTOutput
+    - MetadataMutationAOTOutput
   - Non-tensor, mostly just ignore them:
     - PhiloxUpdatedForwardOffsetAOTOutput
     - PhiloxUpdatedBackwardOffsetAOTOutput
@@ -393,19 +400,6 @@ class BackwardTokenAOTInput(AOTInput):
         return "__backward_token"
 
 
-@dataclasses.dataclass(frozen=True)
-class InputMutationTangentAOTInput(AOTInput):
-    """An input to the joint graph representing the tangent of a mutated input
-    (which is therefore implicitly an output)"""
-
-    base: AOTInput
-
-    def expr(self) -> str:
-        # these are not "real" functions, in that they can't actually be executed;
-        # they truly are new inputs, but they're parameterized by other sources
-        return f"__input_mutation_tangent({self.base.expr()})"
-
-
 # Technically the "output" here is redundant, tangents always correspond to
 # outputs
 @dataclasses.dataclass(frozen=True)
@@ -416,18 +410,6 @@ class TangentAOTInput(AOTInput):
 
     def expr(self) -> str:
         return f"__output_tangent({self.output.expr()})"
-
-
-@dataclasses.dataclass(frozen=True)
-class IntermediateBaseTangentAOTInput(AOTInput):
-    """An input to the joint graph representing the tangent of an
-    'intermediate base' output that was created to deal with aliasing
-    outputs."""
-
-    output: "AOTOutput"
-
-    def expr(self) -> str:
-        return f"__output_intermediate_base_tangent({self.output.expr()})"
 
 
 # ------------
@@ -469,7 +451,7 @@ class IntermediateBaseAOTOutput(AOTOutput):
 
 
 @dataclasses.dataclass(frozen=True)
-class AliasedArgWithMetadataMutationAOTOutput(AOTOutput):
+class MetadataMutationAOTOutput(AOTOutput):
     # TODO: we're not recording detailed information about this
 
     def expr(self) -> str:

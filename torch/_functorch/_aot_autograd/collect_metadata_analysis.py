@@ -31,8 +31,8 @@ from torch.utils._python_dispatch import (
 from .descriptors import (
     AOTInput,
     AOTOutput,
-    InputMutationTangentAOTInput,
-    IntermediateBaseTangentAOTInput,
+    InputMutationAOTOutput,
+    IntermediateBaseAOTOutput,
     PlainAOTOutput,
     TangentAOTInput,
 )
@@ -602,8 +602,13 @@ from a multi-output view call"
                                 new_out_idx
                             )
                             intermediate_bases.append(o._base)
+                            # NB: The desc we picked here is guaranteed to be
+                            # synchronized with the one in
+                            # graph_capture_wrappers.py because we
+                            # SPECIFICALLY notated this output as
+                            # alias_of_intermediate_save_as_output
                             intermediate_bases_descs.append(
-                                IntermediateBaseTangentAOTInput(desc)
+                                TangentAOTInput(IntermediateBaseAOTOutput(desc))
                             )
             elif (
                 # See https://github.com/pytorch/pytorch/issues/100348 for this case.
@@ -741,7 +746,7 @@ from a multi-output view call"
                     and not _is_subclass_mutated_input_tangent_always_subclass(inp)
                     else inp
                 ),
-                InputMutationTangentAOTInput(inp_desc),
+                TangentAOTInput(InputMutationAOTOutput(inp_desc)),
             )
             for inp, inp_desc, info in zip(flat_f_args, flat_f_args_descs, input_info)
             if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
