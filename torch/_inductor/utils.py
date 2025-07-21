@@ -1666,11 +1666,11 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 
 _IntLike: TypeAlias = Union[int, sympy.Expr]
 
-
+@functools.cache
 def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
 
-    decompose_k_threshold = config.decompose_k_threshold
+    decompose_k_threshold = config.triton.decompose_k_threshold
 
     return (
         not torch.version.hip
@@ -1688,7 +1688,7 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
 @functools.cache
 def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     # To limit compile time
-    k_splits_limit = config.num_decompose_k_splits
+    k_splits_limit = config.triton.num_decompose_k_splits
 
     # Hand-tuned
     default_k_splits = [16, 32, 64, 128, 256]
@@ -1736,15 +1736,10 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
 
     if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
         return pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
-    # If the # of power of 2 divisors are greater than k_splits_limit, return all
-    # This should be ok for compile time, all perfect squares between 128 and min(k / m, k / n)
-    # should never be a massive amount
-    if len(pow_of_2_divisors) >= k_splits_limit:
-        return pow_of_2_divisors
-    else:
-        best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
-        # Otherwise, conform results to k_splits_limit
-        return best_splits[:k_splits_limit]
+
+    best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
+    # Otherwise, conform results to k_splits_limit
+    return best_splits[:k_splits_limit]
 
 
 @functools.cache
