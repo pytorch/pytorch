@@ -1073,9 +1073,9 @@ def _get_openmp_args(
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
 
-def _get_libstdcxx_args(cpp_compiler: str) -> tuple[list[str], list[str]]:
+def _get_libstdcxx_args() -> tuple[list[str], list[str]]:
     """
-    For fbcode, we should link stdc++ instead assuming the binary where dlopen is executed is built with dynamic stdc++.
+    For fbcode cpu case, we should link stdc++ instead assuming the binary where dlopen is executed is built with dynamic stdc++.
     """
     lib_dir_paths: list[str] = []
     libs: list[str] = []
@@ -1146,11 +1146,6 @@ def get_cpp_torch_options(
         omp_passthrough_args,
     ) = _get_openmp_args(cpp_compiler)
 
-    (
-        stdcxx_lib_dir_paths,
-        stdcxx_libs,
-    ) = _get_libstdcxx_args(cpp_compiler)
-
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
@@ -1170,13 +1165,8 @@ def get_cpp_torch_options(
     )
     cflags = sys_libs_cflags + omp_cflags
     ldflags = omp_ldflags
-    libraries_dirs = (
-        python_libraries_dirs
-        + torch_libraries_dirs
-        + omp_lib_dir_paths
-        + stdcxx_lib_dir_paths
-    )
-    libraries = torch_libraries + omp_lib + stdcxx_libs
+    libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
+    libraries = torch_libraries + omp_lib
     passthrough_args = (
         sys_libs_passthrough_args + isa_ps_args_build_flags + omp_passthrough_args
     )
@@ -1300,6 +1290,13 @@ def get_cpp_torch_device_options(
     aot_mode: bool = False,
     compile_only: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """
+    This function is used to get the build args of device related build options.
+    1. Device include_directories, libraries, libraries_directories.
+    2. Device MACROs.
+    3. MISC
+    4. Return the build args
+    """
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -1359,6 +1356,14 @@ def get_cpp_torch_device_options(
                 if not compile_only:
                     # Only add link args, when compile_only is false.
                     passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+
+        if device_type == "cpu":
+            (
+                stdcxx_lib_dir_paths,
+                stdcxx_libs,
+            ) = _get_libstdcxx_args()
+            libraries_dirs += stdcxx_lib_dir_paths
+            libraries += stdcxx_libs
 
     if config.aot_inductor.custom_op_libs:
         libraries += config.aot_inductor.custom_op_libs
@@ -1768,7 +1773,7 @@ class CppBuilder:
 
         definitions = " ".join(self._build_option.get_definitions())
         if config.aot_inductor.compile_standalone:
-            if config.test_configs.testing_aot_inductor_compile_standalone:
+            if config.test_configs.use_libtorch:
                 add_target = f"add_library({self._target_name} STATIC)"
             else:
                 add_target = f"add_executable({self._target_name} ${{CMAKE_CURRENT_SOURCE_DIR}}/main.cpp)"
@@ -1789,7 +1794,7 @@ class CppBuilder:
 
         if (
             not config.aot_inductor.compile_standalone
-            or config.test_configs.testing_aot_inductor_compile_standalone
+            or config.test_configs.use_libtorch
         ):
             # When compile_standalone is True, the generated cpp project should
             # not use Torch. But for unit testing purpose, we need to use Torch here.
@@ -1927,7 +1932,7 @@ class CppBuilder:
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
         if (
             config.aot_inductor.compile_standalone
-            and not config.test_configs.testing_aot_inductor_compile_standalone
+            and not config.test_configs.use_libtorch
         ):
             # When compile_standalone is True, do not link with libtorch
             return

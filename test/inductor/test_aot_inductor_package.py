@@ -360,9 +360,7 @@ class TestAOTInductorPackage(TestCase):
     )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfXpu  # build system may be different
-    @torch._inductor.config.patch(
-        "test_configs.testing_aot_inductor_compile_standalone", True
-    )
+    @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_after_package_static(self):
         # compile_standalone will set package_cpp_only=True
         self.check_package_cpp_only()
@@ -421,9 +419,7 @@ class TestAOTInductorPackage(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfXpu  # build system may be different
-    @torch._inductor.config.patch(
-        "test_configs.testing_aot_inductor_compile_standalone", True
-    )
+    @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_standalone_cos(self):
         # compile_standalone will set package_cpp_only=True
         self.check_package_cpp_only()
@@ -460,9 +456,7 @@ class TestAOTInductorPackage(TestCase):
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfRocm  # doesn't support multi-arch binary
     @skipIfXpu  # doesn't support multi-arch binary
-    @torch._inductor.config.patch(
-        "test_configs.testing_aot_inductor_compile_standalone", True
-    )
+    @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter(self):
         self.check_package_cpp_only()
 
