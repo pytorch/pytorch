@@ -236,19 +236,11 @@ def aot_stage2_inference(
         )
 
     fakified_out_wrapper = FakifiedOutWrapper()
-    (
-        fw_module,
-        updated_flat_args,
-        fw_metadata,
-    ) = fakified_out_wrapper.pre_compile(
+    fakified_out_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
     )
     functionalized_rng_wrapper = FunctionalizedRngRuntimeWrapper()
-    (
-        fw_module,
-        updated_flat_args,
-        fw_metadata,
-    ) = functionalized_rng_wrapper.pre_compile(
+    functionalized_rng_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
     )
     assert isinstance(fw_module, GraphModule)
@@ -1612,11 +1604,7 @@ def aot_stage2_autograd(
             adjusted_flat_args = joint_inputs[0]
 
             fakified_out_wrapper = FakifiedOutWrapper()
-            (
-                fw_module,
-                adjusted_flat_args,
-                fw_metadata,
-            ) = fakified_out_wrapper.pre_compile(
+            fakified_out_wrapper.pre_compile(
                 fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
             )
 
@@ -1633,11 +1621,7 @@ def aot_stage2_autograd(
                 ]
                 adjusted_flat_args.extend(rng_states)  # type: ignore[arg-type]
 
-            (
-                fw_module,
-                adjusted_flat_args,
-                fw_metadata,
-            ) = functionalized_rng_wrapper.pre_compile(
+            functionalized_rng_wrapper.pre_compile(
                 fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
             )
             if tracing_context := torch._guards.TracingContext.try_get():
