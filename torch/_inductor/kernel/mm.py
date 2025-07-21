@@ -707,10 +707,24 @@ def tuned_mm(mat1, mat2, *, layout=None):
             search_space = V.choices.get_mm_configs_search_space(device_type)
             preliminary_choices = list(
                 search_space(
-                    m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu), dtype_size=dtype.itemsize
+                    m,
+                    n,
+                    k,
+                    **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+                    dtype_size=dtype.itemsize,
                 )
             )
-            default_topk = len(list(mm_configs(m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu), dtype_size=dtype.itemsize)))
+            default_topk = len(
+                list(
+                    mm_configs(
+                        m,
+                        n,
+                        k,
+                        **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+                        dtype_size=dtype.itemsize,
+                    )
+                )
+            )
             # applies ml filtering/ranking
             preliminary_choices = V.choices.filter_triton_mm_choices(
                 m,
