@@ -1,4 +1,4 @@
-pyyaml==6.0.2
+PyYAML==6.0.1
 numpy==1.26.4
 requests==2.32.2
 setuptools==78.1.1
