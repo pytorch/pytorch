@@ -74,7 +74,7 @@ def _dev_key(device: torch.device) -> Optional[str]:
     For CUDA devices, returns the props.gcnArchName string.
     """
     if device.type != "cuda":
-        # only cuda devices are supported, this indicates tha the system is not in use
+        # only cuda devices are supported, this indicates that the system is not in use
         # for this device
         return None
 
@@ -101,7 +101,7 @@ def _get_op_lookup_table(
     Get the lookup table configs for a specific operation and input configuration.
 
     Args:
-        input_nodes: List of input nodes for the operation
+        input_nodes: Tuple of input nodes for the operation
         op: Operation name (e.g., "mm", "addmm")
 
     Returns:
@@ -151,12 +151,15 @@ def lookup_op_config_entries(
     Get configs grouped by template_id for a specific operation and input configuration.
 
     Args:
-        input_nodes: List of input nodes for the operation
+        input_nodes: Tuple of input nodes for the operation
         op: Operation name (e.g., "mm", "addmm")
 
     Returns:
         Dictionary mapping template_id to lists of configs, or None if not found
     """
+    # TODO(coconutruben): replace input_nodes here with KernelInputs and use that to generate
+    # the input key. This requires that select_algorithm also takes in KernelInputs to enable
+    # us to record table entries too.
     config_list = _get_op_lookup_table(input_nodes, op)
     if config_list is None:
         return None

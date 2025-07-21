@@ -134,6 +134,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
     ]:
         validate_subgraph_args_types(score_mod_other_buffers + mask_mod_other_buffers)
+
         return super().__call__(
             query,
             key,
@@ -770,6 +771,11 @@ def flex_attention_autograd(
             for t in (query, key, value, *score_mod_other_buffers)
         )
         if torch.is_grad_enabled() and input_requires_grad:
+            if block_mask[7] is None:
+                raise RuntimeError(
+                    "BlockMask q_indices is None. Backward pass requires q_indices to be computed. "
+                    "Please create the BlockMask with compute_q_blocks=True"
+                )
             example_vals = (
                 query.new_zeros((), requires_grad=input_requires_grad),
                 query.new_zeros((), dtype=torch.int),

@@ -1351,61 +1351,6 @@ class ExportedProgram:
             "You should use `exported_program.module()` instead."
         )
 
-    def _postprocess_graph_module_outputs(self, res, orig_args, orig_kwargs):
-        """Process potential mutations to the input.
-
-        Because self.graph_module is functional, so mutations has to be written
-        back after execution of graph_module.
-        """
-        import torch._export.error as error
-
-        flat_args, _ = self._get_flat_args_with_check(orig_args, orig_kwargs)
-        if self.call_spec.out_spec is not None:
-            buffer_mutation = self.graph_signature.buffers_to_mutate
-            user_input_mutation = self.graph_signature.user_inputs_to_mutate
-            num_mutated = len(buffer_mutation) + len(user_input_mutation)
-            mutated_values = res[:num_mutated]
-
-            # Exclude dependency token from final result.
-            assertion_dep_token = self.graph_signature.assertion_dep_token
-            if assertion_dep_token is not None:
-                assertion_dep_token_index = next(iter(assertion_dep_token.keys()))
-                res = res[:assertion_dep_token_index]
-
-            res = res[num_mutated:]
-            try:
-                res = pytree.tree_unflatten(res, self.call_spec.out_spec)
-            except Exception:
-                _, received_spec = pytree.tree_flatten(res)
-                raise error.InternalError(  # noqa: B904
-                    "Trying to flatten user outputs with exported output tree spec: \n"
-                    f"{self.call_spec.out_spec}\n"
-                    "but actually got outputs with tree spec of: \n"
-                    f"{received_spec}"
-                )
-            finally:
-                user_inputs = [
-                    spec
-                    for spec in self.graph_signature.input_specs
-                    if spec.kind == InputKind.USER_INPUT
-                ]
-                for i, value in enumerate(mutated_values):
-                    output_spec = self.graph_signature.output_specs[i]
-                    if output_spec.kind == OutputKind.BUFFER_MUTATION:
-                        assert output_spec.target is not None
-                        self.state_dict[output_spec.target] = value
-                    elif output_spec.kind == OutputKind.USER_INPUT_MUTATION:
-                        assert output_spec.target is not None
-                        index = next(
-                            i
-                            for i, spec in enumerate(user_inputs)
-                            if spec.arg.name == output_spec.target
-                        )
-                        flat_args[index].copy_(value)
-                    else:
-                        raise AssertionError(f"Unexpected kind: {output_spec.kind}")
-        return res
-
     def __str__(self) -> str:
         graph_module = self.graph_module.print_readable(
             print_output=False, colored=False
