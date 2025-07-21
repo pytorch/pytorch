@@ -46,7 +46,9 @@ jobs:
         contains(needs.get-changed-files.outputs.changed-files, '.hpp') ||
         contains(needs.get-changed-files.outputs.changed-files, '.hxx') ||
         contains(needs.get-changed-files.outputs.changed-files, '.cu') ||
-        contains(needs.get-changed-files.outputs.changed-files, '.cuh')
+        contains(needs.get-changed-files.outputs.changed-files, '.cuh') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.mm') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.metal')
       )
     with:
       timeout: 120
