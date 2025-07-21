@@ -309,7 +309,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
   if (per_row_fq) {
     if (fake_quant_on.item().toInt()) {
       return at::fake_quantize_per_channel_affine_cachemask(
-          x, scale, zero_point, 0, qmin, qmax);
+          x, scale, zero_point, ch_axis, qmin, qmax);
     } else {
       auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
       return std::make_tuple(x.clone(), mask);
