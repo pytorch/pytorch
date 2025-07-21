@@ -1139,6 +1139,22 @@ std::string get_exception_message() {
   return exc_message;
 }
 
+bool is_nn_module(py::handle example_value) {
+  py::object torch_module_cls = py::module_::import("torch.nn").attr("Module");
+  return py::isinstance(example_value, torch_module_cls);
+}
+
+std::string get_type_str(py::handle example_value) {
+  std::string type_name;
+  try {
+    type_name = py::str(py::type::of(example_value)).cast<std::string>();
+  } catch (const py::error_already_set& e) {
+    // Fallback that never throws in release builds
+    type_name = "<unprintable-type>";
+  }
+  return type_name;
+}
+
 bool is_immutable_object(py::handle example_value) {
   py::object config_module = py::module_::import("torch._dynamo.config");
 
@@ -2554,7 +2570,10 @@ class GuardManager {
       py::handle example_value)
       : _root(root),
         _source(std::move(source)),
-        _is_dict(py::isinstance<py::dict>(example_value)) {
+        _is_dict(py::isinstance<py::dict>(example_value)),
+        _is_immutable(is_immutable_object(example_value)),
+        _is_nn_module(is_nn_module(example_value)),
+        _type_str(get_type_str(example_value)) {
     if (_is_dict) {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
     }
@@ -2577,9 +2596,38 @@ class GuardManager {
   }
 
  public:
+  // type related helpers
+  bool is_guarded_value_immutable() {
+    return _is_immutable;
+  }
+
+  bool is_guarded_value_nn_module() {
+    return _is_nn_module;
+  }
+
+  bool is_guarded_value_dict() {
+    return _is_dict;
+  }
+
+  std::string type_of_guarded_value() {
+    return _type_str;
+  }
+
+ public:
   // For cloning
-  GuardManager(RootGuardManager* root, std::string source, bool is_dict)
-      : _root(root), _source(std::move(source)), _is_dict(is_dict) {}
+  GuardManager(
+      RootGuardManager* root,
+      std::string source,
+      bool is_dict,
+      bool is_immutable,
+      bool is_nn_module,
+      std::string type_str)
+      : _root(root),
+        _source(std::move(source)),
+        _is_dict(is_dict),
+        _is_immutable(is_immutable),
+        _is_nn_module(is_nn_module),
+        _type_str(type_str) {}
 
   void clone_common(
       RootGuardManager* cloned_root,
@@ -2610,7 +2658,13 @@ class GuardManager {
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
     }
-    GuardManager* cloned_mgr = new GuardManager(cloned_root, _source, _is_dict);
+    GuardManager* cloned_mgr = new GuardManager(
+        cloned_root,
+        _source,
+        _is_dict,
+        _is_immutable,
+        _is_nn_module,
+        _type_str);
     clone_common(cloned_root, cloned_mgr, clone_filter_fn);
     return cloned_mgr;
   }
@@ -2890,7 +2944,10 @@ class GuardManager {
   // to enable fail fast for the next check.
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
-  bool _is_dict;
+  bool _is_dict = false;
+  bool _is_immutable = false;
+  bool _is_nn_module = false;
+  std::string _type_str;
   uint64_t _dict_tag{0};
 };
 
@@ -3176,7 +3233,7 @@ class DictGuardManager : public GuardManager {
       RootGuardManager* root,
       std::string source,
       py::handle example_value)
-      : GuardManager(root, std::move(source)),
+      : GuardManager(root, std::move(source), example_value),
         _size(PyDict_Size(example_value.ptr())),
         _expected_type(Py_TYPE(example_value.ptr())),
         _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {}
@@ -3392,7 +3449,13 @@ class DictGuardManager : public GuardManager {
       PyTypeObject* expected_type,
       bool is_exact_dict_type,
       std::vector<Py_ssize_t> indices)
-      : GuardManager(cloned_root, std::move(source), true),
+      : GuardManager(
+            cloned_root,
+            std::move(source),
+            true,
+            false,
+            false,
+            type_of_guarded_value()),
         _size(size),
         _expected_type(expected_type),
         _is_exact_dict_type(is_exact_dict_type),
@@ -3534,7 +3597,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
       throw py::type_error("Invalid guard manager enum");
     }
   }
-  return std::make_unique<GuardManager>(root, std::move(source));
+  return std::make_unique<GuardManager>(root, std::move(source), example_value);
 }
 
 class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
@@ -5925,6 +5988,14 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
       .def("fail_count", &GuardManager::fail_count)
+      .def(
+          "is_guarded_value_immutable",
+          &GuardManager::is_guarded_value_immutable)
+      .def(
+          "is_guarded_value_nn_module",
+          &GuardManager::is_guarded_value_nn_module)
+      .def("is_guarded_value_dict", &GuardManager::is_guarded_value_dict)
+      .def("type_of_guarded_value", &GuardManager::type_of_guarded_value)
       .def(
           "get_accessors",
           &GuardManager::get_accessors,
