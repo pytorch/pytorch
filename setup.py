@@ -229,8 +229,11 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
+import shlex
+import subprocess
 
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
@@ -1221,7 +1224,31 @@ def print_box(msg: str) -> None:
     print("+" + "-" * (max_width + 4) + "+", file=sys.stderr, flush=True)
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command")
+    return parser.parse_args()
+
+def process_legacy_setup_py_commands(args: argparse.Namespace):
+    MAP_LEGACY_SETUP_PY_COMMANDS = {
+        "develop": f"{sys.executable} -m pip install --no-build-isolation -v -e .",
+        "install": f"{sys.executable} -m pip install --no-build-isolation -v ."
+    }
+    if args.command:
+        if MAP_LEGACY_SETUP_PY_COMMANDS.get(args.command):
+            print_box(
+                f"""
+                Detected legay setup.py command, running equivalent:
+                {MAP_LEGACY_SETUP_PY_COMMANDS.get(args.command)}
+                """
+            )
+            subprocess.run(shlex.split(MAP_LEGACY_SETUP_PY_COMMANDS.get(args.command)), check=True)
+            sys.exit(0)
+        else:
+            raise ValueError(f"Invalid command {args.command}")
+
 def main() -> None:
+    process_legacy_setup_py_commands(parse_args())
     if BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY:
         raise RuntimeError(
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. "
