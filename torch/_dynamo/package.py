@@ -32,6 +32,7 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch.compiler._cache import CacheArtifactFactory
 
 from .bytecode_transformation import get_code_keys
+from .utils import dynamo_timed, increment_frame
 
 
 logger = logging.getLogger(__name__)
@@ -218,7 +219,7 @@ class CompilePackage:
 
         assert not self._initialized
         self._inlined_sources = set()
-        self._innermost_fn = innermost_fn(fn)
+        self._innermost_fn = innermost_fn(fn)  # type: ignore[assignment]
         assert self._innermost_fn is not None
         if dynamo is not None:
             assert isinstance(dynamo, _DynamoCacheEntry)
@@ -379,60 +380,87 @@ class CompilePackage:
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
+        from torch._dynamo.convert_frame import get_compile_id
+        from torch._guards import compile_context, CompileContext
 
         from .output_graph import get_builtins_dict
 
         self.uninstall()
-
         for code, entry in self._codes.items():
-            module = sys.modules[entry.python_module]
-            for alias, module_name in entry.import_sources.items():
-                self._install_global(
-                    module, alias, importlib.import_module(module_name)
-                )
-            for function_name in entry.function_names:
-                fn = types.FunctionType(code, module.__dict__, function_name)
-                self._install_global(module, function_name, fn)
-            for backend_id in entry.backend_ids:
-                if backend_id not in backends:
-                    raise RuntimeError(
-                        f"Backend {backend_id} is not found in the given backends"
+            # Each code represents a new compile frame
+            # recompiles on the same frame are all saved
+            # under the same cache entry, so we don't have recompile ids
+            # i.e. If cold start had 0/0, 0/1, 1/0, 1/1, these would be
+            # collapsed into 0/0, 1/0 on warm.
+            increment_frame()
+            compile_id = get_compile_id(frame_state={})
+            with (
+                compile_context(CompileContext(compile_id)),
+                dynamo_timed(
+                    "_compile.compile_inner",
+                    phase_name="entire_frame_compile",
+                    dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
+                    # TODO: save all relevant compilation metrics
+                    metadata={
+                        "frame_key": str(torch._dynamo.utils.curr_frame),
+                        "co_name": code.co_name,
+                        "co_filename": code.co_filename,
+                        "co_firstlineno": code.co_firstlineno,
+                    },
+                ),
+            ):
+                module = sys.modules[entry.python_module]
+                for alias, module_name in entry.import_sources.items():
+                    self._install_global(
+                        module, alias, importlib.import_module(module_name)
                     )
-                backend = backends[backend_id]
-                self._install_global(
-                    module,
-                    backend_id,
-                    torch._dynamo.disable(backend),
-                )
+                for function_name in entry.function_names:
+                    fn = types.FunctionType(code, module.__dict__, function_name)
+                    self._install_global(module, function_name, fn)
+                for backend_id in entry.backend_ids:
+                    if backend_id not in backends:
+                        raise RuntimeError(
+                            f"Backend {backend_id} is not found in the given backends"
+                        )
+                    with dynamo_timed(
+                        "after_deserialization", phase_name="backend_compile"
+                    ):
+                        backend = backends[backend_id].after_deserialization()
+                        self._install_global(
+                            module,
+                            backend_id,
+                            torch._dynamo.disable(backend),
+                        )
 
-        for code, entry in self._codes.items():
-            for guarded_code in entry.guarded_codes:
-                guards_state = pickle.loads(guarded_code.guards_state)
-                runtime_global_scope = sys.modules[entry.python_module].__dict__
-                # The installed builtins dict might be absent from the runtime
-                # while loading guards. Populate it if it's missing.
-                if (
-                    builtin_dict_name
-                    := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
-                ):
-                    builtins_dict = get_builtins_dict(runtime_global_scope)
-                    if builtin_dict_name in runtime_global_scope:
-                        assert runtime_global_scope[builtin_dict_name] is builtins_dict
-                    else:
-                        runtime_global_scope[builtin_dict_name] = builtins_dict
-                assert isinstance(guards_state, torch._dynamo.guards.GuardsState)
-                check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
-                    code,
-                    guards_state.output_graph,
-                    guards_serialization_mode="load",
-                    shape_code_parts=guards_state.shape_code_parts,
-                    runtime_global_scope=runtime_global_scope,
-                )
-                _load_precompile_entry(
-                    code,
-                    check_fn_manager.guard_manager,
-                    SerializedCode.to_code_object(guarded_code.dynamo_code),
-                )
+                for guarded_code in entry.guarded_codes:
+                    guards_state = pickle.loads(guarded_code.guards_state)
+                    runtime_global_scope = sys.modules[entry.python_module].__dict__
+                    # The installed builtins dict might be absent from the runtime
+                    # while loading guards. Populate it if it's missing.
+                    if (
+                        builtin_dict_name
+                        := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+                    ):
+                        builtins_dict = get_builtins_dict(runtime_global_scope)
+                        if builtin_dict_name in runtime_global_scope:
+                            assert (
+                                runtime_global_scope[builtin_dict_name] is builtins_dict
+                            )
+                        else:
+                            runtime_global_scope[builtin_dict_name] = builtins_dict
+                    assert isinstance(guards_state, torch._dynamo.guards.GuardsState)
+                    check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
+                        code,
+                        guards_state.output_graph,
+                        guards_serialization_mode="load",
+                        shape_code_parts=guards_state.shape_code_parts,
+                        runtime_global_scope=runtime_global_scope,
+                    )
+                    _load_precompile_entry(
+                        code,
+                        check_fn_manager.guard_manager,
+                        SerializedCode.to_code_object(guarded_code.dynamo_code),
+                    )
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
@@ -556,7 +584,7 @@ class DynamoStore(abc.ABC):
             PrecompileContext.record_artifact(
                 backend.type(), key=backend.key, content=backend.content
             )
-            backend_content[backend_id] = backend.after_deserialization()
+            backend_content[backend_id] = backend
 
         return cache_entry, backend_content
 
@@ -683,7 +711,8 @@ class DiskDynamoCache(DiskDynamoStore):
         path = os.path.join(self.path_prefix, key)
         if os.path.exists(path):
             try:
-                return super().load_cache_entry(key)
+                result = super().load_cache_entry(key)
+                return result
             except Exception as e:
                 logger.warning("Failed to load package from path %s: %s", path, str(e))
                 return None
