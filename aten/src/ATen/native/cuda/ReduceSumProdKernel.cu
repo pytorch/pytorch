@@ -181,6 +181,8 @@ struct xor_sum_functor<scalar_t, std::enable_if_t<!std::is_integral_v<scalar_t>>
           a_converter.d = a;
           b_converter.d = b;
           result_converter.u = a_converter.u ^ b_converter.u;
+          // return a double, otherwise uint64_t will be cast to double
+          // when accumulating and the result will be wrong
           return result_converter.d;
         }));
   }
