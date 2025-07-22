@@ -929,6 +929,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         NUM_EPOCHS = 2
         LR = 0.01
         torch.manual_seed(0)
+        if device == "xpu":
+            torch.use_deterministic_algorithms(True, warn_only=True)
         if "cpu" not in device:
             torch.get_device_module(device).manual_seed(0)
 
@@ -1042,6 +1044,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         grads = grads_at_each_iter[-num_grads_after_joining:]
         gradient_setter = _GradientSetter()
         iter = 0
+        if device == "xpu":
+            torch.use_deterministic_algorithms(True, warn_only=True)
         with Join(
             [gradient_setter, zero_optim],
             zero_optim=zero_optim,
