@@ -2715,6 +2715,12 @@ class GuardManager {
         _is_immutable,
         _is_nn_module,
         _type_str);
+    if (is_tag_safe()) {
+      cloned_mgr->mark_tag_safe();
+      if (is_tag_safe_root()) {
+        cloned_mgr->mark_tag_safe_root();
+      }
+    }
     clone_common(cloned_root, cloned_mgr, clone_filter_fn);
     return cloned_mgr;
   }
@@ -3613,7 +3619,12 @@ class DictGuardManager : public GuardManager {
         _indices,
         type_of_guarded_value(),
         is_guarded_value_empty_dict());
-
+    if (is_tag_safe()) {
+      cloned_mgr->mark_tag_safe();
+      if (is_tag_safe_root()) {
+        cloned_mgr->mark_tag_safe_root();
+      }
+    }
     clone_common(cloned_root, cloned_mgr, clone_filter_fn);
     for (auto index : _indices) {
       KeyValueManager& key_value_manager = _key_value_managers[index];
