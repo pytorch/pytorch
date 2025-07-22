@@ -294,9 +294,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.cache
-    def _binops() -> dict[
-        Callable[..., object], tuple[list[str], Callable[..., object]]
-    ]:
+    def _binops() -> (
+        dict[Callable[..., object], tuple[list[str], Callable[..., object]]]
+    ):
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
             operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
@@ -1041,12 +1041,15 @@ class BuiltinVariable(VariableTracker):
             BUILTIN_TO_TENSOR_RFN_MAP,
             can_dispatch_torch_function,
             dispatch_torch_function,
+            _ensure_builtin_map_populated,
         )
 
         if can_dispatch_torch_function(tx, args, kwargs):
             # Only remap the fn to tensor methods if we aren't exporting
             # export serde does not handle method descriptors today
             if not tx.export:
+                # Ensure the builtin maps are populated before accessing them
+                _ensure_builtin_map_populated()
                 # Use sourceless builder, we built the map ourselves
                 if not isinstance(args[0], TensorVariable):
                     if self.fn in BUILTIN_TO_TENSOR_RFN_MAP:

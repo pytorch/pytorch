@@ -7085,6 +7085,13 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(out_ref, out_res)
 
 
+    def test_circular_import_with_export_meta(self):
+        try:
+            conv = nn.Conv2d(3, 64, 3, padding=1)
+            with torch.device("meta"):
+                exp = torch.export.export(conv, (torch.zeros(64, 3, 1, 1),))
+        except AttributeError:
+            self.assertFalse("Failed with circular import")
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
         @torch.compile(backend="aot_eager")
