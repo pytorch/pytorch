@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 from typing import Callable, TYPE_CHECKING, Union
+from typing_extensions import deprecated
 
 import torch
 from functorch._C import dim as _C
@@ -149,7 +150,7 @@ def _create_rearrange_callable(
     exec(custom_rearrange_callable_code)
     return locals()[custom_rearrange_callable_name]
 
-
+@deprecated("functorch.einops is deprecated and will be remove in PyTorch 2.10, please use this feature directly from the einops repo", category=UserWarning, stacklevel=1)
 def rearrange(
     tensor: Union[torch.Tensor, list[torch.Tensor], tuple[torch.Tensor, ...]],
     pattern: str,

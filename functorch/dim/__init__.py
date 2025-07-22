@@ -6,7 +6,12 @@ from .tree_map import tree_flatten, tree_map
 from .wrap_type import wrap_type
 
 
-_C._patch_tensor_class()
+@deprecated("functorch.dim is deprecated and will be remove in PyTorch 2.10", category=UserWarning, stacklevel=1)
+def _patch_tensor_class():
+    _C._patch_tensor_class()
+
+_patch_tensor_class()
+
 dims, DimList, dimlists = _C.dims, _C.DimList, _C.dimlists
 
 
