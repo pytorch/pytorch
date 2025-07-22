@@ -24,8 +24,9 @@ namespace torch::nativert {
 
 void ConstantFolder::unlinkConstants(
     std::vector<std::unique_ptr<OpKernel>>& kernels) {
-  TORCH_CHECK_EQ(kernels.size(), graph_.nodes().size())
-      << "graph node count and kernel count should be equal";
+  TORCH_CHECK(
+      kernels.size() == graph_.nodes().size(),
+      "graph node count and kernel count should be equal");
 
   unlinked_ = true;
 
@@ -135,8 +136,9 @@ void ConstantFolder::unlinkConstants(
 */
 
 void ConstantFolder::evaluate(Weights& weights) {
-  CHECK(unlinked_)
-      << "cannot evaluate weights for a graph whose constants have not been unlinked via ConstFolder::unlinkConstants";
+  TORCH_CHECK(
+      unlinked_,
+      "cannot evaluate weights for a graph whose constants have not been unlinked via ConstFolder::unlinkConstants");
 
   weights.validateAllWeightsLoaded();
 
