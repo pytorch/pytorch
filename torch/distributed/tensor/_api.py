@@ -426,6 +426,10 @@ class DTensor(torch.Tensor):
                     if placement.dim < 0:
                         placements[idx] = Shard(placement.dim + local_tensor.ndim)
 
+        # if the backend is xla device, return XLAShardedTensor
+        if device_type == "xla":
+            return xla_distribute_tensor(local_tensor, device_mesh, placements)
+
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd
         # function to construct the dist tensor instead.
