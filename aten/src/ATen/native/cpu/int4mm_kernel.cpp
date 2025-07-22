@@ -1240,29 +1240,28 @@ static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
 }
 
 /**
- * Dynamic Input Quant 4 bit weights matmul execution flow
-              (INT4 Weights + FP scales + FP32 Bias)
-  FP32 Input              Packed Buffer
-       |                       |
-    Quantize                Cast
-   to INT8                 to INT8
-       |                       |
-       v                       v
- INT8 Input              INT8 Weights
-          \               /
-            \            /
-             \         /
-           INT8 Matrix Multiplication
-                   |
-                   v
- FP32 Dequantized and Accumulate in FP32
-                   |
-                   v
-             FP32 Final Output
-
- * The Groupwise kernel requires BFloat16 Scales and Channelwise kernel requires
- * Float32 Scales. If not provided, we will use fallback implementation.
- */
+ * Dynamic INT4 weight-only MatMul with per-row input quantization.
+ *
+ * Execution Flow:
+ *
+ *   (INT4 Weights + FP Scales [+ optional Bias])
+ *
+ *    Input (FP32 or BF16)         Packed Weight Buffer
+ *           |                             |
+ *    Row-wise Quantization (INT8)         |
+ *           |                             |
+ *     INT8 Input Activation      INT4 Quantized Weights + Scales
+ *                  \             /
+ *                   \           /
+ *              Quantized Matrix Multiply
+ *                     |
+ *              Output Tensor (BF16 or FP32)
+ *
+ * Notes:
+ *   - Groupwise kernels expect BF16 scales
+ *   - Channelwise kernels expect FP32 scales
+ *   - Bias is currently unsupported in fallback path
+ */ 
 void dyn_quant_matmul_4bit_kernel(
     const Tensor& output,
     const Tensor& inp,
@@ -1277,8 +1276,7 @@ void dyn_quant_matmul_4bit_kernel(
   if (weight_packed_size == packed_weights.numel()) {
     // KleidiAI interface intenally handles the Channelwise and groupwise
     // distinction
-                kleidiai::kai_quant_pack_lhs_int4_mm(
-        output, inp, packed_weights, M, N, K, block_size);
+    kleidiai::kai_quant_pack_lhs_int4_mm(output, inp, packed_weights, M, N, K, block_size);
   } else
 #endif
   {
