@@ -138,8 +138,12 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # None: Not set -- Off for OSS, JustKnobs based for internal
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
-# See torch.compiler.force_disable_caches
-force_disable_caches: bool = Config(alias="torch.compiler.config.force_disable_caches")
+# Force disabled all inductor level caching -- This will override any other caching flag
+force_disable_caches: bool = Config(
+    justknob="pytorch/remote_cache:force_disable_caches",
+    env_name_force="TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+    default=False,
+)
 
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
@@ -570,6 +574,9 @@ realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8
+realize_acc_reads_size_threshold: Optional[int] = (
+    None  # TODO(xuanzh): harden this to make it non optional
+)
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
@@ -991,7 +998,7 @@ enable_linear_binary_folding = (
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
 # Enable caching codegen of triton templates.
-enable_caching_generated_triton_templates: bool = False
+enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
@@ -1020,7 +1027,7 @@ class cpp:
     dynamic_threads = os.environ.get("TORCHINDUCTOR_CPP_DYNAMIC_THREADS", "0") == "1"
 
     simdlen: Optional[int] = None
-    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "4096"))
+    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "512"))
 
     cxx: tuple[Literal[None], str] = (
         None,  # download gcc12 from conda-forge if conda is installed
@@ -1443,12 +1450,12 @@ class aot_inductor:
     precompile_headers: bool = not is_fbcode()
 
     # Embed generated kernel binary files into model.so
-    embed_kernel_binary: bool = False
+    embed_kernel_binary: Optional[bool] = None
 
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
-    emit_multi_arch_kernel: bool = False
+    emit_multi_arch_kernel: Optional[bool] = None
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
@@ -1602,6 +1609,9 @@ class cuda:
     # Whether to force upload if the key already exists
     # Use this to overwrite and handle cache pollution
     binary_remote_cache_force_write: bool = False
+
+    # Enable caching codegen of cuda templates.
+    enable_caching_codegen: bool = True
 
 
 class rocm:
@@ -1831,6 +1841,10 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
+
+    # If set to True, AOTI-generated CMakelists.txt will still use libtorch
+    # for unit testing
+    use_libtorch = False
 
 
 if TYPE_CHECKING:
