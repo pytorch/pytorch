@@ -54,6 +54,9 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 # Simple and boring model
 class TestDummyModel(torch.nn.Module):
     def __init__(self) -> None:
@@ -72,12 +75,12 @@ class TestDummyModel(torch.nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(8, 8, device="cuda")
+        return torch.rand(8, 8, device=device_type)
 
 
 class TestStatefulObj:
     def __init__(self) -> None:
-        self.data = torch.rand(10, 10, device="cuda")
+        self.data = torch.rand(10, 10, device=device_type)
 
     def state_dict(self):
         return {"data": self.data}
@@ -151,10 +154,11 @@ def _train(model, optim, train_steps=1):
 class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @property
     def backend(self):
-        return "cpu:gloo,cuda:nccl"
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
+        return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
     def _create_model(self, compile, model_type, state_dict_options=None):
-        dummy_model = TestDummyModel().cuda()
+        dummy_model = TestDummyModel().to(self.device_type)
 
         assert model_type in ModelType, f"{model_type} is not supported."
         if model_type == ModelType.FSDP:
@@ -394,11 +398,11 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tl = [
-                    torch.ones(2, dtype=torch.int64, device="cuda")
+                    torch.ones(2, dtype=torch.int64, device=device_type)
                     for _ in range(world_size)
                 ]
                 t = (
-                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    torch.arange(2, dtype=torch.int64, device=device_type)
                     + 1
                     + 2 * dist.get_rank()
                 )
@@ -410,7 +414,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tensor = (
-                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    torch.arange(2, dtype=torch.int64, device=device_type)
                     + 1
                     + 2 * dist.get_rank()
                 )
