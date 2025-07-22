@@ -232,6 +232,27 @@ def chunk_cat(
     torch._chunk_cat(tensors, dim, num_chunks, out=out)
 
 
+lib.define(
+    "chunk_cat_with_output(Tensor[] tensors, int dim, int num_chunks, *) -> Tensor"
+)
+
+
+@torch.library.impl(lib, "chunk_cat_with_output", "Meta")
+@torch.library.impl(lib, "chunk_cat_with_output", "CUDA")
+@torch.library.impl(lib, "chunk_cat_with_output", "XPU")
+@torch.library.impl(lib, "chunk_cat_with_output", "HPU")
+@torch.library.impl(lib, "chunk_cat_with_output", "CPU")
+@torch.library.impl(lib, "chunk_cat_with_output", "MTIA")
+@torch.library.impl(lib, "chunk_cat_with_output", "PrivateUse1")
+def chunk_cat_with_output(
+    tensors: list[torch.Tensor],
+    dim: int,
+    num_chunks: int,
+) -> torch.Tensor:
+    chunk_cat_out = torch._chunk_cat(tensors, dim, num_chunks)
+    return chunk_cat_out
+
+
 @torch.no_grad()
 def foreach_all_gather(
     fsdp_params: list[FSDPParam],
@@ -588,6 +609,7 @@ def foreach_reduce(
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
             )
+            # print("fsdp_param.sharded_size", fsdp_param.sharded_size, fsdp_param.contiguous_sharded_stride,)
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             if fsdp_param.offload_to_cpu:
                 # Only overlap the D2H copy (copying to pinned memory) if not
