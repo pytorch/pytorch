@@ -9538,6 +9538,25 @@ graph():
             ep.module()(*copy.deepcopy(inputs)), M()(*copy.deepcopy(inputs))
         )
 
+    def test_nonzero_memo(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mask = torch.zeros([4497], dtype=torch.bool)
+                self.mask[0:21] = True
+
+            #Causes #154647 when running decompositions
+            def forward(self, x, y):
+                a = x[:, self.mask] # Create u0
+                b = y[:, self.mask] # Create another instance of u0 separately.
+                return a, b
+
+        mod = Model()
+        x = torch.rand([1,4497,2])
+        y = torch.rand([1,4497,2])
+        ep = export(mod, (x, y))
+        ep = ep.run_decompositions(torch.export.default_decompositions())
+
     def test__scaled_dot_product_flash_attention(self):
         class Module(torch.nn.Module):
             def forward(self, q, k, v):
