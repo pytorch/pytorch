@@ -377,36 +377,6 @@ MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format) {
   return [NSArray arrayWithObjects:numbers.data() count:numbers.size()];
 }
 
-void printTensorNDArray(const TensorBase& t) {
-  if (!t.is_mps())
-    return;
-  if (t.numel() == 0)
-    return;
-  // Get shape and data type
-  auto selfShape = getMPSShape(t);
-  auto selfDType = getMPSDataType(t.scalar_type());
-
-  // Initialize data
-  id<MTLBuffer> selfBuf = getMTLBufferStorage(t);
-  MPSGraphTensorData* tdata = [[[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf shape:selfShape
-                                                                    dataType:selfDType] autorelease];
-  C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wobjc-method-access")
-  C10_CLANG_DIAGNOSTIC_IGNORE("-Wobjc-method-access")
-#endif
-  [tdata printNDArray];
-  C10_CLANG_DIAGNOSTIC_POP()
-}
-
-MPSNDArray* ndArrayFromTensor(const TensorBase& tensor, MPSShape* shape, MPSDataType mpsType) {
-  id<MTLBuffer> buffer = getMTLBufferStorage(tensor);
-  MPSGraphTensorData* tmpGraphTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:buffer
-                                                                                    shape:shape
-                                                                                 dataType:mpsType] autorelease];
-
-  return [tmpGraphTensorData mpsndarray];
-}
-
 static std::vector<int64_t> getSortedStrides(const IntArrayRef& s) {
   std::vector<int64_t> idx(s.size());
   iota(idx.begin(), idx.end(), 0);
