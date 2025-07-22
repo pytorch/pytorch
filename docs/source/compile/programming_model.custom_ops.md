@@ -1,5 +1,3 @@
-(programming_model.custom_ops)=
-
 # Custom Operators
 
 **Summary:**

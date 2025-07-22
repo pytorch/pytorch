@@ -8,8 +8,6 @@ mystnb:
   merge_streams: True
 ---
 
-(programming_model.non_strict_tracing_model)=
-
 ```{code-cell}
 :tags: [remove-cell]
 import torch

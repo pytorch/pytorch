@@ -8,8 +8,6 @@ mystnb:
   merge_streams: True
 ---
 
-(programming_model.common_graph_breaks)=
-
 ```{code-cell}
 :tags: [remove-cell]
 import torch
