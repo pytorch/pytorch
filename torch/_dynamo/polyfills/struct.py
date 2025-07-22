@@ -6,17 +6,9 @@ from __future__ import annotations
 
 import struct
 from typing import Any
+from typing_extensions import Buffer
 
 from ..decorators import substitute_in_graph
-
-
-try:
-    # Python 3.12+
-    from typing import Buffer  # type: ignore[attr-defined]
-except ImportError:
-    from typing_extensions import (
-        Buffer,  # Python <3.12 with typing_extensions installed
-    )
 
 
 __all__ = [
