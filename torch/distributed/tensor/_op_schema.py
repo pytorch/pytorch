@@ -28,7 +28,7 @@ KwargsType = dict[str, object]
 
 PlacementList = list[Optional[Placement]]
 
-# ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
+# ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type should
 # be the same set of possibilities.
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
@@ -317,15 +317,6 @@ class OpSchema:
                 args_schema.append(str(arg))
         return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
 
-    def __post_init__(self) -> None:
-        has_symints = False
-        for a in self.args_schema:
-            if isinstance(a, DTensorSpec) and a.tensor_meta is not None:
-                if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
-                    has_symints = True
-                    break
-        self.has_symints = has_symints
-
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
         arg = self.args_schema[arg_idx]
         is_tensor = isinstance(arg, DTensorSpec)
@@ -343,6 +334,13 @@ class OpSchema:
         return_types = self.op._schema.returns
         return len(return_types) > 1 and isinstance(
             return_types[0].type, torch.TensorType
+        )
+
+    def return_type_list_tensor_like(self) -> bool:
+        # returns True if the return type is a List
+        return_types = self.op._schema.returns
+        return len(return_types) == 1 and isinstance(
+            return_types[0].type, torch.ListType
         )
 
     def return_type_tensor(self) -> bool:
