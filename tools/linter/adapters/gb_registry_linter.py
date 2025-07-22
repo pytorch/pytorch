@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from enum import Enum
 from pathlib import Path
 from typing import Any, NamedTuple
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
+
 
 from tools.dynamo.gb_id_mapping import (
     find_unimplemented_v2_calls,
