@@ -123,6 +123,18 @@ def _normalize_args(
     return (sorted_keys, tuple(_extract_args(arg) for arg in all_args))
 
 
+def _sort_with_ref_region(
+    index_to_rank: dict[int, int], regions: list[list[Any]]
+) -> None:
+    # sort topologically
+    # we need to handle edge cases where some nodes have no dependencies
+    # so first we map each node to its ranking
+    ref_region = regions[0]
+    sorted_indices = sorted(range(len(ref_region)), key=lambda i: index_to_rank[i])
+    for region in regions:
+        region[:] = [region[i] for i in sorted_indices]
+
+
 def get_global_state_key() -> GlobalStateKey:
     return (
         torch.is_grad_enabled(),
@@ -327,8 +339,13 @@ class GraphRegionTracker:
                 self._is_identical,
             )
             # sort topologically
-            for region in region_group:
-                region.sort(key=lambda n: topological_ranking[n])
+            # we need to handle edge cases where some nodes have no dependencies
+            # so first we map each node to its ranking,
+            ref_region = region_group[0]
+            index_to_rank = {
+                index: topological_ranking[n] for index, n in enumerate(ref_region)
+            }
+            _sort_with_ref_region(index_to_rank, region_group)
 
         return [
             region_group for region_group in region_groups if len(region_group[0]) > 1
