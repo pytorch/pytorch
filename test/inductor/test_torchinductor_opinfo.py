@@ -366,8 +366,9 @@ def wrapper_noop_set_seed(op, *args, **kwargs):
     return op(*args, **kwargs)
 
 
-torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
-    wrapper_noop_set_seed
+wrapper_noop_set_seed_decorator = patch(
+    "torch.testing._internal.common_methods_invocations.wrapper_set_seed",
+    wrapper_noop_set_seed,
 )
 
 # key can be either op_name, or (op_name, dtype)
@@ -980,6 +981,7 @@ def collection_decorator(fn):
     return inner
 
 
+@wrapper_noop_set_seed_decorator
 class TestInductorOpInfo(TestCase):
     def tearDown(self):
         torch._dynamo.reset()

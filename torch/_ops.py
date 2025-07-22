@@ -1478,6 +1478,9 @@ class _Ops(types.ModuleType):
         Args:
             path (str): A path to a shared library to load.
         """
+        if torch._running_with_deploy():
+            return
+
         path = _utils_internal.resolve_library_path(path)
         with dl_open_guard():
             # Import the shared library into the process, thus running its
@@ -1486,7 +1489,7 @@ class _Ops(types.ModuleType):
             try:
                 ctypes.CDLL(path)
             except Exception as e:
-                raise RuntimeError(f"Could not load this library: {path}") from e
+                raise OSError(f"Could not load this library: {path}") from e
         self.loaded_libraries.add(path)
 
 
