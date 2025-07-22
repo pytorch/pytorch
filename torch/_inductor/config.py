@@ -67,6 +67,19 @@ def prologue_fusion_enabled() -> bool:
         return True
 
 
+def coalesce_tiling_anlaysis_enabled() -> bool:
+    ENABLED_COALESCE_ANALYSIS = 0
+
+    if "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS" in os.environ:
+        return os.environ.get("TORCHINDUCTOR_COALESCE_TILING_ANALYSIS") == "1"
+    elif is_fbcode():
+        jk_name = "pytorch/inductor:coalesce_tiling_analysis_version"
+        version = torch._utils_internal.justknobs_getval_int(jk_name)
+        return version <= ENABLED_COALESCE_ANALYSIS
+    else:
+        return True
+
+
 # Enable auto_functionalized_v2 (enabled by default)
 enable_auto_functionalized_v2 = (
     os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "1") == "1"
@@ -1189,13 +1202,7 @@ class triton:
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
-    # TODO - enable by default
-    coalesce_tiling_analysis: bool = (
-        os.environ.get(
-            "TORCHINDUCTOR_COALESCE_TILING_ANALYSIS", "1" if not is_fbcode() else "0"
-        )
-        == "1"
-    )
+    coalesce_tiling_analysis: bool = coalesce_tiling_anlaysis_enabled()
 
     # limit tiling dimensions
     #   - max_tiles=1 disables tiling
