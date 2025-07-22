@@ -639,10 +639,10 @@ def rebind_unbacked(
                 )
                 continue
 
-            # The old and new could be the same if you improperly hit the memo
-            # while retracing.  Make sure you updated FakeTensorMode.epoch
-            assert raw_u0 != raw_u1, f"{raw_u0} possible memo disaster"
-            # Reuse the OLD symbol name
+            # If fake-tensor memo reuse occurred, raw_u1 == raw_u0; no rebinding needed.
+            if raw_u0 == raw_u1:
+                continue
+            # Otherwise, reuse the OLD symbol name by renaming raw_u1 -> raw_u0
             shape_env._rename_unbacked_to(raw_u1, raw_u0)
 
 

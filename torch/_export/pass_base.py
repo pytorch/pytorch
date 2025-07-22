@@ -315,7 +315,11 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         )
         res_proxy.node.meta.update(meta.data)
         if self.fake_tensor_mode and (shape_env := self.fake_tensor_mode.shape_env):
-            if symbol_to_path := compute_unbacked_bindings(shape_env, res_data):
+            # Peek at pending unbacked symbols without clearing, so shared symbols
+            # (e.g. from the same boolean mask) are bound on all nodes.
+            if symbol_to_path := compute_unbacked_bindings(
+                shape_env, res_data, peek=True
+            ):
                 res_proxy.node.meta["unbacked_bindings"] = symbol_to_path
         self.tracer.set_metadata(res_proxy.node, res_data)
         return ProxyValue(res_data, res_proxy)
