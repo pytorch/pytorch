@@ -934,7 +934,11 @@ void check_differences(void *buf1, void *buf2, size_t n) {
             while (i < n && a[i] != b[i])
                 ++i;
             // Print the region where differences were found in the [start, end) format.
-            std::cout << "GALVEZ wrong region: [" << start << ", " << i << ")\n";
+            if (i - start < 4) {
+
+            } else {
+              std::cout << "GALVEZ wrong region: [" << start << ", " << i << ")" << std::endl;
+            }
         } else {
             ++i;
         }
@@ -1072,7 +1076,7 @@ bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2, bool topological_and_n
       const char* func_name2;
       globalContext().getNVRTC().cuFuncGetName(&func_name2, nodeParams2.func);
 
-      // std::cout << "GALVEZ: kernel name=" << func_name << std::endl;
+      std::cout << "GALVEZ: kernel name=" << func_name << std::endl;
 
       if (nodeParams1.func != nodeParams2.func) {
         TORCH_WARN("graphs_equal: Kernel function mismatch at node index ", i,
@@ -1133,6 +1137,8 @@ bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2, bool topological_and_n
           if (!is_equal(nodeParams1.kernelParams[param_index],
                         nodeParams2.kernelParams[param_index],
                         type_info.members[param_index].second)) {
+
+            std::cout << "graphs_equal: Have type information, but Kernel parameter mismatch at node index " <<  i << "parameter index "<<param_index<<" for function "<<func_name << std::endl;
 
             // TODO: Double check whether we have a void * "data" field.
             TORCH_WARN("graphs_equal: Have type information, but Kernel parameter mismatch at node index ", i,
@@ -1394,7 +1400,7 @@ void* DynamicCUDAGraphMemoryAllocator::cudagraph_malloc(size_t size, int device,
 
 void DynamicCUDAGraphMemoryAllocator::cudagraph_free(void *ptr, size_t size, int device, cudaStream_t stream) {
   // I should really get a backtrace here to see what is causing this.
-  // std::cout << "GALVEZ:cudagraph_free" << std::endl;
+  std::cout << "GALVEZ:cudagraph_free" << std::endl;
   at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   cudaStreamCaptureStatus status{};
@@ -1498,6 +1504,9 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
           if (bool(graph1_result) && bool(graph2_result)) {
             add_dynamic_update({std::get<0>(*graph1_result), std::get<1>(*graph1_result), address_start},
                                node, param_offset);
+            std::cout << "GALVEZ: allocation1: [" << (void*)allocations_[std::get<0>(*graph1_result)].ptr << ", " << (void*)(allocations_[std::get<0>(*graph1_result)].ptr + allocations_[std::get<0>(*graph1_result)].size) << ")" << ", value1: " << (void*) arg1_value << std::endl;
+            std::cout << "GALVEZ: allocation2: [" << (void*)graph2->allocations_[std::get<0>(*graph2_result)].ptr << ", " << (void*)(graph2->allocations_[std::get<0>(*graph2_result)].ptr + graph2->allocations_[std::get<0>(*graph2_result)].size) << ")" << ", value2: " << (void*) arg2_value << std::endl;
+            // std::cout << "GALVEZ: allocation2: [" <<  << ", " << << ")" << std::endl;
           } else if (bool(graph1_result) || bool(graph2_result)) {
             std::cout << "GALVEZ: filtered out a false positive at param_index=" << param_index << " offset=" << address_start << " for potential address=" << (void*) arg1_value << std::endl;
           }

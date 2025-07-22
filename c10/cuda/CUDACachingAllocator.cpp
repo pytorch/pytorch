@@ -2132,6 +2132,7 @@ class DeviceCachingAllocator {
       SegmentInfo& segment_info = result.back();
       segment_info.device = head_block->device;
       segment_info.address = reinterpret_cast<size_t>(head_block->ptr);
+      // where is the segmetns' sized held?
       segment_info.stream = head_block->stream;
       segment_info.is_large = (!head_block->pool->is_small);
       segment_info.is_expandable = head_block->expandable_segment_;
@@ -2715,11 +2716,14 @@ class DeviceCachingAllocator {
     if (block->pool->is_small || CUDAAllocatorConfig::expandable_segments()) {
       return remaining >= kMinBlockSize;
     } else {
+      // very confusing condition
       return (size < CUDAAllocatorConfig::max_split_size()) &&
           (remaining > kSmallSize);
     }
   }
 
+  // how we get our allocation sizes. So all allocation sizes are
+  // 2097152, 10485760, or some multiple of 2097152 above 10485760
   static size_t get_allocation_size(size_t size) {
     if (size <= kSmallSize) {
       return kSmallBuffer;
@@ -2949,6 +2953,8 @@ class DeviceCachingAllocator {
     }
 
     total_allocated_memory += size;
+    // so initially, the block will have the entire size and ptr. Hmm...
+    // How is requested_size set?
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.segment[stat_type].increase(1);

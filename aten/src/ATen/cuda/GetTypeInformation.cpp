@@ -1056,6 +1056,22 @@ struct A {
   };
 };
 
+
+void printHexBytes(const uint8_t* arg1, size_t offset, size_t size) {
+  const uint8_t* start = arg1 + offset;
+  const uint8_t* end = start + size;
+
+  for (const uint8_t* ptr = start; ptr < end; ++ptr) {
+    std::cout << std::hex
+              << std::setw(2)
+              << std::setfill('0')
+              << static_cast<int>(*ptr)
+              << ' ';
+  }
+
+  std::cout << std::dec << '\n';  // Restore decimal formatting
+}
+
 bool is_equal(char *arg1, char *arg2,
               const std::variant<BasicType, StructType, ArrayType>& type_info,
               bool is_last_member_of_struct,
@@ -1078,13 +1094,34 @@ bool is_equal(char *arg1, char *arg2,
         for (auto&& argi: {arg1, arg2}) {
           cudaPointerAttributes attr;
           AT_CUDA_CHECK(cudaPointerGetAttributes(&attr, argi + offset));
-          is_host_memory = is_host_memory && (attr.type == cudaMemoryTypeHost);
+          is_host_memory = is_host_memory && (attr.type == cudaMemoryTypeUnregistered);
         }
-        return is_host_memory;
-      } else {
+        if (!is_host_memory) {
+          std::cout << "Mismatch in host memory pointer at field '" << name << "' at offset " 
+                    << offset << " with size " << arg.size << std::endl;
+          return false;
+        }
+        return true;
+      } else if (!arg.is_pointer) {
         // Calculate the absolute offset including array offset if inside an array
         size_t offset = global_offset_bytes + arg.offset;
-        return std::memcmp(arg1 + offset, arg2 + offset, arg.size) == 0;
+        if (std::memcmp(arg1 + offset, arg2 + offset, arg.size) != 0) {
+          std::cout << "Mismatch in basic type field '" << name << "' at offset " 
+                    << offset << " with size " << arg.size << std::endl;
+          std::cout << "First" << std::endl;
+          printHexBytes(reinterpret_cast<const uint8_t*>(arg1), offset, arg.size);
+          // std::cout.write(arg1 + offset, arg.size);
+          std::cout << std::endl;
+          std::cout << "Second" << std::endl;
+          printHexBytes(reinterpret_cast<const uint8_t*>(arg2), offset, arg.size);
+          // std::cout.write(arg2 + offset, arg.size);
+          std::cout << std::endl;
+          return false;
+        }
+        return true;
+      } else {
+        // hard to check pointer equality...
+        return true;
       }
     } else if constexpr (std::is_same_v<T, StructType>) {
       // For structs, we need to consider its base offset plus any array offset
@@ -1100,9 +1137,9 @@ bool is_equal(char *arg1, char *arg2,
                               arg.members[i].first);
 
         if (!equal) {
+          std::cout << "Mismatch in struct '" << name << "' member '" 
+                    << arg.members[i].first << "'" << std::endl;
           return false;
-        } else {
-          // base_offset = next_offset;
         }
       }
       return true;
@@ -1128,14 +1165,16 @@ bool is_equal(char *arg1, char *arg2,
         bool equal = is_equal(arg1, arg2, up_cast, false, global_offset_bytes, std::string("array[") + std::to_string(i) + "]");
 
         if (!equal) {
+          std::cout << "Mismatch in array '" << name << "' at element " 
+                    << i << " (offset " << global_offset_bytes << ")" << std::endl;
           return false;
         } else {
           global_offset_bytes += element_size;
         }
       }
-
       return true;
     }
+    std::cout << "Unknown type in comparison at offset " << global_offset_bytes << std::endl;
     return false;
   }, type_info);
 }

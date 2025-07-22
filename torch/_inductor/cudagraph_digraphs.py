@@ -188,6 +188,45 @@ def find_overlaps(intervals, assert_should_not_happen=False):
                 if assert_should_not_happen:
                     assert False
 
+def just_capture(inputs, mem_allocator, stream, model):
+    graph = torch.cuda.CUDAGraph(keep_graph=True)
+    input_pool = torch.cuda.MemPool(mem_allocator)
+
+    with torch.cuda.use_mem_pool(input_pool):
+        old_value = torch.utils.deterministic.fill_uninitialized_memory
+        torch.utils.deterministic.fill_uninitialized_memory = False
+        static_inputs = [
+            (
+                x
+                if not isinstance(x, torch.Tensor)
+                else static_input(x)
+            )
+            for idx, x in enumerate(inputs)
+        ]
+        torch.utils.deterministic.fill_uninitialized_memory = old_value
+
+    pool = torch.cuda.MemPool(mem_allocator)
+    with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local",
+                          dynamic_graph=True, pool=pool.id):
+        static_outputs = model(list(static_inputs))
+
+    print("GALVEZ: memory snapshots:")
+    del static_inputs
+    del static_outputs
+    import gc
+    gc.collect()
+    input_memory_snapshot = torch.cuda.memory_snapshot(input_pool.id)
+    import pprint
+    pprint.pprint(input_memory_snapshot)
+    output_memory_snapshot = torch.cuda.memory_snapshot(graph.pool())
+    import pprint
+    pprint.pprint(output_memory_snapshot)
+
+    return graph
+
+cudagraphs_made_so_far = 0
+graph_to_number = {}
+                    
 def cudagraphify(
     model: ModelType,
     inputs: list[InputType],
@@ -209,6 +248,7 @@ def cudagraphify(
     for i, input in enumerate(inputs):
         if isinstance(input, torch.Tensor):
             print("GALVEZ:", i, " input.requires_grad=", input.requires_grad, "input.shape=", input.shape)
+            assert input.data_ptr() % 16 == 0, "Bad alignment"
 
     print("GALVEZ:", len(static_input_idxs))
     print("GALVEZ:", len(mutated_input_idxs))
@@ -233,12 +273,19 @@ def cudagraphify(
     graphs = []
     dynamic_tensors_list = []
 
+    retain_tensors = []
+
     for i in range(2):
         print("GALVEZ:i=", i)
         # One of these graphs gets destroyed, right?
+
         graph = torch.cuda.CUDAGraph(keep_graph=True)
-        graphs.append(graph)
         mem_allocator = graph.get_mem_allocator()
+
+        # graph_ = just_capture(inputs, mem_allocator, stream, model)
+
+        # import ipdb; ipdb.set_trace()
+
         input_pool = torch.cuda.MemPool(mem_allocator)
 
         assert len(static_input_idxs) == 0
@@ -247,20 +294,21 @@ def cudagraphify(
             old_value = torch.utils.deterministic.fill_uninitialized_memory
             torch.utils.deterministic.fill_uninitialized_memory = False
             static_inputs = [
-                (
-                    x
-                    if not isinstance(x, torch.Tensor)
-                    else static_input(x)
-                )
-                for idx, x in enumerate(inputs)
-            ]
+            (
+                x
+                if not isinstance(x, torch.Tensor)
+                else static_input(x)
+            )
+            for idx, x in enumerate(inputs)
+        ]
             torch.utils.deterministic.fill_uninitialized_memory = old_value
 
         pool = torch.cuda.MemPool(mem_allocator)
         with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local",
                               dynamic_graph=True, pool=pool.id):
-            # Can't I get the underlying fxgraph here? No.
             static_outputs = model(list(static_inputs))
+
+        # assert graph_ == graph
 
         replace_memops_with_kernels(cudart.cudaGraph_t(init_value=graph.raw_cuda_graph()))
 
@@ -331,12 +379,27 @@ def cudagraphify(
             containing_segment_idxs.add(segment_idx)
             segment_idx_containing_this_output_tensor.append(segment_idx)
 
+        print("GALVEZ:i=", i, " input overlap check")
+        find_overlaps(list(static_inputs_only_tensors), True)
         dynamic_tensors = list(static_inputs_only_tensors)
+        print("GALVEZ:i=", i, " output overlap check")
+        find_overlaps(list(zip(segment_address_starts, segment_sizes)), True)
         dynamic_tensors.extend(zip(segment_address_starts, segment_sizes))
 
         dynamic_tensors_list.append(dynamic_tensors)
+        print("input length=", len(list(static_inputs_only_tensors)))
+        print("output length=", len(list(zip(segment_address_starts, segment_sizes))))
+        graphs.append(graph)
+
+        retain_tensors.append(static_inputs)
 
     graph = graphs[1]
+    print("GALVEZ: graph 1 overlap check")
+    find_overlaps(dynamic_tensors_list[0], True)
+    print("GALVEZ: graph 2 overlap check")
+    find_overlaps(dynamic_tensors_list[1], True)
+    print("GALVEZ: both graphs overlap check")
+    find_overlaps(dynamic_tensors_list[0] + dynamic_tensors_list[1], True)
     graph.become_dynamic2(dynamic_tensors_list[1], graphs[0], dynamic_tensors_list[0])
 
     # del pool
@@ -345,6 +408,7 @@ def cudagraphify(
     dynamic_input_idxs = OrderedSet([idx for idx in range(len(static_inputs)) if idx not in static_input_idxs and isinstance(static_inputs[idx], torch.Tensor) and static_inputs[idx].is_cuda])
 
     def run(new_inputs):
+        print(f"GALVEZ: running graph: {graph_to_number[id(graph)]=}")
         assert len(static_inputs) == len(new_inputs)
 
         new_inputs_only_tensors = [input for input in new_inputs if isinstance(input, torch.Tensor) and input.is_cuda]
@@ -353,18 +417,22 @@ def cudagraphify(
 
         for idx in dynamic_input_idxs:
             print(f"{idx=} {new_inputs[idx].data_ptr()=} {new_inputs[idx].shape=}")
+            assert new_inputs[idx].data_ptr() % 16 == 0, "Bad dynamic input alignment"
             dynamic_tensors.append(new_inputs[idx])
 
         for idx in range(len(new_inputs_only_tensors)):
             print(f"{idx=} {new_inputs_only_tensors[idx].data_ptr()=} {new_inputs_only_tensors[idx].shape=}")
 
         for segment_size, segment_device, segment_address_start in zip(segment_sizes, segment_devices, segment_address_starts):
+            # This aligned allocation function is buggy in some subtle way...
+            # storage_tensor = aligned_empty_int8(segment_size, max_alignment(segment_address_start), segment_device)
+            # storage_tensor = aligned_empty_int8(segment_size, 2 * 1024 * 1024, segment_device)
             storage_tensor = torch.empty(segment_size, dtype=torch.int8, device=segment_device)
             print("GALVEZ: storage_tensor=", storage_tensor.data_ptr())
             print("GALVEZ: storage_tensor max alignment=", max_alignment(storage_tensor.data_ptr()))
             print("GALVEZ: old segment max alignment=", max_alignment(segment_address_start))
             # debug only
-            storage_tensor[:] = 0
+            # storage_tensor[:] = 0
             dynamic_tensors.append(storage_tensor)
 
         graph.replay_dynamic(dynamic_tensors)
@@ -409,7 +477,10 @@ def cudagraphify(
 
         return outputs
 
-    graph.debug_dump("cudagraph_edited.dot")
+    global cudagraphs_made_so_far
+    graph_to_number[id(graph)] = cudagraphs_made_so_far
+    graph.debug_dump(f"cudagraph_{cudagraphs_made_so_far}.dot")
+    cudagraphs_made_so_far += 1
     return run, outputs
 
 import ctypes
@@ -689,3 +760,29 @@ def replace_node_in_graph(graph, old_node, new_node):
             dependent_nodes,
             len(dependent_nodes)
         ))
+
+
+def aligned_empty_int8(length: int,
+                       align_bytes: int,
+                       device) -> torch.Tensor:
+    """
+    Allocate a 1D torch.int8 tensor of `length` whose underlying storage
+    starts at an address that’s a multiple of `align_bytes`.
+    """
+    # For int8, element size is exactly 1 byte:
+    # We need up to `align_bytes` extra slots to realign
+    pad_elems = align_bytes
+
+    # Over‐allocate
+    storage = torch.empty(length + pad_elems,
+                          dtype=torch.int8,
+                          device=device)
+
+    # Compute byte‐offset to next aligned boundary
+    ptr = storage.data_ptr()
+    offset_bytes = (-ptr) % align_bytes
+    offset_elems = offset_bytes
+
+    # Slice out exactly `length` elements starting at aligned spot
+    aligned = storage[offset_elems : offset_elems + length]
+    return aligned
