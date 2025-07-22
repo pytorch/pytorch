@@ -2,12 +2,13 @@
 
 [build-system]
 requires = [
+    # 70.1.0: min version for integrated bdist_wheel command from wheel package
     # 77.0.0: min version for SPDX expression support for project.license
-    "setuptools>=77.0.0,<80.0",
+    "setuptools>=70.1.0,<80.0",
     "cmake>=3.27",
     "ninja",
     "numpy",
-    "packaging>=24.2",
+    "packaging",
     "pyyaml",
     "requests",
     "six",  # dependency chain: NNPACK -> PeachPy -> six
@@ -20,7 +21,11 @@ name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
 requires-python = ">=3.9,<3.14"
-license = "BSD-3-Clause"
+# TODO: change to `license = "BSD-3-Clause"` and enable PEP 639 after pinning setuptools>=77
+# FIXME: As of 2025.06.20, it is hard to ensure the minimum version of setuptools in our CI environment.
+# TOML-table-based license deprecated in setuptools>=77, and the deprecation warning will be changed
+# to an error on 2026.02.18. See also: https://github.com/pypa/setuptools/issues/4903
+license = { text = "BSD-3-Clause" }
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
 classifiers = [
