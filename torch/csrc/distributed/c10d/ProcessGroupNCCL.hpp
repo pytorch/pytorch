@@ -23,6 +23,7 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/cuda/CUDAEventCache.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 
@@ -349,6 +350,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // or timed out. If timeout, exception will be thrown.
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
+    void blockCurrentStream() override {
+      synchronize();
+    }
+
     void abort() override;
 
     // Let current stream wait on the completion of the NCCL work
@@ -443,8 +448,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Record collective sizes for debug. We only record the size on the first
     // device as multi-device per process is deprecated
-    size_t numelIn_ = -1;
-    size_t numelOut_ = -1;
+    size_t numelIn_ = 0;
+    size_t numelOut_ = 0;
 
     // Wrapper method for the static checkForNCCLErrors which can be overridden
     // for tests.
@@ -499,23 +504,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     friend class ProcessGroupNCCL;
   };
 
-  class CUDAEventCache
-      : public std::enable_shared_from_this<ProcessGroupNCCL::CUDAEventCache> {
-   public:
-    CUDAEventCache();
-    std::shared_ptr<at::cuda::CUDAEvent> create(bool timing);
-    static std::shared_ptr<ProcessGroupNCCL::CUDAEventCache> get(
-        at::DeviceIndex device);
-
-   private:
-    std::mutex cacheMutex_;
-    // NOTE: We intentionally store raw pointers so that
-    // we do not attempt to destroy the event objects on process exit,
-    // because cuda may be gone.
-    std::array<std::deque<at::cuda::CUDAEvent*>, 2>
-        eventsArray_; // 0 for timing=false, 1 for timing=true
-  };
-
   struct Options : Backend::Options {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
@@ -537,7 +525,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Optional "parent" backend and color to create communicators from
     // via `ncclCommSplit`
-    std::shared_ptr<ProcessGroupNCCL> split_from;
+    c10::intrusive_ptr<ProcessGroupNCCL> split_from;
     // Color to use for `ncclCommSplit`, values:
     // * Non-negative value: in group;
     // * NCCL_SPLIT_NOCOLOR (-1): not in group;
@@ -558,7 +546,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     int split_color{-2};
 #endif
     std::vector<uint64_t> global_ranks_in_group;
-    std::string group_name;
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -800,6 +787,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return options_;
   }
 
+  c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
+    return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+  }
+
   const std::string getBackendName() const override {
     return std::string(NCCL_BACKEND_NAME);
   }
@@ -818,6 +809,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 #else
     return false;
 #endif
+  }
+
+  void setTimeout(std::chrono::milliseconds timeout) override {
+    options_->timeout = timeout;
   }
 
   void startCoalescing() override;
@@ -963,6 +958,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void waitForPendingWorks() override;
 
   void enableCollectivesTiming() override;
+
+  c10::intrusive_ptr<Backend> split(
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Backend::Options>& opts) override;
+
+  c10::intrusive_ptr<Backend> merge(
+      const c10::intrusive_ptr<Store>& store,
+      const c10::intrusive_ptr<Backend::Options>& opts,
+      const int& rank,
+      const int& size) override;
 
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
