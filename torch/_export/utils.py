@@ -1125,6 +1125,11 @@ def output_naming_pass(
             candidate = f"{prefix}{sanitized}"
             _rename_without_collisions(name_map, old, candidate, is_placeholder=True)
 
+    # Apply renames to all matching nodes
+    for node in gm.graph.nodes:
+        if node.name in name_map:
+            node.name = name_map[node.name]
+
     # Apply renames into the FX graph
     for node in gm.graph.nodes:
         if node.op == "output":
