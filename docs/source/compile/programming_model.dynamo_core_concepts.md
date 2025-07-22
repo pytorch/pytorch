@@ -7,8 +7,6 @@ mystnb:
   merge_streams: True
 ---
 
-(programming_model.dynamo_core_concepts)=
-
 ```{code-cell}
 :tags: [remove-cell]
 import torch
