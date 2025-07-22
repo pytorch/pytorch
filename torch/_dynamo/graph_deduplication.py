@@ -220,9 +220,11 @@ def _get_inds_with_external_users(region: Region, inds_unique: set[int]) -> None
                     inds_unique.add(ind)
 
 
-def _copy_nodes_and_remap_inputs(
-    subgraph: torch.fx.Graph, region: Region
-) -> list[OrderedSet[UsageIndex]]:
+def _create_subgraph(
+    region: Region,
+    inds_with_external_users: list[int],
+) -> tuple[torch.fx.Graph, list[OrderedSet[UsageIndex]]]:
+    subgraph: torch.fx.Graph = torch.fx.Graph()
     external_input_to_usages = _get_external_inputs(region)
     external_node_usages = list[OrderedSet[UsageIndex]]()
     region_to_subgraph_node = {}
@@ -241,24 +243,10 @@ def _copy_nodes_and_remap_inputs(
         subgraph_node = subgraph.node_copy(node, lambda old: map_arg(old))
         region_to_subgraph_node[node] = subgraph_node
 
-    return external_node_usages
-
-
-def _create_subgraph_outputs(
-    subgraph: torch.fx.Graph, inds_to_output: list[int]
-) -> None:
     node_list = [n for n in subgraph.nodes if n.op not in ("placeholder", "output")]
-    out_tup = tuple(node_list[ind] for ind in inds_to_output)
+    out_tup = tuple(node_list[ind] for ind in inds_with_external_users)
     subgraph.output(out_tup)
 
-
-def _create_subgraph(
-    region: Region,
-    inds_with_external_users: list[int],
-) -> tuple[torch.fx.Graph, list[OrderedSet[UsageIndex]]]:
-    subgraph: torch.fx.Graph = torch.fx.Graph()
-    external_node_usages = _copy_nodes_and_remap_inputs(subgraph, region)
-    _create_subgraph_outputs(subgraph, inds_with_external_users)
     return subgraph, external_node_usages
 
 
