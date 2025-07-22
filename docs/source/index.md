@@ -1,41 +1,72 @@
 % PyTorch documentation master file, created by
 %  sphinx-quickstart on Fri Dec 23 13:31:47 2016.
 %  You can adapt this file completely to your liking, but it should at least
-%  contain the root `toctree` directive.
+%  contain the root toctree directive.
 
 % :github_url: https://github.com/pytorch/pytorch
 
-PyTorch documentation
+PyTorch Documentation
 ===================================
 
-PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
+PyTorch, or `torch` is an open-source machine learning library written in Python that provides a platform for deep learning. It features a dynamic computational graph that allows for flexible model building and debugging.
 
-Features described in this documentation are classified by release status:
+## Why PyTorch?
 
-**Stable (API-Stable):**
-These features will be maintained long-term and there should generally be no major performance limitations or gaps in documentation. We also expect to maintain backwards compatibility (although breaking changes can happen and notice will be given one release ahead of time).
+PyTorch has become one of the leading deep learning frameworks due to its unique advantages:
 
-**Unstable (API-Unstable):**
-Encompasses all features that are under active development where APIs may change based on user feedback, requisite performance improvements or because coverage across operators is not yet complete.
-The APIs and performance characteristics of these features may change.
+- **Dynamic Computational Graph**: Unlike static graph frameworks, PyTorch builds the graph on-the-fly, allowing for more intuitive debugging and flexible model architecture changes.
+- **Pythonic Design**: PyTorch integrates seamlessly with the Python ecosystem, making it easy to use with popular libraries like NumPy, SciPy, and Matplotlib.
+- **Research-Friendly**: Its imperative programming style makes it particularly suitable for research, rapid prototyping, and complex model architectures.
+- **Strong Community Support**: PyTorch has a vibrant ecosystem of tools, libraries, and pre-trained models.
 
-```{toctree}
-:glob:
-:maxdepth: 2
+The sections below will help you get started with PyTorch and offer a deeper dive into its capabilities, allowing you to harness the full power of this versatile framework.
 
-pytorch-api
-notes
+
+
+```{eval-rst}
+.. grid:: 3
+
+    .. grid-item-card:: :octicon:`file-code;1em`
+       Getting Started
+       :link: https://pytorch.org/tutorials/beginner/basics/intro.html
+       :link-type: url
+
+       A step-by-step interactive series for those just starting out
+       with PyTorch.
+       +++
+       :octicon:`code;1em` Code
+
+    .. grid-item-card:: :octicon:`file-code;1em`
+       Learn The Basics
+       :link: https://pytorch.org/tutorials/beginner/basics/intro.html
+       :link-type: url
+
+       Familiarize yourself with PyTorch concepts and modules. Learn how to load data, build deep neural networks, train and save your models in this quickstart guide.
+       +++
+       :octicon:`code;1em` Code :octicon:`square-fill;1em` :octicon:`video;1em` Video
+
+    .. grid-item-card:: :octicon:`file-code;1em`
+       PyTorch API
+       :link: https://pytorch.org/tutorials/beginner/introyt/introyt_index.html
+       :link-type: url
+
+       API Reference for PyTorch.
+       +++
+       :octicon:`code;1em` Code
 ```
+
+
+
 
 ```{toctree}
 :glob:
 :hidden:
 :maxdepth: 2
 
-community/index
-C++ <https://docs.pytorch.org/cppdocs/>
+Getting Started<https://docs.pytorch.org/tutorials/index.html>
+User Guide <https://docs.pytorch.org/tutorials/index.html>
+api
 ```
-
 ## Indices and tables
 
 * {ref}`genindex`
