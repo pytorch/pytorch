@@ -323,7 +323,6 @@ class FSDPParam:
             else:  # HSDP
                 assert self.mesh_info.replicate_mesh_dim == 0
                 self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
-            print("_spmd_placements: ", self._spmd_placements)
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
