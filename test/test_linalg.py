@@ -4762,6 +4762,7 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @skipCUDAIfNotRocm  # Skipping due to SM89 OOM in CI, UT doesn't do much on NV anyways
     @dtypes(*floating_types_and(torch.half))
+    @precisionOverride({torch.float16: 1e-1})  # TunableOp may occasionally find less precise solution
     def test_matmul_small_brute_force_tunableop(self, device, dtype):
         # disable tunableop buffer rotation for all tests everywhere, it can be slow
         # We set the TunableOp numerical check environment variable here because it is
