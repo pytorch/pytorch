@@ -444,9 +444,7 @@ class RingFlexAttentionTest(DTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(2)
-    @with_comms
-    def test_ring_flex_attention(self) -> None:
+    def _test_ring_flex_attention(self, qkv_size) -> None:
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
@@ -454,14 +452,11 @@ class RingFlexAttentionTest(DTensorTestBase):
         compiled_flex_attention = torch.compile(
             flex_attention, dynamic=False, fullgraph=True
         )
-        Q_BLOCK_SIZE_DEFAULT = 128
-        KV_BLOCK_SIZE_DEFAULT = Q_BLOCK_SIZE_DEFAULT
 
         torch.cuda.manual_seed(10)
         dtype = torch.float32
         bs = 8
-        query_tokens = Q_BLOCK_SIZE_DEFAULT * self.world_size
-        context_tokens = KV_BLOCK_SIZE_DEFAULT * self.world_size
+        query_tokens = context_tokens = qkv_size
         dim = 32
         nheads = 8
 
@@ -499,24 +494,10 @@ class RingFlexAttentionTest(DTensorTestBase):
         expect_out.sum().backward()
 
         # Prepare the required global vars for CP+Flex:
-        # NOTE: cp needs to know the sharding dimension
-        # TODO: see if this can be moved to the cp context
-        torch.distributed.tensor.experimental._attention._cp_shard_dim = 2
-
         device_mesh = init_device_mesh(
             device_type=self.device_type,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
-        )
-        # NOTE: cp needs cp_rank, cp_size, and device_type
-        # TODO: add dynamo support to those DeviceMesh attributes so that we don't
-        # need to store them in global vars
-        torch.distributed.tensor.experimental._attention._cp_rank = device_mesh
-        torch.distributed.tensor.experimental._attention._cp_group_size = (
-            device_mesh.size()
-        )
-        torch.distributed.tensor.experimental._attention._device_type = (
-            device_mesh.device_type
         )
         # NOTE: call create_block_mask() within TorchFunctionMode would cause error in create_fw_bw_graph
         shard_q_size = q.shape[2] // self.world_size
@@ -527,7 +508,20 @@ class RingFlexAttentionTest(DTensorTestBase):
             device_mesh.size(),
             device_mesh.device_type,
         )
-        torch.distributed.tensor.experimental._attention._cp_block_mask = cp_block_mask
+        # NOTE: cp needs to know the sharding dimension
+        # TODO: see if this can be moved to the cp context
+        from torch.distributed.tensor.experimental._attention import _set_cp_global_var
+
+        _set_cp_global_var("cp_shard_dim", 2)
+        self.assertEqual(
+            torch.distributed.tensor.experimental._attention._cp_global_vars.cp_shard_dim,
+            2,
+        )
+        _set_cp_global_var("cp_block_mask", cp_block_mask)
+        self.assertEqual(
+            torch.distributed.tensor.experimental._attention._cp_global_vars.cp_block_mask,
+            cp_block_mask,
+        )
 
         # NOTE: we do not test load balance here
         _cp_options.enable_load_balance = False
@@ -595,6 +589,21 @@ class RingFlexAttentionTest(DTensorTestBase):
         torch.distributed.tensor.experimental._attention._dispatch_mode = (
             _DispatchMode.MONKEY_PATCH
         )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_ring_flex_attention(self) -> None:
+        self.run_subtests(
+            {"qkv_size": [128 * self.world_size, 2048]},
+            self._test_ring_flex_attention,
+        )
+
+        # TODO: the current CP impl doesn't support small attentions (block_size < 128)
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
+            self.run_subtests(
+                {"qkv_size": [64 * self.world_size]},
+                self._test_ring_flex_attention,
+            )
 
 
 if __name__ == "__main__":
