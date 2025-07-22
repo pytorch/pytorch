@@ -249,6 +249,10 @@ def is_training_ir_test(test_name):
     )
 
 
+def is_training_ir_strict_test(test_name):
+    return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX)
+
+
 def is_cpp_runtime_test(test_name):
     return test_name.endswith(CPP_RUNTIME_STRICT_SUFFIX) or test_name.endswith(
         CPP_RUNTIME_NONSTRICT_SUFFIX
@@ -1583,6 +1587,42 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(m(*args), ep.module()(*args))
 
+    @testing.expectedFailureCppSerDes  #  AssertionError: 0 not in VR[2, int_oo]
+    @testing.expectedFailureSerDer  #  AssertionError: 0 not in VR[2, int_oo]
+    @testing.expectedFailureSerDerNonStrict  #  AssertionError: 0 not in VR[2, int_oo]
+    def test_cond_access_identical_symint_closure(self):
+        class Example2(torch.nn.Module):
+            def forward(self, x, trigger, target):
+                return torch.cond(
+                    trigger == 1,
+                    lambda: x + target,
+                    lambda: x * target,
+                    (),
+                )
+
+        m = Example2()
+        x = torch.randn(2)
+        trigger = 0
+        target = 2
+        args = (x, trigger, target)
+        ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
+        if is_training_ir_strict_test(self._testMethodName):
+            # In strict mode export's result capturing compiler, we create
+            # 2 new symints when re-fakifying the symint inputs.
+            # Then in run_decompositions, ep.range_constraints was updated
+            # where it checks the var_to_range and put the two newly added ones into the range_constraints.
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo], VR[-int_oo, int_oo], VR[-int_oo, int_oo])""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo])""",
+            )
+
+        self.assertEqual(m(*args), ep.module()(*args))
+
     def test_cond_branches_return_same_int(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -1831,7 +1871,7 @@ class GraphModule(torch.nn.Module):
         for problem in [Problem1, Problem2]:
             m = problem()
             m(torch.rand(64, 64))
-            # simpified torch.distributed.pipeline code
+            # simplified torch.distributed.pipeline code
             annotate_split_points(m, {"blocks.1": 1, "blocks.3": 1})
             gm = export(m, (torch.rand(64, 64),))
             torch.export.unflatten(gm)
@@ -8056,7 +8096,7 @@ def forward(self, x):
             str(schema),
             """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1]""",
         )
-        # serdes deserailizes tuple as list
+        # serdes deserializes tuple as list
         if need_serdes_test(self._testMethodName):
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
@@ -9192,7 +9232,7 @@ graph():
             x = torch.rand(5, 2, 2)
             model = Model()
 
-        # Manualy set the fake_device of fake tensors.
+        # Manually set the fake_device of fake tensors.
         x.fake_device = torch.device("cuda:0")
         for n, p in model.named_parameters():
             p.fake_device = torch.device("cuda:0")
@@ -13522,7 +13562,7 @@ graph():
         self.assertTrue(torch.allclose(m(x2), ep.module()(x2)))
         self.assertTrue(torch.allclose(m(x1), ep.module()(x1)))
 
-    @testing.expectedFailureSerDerNonStrict  # construtor is not serialized today
+    @testing.expectedFailureSerDerNonStrict  # constructor is not serialized today
     @testing.expectedFailureSerDer  # constructor is not serialized today
     @testing.expectedFailureRetraceability  # dynamo doesn't work with FlatApply op
     def test_capture_subclass_constructor(self):

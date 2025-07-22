@@ -2053,12 +2053,15 @@ class Scheduler:
     optimizations such as fusion, reorder, and graph partition.
     """
 
+    __dep_size_hint_cache: dict[Dep, int]
+
     def __init__(self, nodes: list[ir.Operation]) -> None:
         with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
 
     def _init(self, nodes: list[ir.Operation]) -> None:
         super().__init__()
+        self.__dep_size_hint_cache = {}
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
@@ -2168,11 +2171,19 @@ class Scheduler:
                 bucketing_plan = config.simplefsdp.bucketing_plan
                 if has_reduce_scatter:
                     bucketing_plan.reverse()
-                all_gather_plan = manual_bucket_plan.get_all_gather_plan(
-                    self, self.nodes, bucketing_plan
+                all_gather_plan = manual_bucket_plan.get_manual_plan(
+                    self,
+                    self.nodes,
+                    bucketing_plan,
+                    torch.ops._c10d_functional.all_gather_into_tensor.default,
+                    "nn_module_stack",
                 )
-                reduce_scatter_plan = manual_bucket_plan.get_reduce_scatter_plan(
-                    self, self.nodes, bucketing_plan
+                reduce_scatter_plan = manual_bucket_plan.get_manual_plan(
+                    self,
+                    self.nodes,
+                    bucketing_plan,
+                    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                    "fwd_nn_module_stack",
                 )
             else:
                 all_gather_plan = [[]]
@@ -3558,17 +3569,6 @@ class Scheduler:
             return True
         return False
 
-    def fusion_accumulate_large_reads(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        all_reads = (node1.read_writes.reads | node2.read_writes.reads) - (
-            node1.read_writes.writes | node2.read_writes.writes
-        )
-        return (
-            sum(self.dep_size_hint(dep) for dep in all_reads)
-            > config.realize_acc_reads_size_threshold
-        )
-
     def are_long_distant_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -4074,7 +4074,20 @@ class Scheduler:
         return False
 
     def dep_size_hint(self, dep: Dep) -> int:
-        return V.graph.get_dep_size_hint(dep)
+        res = 0
+        if dep not in self.__dep_size_hint_cache:
+            try:
+                if not dep.has_unbacked_symbols():
+                    res = dep.numbytes_hint()
+            except KeyError:
+                # In at least one test (test/inductor/test_torchbind.py) we
+                # create a StarDep that doesn't exist in the graph and calling
+                # `has_unbacked_symbols()` throws an error.
+                pass
+            self.__dep_size_hint_cache[dep] = res
+        else:
+            res = self.__dep_size_hint_cache[dep]
+        return res
 
     def score_fusion_memory(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
