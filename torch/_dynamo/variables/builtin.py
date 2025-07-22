@@ -1271,12 +1271,13 @@ class BuiltinVariable(VariableTracker):
                     args[1:],
                 )
 
-        if self.fn is float and len(args) == 1 and name == "fromhex":
+        if self.fn is float and len(args) == 1 and name in ("fromhex", "hex"):
             if isinstance(args[0], ConstantVariable):
                 try:
-                    res = float.fromhex(args[0].as_python_constant())
+                    fn = getattr(float, name)
+                    res = fn(args[0].as_python_constant())
                     return variables.ConstantVariable.create(res)
-                except OverflowError as e:
+                except (OverflowError, ValueError) as e:
                     raise_observed_exception(
                         type(e),
                         tx,
