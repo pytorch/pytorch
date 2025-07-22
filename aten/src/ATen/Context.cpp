@@ -14,7 +14,9 @@
 #include <ATen/cpu/FlushDenormal.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
+C10_DIAGNOSTIC_POP()
 #endif // USE_FBGEMM
 #if defined(__aarch64__) && !defined(C10_MOBILE)
 #include <cpuinfo.h>
