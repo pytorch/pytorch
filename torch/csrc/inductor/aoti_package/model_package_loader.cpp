@@ -53,13 +53,11 @@ std::string normalize_path_separator(const std::string& orig_path) {
   On Windows, when we input: "C:\Users\Test\file.txt", the output should be:
   "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
   */
-#ifdef _WIN32
   std::string normalized_path = orig_path;
+#ifdef _WIN32
   std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
-  return normalized_path;
-#else
-  return orig_path;
 #endif
+  return normalized_path;
 }
 
 bool file_exists(const std::string& path) {
@@ -548,7 +546,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         << found_filenames[1];
   }
 
-  temp_dir_ = create_temp_dir();
+  temp_dir_ = normalize_path_separator(create_temp_dir());
 
   std::string so_filename;
   std::string cpp_filename;
@@ -580,6 +578,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             .append(k_separator)
             .append(filename);
       }
+
+      output_path_str = normalize_path_separator(output_path_str);
 
       LOG(INFO) << "Extract file: " << filename_str << " to "
                 << output_path_str;
