@@ -2419,7 +2419,10 @@ std::unique_ptr<GuardManager> make_guard_manager(
 void start_recording_dict_pointers(
     RootGuardManager* root,
     GuardManager* tag_safe_root);
-void stop_recording_dict_pointers(RootGuardManager* root, PyObject* value);
+void stop_recording_dict_pointers(
+    RootGuardManager* root,
+    PyObject* value,
+    bool result);
 bool is_recording_dict_pointers(RootGuardManager* root);
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer);
 
@@ -2788,32 +2791,109 @@ class GuardManager {
   }
 
   virtual bool check_nopybind(PyObject* value) {
+    // -----------------------------------------------------------------------------
+    // Recursive Dict‑Tag Matching
+    // -----------------------------------------------------------------------------
+    // The GuardManager implements recursive dictionary‑tag matching.
+    // During compilation we pre‑compute every `tag_safe_node` and its
+    // corresponding `tag_safe_root` (see `find_tag_safe_nodes` in guards.py).
+    // These annotations allow the runtime to validate large subtrees with a
+    // single, cheap check.
+    //
+    // Key idea
+    // --------
+    // For a `tag_safe_root`, the input pointer called `value`, the object the
+    // guard is inspecting, serves as a proxy for the entire nested dictionary
+    // structure beneath that node.  If this `value` pointer is one we have
+    // already recorded, then verifying each dictionary’s tag is sufficient to
+    // prove that nothing inside the subtree has changed.
+    //
+    // Runtime flow
+    // -------------
+    // 1) Previously‑seen `value` pointer
+    //    • Look up the current `value` pointer in our cache.
+    //    • If found, perform a recursive tag comparison on the cached subtree.
+    //      All tags match means guard passes with no further traversal.
+    //
+    // 2) First‑time `value` pointer
+    //    • Enter recording mode; walk the subtree, each tag safe root collects
+    //      dict tag, and cache the new `value` pointer.
+    //    • Future executions with this pointer now hit the fast path above.
+    //
+    // 3) Supporting multiple pointers
+    //    • We deliberately cache a bounded number of distinct `value` pointers
+    //      to enable regional compilation. Compiling one transformer layer and
+    //      reusing it for many identical layers in an LLM requires saving
+    //      multiple `value` pointers. This is done by storing `value` pointers
+    //      in a dictionary.
+    //    • A small fixed cap prevents unbounded growth of the cache.
+    //
+    // 4) Weak‑reference safety
+    //    • Each cached `value` pointer is stored as a weak reference with a
+    //      callback.  When the underlying Python object is garbage‑collected,
+    //      the callback automatically disables dict‑tag matching for the
+    //      entire guard manager.
+    //    • This guards against aliasing bugs: CPython can recycle a freed
+    //    memory
+    //      address, so a new object might otherwise appear to match an old
+    //      pointer.
+    //
+    // 5) Guard failure
+    //    • If a tag check ever fails for this root, we conservatively disable
+    //      dict‑tag matching for that node. In the common case, failures are
+    //      rare, so the optimization remains effective.
+    //
+    // Result
+    // ------
+    // This strategy shrinks guard‑evaluation overhead to recursive dict tag
+    // matching, instead of a full recursive value check on every invocation,
+    // yielding significant speed‑ups in torch.compile’s Guard Tree.
+    // -----------------------------------------------------------------------------
     bool is_recording = false;
-    if (_is_tag_safe_root && !_disable_dict_tag_matching) {
-      if (_dict_pointers.find(value) != _dict_pointers.end()) {
-        if (check_dict_pointer_tags(value)) {
-          return true;
+    if (!_disable_dict_tag_matching) {
+      if (_is_tag_safe_root) {
+        // Check if the `value` object was recorded earlier
+        if (_dict_pointers.find(value) != _dict_pointers.end()) {
+          // Check for fast path
+          // if (is_weakref_valid(value) && check_dict_pointer_tags(value)) {
+          if (check_dict_pointer_tags(value)) {
+            return true;
+          }
+          // Something changed, very likely the dict tag checking will fail in
+          // future. So disable the recursive tag matching.
+          _disable_dict_tag_matching = true;
+        } else if (_dict_pointers.size() == 2) {
+          // TODO(recursive-dict-tag) - Add a config.
+          // Bound the cache size. If there are too many new `value` pointers to
+          // be recorded, it is a sign that dict tag matching will never
+          // succeed.
+          _disable_dict_tag_matching = true;
+        } else {
+          // Start the recording
+          start_recording_dict_pointers(_root, this);
+          // TODO(recursive-dict-tag) - Add a weakref.
+          if (_is_dict) {
+            record_dict_pointer(_root, value);
+          }
+          is_recording = true;
         }
-        // Something changed, very likely there will be recompilations. Disable
-        // recursive dict tag checking.
-        _disable_dict_tag_matching = true;
-      } else if (_dict_pointers.size() == 2) {
-        // Too many nn module instances on the same GuardManager. Its likely
-        // that the fast guard path will never be taken.
-        _disable_dict_tag_matching = true;
-      } else {
-        // start recording
-        _saved = value;
-        start_recording_dict_pointers(_root, this);
+      } else if (
+          _is_tag_safe && _is_dict && is_recording_dict_pointers(_root)) {
+        // This is a tag safe node, record the dict pointer
         record_dict_pointer(_root, value);
-        is_recording = true;
       }
-    } else if (_is_tag_safe && _is_dict && is_recording_dict_pointers(_root)) {
-      record_dict_pointer(_root, value);
     }
+
     bool result = check_nopybind_template(value);
+
     if (is_recording) {
-      stop_recording_dict_pointers(_root, value);
+      stop_recording_dict_pointers(_root, value, result);
+      if (result) {
+        // register_weakref_callback the value poonter
+        if (!register_weakref_callback(value)) {
+          throw std::runtime_error("Could not register a callback");
+        }
+      }
     }
     if (!result) {
       _disable_dict_tag_matching = true;
@@ -2821,6 +2901,39 @@ class GuardManager {
     return result;
   }
 
+  static PyObject* disable_dict_tag_matching_callback(
+      PyObject* self_capsule,
+      PyObject* weakref) {
+    GuardManager* guard_manager = static_cast<GuardManager*>(
+        PyCapsule_GetPointer(self_capsule, "GuardManager*"));
+    if (guard_manager)
+      guard_manager->_disable_dict_tag_matching = true;
+    Py_RETURN_NONE;
+  }
+
+  bool register_weakref_callback(PyObject* target) {
+    PyObject* capsule = PyCapsule_New(this, "GuardManager*", nullptr);
+    if (!capsule)
+      return false;
+
+    static PyMethodDef cb_def = {
+        "_guard_manager_gc_callback", // name (unused)
+        &GuardManager::disable_dict_tag_matching_callback,
+        METH_O,
+        "internal weakref callback"};
+    PyObject* py_cb = PyCFunction_NewEx(&cb_def, capsule, nullptr);
+    Py_DECREF(capsule);
+    if (!py_cb) {
+      return false;
+    }
+
+    PyObject* wr = PyWeakref_NewRef(target, py_cb); // new ref
+    Py_DECREF(py_cb); // weakref holds its own ref
+    _tag_safe_keys_weakrefs.push_back(wr);
+    return wr != nullptr;
+  }
+
+  // TODO(recursive-dict-tag) -  Do we need a destructor for weakrefs?
   virtual bool check_nopybind(FrameLocalsMapping* value) {
     return check_nopybind_template(value);
   }
@@ -3052,10 +3165,10 @@ class GuardManager {
   // tag safe markers
   bool _is_tag_safe = false;
   bool _is_tag_safe_root = false;
-  bool _disable_dict_tag_matching{false};
+  bool _disable_dict_tag_matching = false;
   std::unordered_map<PyObject*, std::unordered_map<PyObject*, uint64_t>>
       _dict_pointers;
-  PyObject* _saved{nullptr};
+  std::vector<PyObject*> _tag_safe_keys_weakrefs;
 };
 
 GuardAccessor::GuardAccessor(
@@ -3129,9 +3242,7 @@ class RootGuardManager : public GuardManager {
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
     // Clean up dict pointer recording for tag safe roots
-    _is_recording_dict_pointers = false;
-    _current_tag_safe_root = nullptr;
-    _recorded_dict_pointers.clear();
+    reset_dict_tag_recording_variables();
 
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
@@ -3290,11 +3401,19 @@ class RootGuardManager : public GuardManager {
     _is_recording_dict_pointers = true;
   }
 
-  void stop_recording_dict_pointers(PyObject* value) {
+  void reset_dict_tag_recording_variables() {
     _is_recording_dict_pointers = false;
-    _current_tag_safe_root->stash_dict_pointers(value, _recorded_dict_pointers);
     _current_tag_safe_root = nullptr;
     _recorded_dict_pointers.clear();
+  }
+
+  void stop_recording_dict_pointers(PyObject* value, bool result) {
+    if (result) {
+      // Stash the pointers only if the guard eval passed
+      _current_tag_safe_root->stash_dict_pointers(
+          value, _recorded_dict_pointers);
+    }
+    reset_dict_tag_recording_variables();
   }
 
   bool is_recording_dict_pointers() {
@@ -3756,8 +3875,11 @@ void start_recording_dict_pointers(
   root->start_recording_dict_pointers(tag_safe_root);
 }
 
-void stop_recording_dict_pointers(RootGuardManager* root, PyObject* value) {
-  root->stop_recording_dict_pointers(value);
+void stop_recording_dict_pointers(
+    RootGuardManager* root,
+    PyObject* value,
+    bool result) {
+  root->stop_recording_dict_pointers(value, result);
 }
 
 bool is_recording_dict_pointers(RootGuardManager* root) {
