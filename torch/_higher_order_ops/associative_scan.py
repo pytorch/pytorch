@@ -119,14 +119,17 @@ class AssociativeScanOp(HigherOrderOperator):
             mutated_inputs,
             outputs,
         ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        if len(mutated_inputs) > 0:
+            raise RuntimeError(
+                "For associative_scan, combine_fn cannot have in-place mutations but found "
+                f"{mutated_inputs}-th inputs are mutated."
+            )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("combine_fn", combine_gm)
 
         for idx, x in enumerate(xs):
-            # Check if any of the two copies of this input are mutated
-            is_mutated = idx in mutated_inputs or (idx + len(xs)) in mutated_inputs
-            schema_gen.add_arg(f"xs{idx}", x, is_mutated=is_mutated)
+            schema_gen.add_arg(f"xs{idx}", x)
 
         for idx, arg in enumerate(additional_inputs):
             schema_gen.add_arg(

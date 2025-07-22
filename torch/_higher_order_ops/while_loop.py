@@ -91,7 +91,6 @@ class WhileLoopOp(HigherOrderOperator):
             body_outputs,
         ) = check_input_alias_and_mutation_return_outputs(body_gm, example_inputs)
 
-        # For cond_fn, we don't expect mutations since it should return a boolean
         (
             _,
             _,
@@ -112,10 +111,11 @@ class WhileLoopOp(HigherOrderOperator):
             )
 
         for idx, arg in enumerate(additional_inputs):
-            carried_idx = len(carried_inputs) + idx
-            schema_gen.add_arg(
-                f"additional_input{idx}", arg, is_mutated=carried_idx in mutated_inputs
+            additional_idx = len(carried_inputs) + idx
+            assert additional_idx not in mutated_inputs, (
+                "Lifted additional_inputs cannot be in-place mutated."
             )
+            schema_gen.add_arg(f"additional_input{idx}", arg, is_mutated=False)
 
         for out in body_outputs:
             schema_gen.add_output(out)
