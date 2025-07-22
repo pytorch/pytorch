@@ -124,7 +124,6 @@ Indexing, Slicing, Joining, Mutating Ops
     scatter_reduce
     segment_reduce
     split
-    functional.split
     squeeze
     stack
     swapaxes
@@ -137,7 +136,6 @@ Indexing, Slicing, Joining, Mutating Ops
     transpose
     unbind
     unravel_index
-    functional.unravel_index
     unsqueeze
     vsplit
     vstack
@@ -465,7 +463,6 @@ Reduction Ops
     nanmedian
     mode
     norm
-    functional.norm
     nansum
     prod
     quantile
@@ -474,9 +471,7 @@ Reduction Ops
     std_mean
     sum
     unique
-    functional.unique
     unique_consecutive
-    functional.unique_consecutive
     var
     var_mean
     count_nonzero
@@ -526,7 +521,6 @@ Spectral Ops
     :nosignatures:
 
     stft
-    functional.stft
     istft
     bartlett_window
     blackman_window
@@ -545,24 +539,15 @@ Other Operations
     atleast_1d
     atleast_2d
     atleast_3d
-    functional.atleast_1d
-    functional.atleast_2d
-    functional.atleast_3d
     bincount
     block_diag
-    functional.block_diag
     broadcast_tensors
-    functional.broadcast_tensors
     broadcast_to
     broadcast_shapes
-    functional.broadcast_shapes
     bucketize
     cartesian_prod
-    functional.cartesian_prod
     cdist
-    functional.cdist
     chain_matmul
-    functional.chain_matmul
     clone
     combinations
     corrcoef
@@ -578,7 +563,6 @@ Other Operations
     diagonal
     diff
     einsum
-    functional.einsum
     flatten
     flip
     fliplr
@@ -590,7 +574,6 @@ Other Operations
     histogram
     histogramdd
     meshgrid
-    functional.meshgrid
     lcm
     logcumsumexp
     ravel
@@ -599,7 +582,6 @@ Other Operations
     roll
     searchsorted
     tensordot
-    functional.tensordot
     trace
     tril
     tril_indices
@@ -638,7 +620,6 @@ BLAS and LAPACK Operations
     logdet
     slogdet
     lu
-    functional.lu
     lu_solve
     lu_unpack
     matmul
@@ -825,7 +806,6 @@ Operator Tags
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
 .. py:module:: torch.utils.viz
-.. py:module:: torch.functional
 .. py:module:: torch.quasirandom
 .. py:module:: torch.return_types
 .. py:module:: torch.serialization
@@ -835,3 +815,10 @@ Operator Tags
 .. py:module:: torch.torch_version
 .. py:module:: torch.types
 .. py:module:: torch.version
+
+.. Hidden aliases (e.g. torch.functional.broadcast_tensors()). We want `torch.broadcast_tensors()` to
+   be visible only.
+.. toctree::
+    :hidden:
+
+    torch.aliases.md
