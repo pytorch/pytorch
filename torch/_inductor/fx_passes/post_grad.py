@@ -288,9 +288,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # wait_ag0 = wait_bucket[0]
         # wait_ag1 = wait_bucket[1]
         # user1(wait_ag1)
-        print(f"XXX PRE_SORT:{gm.graph}")
         stable_topological_sort(gm.graph)
-        print(f"XXX POST_SORT:{gm.graph}")
 
     gm.recompile()
     gm.graph.lint()
