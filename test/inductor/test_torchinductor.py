@@ -13641,7 +13641,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         f_compiled = torch.compile(f)
         test, (code,) = run_and_get_code(f_compiled, input, repeat)
         self.assertEqual(test, f(input, repeat))
-        can_lower = not bool(os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0"))
+        # we don't lower when the cpp_wrapper is used because it cannot generate
+        # proper examples during autotune
+        can_lower = not config.cpp_wrapper
         self.assertEqual("repeat_interleave.Tensor" in code, can_lower)
 
 
