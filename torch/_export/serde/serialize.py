@@ -2257,13 +2257,15 @@ class GraphModuleDeserializer(metaclass=Final):
             # shape env to accommodate unbacked symbols in the exported program
             self.unbacked_symbols = set()
             count_unbacked_symfloat, count_unbacked_symint = -1, -1
-            unbacked_symfloat_prefix, unbacked_symint_prefix = (
+            unbacked_prefixes = tuple(
                 prefix_str[t] for t in [SymT.UNBACKED_FLOAT, SymT.UNBACKED_INT]
             )
+            unbacked_symfloat_prefix, unbacked_symint_prefix = unbacked_prefixes
             if symbol_name_to_range:
                 for k, vr in symbol_name_to_range.items():
                     lower = vr.lower
-                    if vr.upper >= 2:  # max is >= 2, not sym bool range
+                    # max is >= 2, not sym bool range and not unbacked sym int/float
+                    if vr.upper >= 2 and k.startswith(unbacked_prefixes):
                         lower = max(2, lower)
                     self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(
                         _int_to_sympy_int(lower, -int_oo), vr.upper
