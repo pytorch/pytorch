@@ -13,6 +13,7 @@ def _get_main_cpp_file(
     model_names: list[str],
     cuda: bool,
     example_inputs_map: typing.Optional[dict[str, int]],
+    weight_share: bool = False,
 ) -> str:
     """
     Generates a main.cpp file for AOTInductor standalone models in the specified package.
@@ -54,6 +55,9 @@ def _get_main_cpp_file(
         ib.writeline(
             f'#include "{package_name}/data/aotinductor/{model_name}/{model_name}.h"'
         )
+        ib.writeline(
+            f'#include "{package_name}/data/aotinductor/{model_name}/aot_consts_mapping.h"'
+        )
 
     ib.newline()
     for model_name in model_names:
@@ -69,6 +73,14 @@ def _get_main_cpp_file(
     )
 
     with ib.indent():
+        if weight_share:
+            ib.writelines([
+                f"size_t blob_size = torch::aot_inductor::get_{model_names[0]}_total_const_bytes();",
+                "auto constant_blob =  torch::aot_inductor::load_constants_blob(blob_size);",
+                "uint8_t* constants_ptr = static_cast<uint8_t*>(constant_blob.get());",
+            ])
+
+
         ib.writeline(f'std::string device_str = "{"cuda" if cuda else "cpu"}";')
         ib.writeline("try {")
 
@@ -132,9 +144,13 @@ def _get_main_cpp_file(
                         f"    std::move(constants_array{i + 1}),",
                         "    device_str,",
                         f'    "{package_name}/data/aotinductor/{model_name}/");',
-                        f"model{i + 1}->load_constants();",
+                        f'auto model{i + 1}_mapping = torch::aot_inductor::get_{model_name}_consts_mapping();',
                     ]
                 )
+                if weight_share:
+                    ib.writeline( f"model{i + 1}->load_dedup_constants(constants_ptr, model{i + 1}_mapping);")
+                else:
+                    ib.writeline( f"model{i + 1}->load_constants();")
 
             if example_inputs_map is not None:
                 ib.writeline("\n// Run the models")
@@ -181,7 +197,7 @@ def _get_main_cpp_file(
     return ib.getvalue()
 
 
-def _get_make_file(package_name: str, model_names: list[str], cuda: bool) -> str:
+def _get_make_file(package_name: str, model_names: list[str], cuda: bool, weight_share: bool) -> str:
     ib = IndentedBuffer()
 
     ib.writelines(
@@ -201,7 +217,9 @@ def _get_make_file(package_name: str, model_names: list[str], cuda: bool) -> str
     for model_name in model_names:
         ib.writeline(f"add_subdirectory({package_name}/data/aotinductor/{model_name}/)")
 
-    ib.writeline("\nadd_executable(main main.cpp)")
+    ib.newline()
+    if weight_share:
+        ib.writeline(f"add_executable(main main.cpp {package_name}/data/weights/deduped_weights.o)")
     if cuda:
         ib.writeline("target_compile_definitions(main PRIVATE USE_CUDA)")
 

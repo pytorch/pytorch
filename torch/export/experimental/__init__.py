@@ -355,14 +355,15 @@ class _ExportPackage:
         f: torch.types.FileLike,
         standalone: bool = False,
         package_example_inputs: bool = False,
+        weight_share: bool = False,
     ) -> None:
         options: dict[str, typing.Any] = {
             "aot_inductor.package": True,
             "aot_inductor.package_cpp_only": True,
             "always_keep_tensor_constants": True,
-            # we'll change this back to False once we enable weight deduping for standalone mode
-            "aot_inductor.package_constants_in_so": standalone,
+            "aot_inductor.package_constants_in_so": not weight_share,
             "aot_inductor.compile_standalone": standalone,
+            "aot_inductor.package_constants_on_disk": weight_share,
         }
         aoti_files_map = {}
         model_names = []
@@ -417,13 +418,13 @@ class _ExportPackage:
                     path = Path(base_directory) / f"{name}_input_{i}.pt"
                     torch.save(t, path)
 
-        cmake_file_str = _get_make_file(package_name, model_names, use_cuda)
+        cmake_file_str = _get_make_file(package_name, model_names, use_cuda, weight_share=standalone)
 
         with open(Path(base_directory) / "CMakeLists.txt", "w") as file:
             file.write(cmake_file_str)
 
         main_file_str = _get_main_cpp_file(
-            package_name, model_names, use_cuda, example_inputs_map
+            package_name, model_names, use_cuda, example_inputs_map, weight_share=standalone
         )
         with open(Path(base_directory) / "main.cpp", "w") as file:
             file.write(main_file_str)

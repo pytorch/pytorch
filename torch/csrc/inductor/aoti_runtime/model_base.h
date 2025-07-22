@@ -113,6 +113,46 @@ namespace torch::aot_inductor {
 using ConstantMap =
     std::unordered_map<std::string, MaybeOwningAtenTensorHandle>;
 
+inline RAIIDataPtr device_allocate(size_t blob_size){
+  #if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
+    return RAII_gpuMalloc(blob_size);
+  #else
+    return RAII_cpuMalloc(blob_size);
+  #endif
+}
+
+// Allocate memory for constants and copy from 
+// _binary_constants_bin_start to the allocated memory.
+inline RAIIDataPtr load_constants_blob(size_t data_size, bool skip_copy = false) {
+  auto constant_blob = device_allocate(data_size);
+  uint8_t* internal_ptr = static_cast<uint8_t*>(constant_blob.get());
+    if (!skip_copy) {
+#ifdef USE_XPU
+      sycl::queue* queue_ptr = nullptr;
+      aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
+      queue_ptr
+          ->memcpy(internal_ptr, _binary_constants_bin_start, data_size)
+          .wait();
+#elif USE_CUDA
+      AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
+          internal_ptr,
+         _binary_constants_bin_start,
+          data_size,
+          cudaMemcpyHostToDevice));
+#elif USE_MPS
+      aoti_torch_mps_memcpy(
+          internal_ptr,
+          0,
+          0,
+          data_size,
+          _binary_constants_bin_start);
+#else
+      memcpy(internal_ptr, _binary_constants_bin_start, data_size);
+#endif
+    }
+    return constant_blob;
+  }
+
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
 // Update the list here if more devices are supported in the future
 inline void parse_device_str(
@@ -323,12 +363,7 @@ class AOTInductorModelBase {
     if (!include_weights) {
       return;
     }
-#if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
-    constant_blob_ = RAII_gpuMalloc(blob_size);
-#else
-    constant_blob_ = RAII_cpuMalloc(blob_size);
-#endif
-
+    device_allocate(blob_size);
     size_t bytes_read = 0;
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
@@ -345,6 +380,65 @@ class AOTInductorModelBase {
                 /* skip_copy = */ false)
           : nullptr;
       bytes_read += data_size;
+
+      // Create at::Tensor from copied memory.
+      auto dtype = this->constant_dtype(i);
+      auto ndim = this->constant_ndim(i);
+      auto size = this->constant_shape(i);
+      auto stride = this->constant_stride(i);
+#ifdef USE_MPS
+      auto offset = this->constant_offset(i) +
+          (constants_internal_offset[i] / aoti_torch_dtype_element_size(dtype));
+#else
+      auto offset = this->constant_offset(i);
+#endif
+      auto layout = this->constant_layout(i);
+      auto opaque_metadata_ptr = this->opaque_metadata(i);
+      auto opaque_metadata_size = this->opaque_metadata_size(i);
+
+      AtenTensorHandle tensor_handle = nullptr;
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
+          internal_ptr,
+          ndim,
+          size,
+          stride,
+          offset,
+          dtype,
+          device_type_,
+          device_idx_,
+          &tensor_handle,
+          layout,
+          opaque_metadata_ptr,
+          opaque_metadata_size));
+      constants_map_->emplace(std::move(name), tensor_handle);
+    }
+    if (constants_map_) {
+      this->update_constants_array_from_map();
+    }
+  }
+
+  void load_dedup_constants(uint8_t* constants_ptr, const std::unordered_map<std::string, int>& offsets) {
+    if (include_weights) {
+      std::cout << "Please call load_constants() instead \n";
+      return;
+    }
+    size_t num_constants = this->num_constants();
+    size_t num_folded_constants = this->num_folded_constants();
+    constants_map_->reserve(num_constants);
+
+    for (size_t i = 0; i < num_constants; i++) {
+      bool from_folded = this->constant_from_folded(i);
+      if (from_folded) {
+        continue;
+      }
+      std::string name = this->constant_name(i);
+      std::string original_fqn = this->constant_original_fqn(i);
+      // storate tensor offset in blob
+      int storage_offset = offsets.at(original_fqn);
+      size_t data_size = this->constant_data_size(i);
+      uint8_t* internal_ptr = (data_size != 0)
+          ? constants_ptr + storage_offset
+          : nullptr;
 
       // Create at::Tensor from copied memory.
       auto dtype = this->constant_dtype(i);
