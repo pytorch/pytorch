@@ -40,11 +40,9 @@ torch.onnx.export(
 )
 ```
 
-Next sections introduce the two versions of the exporter.
-
 ## TorchDynamo-based ONNX Exporter
 
-*The TorchDynamo-based ONNX exporter is the newest (and Beta) exporter for PyTorch 2.1 and newer*
+*The TorchDynamo-based ONNX exporter is the newest exporter for PyTorch 2.1 and newer*
 
 TorchDynamo engine is leveraged to hook into Python's frame evaluation API and dynamically rewrite its
 bytecode into an FX Graph. The resulting FX Graph is then polished before it is finally translated into an
@@ -54,25 +52,6 @@ The main advantage of this approach is that the [FX graph](https://pytorch.org/d
 bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
 
 {doc}`Learn more about the TorchDynamo-based ONNX Exporter <onnx_dynamo>`
-
-## TorchScript-based ONNX Exporter
-
-*The TorchScript-based ONNX exporter is available since PyTorch 1.2.0*
-
-[TorchScript](https://pytorch.org/docs/stable/jit.html) is leveraged to trace (through {func}`torch.jit.trace`)
-the model and capture a static computation graph.
-
-As a consequence, the resulting graph has a couple limitations:
-
-* It does not record any control-flow, like if-statements or loops;
-* Does not handle nuances between `training` and `eval` mode;
-* Does not truly handle dynamic inputs
-
-As an attempt to support the static tracing limitations, the exporter also supports TorchScript scripting
-(through {func}`torch.jit.script`), which adds support for data-dependent control-flow, for example. However, TorchScript
-itself is a subset of the Python language, so not all features in Python are supported, such as in-place operations.
-
-{doc}`Learn more about the TorchScript-based ONNX Exporter <onnx_torchscript>`
 
 ## Contributing / Developing
 
@@ -87,7 +66,6 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     onnx_dynamo
     onnx_ops
     onnx_verification
-    onnx_torchscript
 ```
 
 <!-- This module needs to be documented. Adding here in the meantime

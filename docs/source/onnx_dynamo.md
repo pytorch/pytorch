@@ -19,7 +19,7 @@ The resulting FX Graph is then polished before it is finally translated into an 
 The main advantage of this approach is that the [FX graph](https://pytorch.org/docs/stable/fx.html) is captured using
 bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
 
-In addition, during the export process, memory usage is significantly reduced compared to the TorchScript-enabled exporter.
+In addition, during the export process, memory usage is significantly reduced.
 See the {doc}`memory usage documentation <onnx_dynamo_memory_usage>` for more information.
 
 
@@ -111,16 +111,6 @@ The ONNX model may then be serialized into a [Protobuf file](https://protobuf.de
 
 ```{code-block} python
   onnx_program.save("mlp.onnx")
-```
-
-## Use the same model to compare with the TorchScript-enabled exporter
-
-The biggest difference between the TorchScript-enabled exporter and the TorchDynamo-based exporter is that the latter
-requires dynamic_shapes to be the same tree structure as the input, while the former
-requires the dynamic_shapes to be a single and flatten dictionary.
-
-```{code-block} python
-  torch.onnx.export(model,(tensor_input, dict_input, list_input), "mlp.onnx", dynamic_axes={"tensor_input":{0: "batch_size"}, "tensor_x": {0: "batch_size"}, "list_input_index_0": {0: "batch_size"}}, input_names=input_names, output_names=output_names)
 ```
 
 ## Inspecting the ONNX model using GUI
