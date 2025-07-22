@@ -443,6 +443,69 @@ void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
   }
 }
 
+class RAIIMinizArchive {
+ public:
+  RAIIMinizArchive(const std::string& zip_path) {
+    mz_zip_zero_struct(&_zip_archive);
+    if (!mz_zip_reader_init_file(&_zip_archive, zip_path.c_str(), 0)) {
+      throw std::runtime_error(fmt::format(
+          "Failed to initialize zip archive: {}",
+          mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
+    }
+  }
+  RAIIMinizArchive(const RAIIMinizArchive&) = delete;
+  RAIIMinizArchive& operator=(const RAIIMinizArchive&) = delete;
+  RAIIMinizArchive(RAIIMinizArchive&&) noexcept = delete;
+  RAIIMinizArchive& operator=(RAIIMinizArchive&&) noexcept = delete;
+  ~RAIIMinizArchive() {
+    // Unconditionally close the file.  We can't handle any errors here without
+    // terminating the program.
+    mz_zip_reader_end(&_zip_archive);
+  }
+
+  std::vector<std::string> get_filenames() {
+    const unsigned num_zip_files{mz_zip_reader_get_num_files(&_zip_archive)};
+    std::vector<std::string> zip_filenames{};
+    zip_filenames.reserve(num_zip_files);
+
+    for (unsigned i{0}; i < num_zip_files; ++i) {
+      // filename_buf_size == 0 returns the filename length, including null
+      // terminator
+      const auto zip_filename_len{
+          mz_zip_reader_get_filename(&_zip_archive, i, nullptr, 0)};
+      if (!zip_filename_len) {
+        throw std::runtime_error(
+            fmt::format("Failed to read zip filename length at index {}", i));
+      }
+      // std::string implicitly appends a character for the null terminator
+      std::string zip_filename(zip_filename_len - 1, '\0');
+      if (!mz_zip_reader_get_filename(
+              &_zip_archive, i, zip_filename.data(), zip_filename_len)) {
+        throw std::runtime_error(
+            fmt::format("Failed to read zip filename at index {}", i));
+      }
+      zip_filenames.emplace_back(zip_filename);
+    }
+
+    return zip_filenames;
+  }
+
+  void extract_file(
+      const std::string& zip_filename,
+      const std::string& dest_filename) {
+    if (!mz_zip_reader_extract_file_to_file(
+            &_zip_archive, zip_filename.c_str(), dest_filename.c_str(), 0)) {
+      throw std::runtime_error(fmt::format(
+          "Failed to extract zip file {} to destination file {}",
+          zip_filename,
+          dest_filename));
+    }
+  }
+
+ private:
+  mz_zip_archive _zip_archive{};
+};
+
 AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
     const std::string& model_name,
@@ -462,32 +525,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   }
 
   // Extract all files within the zipfile to a temporary directory
-  mz_zip_archive zip_archive;
-  memset(&zip_archive, 0, sizeof(zip_archive));
-
-  if (!mz_zip_reader_init_file(&zip_archive, model_package_path.c_str(), 0)) {
-    throw std::runtime_error(
-        std::string("Failed to initialize zip archive: ") +
-        mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive)));
-  }
-
-  std::vector<std::string> found_filenames;
-  for (uint32_t i = 0; i < zip_archive.m_total_files; i++) {
-    uint32_t filename_len =
-        mz_zip_reader_get_filename(&zip_archive, i, nullptr, 0);
-    if (filename_len == 0) {
-      throw std::runtime_error("Failed to read filename");
-    }
-    // filename_len returned by mz_zip_reader_get_filename includes the null
-    // terminator, so we need to subtract 1 here
-    std::string filename_str(filename_len - 1, '\0');
-    if (!mz_zip_reader_get_filename(
-            &zip_archive, i, filename_str.data(), filename_len)) {
-      throw std::runtime_error("Failed to read filename");
-    }
-    found_filenames.push_back(normalize_path_separator(filename_str));
-  }
-
+  RAIIMinizArchive zip_archive{model_package_path};
+  auto found_filenames{zip_archive.get_filenames()};
   if (found_filenames.empty()) {
     throw std::runtime_error("No files found in zip archive.");
   }
@@ -560,8 +599,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       }
 
       // Extracts file to the temp directory
-      mz_zip_reader_extract_file_to_file(
-          &zip_archive, filename_str.c_str(), output_path_str.c_str(), 0);
+      zip_archive.extract_file(filename_str, output_path_str);
 
       // Save the file for bookkeeping
       size_t extension_idx = output_path_str.find_last_of('.');
@@ -576,14 +614,6 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         }
       }
     }
-  }
-
-  // Close the zip archive as we have extracted all files to the temp
-  // directory
-  if (!mz_zip_reader_end(&zip_archive)) {
-    throw std::runtime_error(
-        std::string("Failed to close zip archive: {}") +
-        mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive)));
   }
 
   if (cpp_filename.empty() && so_filename.empty()) {
