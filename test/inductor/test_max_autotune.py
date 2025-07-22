@@ -35,7 +35,10 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch._inductor.template_heuristics import CUDAConfigHeuristic, GemmConfig
+from torch._inductor.template_heuristics import (
+    CUDAMMTemplateConfigHeuristic,
+    GemmConfig,
+)
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -752,7 +755,12 @@ class TestMaxAutotune(TestCase):
     @skipIfXpu(
         msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
     )
-    @config.patch(max_autotune_gemm_backends="TRITON")
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "TRITON",
+            "benchmark_epilogue_fusion": False,
+        }
+    )
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)
 
@@ -1530,9 +1538,9 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.kernel.mm.V.choices.get_config_heuristics"
+            "torch._inductor.template_registry.get_template_heuristic"
         ) as config_mock:
-            config_heuristics = CUDAConfigHeuristic()
+            config_heuristics = CUDAMMTemplateConfigHeuristic()
 
             # Traditionally, this would be set of all possible configs
             # We mock out the code path for the sake of the unit test
