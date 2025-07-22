@@ -958,7 +958,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         choices = (
             [
                 aten_addmm.bind(
-                    kernel_inputs.nodes(),
+                    # TODO(coconutruben): replace with kernel_inputs.nodes()
+                    # once that supports the unexpanded nodes as well
+                    [inp, mat1, mat2],
                     layout,
                     alpha=alpha,
                     beta=beta,
@@ -967,7 +969,14 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             if use_aten_gemm_kernels()
             else []
         )
-        return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+        return autotune_select_algorithm(
+            # TODO(coconutruben): replace with kernel_inputs.nodes()
+            # once that supports the unexpanded nodes as well
+            name,
+            choices,
+            [inp, mat1, mat2],
+            layout,
+        )
 
     # Get lookup table configs grouped by template_id
     op_lookup_dict = lookup_op_config_entries(kernel_inputs.nodes(), name)
@@ -1089,9 +1098,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         CppGemmTemplate.add_choices(
             choices,
             layout,
-            # reorder here because CK expects (x, w, bias) but torch
-            # is bias, x, w
-            kernel_inputs.nodes(reorder=[1, 2, 0]),
+            kernel_inputs.nodes(),
             alpha=alpha,
             beta=beta,
             has_bias=True,
