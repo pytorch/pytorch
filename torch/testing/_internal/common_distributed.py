@@ -339,7 +339,7 @@ def requires_gloo():
 
 def requires_nccl_version(version, msg):
     if TEST_CUDA:
-        if c10d.is_nccl_available():
+        if not c10d.is_nccl_available():
             return skip_but_pass_in_sandcastle(
                 "c10d was not compiled with the NCCL backend",
             )
@@ -364,13 +364,6 @@ def requires_nccl():
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
-    )
-
-
-def requires_xccl():
-    return skip_but_pass_in_sandcastle_if(
-        not c10d.is_xccl_available(),
-        "c10d was not compiled with the XCCL backend",
     )
 
 
@@ -453,7 +446,7 @@ def sm_is_or_higher_than(device: torch.device, major: int, minor: int) -> bool:
     Returns True if the device's compute capability is (major, minor) or higher.
     Error out if the device is not a CUDA device.
     Returns False if device is a RoCM device.
-    Returns True if device is an XPU device.
+    Returns True if device is a non-CUDA device.
     """
     if device.type != "cuda":
         return True
@@ -1483,7 +1476,7 @@ def _dynamo_dist_per_rank_init(
         torch.accelerator.set_device_index(rank)
 
     if backend is None:
-        backend = c10d.distributed_c10d.Backend.default_device_backend_map.get(
+        backend = c10d.get_default_backend_for_device(
             torch.accelerator.current_accelerator().type
         )
 
