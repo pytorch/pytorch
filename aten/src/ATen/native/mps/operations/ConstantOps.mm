@@ -89,8 +89,12 @@ Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
     return self;
   }
   // check if it's possible to use fillBuffer() to fill the Tensor's storage
-  if (value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
+  if (value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true) {
     return self;
+  }
+  if (c10::elementSize(self.scalar_type()) && fill_mps_tensor_(self, value.toByte())) {
+    return self;
+  }
 
   return fill_scalar_mps_impl(self, value);
 }
