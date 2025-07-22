@@ -47,10 +47,23 @@ def concated_logs() -> str:
 
 def upload_to_s3_artifacts(failed: bool) -> None:
     """Upload the file to S3."""
+    job_id = os.environ.get("JOB_ID")
+    if job_id and failed:
+        logs = concated_logs()
+        # Put logs into bucket so log classifier can access them. We cannot get
+        # the actual GH logs so this will have to be a proxy.
+        print(f"Uploading logs for {job_id} to S3")
+        get_s3_resource().put_object(
+            Body=gzip.compress(logs.encode("utf-8")),
+            Bucket="gha-artifacts",
+            Key=f"{LOG_BUCKET_PREFIX}/{job_id}",
+            ContentType="text/plain",
+            ContentEncoding="gzip",
+        )
+
     workflow_id = os.environ.get("GITHUB_RUN_ID")
     workflow_run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT")
     file_suffix = os.environ.get("ARTIFACTS_FILE_SUFFIX")
-    job_id = os.environ.get("JOB_ID")
     if not workflow_id or not workflow_run_attempt or not file_suffix:
         print(
             "GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, or ARTIFACTS_FILE_SUFFIX not set, not uploading"
@@ -88,18 +101,6 @@ def upload_to_s3_artifacts(failed: bool) -> None:
         Bucket="gha-artifacts",
         Key=f"workflows_failing_pending_upload/{workflow_id}.txt",
     )
-    if job_id and failed:
-        logs = concated_logs()
-        # Put logs into bucket so log classifier can access them. We cannot get
-        # the actual GH logs so this will have to be a proxy.
-        print(f"Uploading logs for {job_id} to S3")
-        get_s3_resource().put_object(
-            Body=gzip.compress(logs.encode("utf-8")),
-            Bucket="gha-artifacts",
-            Key=f"{LOG_BUCKET_PREFIX}/{job_id}",
-            ContentType="text/plain",
-            ContentEncoding="gzip",
-        )
 
 
 def zip_and_upload_artifacts(failed: bool) -> None:
