@@ -120,7 +120,8 @@ def rebuild_tensor(cls, storage, metadata):
     return t
 
 
-def rebuild_meta_tensor(
+def rebuild_device_tensor_without_cache(
+    device,
     tensor_cls,
     tensor_size,
     tensor_stride,
@@ -129,27 +130,20 @@ def rebuild_meta_tensor(
     storage_size_bytes,
     requires_grad,
 ):
-    untyped_storage = torch.UntypedStorage(storage_size_bytes, device="meta")
-
+    untyped_storage = torch.UntypedStorage(storage_size_bytes, device=device)
     typed_storage = torch.TypedStorage(
         wrap_storage=untyped_storage, dtype=dtype, _internal=True
     )
-
-    t = torch._utils._rebuild_tensor(
+    return rebuild_tensor(
+        tensor_cls,
         typed_storage,
-        tensor_offset,
-        tensor_size,
-        tensor_stride,
+        (
+            tensor_offset,
+            tensor_size,
+            tensor_stride,
+            requires_grad,
+        ),
     )
-
-    if tensor_cls == torch.nn.parameter.Parameter:
-        # It is crucial for integer tensors to receive
-        # the requires_grad=False as an argument in the constructor
-        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
-    else:
-        t.requires_grad = requires_grad
-
-    return t
 
 
 def rebuild_cuda_tensor(
@@ -376,10 +370,11 @@ def reduce_tensor(tensor):
                 event_sync_required,
             ),
         )
-    elif storage._untyped_storage.device.type == "meta":
+    elif storage._untyped_storage.device.type in ["meta", "xpu"]:
         return (
-            rebuild_meta_tensor,
+            rebuild_device_tensor_without_cache,
             (
+                storage._untyped_storage.device,
                 type(tensor),
                 tensor.size(),
                 tensor.stride(),
@@ -602,6 +597,10 @@ def reduce_storage(storage):
     elif storage.device.type == "meta":
         raise RuntimeError(
             "Cannot pickle meta storage; try pickling a meta tensor instead"
+        )
+    elif storage.device.type == "xpu":
+        raise RuntimeError(
+            "Cannot pickle XPU storage; try pickling a XPU tensor instead"
         )
     elif get_sharing_strategy() == "file_system":
         metadata = storage._share_filename_cpu_()
