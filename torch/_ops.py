@@ -85,7 +85,7 @@ class OperatorBase:
 
         # This table allows you to override the behavior of a particular
         # dispatch key to call a custom Python function, rather than the
-        # ordinary C++ configured behavior.  This is the raison d'etre of
+        # ordinary C++ configured behavior.  This is the raison d'etre of  # codespell:ignore
         # Python dispatcher: to let you program the dispatcher from Python
         # in case you need something unusual, and don't want to clobber
         # the existing registrations using the Python operator registration
@@ -297,7 +297,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             self.fallthrough(dispatch_key)
 
         # [NOTE] We have to register pre-dispatch key implementation
-        # because sometimes HOP use aot-dispatch tracing to detect certaion
+        # because sometimes HOP use aot-dispatch tracing to detect certain
         # mutations. This is problematic when we are functionalizing HOP
         # during pre-dispatch because when the inner tracer starts, it will see
         # that PreDispatch key is still active. In that case, we just redispatch
@@ -415,10 +415,19 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                         # TODO(rzou): we should support torch_dispatch calling convention too.
                         result = handler(mode, *args, **kwargs)
                 else:
-                    raise NotImplementedError(
-                        f"There was no rule registered for HOP {self._name} and mode {curr_mode}. "
-                        f"We recommend filing an issue."
-                    )
+                    if curr_mode.supports_higher_order_operators:
+                        with _pop_mode_temporarily() as mode:
+                            return curr_mode.__torch_dispatch__(self, [], args, kwargs)
+                    else:
+                        raise NotImplementedError(
+                            f"There was no rule registered for HigherOrderOperator {self._name} and mode {curr_mode}."
+                            f"Hint: set {curr_mode}'s supports_higher_order_operators to True."
+                            f" This causes all higher order operators to pass through {curr_mode}'s __torch_dispatch__,"
+                            f" so handle them accordingly by"
+                            f" adding support for HigerOrderOperators (in this case, {self._name}) in"
+                            f" {curr_mode}.__torch_dispatch__ or"
+                            f" returning NotImplemented when not supported."
+                        )
                 if result is not NotImplemented:
                     return result
 
@@ -457,10 +466,12 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
             # All handlers returned NotImplemented
             raise TypeError(
-                f"Multiple dispatch failed for {self._name}. There was no registered that "
-                f"did not return NotImplemented. Use HOP.py_impl to register some. "
-                f"Tried mode: {curr_mode}) and subclasses: "
-                f"{[type(a) for a in overloaded_args]}"
+                f"HigherOrderOperator '{self._name}' is not supported for the given input types. "
+                f"This typically happens when using custom tensor types or dispatch modes that don't "
+                f"have implementations for this operation.\n\n"
+                f"Current mode: {curr_mode}\n"
+                f"Input types: {[type(a).__name__ for a in overloaded_args]}\n\n"
+                f"To fix this, can add support for '{self._name}' in {curr_mode}'s __torch_dispatch__\n"
             )
 
         functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
@@ -1104,7 +1115,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
                 f" but no python implementation is found."
                 f" Please file an issue on this when you encounter this error."
                 f" This error can happen when you export or compile the model."
-                f" It can still happpen even if a C++ implementation for {dispatch_key}. "
+                f" It can still happen even if a C++ implementation for {dispatch_key}. "
                 f" has been registered. That's because FakeScriptObject purely lives in python and cannot work "
                 f" with a C++ implementation."
             )
@@ -1252,7 +1263,7 @@ class OpOverloadPacket(Generic[_P, _T]):
 def _call_overload_packet_from_python(
     op: OpOverloadPacket[_P, _T], *args: _P.args, **kwargs: _P.kwargs
 ) -> _T:
-    # Re-use the torch function handling logic in cpp
+    # Reuse the torch function handling logic in cpp
     torch_function_called, ret = torch._C._maybe_call_torch_function_for_op_packet(
         op, *args, **kwargs
     )
@@ -1475,7 +1486,10 @@ class _Ops(types.ModuleType):
             # Import the shared library into the process, thus running its
             # static (global) initialization code in order to register custom
             # operators with the JIT.
-            ctypes.CDLL(path)
+            try:
+                ctypes.CDLL(path)
+            except Exception as e:
+                raise OSError(f"Could not load this library: {path}") from e
         self.loaded_libraries.add(path)
 
 
