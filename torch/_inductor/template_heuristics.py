@@ -5,7 +5,7 @@ import itertools
 import math
 from functools import partial
 from threading import Lock
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeAlias
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from triton import Config as TritonConfig
 
 # Add this type alias at the top of your imports
-SymInt: TypeAlias = sympy.core.numbers.Integer
+SymInt = sympy.core.numbers.Integer
 
 
 # Gemm Configs
