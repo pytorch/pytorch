@@ -4071,6 +4071,15 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
             torch.ones([]).index_select(0, torch.Tensor([0, 0]).int())
 
+    def test_zerotensor(self, device):
+        supported_ops = [torch.mm, torch.mul, torch.div, torch.add, torch.sub]
+        x = torch._efficientzerotensor((2, 2), device=device)
+        y = torch._efficientzerotensor((2, 2), device=device)
+        for ops in supported_ops:
+            t = ops(x, y)
+            self.assertEqual(t.device, x.device)
+            self.assertEqual(t.shape, (2, 2))
+
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @skipIfRocm
