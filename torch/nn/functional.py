@@ -3070,10 +3070,7 @@ def ctc_loss(
             zero_infinity=zero_infinity,
         )
 
-    def raw_ctc(x, *o):
-        return torch.ctc_loss(log_softmax(x, -1), *o)
-
-    return raw_ctc(
+    return torch.ctc_loss(
         inputs,
         targets,
         input_lengths,
