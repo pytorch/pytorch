@@ -1359,12 +1359,27 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
             # the call and wrap output into a VariableTracker.
             proxy = tx.output.create_proxy("call_function", flat_apply, all_args, {})
-            out_vt = wrap_fx_proxy(tx, proxy)
-            # TODO support more output types
-            # Q: flat_apply will likely pytree_flatten the output for this, then
-            # how do we intercept the output before flatten, and wrap those?
-            # - Maybe we can have `flat_apply` return the output spec, so that
-            #   Dynamo can unflatten and wrap the result.
+            try:
+                # TODO support more output types once `flat_apply` supports
+                # pytree-able output types. We can have Dynamo trace through an
+                # unflatten call (just like we traced through a flatten above)
+                # to rebuild the actual output VT.
+                out_vt = wrap_fx_proxy(tx, proxy)
+            except (
+                # From `handle_traced_output`.
+                torch._dynamo.exc.Unsupported,
+                # From `flat_apply` assert on output type.
+                torch._dynamo.exc.TorchRuntimeError,
+            ):
+                unimplemented_v2(
+                    gb_type="Unsupported output type for nonstrict_trace-ed function",
+                    context=f"Function: {fn.__name__}",
+                    explanation=(
+                        "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, list)"
+                        " are allowed as output. The result of this call contains an unsupported type."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
 
             return out_vt
 

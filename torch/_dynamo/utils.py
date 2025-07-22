@@ -102,6 +102,7 @@ if typing.TYPE_CHECKING:
         Iterable,
         Iterator,
         KeysView,
+        Sequence,
         ValuesView,
     )
 
@@ -1713,9 +1714,15 @@ class ChromiumEventLogger:
 
     def __init__(self):
         self.tls = threading.local()
+
+        from . import config
+
         # Generate a unique id for this logger, which we can use in scuba to filter down
         # to a single python run.
-        self.id_ = str(uuid.uuid4())
+        if config.pt2_compile_id_prefix:
+            self.id_ = f"{config.pt2_compile_id_prefix}-{uuid.uuid4()}"
+        else:
+            self.id_ = str(uuid.uuid4())
 
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
@@ -2137,8 +2144,18 @@ def clone_input(x, *, dtype=None):
         return result
 
 
+@overload
+def clone_inputs(
+    example_inputs: dict[str, Union[T, tuple[T, ...]]],
+) -> dict[str, list[T]]: ...
+
+
+@overload
+def clone_inputs(example_inputs: Sequence[T]) -> list[T]: ...
+
+
 def clone_inputs(example_inputs):
-    res: Union[dict[Any, Any], list[Any]]
+    res: Union[dict[str, Any], list[Any]]
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
@@ -2219,7 +2236,7 @@ def torchscript(model, example_inputs, verbose=False):
     return None
 
 
-def getfile(obj):
+def getfile(obj: Any) -> Optional[str]:
     try:
         return inspect.getfile(obj)
     except (TypeError, OSError):
@@ -2570,6 +2587,10 @@ def product(it):
 def tuple_iterator_getitem(it, index):
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+def dataclass_fields(cls):
+    return torch._dynamo.disable(dataclasses.fields)(cls)
 
 
 iter_next = next
