@@ -89,8 +89,14 @@ Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
     return self;
   }
   // check if it's possible to use fillBuffer() to fill the Tensor's storage
-  if (value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
+  if (value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true) {
     return self;
+    // Special handling for bool, as one can full bool tesnros with infs
+  } else if (self.scalar_type() == kBool && fill_mps_tensor_(self, value.toBool())) {
+    return self;
+  } else if (c10::elementSize(self.scalar_type()) == 1 && fill_mps_tensor_(self, value.toByte())) {
+    return self;
+  }
 
   return fill_scalar_mps_impl(self, value);
 }
