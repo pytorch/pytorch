@@ -1130,11 +1130,7 @@ class cpp:
 
 class triton:
     """
-    <<<<<<< HEAD
-        Config specific to codegen/triton.py
-    =======
-        Settings specific to the Triton backend.
-    >>>>>>> 6d1789f9a31 ([inductor] initial triton static config lookup table)
+    Settings specific to the Triton backend.
     """
 
     # Use cudagraphs on output code
