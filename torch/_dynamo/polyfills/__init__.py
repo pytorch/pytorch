@@ -75,19 +75,14 @@ def radians(x):
     return math.pi / 180.0 * x
 
 
-def impl_CONTAINS_OP(a, b):
-    # performs a in b
-    # hasattr(b, "__contains__") might fail but b.__contains__(a) works. So, we
-    # just try to call __contains__ directly.
-    try:
-        return b.__contains__(a)
-    except AttributeError:
-        if hasattr(b, "__iter__"):
-            # use __iter__ if __contains__ is not available
-            for x in b:
-                if x == a:
-                    return True
-            return False
+def impl_CONTAINS_OP_fallback(a, b):
+    # performs fallback "a in b"
+    if hasattr(b, "__iter__"):
+        # use __iter__ if __contains__ is not available
+        for x in b:
+            if x == a:
+                return True
+        return False
     raise TypeError(f"argument of type {type(b)} is not iterable")
 
 
