@@ -35,7 +35,7 @@ inline Tensor transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
 }
 
 // We expect this to be the stable version of the zero_ op with identical
-// semantics to the existing zero_ op (except that it will not be called as 
+// semantics to the existing zero_ op (except that it will not be called as
 // a tensor method but only as a function i.e. zero_(t) not t.zero_()).
 inline Tensor zero_(Tensor& self) {
   const auto num_args = 1;
