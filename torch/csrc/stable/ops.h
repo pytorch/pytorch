@@ -8,7 +8,7 @@
 using torch::stable::Tensor;
 
 // We expect this to be the stable version of the empty_like op that takes in
-// no kwargs (device, dtpye, layout, memory_format). We will add kwargs
+// no kwargs (device, dtype, layout, memory_format). We will add kwargs
 // support in the future.
 inline Tensor empty_like(const Tensor& self) {
   const auto num_args = 6;
