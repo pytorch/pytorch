@@ -407,7 +407,7 @@ TORCH_META_FUNC(hash_tensor)
 (const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode) {
   auto maybe_result = maybe_get_output();
   if (maybe_result.defined()){
-    TORCH_CHECK(maybe_result.scalar_type() == at::kUInt64, "Expected result to be of dtype long, but got ", maybe_result.scalar_type());
+    TORCH_CHECK(maybe_result.scalar_type() == at::kUInt64, "Expected result to be of dtype uint64, but got ", maybe_result.scalar_type());
   }
   if (self.sym_numel() == 0) {
     native::zero_numel_check_dims(self, dim, "hash_tensor");
