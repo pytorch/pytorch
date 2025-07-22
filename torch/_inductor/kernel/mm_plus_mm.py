@@ -6,11 +6,7 @@ from typing import Any
 import torch
 
 from ..kernel_inputs import MMKernelInputs
-from ..lookup_table import (
-    lookup_op_config_entries,
-    lookup_table_extract_choices,
-    lookup_template_configs_from_op,
-)
+from ..lookup_table import lookup_table_extract_choices, lookup_template_configs
 from ..lowering import lowerings
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -155,9 +151,9 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     kernel_inputs = MMKernelInputs([mat1, mat2, mat3, mat4], mat1_idx=0, mat2_idx=1)
 
     assert layout1 == layout2
-    # Get lookup table configs grouped by template_id
-    op_lookup_dict = lookup_op_config_entries(kernel_inputs.nodes(), name)
-    aten_params = lookup_template_configs_from_op(op_lookup_dict, "aten")
+
+    # Get template configs directly from the lookup table
+    aten_params = lookup_template_configs(kernel_inputs.nodes(), "mm_plus_mm", "aten")
 
     # options to tune from
     def add_aten():

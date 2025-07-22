@@ -574,6 +574,9 @@ realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8
+realize_acc_reads_size_threshold: Optional[int] = (
+    None  # TODO(xuanzh): harden this to make it non optional
+)
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
@@ -1448,12 +1451,12 @@ class aot_inductor:
     precompile_headers: bool = not is_fbcode()
 
     # Embed generated kernel binary files into model.so
-    embed_kernel_binary: bool = False
+    embed_kernel_binary: Optional[bool] = None
 
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
-    emit_multi_arch_kernel: bool = False
+    emit_multi_arch_kernel: Optional[bool] = None
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
@@ -1842,24 +1845,22 @@ external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 # - it will only work if the backend (and template) requested is enabled e.g. triton, decompose_k, etc.
 #     - if the backend/template is not enabled, the lookup table is not consulted for that backend/template
 #
-# To construct your own lookup table, the simplest way now is to run max-autotune without a lookup table
-# with `export TORCH_LOGS="+inductor"` enabled. This will show the different keys and config values
-# that you can use to construct a table
-#
 # Supported: mm, addmm, bmm, mm_plus_mm operations with triton, tma, decompose_k, bias_addmm templates
 #
 # Performance: Autotuning is bypassed when single choice provided or no match (ATEN fallback).
 
 
-# The actual lookup table data
-# Format: dict[device][op][input_key] = list[complete_template_options_dict]
-# Each complete_template_options_dict must contain a required 'template_id' field
+# Template lookup table for overriding autotune configs based on input configuration
+# Format: {device_key+op_name+input_key: [{template_id: ..., params...}, ...]}
 #
-# A sample input key would be:
+# The key is a flattened string with format: "device_key+op_name+input_key"
+# - device_key: CUDA device architecture name (e.g., "NVIDIA H100")
+# - op_name: Operation name (e.g., "mm", "addmm", "bmm")
+# - input_key: String representation of input tensor properties
 #
-# ((torch.float32, [1152, 512], [512, 1]), (torch.float32, [512, 14337], [1, 512]))
-#
-# see lookup_table.py for more details on input key construction based on input_nodes
+# Each value is a list of configuration dictionaries, where each dictionary must contain:
+# - template_id: Identifier for the template (e.g., "mm", "tma", "decompose_k")
+# - Various template-specific parameters (BLOCK_M, BLOCK_N, etc.)
 #
 # If you want to make sure your lookup table is as stable as possible, you can
 # add 'template_hash' with a hash of the source code for templates that support it
@@ -1867,48 +1868,32 @@ external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 # when using the lookup table. If you add a `template_hash` to the config, and it
 # does not match the template source hash at runtime, the config will be filtered out
 #
-#
-# Example structure:
+# Example:
 # {
-#   "NVIDIA H100": {
-#     "mm": {
-#       "input_key": [
-#         {
-#           "template_id": "triton",
-#           "BLOCK_M": 128,
-#           "BLOCK_N": 128,
-#           "BLOCK_K": 64,
-#           "num_stages": 3,
-#           "num_warps": 8,
-#           "ALLOW_TF32": True,
-#           "GROUP_M": 8
-#         },
-#         {
-#           "template_id": "triton",
-#           "BLOCK_M": 64,
-#           "BLOCK_N": 64,
-#           "BLOCK_K": 32,
-#           "num_stages": 2,
-#           "num_warps": 4,
-#           "ALLOW_TF32": True,
-#           "GROUP_M": 8
-#         },
-#         {
-#           "template_id": "tma",
-#           "BLOCK_M": 256,
-#           "BLOCK_N": 128,
-#           "BLOCK_K": 64,
-#           "num_stages": 4,
-#           "num_warps": 8,
-#           "ALLOW_TF32": True
-#         }
-#       ]
-#     }
-#   }
+#   "NVIDIA H100+mm+((torch.float16, [128, 64], [64, 1]), (torch.float16, [64, 128], [1, 64]))": [
+#     {
+#       "template_id": "mm",
+#       "BLOCK_M": 128,
+#       "BLOCK_N": 128,
+#       "BLOCK_K": 32,
+#       "num_stages": 3,
+#       "num_warps": 8,
+#       "EVEN_K": true,
+#       "ALLOW_TF32": true,
+#       "GROUP_M": 8
+#     },
+#     {
+#       "template_id": "mm_persistent_tma",
+#       "BLOCK_M": 256,
+#       "BLOCK_N": 128,
+#       "BLOCK_K": 64,
+#       "num_stages": 4,
+#       "num_warps": 8,
+#       "ALLOW_TF32": True
+#     },
+#   ]
 # }
-template_lookup_table: Optional[
-    dict[str, dict[str, dict[str, list[dict[str, Any]]]]]
-] = None
+template_lookup_table: Optional[dict[str, list[dict[str, Any]]]] = None
 
 
 class test_configs:
@@ -1925,6 +1910,10 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
+
+    # If set to True, AOTI-generated CMakelists.txt will still use libtorch
+    # for unit testing
+    use_libtorch = False
 
 
 if TYPE_CHECKING:

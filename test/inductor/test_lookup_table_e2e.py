@@ -131,9 +131,10 @@ class BaseE2ELookupTableTest(TestCase):
 
     def setup_lookup_table(self, operation, lookup_key, backend_configs):
         """Setup lookup table with given configuration"""
-        inductor_config.template_lookup_table = {
-            self.dev_key: {operation: {lookup_key: backend_configs}}
-        }
+        # following the logic inside torch._inductor.lookup_table.make_lookup_key
+
+        flat_key = f"{self.dev_key}+{operation}+{lookup_key}"
+        inductor_config.template_lookup_table = {flat_key: backend_configs}
 
     def run_compiled_model(self, model, tensors, config_patches=None):
         """Run compiled model with given configuration patches"""

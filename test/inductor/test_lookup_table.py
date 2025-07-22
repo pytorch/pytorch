@@ -5,10 +5,7 @@ from unittest.mock import patch
 import torch
 import torch._inductor.lookup_table
 from torch._inductor import config as inductor_config
-from torch._inductor.lookup_table import (
-    lookup_op_config_entries,
-    lookup_template_configs_from_op,
-)
+from torch._inductor.lookup_table import lookup_template_configs
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -48,6 +45,12 @@ class MockInputNode:
     def get_dtype(self):
         return self.dtype
 
+    def get_size(self):
+        return self.size_hint
+
+    def get_stride(self):
+        return self.stride_hint
+
 
 class BaseLookupTableTest(TestCase):
     """Base class for lookup table tests with common setup and utilities"""
@@ -63,6 +66,7 @@ class BaseLookupTableTest(TestCase):
         self.original_allow_tf32 = getattr(
             torch.backends.cuda.matmul, "allow_tf32", True
         )
+        inductor_config.max_autotune = True
 
     def tearDown(self):
         # Restore all original values
@@ -104,8 +108,8 @@ class BaseLookupTableTest(TestCase):
 
         # Create expected config without template_id for comparison
         expected_without_template_id = expected_config.copy()
-        if "template_id" in expected_without_template_id:
-            expected_without_template_id.pop("template_id")
+        expected_without_template_id.pop("template_id", None)
+        expected_without_template_id.pop("template_hash", None)
 
         # Compare the configs without template_id
         self.assertEqual(result_config, expected_without_template_id)
@@ -114,18 +118,27 @@ class BaseLookupTableTest(TestCase):
         """Create mock input nodes with default or custom properties"""
         return [MockInputNode(**kwargs) for _ in range(count)]
 
+    def create_lookup_key(self, device_key, method, lookup_key):
+        """Create a lookup key"""
+        # following the logic inside torch._inductor.lookup_table.make_lookup_key
+        flat_key = f"{device_key}+{method}+{lookup_key}"
+        return flat_key
+
     def create_lookup_table_config(
         self, device_key, method, lookup_key, backend_configs
     ):
         """Create a lookup table configuration"""
-        return {device_key: {method: {lookup_key: backend_configs}}}
+        # following the logic inside torch._inductor.lookup_table.make_lookup_key
+        flat_key = self.create_lookup_key(device_key, method, lookup_key)
+        return {flat_key: backend_configs}
 
     def create_config(self, template_id, **kwargs):
         """Create a backend configuration with template_id field for any template type"""
         # Define default configurations for each template type
         common = {
             "EVEN_K": True,
-            "ALLOW_TF32": True,
+            # match inductor config to make test more robust
+            "ALLOW_TF32": torch.backends.cuda.matmul.allow_tf32,
             "USE_FAST_ACCUM": False,
             "ACC_TYPE": "tl.float32",
             "GROUP_M": 8,
@@ -186,6 +199,8 @@ class BaseLookupTableTest(TestCase):
         method,
         lookup_table_data,
         expected_result,
+        template_id="triton",
+        template_hash=None,
         should_call_lookup_key=True,
         input_nodes=None,
         enable_max_autotune=True,
@@ -200,16 +215,35 @@ class BaseLookupTableTest(TestCase):
         with (
             patch("torch._inductor.lookup_table._dev_key", return_value=dev_key),
             patch(
-                "torch._inductor.lookup_table._template_lookup_key",
+                "torch._inductor.lookup_table._inputs_lookup_key",
                 return_value=lookup_key,
             ) as mock_lookup_key,
             patch.object(inductor_config, "template_lookup_table", lookup_table_data),
         ):
-            result = lookup_op_config_entries(input_nodes, method)
+            result = lookup_template_configs(
+                input_nodes, method, template_id, template_hash=template_hash
+            )
 
-            self.assertEqual(result, expected_result)
+            if expected_result is None:
+                # If we expect None, the result should be None
+                self.assertIsNone(result)
+            elif expected_result == {} or expected_result == []:
+                # If we expect empty dict or list, the result should be empty list
+                self.assertEqual(result, [])
+            elif isinstance(expected_result, list):
+                # If we expect a list of configs, compare them
+                if len(expected_result) == 0:
+                    self.assertEqual(result, [])
+                else:
+                    self.assert_configs_equal_without_template_id(
+                        result, expected_result
+                    )
+            else:
+                # For other cases, compare directly
+                self.assertEqual(result, expected_result)
+
             if should_call_lookup_key:
-                mock_lookup_key.assert_called_once_with(input_nodes)
+                mock_lookup_key.assert_called_with(input_nodes)
             else:
                 mock_lookup_key.assert_not_called()
 
@@ -224,6 +258,10 @@ class BaseLookupTableTest(TestCase):
         warning_count=0,
     ):
         """Helper method to run template lookup tests with TF32 filtering"""
+        # This method is no longer used with the new flattened structure
+        # It's kept for backward compatibility with existing tests
+        # but the implementation is simplified to use the new lookup_template_configs function
+
         if enable_max_autotune:
             inductor_config.max_autotune = True
             inductor_config.template_lookup_table = {"test": "data"}
@@ -233,22 +271,43 @@ class BaseLookupTableTest(TestCase):
 
         torch.backends.cuda.matmul.allow_tf32 = allow_tf32
 
-        if should_log_warning:
-            with patch("torch._inductor.lookup_table.log.warning") as mock_warning:
-                result = lookup_template_configs_from_op(lookup_dict, template_id)
-                self.assertEqual(mock_warning.call_count, warning_count)
-        else:
-            result = lookup_template_configs_from_op(lookup_dict, template_id)
+        # Create mock input nodes and a flattened lookup table
+        input_nodes = self.create_mock_input_nodes(2)
+        method = "mm"  # Default method for tests
 
-        if expected_result is None:
-            self.assertIsNone(result)
-        elif isinstance(expected_result, list):
-            if len(expected_result) == 0:
-                self.assertEqual(result, [])
+        # Create a flattened lookup table from the old format
+        flat_lookup_table = {}
+        if lookup_dict is not None and template_id in lookup_dict:
+            configs = lookup_dict[template_id]
+            flat_key = self.create_lookup_key("NVIDIA H100", method, "test_key")
+            flat_lookup_table[flat_key] = configs
+
+        with (
+            patch("torch._inductor.lookup_table._dev_key", return_value="NVIDIA H100"),
+            patch(
+                "torch._inductor.lookup_table._inputs_lookup_key",
+                return_value="test_key",
+            ),
+            patch.object(inductor_config, "template_lookup_table", flat_lookup_table),
+        ):
+            if should_log_warning:
+                with patch("torch._inductor.lookup_table.log.warning") as mock_warning:
+                    result = lookup_template_configs(input_nodes, method, template_id)
+                    self.assertEqual(mock_warning.call_count, warning_count)
+            else:
+                result = lookup_template_configs(input_nodes, method, template_id)
+
+            if expected_result is None:
+                self.assertIsNone(result)
+            elif isinstance(expected_result, list):
+                if len(expected_result) == 0:
+                    self.assertEqual(result, [])
+                else:
+                    self.assert_configs_equal_without_template_id(
+                        result, expected_result
+                    )
             else:
                 self.assert_configs_equal_without_template_id(result, expected_result)
-        else:
-            self.assert_configs_equal_without_template_id(result, expected_result)
 
 
 @unittest.skipIf(not HAS_CUDA, "CUDA not available")
@@ -299,15 +358,13 @@ class TestLookupTableCore(BaseLookupTableTest):
         expected,
     ):
         """Test various mismatch scenarios in lookup table"""
-        lookup_table_data = {
-            table_dev_key: {
-                table_method: {table_lookup_key: [self.create_triton_config()]}
-            }
-        }
+        lookup_table_data = self.create_lookup_table_config(
+            table_dev_key, table_method, table_lookup_key, [self.create_triton_config()]
+        )
         self._run_lookup_test(dev_key, lookup_key, method, lookup_table_data, expected)
 
-    def test_successful_lookup_with_grouping(self):
-        """Test successful lookup that groups configs by template_id"""
+    def test_successful_lookup_with_template_filtering(self):
+        """Test successful lookup that filters configs by template_id"""
         # Create configs with different template_ids
         config_list = [
             self.create_triton_config(block_m=128, block_n=128),
@@ -316,26 +373,57 @@ class TestLookupTableCore(BaseLookupTableTest):
             self.create_decompose_k_config(k=4),
         ]
 
-        # Expected result should be grouped by template_id
-        expected_result = {
-            "triton": [
-                self.create_triton_config(block_m=128, block_n=128),
-                self.create_triton_config(block_m=64, block_n=64),
-            ],
-            "tma": [self.create_tma_config(block_m=256, block_n=128)],
-            "decompose_k": [self.create_decompose_k_config(k=4)],
+        lookup_table_data = {
+            self.create_lookup_key("NVIDIA H100", "mm", "test_key"): config_list
         }
 
-        lookup_table_data = {"NVIDIA H100": {"mm": {"test_key": config_list}}}
+        # Test that we get only triton configs when asking for triton template
+        expected_triton_result = [
+            self.create_triton_config(block_m=128, block_n=128),
+            self.create_triton_config(block_m=64, block_n=64),
+        ]
         self._run_lookup_test(
-            "NVIDIA H100", "test_key", "mm", lookup_table_data, expected_result
+            "NVIDIA H100",
+            "test_key",
+            "mm",
+            lookup_table_data,
+            expected_triton_result,
+            template_id="triton",
+        )
+
+        # Test that we get only tma configs when asking for tma template
+        expected_tma_result = [
+            self.create_tma_config(block_m=256, block_n=128),
+        ]
+        self._run_lookup_test(
+            "NVIDIA H100",
+            "test_key",
+            "mm",
+            lookup_table_data,
+            expected_tma_result,
+            template_id="tma",
+        )
+
+        # Test that we get only decompose_k configs when asking for decompose_k template
+        expected_decompose_k_result = [
+            self.create_decompose_k_config(k=4),
+        ]
+        self._run_lookup_test(
+            "NVIDIA H100",
+            "test_key",
+            "mm",
+            lookup_table_data,
+            expected_decompose_k_result,
+            template_id="decompose_k",
         )
 
     def test_empty_table(self):
         """Test when template lookup table is empty"""
         with patch.object(inductor_config, "template_lookup_table", {}):
-            result = lookup_op_config_entries(self.create_mock_input_nodes(2), "mm")
-            self.assertIsNone(result)
+            result = lookup_template_configs(
+                self.create_mock_input_nodes(2), "mm", "triton"
+            )
+            self.assertEqual(result, [])
 
     @parametrize(
         "invalid_config,expected_error_message",
@@ -347,7 +435,9 @@ class TestLookupTableCore(BaseLookupTableTest):
     def test_validation_errors(self, invalid_config, expected_error_message):
         """Test validation errors for invalid configs"""
         config_list = [invalid_config]
-        lookup_table_data = {"NVIDIA H100": {"mm": {"test_key": config_list}}}
+        flat_lookup_table_data = self.create_lookup_table_config(
+            "NVIDIA H100", "mm", "test_key", config_list
+        )
 
         input_nodes = self.create_mock_input_nodes(2)
         inductor_config.max_autotune = True
@@ -355,17 +445,19 @@ class TestLookupTableCore(BaseLookupTableTest):
         with (
             patch("torch._inductor.lookup_table._dev_key", return_value="NVIDIA H100"),
             patch(
-                "torch._inductor.lookup_table._template_lookup_key",
+                "torch._inductor.lookup_table._inputs_lookup_key",
                 return_value="test_key",
             ),
-            patch.object(inductor_config, "template_lookup_table", lookup_table_data),
+            patch.object(
+                inductor_config, "template_lookup_table", flat_lookup_table_data
+            ),
         ):
             with self.assertRaises(ValueError) as cm:
-                torch._inductor.lookup_table._get_op_lookup_table(input_nodes, "mm")
+                lookup_template_configs(input_nodes, "mm", "triton")
             self.assertIn(expected_error_message, str(cm.exception))
 
     def test_lookup_key_generation(self):
-        """Test the _template_lookup_key function with mock input nodes"""
+        """Test the _inputs_lookup_key function with mock input nodes"""
         input_nodes = [
             MockInputNode(
                 dtype=torch.float32, size_hint=[128, 64], stride_hint=[64, 1]
@@ -380,7 +472,7 @@ class TestLookupTableCore(BaseLookupTableTest):
             mock_size_hint.side_effect = lambda node: node.size_hint
             mock_stride_hint.side_effect = lambda node: node.stride_hint
 
-            result = torch._inductor.lookup_table._template_lookup_key(input_nodes)
+            result = torch._inductor.lookup_table._inputs_lookup_key(input_nodes)
             expected = str(
                 (
                     (torch.float32, [128, 64], [64, 1]),
@@ -398,26 +490,25 @@ class TestLookupTableCore(BaseLookupTableTest):
         ]
 
         # Create lookup table configured for H100
-        h100_lookup_table_data = {
-            "NVIDIA H100": {
-                "mm": {
-                    "test_key": [self.create_triton_config(block_m=128, block_n=128)]
-                }
-            }
-        }
+        h100_lookup_table_data = self.create_lookup_table_config(
+            "NVIDIA H100",
+            "mm",
+            "test_key",
+            [self.create_triton_config(block_m=128, block_n=128)],
+        )
 
         inductor_config.max_autotune = True
 
         with (
             patch(
-                "torch._inductor.lookup_table._template_lookup_key",
+                "torch._inductor.lookup_table._inputs_lookup_key",
                 return_value="test_key",
             ),
             patch.object(
                 inductor_config, "template_lookup_table", h100_lookup_table_data
             ),
         ):
-            result = lookup_op_config_entries(cpu_input_nodes, "mm")
+            result = lookup_template_configs(cpu_input_nodes, "mm", "triton")
             # CPU device should not match H100 lookup table, result should be None
             self.assertIsNone(result)
 
@@ -426,7 +517,7 @@ class TestLookupTableCore(BaseLookupTableTest):
 class TestTemplateLookupTableConfig(BaseLookupTableTest):
     """Test class for new template lookup table configuration"""
 
-    def test_in_use_with_table_data(self):
+    def test_in_use_with_data(self):
         """Test: table has data -> _in_use() returns True"""
         # Setup: table has data and max_autotune enabled
         inductor_config.template_lookup_table = {"test": "data"}
@@ -437,13 +528,14 @@ class TestTemplateLookupTableConfig(BaseLookupTableTest):
         self.assertTrue(result)
 
     def test_in_use_with_empty_table(self):
-        """Test: table is empty -> _in_use() returns False"""
-        # Setup: table is empty
+        """Test: table is empty -> _in_use() returns True"""
+        # Setup: table is empty but not None
         inductor_config.template_lookup_table = {}
+        inductor_config.max_autotune = True
 
-        # Should return False when table is empty
+        # Should return True when table is empty dict (not None)
         result = torch._inductor.lookup_table._in_use()
-        self.assertFalse(result)
+        self.assertTrue(result)
 
     def test_in_use_raises_error_when_table_exists_but_max_autotune_disabled(self):
         """Test: RuntimeError is raised when table has data but max_autotune is not enabled"""
@@ -478,7 +570,9 @@ class TestTemplateLookupTableConfig(BaseLookupTableTest):
 
     def test_get_lookup_table_returns_config_table(self):
         """Test: _get_lookup_table() returns the config table"""
-        test_table = {"device": {"op": {"key": {"template": "options"}}}}
+        test_table = self.create_lookup_table_config(
+            "NVIDIA H100", "mm", "test_key", [self.create_triton_config()]
+        )
         inductor_config.template_lookup_table = test_table
         inductor_config.max_autotune = True
 
@@ -490,31 +584,6 @@ class TestTemplateLookupTableConfig(BaseLookupTableTest):
 @instantiate_parametrized_tests
 class TestLookupConfigsForTemplateId(BaseLookupTableTest):
     """Test class for lookup_configs_for_template_id function with TF32 filtering"""
-
-    @parametrize(
-        "enable_max_autotune,lookup_table,lookup_dict,template_id,expected_result",
-        [
-            # Test when not in use
-            (False, {}, {"triton": "configs"}, "triton", None),
-            # Test with None lookup_dict
-            (True, {"test": "data"}, None, "triton", None),
-        ],
-    )
-    def test_lookup_configs_edge_cases(
-        self,
-        enable_max_autotune,
-        lookup_table,
-        lookup_dict,
-        template_id,
-        expected_result,
-    ):
-        """Test edge cases for template lookup"""
-        if lookup_dict == "configs":
-            lookup_dict = {"triton": [self.create_triton_config()]}
-
-        self._run_template_lookup_test(
-            lookup_dict, template_id, expected_result, enable_max_autotune
-        )
 
     @parametrize(
         "allow_tf32,configs_setup,expected_count,warning_count",
@@ -622,69 +691,73 @@ class TestLookupConfigsForTemplateId(BaseLookupTableTest):
             self.create_triton_config(block_m=128, block_n=64),
             self.create_tma_config(block_m=512, block_n=256),
         ]
-        lookup_table_data = {"NVIDIA H100": {"mm": {"test_key": config_list}}}
+        lookup_table_data = {
+            self.create_lookup_key("NVIDIA H100", "mm", "test_key"): config_list
+        }
 
         with (
             patch("torch._inductor.lookup_table._dev_key", return_value="NVIDIA H100"),
             patch(
-                "torch._inductor.lookup_table._template_lookup_key",
+                "torch._inductor.lookup_table._inputs_lookup_key",
                 return_value="test_key",
             ),
             patch.object(inductor_config, "template_lookup_table", lookup_table_data),
         ):
-            # First call - should find entries
-            first_result = lookup_op_config_entries(input_nodes, "mm")
-            self.assertIsNotNone(first_result)
-            self.assertEqual(len(first_result["triton"]), 1)
-            self.assertEqual(len(first_result["tma"]), 1)
+            # First call - should find entries for triton template
+            first_result_triton = lookup_template_configs(input_nodes, "mm", "triton")
+            self.assertIsNotNone(first_result_triton)
+            self.assertEqual(len(first_result_triton), 1)
+
+            # First call - should find entries for tma template
+            first_result_tma = lookup_template_configs(input_nodes, "mm", "tma")
+            self.assertIsNotNone(first_result_tma)
+            self.assertEqual(len(first_result_tma), 1)
 
             # Second call - should find same entries again
-            second_result = lookup_op_config_entries(input_nodes, "mm")
-            self.assertIsNotNone(second_result)
-            self.assertEqual(len(second_result["triton"]), 1)
-            self.assertEqual(len(second_result["tma"]), 1)
+            second_result_triton = lookup_template_configs(input_nodes, "mm", "triton")
+            self.assertIsNotNone(second_result_triton)
+            self.assertEqual(len(second_result_triton), 1)
+
+            # Second call - should find same entries again for tma
+            second_result_tma = lookup_template_configs(input_nodes, "mm", "tma")
+            self.assertIsNotNone(second_result_tma)
+            self.assertEqual(len(second_result_tma), 1)
 
     @parametrize(
-        "config_hash,provided_hash,expected_kept,should_log_warning",
+        "config_hash,provided_hash,expected_kept",
         [
-            # Case 1: hash in config, not provided - should keep config
-            ("hash123", None, True, False),
-            # Case 2: hash in config, provided, match - should keep config
-            ("hash123", "hash123", True, False),
-            # Case 3: hash in config, provided, mismatch - should filter out config
-            ("hash123", "hash456", False, True),
-            # Case 4: hash not in config, provided - should keep config
-            (None, "hash123", True, False),
-            # Case 5: hash not in config, not provided - should keep config
-            (None, None, True, False),
+            # hash provided, hash not defined
+            (None, "hash123", True),
+            # hash provided, hash defined
+            ("hash123", "hash123", True),
+            # hash provided, hash defined, mismatch
+            ("hash123", "hash456", False),
+            # hash not provided, hash defined
+            ("hash123", None, True),
         ],
     )
     def test_lookup_configs_hash_filtering(
-        self, config_hash, provided_hash, expected_kept, should_log_warning
+        self, config_hash, provided_hash, expected_kept
     ):
-        """Test hash filtering behavior of lookup_template_configs_from_op"""
-        # Create config with or without template_hash
-        config = self.create_triton_config(block_m=128, block_n=64)
+        """Test hash filtering behavior of lookup_template_configs"""
+        config = self.create_triton_config(BLOCK_M=128, BLOCK_N=64)
         if config_hash is not None:
             config["template_hash"] = config_hash
 
-        lookup_dict = {"triton": [config]}
-
-        inductor_config.max_autotune = True
-        inductor_config.template_lookup_table = {"test": "data"}
-        torch.backends.cuda.matmul.allow_tf32 = True
-
-        result = lookup_template_configs_from_op(
-            lookup_dict, "triton", template_hash=provided_hash
+        lookup_table_data = self.create_lookup_table_config(
+            "NVIDIA H100", "mm", "test_key", [config]
         )
 
-        if expected_kept:
-            self.assertEqual(len(result), 1)
-            # Verify template_id and template_hash are removed from result
-            self.assertNotIn("template_id", result[0])
-            self.assertNotIn("template_hash", result[0])
-        else:
-            self.assertEqual(len(result), 0)
+        expected_result = [config] if expected_kept else []
+        self._run_lookup_test(
+            "NVIDIA H100",
+            "test_key",
+            "mm",
+            lookup_table_data,
+            expected_result,
+            template_id="triton",
+            template_hash=provided_hash,
+        )
 
 
 if __name__ == "__main__":

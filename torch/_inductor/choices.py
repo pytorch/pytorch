@@ -10,7 +10,7 @@ import torch
 from . import config
 from .codecache import write_text
 from .kernel_inputs import KernelInputs  # noqa: TC001
-from .lookup_table import lookup_op_config_entries, lookup_template_configs_from_op
+from .lookup_table import lookup_template_configs
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
@@ -100,15 +100,14 @@ class InductorChoices:
 
     def _get_configs_from_lookup_table(
         self,
-        input_tensors: list[Any],
+        input_nodes: list[Any],
         op_name: str,
         template_name: str,
         template_hash: Optional[str] = None,
     ) -> Optional[list[dict[str, Any]]]:
         """Get configs from lookup table if available."""
-        op_lookup_dict = lookup_op_config_entries(input_tensors, op_name)
-        return lookup_template_configs_from_op(
-            op_lookup_dict, template_name, template_hash
+        return lookup_template_configs(
+            input_nodes, op_name, template_name, template_hash
         )
 
     def get_mm_configs(
@@ -369,6 +368,17 @@ class InductorChoices:
 
         if scheduler.can_fusion_increase_peak_memory(node1, node2):
             WhyNoFuse(node1, node2)("Fusion will increase peak memory")
+            return False
+
+        if (
+            config.realize_acc_reads_size_threshold is not None
+            and scheduler.fusion_accumulate_large_reads(
+                node1,
+                node2,
+                config.realize_acc_reads_size_threshold,
+            )
+        ):
+            WhyNoFuse(node1, node2)("Fusion accumulate large amount of reads")
             return False
 
         return True

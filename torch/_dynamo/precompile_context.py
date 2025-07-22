@@ -70,8 +70,7 @@ class PrecompileContext(CacheArtifactManager):
 
     The following artifact types are supported by PrecompileContext:
      - BundledAOTAutogradCacheArtifact
-     - DynamoCodeStateArtifact
-     - AutotuneCacheArtifact (regular autotune results, same as Megacache)
+     - CodeStateArtifact (from torch._dynamo.package once available)
     """
 
     # Protected by the compile_lock
@@ -150,12 +149,8 @@ class PrecompileContext(CacheArtifactManager):
         artifacts_by_key = {}
         cache_info = CacheInfo()
         for artifact in chain(*artifacts.values()):
-            if artifact.type() == "autotune":
-                # Populate autotune cache artifacts
-                artifact.populate_cache()
-            else:
-                artifacts_by_key[artifact.key] = artifact
             cache_info.add(artifact)
+            artifacts_by_key[artifact.key] = artifact
 
         from torch._dynamo.package import _BackendId, DynamoCache
 
