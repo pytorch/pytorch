@@ -2866,8 +2866,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     mod,
                     (v,),
                     [
-                        "aoti_torch_cpu__qlinear_pointwise_tensor",
-                        "aoti_torch_cpu__qlinear_pointwise_binary_tensor",
+                        f"aoti_torch_{device}__qlinear_pointwise_tensor",
+                        f"aoti_torch_{device}__qlinear_pointwise_binary_tensor",
                     ],
                     [],
                     check_quantization=True,
