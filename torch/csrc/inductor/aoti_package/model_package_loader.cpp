@@ -53,13 +53,11 @@ std::string normalize_path_separator(const std::string& orig_path) {
   On Windows, when we input: "C:\Users\Test\file.txt", the output should be:
   "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
   */
-#ifdef _WIN32
   std::string normalized_path = orig_path;
+#ifdef _WIN32
   std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
-  return normalized_path;
-#else
-  return orig_path;
 #endif
+  return normalized_path;
 }
 
 bool file_exists(const std::string& path) {
