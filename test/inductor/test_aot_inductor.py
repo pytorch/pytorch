@@ -1456,6 +1456,22 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(self.device), example_inputs)
 
     @skipIfNoFBGEMM
+    def test_quantized_linear_bias_none(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+
+            def forward(self, x):
+                return torch.ops.quantized.linear_dynamic_fp16_unpacked_weight(
+                    x, self.weight, None
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
+    @skipIfNoFBGEMM
     def test_quanatized_int8_linear(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -2076,7 +2092,6 @@ class AOTInductorTestsTemplate:
             "b": {0: dim0_ab, 1: None},
         }
         inps = prepend_counters(inputs, num_counters=2)
-        breakpoint()
         self.check_model_with_multiple_inputs(
             WhileLoopModels.Nested(),
             prepend_counters(inputs, num_counters=2),
@@ -5958,6 +5973,31 @@ class AOTInductorTestsTemplate:
         )
         self.assertEqual(new_expected, new_output)
 
+        new_weights = {
+            "L__self___weight": torch.randn(N, K, device=self.device),
+            "L__self___bias": torch.randn(N, device=self.device),
+        }
+
+        runner.update_constant_buffer(new_weights, True, False, True)
+        runner.swap_constant_buffer()
+
+        model.weight = torch.nn.Parameter(new_weights["L__self___weight"])
+        model.bias = torch.nn.Parameter(new_weights["L__self___bias"])
+
+        updated_state_dict = {
+            "weight": torch.ones_like(model.weight),
+            "bias": torch.zeros_like(model.bias),
+        }
+
+        model.load_state_dict(updated_state_dict)
+
+        new_output = runner_call(test_inputs)
+        expected_output = model(test_inputs)
+        torch.testing.assert_close(new_output, expected_output)
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_close(new_expected, new_output)
+
     def test_cond_share_predicte(self):
         class Model(torch.nn.Module):
             def forward(self, predicate, x):
@@ -6670,11 +6710,19 @@ class TestAOTInductorConfig(TestCase):
         result = maybe_aoti_standalone_config({"aot_inductor.compile_standalone": True})
         self.assertEqual(result["aot_inductor.package_cpp_only"], True)
         self.assertEqual(result["aot_inductor.compile_standalone"], True)
+        self.assertEqual(result["aot_inductor.embed_kernel_binary"], True)
+        self.assertEqual(result["aot_inductor.emit_multi_arch_kernel"], True)
+        self.assertEqual(
+            result["aot_inductor.model_name_for_generated_files"], "aoti_model"
+        )
 
-    def test_compile_standalone_package_cpp_already_true(self):
+    def test_compile_standalone_explicit_set(self):
         patches = {
             "aot_inductor.compile_standalone": True,
             "aot_inductor.package_cpp_only": True,
+            "aot_inductor.embed_kernel_binary": True,
+            "aot_inductor.emit_multi_arch_kernel": True,
+            "aot_inductor.model_name_for_generated_files": "aoti_model",
         }
         result = maybe_aoti_standalone_config(patches)
         self.assertEqual(result, patches)
@@ -6730,6 +6778,7 @@ GPU_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
+    "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
     # No scaled_dot_product_efficient_attention implementation for XPU yet.
     "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
     # No fft implementation for XPU yet.
@@ -6754,10 +6803,14 @@ MPS_TEST_FAILURES = {
     "test_fp8_view_of_param": fail_mps(),
     # unsupported operator: aten._scaled_dot_product_attention_math_for_mps.default
     "test_issue_140766": fail_mps(),
-    # Compilation Error
-    # "test_fallback_kernel_with_symexpr_output": fail_mps(),
-    # "test_while_loop_nested": fail_mps(),
-    # "test_index_put_with_none_index": fail_mps(),
+    # cannot initialize a parameter of type 'double' with an rvalue of type 'std::nullptr_t'
+    "test_fallback_kernel_with_symexpr_output": fail_mps(),
+    # while-loop subgraph calls same kernel as outside. need to figure out how to
+    # either (1) tell outside to initialize a new kernel or (2) generate
+    # subgraph as a separate function, which would(?) cause (1) to happen automatically.
+    "test_while_loop_nested": fail_mps(),
+    # correctness issue
+    "test_index_put_with_none_index": fail_mps(),
     # Dynamism
     "test_shifted_constraint_ranges": fail_mps(),
     "test_while_loop_with_sym_expr_cond_dynamic_True": fail_mps(),
