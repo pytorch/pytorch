@@ -1562,7 +1562,7 @@ test_linux_aarch64() {
   #functorch tests
   python test/run_test.py --include functorch/test_aotdispatch.py \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
- 
+
   # Dynamo tests
   python test/run_test.py --include dynamo/test_compile dynamo/test_backends dynamo/test_comptime dynamo/test_config \
        dynamo/test_functions dynamo/test_fx_passes_pre_grad dynamo/test_interop dynamo/test_model_output dynamo/test_modules \
