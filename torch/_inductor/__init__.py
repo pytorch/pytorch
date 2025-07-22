@@ -6,7 +6,6 @@ import logging
 import os
 from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
-import torch._inductor.config
 import torch.fx
 
 from .standalone_compile import CompiledArtifact  # noqa: TC001
@@ -15,6 +14,7 @@ from .standalone_compile import CompiledArtifact  # noqa: TC001
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
     from torch.export import ExportedProgram
+    from torch.export.pt2_archive._package import AOTICompiledModel
     from torch.export.pt2_archive._package_weights import Weights
     from torch.types import FileLike
 
@@ -223,7 +223,7 @@ def _aoti_compile_and_package_inner(
             not_strict_accuracy = check_accuracy == "accuracy"
             if not same_two_models(
                 gm,
-                compiled_model,
+                compiled_model,  # type: ignore[arg-type]
                 args,
                 only_fwd=True,
                 require_fp64=not_strict_accuracy,
@@ -238,7 +238,7 @@ def _aoti_compile_and_package_inner(
 
 def aoti_load_package(
     path: FileLike, run_single_threaded: bool = False, device_index: int = -1
-) -> Any:  # type: ignore[type-arg]
+) -> AOTICompiledModel:
     """
     Loads the model from the PT2 package.
 

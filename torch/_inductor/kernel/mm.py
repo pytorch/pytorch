@@ -26,11 +26,7 @@ from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
 from ..ir import is_triton
 from ..kernel_inputs import MMKernelInputs
-from ..lookup_table import (
-    lookup_op_config_entries,
-    lookup_table_extract_choices,
-    lookup_template_configs_from_op,
-)
+from ..lookup_table import lookup_table_extract_choices, lookup_template_configs
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -699,9 +695,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
         aten_layout = _flexible_layout(aten_layout)
 
-    # Get lookup table configs grouped by template_id
-    op_lookup_dict = lookup_op_config_entries(kernel_inputs.nodes(), name)
-    aten_params = lookup_template_configs_from_op(op_lookup_dict, "aten")
+    # Get template configs directly from the lookup table
+    aten_params = lookup_template_configs(kernel_inputs.nodes(), name, "aten")
     # options to tune from
     choices: list[Any] = []
     if use_aten_gemm_kernels():
@@ -754,8 +749,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
         )
         if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
-            decompose_k_params = lookup_template_configs_from_op(
-                op_lookup_dict, "decompose_k"
+            decompose_k_params = lookup_template_configs(
+                kernel_inputs.nodes(), name, "decompose_k"
             )
             if decompose_k_params is None:
                 # Fallback to default configs if no lookup table exists
@@ -978,9 +973,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             layout,
         )
 
-    # Get lookup table configs grouped by template_id
-    op_lookup_dict = lookup_op_config_entries(kernel_inputs.nodes(), name)
-    aten_params = lookup_template_configs_from_op(op_lookup_dict, "aten")
+    # Get template configs directly from the lookup table
+    aten_params = lookup_template_configs(kernel_inputs.nodes(), name, "aten")
 
     def add_aten():
         return [
@@ -1004,10 +998,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         and inp_expanded.get_device().type == "cuda"
         and inductor_config.triton.autotune_cublasLt
     ):
-        # Safe noop if lookup table is not in use
-        bias_addmm_params = lookup_template_configs_from_op(
-            op_lookup_dict,
-            aten_bias_addmm.name,
+        # Get template configs directly from the lookup table
+        bias_addmm_params = lookup_template_configs(
+            kernel_inputs.nodes(), name, aten_bias_addmm.name
         )
         if bias_addmm_params is None or len(bias_addmm_params) > 0:
             # Add the bias_addmm choice if
