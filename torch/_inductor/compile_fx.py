@@ -909,37 +909,10 @@ def _compile_fx_inner(
             else:
                 log.debug("Failed to generate FX cache key")
 
-        if torch._functorch.config.bundled_autograd_cache:
-            assert mb_compiled_graph is None
-            assert cache_info is None
-            # When using bundled autograd cache, we still want
-            # to use the TritonBundler, but we don't want to save
-            # the results here. The results will get saved directly
-            # to AOTAutogradCache.
-            TritonBundler.begin_compile()
-            try:
-                mb_compiled_graph = fx_codegen_and_compile(
-                    gm, example_inputs, inputs_to_check, **graph_kwargs
-                )
-                assert mb_compiled_graph is not None
-                (
-                    triton_bundle,
-                    triton_bundler_meta,
-                ) = TritonBundler.collect()
-                mb_compiled_graph.set_triton_bundle(triton_bundle)
-            except (ShortenTraceback, SkipFrame):
-                raise
-            except Exception as e:
-                raise InductorError(e, currentframe()).with_traceback(
-                    e.__traceback__
-                ) from None
-            finally:
-                TritonBundler.end_compile()
-
         # CACHE BYPASS: Compile the graph, don't save it to the cache
         # (this can happen either because cache was disabled, or we
         # determined the input is uncacheable)
-        elif cache_info is None or cache_info["cache_state"] == "bypass":
+        if cache_info is None or cache_info["cache_state"] == "bypass":
             assert mb_compiled_graph is None
             log.debug(
                 "FX cache bypass reason: %s",
