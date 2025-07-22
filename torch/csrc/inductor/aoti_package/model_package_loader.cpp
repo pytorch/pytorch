@@ -9,6 +9,7 @@
 #include <fmt/format.h>
 #include <miniz.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <regex>
@@ -36,6 +37,31 @@ namespace fs = std::filesystem;
 #endif
 
 namespace {
+
+const std::string k_separator = "/";
+
+std::string normalize_path_separator(const std::string& orig_path) {
+  /*
+  On Windows and Linux have different separator:
+  On Windows use "\", and the path like: C:\Users\Test\file.txt
+  On Linux use "/", and the path like: /home/user/file.txt
+
+  In order to simplify the path operation, we can use this function to
+  normalize path separator. It will convert Windows separator to Linux
+  separator, and reuse the common code to handle both Windows and Linux
+  path.
+  On Windows, when we input: "C:\Users\Test\file.txt", the output should be:
+  "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
+  */
+#ifdef _WIN32
+  std::string normalized_path = orig_path;
+  std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
+  return normalized_path;
+#else
+  return orig_path;
+#endif
+}
+
 bool file_exists(const std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
@@ -47,7 +73,16 @@ bool file_exists(const std::string& path) {
 
 std::string create_temp_dir() {
 #ifdef _WIN32
-  throw std::runtime_error("Not implemented");
+  try {
+    fs::path temp_dir = fs::temp_directory_path();
+    return temp_dir.string();
+  } catch (const fs::filesystem_error& e) {
+    throw std::runtime_error(
+        "Failed to get temporary directory: " + std::string(e.what()));
+  } catch (...) {
+    throw std::runtime_error(
+        "Unknown error occurred while getting temporary directory");
+  }
 #else
   std::string temp_dir = "/tmp/XXXXXX";
   if (mkdtemp(temp_dir.data()) == nullptr) {
@@ -59,11 +94,29 @@ std::string create_temp_dir() {
 #endif
 }
 
+const char* object_file_ext() {
 #ifdef _WIN32
-const std::string k_separator = "\\";
+  return ".obj";
 #else
-const std::string k_separator = "/";
+  return ".o";
 #endif
+}
+
+const char* extension_file_ext() {
+#ifdef _WIN32
+  return ".pyd";
+#else
+  return ".so";
+#endif
+}
+
+bool _is_windows_os() {
+#ifdef _WIN32
+  return true;
+#else
+  return false;
+#endif
+}
 } // namespace
 
 namespace torch::inductor {
@@ -83,11 +136,12 @@ const nlohmann::json& load_json_file(const std::string& json_path) {
 }
 
 std::tuple<std::string, std::string> get_cpp_compile_command(
-    const std::string& filename,
+    const std::string& arg_filename,
     const std::vector<std::string>& sources,
     const nlohmann::json& compile_options,
     const std::string& output_dir = "") {
   // Construct the cpp command
+  auto filename = normalize_path_separator(arg_filename);
 
   std::string compiler = compile_options["compiler"].get<std::string>();
   bool compile_only = compile_options["compile_only"].get<bool>();
@@ -97,7 +151,8 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     source_args += source + " ";
   }
 
-  std::string file_ext = compile_only ? ".o" : ".so";
+  std::string file_ext =
+      compile_only ? object_file_ext() : extension_file_ext();
   std::string target_file = output_dir + filename + file_ext;
   std::string target_dir = output_dir;
   if (target_dir.empty()) {
@@ -107,32 +162,43 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string cflags_args;
   for (auto& arg : compile_options["cflags"]) {
-    cflags_args += "-" + arg.get<std::string>() + " ";
+    cflags_args += _is_windows_os() ? "/" : "-" + arg.get<std::string>() + " ";
   }
 
   std::string definitions_args;
   for (auto& arg : compile_options["definitions"]) {
-    definitions_args += "-D " + arg.get<std::string>() + " ";
+    definitions_args +=
+        _is_windows_os() ? "/D" : "-D " + arg.get<std::string>() + " ";
   }
 
   std::string include_dirs_args;
   for (auto& arg : compile_options["include_dirs"]) {
-    include_dirs_args += "-I" + arg.get<std::string>() + " ";
+    include_dirs_args +=
+        _is_windows_os() ? "/I" : "-I" + arg.get<std::string>() + " ";
   }
 
   std::string ldflags_args;
   for (auto& arg : compile_options["ldflags"]) {
-    ldflags_args += "-" + arg.get<std::string>() + " ";
+    ldflags_args += _is_windows_os() ? "/" : "-" + arg.get<std::string>() + " ";
   }
 
   std::string libraries_dirs_args;
   for (auto& arg : compile_options["libraries_dirs"]) {
-    libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
+    if (_is_windows_os()) {
+      libraries_dirs_args +=
+          fmt::format("/LIBPATH:\"{}\"", arg.get<std::string>()) + " ";
+    } else {
+      libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
+    }
   }
 
   std::string libraries_args;
   for (auto& arg : compile_options["libraries"]) {
-    libraries_args += "-l" + arg.get<std::string>() + " ";
+    if (_is_windows_os()) {
+      libraries_args += fmt::format("{}.lib", arg.get<std::string>()) + " ";
+    } else {
+      libraries_args += "-l" + arg.get<std::string>() + " ";
+    }
   }
 
   std::string passthrough_parameters_args;
@@ -145,21 +211,39 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     passthrough_parameters_args += arg_str + " ";
   }
 
-  std::string compile_only_arg = compile_only ? "-c" : "";
+  std::string compile_only_arg =
+      compile_only ? (_is_windows_os() ? "/c" : "-c") : "";
 
-  std::string cmd = fmt::format(
-      "{} {} {} {} {} {} {} {} {} {} -o {}",
-      compiler,
-      source_args,
-      definitions_args,
-      cflags_args,
-      include_dirs_args,
-      passthrough_parameters_args,
-      ldflags_args,
-      libraries_args,
-      libraries_dirs_args,
-      compile_only_arg,
-      target_file);
+  std::string cmd;
+  if (_is_windows_os()) {
+    cmd = normalize_path_separator(fmt::format(
+        "{} {} {} {} {} {} /LD /Fe{} {} /link {} {} {}",
+        compiler,
+        include_dirs_args,
+        definitions_args,
+        cflags_args,
+        source_args,
+        passthrough_parameters_args,
+        target_file,
+        compile_only_arg,
+        libraries_dirs_args,
+        libraries_args,
+        ldflags_args));
+  } else {
+    cmd = normalize_path_separator(fmt::format(
+        "{} {} {} {} {} {} {} {} {} {} -o {}",
+        compiler,
+        source_args,
+        definitions_args,
+        cflags_args,
+        include_dirs_args,
+        passthrough_parameters_args,
+        ldflags_args,
+        libraries_args,
+        libraries_dirs_args,
+        compile_only_arg,
+        target_file));
+  }
 
   return std::make_tuple(cmd, target_file);
 }
@@ -329,8 +413,6 @@ std::unordered_set<std::string> find_model_names(
 
   // Escape the separator if it's backslash (needed for regex)
   std::string sep = k_separator;
-  if (sep == "\\")
-    sep = "\\\\";
 
   std::string pattern =
       "data" + sep + "aotinductor" + sep + "([^" + sep + "]+)" + sep;
@@ -403,7 +485,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             &zip_archive, i, filename_str.data(), filename_len)) {
       throw std::runtime_error("Failed to read filename");
     }
-    found_filenames.push_back(filename_str);
+    found_filenames.push_back(normalize_path_separator(filename_str));
   }
 
   if (found_filenames.empty()) {
@@ -487,9 +569,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         std::string filename_extension = output_path_str.substr(extension_idx);
         if (filename_extension == ".cpp") {
           cpp_filename = output_path_str;
-        } else if (filename_extension == ".o") {
+        } else if (filename_extension == object_file_ext()) {
           obj_filenames.push_back(output_path_str);
-        } else if (filename_extension == ".so") {
+        } else if (filename_extension == extension_file_ext()) {
           so_filename = output_path_str;
         }
       }
