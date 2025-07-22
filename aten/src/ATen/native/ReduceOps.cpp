@@ -2257,21 +2257,11 @@ enum class HashMode { XOR_SUM = 0 };
 TORCH_IMPL_FUNC(hash_tensor_out) (const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode, const Tensor& result)  {
 
   auto result_view = result;
-  if (self.is_floating_point()){ // && !self.device().is_cpu()) {
+  if (self.is_floating_point()){
     result_view = result.view(at::kDouble);
   }
 
-  // // FIXME: remove this branch for CPU
-  auto self_view = self;
-  // if (self.device().is_cpu()) {
-  //   if (self.is_floating_point()) {
-  //     self_view = self.to(at::kDouble).view(at::kUInt64);
-  //   } else {
-  //     self_view = self.to(at::kUInt64);
-  //   }
-  // }
-
-  auto iter = meta::make_reduction(self_view, result_view, dim, keepdim, self_view.scalar_type());
+  auto iter = meta::make_reduction(self, result_view, dim, keepdim, self.scalar_type());
   switch (static_cast<HashMode>(mode)) {
     case HashMode::XOR_SUM:
       if (iter.numel() == 0) {
