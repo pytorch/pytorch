@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Gradient Descent optimizer."""
+
 from typing import cast, Optional, Union
 
 import torch
@@ -48,17 +49,17 @@ class SGD(Optimizer):  # noqa: D101
         if weight_decay < 0.0:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(
-            lr=lr,
-            momentum=momentum,
-            dampening=dampening,
-            weight_decay=weight_decay,
-            nesterov=nesterov,
-            maximize=maximize,
-            foreach=foreach,
-            differentiable=differentiable,
-            fused=fused,
-        )
+        defaults = {
+            "lr": lr,
+            "momentum": momentum,
+            "dampening": dampening,
+            "weight_decay": weight_decay,
+            "nesterov": nesterov,
+            "maximize": maximize,
+            "foreach": foreach,
+            "differentiable": differentiable,
+            "fused": fused,
+        }
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super().__init__(params, defaults)
@@ -397,7 +398,8 @@ def _multi_tensor_sgd(
     lr = _to_scalar(lr)
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, momentum_buffer_list], with_indices=True  # type: ignore[list-item]
+        [params, grads, momentum_buffer_list],  # type: ignore[list-item]
+        with_indices=True,
     )
     for (
         device_params_,
@@ -415,7 +417,7 @@ def _multi_tensor_sgd(
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
         if weight_decay != 0:
-            # Re-use the intermediate memory (device_grads) already allocated for maximize
+            # Reuse the intermediate memory (device_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
@@ -502,7 +504,8 @@ def _fused_sgd(
         for i, g in enumerate(grads):
             momentum_buffer_list[i] = torch.empty_like(g)
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, momentum_buffer_list], with_indices=False  # type: ignore[list-item]
+        [params, grads, momentum_buffer_list],  # type: ignore[list-item]
+        with_indices=False,
     )
     for (device, _), (
         (device_params_, device_grads_, device_momentum_buffer_list),

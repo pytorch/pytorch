@@ -78,19 +78,8 @@ def get_freeable_input_buf(
         A dictionary containing all freeble input buffers, keyed by their names.
     """
 
-    # this function is copied from torch/_inductor/scheduler.py
-    # TODO: would be nice to remove the try/except block for both places
     def _dep_size_hint(dep: Dep) -> int:
-        res = 0
-        try:
-            if not dep.has_unbacked_symbols():
-                res = dep.numbytes_hint()
-        except KeyError:
-            # In at least one test (test/inductor/test_torchbind.py) we
-            # create a StarDep that doesn't exist in the graph and calling
-            # `has_unbacked_symbols()` throws an error.
-            pass
-        return res
+        return V.graph.get_dep_size_hint(dep)
 
     # get freeable input buffers' successor nodes and their sizes
     # note that different deps can have the same name, so we use name as keys
@@ -147,7 +136,17 @@ def compute_size_for_scheduler_buffer(
         sched_buf: SchedulerBuffer, user_of_MultiOutputLayout: bool = False
     ) -> int:
         if isinstance(sched_buf.node.layout, NoneLayout):
-            sched_buf_to_size[sched_buf.get_name()] = (0, 0)
+            # mutations should inherit the size of the mutated buffer
+            if sched_buf.get_mutations():
+                mutated_buf_name = sched_buf.get_mutations()[0]
+                if mutated_buf_name in sched_buf_to_size:
+                    (_size_alloc, _size_free) = sched_buf_to_size[mutated_buf_name]
+                else:
+                    (_size_alloc, _size_free) = (0, 0)
+                sched_buf_to_size[sched_buf.get_name()] = (0, _size_free)
+                sched_buf_to_size[mutated_buf_name] = (_size_alloc, 0)
+            else:
+                sched_buf_to_size[sched_buf.get_name()] = (0, 0)
             return 0
         elif isinstance(sched_buf.node.layout, MultiOutputLayout):
             size_alloc = 0

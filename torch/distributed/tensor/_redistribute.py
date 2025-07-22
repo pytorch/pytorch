@@ -318,7 +318,6 @@ class Redistribute(torch.autograd.Function):
                 device_mesh, placements, tensor_meta=current_spec.tensor_meta
             )
 
-            local_tensor = input._local_tensor
             output = redistribute_local_tensor(
                 local_tensor, current_spec, target_spec, async_op=async_op
             )

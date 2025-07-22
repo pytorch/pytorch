@@ -70,7 +70,7 @@ jobs:
             runner: ${{ inputs.runner_prefix }}linux.12xlarge
             # TODO: Nightly cpp docs take longer and longer to finish (more than 3h now)
             # Let's try to figure out how this can be improved
-            timeout-minutes: 240
+            timeout-minutes: 360
           - docs_type: python
             runner: ${{ inputs.runner_prefix }}linux.2xlarge
             # It takes less than 30m to finish python docs unless there are issues

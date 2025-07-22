@@ -7,7 +7,7 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -119,9 +119,6 @@ dtensor_fails = {
     xfail("cholesky_inverse"),
     xfail("cholesky_solve"),
     xfail("chunk"),
-    xfail("clamp"),
-    xfail("clamp_max"),
-    xfail("clamp_min"),
     xfail("combinations"),
     xfail("complex"),
     xfail("constant_pad_nd"),
@@ -131,7 +128,6 @@ dtensor_fails = {
     xfail("cummin"),
     xfail("diagonal_scatter"),
     xfail("dist"),
-    xfail("dot"),
     xfail("empty"),
     xfail("empty_strided"),
     xfail("empty_like"),
@@ -318,7 +314,6 @@ dtensor_fails = {
     xfail("nn.functional.multi_head_attention_forward"),
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
-    xfail("nn.functional.normalize"),
     xfail("nn.functional.pad", "constant"),
     xfail("nn.functional.pad", "reflect"),
     xfail("nn.functional.pad", "replicate"),
@@ -386,6 +381,8 @@ dtensor_fails = {
     xfail("special.bessel_y1"),
     xfail("special.chebyshev_polynomial_t"),
     xfail("special.chebyshev_polynomial_u"),
+    xfail("special.chebyshev_polynomial_v"),
+    xfail("special.chebyshev_polynomial_w"),
     xfail("special.entr"),
     xfail("special.erfcx"),
     xfail("special.hermite_polynomial_h"),
@@ -394,6 +391,7 @@ dtensor_fails = {
     xfail("special.i1"),
     xfail("special.i1e"),
     xfail("special.laguerre_polynomial_l"),
+    xfail("special.legendre_polynomial_p"),
     xfail("special.log_ndtr"),
     xfail("special.modified_bessel_i0"),
     xfail("special.modified_bessel_i1"),
@@ -402,6 +400,10 @@ dtensor_fails = {
     xfail("special.ndtri"),
     xfail("special.scaled_modified_bessel_k0"),
     xfail("special.scaled_modified_bessel_k1"),
+    xfail("special.shifted_chebyshev_polynomial_t"),
+    xfail("special.shifted_chebyshev_polynomial_u"),
+    xfail("special.shifted_chebyshev_polynomial_v"),
+    xfail("special.shifted_chebyshev_polynomial_w"),
     xfail("special.spherical_bessel_j0"),
     xfail("special.xlog1py"),
     xfail("special.zeta"),

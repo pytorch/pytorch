@@ -5,6 +5,7 @@ import importlib
 import pickle
 import sys
 import types
+import unittest
 from collections.abc import Iterator
 from unittest.mock import patch
 
@@ -15,6 +16,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
+from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, CompileId
 from torch._dynamo.symbolic_convert import (
     ExceptionStack,
@@ -23,6 +25,8 @@ from torch._dynamo.symbolic_convert import (
 )
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
+from torch.overrides import TorchFunctionMode
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -41,6 +45,13 @@ class GlobalModule(torch.nn.Module):
 
 def global_func(x):
     return x + 1
+
+
+class GlobalTorchFunctionMode(TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        return func(*args, **kwargs)
 
 
 class SubclassWithMeta(torch.Tensor):
@@ -225,6 +236,15 @@ pytree.register_constant(CustomConstantType)
 
 
 class TestGuardSerialization(torch._inductor.test_case.TestCase):
+    def test_function_locals(self):
+        def foo(x):
+            return x + 1
+
+        def fn(x, g):
+            return g(x) + 1
+
+        self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
+
     def _tracefunc(self, frame, event, arg):
         if event != "call":
             return
@@ -234,7 +254,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
 
         self._frame_state = _FrameState(
             f_locals=dict(frame.f_locals),
-            f_globals=dict(frame.f_globals),
+            f_globals=frame.f_globals,
             f_code=frame.f_code,
             f_builtins=frame.f_builtins,
         )
@@ -285,6 +305,9 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             nonlocal ref_gm
             nonlocal loaded_gm
 
+            torch._dynamo.convert_frame.initial_global_state = (
+                torch._C._dynamo.guards.GlobalStateGuard()
+            )
             tracer = InstructionTranslator(
                 instructions,
                 self._frame_state.f_code,
@@ -292,7 +315,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 self._frame_state.f_globals,
                 self._frame_state.f_builtins,
                 fn.__closure__ or (),
-                [],  # TODO tf_mode_stack,
+                torch.overrides._get_current_function_mode_stack(),
                 code_options,
                 torch._dynamo.lookup_backend("eager"),
                 one_graph=False,
@@ -302,11 +325,22 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 speculation_log=SpeculationLog(),
                 exn_vt_stack=ExceptionStack(),
                 distributed_state=None,
+                package=None,
             )
-            with compile_context(CompileContext(CompileId(0, 0))), tracing(
-                tracer.output.tracing_context
-            ), tracer.set_current_tx(), get_metrics_context(), dynamo_timed(""):
+            with (
+                compile_context(CompileContext(CompileId(0, 0))),
+                tracing(tracer.output.tracing_context),
+                tracer.set_current_tx(),
+                get_metrics_context(),
+                dynamo_timed(""),
+            ):
                 tracer.run()
+
+                ref_gm = CheckFunctionManager(
+                    self._frame_state.f_code,
+                    tracer.output,
+                    guard_filter_fn=guard_filter_fn,
+                ).guard_manager
 
                 check_fn_manager = CheckFunctionManager(
                     self._frame_state.f_code,
@@ -314,8 +348,9 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                     guard_filter_fn=guard_filter_fn,
                     guards_serialization_mode="save",
                 )
-                ref_gm = check_fn_manager.guard_manager
                 guards_state = check_fn_manager.guards_state
+                self._cached_guards_state = guards_state
+                self._cached_f_code = self._frame_state.f_code
                 self.assertIsNotNone(guards_state)
                 guards_state = pickle.loads(guards_state)
 
@@ -323,12 +358,15 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                     self._frame_state.f_code,
                     guards_state.output_graph,
                     guards_serialization_mode="load",
+                    shape_code_parts=guards_state.shape_code_parts,
+                    runtime_global_scope=self._frame_state.f_globals,
                 )
                 loaded_gm = check_fn_manager.guard_manager
 
         try:
             transform_code_object(self._frame_state.f_code, transform)
         finally:
+            torch._dynamo.convert_frame.initial_global_state = None
             self._frame_state = None
 
         self.assertIsNotNone(ref_gm)
@@ -470,7 +508,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         # === example subclass defined locally (error) ===
         local_sub = LocalSubclass(torch.randn(3))
         with self.assertRaisesRegex(
-            RuntimeError, "Please define the class at global scope"
+            PackageError, "Please define the class at global scope"
         ):
             self._test_serialization("TENSOR_SUBCLASS_METADATA_MATCH", fn, local_sub)
 
@@ -635,7 +673,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             # we don't support NN_MODULE because it adds an ID_MATCH guard, and we don't
             # support that in serialization
             with self.assertRaisesRegex(
-                RuntimeError, "NN_MODULE guard cannot be serialized."
+                PackageError, "NN_MODULE guard cannot be serialized."
             ):
                 self._test_serialization("NN_MODULE", fn, m, x)
 
@@ -651,7 +689,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         # we don't support FUNCTION_MATCH because it adds an ID_MATCH guard, and we don't
         # support that in serialization
         with self.assertRaisesRegex(
-            RuntimeError, "FUNCTION_MATCH guard cannot be serialized."
+            PackageError, "FUNCTION_MATCH guard cannot be serialized."
         ):
             self._test_serialization("FUNCTION_MATCH", fn, x)
 
@@ -665,7 +703,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         # we don't support CLOSURE_MATCH because it adds a FUNCTION_MATCH guard, and we don't
         # support that in serialization
         with self.assertRaisesRegex(
-            RuntimeError, "CLOSURE_MATCH guard cannot be serialized."
+            PackageError, "CLOSURE_MATCH guard cannot be serialized."
         ):
             self._test_serialization("CLOSURE_MATCH", fn, x)
 
@@ -784,7 +822,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return pytree.tree_leaves(x)[0] + 1
 
         with self.assertRaisesRegex(
-            RuntimeError, "DICT_VERSION guard cannot be serialized."
+            PackageError, "DICT_VERSION guard cannot be serialized."
         ):
             self._test_serialization("DICT_VERSION", fn, {"t": torch.randn(3)})
 
@@ -836,9 +874,26 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return x + id(x)
 
         with self.assertRaisesRegex(
-            RuntimeError, "ID_MATCH guard cannot be serialized."
+            PackageError, "ID_MATCH guard cannot be serialized."
         ):
             self._test_serialization("ID_MATCH", fn, torch.randn(3))
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_id_match_with_config(self):
+        def fn(x):
+            return x + id(x)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
+        def fn(x):
+            # usage of this context manager installs a FUNCTION_MATCH guard
+            with torch.no_grad():
+                y = x * 2
+            return y
+
+        ref, loaded = self._test_serialization("FUNCTION_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
 
     def test_dispatch_key_set_match(self):
         def fn(x, dks):
@@ -1011,10 +1066,10 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return x + x_
 
         x = torch.randn(3, 2)
-        with self.assertRaisesRegex(
-            RuntimeError, "DUPLICATE_INPUT guard cannot be serialized"
-        ):
-            self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+        ref, loaded = self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+
+        self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
 
     def test_weakref_alive(self):
         mod = torch.nn.Linear(10, 10, bias=False)
@@ -1029,7 +1084,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return params[0].sum()
 
         with self.assertRaisesRegex(
-            RuntimeError, "WEAKREF_ALIVE guard cannot be serialized"
+            PackageError, "WEAKREF_ALIVE guard cannot be serialized"
         ):
             with torch.set_grad_enabled(False):
                 self._test_serialization("WEAKREF_ALIVE", fn)
@@ -1072,6 +1127,203 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             False,
         )
         self._test_check_fn(ref, loaded, {"x": {"a": torch.randn(3, 2)}}, False)
+
+    @torch._dynamo.config.patch("skip_nnmodule_hook_guards", False)
+    def test_empty_nn_module_hooks_dict(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                return x + 1
+
+        m = Module()
+
+        def fn(x):
+            return m(x)
+
+        x = torch.ones(2, dtype=torch.float32)
+        ref, loaded = self._test_serialization("EMPTY_NN_MODULE_HOOKS_DICT", fn, x)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, True)
+
+        h = m.register_forward_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
+        h = m.register_forward_pre_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
+        h = m.register_backward_hook(lambda *args, **kwargs: None)
+        self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
+        h.remove()
+
+    def test_grad_mode(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        with torch.enable_grad():
+            ref, loaded = self._test_serialization("GRAD_MODE", fn, x)
+        with torch.no_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch.enable_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+
+    def test_grad_mode_loading(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        with torch.enable_grad():
+            ref, _ = self._test_serialization("GRAD_MODE", fn, x)
+        with torch.no_grad():
+            # Ensure guards state loading is not affected by the current global grad mode.
+            guards_state = pickle.loads(self._cached_guards_state)
+            check_fn_manager = CheckFunctionManager(
+                self._cached_f_code,
+                guards_state.output_graph,
+                guards_serialization_mode="load",
+                shape_code_parts=guards_state.shape_code_parts,
+            )
+            loaded = check_fn_manager.guard_manager
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_deterministic_algorithms(self):
+        def fn(x):
+            return x + 1
+
+        deterministic_restore = torch.are_deterministic_algorithms_enabled()
+        try:
+            x = torch.randn(3, 2)
+            torch.use_deterministic_algorithms(True)
+            ref, loaded = self._test_serialization("DETERMINISTIC_ALGORITHMS", fn, x)
+            torch.use_deterministic_algorithms(False)
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+            torch.use_deterministic_algorithms(True)
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        finally:
+            torch.use_deterministic_algorithms(deterministic_restore)
+
+    def test_torch_function_state(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+
+        class LocalTorchFunctionMode(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        with GlobalTorchFunctionMode():
+            ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        self._test_check_fn(ref, loaded, {"x": x}, False)
+        with GlobalTorchFunctionMode():
+            with torch._C.DisableTorchFunction():
+                self._test_check_fn(ref, loaded, {"x": x}, False)
+        with self.assertRaisesRegex(
+            PackageError,
+            "defined in local scope. Please define the class at global scope",
+        ):
+            with LocalTorchFunctionMode():
+                ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_fsdp_training_state(self):
+        from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
+        from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+
+        param_group = FSDPParamGroup(
+            [],  # params: List[nn.Parameter],
+            (torch.nn.Linear(1, 1),),  # module: nn.Module,
+            None,  # mesh_info: FSDPMeshInfo,
+            None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
+            torch.device("cpu"),  # device: torch.device,
+            None,  # shard_placement_fn: Optional[Callable],
+            None,  # mp_policy: MixedPrecisionPolicy,
+            None,  # offload_policy: OffloadPolicy,
+        )
+
+        def fn(x):
+            with param_group.use_training_state(TrainingState.FORWARD):
+                if param_group._training_state == TrainingState.FORWARD:
+                    return x + 1
+                else:
+                    return x - 1
+
+        x = torch.randn(3, 2)
+
+        with torch.enable_grad():
+            ref, loaded = self._test_serialization("FSDP_TRAINING_STATE", fn, x)
+        with torch.no_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+        with torch.enable_grad():
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+
+    def test_default_device(self):
+        device = torch.get_default_device()
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        try:
+            torch.set_default_device("cpu")
+            ref, loaded = self._test_serialization("DEFAULT_DEVICE", fn, x)
+            torch.set_default_device("meta")
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+            torch.set_default_device("cpu")
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+        finally:
+            torch.set_default_device(device)
+
+    def test_shape_env(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+
+        x = torch.randn(3, 2)
+        torch._dynamo.mark_dynamic(x, 0, min=3, max=10)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(10, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(11, 2)}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(2, 2)}, False)
+
+        x = torch.randn(3, 3, 2)
+        torch._dynamo.mark_dynamic(x, 1, min=3, max=10)
+        ref, loaded = self._test_serialization("SHAPE_ENV", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 4, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 10, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 11, 2)}, False)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3, 2, 2)}, False)
+
+    def test_builtin_match(self):
+        def fn(x):
+            # usage of getattr() here installs a BUILTIN_MATCH guard
+            s = getattr(x, "shape")  # noqa: B009
+            return x + s[0]
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("BUILTIN_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        getattr_original = getattr
+
+        def getattr_new(*args, **kwargs):
+            return getattr_original(*args, **kwargs)
+
+        builtins_dict = (
+            __builtins__ if isinstance(__builtins__, dict) else __builtins__.__dict__
+        )
+        builtins_dict["getattr"] = getattr_new
+        try:
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+        finally:
+            builtins_dict["getattr"] = getattr_original
 
 
 if __name__ == "__main__":

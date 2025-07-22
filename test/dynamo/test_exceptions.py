@@ -19,7 +19,16 @@ from torch.testing._internal.common_utils import (
 
 
 class CustomException(Exception):
-    ...
+    pass
+
+
+class CustomExceptionMeta(type):
+    def __instancecheck__(cls, instance):
+        return True
+
+
+class CustomExceptionWithInstanceCheck(Exception, metaclass=CustomExceptionMeta):
+    pass
 
 
 class CustomExceptionWithArgs(Exception):
@@ -150,6 +159,14 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.equal(out, inp + 1))
 
     @make_dynamo_test
+    def test_isinstance_CustomException(self):
+        assert isinstance(CustomException, type)
+        assert not isinstance(CustomException(), type)
+        C = CustomExceptionWithInstanceCheck
+        assert isinstance(C, C)
+        assert isinstance(C(), C)
+
+    @make_dynamo_test
     def test_propagate_exception_inside_ctx_manager(self):
         @contextlib.contextmanager
         def cm():
@@ -275,7 +292,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         fn(x)
-        # Cant use fullgraph=True because RERAISE is not supported
+        # Can't use fullgraph=True because RERAISE is not supported
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
@@ -341,7 +358,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_raise_custom_exception(self):
         class Exc(Exception):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -358,7 +375,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_raise_custom_exception_with_args(self):
         class Exc(Exception):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
