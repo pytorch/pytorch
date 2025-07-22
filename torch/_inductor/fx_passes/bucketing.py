@@ -7,10 +7,6 @@ from typing import Any, Callable, Optional, Union
 import torch
 from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.virtualized import V
-from torch.distributed.distributed_c10d import (
-    _resolve_process_group,
-    get_process_group_ranks,
-)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -82,13 +78,9 @@ def bucket_all_gather_by_mb(
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all all_gather nodes and groups them into buckets based on size limit `all_gather_bucket_cap_mb_callback`.
-
-
     Returns a list of buckets, where each bucket is a list of all_gather nodes.
     """
-
     node_list = gm.graph.nodes
-
     # Prerequisite: Check if there is any all_gather node
     found_all_gather = False
     for node in node_list:
@@ -97,22 +89,23 @@ def bucket_all_gather_by_mb(
             break
     if not found_all_gather:
         return []
-
-    group_name_ag_nodes: dict[str, list[torch.fx.Node]] = defaultdict(list)
-
+    group_name_ag_nodes: dict[tuple[str, torch.dtype], list[torch.fx.Node]] = (  # type: ignore[name-defined]
+        defaultdict(list)
+    )
     # Step 1: Find all all_gather nodes
     for node in node_list:
         if is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0]):
             if (filter_wait_node is None) or filter_wait_node(node):
                 ag_node = node.args[0]
                 _, group_size, group_name = ag_node.args
+                dtype = ag_node.meta["val"].dtype
                 assert isinstance(group_name, str)
-                group_name_ag_nodes[group_name].append(ag_node)
-
+                group_name_ag_nodes[(group_name, dtype)].append(ag_node)
     # Step 2: Put all_gather nodes into buckets
     ag_buckets: list[list[torch.fx.Node]] = []
-    for group_name, ag_nodes in group_name_ag_nodes.items():
+    for (group_name, dtype), ag_nodes in group_name_ag_nodes.items():
         cur_bucket: list[torch.fx.Node] = []
+        cur_bucket_recursive_users: OrderedSet[torch.fx.Node] = OrderedSet()
         cur_bucket_size_bytes: int = 0
         cur_bucket_id: int = 0
         all_gather_bucket_size_bytes = int(
@@ -120,28 +113,29 @@ def bucket_all_gather_by_mb(
         )
         for ag_node in ag_nodes:
             assert is_all_gather_into_tensor(ag_node)
+            if ag_node in cur_bucket_recursive_users:
+                # We can not bucket successors with the node
+                continue
             assert "val" in ag_node.meta
-            ag_output_size_bytes = (
-                ag_node.meta["val"].numel()
-                * torch.finfo(ag_node.meta["val"].dtype).bits
-                // 8
-            )
+            ag_n_val = ag_node.meta["val"]
+            ag_output_size_bytes = ag_n_val.numel() * ag_n_val.element_size()
             if (
                 cur_bucket_size_bytes + ag_output_size_bytes
                 > all_gather_bucket_size_bytes
                 and cur_bucket
             ):
                 # Current bucket is full, create new bucket
-                ag_buckets.append(cur_bucket)
+                if len(cur_bucket) > 1:
+                    ag_buckets.append(cur_bucket)
                 cur_bucket = []
                 cur_bucket_size_bytes = 0
                 cur_bucket_id += 1
             cur_bucket_size_bytes += ag_output_size_bytes
             cur_bucket.append(ag_node)
-        if cur_bucket:
+            find_recursive_users_of_fx_node(ag_node, cur_bucket_recursive_users)
+        if len(cur_bucket) > 1:
             # add remaining nodes in the last bucket
             ag_buckets.append(cur_bucket)
-
     return ag_buckets
 
 
@@ -151,13 +145,9 @@ def bucket_reduce_scatter_by_mb(
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all reduce_scatter nodes and groups them into buckets based on size limit `reduce_scatter_bucket_cap_mb_callback`.
-
-
     Returns a list of buckets, where each bucket is a list of reduce_scatter nodes.
     """
-
     node_list = list(gm.graph.nodes)
-
     # Prerequisite: Check if there is any reduce_scatter node
     found_reduce_scatter = False
     for node in node_list:
@@ -166,21 +156,23 @@ def bucket_reduce_scatter_by_mb(
             break
     if not found_reduce_scatter:
         return []
-
-    group_name_rs_nodes: dict[str, list[torch.fx.Node]] = defaultdict(list)
-
+    group_name_rs_nodes: dict[tuple[str, str, torch.dtype], list[torch.fx.Node]] = (  # type: ignore[name-defined]
+        defaultdict(list)
+    )
     # Step 1: Find all reduce_scatter nodes
     for node in node_list:
         if is_wait_tensor(node) and is_reduce_scatter_tensor(node.args[0]):
             rs_node = node.args[0]
-            _, _, group_size, group_name = rs_node.args
+            _, reduce_op, group_size, group_name = rs_node.args
+            dtype = rs_node.meta["val"].dtype
             assert isinstance(group_name, str)
-            group_name_rs_nodes[group_name].append(rs_node)
-
+            assert isinstance(reduce_op, str)
+            group_name_rs_nodes[(group_name, reduce_op, dtype)].append(rs_node)
     # Step 2: Put reduce_scatter nodes into buckets
     rs_buckets: list[list[torch.fx.Node]] = []
-    for group_name, rs_nodes in group_name_rs_nodes.items():
+    for (group_name, reduce_op, dtype), rs_nodes in group_name_rs_nodes.items():
         cur_bucket: list[torch.fx.Node] = []
+        cur_bucket_recursive_users: OrderedSet[torch.fx.Node] = OrderedSet()
         cur_bucket_size_bytes: int = 0
         cur_bucket_id: int = 0
         # Convert MiB to bytes
@@ -189,13 +181,13 @@ def bucket_reduce_scatter_by_mb(
         )
         for rs_node in rs_nodes:
             assert is_reduce_scatter_tensor(rs_node)
+            if rs_node in cur_bucket_recursive_users:
+                # We can not bucket successors with the node
+                continue
             rs_input = rs_node.args[0]
             assert "val" in rs_input.meta  # type: ignore[union-attr]
-            rs_input_size_bytes = (
-                rs_input.meta["val"].numel()  # type: ignore[union-attr]
-                * torch.finfo(rs_input.meta["val"].dtype).bits  # type: ignore[union-attr]
-                // 8
-            )
+            rs_in_val = rs_input.meta["val"]  # type: ignore[union-attr]
+            rs_input_size_bytes = rs_in_val.numel() * rs_in_val.element_size()
             if (
                 cur_bucket_size_bytes + rs_input_size_bytes
                 > reduce_scatter_bucket_size_bytes
@@ -209,7 +201,8 @@ def bucket_reduce_scatter_by_mb(
                     f"{cur_bucket_size_bytes} + {rs_input_size_bytes},"
                     f"bucket_cap = {reduce_scatter_bucket_size_bytes}"
                 )
-                rs_buckets.append(cur_bucket)
+                if len(cur_bucket) > 1:
+                    rs_buckets.append(cur_bucket)
                 cur_bucket = []
                 cur_bucket_size_bytes = 0
                 cur_bucket_id += 1
@@ -218,6 +211,7 @@ def bucket_reduce_scatter_by_mb(
                 )
             cur_bucket_size_bytes += rs_input_size_bytes
             cur_bucket.append(rs_node)
+            find_recursive_users_of_fx_node(rs_node, cur_bucket_recursive_users)
         if cur_bucket:
             # add remaining nodes in the last bucket
             logger.info(
@@ -225,8 +219,8 @@ def bucket_reduce_scatter_by_mb(
                 f"total_size = {cur_bucket_size_bytes}, "
                 f"bucket_cap = {reduce_scatter_bucket_size_bytes}"
             )
-            rs_buckets.append(cur_bucket)
-
+            if len(cur_bucket) > 1:
+                rs_buckets.append(cur_bucket)
     return rs_buckets
 
 
@@ -272,6 +266,11 @@ def env_lookup(  # type: ignore[no-untyped-def]
 
 
 def _rank_idx_dict(group_name: str) -> dict[int, int]:
+    from torch.distributed.distributed_c10d import (
+        _resolve_process_group,
+        get_process_group_ranks,
+    )
+
     pg = _resolve_process_group(group_name)
     ranks = get_process_group_ranks(pg)
     rank_idx_dict: dict[int, int] = {rank: idx for idx, rank in enumerate(ranks)}
@@ -665,8 +664,8 @@ def merge_reduce_scatter(
             # Only float32 and bfloat16 are supported for now.
             # To support fp16, please see FSDP2 `_get_gradient_divide_factors`.
             assert reduce_dtype in (
-                torch.float32,
-                torch.bfloat16,
+                torch.float32,  # type: ignore[attr-defined]
+                torch.bfloat16,  # type: ignore[attr-defined]
             ), f"reduce_dtype {reduce_dtype} is not supported"
             assert all(
                 grad.meta["val"].dtype == reduce_dtype for grad in unsharded_grads
@@ -677,9 +676,10 @@ def merge_reduce_scatter(
             shard_dim = 0
 
             def _get_dim0_padded_size(
-                tensor_size: torch.Size, dim0_factor: int
-            ) -> torch.Size:
-                padded_dim0 = math.ceil(tensor_size[0] / dim0_factor) * dim0_factor
+                tensor_size: torch.Size,
+                dim0_factor: int,  # type: ignore[name-defined]
+            ) -> torch.Size:  # type: ignore[name-defined]
+                padded_dim0 = math.ceil(tensor_size[0] / dim0_factor) * dim0_factor  # type: ignore[attr-defined]
                 return torch.Size([padded_dim0]) + tensor_size[1:]
 
             padded_unsharded_sizes = tuple(
