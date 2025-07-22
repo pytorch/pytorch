@@ -10,7 +10,6 @@ import random
 import re
 import tempfile
 import unittest
-from functools import partial
 from typing import Callable, Optional
 from unittest import mock
 from unittest.mock import MagicMock
@@ -36,11 +35,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch._inductor.template_heuristics import (
-    BaseConfigHeuristic,
-    CUDAConfigHeuristic,
-    GemmConfig,
-)
+from torch._inductor.template_heuristics import CUDAConfigHeuristic, GemmConfig
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -55,7 +50,12 @@ from torch.utils._triton import has_triton_tma_device
 aten = torch.ops.aten
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache, run_and_get_code
+from torch._inductor.utils import (
+    fresh_cache,
+    get_k_splits,
+    run_and_get_code,
+    use_decompose_k_choice,
+)
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -757,7 +757,12 @@ class TestMaxAutotune(TestCase):
     @skipIfXpu(
         msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
     )
-    @config.patch(max_autotune_gemm_backends="TRITON")
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "TRITON",
+            "benchmark_epilogue_fusion": False,
+        }
+    )
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)
 
@@ -783,7 +788,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(out, m(input_tensor))
 
             if not TEST_WITH_ROCM:
-                FileCheck().check("def triton_poi_fused_cat_").run(code[0])
+                FileCheck().check("def triton_poi_fused_add_cat_").run(code[0])
 
     def test_conv3d(self):
         fn = torch.nn.functional.conv3d
@@ -1210,7 +1215,7 @@ class TestMaxAutotune(TestCase):
         # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
         # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
         self.assertEqual(generate_and_load_args - 1, make_key_args)
-        self.assertEqual(generate_and_load_args, 16)
+        self.assertEqual(generate_and_load_args, 17)
 
     @fresh_cache()
     @config.patch(
@@ -1298,7 +1303,7 @@ class TestMaxAutotune(TestCase):
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity',
                         'kwargs':{'EVEN_K':False,'ALLOW_TF32':True,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
-                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8}}"""
+                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8},'hint_override':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
@@ -1337,7 +1342,7 @@ class TestMaxAutotune(TestCase):
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','kwargs':{'EVEN_K':False,'ALLOW_TF32':True,
-                    'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8}}"""
+                    'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8},'hint_override':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
@@ -1498,6 +1503,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(hits(), 4)
             self.assertEqual(misses(), 4)
 
+    @fresh_cache()
     @skipIfXpu
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -1506,19 +1512,42 @@ class TestMaxAutotune(TestCase):
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
         autotune_fallback_to_aten=False,
-        disable_decompose_k=True,
     )
-    def test_max_autotune_disable_decompose_K(self):
-        M, N, K = (32, 32, 32768)
+    @parametrize("num_decompose_k_splits", (0, 5, 20))
+    @parametrize("decompose_k_threshold", (8, 16))
+    def test_max_autotune_decompose_k_envvars(
+        self, num_decompose_k_splits, decompose_k_threshold
+    ):
+        shapes = [(32, 32, 32768), (32, 32, 256)]
+        for M, N, K in shapes:
+            get_k_splits.cache_clear()
+            use_decompose_k_choice.cache_clear()
+            a = torch.randn(M, K, dtype=torch.float16, device="cuda")
+            b = torch.randn(K, N, dtype=torch.float16, device="cuda")
 
-        a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
-        b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
+            with config.patch(
+                {
+                    "triton.num_decompose_k_splits": num_decompose_k_splits,
+                    "triton.decompose_k_threshold": decompose_k_threshold,
+                }
+            ):
+                compiled_func = torch.compile(lambda a, b: a @ b)
+                _, code = run_and_get_code(compiled_func, a, b)
 
-        compiled_func = torch.compile(lambda a, b: a @ b)
-        out, code = run_and_get_code(compiled_func, a, b)
+                decompose_count = 0
+                for codegen in code:
+                    if "benchmark_decompose_k_mm" in codegen:
+                        decompose_count += 1
 
-        for codegen in code:
-            FileCheck().check_not("decompose_k").run(codegen)
+                if (
+                    K // M < decompose_k_threshold
+                    or K // N < decompose_k_threshold
+                    or num_decompose_k_splits == 0
+                ):
+                    self.assertEqual(decompose_count, 0)
+                else:
+                    self.assertTrue(decompose_count > 0)
+                    self.assertTrue(decompose_count <= num_decompose_k_splits)
 
     @skipIfXpu
     @unittest.skipIf(
@@ -1555,61 +1584,6 @@ class TestMaxAutotune(TestCase):
                 if "benchmark_gpu" in counter:
                     self.assertEqual(counters["inductor"][counter], 2)
 
-    @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
-    )
-    @config.patch(
-        max_autotune=True,
-        max_autotune_gemm_backends="TRITON",
-        autotune_fallback_to_aten=False,
-    )
-    def test_one_triton_choice_epilogue_fusion(self):
-        """
-        Here we test the fusion case with only 1 Triton choice for mm lowering.
-        The hardcoded config itself is valid, but when fused with the torch.float32
-        case, the shared memory requirements is higher than the amount available on H100.
-
-        This test checks that the fusion does not occur in this edge case. This is important
-        for future work on lookup table for autotuned gemm configs.
-        """
-
-        def f(a, b):
-            return (a @ b).to(torch.float32)
-
-        a = torch.randn(512, 1152, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(1152, 7680, device="cuda", dtype=torch.bfloat16)
-
-        config_heuristic = BaseConfigHeuristic()
-        with config.patch(
-            {
-                "triton.enable_persistent_tma_matmul": "1",
-            }
-        ):
-            with (
-                mock.patch(
-                    "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
-                ) as base_mm_mock,
-                mock.patch(
-                    "torch._inductor.kernel.mm.V.choices.get_persistent_mm_configs"
-                ) as persistent_mm_mock,
-            ):
-                base_mm_mock.return_value = partial(
-                    config_heuristic.preprocess_mm_configs, configs=[]
-                )
-                persistent_mm_mock.return_value = partial(
-                    config_heuristic.preprocess_mm_configs,
-                    configs=[GemmConfig(256, 128, 64, 4, 8, 8)],
-                )
-
-                compiled_f = torch.compile(f)
-                out, code = run_and_get_code(compiled_f, a, b)
-
-                FileCheck().check("triton_tem_fused_mm").check(
-                    "triton_poi_fused__to_copy"
-                ).run(code[0])
-
-                torch.testing.assert_close(out, f(a, b), atol=1e-2, rtol=1e-2)
-
 
 class TestMaxAutotunePrecompile(TestCase):
     def test_precompilation_threads(self):
@@ -1645,6 +1619,7 @@ class TestMaxAutotunePrecompile(TestCase):
             op: str,
             inputs: str,
             benchmark: Callable[[Any], dict[ChoiceCaller, float]],
+            hint_override: Optional[int] = None,
         ) -> Optional[dict[ChoiceCaller, float]]:
             if benchmark is not None:
                 return benchmark(choices)

@@ -327,7 +327,7 @@ std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, boo
         if (exclude_shape) {
           fmt::format_to(buf_iterator, "-1");
         } else {
-          fmt::format_to(buf_iterator, getArrayRefString(tensor.sizes()));
+          fmt::format_to(buf_iterator, "{}", getArrayRefString(tensor.sizes()));
         }
       }
       fmt::format_to(buf_iterator, "]");
@@ -375,36 +375,6 @@ MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format) {
     numbers[i] = number;
   }
   return [NSArray arrayWithObjects:numbers.data() count:numbers.size()];
-}
-
-void printTensorNDArray(const TensorBase& t) {
-  if (!t.is_mps())
-    return;
-  if (t.numel() == 0)
-    return;
-  // Get shape and data type
-  auto selfShape = getMPSShape(t);
-  auto selfDType = getMPSDataType(t.scalar_type());
-
-  // Initialize data
-  id<MTLBuffer> selfBuf = getMTLBufferStorage(t);
-  MPSGraphTensorData* tdata = [[[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf shape:selfShape
-                                                                    dataType:selfDType] autorelease];
-  C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wobjc-method-access")
-  C10_CLANG_DIAGNOSTIC_IGNORE("-Wobjc-method-access")
-#endif
-  [tdata printNDArray];
-  C10_CLANG_DIAGNOSTIC_POP()
-}
-
-MPSNDArray* ndArrayFromTensor(const TensorBase& tensor, MPSShape* shape, MPSDataType mpsType) {
-  id<MTLBuffer> buffer = getMTLBufferStorage(tensor);
-  MPSGraphTensorData* tmpGraphTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:buffer
-                                                                                    shape:shape
-                                                                                 dataType:mpsType] autorelease];
-
-  return [tmpGraphTensorData mpsndarray];
 }
 
 static std::vector<int64_t> getSortedStrides(const IntArrayRef& s) {
@@ -971,23 +941,6 @@ class BundledShaderLibary : public MetalShaderLibrary {
   }
 };
 
-void MetalShaderLibrary::bind_tensors(id<MTLComputeCommandEncoder> encoder, TensorIteratorBase& iter) {
-  for (auto idx : c10::irange(iter.ntensors())) {
-    auto& t = iter.tensor_base(idx);
-    // Handle CPU scalars
-    if (C10_UNLIKELY(t.device().type() == kCPU)) {
-      mtl_setBuffer(encoder, t, idx);
-      continue;
-    }
-    // At the moment, MPS storage data is not the real GPU pointer, but rather a pointer to id<MTLBuffer> object
-    // But TensorIterator constructs data_ptr as if base was just a raw pointer
-    // Workaround this problem by computing an offset from the start of the tensor, which works for both
-    // tensor vies and sliced 64-bit iterators
-    auto offs = reinterpret_cast<size_t>(iter.data_ptr(idx)) - reinterpret_cast<size_t>(t.storage().data());
-    [encoder setBuffer:getMTLBufferStorage(t) offset:offs atIndex:idx];
-  }
-}
-
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<c10::Scalar> alpha,
@@ -1024,7 +977,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
       getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
 
       [computeEncoder setComputePipelineState:cplState];
-      bind_tensors(computeEncoder, iter);
+      bind_iter_tensors(computeEncoder, iter);
       if (!iter.is_contiguous()) {
         mtl_setArgs<2>(computeEncoder,
                        outputTensor.sizes(),
@@ -1100,7 +1053,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
       [computeEncoder setComputePipelineState:binaryPSO];
       // Set input and output tensors
-      bind_tensors(computeEncoder, iter);
+      bind_iter_tensors(computeEncoder, iter);
       // Iterator is contiguous if all of its elements are dense in storage,
       // i.e. it's true for both row-first and column-first tensors
       if (iter.is_contiguous()) {

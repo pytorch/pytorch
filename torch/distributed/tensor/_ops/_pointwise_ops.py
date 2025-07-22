@@ -134,8 +134,14 @@ pointwise_ops = [
     aten.ceil.out,
     aten.ceil_.default,
     aten.clamp.default,
+    aten.clamp.Tensor,
     aten.clamp.out,
     aten.clamp_.default,
+    aten.clamp_.Tensor,
+    aten.clamp_min.default,
+    aten.clamp_min.Tensor,
+    aten.clamp_max.default,
+    aten.clamp_max.Tensor,
     aten.clip.default,
     aten.clip.out,
     aten.clip_.default,
@@ -707,12 +713,12 @@ def list_pointwise_strategy(
     ) -> list[Optional[TupleStrategy]]:
         first_arg = args_schema[0]
         assert isinstance(first_arg, TupleStrategy)
-        strategy_len = len(first_arg.childs)
+        strategy_len = len(first_arg.children)
         tuple_strategies: list[Optional[TupleStrategy]] = []
         for arg_idx, arg in enumerate(args_schema):
             if isinstance(arg, TupleStrategy):
                 # every tuple strategy should have the same length
-                assert len(arg.childs) == strategy_len
+                assert len(arg.children) == strategy_len
                 tuple_strategies.append(arg)
             elif isinstance(arg, OpStrategy):
                 if arg_idx > 0:  # implicitly broadcast
@@ -732,10 +738,10 @@ def list_pointwise_strategy(
     follow_strategy: TupleStrategy = not_none(args_strategies[0])
     list_strategy: list[OpStrategy] = []
 
-    for child_idx, child_strtgy in enumerate(follow_strategy.childs):
+    for child_idx, child_strtgy in enumerate(follow_strategy.children):
         assert isinstance(child_strtgy, OpStrategy)
         args_schema: list[Optional[OpStrategy]] = [
-            cast(OpStrategy, arg_strategy.childs[child_idx]) if arg_strategy else None
+            cast(OpStrategy, arg_strategy.children[child_idx]) if arg_strategy else None
             for arg_strategy in args_strategies
         ]
         pointwise_strategy: OpStrategy = common_pointwise_strategy(

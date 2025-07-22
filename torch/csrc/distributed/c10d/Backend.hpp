@@ -46,6 +46,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // backend name
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::string backend;
+    std::string group_name;
   };
 
   explicit Backend(int rank, int size);
@@ -77,6 +78,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  virtual void setTimeout(std::chrono::milliseconds timeout) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support setting timeout"));
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
@@ -96,6 +104,16 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Subclasses must override this method to return the backend name
   virtual const std::string getBackendName() const {
     TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
+  }
+
+  // Subclasses must override this method to return the backend name
+  virtual c10::intrusive_ptr<Options> getBackendOptions() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not implement getBackendOptions."));
   }
 
   virtual c10::intrusive_ptr<Work> broadcast(
@@ -370,6 +388,28 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         "Backend ",
         getBackendName(),
         " is missing implementation of enableCollectivesTiming.");
+  }
+
+  virtual c10::intrusive_ptr<Backend> split(
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Options>& opts) {
+    TORCH_CHECK(
+        false,
+        "Backend ",
+        getBackendName(),
+        " is missing implementation of split.");
+  }
+
+  virtual c10::intrusive_ptr<Backend> merge(
+      const c10::intrusive_ptr<Store>& store,
+      const c10::intrusive_ptr<Options>& opts,
+      const int& rank,
+      const int& size) {
+    TORCH_CHECK(
+        false,
+        "Backend ",
+        getBackendName(),
+        " is missing implementation of merge.");
   }
 
   bool hasHooks() const {
