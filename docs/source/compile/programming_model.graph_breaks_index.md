@@ -1,4 +1,3 @@
-(programming_model.graph_breaks_index)=
 # Working with Graph Breaks
 
 As you might remember from (Dynamo Core Concepts)[programming_model.dynamo_core_concepts] that Dynamo performs a graph break when
