@@ -36,7 +36,6 @@ import re
 import sys
 import traceback
 import types
-import warnings
 import weakref
 from collections.abc import MutableMapping
 from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
@@ -52,6 +51,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import TracingContext
+from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -304,8 +304,7 @@ DimList = list
 
 
 def safe_has_grad(t):
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+    with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return hasattr(t, "grad")
 
 
@@ -3001,6 +3000,12 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif (
         isinstance(example_value, (int, float, bool))
         and proxy.node.target is call_torchbind
+    ):
+        set_example_value(proxy.node, example_value)
+        return ConstantVariable.create(example_value, **options)
+    elif (
+        isinstance(example_value, (int, float, bool))
+        and proxy.node.target is flat_apply
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)

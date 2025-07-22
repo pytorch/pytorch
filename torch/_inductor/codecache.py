@@ -1674,12 +1674,6 @@ class AotCodeCompiler:
             wrapper_code = "\n".join((wrapper_code, kernel_code))
             kernel_code = ""
 
-        from .utils import aoti_model_name_from_config
-
-        model_class_name = ""
-        if config.aot_inductor.compile_standalone:
-            model_class_name = aoti_model_name_from_config()
-
         wrapper_key, wrapper_path = write(
             wrapper_code,
             "wrapper.cpp",
@@ -1712,6 +1706,8 @@ class AotCodeCompiler:
                     "model.h",
                 )
             ) as f:
+                # model_name_for_generated_files is guaranteed to be non-empty when compile_standalone
+                model_class_name = config.aot_inductor.model_name_for_generated_files
                 class_name = f"AOTInductorModel{model_class_name}"
                 header_code = f.read()
 
@@ -1726,7 +1722,7 @@ class AotCodeCompiler:
                     header_code,
                     "h",
                     specified_dir=specified_output_path,
-                    key=f"{model_class_name}",
+                    key=model_class_name,
                 )
 
         # Log the AOTInductor wrapper and kernel code, if needed.
@@ -1804,6 +1800,10 @@ class AotCodeCompiler:
             elif platform == "darwin":
                 section_attr = "__DATA,__data"
                 symbol_prefix = "_"
+            elif platform == "win32":
+                symbol_prefix = ""
+                # ASM build is not supported on Windows, force use CPP build.
+                use_asm_build = False
             else:
                 raise RuntimeError(f"Unsupported platform: {platform}")
 
@@ -1836,7 +1836,7 @@ class AotCodeCompiler:
                     consts_asm += f"\t.space {len(consts) - 8}\n"
                 consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
-                return consts_asm, "S"
+                return consts_asm, "weights.S"
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
@@ -1852,7 +1852,7 @@ class AotCodeCompiler:
 ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 const_cpp = asan_attr
                 const_cpp += f"alignas({align_bytes}) extern "
-                const_cpp += f"const unsigned char {symbol_prefix}_binary_constants_bin_start[{consts_size}] = {{\t\n"
+                const_cpp += f"unsigned char {symbol_prefix}_binary_constants_bin_start[{consts_size}] = {{\t\n"
                 count_bytes = 0
                 for c in consts:
                     const_cpp += f"{c}, "
@@ -1860,8 +1860,8 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                     if count_bytes % 16 == 0:
                         const_cpp += "\t\n"
                 const_cpp += "};\t\n"
-                const_cpp += f"alignas({align_bytes}) extern const unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
-                return const_cpp, "cpp"
+                const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
+                return const_cpp, "weights.cpp"
 
             if use_asm_build:
                 consts_code, code_ext = format_consts_to_asm(
@@ -1876,6 +1876,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 consts_code,
                 code_ext,
                 specified_dir=str(specified_sub_dir),
+                key=config.aot_inductor.model_name_for_generated_files,
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
@@ -2167,40 +2168,50 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
 
             cubins_o = []
             asm_files = []
-            ld, objcopy = get_ld_and_objcopy(use_relative_path)
-            for kernel_name, value in CudaKernelParamCache.cache.items():
-                if asm_file := value["asm"]:
-                    asm_files.append(asm_file)
+            if not _IS_WINDOWS:
+                ld, objcopy = get_ld_and_objcopy(use_relative_path)
+                kernels = getattr(V.graph.wrapper_code, "_kernel_name_to_body", {})
+                for kernel_name, value in CudaKernelParamCache.cache.items():
+                    if kernel_name not in kernels:
+                        # It is possible that CudaKernelParamCache contains more Triton kernels
+                        # than what the current graph uses
+                        continue
 
-                cubin_file = value[get_cpp_wrapper_cubin_path_name()]
-                if config.aot_inductor.emit_multi_arch_kernel and device_type == "cuda":
-                    current_arch = _nvcc_arch_as_compile_option()
-                    cmd = (
-                        f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
-                        # Triton only allows generating PTX version as same as the current arch
-                        f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
-                        # Include SASS for the current specific arch
-                        f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
-                    )
-                    try:
-                        subprocess.run(
-                            cmd.split(),
-                            capture_output=True,
-                            text=True,
-                            check=True,
-                        )
-                    except subprocess.CalledProcessError as e:
-                        print(
-                            f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
-                            file=sys.stderr,
-                        )
-                        raise
+                    if asm_file := value["asm"]:
+                        asm_files.append(asm_file)
 
-                if config.aot_inductor.embed_kernel_binary:
-                    # Embed cubin files into model.so using objcopy
-                    cubins_o.append(
-                        convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
-                    )
+                    cubin_file = value[get_cpp_wrapper_cubin_path_name()]
+                    if (
+                        config.aot_inductor.emit_multi_arch_kernel
+                        and device_type == "cuda"
+                    ):
+                        current_arch = _nvcc_arch_as_compile_option()
+                        cmd = (
+                            f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
+                            # Triton only allows generating PTX version as same as the current arch
+                            f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
+                            # Include SASS for the current specific arch
+                            f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
+                        )
+                        try:
+                            subprocess.run(
+                                cmd.split(),
+                                capture_output=True,
+                                text=True,
+                                check=True,
+                            )
+                        except subprocess.CalledProcessError as e:
+                            print(
+                                f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                                file=sys.stderr,
+                            )
+                            raise
+
+                    if config.aot_inductor.embed_kernel_binary:
+                        # Embed cubin files into model.so using objcopy
+                        cubins_o.append(
+                            convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
+                        )
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(
