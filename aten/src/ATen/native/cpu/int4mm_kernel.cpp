@@ -800,7 +800,8 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
     const float* rhs_scales,
     uint16_t* dst_bf16,
     float scalar_min,
-    float scalar_max) {
+    float scalar_max,
+    const float* bias) {
 
     // Roundup lambda for internal stride calculations
     auto roundup = [](size_t a, size_t b) {
@@ -892,6 +893,9 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
                     acc += lv * rv + lhs_off * rv;
                 }
                 float res = static_cast<float>(acc) * scales[j] * lhs_scale;
+                if (bias) {
+                    res += bias[j];
+                }
                 res = std::clamp(res, lo, hi);
                 *dst++ = cast_f32_to_bf16(res);
             }
@@ -938,14 +942,14 @@ void dyn_quant_pack_4bit_weight_kernel(
   } else
 #endif
   {
-    TORCH_CHECK(
-        bias.has_value() == 0,
-        __func__,
-        " : Bias is unsupported in reference implementation");
     packed_weights = packed_weights.to(kFloat);
-    auto weight_reshaped = weights.view({-1}).to(kFloat);
-    auto scales_zeros_reshaped = scales_zeros.view({-1}).to(kFloat);
-    auto res = at::cat({weight_reshaped, scales_zeros_reshaped}, 0);
+    auto weight_reshaped = weights.reshape({-1}).to(kFloat);
+    auto scales_zeros_reshaped = scales_zeros.reshape({-1}).to(kFloat);
+    std::vector<at::Tensor> tensors_to_cat = {weight_reshaped, scales_zeros_reshaped};
+    if (bias.has_value()) {
+      tensors_to_cat.push_back(bias.value().view({-1}).to(kFloat));
+    }
+    auto res = at::cat(tensors_to_cat, 0);
     packed_weights.resize_(res.sizes()).copy_(res);
   }
 }
@@ -959,7 +963,8 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
     const float* rhs_scales_f32,
     float* dst_f32,
     float scalar_min,
-    float scalar_max) {
+    float scalar_max,
+    const float* bias) {
   const size_t input_size_8bit = m * (k + sizeof(int32_t) + sizeof(float));
 
   auto lhs_qa8dx_buffer = std::make_unique<uint8_t[]>(input_size_8bit);
@@ -1119,7 +1124,8 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
     const float* rhs_scales_fp32,
     float* dst_f32,
     float scalar_min,
-    float scalar_max) {
+    float scalar_max,
+    const float* bias) {
   // Lambda for LHS quantization
   auto lhs_quant_pack = [&](size_t m,
                             size_t k,
@@ -1240,29 +1246,28 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
 }
 
 /**
- * Dynamic Input Quant 4 bit weights matmul execution flow
-              (INT4 Weights + FP scales + FP32 Bias)
-  FP32 Input              Packed Buffer
-       |                       |
-    Quantize                Cast
-   to INT8                 to INT8
-       |                       |
-       v                       v
- INT8 Input              INT8 Weights
-          \               /
-            \            /
-             \         /
-           INT8 Matrix Multiplication
-                   |
-                   v
- FP32 Dequantized and Accumulate in FP32
-                   |
-                   v
-             FP32 Final Output
-
- * The Groupwise kernel requires BFloat16 Scales and Channelwise kernel requires
- * Float32 Scales. If not provided, we will use fallback implementation.
- */
+ * Dynamic INT4 weight-only MatMul with per-row input quantization.
+ *
+ * Execution Flow:
+ *
+ *   (INT4 Weights + FP Scales [+ optional Bias])
+ *
+ *    Input (FP32 or BF16)         Packed Weight Buffer
+ *           |                             |
+ *    Row-wise Quantization (INT8)         |
+ *           |                             |
+ *     INT8 Input Activation      INT4 Quantized Weights + Scales
+ *                  \             /
+ *                   \           /
+ *              Quantized Matrix Multiply
+ *                     |
+ *              Output Tensor (BF16 or FP32)
+ *
+ * Notes:
+ *   - Groupwise kernels expect BF16 scales
+ *   - Channelwise kernels expect FP32 scales
+ *   - Bias is currently unsupported in fallback path
+ */ 
 void dyn_quant_matmul_4bit_kernel(
     const Tensor& output,
     const Tensor& inp,
@@ -1277,67 +1282,108 @@ void dyn_quant_matmul_4bit_kernel(
   if (weight_packed_size == packed_weights.numel()) {
     // KleidiAI interface internally handles the Channelwise and groupwise
     // distinction
-                kleidiai::kai_quant_pack_lhs_int4_mm(
-        output, inp, packed_weights, M, N, K, block_size);
+    kleidiai::kai_quant_pack_lhs_int4_mm(output, inp, packed_weights, M, N, K, block_size);
   } else
 #endif
   {
-    float* lhs_f32 = reinterpret_cast<float*>(inp.data_ptr());
-bool is_bf16 = inp.scalar_type() == at::kBFloat16;
+    {
+    bool is_bf16_inp = inp.scalar_type() == at::kBFloat16;
+    bool is_fp32_inp = inp.scalar_type() == at::kFloat;
+    bool is_bf16_out = output.scalar_type() == at::kBFloat16;
+    bool is_fp32_out = output.scalar_type() == at::kFloat;
 
-const auto weights_size = N * K / 2;
-auto extracted_weights = (packed_weights.narrow(0, 0, weights_size)).to(kByte);
-auto float32_scales = (packed_weights.narrow(0, weights_size, packed_weights.size(0) - weights_size)).to(kFloat);
+    // Input pointers
+    const float* lhs_f32 = nullptr;
+    const uint16_t* lhs_bf16 = nullptr;
+    if (is_bf16_inp) {
+        lhs_bf16 = reinterpret_cast<const uint16_t*>(inp.data_ptr<at::BFloat16>());
+    } else if (is_fp32_inp) {
+        lhs_f32 = inp.data_ptr<float>();
+    } else {
+        TORCH_WARN("Expected input to be BF16 or FP32, got scalar_type = ", inp.scalar_type());
+        TORCH_CHECK(false, "Unsupported input dtype for int4mm kernel");
+    }
 
-uint8_t* rhs_4bit = reinterpret_cast<uint8_t*>(extracted_weights.data_ptr());
-float* rhs_scales_f32 = reinterpret_cast<float*>(float32_scales.data_ptr());
+    // Prepare weights and scales
+    const auto weights_size = N * K / 2;
+    auto extracted_weights = packed_weights.narrow(0, 0, weights_size).to(kByte);
+    auto float32_scales_and_bias = packed_weights.narrow(0, weights_size, packed_weights.size(0) - weights_size).to(kFloat);
+    const float* bias_ptr = nullptr;
+    int num_scales = N * (K / block_size);  // groupwise or channelwise
+    bool has_bias = (packed_weights.numel() > weights_size + num_scales);
+    const float* rhs_scales_f32 = nullptr;
+    auto float32_scales = float32_scales_and_bias.narrow(0, 0, num_scales);
 
-at::Tensor output_f32;
-float* dst_f32 = nullptr;
-
-if (output.scalar_type() != at::kFloat && !is_bf16) {
-    output_f32 = output.to(at::kFloat);
-        dst_f32 = output_f32.data_ptr<float>();
-
-} else {
-    output_f32 = output;
+    // const float* bias_ptr = nullptr;
+    if (has_bias) {
+        auto float32_scales = float32_scales_and_bias.narrow(0, 0, num_scales);
+        auto float32_bias = float32_scales_and_bias.narrow(0, num_scales, float32_scales_and_bias.size(0) - num_scales);
+        rhs_scales_f32 = float32_scales.data_ptr<float>();
+        bias_ptr = float32_bias.data_ptr<float>();
+        TORCH_CHECK(float32_bias.size(0) == N, "Expected bias length to match output dim N");
+    } else {
+        rhs_scales_f32 = float32_scales_and_bias.data_ptr<float>();
+    }
+    uint8_t* rhs_4bit = reinterpret_cast<uint8_t*>(extracted_weights.data_ptr());
+    // float* rhs_scales_f32 = reinterpret_cast<float*>(float32_scales.data_ptr());
+    // Output pointers
+    float* dst_f32 = nullptr;
+    uint16_t* dst_bf16 = nullptr;
+    if (is_fp32_out) {
         dst_f32 = output.data_ptr<float>();
+    } else if (is_bf16_out) {
+        dst_bf16 = reinterpret_cast<uint16_t*>(output.data_ptr<at::BFloat16>());
+    } else {
+        TORCH_CHECK(false, "Unsupported output dtype for int4mm kernel");
+    }
 
-}
-constexpr float BF16_MAX = std::ldexp(254.0f, 120);  // ≈ 3.38953139e+38
-constexpr float BF16_MIN = -BF16_MAX;
+    constexpr float BF16_MAX = std::ldexp(254.0f, 120);  // ≈ 3.38953139e+38
+    constexpr float BF16_MIN = -BF16_MAX;
 
-if (is_bf16) {
-  uint16_t* lhs_bf16 = reinterpret_cast<uint16_t*>(inp.data_ptr());
-  uint16_t* dst_bf16 = reinterpret_cast<uint16_t*>(output.data_ptr());
-  if (block_size == K) {
-    ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
-        M, N, K,
-        lhs_bf16, rhs_4bit, rhs_scales_f32,
-        dst_bf16, BF16_MIN, BF16_MAX);
-  } else {
-    TORCH_CHECK(false, "Unsupported block size for BF16 fallback");
-  }
-} else {
-  if (block_size == K) {
-    ref_dyn_quant_matmul_4bit_channelwise_kernel(
-        M, N, K,
-        lhs_f32, rhs_4bit, rhs_scales_f32,
-        dst_f32, -FLT_MAX, FLT_MAX);
-  } else if (!(block_size % 32) && !(K % block_size)) {
-    ref_dyn_quant_matmul_4bit_groupwise_kernel(
-        M, N, K, block_size,
-        lhs_f32, rhs_4bit, rhs_scales_f32,
-        dst_f32, -FLT_MAX, FLT_MAX);
-  } else {
-    TORCH_CHECK(false, "Unsupported block size for FP32 fallback");
-  }
+    // Dispatch to reference kernels
+    if (is_bf16_inp && is_bf16_out) {
+        // BF16 input, BF16 output
+        if (block_size == K) {
+            ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
+                M, N, K,
+                lhs_bf16, rhs_4bit, rhs_scales_f32,
+                dst_bf16, BF16_MIN, BF16_MAX, bias_ptr);
+        } else {
+            TORCH_CHECK(false, "Unsupported block size for BF16 fallback");
+        }
+    } else if (is_fp32_inp && is_bf16_out) {
+        // FP32 input, BF16 output
+        if (block_size == K) {
+            ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
+                M, N, K,
+                reinterpret_cast<const uint16_t*>(lhs_f32), // reinterpret FP32 as BF16 (only valid if input is actually BF16 stored as FP32)
+                rhs_4bit, rhs_scales_f32,
+                dst_bf16, BF16_MIN, BF16_MAX, bias_ptr);
+        } else {
+            TORCH_CHECK(false, "Unsupported block size for FP32->BF16 fallback");
+        }
+    } else if (is_fp32_inp && is_fp32_out) {
+        // FP32 input, FP32 output
+        if (block_size == K) {
+            ref_dyn_quant_matmul_4bit_channelwise_kernel(
+                M, N, K,
+                lhs_f32, rhs_4bit, rhs_scales_f32,
+                dst_f32, -FLT_MAX, FLT_MAX, bias_ptr);
+        } else if (!(block_size % 32) && !(K % block_size)) {
+            ref_dyn_quant_matmul_4bit_groupwise_kernel(
+                M, N, K, block_size,
+                lhs_f32, rhs_4bit, rhs_scales_f32,
+                dst_f32, -FLT_MAX, FLT_MAX, bias_ptr);
+        } else {
+            TORCH_CHECK(false, "Unsupported block size for FP32 fallback");
+        }
+    } else {
+        TORCH_CHECK(false, "Unsupported input/output dtype combination for int4mm kernel");
+    }
 }
-}
-
 }
 } // anonymous namespace
-
+}
 ALSO_REGISTER_AVX512_DISPATCH(weight_to_int4pack_stub, &weight_to_int4pack_kernel)
 ALSO_REGISTER_AVX512_DISPATCH(int4pack_mm_stub, &int4pack_mm_kernel)
 REGISTER_DISPATCH(dyn_quant_pack_4bit_weight_stub, &dyn_quant_pack_4bit_weight_kernel)

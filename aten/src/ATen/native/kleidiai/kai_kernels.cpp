@@ -21,18 +21,30 @@ void kai_pack_int4_rhs(
     const int64_t n,
     const int64_t k,
     const int64_t bl) {
-  // Prefer Channelwise kernel over Groupwise kernel for conflicting cases
+       size_t expected_size = kai_pack_rhs_int4_size(n, k, bl, scales.scalar_type());
+  TORCH_WARN(
+      ": expected ", expected_size,
+      ", got ", weight_packed.numel()
+  );
   if (bl == k) {
     // Channelwise
-    auto kernel_packet = kai_select_channelwise_matmul_ukernel(
-        kai_kernel_id::
-            matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
-    auto& params = kernel_packet.rhs_pack_params;
-    params.lhs_zero_point = 1;
-    params.rhs_zero_point = 8;
-
-    kai_pack_rhs_channelwise_int4<kai_matmul_ukernel_f32_qa8dxp_qs4cxp>(
-        kernel_packet, weight_packed, weight, scales, bias, n, k);
+    if (scales.scalar_type() == at::kBFloat16) {
+      auto kernel_packet = kai_select_bf16_channelwise_matmul_ukernel(
+          kai_kernel_id::matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod);
+      auto& params = kernel_packet.rhs_pack_params;
+      params.lhs_zero_point = 1;
+      params.rhs_zero_point = 8;
+      kai_pack_rhs_channelwise_int4<kai_matmul_ukernel_bf16_qa8dxp_qs4cxp>(
+          kernel_packet, weight_packed, weight, scales, bias, n, k);
+    } else {
+      auto kernel_packet = kai_select_channelwise_matmul_ukernel(
+          kai_kernel_id::matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
+      auto& params = kernel_packet.rhs_pack_params;
+      params.lhs_zero_point = 1;
+      params.rhs_zero_point = 8;
+      kai_pack_rhs_channelwise_int4<kai_matmul_ukernel_f32_qa8dxp_qs4cxp>(
+          kernel_packet, weight_packed, weight, scales, bias, n, k);
+    }
   } else if (!(bl % 32) && !(k % bl)) {
     // Groupwise
     auto kernel_packet = kai_select_groupwise_matmul_ukernel(
@@ -63,19 +75,28 @@ void kai_pack_int4_rhs(
 size_t kai_pack_rhs_int4_size(
     const int64_t n,
     const int64_t k,
-    const int64_t bl) {
+    const int64_t bl,
+    at::ScalarType scale_dtype)
+{
   size_t packed_size = n * k;
-  // Prefer Channelwise kernel over Groupwise kernel for conflicting cases
   if (bl == k) {
-    // Channelwise
-    auto kernel_packet = kai_select_channelwise_matmul_ukernel(
-        kai_kernel_id::
-            matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
-    const auto& ukernel = kernel_packet.ukernel;
-    const size_t nr = ukernel.get_nr();
-    const size_t kr = ukernel.get_kr();
-    const size_t sr = ukernel.get_sr();
-    packed_size = kernel_packet.kai_get_rhs_packed_size(n, k, nr, kr, sr);
+    if (scale_dtype == at::kBFloat16) {
+      auto kernel_packet = kai_select_bf16_channelwise_matmul_ukernel(
+          kai_kernel_id::matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod);
+      const auto& ukernel = kernel_packet.ukernel;
+      const size_t nr = ukernel.get_nr();
+      const size_t kr = ukernel.get_kr();
+      const size_t sr = ukernel.get_sr();
+      packed_size = kernel_packet.kai_get_rhs_packed_size(n, k, nr, kr, sr);
+    } else {
+      auto kernel_packet = kai_select_channelwise_matmul_ukernel(
+          kai_kernel_id::matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
+      const auto& ukernel = kernel_packet.ukernel;
+      const size_t nr = ukernel.get_nr();
+      const size_t kr = ukernel.get_kr();
+      const size_t sr = ukernel.get_sr();
+      packed_size = kernel_packet.kai_get_rhs_packed_size(n, k, nr, kr, sr);
+    }
   } else if (!(bl % 32) && !(k % bl)) {
     // Groupwise
     auto kernel_packet = kai_select_groupwise_matmul_ukernel(
