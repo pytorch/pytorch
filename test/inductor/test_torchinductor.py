@@ -13644,7 +13644,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # we don't lower when the cpp_wrapper is used because it cannot generate
         # proper examples during autotune
         can_lower = not config.cpp_wrapper
-        has_lowered "repeat_interleave.Tensor" not in code
+        has_lowered = "repeat_interleave.Tensor" not in code
         self.assertEqual(has_lowered, can_lower)
 
 
