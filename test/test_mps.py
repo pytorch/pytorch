@@ -8015,6 +8015,8 @@ class TestLargeTensors(TestCaseMPS):
 
     @serialTest()
     def test_rand_2b_raises(self):
+        if MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("Crashes on MacOS-13")
         int32_max = torch.iinfo(torch.int32).max
         with self.assertRaises(RuntimeError):
             # This used to crash with NDArray dimension length > INT_MAX
