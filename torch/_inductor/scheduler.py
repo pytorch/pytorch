@@ -2130,11 +2130,9 @@ class Scheduler:
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
-
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
-
         self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.combo_kernels:
@@ -2368,6 +2366,7 @@ class Scheduler:
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
+
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             assert node.node is not None
@@ -3504,15 +3503,12 @@ class Scheduler:
         return False
 
     def fusion_accumulate_large_reads(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, threshold: int
     ) -> bool:
         all_reads = (node1.read_writes.reads | node2.read_writes.reads) - (
             node1.read_writes.writes | node2.read_writes.writes
         )
-        return (
-            sum(self.dep_size_hint(dep) for dep in all_reads)
-            > config.realize_acc_reads_size_threshold
-        )
+        return sum(self.dep_size_hint(dep) for dep in all_reads) > threshold
 
     def are_long_distant_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

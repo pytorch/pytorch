@@ -595,6 +595,10 @@ class CustomOpDef:
         self._setup_context_fn = setup_context
 
     def _register_to_dispatcher(self, tags: Sequence[_C.Tag]) -> None:
+        if torch._running_with_deploy():
+            utils.warn_deploy(stacklevel=5)
+            return
+
         lib = self._lib
         schema_str = self._name + self._schema
         cpp_schema = _C.parse_schema(schema_str)

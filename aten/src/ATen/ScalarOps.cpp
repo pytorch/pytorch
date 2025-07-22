@@ -10,14 +10,13 @@ template <typename scalar_t>
 inline void fill_inplace(Tensor& self, const Scalar& value_scalar) {
   scalar_t value{};
 
-  if constexpr (std::is_floating_point_v<scalar_t> ||
-                       std::is_same_v<scalar_t, at::Half> ||
-                       std::is_same_v<scalar_t, at::BFloat16> ||
-                       std::is_same_v<scalar_t, at::Float8_e5m2> ||
-                       std::is_same_v<scalar_t, at::Float8_e5m2fnuz> ||
-                       std::is_same_v<scalar_t, at::Float8_e4m3fn> ||
-                       std::is_same_v<scalar_t, at::Float8_e4m3fnuz> ||
-                       std::is_same_v<scalar_t, at::Float8_e8m0fnu>) {
+  if constexpr (std::is_same_v<scalar_t, at::Half> ||
+                std::is_same_v<scalar_t, at::BFloat16> ||
+                std::is_same_v<scalar_t, at::Float8_e5m2> ||
+                std::is_same_v<scalar_t, at::Float8_e5m2fnuz> ||
+                std::is_same_v<scalar_t, at::Float8_e4m3fn> ||
+                std::is_same_v<scalar_t, at::Float8_e4m3fnuz> ||
+                std::is_same_v<scalar_t, at::Float8_e8m0fnu>) {
     // relaxed float cast: allow inf similar to the torch.tensor constructor
     //
     // without this, we had the following divergence:
