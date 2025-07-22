@@ -11602,7 +11602,7 @@ def reference_hash_tensor(tensor, dim=(), keepdim=False, mode=0):
     if dtype.kind == 'f':
         tensor = tensor.astype(np.float64).view(np.uint64)
     else:
-        tensor = tensor.astype(np.int64).view(np.uint64)
+        tensor = tensor.astype(np.uint64)
 
 
     if dim == ():

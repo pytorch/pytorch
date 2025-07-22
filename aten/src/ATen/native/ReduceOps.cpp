@@ -2256,12 +2256,7 @@ enum class HashMode { XOR_SUM = 0 };
 
 TORCH_IMPL_FUNC(hash_tensor_out) (const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode, const Tensor& result)  {
 
-  auto result_view = result;
-  if (self.is_floating_point()){
-    result_view = result.view(at::kDouble);
-  }
-
-  auto iter = meta::make_reduction(self, result_view, dim, keepdim, self.scalar_type());
+  auto iter = meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
   switch (static_cast<HashMode>(mode)) {
     case HashMode::XOR_SUM:
       if (iter.numel() == 0) {

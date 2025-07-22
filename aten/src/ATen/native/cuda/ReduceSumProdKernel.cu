@@ -154,23 +154,24 @@ struct prod_functor<c10::complex<at::Half>> {
 #endif
 };
 
-template <typename scalar_t>
+template <typename scalar_t, typename enable = void>
 struct xor_sum_functor {
   void operator()(TensorIterator& iter) {
     gpu_reduce_kernel<scalar_t, uint64_t>(
         iter,
         func_wrapper<uint64_t>(
-            [] GPU_LAMBDA(scalar_t a, scalar_t b) -> uint64_t {
-              return static_cast<uint64_t>(a ^ b);
+            [] GPU_LAMBDA(uint64_t a, uint64_t b) -> uint64_t {
+              return a ^ b;
             }));
   }
 };
 
-template <>
-struct xor_sum_functor<float> {
+template <typename scalar_t>
+struct xor_sum_functor<scalar_t, std::enable_if_t<!std::is_integral_v<scalar_t>>> {
   void operator()(TensorIterator& iter) {
-    gpu_reduce_kernel<float, double>(
+    gpu_reduce_kernel<scalar_t, double>(
         iter,
+        // implicitly upcast scalar_t to double
         func_wrapper<double>([] GPU_LAMBDA(double a, double b) -> double {
           union {
             double d;
@@ -185,65 +186,8 @@ struct xor_sum_functor<float> {
   }
 };
 
-template <>
-struct xor_sum_functor<double> {
-  void operator()(TensorIterator& iter) {
-    gpu_reduce_kernel<double, double>(
-        iter,
-        func_wrapper<double>([] GPU_LAMBDA(double a, double b) -> double {
-          union {
-            double d;
-            uint64_t u;
-          } a_converter, b_converter, result_converter;
-
-          a_converter.d = a;
-          b_converter.d = b;
-          result_converter.u = a_converter.u ^ b_converter.u;
-          return result_converter.d;
-        }));
-  }
-};
-
-template <>
-struct xor_sum_functor<at::Half> {
-  void operator()(TensorIterator& iter) {
-    gpu_reduce_kernel<at::Half, double>(
-        iter,
-        func_wrapper<double>([] GPU_LAMBDA(double a, double b) -> double {
-          union {
-            double d;
-            uint64_t u;
-          } a_converter, b_converter, result_converter;
-
-          a_converter.d = a;
-          b_converter.d = b;
-          result_converter.u = a_converter.u ^ b_converter.u;
-          return result_converter.d;
-        }));
-  }
-};
-
-template <>
-struct xor_sum_functor<at::BFloat16> {
-  void operator()(TensorIterator& iter) {
-    gpu_reduce_kernel<at::BFloat16, double>(
-        iter,
-        func_wrapper<double>([] GPU_LAMBDA(double a, double b) -> double {
-          union {
-            double d;
-            uint64_t u;
-          } a_converter, b_converter, result_converter;
-
-          a_converter.d = a;
-          b_converter.d = b;
-          result_converter.u = a_converter.u ^ b_converter.u;
-          return result_converter.d;
-        }));
-  }
-};
-
-template <>
-struct xor_sum_functor<bool> {
+template <typename scalar_t>
+struct xor_sum_functor<scalar_t, std::enable_if_t<std::is_same_v<scalar_t, bool>>>  {
   void operator()(TensorIterator& iter) {
     gpu_reduce_kernel<bool, uint64_t>(
         iter, func_wrapper<uint64_t>([] GPU_LAMBDA(bool a, bool b) -> uint64_t {
@@ -322,7 +266,7 @@ static void prod_kernel_cuda(TensorIterator& iter) {
 }
 
 static void xor_sum_kernel_cuda(TensorIterator& iter) {
-  // Use iter.dtype(1) to get the type of the input tensor
+  // Use iter.dtype(1) to dispatch based on the type of the input tensor
   AT_DISPATCH_ALL_TYPES_AND3(
       kHalf, kBFloat16, kBool, iter.dtype(1), "xor_sum_cuda", [&]() {
         xor_sum_functor<scalar_t>{}(iter);

@@ -427,10 +427,9 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 template <typename scalar_t, typename acc_t = uint64_t, typename out_t = acc_t>
 struct XorSumOps {
-  inline C10_DEVICE uint64_t
-  reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
     if (std::is_same<scalar_t, bool>::value) {
-      return acc ^ (static_cast<bool>(data) ? 1 : 0);
+      return acc ^ (data ? 1 : 0);
     } else if (
         std::is_same<scalar_t, float>::value ||
         std::is_same<scalar_t, double>::value ||
@@ -461,6 +460,7 @@ struct XorSumOps {
 };
 
 static void xor_sum_kernel_impl(TensorIterator& iter) {
+  // Use iter.dtype(1) to dispatch based on the type of the input tensor
   AT_DISPATCH_ALL_TYPES_AND3(
       kBFloat16, kHalf, kBool, iter.dtype(1), "xor_sum_cpu", [&] {
         binary_kernel_reduce(
