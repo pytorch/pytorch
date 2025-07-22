@@ -280,9 +280,9 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_t_opt,
-    const c10::optional<Tensor>& running_mean_t_opt,
-    const c10::optional<Tensor>& running_var_t_opt,
+    const std::optional<Tensor>& bias_t_opt,
+    const std::optional<Tensor>& running_mean_t_opt,
+    const std::optional<Tensor>& running_var_t_opt,
     bool training,
     double exponential_average_factor,
     double epsilon) {
