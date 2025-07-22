@@ -44,6 +44,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
+    _NOTHING,
     AttributeMutationError,
     ObservedAttributeError,
     raise_observed_exception,
@@ -1340,18 +1341,19 @@ class BuiltinVariable(VariableTracker):
     call_float = _call_int_float
 
     def call___build_class__(self, tx, *args, **kwargs):
-        def fail(args, kwargs):
+        def fail(args, kwargs, exc=_NOTHING):
             unimplemented_v2(
                 gb_type="invalid call to __build_class__",
                 context=f"invalid args to __build_class__: {args} {kwargs}",
                 explanation="Encountered TypeError when trying to handle op __build_class__",
-                hints=[*graph_break_hints.DYNAMO_BUG],
+                hints=[*graph_break_hints.SUPPORTABLE],
+                from_exc=exc,
             )
 
         try:
             fn = args[0].get_function()
-        except NotImplementedError:
-            fail(args, kwargs)
+        except NotImplementedError as e:
+            fail(args, kwargs, exc=e)
 
         if check_constant_args(args[1:], kwargs):
             r = builtins.__build_class__(
