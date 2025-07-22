@@ -2805,6 +2805,7 @@ class GuardManager {
         // start recording
         _saved = value;
         start_recording_dict_pointers(_root, this);
+        record_dict_pointer(_root, value);
         is_recording = true;
       }
     } else if (_is_tag_safe && _is_dict && is_recording_dict_pointers(_root)) {
