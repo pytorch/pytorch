@@ -1073,6 +1073,19 @@ def _get_openmp_args(
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
 
+def _get_libstdcxx_args() -> tuple[list[str], list[str]]:
+    """
+    For fbcode cpu case, we should link stdc++ instead assuming the binary where dlopen is executed is built with dynamic stdc++.
+    """
+    lib_dir_paths: list[str] = []
+    libs: list[str] = []
+    if config.is_fbcode():
+        lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
+        libs.append("stdc++")
+
+    return lib_dir_paths, libs
+
+
 def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
     macros = []
     if use_mmap_weights:
@@ -1088,6 +1101,15 @@ def get_cpp_torch_options(
     use_relative_path: bool,
     use_mmap_weights: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """
+    This function is used to get the build args of torch related build options.
+    1. Torch include_directories, libraries, libraries_directories.
+    2. Python include_directories, libraries, libraries_directories.
+    3. OpenMP related.
+    4. Torch MACROs.
+    5. MISC
+    6. Return the build args
+    """
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -1268,6 +1290,13 @@ def get_cpp_torch_device_options(
     aot_mode: bool = False,
     compile_only: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """
+    This function is used to get the build args of device related build options.
+    1. Device include_directories, libraries, libraries_directories.
+    2. Device MACROs.
+    3. MISC
+    4. Return the build args
+    """
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -1287,6 +1316,8 @@ def get_cpp_torch_device_options(
 
     include_dirs = cpp_extension.include_paths(device_type)
     libraries_dirs = cpp_extension.library_paths(device_type)
+    if not config.is_fbcode():
+        libraries += ["c10"]
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1325,6 +1356,14 @@ def get_cpp_torch_device_options(
                 if not compile_only:
                     # Only add link args, when compile_only is false.
                     passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+
+        if device_type == "cpu":
+            (
+                stdcxx_lib_dir_paths,
+                stdcxx_libs,
+            ) = _get_libstdcxx_args()
+            libraries_dirs += stdcxx_lib_dir_paths
+            libraries += stdcxx_libs
 
     if config.aot_inductor.custom_op_libs:
         libraries += config.aot_inductor.custom_op_libs
@@ -1505,6 +1544,9 @@ class CppBuilder:
         self._aot_mode: bool = False
 
         self._name = name
+        self._target_name = (
+            config.aot_inductor.model_name_for_generated_files or "aoti_model"
+        )
 
         # Code start here, initial self internal variables firstly.
         self._build_option = BuildOption
@@ -1730,28 +1772,68 @@ class CppBuilder:
         """
 
         definitions = " ".join(self._build_option.get_definitions())
+        if config.aot_inductor.compile_standalone:
+            if config.test_configs.use_libtorch:
+                add_target = f"add_library({self._target_name} STATIC)"
+            else:
+                add_target = f"add_executable({self._target_name} ${{CMAKE_CURRENT_SOURCE_DIR}}/main.cpp)"
+        else:
+            add_target = f"add_library({self._target_name} SHARED)"
+
         contents = textwrap.dedent(
             f"""
             cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
-            project(aoti_model LANGUAGES CXX)
+            project({self._target_name} LANGUAGES CXX)
             set(CMAKE_CXX_STANDARD 17)
 
-            # May need to point CMAKE_PREFIX_PATH to the right torch location
-            find_package(Torch REQUIRED)
-
-            # Set a shared library target
-            add_library(aoti_model SHARED)
-
-            # Add macro definitions
-            target_compile_definitions(aoti_model PRIVATE {definitions})
-
-            # Add compile flags
-            target_compile_options(aoti_model PRIVATE {self._cflags_args})
-            # Backend specific flags
-            target_compile_options(aoti_model PRIVATE {self._passthrough_parameters_args} -c)
+            # Set target
+            {add_target}
 
             """
         )
+
+        if (
+            not config.aot_inductor.compile_standalone
+            or config.test_configs.use_libtorch
+        ):
+            # When compile_standalone is True, the generated cpp project should
+            # not use Torch. But for unit testing purpose, we need to use Torch here.
+            contents += textwrap.dedent(
+                """
+                # May need to point CMAKE_PREFIX_PATH to the right torch location
+                find_package(Torch REQUIRED)
+
+                """
+            )
+            # flags and macros here are mostly CPU specific. Not emitting them for GPU models
+            # will make the generated CMake file more portable and won't really hurt performance.
+            # NOTE: standalone focuses on GPU now. For CPU, some of the flags and macros may
+            # be still needed.
+            contents += textwrap.dedent(
+                f"""
+                # Add macro definitions
+                target_compile_definitions({self._target_name} PRIVATE {definitions})
+
+                # Add compile flags
+                target_compile_options({self._target_name} PRIVATE {self._cflags_args})
+
+                # Backend-specific flags
+                target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
+
+                """
+            )
+        else:
+            # When compile_standalone is True, use TorchStandalone instead of Torch
+            contents += textwrap.dedent(
+                """
+                find_package(TorchStandalone REQUIRED)
+                # Set up include directories to find headers at the correct paths
+                target_include_directories(cos PRIVATE ${TorchStandalone_INCLUDE_DIRS})
+                target_include_directories(cos PRIVATE ${TorchStandalone_INCLUDE_DIRS}/standalone)
+
+                """
+            )
+
         if device_type == "cuda" and torch.version.hip is None:
             from torch._inductor.codecache import _nvcc_arch_as_compile_option
 
@@ -1759,7 +1841,11 @@ class CppBuilder:
             contents += textwrap.dedent(
                 f"""
                 enable_language(CUDA)
+                set(CMAKE_CUDA_STANDARD 17)
                 find_package(CUDAToolkit REQUIRED)
+                target_include_directories({self._target_name} PRIVATE ${{CUDAToolkit_INCLUDE_DIRS}})
+                target_compile_definitions({self._target_name} PRIVATE USE_CUDA)
+                target_link_libraries({self._target_name} PRIVATE cuda CUDA::cudart_static)
 
                 find_program(OBJCOPY_EXECUTABLE objcopy)
                 if(NOT OBJCOPY_EXECUTABLE)
@@ -1788,7 +1874,7 @@ class CppBuilder:
                     add_custom_command(
                         OUTPUT ${{FATBIN_FILE}}
                         COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
-                                -gencode arch=compute_80,code=compute_80
+                                -gencode arch=compute_{current_arch},code=compute_{current_arch}
                                 -gencode arch=compute_{current_arch},code=sm_{current_arch}
                         DEPENDS ${{PTX_FILE}}
                     )
@@ -1823,7 +1909,7 @@ class CppBuilder:
         # Remove the directory part of file_path
         src_path = "${CMAKE_CURRENT_SOURCE_DIR}/" + Path(src_path).name
         with open(cmake_path, "a") as f:
-            f.write(f"target_sources(aoti_model PRIVATE {src_path})\n")
+            f.write(f"target_sources({self._target_name} PRIVATE {src_path})\n")
 
     def save_kernel_asm_to_cmake(self, cmake_path: str, asm_files: list[str]) -> None:
         # TODO: make this work beyond CUDA
@@ -1837,21 +1923,29 @@ class CppBuilder:
                     """
                 )
                 f.write(contents)
-            f.write("add_dependencies(aoti_model ${KERNEL_TARGETS})\n")
-            f.write(
-                "target_link_libraries(aoti_model PRIVATE ${KERNEL_OBJECT_FILES})\n"
-            )
+            if asm_files:
+                f.write(f"add_dependencies({self._target_name} ${{KERNEL_TARGETS}})\n")
+                f.write(
+                    f"target_link_libraries({self._target_name} PRIVATE ${{KERNEL_OBJECT_FILES}})\n"
+                )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
+        if (
+            config.aot_inductor.compile_standalone
+            and not config.test_configs.use_libtorch
+        ):
+            # When compile_standalone is True, do not link with libtorch
+            return
+
         lflags = " ".join(self._build_option.get_ldflags())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(
             f"""
             # Add linker flags
-            target_link_options(aoti_model PRIVATE {lflags})
+            target_link_options({self._target_name} PRIVATE {lflags})
 
             # Add libraries
-            target_link_libraries(aoti_model PRIVATE {libs})
+            target_link_libraries({self._target_name} PRIVATE {libs})
          """
         )
 
