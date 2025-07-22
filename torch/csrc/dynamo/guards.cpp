@@ -2412,6 +2412,17 @@ std::unique_ptr<GuardManager> make_guard_manager(
     py::handle example_value,
     py::handle guard_manager_enum);
 
+// Forward declarations for tag safe related helpers. All of these require some
+// interaction between RootGuardManager and GuardManager. Since both of the
+// classes are forward declared, we have to forward declare these helpers as
+// well.
+void start_recording_dict_pointers(
+    RootGuardManager* root,
+    GuardManager* tag_safe_root);
+void stop_recording_dict_pointers(RootGuardManager* root, PyObject* value);
+bool is_recording_dict_pointers(RootGuardManager* root);
+void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer);
+
 GuardManager* clone_guard_manager(
     GuardManager* from,
     RootGuardManager* root,
@@ -2642,6 +2653,14 @@ class GuardManager {
   }
 
  public:
+  // tag safe optimizations
+  void stash_dict_pointers(
+      PyObject* value,
+      std::unordered_map<PyObject*, uint64_t> dict_pointers) {
+    _dict_pointers[value] = dict_pointers;
+  }
+
+ public:
   // For cloning
   GuardManager(
       RootGuardManager* root,
@@ -2750,8 +2769,49 @@ class GuardManager {
     return this->check_accessors_nopybind(value);
   }
 
+  bool check_dict_pointer_tags(PyObject* value) {
+    for (auto& kv : _dict_pointers[value]) {
+      PyObject* dict_pointer = kv.first;
+      uint64_t old_tag = kv.second;
+      uint64_t new_tag = get_dict_version_unchecked(dict_pointer);
+      if (old_tag != new_tag) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   virtual bool check_nopybind(PyObject* value) {
-    return check_nopybind_template(value);
+    bool is_recording = false;
+    if (_is_tag_safe_root && !_disable_dict_tag_matching) {
+      if (_dict_pointers.find(value) != _dict_pointers.end()) {
+        if (check_dict_pointer_tags(value)) {
+          return true;
+        }
+        // Something changed, very likely there will be recompilations. Disable
+        // recursive dict tag checking.
+        _disable_dict_tag_matching = true;
+      } else if (_dict_pointers.size() == 2) {
+        // Too many nn module instances on the same GuardManager. Its likely
+        // that the fast guard path will never be taken.
+        _disable_dict_tag_matching = true;
+      } else {
+        // start recording
+        _saved = value;
+        start_recording_dict_pointers(_root, this);
+        is_recording = true;
+      }
+    } else if (_is_tag_safe && _is_dict && is_recording_dict_pointers(_root)) {
+      record_dict_pointer(_root, value);
+    }
+    bool result = check_nopybind_template(value);
+    if (is_recording) {
+      stop_recording_dict_pointers(_root, value);
+    }
+    if (!result) {
+      _disable_dict_tag_matching = true;
+    }
+    return result;
   }
 
   virtual bool check_nopybind(FrameLocalsMapping* value) {
@@ -2985,6 +3045,10 @@ class GuardManager {
   // tag safe markers
   bool _is_tag_safe = false;
   bool _is_tag_safe_root = false;
+  bool _disable_dict_tag_matching{false};
+  std::unordered_map<PyObject*, std::unordered_map<PyObject*, uint64_t>>
+      _dict_pointers;
+  PyObject* _saved{nullptr};
 };
 
 GuardAccessor::GuardAccessor(
@@ -3056,6 +3120,11 @@ class RootGuardManager : public GuardManager {
     Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
+
+    // Clean up dict pointer recording for tag safe roots
+    _is_recording_dict_pointers = false;
+    _current_tag_safe_root = nullptr;
+    _recorded_dict_pointers.clear();
 
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
@@ -3208,6 +3277,29 @@ class RootGuardManager : public GuardManager {
   }
 
  public:
+  // tag safe optimizations
+  void start_recording_dict_pointers(GuardManager* tag_safe_root) {
+    _current_tag_safe_root = tag_safe_root;
+    _is_recording_dict_pointers = true;
+  }
+
+  void stop_recording_dict_pointers(PyObject* value) {
+    _is_recording_dict_pointers = false;
+    _current_tag_safe_root->stash_dict_pointers(value, _recorded_dict_pointers);
+    _current_tag_safe_root = nullptr;
+    _recorded_dict_pointers.clear();
+  }
+
+  bool is_recording_dict_pointers() {
+    return _is_recording_dict_pointers;
+  }
+
+  void record_dict_pointer(PyObject* dict_pointer) {
+    _recorded_dict_pointers[dict_pointer] =
+        get_dict_version_unchecked(dict_pointer);
+  }
+
+ public:
   // Local state for TENSOR_MATCH guards.
   LocalState _local_state;
 
@@ -3251,6 +3343,11 @@ class RootGuardManager : public GuardManager {
   // We init LocalState only when this flag it set. This flag is set during
   // TENSOR_MATCH guard init.
   bool _init_local_state = false;
+
+  // tag safe optimization related members
+  bool _is_recording_dict_pointers{false};
+  GuardManager* _current_tag_safe_root{nullptr};
+  std::unordered_map<PyObject*, uint64_t> _recorded_dict_pointers;
 };
 
 /*
@@ -3639,6 +3736,24 @@ std::unique_ptr<GuardManager> make_guard_manager(
     }
   }
   return std::make_unique<GuardManager>(root, std::move(source), example_value);
+}
+
+void start_recording_dict_pointers(
+    RootGuardManager* root,
+    GuardManager* tag_safe_root) {
+  root->start_recording_dict_pointers(tag_safe_root);
+}
+
+void stop_recording_dict_pointers(RootGuardManager* root, PyObject* value) {
+  root->stop_recording_dict_pointers(value);
+}
+
+bool is_recording_dict_pointers(RootGuardManager* root) {
+  return root->is_recording_dict_pointers();
+}
+
+void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer) {
+  root->record_dict_pointer(dict_pointer);
 }
 
 class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
