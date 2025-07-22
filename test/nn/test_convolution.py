@@ -2440,7 +2440,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 decorators=[onlyCUDA, disablecuDNN],
                 name="cuda_depthwise3d",
             ),
-            # === cudnn ===
+            # === cudnn or miopen ===
             subtest(
                 (
                     (2, 6, 7),
@@ -2448,9 +2448,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     False,
                     3,
                     torch.strided,
-                    torch._C._ConvBackend.Cudnn,
+                    torch._C._ConvBackend.Miopen if torch.version.hip else torch._C._ConvBackend.Cudnn,
                 ),
-                decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen],
+                decorators=[onlyCUDA, skipCUDAIfNoCudnn],
                 name="cudnn1d",
             ),
             subtest(
@@ -2460,9 +2460,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     False,
                     3,
                     torch.strided,
-                    torch._C._ConvBackend.Cudnn,
+                    torch._C._ConvBackend.Miopen if torch.version.hip else torch._C._ConvBackend.Cudnn,
                 ),
-                decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen],
+                decorators=[onlyCUDA, skipCUDAIfNoCudnn],
                 name="cudnn2d",
             ),
             subtest(
@@ -2472,9 +2472,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     False,
                     3,
                     torch.strided,
-                    torch._C._ConvBackend.Cudnn,
+                    torch._C._ConvBackend.Miopen if torch.version.hip else torch._C._ConvBackend.Cudnn,
                 ),
-                decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen],
+                decorators=[onlyCUDA, skipCUDAIfNoCudnn],
                 name="cudnn3d",
             ),
             subtest(
@@ -2484,9 +2484,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     False,
                     3,
                     torch.strided,
-                    torch._C._ConvBackend.CudnnTranspose,
+                    torch._C._ConvBackend.MiopenTranspose if torch.version.hip else torch._C._ConvBackend.CudnnTranspose,
                 ),
-                decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen],
+                decorators=[onlyCUDA, skipCUDAIfNoCudnn],
                 name="cudnn1d_transposed",
             ),
             subtest(
@@ -2496,75 +2496,15 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     False,
                     3,
                     torch.strided,
-                    torch._C._ConvBackend.CudnnTranspose,
+                    torch._C._ConvBackend.MiopenTranspose if torch.version.hip else torch._C._ConvBackend.CudnnTranspose,
                 ),
-                decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen],
+                decorators=[onlyCUDA, skipCUDAIfNoCudnn],
                 name="cudnn2d_transposed",
             ),
             # FIXME: RuntimeError: CUDA out of memory.
             # subtest(((2, 6, 7, 8, 9), True, False, 3, torch.strided, torch._C._ConvBackend.CudnnTranspose),
             #         decorators=[onlyCUDA, skipCUDAIfNoCudnn, skipCUDAIfMiopen], name='cudnn3d_transposed'),
             # === miopen ===
-            subtest(
-                (
-                    (2, 6, 7),
-                    False,
-                    False,
-                    3,
-                    torch.strided,
-                    torch._C._ConvBackend.Miopen,
-                ),
-                decorators=[onlyCUDA, skipCUDAIfNoMiopen],
-                name="miopen1d",
-            ),
-            subtest(
-                (
-                    (2, 6, 7, 8),
-                    False,
-                    False,
-                    3,
-                    torch.strided,
-                    torch._C._ConvBackend.Miopen,
-                ),
-                decorators=[onlyCUDA, skipCUDAIfNoMiopen],
-                name="miopen2d",
-            ),
-            subtest(
-                (
-                    (2, 6, 7, 8, 9),
-                    False,
-                    False,
-                    3,
-                    torch.strided,
-                    torch._C._ConvBackend.Miopen,
-                ),
-                decorators=[onlyCUDA, skipCUDAIfNoMiopen],
-                name="miopen3d",
-            ),
-            subtest(
-                (
-                    (2, 6, 7),
-                    True,
-                    False,
-                    3,
-                    torch.strided,
-                    torch._C._ConvBackend.MiopenTranspose,
-                ),
-                decorators=[onlyCUDA, skipCUDAIfNoMiopen],
-                name="miopen1d_transposed",
-            ),
-            subtest(
-                (
-                    (2, 6, 7, 8),
-                    True,
-                    False,
-                    3,
-                    torch.strided,
-                    torch._C._ConvBackend.MiopenTranspose,
-                ),
-                decorators=[onlyCUDA, skipCUDAIfNoMiopen],
-                name="miopen2d_transposed",
-            ),
             subtest(
                 (
                     (2, 6, 7, 8, 9),
