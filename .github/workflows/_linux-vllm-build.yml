@@ -1,0 +1,169 @@
+name: linux-external-build
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      docker-image-name:
+        required: true
+        type: string
+        description: Name of the base docker image to build with.
+      build-generates-artifacts:
+        required: false
+        type: boolean
+        default: true
+        description: If set, upload generated build artifacts.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+      cuda-arch-list:
+        required: false
+        type: string
+        default: "5.2"
+        description: |
+          List of CUDA architectures CI build should target.
+      runner_prefix:
+        required: false
+        default: ""
+        type: string
+        description: Prefix for runner label
+      runner:
+        required: false
+        type: string
+        default: "linux.2xlarge"
+        description: |
+          Label of the runner this job should run on.
+      s3-bucket:
+        description: S3 bucket to download artifact
+        required: false
+        type: string
+        default: "gha-artifacts"
+      aws-role-to-assume:
+        description: Role to assume for downloading artifacts
+        required: false
+        type: string
+        default: ""
+      disable-monitor:
+        description: |
+          Disable utilization monitoring for build job
+        required: false
+        type: boolean
+        default: false
+      monitor-log-interval:
+        description: |
+          Set the interval for the monitor script to log utilization.
+        required: false
+        type: number
+        default: 5
+      monitor-data-collect-interval:
+        description: |
+          Set the interval for the monitor script to collect data.
+        required: false
+        type: number
+        default: 1
+      build-additional-packages:
+        description: |
+          If set, the build job will also builds these packages and saves their
+          wheels as artifacts
+        required: false
+        type: string
+        default: ""
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
+      SCRIBE_GRAPHQL_ACCESS_TOKEN:
+        required: false
+        description: |
+          FB app token to write to scribe endpoint
+
+    outputs:
+      docker-image:
+        value: ${{ jobs.build.outputs.docker-image }}
+        description: The docker image containing the built PyTorch.
+      test-matrix:
+        value: ${{ jobs.build.outputs.test-matrix }}
+        description: An optional JSON description of what test configs to run later on.
+
+jobs:
+  build:
+    environment: ${{ github.ref == 'refs/heads/main' && 'scribe-protected' || startsWith(github.ref, 'refs/heads/release/') && 'scribe-protected' || contains(github.event.pull_request.labels.*.name, 'ci-scribe') && 'scribe-pr' || '' }}
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
+    runs-on: ${{ inputs.runner_prefix}}${{ inputs.runner }}
+    timeout-minutes: 240
+    outputs:
+      docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            Build is done inside the container, to start an interactive session run:
+              docker exec -it $(docker container ps --format '{{.ID}}') bash
+
+      # [pytorch repo ref]
+      # Use a pytorch/pytorch reference instead of a reference to the local
+      # checkout because when we run this action we don't *have* a local
+      # checkout. In other cases you should prefer a local checkout.
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          role-session-name: gha-linux-build
+          aws-region: us-east-1
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download pytorch build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+          s3-bucket: ${{ inputs.s3-bucket }}
+          use-gha: ${{ inputs.use-gha }}
+
+      - name: Download TD artifacts
+        continue-on-error: true
+        uses: ./.github/actions/download-td-artifacts
+
+      - name: Build external project
+        id: build
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Do not set SCCACHE_S3_KEY_PREFIX to share the cache between all build jobs
+          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_REGION: us-east-1
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+        run: |
+          
