@@ -532,11 +532,6 @@ def unimplemented_v2(
     raise Unsupported(msg)
 
 
-def warning(msg: str) -> None:
-    counters["warnings"][msg] += 1
-    assert msg != os.environ.get("BREAK", False)
-
-
 # KeyError has special handling for its args
 # see https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L2534 for details
 class KeyErrorMsg:
