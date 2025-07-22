@@ -50,12 +50,7 @@ from torch.utils._triton import has_triton_tma_device
 aten = torch.ops.aten
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import (
-    fresh_cache,
-    get_k_splits,
-    run_and_get_code,
-    use_decompose_k_choice,
-)
+from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -1503,7 +1498,6 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(hits(), 4)
             self.assertEqual(misses(), 4)
 
-    @fresh_cache()
     @skipIfXpu
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -1512,42 +1506,19 @@ class TestMaxAutotune(TestCase):
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
         autotune_fallback_to_aten=False,
+        disable_decompose_k=True,
     )
-    @parametrize("num_decompose_k_splits", (0, 5, 20))
-    @parametrize("decompose_k_threshold", (8, 16))
-    def test_max_autotune_decompose_k_envvars(
-        self, num_decompose_k_splits, decompose_k_threshold
-    ):
-        shapes = [(32, 32, 32768), (32, 32, 256)]
-        for M, N, K in shapes:
-            get_k_splits.cache_clear()
-            use_decompose_k_choice.cache_clear()
-            a = torch.randn(M, K, dtype=torch.float16, device="cuda")
-            b = torch.randn(K, N, dtype=torch.float16, device="cuda")
+    def test_max_autotune_disable_decompose_K(self):
+        M, N, K = (32, 32, 32768)
 
-            with config.patch(
-                {
-                    "triton.num_decompose_k_splits": num_decompose_k_splits,
-                    "triton.decompose_k_threshold": decompose_k_threshold,
-                }
-            ):
-                compiled_func = torch.compile(lambda a, b: a @ b)
-                _, code = run_and_get_code(compiled_func, a, b)
+        a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
+        b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
 
-                decompose_count = 0
-                for codegen in code:
-                    if "benchmark_decompose_k_mm" in codegen:
-                        decompose_count += 1
+        compiled_func = torch.compile(lambda a, b: a @ b)
+        out, code = run_and_get_code(compiled_func, a, b)
 
-                if (
-                    K // M < decompose_k_threshold
-                    or K // N < decompose_k_threshold
-                    or num_decompose_k_splits == 0
-                ):
-                    self.assertEqual(decompose_count, 0)
-                else:
-                    self.assertTrue(decompose_count > 0)
-                    self.assertTrue(decompose_count <= num_decompose_k_splits)
+        for codegen in code:
+            FileCheck().check_not("decompose_k").run(codegen)
 
     @skipIfXpu
     @unittest.skipIf(
