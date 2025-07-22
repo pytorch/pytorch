@@ -100,19 +100,20 @@ log = logging.getLogger(__name__)
 triton_name_sub = re.compile(r"^def [^(]+\(")
 
 
-def generate_lookup_hash_from_source_code(source_code: str) -> str:
+def generate_lookup_hash_from_source_code(size_hints_str: str, source_code: str) -> str:
     # Name agnostic + strip white space
     fn_strip_name = re.sub(triton_name_sub, "(", source_code.strip(), count=1)
-    fn_hash = hashlib.sha256(fn_strip_name.encode("utf-8")).hexdigest()
+    hash_str = size_hints_str + fn_strip_name
+    fn_hash = hashlib.sha256(hash_str.encode("utf-8")).hexdigest()
 
     return fn_hash
 
 
-def lookup_autotune_config(fn) -> Optional[Config]:
+def lookup_autotune_config(size_hints, fn) -> Optional[Config]:
     lookup_table = torch._inductor.config.autotune_lookup_table
     cached_config = None
     if len(lookup_table) > 0 and "_fused_" in fn.src:
-        fn_hash = generate_lookup_hash_from_source_code(fn.src)
+        fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
         if fn_hash in lookup_table:
             config_dict = lookup_table[fn_hash]
             block_configs = {k: v for k, v in config_dict.items() if "BLOCK" in k}
@@ -308,7 +309,7 @@ class CachingAutotuner(KernelInterface):
             [] if reset_to_zero_arg_names is None else reset_to_zero_arg_names
         )
         self.optimize_mem = optimize_mem
-        cached_config = lookup_autotune_config(fn)
+        cached_config = lookup_autotune_config(size_hints, fn)
         self.configs = [cached_config] if cached_config else configs
 
         self.heuristic_type = heuristic_type
@@ -588,7 +589,13 @@ class CachingAutotuner(KernelInterface):
         # load binary to the correct device
         with DeviceGuard(device_interface, self.triton_meta["device"]):
             # need to initialize context
-            device_interface.synchronize(device_interface.current_device())
+            with dynamo_timed(
+                "CachingAutotuner.synchronize",
+                # Deliberately avoid overloading pt2_compile_events:
+                log_pt2_compile_event=False,
+            ):
+                device_interface.synchronize(device_interface.current_device())
+
             launchers = []
             exc = None
             for result in self.compile_results:
@@ -1156,6 +1163,11 @@ class CachingAutotuner(KernelInterface):
             config2launcher[best_config] = self._precompile_config(
                 best_config
             ).make_launcher()
+
+        fn_hash = generate_lookup_hash_from_source_code(
+            str(self.size_hints), self.fn.src
+        )
+        log.debug("Function hash %s has best config %s", fn_hash, best_config)
         return config2launcher[best_config]
 
     def get_profiler_kwargs(self, stream, launcher):
@@ -1223,7 +1235,7 @@ class CachingAutotuner(KernelInterface):
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(stream, launcher)
 
-        # PyTorch execution trace replay calls CachingAutotuner::run() instread of calls launcher
+        # PyTorch execution trace replay calls CachingAutotuner::run() instead of calls launcher
         # so _RecordFunctionFast need to capture the args into CachingAutotuner::run()
         # make a copy here to avoid mutating the original args
         args_without_constexprs = tuple(args)
@@ -2290,6 +2302,51 @@ def triton_config_tiled_reduction(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
+def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Config]):
+    tma_min_block_sizes: dict[str, int]
+    if (tma_min_block_sizes := inductor_meta.get("tma_min_block_sizes")) and configs:
+        # Rn blocks are not provided to the kernel for persistent reductions
+        if inductor_meta.get("persistent_reduction"):
+            tma_min_block_sizes = {
+                block_type: block_size
+                for block_type, block_size in tma_min_block_sizes
+                if not prefix_is_reduction(block_type.lower())
+            }
+
+        assert all(
+            block_type in configs[0].kwargs for block_type in tma_min_block_sizes.keys()
+        )
+
+        # Add a config that is guaranteed to compile
+        example_config = configs[0]
+        config_block_sizes = {**example_config.kwargs}
+        config_block_sizes.update(tma_min_block_sizes)
+        new_configs = [
+            Config(
+                config_block_sizes,
+                num_warps=example_config.num_warps,
+                num_stages=example_config.num_stages,
+                maxnreg=example_config.maxnreg,
+                pre_hook=example_config.pre_hook,
+            )
+        ]
+        # Remove configs that will not compile
+        for c in configs:
+            if all(
+                c.kwargs.get(block_type) >= min_block_value
+                for block_type, min_block_value in tma_min_block_sizes.items()
+            ):
+                new_configs.append(c)
+
+        log.debug(
+            "Filtering configs for TMA API restrictions. Input configs size: %d. Output configs size: %d",
+            len(configs),
+            len(new_configs),
+        )
+        return new_configs
+    return configs
+
+
 def pointwise(
     size_hints,
     triton_meta,
@@ -2368,6 +2425,9 @@ def pointwise(
 
     if not configs:
         raise NotImplementedError(f"size_hints: {size_hints}")
+
+    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+
     return cached_autotune(
         size_hints,
         configs,
@@ -2563,6 +2623,7 @@ def reduction(
     assert triton_meta is not None
 
     configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
+    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs=configs,
@@ -2609,6 +2670,7 @@ def cooperative_reduction(
         config.kwargs["RSPLIT"] = split
     # TODO(jansel): add more configs in max_autotune
 
+    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs=configs,
@@ -2695,6 +2757,14 @@ def persistent_reduction(
 
     configs = _persistent_reduction_configs(size_hints, reduction_hint, inductor_meta)
 
+    # This key is not added to the inductor meta as its clear from the heuristic
+    # choice that it is persistent. Add it and remove it below so that persistent
+    # configs can be filtered appropriately by _maybe_filter_configs_for_tma_restrictions
+    persistent_reduction_key = "persistent_reduction"
+    inductor_meta[persistent_reduction_key] = True
+    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    inductor_meta.pop(persistent_reduction_key)
+
     return cached_autotune(
         size_hints,
         configs,
@@ -2731,6 +2801,7 @@ def split_scan(
             if var.startswith("R") and cfg.kwargs[var] < min_rblock:
                 cfg.kwargs[var] = min_rblock
 
+    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs=configs,
