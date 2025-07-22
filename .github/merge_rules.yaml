@@ -76,6 +76,7 @@
   - .github/ci_commit_pins/audio.txt
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
+  - .github/ci_commit_pins/vllm.txt
   - .ci/docker/ci_commit_pins/triton.txt
   approved_by:
   - pytorchbot
