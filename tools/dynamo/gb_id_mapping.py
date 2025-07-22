@@ -25,7 +25,7 @@ def save_registry(reg, path):
 
 def next_gb_id(reg):
     ids = [int(x[2:]) for x in reg if x.startswith("GB") and x[2:].isdigit()]
-    return f"GB{(max(ids, default=0) + 1):04d}"
+    return f"GB{(max(ids, default=-1) + 1):04d}"
 
 
 def clean_string(s):
