@@ -643,15 +643,16 @@ else:
             _mesh_resources.mesh_stack.pop()
 
         def __repr__(self) -> str:
-            mesh_repr = f"DeviceMesh('{self.device_type}', shape: {self.mesh.shape}, stride: {self.mesh.stride()}"
-            if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "") == "DETAIL":
-                mesh_repr += f", Mesh: {self.mesh.tolist()}"
             device_mesh_repr = (
-                f"{mesh_repr})"
-                if not self.mesh_dim_names
-                else f"{mesh_repr}, mesh_dim_names={self.mesh_dim_names})"
+                f"({', '.join(f'{k}={v}' for k, v in zip(self.mesh_dim_names, self.mesh.shape))})"
+                if self.mesh_dim_names
+                else f"{tuple(self.mesh.shape)}"
             )
-            return device_mesh_repr
+            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, device: '{self.device_type}', stride: {self.mesh.stride()}"
+            # We only print the mesh tensor if the debug mode is turned on.
+            if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "") == "DETAIL":
+                device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
+            return f"{device_mesh_repr})"
 
         def __hash__(self):
             # lazily compute hash
