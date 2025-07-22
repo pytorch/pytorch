@@ -1162,12 +1162,9 @@ def rewrite_context_parallel_block_mask(
 
     Q_LEN, KV_LEN = block_mask.seq_lengths
     Q_BLOCK_SIZE, KV_BLOCK_SIZE = block_mask.BLOCK_SIZE
-    # assert Q_LEN == 128
-    # assert KV_LEN == 128
+    # TODO: support other KV block sizes
     assert Q_BLOCK_SIZE == 128
     assert KV_BLOCK_SIZE == 128
-    # TODO: support other KV block sizes
-    assert Q_BLOCK_SIZE == KV_BLOCK_SIZE
     mask_mod = block_mask.mask_mod
 
     # rewrite block_mask's mask_mod
