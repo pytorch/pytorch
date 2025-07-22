@@ -616,6 +616,12 @@ MPSGraphTensorData* getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStre
     id<MTLBuffer> buf = getMTLBufferStorage(tensor);
     result = [[[MPSGraphTensorData alloc] initWithMTLBuffer:buf shape:mpsShape dataType:dataType] autorelease];
   } else {
+    // TODO: Remove me when MacOS-13 support is gone
+    if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)) {
+      TORCH_CHECK(tensor.nbytes() <= std::numeric_limits<uint32_t>::max(),
+                  "MPSGraph does not support 4Gb+ tensors on MacOS-13");
+    }
+
     // create empty NDArray
     MPSNDArrayDescriptor* desc = [MPSNDArrayDescriptor descriptorWithDataType:dataType shape:mpsShape];
     MPSNDArray* emptyArray = [[[MPSNDArray alloc] initWithDevice:mpsStream->device() descriptor:desc] autorelease];
