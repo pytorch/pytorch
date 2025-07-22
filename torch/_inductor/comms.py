@@ -193,8 +193,7 @@ def _reorder_communication_preserving_peak_memory_internal(
         - reordered snodes list
         - dict {snode: ReorderInfo}
     """
-    # Short circuit to not regress compilation time for non distributed cases.
-    has_collectives: bool = False
+    has_collectives = False
     for snode in snodes:
         if contains_collective(snode):
             has_collectives = True
