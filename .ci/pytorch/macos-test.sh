@@ -21,8 +21,11 @@ setup_test_python() {
   # This environment variable makes ProcessGroupGloo default to
   # using the address associated with the loopback interface.
   export GLOO_SOCKET_IFNAME=lo0
-  echo "Ninja version: $(ninja --version)"
   echo "Python version: $(which python) ($(python --version))"
+  python -m pip install -qr requirements-build.txt
+
+  echo "CMake version: $(cmake --version)"
+  echo "Ninja version: $(ninja --version)"
 
   # Set the limit on open file handles to 16384
   # might help with intermittent compiler test failures
