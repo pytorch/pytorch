@@ -50,7 +50,7 @@ aoti_torch_mps_copy_buffer(void* buffer, size_t constant_offset, size_t bytes_re
     auto constant_metal_buffer = (id<MTLBuffer>)constant_buffer;
     auto metal_buffer = (id<MTLBuffer>)buffer;
 
-    const auto* stream = at::mps::getCurrentMPSStream();
+    auto* stream = at::mps::getCurrentMPSStream();
     uint64_t profile_id = at::mps::getMPSProfiler().beginProfileCopy(constant_metal_buffer, metal_buffer, at::OptionalTensorRef(), at::OptionalTensorRef(), data_size, true);
     stream->copy_and_sync(constant_metal_buffer, metal_buffer, data_size, bytes_read, constant_offset, true, profile_id);
   });
