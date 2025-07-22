@@ -6777,8 +6777,6 @@ GPU_TEST_FAILURES = {
 }
 
 MPS_TEST_FAILURES = {
-    # Expected supportedFloatingType(scalar_type) || scalar_type == kInt || scalar_type == kBool
-    "test_index_put_fallback": fail_mps(),
     # aten::_embedding_bag is not currently implemented for the MPS device.
     "test_embedding_bag": fail_mps(),
     # aten::_embedding_bag is not currently implemented for the MPS device.
@@ -6800,12 +6798,9 @@ MPS_TEST_FAILURES = {
     "test_fallback_kernel_with_symexpr_output": fail_mps(),
     "test_while_loop_with_mixed_device": fail_mps(),
     "test_while_loop_nested": fail_mps(),
-    "test_assert_async": fail_mps(),
     "test_index_put_with_none_index": fail_mps(),
     "test_size_from_multi_ouptut": fail_mps(),
     "test_simple_embed_kernel_binary_False": fail_mps(),
-    "test_while_loop_with_mixed_device_dynamic_False": fail_mps(),
-    "test_while_loop_with_mixed_device_dynamic_True": fail_mps(),
     "test_simple_embed_cubin_False": fail_mps(is_skip=True),
     "test_simple_embed_cubin_True": fail_mps(is_skip=True),
     "test_simple_embed_kernel_binary_True": fail_mps(),
