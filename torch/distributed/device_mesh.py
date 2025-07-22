@@ -1011,7 +1011,7 @@ else:
             required for distributed communications behind the scene.
 
         Args:
-            device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
+            device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like", "xpu".
                 Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.
