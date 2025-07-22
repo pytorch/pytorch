@@ -3536,7 +3536,11 @@ class OutputSpec:
 class Layout(OutputSpec):
     """
     Layout base class
+
+    Carries tensor meta-information including offset and
+    whether it is pinned.
     """
+
     def __init__(
         self,
         device: torch.device,
