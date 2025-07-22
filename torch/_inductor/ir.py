@@ -3534,6 +3534,9 @@ class OutputSpec:
 
 @ir_dataclass
 class Layout(OutputSpec):
+    """
+    Layout base class
+    """
     def __init__(
         self,
         device: torch.device,
@@ -3562,9 +3565,12 @@ class Layout(OutputSpec):
             offset = f", offset={self.offset}"
 
         device_index_str = "" if self.device.index is None else f":{self.device.index}"
+        is_pinned_str = ""
+        if self.is_pinned:
+            is_pinned_str = f", is_pinned={self.is_pinned}"
         return (
             f"{type(self).__name__}('{self.device.type}{device_index_str}', {self.dtype}, "
-            f"size={self.size}, stride={self.stride}{offset}, is_pinned={self.is_pinned})"
+            f"size={self.size}, stride={self.stride}{offset}{is_pinned_str})"
         )
 
     __repr__ = __str__
@@ -5122,6 +5128,9 @@ class ConcatKernel(NopKernel):
 
     @classmethod
     def create(cls, inputs: Sequence[IRNode], dim: int) -> StorageBox:
+        """
+        Create the concat kernel from inputs
+        """
         device = inputs[0].get_device()
         dtype = inputs[0].get_dtype()
         new_size = list(inputs[0].get_size())
@@ -6983,8 +6992,12 @@ class DeviceCopy(ExternKernelOut):
 
         developer_warning("DeviceCopy in input program")
         constant_args = (non_blocking,)
-        is_destination_pinned = x.get_device().type == 'cuda' and device.type == 'cpu' and non_blocking
-        is_source_pinned = x.get_device().type == 'cpu' and device.type == 'cuda' and non_blocking
+        is_destination_pinned = (
+            x_device.type == "cuda" and device.type == "cpu" and non_blocking
+        )
+        is_source_pinned = (
+            x_device.type == "cpu" and device.type == "cuda" and non_blocking
+        )
         if is_source_pinned:
             x.get_layout().is_pinned = True
         return DeviceCopy(
