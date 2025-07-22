@@ -485,11 +485,11 @@ class AOTInductorModelContainer {
 #elif USE_MPS
       internal_constants_ptr = constants_blob_ptr;
       aoti_torch_mps_copy_buffer(
+          user_constant_ptr,
           constants_blob_ptr,
-          constants_internal_offset_[idx],
-          offset,
           constant_size,
-          user_constant_ptr);
+          offset,
+          constants_internal_offset_[idx]);
       // For mps tensors, all constants are stored in one buffer, with the
       // offset being where the constant starts. So we want to change the
       // constant tensor's offset to point to constants_internal_offset_[idx]
