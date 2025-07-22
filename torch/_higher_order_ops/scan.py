@@ -301,26 +301,23 @@ class ScanOp(HigherOrderOperator):
             mutated_inputs,
             outputs,
         ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        if len(mutated_inputs) > 0:
+            raise RuntimeError(
+                "For scan, combine_fn cannot have in-place mutations but found "
+                f"{mutated_inputs}-th inputs are mutated."
+            )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("combine_fn", combine_gm)
 
         for idx, arg in enumerate(init):
-            schema_gen.add_arg(f"init{idx}", arg, is_mutated=idx in mutated_inputs)
+            schema_gen.add_arg(f"init{idx}", arg)
 
         for idx, arg in enumerate(xs):
-            xs_idx = len(init) + idx
-            schema_gen.add_arg(f"xs{idx}", arg, is_mutated=xs_idx in mutated_inputs)
+            schema_gen.add_arg(f"xs{idx}", arg)
 
         for idx, arg in enumerate(additional_inputs):
-            additional_idx = len(init) + len(xs) + idx
-            assert additional_idx not in mutated_inputs, (
-                "Lifted additional_inputs cannot be in-place mutated."
-            )
-            schema_gen.add_arg(
-                f"additional_input{idx}",
-                arg,
-            )
+            schema_gen.add_arg(f"additional_input{idx}", arg)
 
         for out in outputs:
             schema_gen.add_output(out)
