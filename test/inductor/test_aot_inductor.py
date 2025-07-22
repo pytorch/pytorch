@@ -2091,7 +2091,6 @@ class AOTInductorTestsTemplate:
             "a": {0: dim0_ab, 1: None},
             "b": {0: dim0_ab, 1: None},
         }
-        inps = prepend_counters(inputs, num_counters=2)
         self.check_model_with_multiple_inputs(
             WhileLoopModels.Nested(),
             prepend_counters(inputs, num_counters=2),
