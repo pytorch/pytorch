@@ -27,6 +27,9 @@ setup_test_python() {
   echo "CMake version: $(cmake --version)"
   echo "Ninja version: $(ninja --version)"
 
+  echo "Python packages:"
+  python -m pip freeze
+
   # Set the limit on open file handles to 16384
   # might help with intermittent compiler test failures
   ulimit -n 16384
@@ -314,6 +317,8 @@ test_timm_perf() {
 
   echo "timm benchmark on mps device completed"
 }
+
+setup_test_python
 
 if [[ $TEST_CONFIG == *"perf_all"* ]]; then
   test_torchbench_perf
