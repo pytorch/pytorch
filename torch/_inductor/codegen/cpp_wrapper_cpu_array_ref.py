@@ -619,6 +619,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             dtype_code,
             device_type,
             device_idx,
+            str(int(is_pinned)),
             f"&{name}_handle",
         ]
 

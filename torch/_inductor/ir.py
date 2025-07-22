@@ -517,6 +517,7 @@ def try_match_insignificant_strides(
         old_layout.size,
         new_stride,
         old_layout.offset,
+        old_layout.is_pinned,
     )
     return TensorBox(ReinterpretView(data=storage, layout=new_layout))
 
@@ -2865,6 +2866,7 @@ class ExpandView(BaseView):
                 list(new_size),
                 new_stride,
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -2911,6 +2913,7 @@ class PermuteView(BaseView):
                 [old_layout.size[i] for i in dims],
                 [old_layout.stride[i] for i in dims],
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -2972,6 +2975,7 @@ class SqueezeView(BaseView):
                 new_size,
                 new_stride,
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -3090,6 +3094,7 @@ class View(GenericView):
                 new_size,
                 FlexibleLayout.contiguous_strides(new_size),
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -3324,6 +3329,7 @@ class DtypeView(BaseView):
                 old_layout.size,
                 old_layout.stride,
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
         return DtypeView(data=x, target_dtype=new_dtype)
@@ -3431,6 +3437,7 @@ class SliceView(View):
                 new_size,
                 new_stride,
                 old_layout.offset + old_layout.stride[dim] * start,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -3547,7 +3554,7 @@ class Layout(OutputSpec):
         self.offset = offset
         self.is_pinned = is_pinned
         # is_pinned implies cpu
-        assert not self.is_pinned or self.device.type == "cpu"
+        assert (not self.is_pinned) or (self.device.type == "cpu")
 
     def __str__(self) -> str:
         offset = ""
@@ -3978,6 +3985,7 @@ class CommBufferLayout(FixedLayout):
             size=fixed.size,
             stride=fixed.stride,
             offset=fixed.offset,
+            is_pinned=fixed.is_pinned,
         )
         self.comm_buffer_type = comm_buffer_type
         self.group_name = group_name
@@ -5659,6 +5667,7 @@ class ExternKernel(InputsKernel):
                 size=x.get_size(),
                 stride=strides,
                 offset=offset,
+                is_pinned=False,
             ),
         )
 
@@ -6974,12 +6983,16 @@ class DeviceCopy(ExternKernelOut):
 
         developer_warning("DeviceCopy in input program")
         constant_args = (non_blocking,)
+        is_destination_pinned = x.get_device().type == 'cuda' and device.type == 'cpu' and non_blocking
+        is_source_pinned = x.get_device().type == 'cpu' and device.type == 'cuda' and non_blocking
+        if is_source_pinned:
+            x.get_layout().is_pinned = True
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
                 dtype=x.get_dtype(),
                 size=x.get_size(),
-                is_pinned=non_blocking,
+                is_pinned=is_destination_pinned,
             ),
             [cls.realize_input(x)],
             constant_args,
@@ -7508,6 +7521,7 @@ class FallbackKernel(ExternKernelAlloc):
             output.dtype,
             convert_shape_to_inductor(output.size()),
             convert_shape_to_inductor(output.stride()),
+            is_pinned=output.is_pinned(),
         )
 
     @classmethod
@@ -7883,6 +7897,7 @@ class StorageBox(MutableBox):
                 device=device,
                 dtype=self.data.get_dtype(),
                 size=self.data.get_size(),
+                is_pinned=False,
             ),
             data=self.data,
         )
@@ -8059,6 +8074,7 @@ class InvokeSubgraph(ExternKernel):
                         size=output.get_size(),
                         stride=output.get_stride(),
                         offset=output.get_layout().offset,
+                        is_pinned=output.get_layout().is_pinned,
                     ),
                     invoke_subgraph,  # type: ignore[has-type]
                     [(list, ind)],
@@ -8188,6 +8204,7 @@ class Conditional(ExternKernel):
                     size=[_maybe_expr(sz) for sz in merged_output.size()],
                     stride=[_maybe_expr(sz) for sz in merged_output.stride()],
                     offset=output.get_layout().offset,
+                    is_pinned=output.get_layout().is_pinned,
                 ),
                 conditional,
                 [(list, i)],
@@ -8415,6 +8432,7 @@ class WhileLoop(ExternKernel):
                     size=output.get_size(),
                     stride=output.get_stride(),
                     offset=output.get_layout().offset,
+                    is_pinned=output.get_layout().is_pinned,
                 ),
                 while_loop,
                 [(list, idx)],

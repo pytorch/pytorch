@@ -13626,6 +13626,47 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 FileCheck().check("cpp_fused_add_0").run(code)
             self.assertEqual(refe_out, test_out)
 
+    @requires_gpu()
+    @parametrize("use_cat", [True, False])
+    def test_copy_non_blocking_is_pinned(self, use_cat):
+        def f(a_list):
+            a_cpu_list = []
+            a_to_cpu_event_list = []
+
+            for a in a_list:
+                a_cpu = a.to(device="cpu", non_blocking=True)
+                a_to_cpu_event = torch.cuda.Event()
+                a_to_cpu_event.record()
+                a_cpu_list.append(a_cpu)
+                a_to_cpu_event_list.append(a_to_cpu_event)
+
+            for e in a_to_cpu_event_list:
+                e.synchronize()
+
+            if use_cat:
+                return torch.cat(a_cpu_list)
+            else:
+                return a_cpu_list
+
+        f_compiled = torch.compile(f)
+        inputs = [torch.rand(1000, dtype=torch.float16, device="cuda") for _ in range(100)]
+        outputs = f(inputs)
+
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as p:
+            outputs_compiled = f_compiled(inputs)
+
+        # outputs_compiled, (code,) = run_and_get_code(f_compiled, inputs)
+        # self.assertTrue("pinned" in code)
+
+        self.assertEqual(outputs, outputs_compiled)
+        profile_output = str(p.key_averages())
+        print(profile_output)
+        self.assertFalse("Pageable" in profile_output)
+
 
 @dataclasses.dataclass
 class TestFailure:

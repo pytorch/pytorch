@@ -45,7 +45,7 @@ Tensor sgd_out_of_place(
   aoti_torch_get_device_type(param.get(), &param_device_type);
 
   AtenTensorHandle out_ath;
-  aoti_torch_empty_strided(param.dim(), param_sizes, param_strides, param_dtype, param_device_type, param.get_device(), &out_ath);
+  aoti_torch_empty_strided(param.dim(), param_sizes, param_strides, param_dtype, param_device_type, param.get_device(), /*is_pinned=*/false, &out_ath);
   auto out = Tensor(out_ath);
 
   sgd_math(

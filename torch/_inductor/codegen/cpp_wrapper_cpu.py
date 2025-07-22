@@ -1595,6 +1595,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             dtype_code,
             device_type,
             device_idx,
+            str(int(is_pinned)),
             f"&{handle_name}",
         ]
 

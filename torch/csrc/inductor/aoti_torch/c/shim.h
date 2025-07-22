@@ -314,6 +314,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided(
     int32_t dtype,
     int32_t device_type,
     int32_t device_index,
+    bool is_pinned,
     AtenTensorHandle* ret_new_tensor // returns new reference
 );
 

@@ -66,6 +66,7 @@ class ArrayRefTensor {
         aoti_torch_dtype<std::remove_const_t<T>>(),
         device_type_,
         device_idx_,
+        /*is_pinned=*/false,
         &result));
     void* dataPtr = nullptr;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(result, &dataPtr));

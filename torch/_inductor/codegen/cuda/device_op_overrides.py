@@ -351,7 +351,8 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                         f"AtenTensorHandle {var_name}_handle;",
                         (
                             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(1, {var_name}_size, {var_name}_stride, "
-                            f"{workspace.generate_dtype_str()}, {device_type}, {device_idx}, &{var_name}_handle));"
+                            f"{workspace.generate_dtype_str()}, {device_type}, {device_idx}, /*is_pinned=*/false, "
+                            f"&{var_name}_handle));"
                         ),
                         f"RAIIAtenTensorHandle {var_name}_tensor({var_name}_handle);",
                         f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({var_name}_tensor.data_ptr());",
