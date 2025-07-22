@@ -263,7 +263,6 @@ def estimate_peak_memory(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
-    skip_comm_estimation: bool = False,
 ) -> tuple[int, list[int]]:
     """
     Given a list of nodes in their execution order, estimate the peak memory, by
@@ -343,15 +342,8 @@ def estimate_peak_memory(
 
     # for each buffer, update memory when created and when freed
     for buf_info in buf_info_list:
-        if (
-            skip_comm_estimation
-            and isinstance(buf_info.buffer, torch._inductor.scheduler.SchedulerBuffer)
-            and isinstance(buf_info.buffer.node, torch._inductor.ir._CollectiveKernel)
-        ):
-            continue
-        else:
-            memory[buf_info.start_step] += buf_info.size_alloc
-            memory[buf_info.end_step + 1] -= buf_info.size_free
+        memory[buf_info.start_step] += buf_info.size_alloc
+        memory[buf_info.end_step + 1] -= buf_info.size_free
 
     # get peak memory by compute the cumulative memories
     max_memory = 0

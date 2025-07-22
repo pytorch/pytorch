@@ -300,7 +300,7 @@ def get_bucketing_plan(
         graph_outputs,
     )
     peak_memory, memories_at_nodes = memory.estimate_peak_memory(
-        snodes, name_to_freeable_input_buf, graph_outputs, skip_comm_estimation=False
+        snodes, name_to_freeable_input_buf, graph_outputs
     )
     assert len(memories_at_nodes) == len(snodes) + 1
 
@@ -418,7 +418,6 @@ def get_bucketing_plan(
                         memory_threshold,
                         heuristic_info["next_step_memory"],
                     )
-                    # print("break_rs_overlap_criteria", break_rs_overlap_criteria, total_comp_time, heuristic_info["this_step_rs_comm"])
                     print("current_ag_bucket", all_gather_plan[-1])
                 release_steps.append(idx + 1)
                 if len(current_rs_bucket) > 0:
