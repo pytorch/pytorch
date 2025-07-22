@@ -2812,7 +2812,8 @@ class InstructionTranslatorBase(
                 context="",
                 explanation="Dynamo does not support tracing classes that are defined in the compiled region.",
                 hints=[
-                    "Move the class definition out of the compiled region.",
+                    "Move the class definition out of the compiled region or set "
+                    "`torch._dynamo.config.enable_trace_load_build_class=True`.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
