@@ -355,7 +355,7 @@ class ProcessGroup:
         self,
         new_ranks: list[int],
         timeout: Optional[timedelta] = None,
-        pg_options: Optional[Backend.Options] = None,
+        opts: Optional[Backend.Options] = None,
         group_name: Optional[str] = None,
         group_desc: Optional[str] = None,
     ) -> Optional[ProcessGroup]: ...

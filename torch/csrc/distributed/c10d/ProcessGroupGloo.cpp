@@ -700,7 +700,7 @@ const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
 c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
     const c10::intrusive_ptr<Store>& store,
     const std::vector<int>& ranks,
-    const c10::intrusive_ptr<Backend::Options> opts) {
+    const c10::intrusive_ptr<Backend::Options>& opts) {
   auto it = std::find(ranks.begin(), ranks.end(), rank_);
   int groupRank;
   if (it == ranks.end()) {
@@ -725,7 +725,7 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
 
 c10::intrusive_ptr<Backend> ProcessGroupGloo::merge(
     const c10::intrusive_ptr<Store>& store,
-    const c10::intrusive_ptr<Backend::Options> opts,
+    const c10::intrusive_ptr<Backend::Options>& opts,
     const int& rank,
     const int& size) {
   auto glooOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);

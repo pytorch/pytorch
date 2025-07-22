@@ -153,8 +153,8 @@ class PyProcessGroup : public ProcessGroup {
 
   c10::intrusive_ptr<ProcessGroup> splitGroup(
       const std::vector<int>& ranks,
-      const std::optional<std::chrono::milliseconds> timeout,
-      const std::optional<c10::intrusive_ptr<Backend::Options>> opts,
+      const std::optional<std::chrono::milliseconds>& timeout,
+      const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
       const std::optional<std::string>& group_name,
       const std::optional<std::string>& group_desc) override {
     PYBIND11_OVERRIDE(

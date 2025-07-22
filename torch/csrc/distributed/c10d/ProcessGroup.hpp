@@ -982,8 +982,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // The current rank must be included in the list of new_ranks.
   virtual c10::intrusive_ptr<ProcessGroup> splitGroup(
       const std::vector<int>& ranks,
-      const std::optional<std::chrono::milliseconds> timeout,
-      const std::optional<c10::intrusive_ptr<Backend::Options>> opts,
+      const std::optional<std::chrono::milliseconds>& timeout,
+      const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
       const std::optional<std::string>& name,
       const std::optional<std::string>& groupDesc);
 

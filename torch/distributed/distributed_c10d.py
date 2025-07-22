@@ -5095,7 +5095,7 @@ def split_group(
     split_pg = parent_pg.split_group(
         my_group,
         timeout=timeout,
-        pg_options=pg_options,
+        opts=pg_options,
         group_name=group_name,
         group_desc=group_desc,
     )
