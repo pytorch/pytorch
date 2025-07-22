@@ -276,7 +276,7 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
+    pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     VISION=yes
