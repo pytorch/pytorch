@@ -1,13 +1,11 @@
 import subprocess
 import os
-import subprocess
-import os
 from typing import Dict
 from vllm_build import build_vllm
 import argparse
 
 
-def main():
+def build():
     parser = argparse.ArgumentParser(description="Build docker images for various targets")
     parser.add_argument("--target", required=True, help="Target to build (e.g., vllm)")
 
@@ -21,4 +19,4 @@ def main():
             print(f"Unknown target: {target}")
             return
 if __name__ == "__main__":
-    main()
+    build()

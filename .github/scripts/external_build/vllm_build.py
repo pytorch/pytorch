@@ -1,10 +1,8 @@
 
 from typing import Dict
-from utils import run, get_pinned_commit, get_env
+from utils import run, get_post_build_pinned_commit, get_env
 import os
 from pathlib import Path
-
-
 
 
 def export_wheels_and_files(
@@ -24,6 +22,7 @@ def export_wheels_and_files(
         "xformers": "/vllm-workspace/xformers-dist",
         "flashinfer": "/vllm-workspace/flashinfer-dist",
     }
+    
     for name, container_path in wheels.items():
         local_path = Path(export_dir) / "wheels" / name
         local_path.mkdir(parents=True, exist_ok=True)
@@ -50,7 +49,7 @@ def build_vllm() -> None:
     sccache_bucket_name=get_env("SCCACHE_BUCKET_NAME", "")
     sccache_region_name = get_env("SCCACHE_REGION_NAME", "")
 
-    commit = get_pinned_commit("vllm")
+    commit = get_post_build_pinned_commit("vllm")
     clone_vllm(commit)
 
     cmd = f"""
@@ -67,7 +66,7 @@ def build_vllm() -> None:
         """
     run(cmd, cwd="vllm")
 
-    # run the the container 
+    # run the the container
     export_wheels_and_files()
 
 
