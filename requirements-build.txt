@@ -1,9 +1,9 @@
 # Build System requirements
-setuptools>=77.0.0,<80.0  # setuptools develop deprecated on 80.0
+setuptools>=70.1.0,<80.0  # setuptools develop deprecated on 80.0
 cmake>=3.27
 ninja
 numpy
-packaging>=24.2
+packaging
 pyyaml
 requests
 six  # dependency chain: NNPACK -> PeachPy -> six
