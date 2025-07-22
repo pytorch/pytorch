@@ -409,7 +409,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
 Tensor fbgemm_linear_fp16_weight_fp32_activation(
     const Tensor& input,
     const Tensor& packed_weight,
-    const Tensor& bias) {
+    const std::optional<Tensor>& bias) {
   TORCH_WARN_ONCE("fbgemm_linear_fp16_weight_fp32_activation is deprecated "
                   "and will be removed in a future PyTorch release.")
 
@@ -430,7 +430,6 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
 
   TORCH_CHECK(input.size(input.dim() - 1) == packed_weight_fp16.numRows())
   TORCH_CHECK(input.dim() >= 2);
-  TORCH_CHECK(bias.dim() == 1);
 
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
@@ -449,7 +448,12 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
       output.data_ptr<float>());
 
   // Add bias term
-  output.add_(bias);
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias);
+  const Tensor& bias_ = *bias_maybe_owned;
+  if (bias_.defined()) {
+    TORCH_CHECK(bias_.dim() == 1);
+    output.add_(bias_);
+  }
 
   return output;
 }
@@ -551,7 +555,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
 Tensor fbgemm_linear_fp16_weight_fp32_activation(
     const Tensor& input,
     const Tensor& packed_weight,
-    const Tensor& bias) {
+    const std::optional<Tensor>& bias) {
   TORCH_WARN_ONCE("fbgemm_linear_fp16_weight_fp32_activation is deprecated "
                   "and will be removed in a future PyTorch release.")
 
