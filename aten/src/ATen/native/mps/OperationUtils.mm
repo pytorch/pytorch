@@ -427,12 +427,22 @@ static MPSNDArray* permuteNDArray(MPSNDArray* inArray, const std::vector<int64_t
   return result;
 }
 
+// Should be called before initWithBuffer to prevent hard crashes with
+// '[MPSNDArray initWithDevice:descriptor:isTextureBacked:] Error: NDArray dimension length > INT_MAX'
+static void check_mps_shape(MPSShape* shape) {
+  for (NSNumber* elem in shape) {
+    const auto val = [elem longValue];
+    TORCH_CHECK(val <= std::numeric_limits<int32_t>::max(), "MPSGaph does not support tensor dims larger than INT_MAX");
+  }
+}
+
 MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes, MPSShape* strides) {
   id<MTLBuffer> srcBuf = getMTLBufferStorage(t);
 
   MPSDataType mpsDataType = getMPSDataType(t.scalar_type());
   MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:mpsDataType shape:sizes];
   srcTensorDesc.preferPackedRows = YES;
+  check_mps_shape(sizes);
   MPSNDArray* srcNDArray = [[[MPSNDArray alloc] initWithBuffer:srcBuf
                                                         offset:t.storage_offset() * t.element_size()
                                                     descriptor:srcTensorDesc] autorelease];
@@ -542,9 +552,9 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   // Tensor is contiguous and has no storage offset.
   // Wrap it directly inside MPSGraphTensorData
   if ((_tensor.is_contiguous() && !_tensor.storage_offset()) || !useMPSStridedAPI || !is_macOS_15_0_or_newer) {
-    _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
-                                                      shape:mpsShape_ ? mpsShape_ : getMPSShape(_tensor)
-                                                   dataType:dataType] autorelease];
+    auto shape = mpsShape_ ? mpsShape_ : getMPSShape(_tensor);
+    check_mps_shape(shape);
+    _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf shape:shape dataType:dataType] autorelease];
   } else {
     IntArrayRef view_shape;
     if (mpsShape_) {
@@ -553,8 +563,11 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
 
     MPSShape* mpsShape = getMPSShape(_tensor);
     MPSShape* mpsStrides = getMPSShape(_tensor.strides());
+    check_mps_shape(mpsShape);
 
     auto storage_numel = src.storage().nbytes() / src.element_size();
+    TORCH_CHECK(storage_numel <= std::numeric_limits<int32_t>::max(),
+                "MPSGaph does not support tensor dims larger than INT_MAX");
     MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType
                                                                                  shape:@[ @(storage_numel) ]];
     srcTensorDesc.preferPackedRows = YES;
