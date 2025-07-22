@@ -1071,6 +1071,91 @@ def placeholder_naming_pass(
                 del constants[name]
 
 
+def output_naming_pass(
+    gm: torch.fx.GraphModule,
+    export_graph_signature: "ExportGraphSignature",
+    mod: torch.nn.Module,
+) -> None:
+    """
+    Rename each output to match the NamedTuple field
+    that produced it and update the export signature.
+    If outputs are named using Dataclass, then context
+    list/tuple is used.
+    """
+    name_map: dict[str, str] = {}
+    out_spec = getattr(mod, "_out_spec", None)
+
+    # Build name_map by picking the i-th field name for spec i.
+    # This way we can handling NamedTuple and Dataclass with multiple names.
+    if out_spec is not None and len(out_spec.children_specs) == 1:
+        ctx = out_spec.children_specs[0].context
+        # NamedTuple case
+        if hasattr(ctx, "_fields"):
+            all_fields = list(ctx._fields)
+        # Dataclass case: context is a list/tuple with first element is a field name
+        elif isinstance(ctx, (list, tuple)) and ctx and isinstance(ctx[0], (list, tuple)):
+            all_fields = list(ctx[0])
+        else:
+            all_fields = []
+
+        if all_fields:
+            for spec, field_name in zip(export_graph_signature.output_specs, all_fields):
+                old = spec.arg.name
+                base = field_name or old or spec.target
+                prefix = placeholder_prefixes.get(spec.kind, "o_")
+                sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
+                candidate = f"{prefix}{sanitized}"
+                _rename_without_collisions(name_map, old, candidate, is_placeholder=True)
+        else:
+            # fallback to one‐to‐one if we couldn't extract any field names
+            for spec in export_graph_signature.output_specs:
+                old = spec.arg.name
+                base = old or spec.target
+                prefix = placeholder_prefixes.get(spec.kind, "o_")
+                sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
+                candidate = f"{prefix}{sanitized}"
+                _rename_without_collisions(name_map, old, candidate, is_placeholder=True)
+    else:
+        # fallback: one output_spec per leaf → simple one‐to‐one
+        for spec in export_graph_signature.output_specs:
+            old = spec.arg.name
+            base = old or spec.target
+            prefix = placeholder_prefixes.get(spec.kind, "o_")
+            sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
+            candidate = f"{prefix}{sanitized}"
+            _rename_without_collisions(name_map, old, candidate, is_placeholder=True)
+
+    # Apply renames into the FX graph
+    for node in gm.graph.nodes:
+        if node.op == "output":
+            new_outs = []
+            for out_node in node.args[0]:
+                if out_node.name in name_map:
+                    out_node.name = name_map[out_node.name]
+                new_outs.append(out_node)
+            node.args = (tuple(new_outs),)
+        elif node.name in name_map:
+            node.name = name_map[node.name]
+
+    # Update the ExportGraphSignature
+    for spec in export_graph_signature.output_specs:
+        spec.arg.name = name_map[spec.arg.name]
+
+    # Patch mod._out_spec for NamedTuple
+    if (
+        out_spec is not None
+        and len(out_spec.children_specs) == 1
+        and hasattr(out_spec.children_specs[0].context, "_fields")
+    ):
+        ctx = out_spec.children_specs[0].context
+        for i, field_name in enumerate(ctx._fields):
+            # set attribute so debugger sees the new names
+            setattr(ctx, field_name, export_graph_signature.output_specs[i].arg.name)
+
+    _name_hoo_subgraph_placeholders(gm)
+    gm.recompile()
+
+
 def remove_proxy_from_state_dict(state_dict: dict, in_place: bool) -> dict:
     """
     If `in_place` is false, return a new copy of `state_dict` with "proxy" removed from `v.__dict__`.
