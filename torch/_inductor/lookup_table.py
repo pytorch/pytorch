@@ -211,7 +211,8 @@ def lookup_template_configs(
             chash = config.get("template_hash")
             if chash is None:
                 log.debug(
-                    "Config %r for template_id %s has no template_hash, so we will keep it and not compare it against provided hash %s",
+                    "Config %r for template_id %s has no template_hash, so we will "
+                    "keep it and not compare it against provided hash %s",
                     config,
                     template_id,
                     template_hash,
