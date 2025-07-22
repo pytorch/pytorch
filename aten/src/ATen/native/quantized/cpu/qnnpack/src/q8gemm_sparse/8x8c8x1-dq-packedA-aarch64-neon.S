@@ -31,11 +31,11 @@
 
 #  Args passed via stack.
 #  TOS
-#  |-----------|
-#  |c_stride   | 0
-#  |out ch indx| 8
-#  |params     | 16
-#  |-----------|
+#  |------------|
+#  |c_stride    | 0
+#  |out ch index| 8
+#  |params      | 16
+#  |------------|
 
 # void pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w##W_INDEX_DTYPE_NUM_BITS##__aarch64_neon(
 #     size_t mr,

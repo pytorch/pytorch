@@ -78,8 +78,19 @@ def get_freeable_input_buf(
         A dictionary containing all freeble input buffers, keyed by their names.
     """
 
+    # this function is copied from torch/_inductor/scheduler.py
+    # TODO: would be nice to remove the try/except block for both places
     def _dep_size_hint(dep: Dep) -> int:
-        return V.graph.get_dep_size_hint(dep)
+        res = 0
+        try:
+            if not dep.has_unbacked_symbols():
+                res = dep.numbytes_hint()
+        except KeyError:
+            # In at least one test (test/inductor/test_torchbind.py) we
+            # create a StarDep that doesn't exist in the graph and calling
+            # `has_unbacked_symbols()` throws an error.
+            pass
+        return res
 
     # get freeable input buffers' successor nodes and their sizes
     # note that different deps can have the same name, so we use name as keys
@@ -252,6 +263,7 @@ def estimate_peak_memory(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
+    skip_comm_estimation: bool = False,
 ) -> tuple[int, list[int]]:
     """
     Given a list of nodes in their execution order, estimate the peak memory, by
@@ -327,11 +339,19 @@ def estimate_peak_memory(
 
     # incremental memory changes at each step
     memory = [0 for _ in range(len(nodes) + 1)]
+    import torch
 
     # for each buffer, update memory when created and when freed
     for buf_info in buf_info_list:
-        memory[buf_info.start_step] += buf_info.size_alloc
-        memory[buf_info.end_step + 1] -= buf_info.size_free
+        if (
+            skip_comm_estimation
+            and isinstance(buf_info.buffer, torch._inductor.scheduler.SchedulerBuffer)
+            and isinstance(buf_info.buffer.node, torch._inductor.ir._CollectiveKernel)
+        ):
+            continue
+        else:
+            memory[buf_info.start_step] += buf_info.size_alloc
+            memory[buf_info.end_step + 1] -= buf_info.size_free
 
     # get peak memory by compute the cumulative memories
     max_memory = 0

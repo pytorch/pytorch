@@ -72,15 +72,36 @@ class CommPerfCache:
     def __init__(self, threshold=3000):
         self.cache = {}
         self.threshold = threshold
+        self.ag_max_inp_size = -1
+        self.rs_max_out_size = -1
 
     def _calculate_distance(self, size1, size2):
         word_size1 = get_data_size(size1)
         word_size2 = get_data_size(size2)
         return abs(word_size1 - word_size2)
 
+    def _update_max_size(self):
+        for k in self.cache.keys():
+            if k[2] == "torch.ops._c10d_functional.all_gather_into_tensor.default":
+                self.ag_max_inp_size = max(
+                    self.ag_max_inp_size, get_data_size(list(k[0]))
+                )
+            if k[2] == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
+                self.rs_max_out_size = max(
+                    self.rs_max_out_size, get_data_size(list(k[1]))
+                )
+
     def add_comm_time(self, tensor_input_size, tensor_output_size, comm_func, value):
         key = (tuple(tensor_input_size), tuple(tensor_output_size), comm_func)
         self.cache[key] = value
+        if comm_func == "torch.ops._c10d_functional.all_gather_into_tensor.default":
+            self.ag_max_inp_size = max(
+                self.ag_max_inp_size, get_data_size(tensor_input_size)
+            )
+        if comm_func == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
+            self.rs_max_out_size = max(
+                self.rs_max_out_size, get_data_size(tensor_output_size)
+            )
 
     def get_comm_time(
         self, tensor_input_size, tensor_output_size, comm_func, calibrated=False
@@ -97,7 +118,7 @@ class CommPerfCache:
         closest_distance = float("inf")
 
         for k in self.cache.keys():
-            if k[2] == comm_func:  # Check if comm_func matches
+            if k[2] == comm_func:
                 input_distance = self._calculate_distance(tensor_input_size, k[0])
                 output_distance = self._calculate_distance(tensor_output_size, k[1])
                 total_distance = input_distance + output_distance
@@ -112,7 +133,7 @@ class CommPerfCache:
         if closest_key:
             return self.cache[closest_key]
 
-        return None  # Return None if no suitable match is found
+        return None
 
 
 class CompPerfCache:

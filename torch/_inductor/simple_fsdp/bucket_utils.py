@@ -37,7 +37,6 @@ def has_reduce_scatter_in_nodes(snodes: list["scheduler.BaseSchedulerNode"]) -> 
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
         ):
             return True
-
     return False
 
 
@@ -323,7 +322,7 @@ def bucket_all_gathers(
     )
     if return_ag_only:
         assert len(all_gather_into_tensor_out.inputs) == 1
-        return all_gather_into_tensor_out, all_gather_input, all_gather_output
+        return all_gather_input, all_gather_output, all_gather_into_tensor_out
 
     wait_tensor = schedule_fallback_operation(
         torch.ops._c10d_functional.wait_tensor.default,
@@ -370,8 +369,8 @@ def bucket_reduce_scatters(
     reduce_op: Any,
     rs_input_ir_nodes: list["ir.IRNode"],
     orig_rs_snodes: list["scheduler.BaseSchedulerNode"],
-    orig_wait_snodes: list["scheduler.BaseSchedulerNode"],
     name_to_buf: Dict[str, "scheduler.SchedulerBuffer"],
+    orig_wait_snodes: list["scheduler.BaseSchedulerNode"] = None,
     return_rs_only: bool = False,
 ):
     orig_rs_fx_nodes = [
@@ -448,8 +447,8 @@ def bucket_reduce_scatters(
     )
 
     if return_rs_only:
-        assert len(reduce_scatter_tensor.inputs[0]) == 1
-        return reduce_scatter_tensor.inputs[0]
+        assert len(reduce_scatter_tensor.inputs) == 1
+        return reduce_scatter_tensor.inputs[0].inputs[0], reduce_scatter_tensor
 
     wait_tensor = schedule_fallback_operation(
         torch.ops._c10d_functional.wait_tensor.default,
