@@ -131,7 +131,7 @@ def aot_stage1_graph_capture(
     def orig_flat_fn2(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
         out = orig_flat_fn(*args)
         out_descs: list[AOTOutput] = type(out)(  # type: ignore[assignment]
-            PlainAOTOutput(i)
+            PlainAOTOutput(i)  # type: ignore[misc]
             for i in range(len(out))  # type: ignore[misc]
         )
         return out, out_descs
