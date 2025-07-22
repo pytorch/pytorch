@@ -92,7 +92,7 @@ Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
   if (value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true) {
     return self;
   }
-  if (c10::elementSize(self.scalar_type()) && fill_mps_tensor_(self, value.toByte())) {
+  if (c10::elementSize(self.scalar_type()) == 1 && fill_mps_tensor_(self, value.toByte())) {
     return self;
   }
 
