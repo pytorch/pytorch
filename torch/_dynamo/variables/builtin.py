@@ -1343,8 +1343,8 @@ class BuiltinVariable(VariableTracker):
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs, exc=_NOTHING):
             unimplemented_v2(
-                gb_type="invalid call to __build_class__",
-                context=f"invalid args to __build_class__: {args} {kwargs}",
+                gb_type="Invalid call to __build_class__",
+                context=f"Non-constant args to __build_class__: {args} {kwargs}",
                 explanation="Encountered TypeError when trying to handle op __build_class__",
                 hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=exc,

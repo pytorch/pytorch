@@ -705,6 +705,32 @@ from user code:
     class Foo:""",
         )
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class__(self):
+        x = 3
+        def fn():
+            class Foo:
+                def __init__(self):
+                    self.x = x
+
+            return Foo
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Invalid call to __build_class__
+  Explanation: Encountered TypeError when trying to handle op __build_class__
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: Non-constant args to __build_class__: (NestedUserFunctionVariable(), ConstantVariable(str: 'Foo')) {}
+
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    class Foo:""",
+        )
+
     @skipIfNotPy312
     def test_unsupported_bytecode(self):
         async def fn():
