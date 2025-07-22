@@ -2236,7 +2236,7 @@ def torchscript(model, example_inputs, verbose=False):
     return None
 
 
-def getfile(obj):
+def getfile(obj: Any) -> Optional[str]:
     try:
         return inspect.getfile(obj)
     except (TypeError, OSError):
@@ -2438,6 +2438,15 @@ def is_int_specialization_case(value, source):
         or (
             source.guard_source().is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
+        )
+        # integers coming from FSDP modules are considered static. This is
+        # purely empirical and perhaps we should have a better heuristic.
+        or (
+            source.guard_source().is_fsdp_module()
+            and not (
+                config.allow_unspec_int_on_nn_module
+                or config.allow_unspec_int_on_fsdp_module
+            )
         )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()

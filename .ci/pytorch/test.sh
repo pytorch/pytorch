@@ -201,7 +201,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
-  pip_install "ninja==1.11.1.4"
+  pip_install "ninja==1.10.2"
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
@@ -343,6 +343,12 @@ test_h100_symm_mem() {
   time python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nccl.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
+}
+
+test_h100_cutlass_backend() {
+  # cutlass backend tests for H100
+  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_backend -k "not addmm" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_evt $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
 test_lazy_tensor_meta_reference_disabled() {
@@ -1769,6 +1775,8 @@ elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem
+elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
+  test_h100_cutlass_backend
 else
   install_torchvision
   install_monkeytype
