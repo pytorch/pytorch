@@ -15,13 +15,18 @@ from typing import Callable
 from parameterized import parameterized_class
 
 import torch
+import torch._inductor.config
 from torch._inductor.codecache import get_kernel_bin_format
-from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
+from torch._inductor.package import load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_cache
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
-from torch.export.pt2_archive._package import load_pt2, load_weights_to_pt2_contents
+from torch.export.pt2_archive._package import (
+    AOTICompiledModel,
+    load_pt2,
+    load_weights_to_pt2_contents,
+)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -359,6 +364,7 @@ class TestAOTInductorPackage(TestCase):
     )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfXpu  # build system may be different
+    @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_after_package_static(self):
         # compile_standalone will set package_cpp_only=True
         self.check_package_cpp_only()
@@ -415,12 +421,46 @@ class TestAOTInductorPackage(TestCase):
             with self.assertRaisesRegex(Exception, "Invalid AOTI model name"):
                 self.cmake_compile(model, example_inputs, options, "")
 
+    @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @skipIfXpu  # build system may be different
+    @torch._inductor.config.patch("test_configs.use_libtorch", True)
+    def test_compile_standalone_cos(self):
+        # compile_standalone will set package_cpp_only=True
+        self.check_package_cpp_only()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return torch.cos(x)
+
+        with torch.no_grad():
+            example_inputs = (torch.randn(8, 32, device=self.device),)
+            model = Model().to(device=self.device)
+
+            # Test compilation when model name is passed in
+            options = {
+                "aot_inductor.compile_standalone": True,
+                "aot_inductor.model_name_for_generated_files": "cos",
+            }
+            with (
+                tempfile.TemporaryDirectory() as tmp_dir,
+            ):
+                build_path, _ = self.cmake_compile(
+                    model, example_inputs, options, tmp_dir
+                )
+                # Check if the .a file was build successfully
+                a_path = build_path / "libcos.a"
+                self.assertTrue(a_path.exists())
+
     @unittest.skipIf(
         _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
     )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfRocm  # doesn't support multi-arch binary
     @skipIfXpu  # doesn't support multi-arch binary
+    @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter(self):
         self.check_package_cpp_only()
 
