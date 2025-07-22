@@ -1260,9 +1260,7 @@ class ListIteratorVariable(IteratorVariable):
         return self.items[old_index]
 
     def call_obj_hasattr(self, tx, name):
-        return variables.ConstantVariable.create(
-            hasattr(iter([]), name)
-        )
+        return variables.ConstantVariable.create(hasattr(iter([]), name))
 
     def python_type(self):
         return type(iter([]))

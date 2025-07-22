@@ -2720,7 +2720,9 @@ class InstructionTranslatorBase(
             # Use __iter__ as fallback
             self.push(
                 self.inline_user_function_return(
-                    VariableTracker.build(self, impl_CONTAINS_OP_fallback), [left, right], {}
+                    VariableTracker.build(self, impl_CONTAINS_OP_fallback),
+                    [left, right],
+                    {},
                 )
             )
         if op == 1:
