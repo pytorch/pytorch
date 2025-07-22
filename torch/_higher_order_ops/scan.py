@@ -309,15 +309,17 @@ class ScanOp(HigherOrderOperator):
             schema_gen.add_arg(f"init{idx}", arg, is_mutated=idx in mutated_inputs)
 
         for idx, arg in enumerate(xs):
-            init_idx = len(init) + idx
-            schema_gen.add_arg(f"xs{idx}", arg, is_mutated=init_idx in mutated_inputs)
+            xs_idx = len(init) + idx
+            schema_gen.add_arg(f"xs{idx}", arg, is_mutated=xs_idx in mutated_inputs)
 
         for idx, arg in enumerate(additional_inputs):
             additional_idx = len(init) + len(xs) + idx
+            assert additional_idx not in mutated_inputs, (
+                "Lifted additional_inputs cannot be in-place mutated."
+            )
             schema_gen.add_arg(
                 f"additional_input{idx}",
                 arg,
-                is_mutated=additional_idx in mutated_inputs,
             )
 
         for out in outputs:

@@ -9,8 +9,8 @@ from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
-    first_slice_copy,
     check_input_alias_and_mutation_return_outputs,
+    first_slice_copy,
     reenter_make_fx,
 )
 from torch._ops import HigherOrderOperator
@@ -65,19 +65,21 @@ class MapImpl(HigherOrderOperator):
             mutated_inputs,
             outputs,
         ) = check_input_alias_and_mutation_return_outputs(f_gm, example_inputs)
+        if len(mutated_inputs) > 0:
+            raise RuntimeError(
+                "For map, combine_fn cannot have in-place mutations but found "
+                f"{mutated_inputs}-th inputs are mutated."
+            )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("f", f_gm)
 
         for idx, x in enumerate(xs):
             # Check if this input is mutated in the mapped function
-            schema_gen.add_arg(f"xs{idx}", x, is_mutated=idx in mutated_inputs)
+            schema_gen.add_arg(f"xs{idx}", x)
 
         for idx, arg in enumerate(pos_args):
-            pos_idx = len(xs) + idx
-            schema_gen.add_arg(
-                f"pos_args{idx}", arg, is_mutated=pos_idx in mutated_inputs
-            )
+            schema_gen.add_arg(f"pos_args{idx}", arg)
 
         for out in outputs:
             schema_gen.add_output(out)

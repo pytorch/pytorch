@@ -8763,7 +8763,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """while_loop(Any cond_fn, Any body_fn, Tensor carried_input0, Tensor carried_input1) -> (Tensor, Tensor)""",  # noqa: B950
+            """while_loop(Any cond_fn, Any body_fn, Tensor carried_input0, Tensor carried_input1) -> (Tensor, Tensor)""",
         )
 
     def test_while_loop_gen_schema_with_additional_inputs(self):
@@ -8781,7 +8781,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """while_loop(Any cond_fn, Any body_fn, Tensor carried_input0, Tensor carried_input1, Tensor additional_input0) -> ((Tensor, Tensor))""",  # noqa: B950
+            """while_loop(Any cond_fn, Any body_fn, Tensor carried_input0, Tensor carried_input1, Tensor additional_input0) -> (Tensor, Tensor)""",  # noqa: B950
         )
 
     def test_scan_gen_schema_tensor_inputs(self):
@@ -8826,7 +8826,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1) -> ((Tensor, Tensor, Tensor, Tensor))""",  # noqa: B950
+            """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1) -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
         )
 
     def test_associative_scan_gen_schema_tensor_inputs(self):
