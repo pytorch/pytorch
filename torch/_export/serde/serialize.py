@@ -143,6 +143,8 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.bfloat16: ScalarType.BFLOAT16,
     torch.float8_e4m3fn: ScalarType.FLOAT8E4M3FN,
     torch.float8_e5m2: ScalarType.FLOAT8E5M2,
+    torch.float8_e4m3fnuz: ScalarType.FLOAT8E4M3FNUZ,
+    torch.float8_e5m2fnuz: ScalarType.FLOAT8E5M2FNUZ,
 }
 
 
@@ -1408,7 +1410,7 @@ class GraphModuleSerializer(metaclass=Final):
                 assert isinstance(
                     return_schema.real_type, (torch.OptionalType, torch.TensorType)
                 )
-                # When the return type is annoated as Tensor type, the op can also return an
+                # When the return type is annotated as Tensor type, the op can also return an
                 # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=True))
             elif isinstance(meta, FakeTensor):
@@ -2057,7 +2059,7 @@ class GraphModuleDeserializer(metaclass=Final):
             _additional_msg = (
                 (
                     f"We failed to resolve {target} to an operator. "
-                    + "If it's a custom op/custom triton op, this is usally because the custom op is not registered"
+                    + "If it's a custom op/custom triton op, this is usually because the custom op is not registered"
                     + " when deserializing. Please import the custom op to register it before deserializing."
                     + " Otherwise, please file an issue on github."
                 )
@@ -2887,7 +2889,7 @@ def _dataclass_to_dict(obj):
             return "Infinity"
         elif obj == -math.inf:
             return "-Infinity"
-        elif obj == math.nan:
+        elif math.isnan(obj):
             return "NaN"
         else:
             return obj
