@@ -43,13 +43,20 @@ import torch.library
 import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import CompileCounter, rand_strided, same, skipIfPy312
+from torch._dynamo.testing import (
+    CompileCounter,
+    rand_strided,
+    same,
+    skipIfNotPy312,
+    skipIfPy312,
+)
 from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
+    SM70OrLater,
     TEST_CUDA,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -956,6 +963,7 @@ class LRUCacheWarningTests(LoggingTestCase):
 
         @torch.compile(backend="eager")
         def f(x):
+            torch.get_device_module()
             x = x.cos().sin()
             return x
 
@@ -2034,8 +2042,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             ref0 = fn(x)
             ref1 = fn(x)
 
-            random.seed(0)
             opt_fn = torch.compile(fn, backend="eager")
+            # Especially for internal usage, there are many calls to random functions
+            # on first compile, e.g., from various library initializations. Run once
+            # to get that out of the way before resetting the seed:
+            opt_fn(x)
+
+            random.seed(0)
             res0 = opt_fn(x)
             res1 = opt_fn(x)
 
@@ -3939,7 +3952,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(17, (12,), out2)
 
     @requires_cuda
-    @serialTest
+    @serialTest()
     def test_mem_leak_guards(self):
         def gn(x0, x):
             return x0 * x
@@ -5838,6 +5851,10 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
 
+    @unittest.skipIf(
+        not SM70OrLater,
+        "Triton only supports devices of CUDA capability >= 7.0",
+    )
     def test_add_complex_conj(self):
         def f(x):
             return x + x.conj()
@@ -6158,7 +6175,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(out_ref, out_test)
 
     @requires_cuda
-    # This test will fail as flip in combination with particular input lenghts
+    # This test will fail as flip in combination with particular input lengths
     # produces weird results.
     # This is under investigations in
     # https://github.com/pytorch/pytorch/issues/131805
@@ -6916,6 +6933,8 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         torch._dynamo.utils.clear_compilation_metrics()
 
+    # https://github.com/pytorch/pytorch/issues/156580
+    @serialTest()
     def test_dont_dce_rand(self):
         # https://github.com/pytorch/pytorch/issues/143431
         def f(image_latent):
@@ -6977,6 +6996,38 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         c = "foobar"
         self.assertEqual(f(x, c), opt_f(x, c))
 
+    def test_nn_param_freevar_codegen(self):
+        class Model2(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3)
+                self.batchnorm = nn.BatchNorm2d(num_features=5)
+                self.conv_weight = torch.randn(5, 3, 3, 3)
+                self.conv_bias = torch.randn(5)
+
+            def forward(self, x):
+                self.conv.weight = nn.Parameter(self.conv_weight)
+                self.conv.bias = nn.Parameter(self.conv_bias, requires_grad=False)
+                self.conv.eval()
+                x = self.conv(x)
+                x = self.batchnorm(x)
+                x = F.relu(x)
+                return x
+
+        input_tensor = torch.randn(1, 3, 10, 10)
+        func = Model2().to("cpu")
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        with torch.no_grad():
+            func.train(False)
+            v1 = func(input_tensor)
+            jit_func = torch.compile(wrapper, backend="eager", fullgraph=True)
+            v2 = jit_func(input_tensor)
+            self.assertEqual(v1, v2)
+
     def test_amp_foreach_fake_impl(self):
         inv_scale = torch.full((1,), 0.25)
         found_inf = torch.full((1,), 0.0)
@@ -7014,6 +7065,74 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             fn(torch.ones(3))
+
+    def test_nanmean_out(self):
+        def f(x, out):
+            torch.nanmean(x, out=out)
+
+        x = torch.randn(4)
+        out_ref = torch.tensor(0.0)
+        out_res = torch.tensor(0.0)
+
+        f(x, out_ref)
+        torch.compile(f, backend="eager", fullgraph=True)(x, out_res)
+        self.assertEqual(out_ref, out_res)
+
+    @skipIfNotPy312
+    def test_sys_monitoring(self):
+        found_dynamo = False
+        found_compiled_graph = False
+        compiled_graph = None
+
+        def backend(gm, _):
+            nonlocal compiled_graph
+            compiled_graph = gm
+            return gm
+
+        def callback(code, offset):
+            nonlocal found_dynamo
+            nonlocal found_compiled_graph
+            torch._dynamo.graph_break()
+            if (
+                code
+                is torch._dynamo.symbolic_convert.InstructionTranslator.run.__code__
+            ):
+                found_dynamo = True
+            elif compiled_graph and code is compiled_graph.__call__.__code__:
+                found_compiled_graph = True
+
+        sys.monitoring.use_tool_id(0, "test")
+        old_callback = sys.monitoring.register_callback(
+            0, sys.monitoring.events.PY_START, callback
+        )
+        sys.monitoring.set_events(0, sys.monitoring.events.PY_START)
+        try:
+
+            @torch.compile(backend=backend, fullgraph=True)
+            def fn(x):
+                return x + 1
+
+            fn(torch.ones(3))
+            # sys.monitoring should still run in Python dynamo
+            self.assertTrue(found_dynamo)
+            # sys.monitoring should still run on the compiled graph
+            self.assertTrue(found_compiled_graph)
+        finally:
+            sys.monitoring.register_callback(
+                0, sys.monitoring.events.PY_START, old_callback
+            )
+
+    def test_unbind_copy_out(self):
+        def f(eye, out):
+            torch.unbind_copy(eye, out=out)
+
+        eye = torch.eye(3)
+        out_ref = (torch.zeros(3), torch.zeros(3), torch.zeros(3))
+        out_res = (torch.zeros(3), torch.zeros(3), torch.zeros(3))
+
+        f(eye, out_ref)
+        torch.compile(f, backend="eager", fullgraph=True)(eye, out_res)
+        self.assertEqual(out_ref, out_res)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -7392,7 +7511,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # *are* saved for backward, and become back inputs.
         # The easier-to-test thing I'm checking for here is that the recompute
         # on primals_2 happens in the backward. With the recompute,
-        # there are 5 _to_copy ops in the backwrad. Without it, there are 4
+        # there are 5 _to_copy ops in the backward. Without it, there are 4
         # (aka if you set torch._functorch.config.treat_parameters_as_free_to_save = False)
         self.assertEqual(mode.ops_counter[torch.ops.aten._to_copy.default], 5)
 
@@ -7504,6 +7623,81 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         with mock.patch("torch.cuda.is_initialized", lambda: False):
             self.assertEqual(f(inp), inp + 2)
+
+    def test_named_tuple_vt_clone(self):
+        # https://github.com/pytorch/pytorch/issues/157945
+        class SVDCompressor(nn.Module):
+            def __init__(self, k=10):
+                super().__init__()
+                self.k = k
+
+            def forward(self, x):
+                U, S = torch.linalg.svd(x)[:2]
+                reduced = U[:, :, : self.k] @ torch.diag_embed(S[:, : self.k])
+                return reduced
+
+        input = torch.randn(4, 8, 6)
+        model = SVDCompressor(k=5)
+
+        out1 = model(input.clone())
+        out2 = torch.compile(model, backend="eager")(input.clone())
+        self.assertEqual(out1, out2)
+
+    def test_filter_warnings(self):
+        x = torch.ones(2, 2, requires_grad=True)
+
+        def call_foobar(x):
+            warnings.warn("foobar")
+
+        @torch.compile(backend="eager")
+        def f(x):
+            call_foobar(x)
+            call_foobar(x)
+            call_foobar(x)
+            call_foobar(x)
+            return call_foobar(x)
+
+        with warnings.catch_warnings(record=True) as w:
+            f(x)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "foobar")
+
+    def test_filter_safe_grad_warning(self):
+        x = torch.ones(2, 2, requires_grad=True)
+        y = x * 5  # non-leaf, .grad should warn
+        torch._subclasses.meta_utils.safe_grad(y)  # filters out warning
+
+        def unsafe_grad(y):
+            return y.grad
+
+        with warnings.catch_warnings(record=True) as w:
+            unsafe_grad(y)  # should still warn, different callsite
+            self.assertEqual(len(w), 1)
+            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
+
+            unsafe_grad(y)  # should not warn
+            self.assertEqual(len(w), 1)
+
+    def test_filter_user_warnings(self):
+        x = torch.ones(2, 2, requires_grad=True)
+        y = x * 5  # non-leaf, .grad should warn
+
+        @torch._dynamo.eval_frame.TorchPatcher.suppress_torch_distributed_warnings
+        def mute_warn(y):
+            return y.grad
+
+        mute_warn(y)  # filters out warning
+
+        def unsafe_grad(y):
+            return y.grad
+
+        with warnings.catch_warnings(record=True) as w:
+            unsafe_grad(y)  # should still warn, different callsite
+            self.assertEqual(len(w), 1)
+            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
+
+            unsafe_grad(y)  # should not warn
+            self.assertEqual(len(w), 1)
 
 
 instantiate_parametrized_tests(ReproTests)

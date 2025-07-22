@@ -306,6 +306,11 @@ class SuperVariable(VariableTracker):
         ):
             return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
         elif (
+            isinstance(self.objvar, variables.UserDefinedSetVariable)
+            and inner_fn in self.objvar._set_methods
+        ):
+            return self.objvar._set_vt.call_method(tx, name, args, kwargs)
+        elif (
             isinstance(self.objvar, variables.UserDefinedTupleVariable)
             and inner_fn in tuple_methods
         ):
@@ -1006,7 +1011,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                assert tx.one_graph, (
+                assert tx.one_graph or tx.error_on_graph_break, (
                     "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 )
                 return variables.UserFunctionVariable(

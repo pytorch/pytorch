@@ -10,7 +10,9 @@ from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen.cuda.cutlass_cache import maybe_fetch_ops
+from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.select_algorithm import create_inputs_key
 from torch._inductor.utils import clear_on_fresh_cache
@@ -34,7 +36,12 @@ from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
 from .cutlass_presets import gen_cutlass_presets
 from .cutlass_python_evt import CutlassEVTCodegen, scaled_mm_evt
-from .cutlass_utils import torch_dtype_to_cutlass_type
+from .cutlass_utils import (
+    ACCUMULATOR_DTYPES,
+    dtype_match,
+    torch_dtype_to_cutlass_type,
+    XW_DTYPES,
+)
 
 
 GemmOperation = Any
@@ -556,12 +563,33 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         """
 
         ops = self.gen_ops()
-        for name, op in ops:
-            for swizzle in inductor_cuda_config.cutlass_max_profiling_swizzle_options:
-                description = f"{name} swizzle={swizzle}"
-                self.maybe_append_choice(
-                    choices, description=description, op=op, swizzle=swizzle
-                )
+
+        # pre-computation
+        layout_repr: str = str(layout)
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]] = (
+            TensorMeta.from_irnodes(self.input_nodes)
+        )
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]] = (
+            TensorMeta.from_irnodes(self.output_node)
+        )
+
+        with dynamo_timed("CUTLASSGemmTemplate.maybe_append_choice"):
+            for name, op in ops:
+                for (
+                    swizzle
+                ) in inductor_cuda_config.cutlass_max_profiling_swizzle_options:
+                    description = f"{name} swizzle={swizzle}"
+                    self.maybe_append_choice(
+                        choices,
+                        op=op,
+                        name=name,
+                        description=description,
+                        input_key=self.cache_key,
+                        layout_repr=layout_repr,
+                        input_tensor_meta=input_tensor_meta,
+                        output_tensor_meta=output_tensor_meta,
+                        swizzle=swizzle,
+                    )
 
         if len(ops) == 0:
             input_layouts = [node.get_layout() for node in input_nodes]
@@ -654,6 +682,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     ) -> bool:
         """Helper Method: Determines whether a given torch layout matches a given Cutlass layout"""
         return CUTLASSGemmTemplate.cutlass_layout(torch_layout) == cutlass_layout
+
+    @staticmethod
+    def set_layout(tensor_desc: "TensorDescription", torch_layout: ir.Layout) -> None:  # type: ignore[name-defined]  # noqa: F821
+        """
+        Helper method: Sets the layout of a given tensor description to match the given torch layout
+        """
+        if CUTLASSGemmTemplate.layout_match(torch_layout, tensor_desc.layout):
+            return
+        tensor_desc.layout = CUTLASSGemmTemplate.cutlass_layout(torch_layout)
 
     @staticmethod
     def set_alignment(torch_layout, op_element) -> bool:
@@ -796,6 +833,53 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         return True
 
+    @classmethod
+    def global_filter_ops(
+        cls,
+        ops: list["cutlass_library.gemm_op.GemmOperation"],  # type: ignore[name-defined]  # noqa: F821
+    ) -> list["cutlass_library.gemm_op.GemmOperation"]:  # type: ignore[name-defined]  # noqa: F821
+        """
+        Filter ops without using information about the torch op, input nodes and output node.
+        """
+        assert cutlass_utils.try_import_cutlass()
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+
+        # Skip simt kernels
+        ops = [
+            op
+            for op in ops
+            if op.tile_description.math_instruction.opcode_class
+            != cutlass_lib.OpcodeClass.Simt
+        ]
+
+        # only keep the set of row x column ops
+        # for other layout, we modify in place in filter_op, after deepcopy
+        ops = [
+            op
+            for op in ops
+            if op.A.layout.name == "RowMajor" and op.B.layout.name == "ColumnMajor"
+        ]
+
+        # filter by supported accumulator types
+        ops = [
+            op
+            for op in ops
+            if any(
+                dtype_match(torch_dtype, op.accumulator_type())
+                for torch_dtype in ACCUMULATOR_DTYPES
+            )
+        ]
+
+        # check if dtypes of A and B are supported
+        ops = [
+            op
+            for op in ops
+            if any(dtype_match(torch_dtype, op.A.element) for torch_dtype in XW_DTYPES)
+            and any(dtype_match(torch_dtype, op.B.element) for torch_dtype in XW_DTYPES)
+        ]
+
+        return ops
+
     def filter_op(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
@@ -813,16 +897,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         have been mutated.
         """
 
-        assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
-
-        # Skip simt kernels
-        if (
-            op.tile_description.math_instruction.opcode_class
-            == cutlass_lib.OpcodeClass.Simt
-        ):
-            return None
-
         if op.gemm_kind not in self._get_supported_ops():
             return None
 
@@ -837,13 +911,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         if not self._dtype_match(op):
             return None
 
-        # Filter ops by input layouts.
-        if not (
-            self.layout_match(X.get_layout(), op.A.layout)
-            and self.layout_match(W.get_layout(), op.B.layout)
-        ):
-            return None
-
         # Filter ops by alignment.
         if not self._alignment_match(op):
             log.debug(
@@ -853,6 +920,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         # Update op.
         op = copy.deepcopy(op)
+
+        # set layouts for X and W
+        self.set_layout(op.A, X.get_layout())
+        self.set_layout(op.B, W.get_layout())
 
         # Set output layout.
         op.D.layout = CUTLASSGemmTemplate.cutlass_layout(self.output_node.get_layout())
@@ -940,7 +1011,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             log.debug("Using cached ops for %s", self.cache_key)
             return self.filtered_ops_cache[self.cache_key]
 
-        maybe_ops = maybe_fetch_ops()
+        with dynamo_timed("CUTLASSGemmTemplate.maybe_fetch_ops"):
+            maybe_ops = maybe_fetch_ops()
         if maybe_ops is None:
             log.debug("Cannot fetch ops from cache, generating ops from scratch")
             full_ops = cutlass_utils.gen_ops()
@@ -948,6 +1020,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         else:
             log.debug("Using cached ops from cache")
             ops = maybe_ops
+
+        ops = self.global_filter_ops(ops)
 
         res: dict[str, cutlass_gemm_op.GemmOperation] = {}
         start_time = time.time()
@@ -1174,27 +1248,27 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         instance_definition, instance_type = self._define_gemm_instance(op, evt_name)
 
-        options = dict(
-            alpha=self.alpha,
-            beta=self.beta,
-            X=X,
-            W=W,
-            Y=Y,
-            kernel_call_signature=kernel_call_signature,
-            Bias=Bias,
-            epilogue_template=epilogue_template,
-            argument_template=argument_template,
-            should_swap_xw=should_swap_xw,
-            template=self,
-            kernel=kernel,
-            instance_definition=instance_definition,
-            instance_type=instance_type,
-            input_reorder=self.input_reorder,
-            epilogue_args=evt_args,
-            test_call_statement=test_call_statement,
-            op_conf_name=op.configuration_name(),
-            epilogue_visitor_tree=evt_code,
-        )
+        options = {
+            "alpha": self.alpha,
+            "beta": self.beta,
+            "X": X,
+            "W": W,
+            "Y": Y,
+            "kernel_call_signature": kernel_call_signature,
+            "Bias": Bias,
+            "epilogue_template": epilogue_template,
+            "argument_template": argument_template,
+            "should_swap_xw": should_swap_xw,
+            "template": self,
+            "kernel": kernel,
+            "instance_definition": instance_definition,
+            "instance_type": instance_type,
+            "input_reorder": self.input_reorder,
+            "epilogue_args": evt_args,
+            "test_call_statement": test_call_statement,
+            "op_conf_name": op.configuration_name(),
+            "epilogue_visitor_tree": evt_code,
+        }
         options.update(dict(zip(extra_names, extra_inputs)))
         res = self._template_from_string(self._get_template()).render(**options)
         if inductor_cuda_config.generate_test_runner and not is_dynamic(X, W, Y, Bias):
@@ -1582,19 +1656,19 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         tensors. This operation also implies the M and N dimensions of Bias and GEMM output to be swapped
         before the function call.
         """
-        options = dict(
-            alpha=alpha,
-            beta=beta,
-            X=X,
-            W=W,
-            Y=Y,
-            Bias=Bias,
-            template=self,
-            kernel=kernel,
-            M="M",
-            N="N",
-            epilogue_args=epilogue_args,
-        )
+        options = {
+            "alpha": alpha,
+            "beta": beta,
+            "X": X,
+            "W": W,
+            "Y": Y,
+            "Bias": Bias,
+            "template": self,
+            "kernel": kernel,
+            "M": "M",
+            "N": "N",
+            "epilogue_args": epilogue_args,
+        }
         assert epilogue_template is not None
 
         if should_swap_xw:
@@ -1873,21 +1947,21 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         tensors. This operation also implies the M and N dimensions of Bias and GEMM output to be swapped
         before the function call.
         """
-        options = dict(
-            instance_type=instance_type,
-            alpha=alpha,
-            beta=beta,
-            X=X,
-            W=W,
-            Y=Y,
-            Bias=Bias,
-            Meta=Meta,
-            template=self,
-            kernel=kernel,
-            M="M",
-            N="N",
-            epilogue_args=epilogue_args,
-        )
+        options = {
+            "instance_type": instance_type,
+            "alpha": alpha,
+            "beta": beta,
+            "X": X,
+            "W": W,
+            "Y": Y,
+            "Bias": Bias,
+            "Meta": Meta,
+            "template": self,
+            "kernel": kernel,
+            "M": "M",
+            "N": "N",
+            "epilogue_args": epilogue_args,
+        }
 
         if epilogue_template is None:
             arguments = self._template_from_string(argument_template).render(
