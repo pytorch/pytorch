@@ -599,12 +599,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       }
 
       // Extracts file to the temp directory
-      mz_bool b_extract = mz_zip_reader_extract_file_to_file(
-          &zip_archive, filename_str.c_str(), output_path_str.c_str(), 0);
-      if (b_extract == MZ_FALSE) {
-        throw std::runtime_error(fmt::format(
-            "Failed to extract file {} to {}", filename_str, output_path_str));
-      }
+      zip_archive.extract_file(filename_str, output_path_str);
 
       // Save the file for bookkeeping
       size_t extension_idx = output_path_str.find_last_of('.');
