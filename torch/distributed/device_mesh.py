@@ -643,10 +643,13 @@ else:
             _mesh_resources.mesh_stack.pop()
 
         def __repr__(self) -> str:
+            mesh_repr = f"DeviceMesh('{self.device_type}', shape: {self.mesh.shape}, stride: {self.mesh.stride()}"
+            if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "") == "DETAIL":
+                mesh_repr += f", Mesh: {self.mesh.tolist()}"
             device_mesh_repr = (
-                f"DeviceMesh('{self.device_type}', {self.mesh.tolist()})"
+                f"{mesh_repr})"
                 if not self.mesh_dim_names
-                else f"DeviceMesh('{self.device_type}', {self.mesh.tolist()}, mesh_dim_names={self.mesh_dim_names})"
+                else f"{mesh_repr}, mesh_dim_names={self.mesh_dim_names})"
             )
             return device_mesh_repr
 
