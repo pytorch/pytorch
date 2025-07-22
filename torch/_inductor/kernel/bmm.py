@@ -8,11 +8,7 @@ from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTempla
 
 from .. import ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
-from ..lookup_table import (
-    lookup_op_config_entries,
-    lookup_table_extract_choices,
-    lookup_template_configs_from_op,
-)
+from ..lookup_table import lookup_table_extract_choices, lookup_template_configs
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -204,9 +200,8 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     else:
         aten_func = aten_bmm.bind(kernel_inputs.nodes(), layout)
 
-    # Get lookup table configs grouped by template_id
-    op_lookup_dict = lookup_op_config_entries(kernel_inputs.nodes(), name)
-    aten_params = lookup_template_configs_from_op(op_lookup_dict, "aten")
+    # Get template configs directly from the lookup table
+    aten_params = lookup_template_configs(kernel_inputs.nodes(), name, "aten")
     # options to tune from
     choices: list[Any] = []
     if use_aten_gemm_kernels():
