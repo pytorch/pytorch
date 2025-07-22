@@ -25,9 +25,6 @@ if TYPE_CHECKING:
 
     from triton import Config as TritonConfig
 
-# Add this type alias at the top of your imports
-SymInt = sympy.core.numbers.Integer
-
 
 # Gemm Configs
 @dataclasses.dataclass
@@ -475,7 +472,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         configs: list[BaseConfig],
         scale: float,
         has_int8_tensor: bool,
-        exclude: Callable[[SymInt, SymInt, SymInt], bool],
+        exclude: Callable[
+            [sympy.numbers.Integer, sympy.numbers.Integer, sympy.numbers.Integer], bool
+        ],
         hint_override: Optional[int] = None,
     ) -> list[BaseConfig]:
         """
@@ -577,7 +576,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         configs: list[BaseConfig],
         has_int8_tensor: bool = False,
         scale: float = 1.0,
-        exclude: Callable[[SymInt, SymInt, SymInt], bool] = lambda m, n, k: False,
+        exclude: Callable[
+            [sympy.numbers.Integer, sympy.numbers.Integer, sympy.numbers.Integer], bool
+        ] = lambda m, n, k: False,
         dtype_size: int = 0,
         op_name: str = "mm",  # For preprocessing overrides e.g. on CPU
     ) -> Generator[TritonConfig, None, None]:
@@ -673,7 +674,9 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
 
     def _get_cpu_exclude_function(
         self, method: str = "bmm"
-    ) -> Callable[[SymInt, SymInt, SymInt], bool]:
+    ) -> Callable[
+        [sympy.numbers.Integer, sympy.numbers.Integer, sympy.numbers.Integer], bool
+    ]:
         """
         Get CPU-specific exclude function based on method type.
         Returns a function that can be used as exclude condition.
@@ -681,7 +684,11 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
         """
         if method in ("conv"):
 
-            def exclude_conv(m: SymInt, n: SymInt, k: SymInt) -> bool:
+            def exclude_conv(
+                m: sympy.numbers.Integer,
+                n: sympy.numbers.Integer,
+                k: sympy.numbers.Integer,
+            ) -> bool:
                 # Thresholds are experimentally determined to reduce Triton CPU compile times
                 if m > 256 or n > 256 or k > 256:
                     return True
@@ -690,13 +697,21 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
             return exclude_conv
         elif method in ("mm", "addmm", "int_mm"):
 
-            def exclude_mm(m: SymInt, n: SymInt, k: SymInt) -> bool:
+            def exclude_mm(
+                m: sympy.numbers.Integer,
+                n: sympy.numbers.Integer,
+                k: sympy.numbers.Integer,
+            ) -> bool:
                 return m * n > 2**13
 
             return exclude_mm
         else:  # Default to bmm implementation for unknown methods
 
-            def exclude_bmm(m: SymInt, n: SymInt, k: SymInt) -> bool:
+            def exclude_bmm(
+                m: sympy.numbers.Integer,
+                n: sympy.numbers.Integer,
+                k: sympy.numbers.Integer,
+            ) -> bool:
                 if m > 128 or n > 128 or k > 128:
                     return True
                 return m * n > 2**12
@@ -711,7 +726,9 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
         configs: list[BaseConfig],
         has_int8_tensor: bool = False,
         scale: float = 1.0,
-        exclude: Callable[[SymInt, SymInt, SymInt], bool] = lambda m, n, k: False,
+        exclude: Callable[
+            [sympy.numbers.Integer, sympy.numbers.Integer, sympy.numbers.Integer], bool
+        ] = lambda m, n, k: False,
         dtype_size: int = 0,
         op_name: str = "mm",
     ) -> Generator[TritonConfig, None, None]:
@@ -1270,9 +1287,9 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
     def _convert_config_to_template_kwargs(
         self,
         triton_config: TritonConfig,
-        m: SymInt,
-        n: SymInt,
-        k: SymInt,
+        m: sympy.numbers.Integer,
+        n: sympy.numbers.Integer,
+        k: sympy.numbers.Integer,
         layout: Any,
     ) -> dict[str, Any]:
         """
