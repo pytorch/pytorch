@@ -1,4 +1,4 @@
-# TorchDynamo-based ONNX Exporter
+# PyTorch2-based ONNX Exporter
 
 ```{eval-rst}
 .. automodule:: torch.onnx
@@ -12,7 +12,7 @@
 
 ## Overview
 
-The ONNX exporter leverages TorchDynamo engine to hook into Python's frame evaluation API
+The ONNX exporter leverages PyTorch 2.0 engine to hook into Python's frame evaluation API
 and dynamically rewrite its bytecode into an FX Graph.
 The resulting FX Graph is then polished before it is finally translated into an ONNX graph.
 
@@ -20,8 +20,6 @@ The main advantage of this approach is that the [FX graph](https://pytorch.org/d
 bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
 
 In addition, during the export process, memory usage is significantly reduced.
-See the {doc}`memory usage documentation <onnx_dynamo_memory_usage>` for more information.
-
 
 ## Dependencies
 
@@ -129,10 +127,6 @@ Function {func}`torch.onnx.export` should be called a second time with
 parameter ``report=True``. A markdown report is generated to help the user
 to resolve the issue.
 
-```{toctree}
-:hidden:
-onnx_dynamo_memory_usage
-```
 ## Metadata
 
 During ONNX export, each ONNX node is annotated with metadata that helps trace its origin and context from the original PyTorch model. This metadata is useful for debugging, model inspection, and understanding the mapping between PyTorch and ONNX graphs.

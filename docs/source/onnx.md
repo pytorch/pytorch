@@ -12,8 +12,6 @@ The exported model can be consumed by any of the many
 [runtimes that support ONNX](https://onnx.ai/supported-tools.html#deployModel), including
 Microsoft's [ONNX Runtime](https://www.onnxruntime.ai).
 
-**There are two flavors of ONNX exporter API that you can use, as listed below.**
-Both can be called through function {func}`torch.onnx.export`.
 Next example shows how to export a simple model.
 
 ```python
@@ -40,18 +38,18 @@ torch.onnx.export(
 )
 ```
 
-## TorchDynamo-based ONNX Exporter
+## PyTorch2-based ONNX Exporter
 
-*The TorchDynamo-based ONNX exporter is the newest exporter for PyTorch 2.1 and newer*
+*The PyTorch2-based ONNX exporter is the newest exporter for PyTorch 2.6 and newer*
 
-TorchDynamo engine is leveraged to hook into Python's frame evaluation API and dynamically rewrite its
+PyTorch 2.0 engine is leveraged to hook into Python's frame evaluation API and dynamically rewrite its
 bytecode into an FX Graph. The resulting FX Graph is then polished before it is finally translated into an
 ONNX graph.
 
 The main advantage of this approach is that the [FX graph](https://pytorch.org/docs/stable/fx.html) is captured using
 bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
 
-{doc}`Learn more about the TorchDynamo-based ONNX Exporter <onnx_dynamo>`
+{doc}`Learn more about the PyTorch2-based ONNX Exporter <onnx_pt2>`
 
 ## Contributing / Developing
 
@@ -63,7 +61,7 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
 .. toctree::
     :hidden:
 
-    onnx_dynamo
+    onnx_pt2
     onnx_ops
     onnx_verification
 ```
