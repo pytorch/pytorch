@@ -8,8 +8,6 @@ mystnb:
   merge_streams: True
 ---
 
-(programming_model.fullgraph_true)=
-
 ```{code-cell}
 :tags: [remove-cell]
 import torch
