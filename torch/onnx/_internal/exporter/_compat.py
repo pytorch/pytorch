@@ -13,7 +13,6 @@ import torch
 from torch.onnx import _constants as onnx_constants
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import (
-    _constants,
     _core,
     _dynamic_shapes,
     _onnx_program,
