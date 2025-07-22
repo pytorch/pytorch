@@ -403,7 +403,7 @@ class CustomOpDef:
         (sizes/strides/storage_offset/device), it specifies what the properties of
         the output Tensors are.
 
-        Please see :func:`torch.library.impl_abstract` for more details.
+        Please see :func:`torch.library.register_fake` for more details.
 
         Args:
             fn (Callable): The function to register as the FakeTensor

@@ -1664,7 +1664,7 @@ def _(x):
         lib = self.lib()
         lib.define("sin.blah(Tensor x) -> Tensor")
 
-        torch.library.impl_abstract(
+        torch.library.register_fake(
             f"{self.test_ns}::sin.blah", torch.empty_like, lib=lib
         )
 
@@ -1677,7 +1677,7 @@ def _(x):
         def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
             raise NotImplementedError
 
-        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+        @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x, dim):
             output_shape = list(x.shape)
             del output_shape[dim]
@@ -1693,7 +1693,7 @@ def _(x):
         def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
             raise NotImplementedError
 
-        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+        @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x, dim):
             output_shape = list(x.shape)
             del output_shape[dim]
@@ -1701,7 +1701,7 @@ def _(x):
 
         with self.assertRaisesRegex(RuntimeError, r"test_custom_ops.py:\d+"):
 
-            @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+            @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
             def foo_meta2(x, dim):
                 output_shape = list(x.shape)
                 del output_shape[dim]
@@ -1712,7 +1712,7 @@ def _(x):
         def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError
 
-        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+        @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x):
             ctx = torch.library.get_ctx()
             r = ctx.new_dynamic_size(min=1)
@@ -1739,7 +1739,7 @@ def _(x):
         def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError
 
-        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+        @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x):
             return x.sum()
 
@@ -1882,7 +1882,7 @@ Dynamic shape operator
         lib.define("foo(Tensor x) -> Tensor")
         qualname = f"{self.test_ns}::foo"
 
-        @torch.library.impl_abstract(qualname, lib=self.lib())
+        @torch.library.register_fake(qualname, lib=self.lib())
         def foo_impl(x):
             return x.sin()
 
@@ -1905,7 +1905,7 @@ Dynamic shape operator
         op = self.get_op(qualname)
 
         with self.assertRaisesRegex(RuntimeError, r"already has .*Meta implementation"):
-            torch.library.impl_abstract(qualname, func=foo_impl, lib=self.lib())
+            torch.library.register_fake(qualname, func=foo_impl, lib=self.lib())
 
     def test_abstract_impl_on_existing_op_with_CompositeImplicitAutograd(self):
         lib = self.lib()
@@ -1919,7 +1919,7 @@ Dynamic shape operator
         op = self.get_op(qualname)
 
         with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
-            torch.library.impl_abstract(qualname, func=foo_impl, lib=self.lib())
+            torch.library.register_fake(qualname, func=foo_impl, lib=self.lib())
 
     def test_abstract_impl_on_existing_op_with_CompositeExplicitAutograd(self):
         lib = self.lib()
@@ -1932,7 +1932,7 @@ Dynamic shape operator
         lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
         op = self.get_op(qualname)
 
-        torch.library.impl_abstract(qualname, func=lambda x: x.sum(), lib=self.lib())
+        torch.library.register_fake(qualname, func=lambda x: x.sum(), lib=self.lib())
         with torch._subclasses.FakeTensorMode():
             x = torch.randn(10)
             result = op(x)

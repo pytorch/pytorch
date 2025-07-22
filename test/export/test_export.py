@@ -145,7 +145,7 @@ torch.library.define(
 
 
 @torch.library.impl("testlib::returns_tensor_symint", "cpu")
-@torch.library.impl_abstract("testlib::returns_tensor_symint")
+@torch.library.register_fake("testlib::returns_tensor_symint")
 def returns_tensor_symint_impl(x):
     return x, x.shape[0]
 
@@ -158,7 +158,7 @@ def foo_impl(x, z):
     return x, z, x + z
 
 
-@torch.library.impl_abstract("testlib::foo")
+@torch.library.register_fake("testlib::foo")
 def foo_abstract(x, z):
     return x, z, x + z
 
