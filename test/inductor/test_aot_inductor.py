@@ -1456,6 +1456,22 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(self.device), example_inputs)
 
     @skipIfNoFBGEMM
+    def test_quantized_linear_bias_none(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+
+            def forward(self, x):
+                return torch.ops.quantized.linear_dynamic_fp16_unpacked_weight(
+                    x, self.weight, None
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
+    @skipIfNoFBGEMM
     def test_quanatized_int8_linear(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -5956,6 +5972,31 @@ class AOTInductorTestsTemplate:
         )
         self.assertEqual(new_expected, new_output)
 
+        new_weights = {
+            "L__self___weight": torch.randn(N, K, device=self.device),
+            "L__self___bias": torch.randn(N, device=self.device),
+        }
+
+        runner.update_constant_buffer(new_weights, True, False, True)
+        runner.swap_constant_buffer()
+
+        model.weight = torch.nn.Parameter(new_weights["L__self___weight"])
+        model.bias = torch.nn.Parameter(new_weights["L__self___bias"])
+
+        updated_state_dict = {
+            "weight": torch.ones_like(model.weight),
+            "bias": torch.zeros_like(model.bias),
+        }
+
+        model.load_state_dict(updated_state_dict)
+
+        new_output = runner_call(test_inputs)
+        expected_output = model(test_inputs)
+        torch.testing.assert_close(new_output, expected_output)
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_close(new_expected, new_output)
+
     def test_cond_share_predicte(self):
         class Model(torch.nn.Module):
             def forward(self, predicate, x):
@@ -6668,11 +6709,19 @@ class TestAOTInductorConfig(TestCase):
         result = maybe_aoti_standalone_config({"aot_inductor.compile_standalone": True})
         self.assertEqual(result["aot_inductor.package_cpp_only"], True)
         self.assertEqual(result["aot_inductor.compile_standalone"], True)
+        self.assertEqual(result["aot_inductor.embed_kernel_binary"], True)
+        self.assertEqual(result["aot_inductor.emit_multi_arch_kernel"], True)
+        self.assertEqual(
+            result["aot_inductor.model_name_for_generated_files"], "aoti_model"
+        )
 
-    def test_compile_standalone_package_cpp_already_true(self):
+    def test_compile_standalone_explicit_set(self):
         patches = {
             "aot_inductor.compile_standalone": True,
             "aot_inductor.package_cpp_only": True,
+            "aot_inductor.embed_kernel_binary": True,
+            "aot_inductor.emit_multi_arch_kernel": True,
+            "aot_inductor.model_name_for_generated_files": "aoti_model",
         }
         result = maybe_aoti_standalone_config(patches)
         self.assertEqual(result, patches)
@@ -6728,6 +6777,7 @@ GPU_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
+    "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
     # No scaled_dot_product_efficient_attention implementation for XPU yet.
     "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
     # No fft implementation for XPU yet.

@@ -500,7 +500,7 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    'c10/macros/Macros.h',
+    'torch/headeronly/macros/Macros.h',
 ]
 command = [
     'python3',
@@ -523,7 +523,7 @@ include_patterns = [
     '**/*.h',
 ]
 exclude_patterns = [
-    'c10/macros/Macros.h',
+    'torch/headeronly/macros/Macros.h',
 ]
 command = [
     'python3',
@@ -1162,14 +1162,9 @@ exclude_patterns = [
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     # NOTE: remove the patterns in the order they are listed
-    'aten/**',
-    'aten/src/ATen/native/**',
-    'aten/src/ATen/native/q*/**',
     'aten/src/ATen/native/[a-pA-P]*/**',
     'aten/src/ATen/[a-mA-M]*/**',
     'test/**',
-    'test/[a-hA-h]*/**',
-    'torch/distributed/tensor/**',
 ]
 init_command = [
     'python3',
@@ -1605,7 +1600,10 @@ is_formatter = true
 # the same line, merge conflicts should not arise in git or hg
 [[linter]]
 code = 'MERGE_CONFLICTLESS_CSV'
-include_patterns = ['benchmarks/dynamo/ci_expected_accuracy/*.csv']
+include_patterns = [
+    'benchmarks/dynamo/ci_expected_accuracy/*.csv',
+    'benchmarks/dynamo/pr_time_benchmarks/expected_results.csv',
+]
 command = [
     'python3',
     'tools/linter/adapters/no_merge_conflict_csv_linter.py',
