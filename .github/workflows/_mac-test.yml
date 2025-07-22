@@ -80,6 +80,11 @@ jobs:
         run: |
           sysctl machdep.cpu.brand_string kern.osproductversion
 
+      - name: Install build toolchain
+        run: |
+          brew update --quiet
+          brew install --formula cmake ninja
+
       - name: Clean up leftover processes on MacOS pet runner
         continue-on-error: true
         run: |
