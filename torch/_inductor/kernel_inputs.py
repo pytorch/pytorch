@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence
+from collections.abc import Sequence  # noqa: TC003
+from typing import Any, Optional
 
-import sympy
+import sympy  # noqa: TC002
 
 import torch
 import torch._inductor.config
