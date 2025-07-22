@@ -694,7 +694,7 @@ Call to `torch._dynamo.graph_break()`
             """\
 LOAD_BUILD_CLASS bytecode not supported
   Explanation: Dynamo does not support tracing classes that are defined in the compiled region.
-  Hint: Move the class definition out of the compiled region.
+  Hint: Move the class definition out of the compiled region or set `torch._dynamo.config.enable_trace_load_build_class=True`.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
   Developer debug context:
