@@ -113,6 +113,7 @@ from ._aot_autograd.schemas import (  # noqa: F401
     GraphOutputName,
     GraphSignature,
     InputAliasInfo,
+    JointWithDescriptors,
     MutationType,
     OutputAliasInfo,
     OutputType,
@@ -886,26 +887,38 @@ def prepare_aot_module_simplified(
 ):
     # TODO: There's something a bit suspicious here; typically simplified
     # module shouldn't actually have any parameters...
-    params = {
-        **dict(mod.named_parameters(remove_duplicate=False)),
-        **dict(mod.named_buffers(remove_duplicate=False)),
-    }
+    params = dict(mod.named_parameters(remove_duplicate=False))
+    buffers = dict(dict(mod.named_buffers(remove_duplicate=False)))
+
     params_flat, params_spec = list(params.values()), list(params.keys())
     params_len = len(params_flat)
+
+    buffers_flat, buffers_spec = list(buffers.values()), list(buffers.keys())
+    buffers_len = len(buffers_flat)
+
+    params_buffers = {**params, **buffers}
+    params_buffers_flat = params_flat + buffers_flat
+    params_buffers_spec = params_spec + buffers_spec
 
     full_args, full_args_descs = [], []
     # First, the params
     full_args.extend(params_flat)
     full_args_descs.extend(ParamAOTInput(fqn) for fqn in params_spec)
 
+    # Next, the buffers
+    full_args.extend(buffers_flat)
+    full_args_descs.extend(BufferAOTInput(fqn) for fqn in buffers_spec)
+
     # TODO: These tracing_context fields should become unnecessary once we
     # always maintain sources on all arguments
     if tracing_context := torch._guards.TracingContext.try_get():
-        tracing_context.params_flat = params_flat
+        # NB: TracingContext misnames this, the "params" here also contains
+        # buffers
+        tracing_context.params_flat = params_buffers_flat
         (
             tracing_context.params_flat_unwrap_subclasses,
             tracing_context.params_unwrapped_to_flat_index,
-        ) = unwrap_tensor_subclasses_with_indices_to_original(params_flat)
+        ) = unwrap_tensor_subclasses_with_indices_to_original(params_buffers_flat)
 
     # Next, the input args
     full_args.extend(args)
@@ -915,7 +928,7 @@ def prepare_aot_module_simplified(
     (
         aot_autograd_arg_pos_to_source,
         static_input_indices,
-    ) = _try_get_metadata_from_dynamo(mod, params.keys(), len(full_args))
+    ) = _try_get_metadata_from_dynamo(mod, params_buffers.keys(), len(full_args))
 
     dynamic_shapes = False
     for x in full_args:
@@ -929,7 +942,7 @@ def prepare_aot_module_simplified(
         inference_compiler=inference_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
-        num_params_buffers=params_len,
+        num_params_buffers=params_len + buffers_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic_shapes,
@@ -946,12 +959,17 @@ def prepare_aot_module_simplified(
     fake_flat_args = process_inputs(
         full_args, aot_config, fake_mode, shape_env, ignore_shape_env
     )
-    # NB: This doesn't change the in/out convention
-    functional_call = create_functional_call(mod, params_spec, params_len)
+    # NB: This doesn't change the in/out convention, except adding the
+    # parameters as explicit arguments
+    functional_call = create_functional_call(
+        mod, params_buffers_spec, params_len + buffers_len
+    )
 
     return (
         functional_call,
-        params_flat,
+        params_buffers_flat,
+        params_spec,
+        buffers_spec,
         fake_flat_args,
         full_args_descs,
         aot_config,
@@ -996,7 +1014,9 @@ def aot_module_simplified(
     with contextlib.ExitStack() as stack:
         (
             functional_call,
-            params_flat,
+            params_buffers_flat,
+            _params_spec,
+            _buffers_spec,
             fake_flat_args,
             full_args_descs,
             aot_config,
@@ -1053,7 +1073,7 @@ def aot_module_simplified(
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
         def forward(runtime_args: list[Any]):
             flat_args = []
-            flat_args.extend(params_flat)
+            flat_args.extend(params_buffers_flat)
             flat_args.extend(runtime_args)
             runtime_args.clear()
             return compiled_fn(flat_args)
@@ -1066,7 +1086,7 @@ def aot_module_simplified(
         # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
         def forward(*runtime_args: tuple[Any]):
             full_args = []
-            full_args.extend(params_flat)
+            full_args.extend(params_buffers_flat)
             full_args.extend(runtime_args)
             return compiled_fn(full_args)
 
@@ -1086,7 +1106,7 @@ def aot_export_joint_with_descriptors(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
-) -> tuple[AOTState, AOTGraphCapture]:
+) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
     aot_export_joint_simple or aot_export_module(trace_joint=True), the
@@ -1137,11 +1157,17 @@ def aot_export_joint_with_descriptors(
 
     NB: These APIs do NOT hit cache, as we only ever cache the final compile results,
     not the intermediate export result.
+
+    TODO: talk carefully about how parameters/buffers work here
     """
+
+    from torch._dynamo.backends.debugging import boxed_nop
 
     (
         functional_call,
-        params_flat,
+        _params_buffers_flat,
+        params_spec,
+        buffers_spec,
         fake_flat_args,
         full_args_descs,
         aot_config,
@@ -1150,9 +1176,9 @@ def aot_export_joint_with_descriptors(
     ) = prepare_aot_module_simplified(
         mod,
         args,
-        None,
-        None,
-        None,
+        boxed_nop,
+        boxed_nop,
+        default_partition,
         decompositions,
         keep_inference_input_mutations,
         None,
@@ -1176,15 +1202,15 @@ def aot_export_joint_with_descriptors(
     # NB: no cache lookup!
     aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
 
-    # Invariant: the compiled function takes all of params_flat as argument,
-    # you cannot change structure of this but you can change the inputs
+    return JointWithDescriptors(
+        _aot_state=aot_state,
+        _aot_graph_capture=aot_graph_capture,
+        params_spec=params_spec,
+        buffers_spec=buffers_spec,
+    )
 
-    return aot_state, aot_graph_capture
 
-
-def aot_compile_joint_with_descriptors(
-    aot_state: AOTState, aot_graph_capture: AOTGraphCapture
-) -> callable:
+def aot_compile_joint_with_descriptors(jd: JointWithDescriptors) -> callable:
     """
     Companion function for aot_export_joint_with_descriptors which compiles the joint
     graph into a callable function that follows a standard calling convention.
@@ -1195,7 +1221,7 @@ def aot_compile_joint_with_descriptors(
 
     TODO: Consider if we should allow_in_graph the result by default.
     """
-    compiled_fn, _ = aot_stage2_compile(aot_state, aot_graph_capture)
+    compiled_fn, _ = aot_stage2_compile(jd._aot_state, jd._aot_graph_capture)
     return compiled_fn
 
 

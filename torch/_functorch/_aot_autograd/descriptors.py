@@ -307,6 +307,15 @@ class AOTInput:
     def expr(self) -> str:
         raise NotImplementedError("Subclasses must implement expr()")
 
+    def is_param(self) -> bool:
+        return False
+
+    def is_buffer(self) -> bool:
+        return False
+
+    def is_tangent(self) -> bool:
+        return False
+
 
 @dataclasses.dataclass(frozen=True)
 class DifferentiableAOTInput(AOTInput):
@@ -320,6 +329,9 @@ class AOTOutput:
 
     def expr(self) -> str:
         raise NotImplementedError("Subclasses must implement expr()")
+
+    def is_grad(self) -> bool:
+        return False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -342,6 +354,28 @@ class ParamAOTInput(DifferentiableAOTInput):
 
     def expr(self) -> str:
         return f"self.get_parameter({self.target!r})"
+
+    def is_param(self) -> bool:
+        return True
+
+    def is_buffer(self) -> bool:
+        return False
+
+
+@dataclasses.dataclass(frozen=True)
+class BufferAOTInput(DifferentiableAOTInput):
+    """The input is a buffer, whose FQN is target"""
+
+    target: str
+
+    def expr(self) -> str:
+        return f"self.get_buffer({self.target!r})"
+
+    def is_param(self) -> bool:
+        return False
+
+    def is_buffer(self) -> bool:
+        return True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -386,6 +420,15 @@ class SubclassGetAttrAOTInput(AOTInput):
 
     def expr(self) -> str:
         return f"{self.base.expr()}.{self.attr}"
+
+    def is_param(self) -> bool:
+        return self.base.is_param()
+
+    def is_buffer(self) -> bool:
+        return self.base.is_buffer()
+
+    def is_tangent(self) -> bool:
+        return self.base.is_tangent()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -496,10 +539,13 @@ class BackwardTokenAOTInput(AOTInput):
 class TangentAOTInput(DifferentiableAOTInput):
     """An input to the joint graph representing the tangent of an output."""
 
-    output: "AOTOutput"
+    output: DifferentiableAOTOutput
 
     def expr(self) -> str:
         return f"__output_tangent({self.output.expr()})"
+
+    def is_tangent(self) -> bool:
+        return True
 
 
 # ------------
@@ -556,10 +602,13 @@ class MetadataMutationAOTOutput(DifferentiableAOTOutput):
 class GradAOTOutput(DifferentiableAOTOutput):
     """An output representing the computed gradient for a differentiable input, in the joint graph"""
 
-    grad_of: AOTInput
+    grad_of: DifferentiableAOTInput
 
     def expr(self) -> str:
         return f"__grad({self.grad_of.expr()})"
+
+    def is_grad(self) -> bool:
+        return True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -607,6 +656,9 @@ class SubclassGetAttrAOTOutput(AOTOutput):
 
     def expr(self) -> str:
         return f"{self.base.expr()}.{self.attr}"
+
+    def is_grad(self) -> bool:
+        return self.base.is_grad()
 
 
 @dataclasses.dataclass(frozen=True)
