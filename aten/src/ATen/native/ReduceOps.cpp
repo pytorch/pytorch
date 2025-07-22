@@ -45,7 +45,6 @@
 #include <ATen/ops/aminmax_native.h>
 #include <ATen/ops/any_meta.h>
 #include <ATen/ops/any_native.h>
-#include <ATen/ops/arange.h>
 #include <ATen/ops/argmax_meta.h>
 #include <ATen/ops/argmax_native.h>
 #include <ATen/ops/argmin_meta.h>
@@ -95,8 +94,6 @@
 #include <ATen/ops/norm_meta.h>
 #include <ATen/ops/norm_native.h>
 #include <ATen/ops/ones.h>
-#include <ATen/ops/pad.h>
-#include <ATen/ops/permute.h>
 #include <ATen/ops/prod.h>
 #include <ATen/ops/prod_meta.h>
 #include <ATen/ops/prod_native.h>
