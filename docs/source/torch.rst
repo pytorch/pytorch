@@ -547,7 +547,6 @@ Other Operations
     bucketize
     cartesian_prod
     cdist
-    chain_matmul
     clone
     combinations
     corrcoef

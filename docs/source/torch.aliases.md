@@ -11,6 +11,7 @@ in which they are defined. Feel free to use either the top-level version in ``to
    :toctree: generated
    :nosignatures:
 
+    align_tensors
     atleast_1d
     atleast_2d
     atleast_3d
