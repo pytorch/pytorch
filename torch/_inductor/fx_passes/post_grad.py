@@ -664,55 +664,31 @@ def lazy_init():
 
 
 def register_addmm_activation_fusion():
-    inp = torch.empty(5)
-    mat1 = torch.empty(3, 4)
-    mat2 = torch.empty(4, 5)
+    shapes = [(5,), (3, 4), (4, 5)]
+    args_f32 = [torch.empty(shape) for shape in shapes]
+    args_bf16 = [torch.empty(shape, dtype=torch.bfloat16) for shape in shapes]
 
-    # detect upcast to float32
-    inp_b16 = torch.empty(5, dtype=torch.bfloat16)
-    mat1_b16 = torch.empty(3, 4, dtype=torch.bfloat16)
-    mat2_b16 = torch.empty(4, 5, dtype=torch.bfloat16)
-
-    for pattern, replacement, args in [
-        (
-            addmm_relu_pattern,
-            addmm_relu_replacement,
-            [inp, mat1, mat2],
-        ),
-        (
-            addmm_relu_pattern_2,
-            addmm_relu_replacement,
-            [inp, mat1, mat2],
-        ),
-        (
-            addmm_gelu_pattern,
-            addmm_gelu_replacement,
-            [inp, mat1, mat2],
-        ),
-        (
-            addmm_gelu_pattern_2,
-            addmm_gelu_replacement,
-            [inp, mat1, mat2],
-        ),
-        (
-            addmm_gelu_pattern,
-            addmm_gelu_replacement,
-            [inp_b16, mat1_b16, mat2_b16],
-        ),
-        (
-            addmm_gelu_pattern_2,
-            addmm_gelu_replacement,
-            [inp_b16, mat1_b16, mat2_b16],
-        ),
-    ]:
+    for pattern in [addmm_relu_pattern, addmm_relu_pattern_2]:
         register_replacement(
             pattern,
-            replacement,
-            args,
+            addmm_relu_replacement,
+            args_f32,
             trace_fn=fwd_only,
             pass_dicts=pass_patterns[2],
             extra_check=is_valid_addmm_activation_fusion,
         )
+
+    # bfloat16 to detect upcast in the decomposed gelu
+    for args in [args_f32, args_bf16]:
+        for pattern in [addmm_gelu_pattern, addmm_gelu_pattern_2]:
+            register_replacement(
+                pattern,
+                addmm_gelu_replacement,
+                args,
+                trace_fn=fwd_only,
+                pass_dicts=pass_patterns[2],
+                extra_check=is_valid_addmm_activation_fusion,
+            )
 
 
 def is_valid_addmm_activation_fusion(match):
