@@ -1240,13 +1240,13 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             )
         for model, inputs in models_to_test:
             # Select deterministic context based on device
-            det_ctx = (
-                torch.backends.cudnn.flags(
+            if "cuda" in device:
+                det_ctx = torch.backends.cudnn.flags(
                     enabled=True, deterministic=True, benchmark=False
                 )
-                if "cuda" in device
-                else torch.use_deterministic_algorithms(True)
-            )
+            else:
+                det_ctx = nullcontext()
+                torch.use_deterministic_algorithms(True, warn_only=True)
             with det_ctx:
                 device_ids = [rank] if requires_ddp_rank(device) else None
                 # Set up the DDP model overlapping with ZeRO
