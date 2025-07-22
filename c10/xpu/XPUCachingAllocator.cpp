@@ -432,9 +432,7 @@ class DeviceCachingAllocator {
           (release_cached_blocks() && alloc_block(params, true));
     }
     if (!block_found) {
-      c10::xpu::DeviceProp device_prop;
-      c10::xpu::get_device_properties(&device_prop, device);
-      auto device_total = device_prop.global_mem_size;
+      const auto [device_free, device_total] = getMemoryInfo();
       auto allocated_bytes =
           stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
@@ -457,7 +455,9 @@ class DeviceCachingAllocator {
           static_cast<int>(device),
           " has a total capacity of ",
           format_size(device_total),
-          ". Of the allocated memory ",
+          " of which ",
+          format_size(device_free),
+          " is free. Of the allocated memory ",
           format_size(allocated_bytes),
           " is allocated by PyTorch, and ",
           format_size(reserved_bytes - allocated_bytes),
@@ -535,6 +535,27 @@ class DeviceCachingAllocator {
       stats.active_bytes[statType].reset_peak();
       stats.requested_bytes[statType].reset_peak();
     }
+  }
+
+  std::pair<size_t, size_t> getMemoryInfo() {
+#if SYCL_COMPILER_VERSION >= 20250000
+    const auto& device = c10::xpu::get_raw_device(device_index);
+    const size_t total = device.get_info<sycl::info::device::global_mem_size>();
+    TORCH_CHECK(
+        device.has(sycl::aspect::ext_intel_free_memory),
+        "The device (",
+        device.get_info<sycl::info::device::name>(),
+        ") doesn't support querying the available free memory. ",
+        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
+        "to help us prioritize its implementation.");
+    const size_t free =
+        device.get_info<sycl::ext::intel::info::device::free_memory>();
+    return {free, total};
+#else
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "getMemoryInfo requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
+#endif
   }
 };
 
@@ -697,6 +718,11 @@ class XPUAllocator : public DeviceAllocator {
   void resetAccumulatedStats(DeviceIndex device) override {
     assertValidDevice(device);
     device_allocators[device]->resetAccumulatedStats();
+  }
+
+  std::pair<size_t, size_t> getMemoryInfo(DeviceIndex device) override {
+    assertValidDevice(device);
+    return device_allocators[device]->getMemoryInfo();
   }
 };
 

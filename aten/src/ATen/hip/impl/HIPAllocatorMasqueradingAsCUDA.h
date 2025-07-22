@@ -44,6 +44,9 @@ public:
   void resetPeakStats(c10::DeviceIndex device) {
     allocator_->resetPeakStats(device);
   }
+  std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) {
+    return allocator_->getMemoryInfo(device);
+  }
 };
 
 } // namespace c10::hip
