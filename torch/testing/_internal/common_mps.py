@@ -157,6 +157,8 @@ if torch.backends.mps.is_available():
             "tensor_split",
             "transpose",
             "transpose_copy",
+            "tril",
+            "triu",
             "true_divide",
             "T",
             "unbind",
@@ -283,8 +285,6 @@ if torch.backends.mps.is_available():
             "trace",
             "trapz",
             "trapezoid",
-            "tril",
-            "triu",
             "vstack",
             "where",
             "byte",
@@ -416,7 +416,6 @@ if torch.backends.mps.is_available():
             "linalg.qr": None,
             "linalg.svdvals": None,
             "linalg.vecdot": None,
-            "logcumsumexp": None,
             "lu_solve": None,
             "masked.median": None,
             "matrix_exp": None,
@@ -435,7 +434,6 @@ if torch.backends.mps.is_available():
             "nn.functional.avg_pool3d": None,
             "nn.functional.ctc_loss": None,
             "nn.functional.embedding_bag": None,
-            "nn.functional.max_pool3d": None,
             "nn.functional.max_unpool1d": None,
             "nn.functional.max_unpool2d": None,
             "nn.functional.max_unpool3d": None,
@@ -467,6 +465,7 @@ if torch.backends.mps.is_available():
             "special.airy_ai": None,
             "special.erfcx": None,
             "special.laguerre_polynomial_l": None,
+            "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
             "special.ndtri": None,
             "svd_lowrank": None,
@@ -542,14 +541,6 @@ if torch.backends.mps.is_available():
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
-            # atomic operations not supported
-            "_unsafe_masked_index_put_accumulate": [
-                torch.bool,
-                torch.int8,
-                torch.uint8,
-                torch.int16,
-                torch.int64,
-            ],
         }
 
         if MACOS_VERSION < 14.0:
@@ -643,13 +634,6 @@ if torch.backends.mps.is_available():
                 torch.float32,
                 torch.float16,
                 torch.bfloat16,
-            ],
-            "index_put": [
-                torch.bool,
-                torch.uint8,
-                torch.int8,
-                torch.int16,
-                torch.int64,
             ],
             # zero to negative integer powers are undefined
             "__rpow__": [torch.int8, torch.int16, torch.int32, torch.int64],
@@ -993,8 +977,6 @@ if torch.backends.mps.is_available():
             "aminmax",
             # memory overlapping checks
             "index_select",
-            # unimplemented
-            "logcumsumexp",
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:

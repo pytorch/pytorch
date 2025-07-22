@@ -342,6 +342,12 @@ class WeakDep(Dep):
     name: str
     # Buffer that is doing the mutation
     mutating_buf: str
+    # WeakDep's are also used to add dependencies to prevent some specific reordering,
+    # E.g. collectives global ordering.
+    # But if other pass guarantees proper ordering by its logic,
+    # This additional "fake" deps will be holding optimizations.
+    # This flag is used to identify those additional deps.
+    is_fake: bool = False
 
     @property
     def index(self) -> sympy.Expr:
@@ -352,7 +358,7 @@ class WeakDep(Dep):
 
     def rename(self, renames: dict[str, str]) -> "WeakDep":
         if self.name in renames:
-            return WeakDep(renames[self.name], self.mutating_buf)
+            return WeakDep(renames[self.name], self.mutating_buf, self.is_fake)
         return self
 
     def numbytes_hint(self) -> int:
@@ -581,12 +587,12 @@ def index_vars_no_squeeze(
 
 def index_vars_squeeze(
     *argsizes: Sequence[sympy.Expr], prefix: str = "d"
-) -> tuple[list[list[sympy.Expr]], VarRanges]:
+) -> tuple[list[Sequence[sympy.Expr]], VarRanges]:
     from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
-    args: list[list[sympy.Expr]] = []
-    new_sizes: list[list[sympy.Expr]] = []
+    args: list[Sequence[sympy.Expr]] = []
+    new_sizes: list[Sequence[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
@@ -607,7 +613,10 @@ def extract_read_writes(
 
     if isinstance(fn, LoopBody):
         inner = extract_loop_body_with_args(
-            fn, [*args, *hidden_args], var_ranges, normalize
+            fn,
+            [*args, *hidden_args],  # type: ignore[list-item]
+            var_ranges,
+            normalize,
         )
     else:
         # Slow path tracing the function

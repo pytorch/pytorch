@@ -688,20 +688,14 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 <!-- This module needs to be documented. Adding here in the meantime
 for tracking purposes -->
 ```{eval-rst}
-.. py:module:: torch.optim.adadelta
-.. py:module:: torch.optim.adagrad
-.. py:module:: torch.optim.adam
-.. py:module:: torch.optim.adamax
-.. py:module:: torch.optim.adamw
-.. py:module:: torch.optim.asgd
-.. py:module:: torch.optim.lbfgs
 .. py:module:: torch.optim.lr_scheduler
-.. py:module:: torch.optim.nadam
 .. py:module:: torch.optim.optimizer
-.. py:module:: torch.optim.radam
-.. py:module:: torch.optim.rmsprop
-.. py:module:: torch.optim.rprop
-.. py:module:: torch.optim.sgd
-.. py:module:: torch.optim.sparse_adam
 .. py:module:: torch.optim.swa_utils
+```
+
+```{eval-rst}
+.. toctree::
+    :hidden:
+
+    optim.aliases.md
 ```

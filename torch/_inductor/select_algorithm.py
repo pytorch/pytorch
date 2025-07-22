@@ -54,12 +54,14 @@ from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
+    TMACompatibilityChecker,
     TritonKernel,
     TritonScheduling,
 )
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
+from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
@@ -165,10 +167,24 @@ class PartialRender:
     of replacements after the initial render.
     """
 
+    FINALIZED_HOOK: object = object()
+
     def __init__(self, code, replacement_hooks) -> None:
         super().__init__()
-        self.code = code
+        self._code = code
         self.replacement_hooks = replacement_hooks
+
+    @property
+    def code(self):
+        remaining_active_hooks = [
+            key
+            for key, fn in self.replacement_hooks.items()
+            if fn is not self.FINALIZED_HOOK
+        ]
+        assert len(remaining_active_hooks) == 0, (
+            f"The following hooks have not yet been finalized:\n {remaining_active_hooks=}"
+        )
+        return self._code
 
     def finalize_hook(self, hook_key: str, strict=True) -> None:
         if hook_key not in self.replacement_hooks:
@@ -178,15 +194,28 @@ class PartialRender:
                 )
             else:
                 return
-        assert self.replacement_hooks[hook_key] is not None, (
+        assert self.replacement_hooks[hook_key] is not self.FINALIZED_HOOK, (
             "hook_key can only be called once"
         )
-        self.code = self.code.replace(hook_key, self.replacement_hooks[hook_key]())
-        self.replacement_hooks[hook_key] = None
+        self._code = self._code.replace(hook_key, self.replacement_hooks[hook_key]())
+        self.replacement_hooks[hook_key] = self.FINALIZED_HOOK
+
+    def finalize_remaining(self) -> str:
+        """
+        Finalize the remaining active hooks. This function can be used in cases
+        where the caller uses `finalize_hook` rather than `finalize_all`.
+        Note: `finalize_all` errors if a hook that has already been finalized
+        is attempted to be called again. This function only attempts to
+        finalize active hooks.
+        """
+        for key, fn in self.replacement_hooks.items():
+            if fn is not self.FINALIZED_HOOK:
+                self.finalize_hook(key)
+        return self.code
 
     def finalize_all(self) -> str:
-        for key, fn in self.replacement_hooks.items():
-            self.code = self.code.replace(key, fn())
+        for key in self.replacement_hooks:
+            self.finalize_hook(key)
         return self.code
 
 
@@ -292,6 +321,15 @@ RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
 
 
 class TritonTemplateKernel(TritonKernel):
+    """
+    A specialized kernel class for Triton templates that handles code generation
+    for templated Triton kernels.
+
+    This class extends TritonKernel to provide additional functionality for
+    template-based kernel generation, including support for subgraphs, workspace
+    arguments, and prologue/epilogue fusion.
+    """
+
     def __init__(
         self,
         kernel_name,
@@ -312,6 +350,7 @@ class TritonTemplateKernel(TritonKernel):
         subgraphs: Optional[list[ir.ComputedBuffer]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
         prologue_loads_all_inputs=False,
+        hint_override: Optional[int] = None,
     ) -> None:
         numel = sympy_product(output_node.get_size())
         super().__init__(
@@ -320,6 +359,7 @@ class TritonTemplateKernel(TritonKernel):
                 "r0_": sympy.S.One,
             },
             features=SIMDKernelFeatures([], numel),
+            hint_override=hint_override,
         )
         self.input_nodes = input_nodes
         self.output_node = output_node
@@ -481,11 +521,19 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size())
+            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=0)
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
+
+    def estimate_flops(self) -> int:
+        for node in self.input_nodes:
+            for fx_node in node._current_origins:
+                f = count_flops_fx(fx_node)
+                if f is not None:
+                    return V.graph.sizevars.size_hint(f, fallback=0)
+        return 0
 
     def jit_lines(self):
         if self.use_jit:
@@ -525,6 +573,9 @@ class TritonTemplateKernel(TritonKernel):
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel:
+            flops = self.estimate_flops()
+            inductor_meta["kernel_flop"] = flops
 
         template_args = f"""
             num_stages={self.num_stages},
@@ -1063,6 +1114,7 @@ class TritonTemplateKernel(TritonKernel):
         copy_shape=None,
         override_mask=None,
         block_ptr=False,
+        tma_compatibility_checker: Optional[TMACompatibilityChecker] = None,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -1076,21 +1128,32 @@ class TritonTemplateKernel(TritonKernel):
             copy_shape=self.template_out,
             override_mask=self.template_mask,
             block_ptr=block_ptr,
+            tma_compatibility_checker=tma_compatibility_checker,
         )
 
     def codegen_range_tree(self):
         pass  # ignore default codegen
 
+    def additional_call_args_and_types(self):
+        if isinstance(self.grid_fn, SymbolicGridFn):
+            grid_args = self.grid_fn.sympy_call(*self.call_sizes, self.meta)
+            assert len(grid_args) in (0, 3), "grid_fn should return 3 values"
+            return (grid_args, map(type, grid_args))
+        elif all(isinstance(x, (int, sympy.Integer)) for x in self.call_sizes):
+            grid_args = self.grid_fn(*map(int, self.call_sizes), self.meta)
+            assert len(grid_args) in (0, 3), "grid_fn should return 3 values"
+            return (grid_args, map(type, grid_args))
+        return ((), ())
+
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
 
-        grid_args = ()
-        if isinstance(self.grid_fn, SymbolicGridFn):
-            grid_args = self.grid_fn.sympy_call(*self.call_sizes, self.meta)
-        elif all(isinstance(x, (int, sympy.Integer)) for x in self.call_sizes):
-            grid_args = self.grid_fn(*map(int, self.call_sizes), self.meta)
-        else:
+        additional_call_args, additional_arg_types = (
+            self.additional_call_args_and_types()
+        )
+
+        if not additional_call_args:
             assert not V.graph.cpp_wrapper, "cpp_wrapper requires SymbolicGridFn"
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
@@ -1099,9 +1162,9 @@ class TritonTemplateKernel(TritonKernel):
                 f"*{fn_name}({', '.join(map(pexpr, self.call_sizes))}, {meta})"
             )
             arg_types.append(None)
-        assert len(grid_args) in (0, 3), "grid_fn should return 3 values"
-        call_args.extend(grid_args)
-        arg_types.extend(map(type, grid_args))
+
+        call_args.extend(additional_call_args)
+        arg_types.extend(additional_arg_types)
 
         if self.workspace_arg is not None:
             wrapper.generate_workspace_allocation(self.workspace_arg)
@@ -1176,7 +1239,7 @@ class GeneratedCodeCache:
         input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
-        call_sizes: list[sympy.core.symbol.Symbol],
+        call_sizes: Sequence[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
@@ -1187,6 +1250,7 @@ class GeneratedCodeCache:
         num_consumer_groups: int,
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
+        hint_override: Optional[int] = None,
     ) -> Optional[str]:
         def layout_key(layout: ir.Layout) -> str:
             assert not isinstance(layout, ir.FlexibleLayout)
@@ -1237,6 +1301,7 @@ class GeneratedCodeCache:
                 "num_buffers_warp_spec": num_buffers_warp_spec,
                 "epilogue_fn_hash": epilogue_fn_hash,
                 "kwargs": kwargs,
+                "hint_override": hint_override,
             }
         )
 
@@ -1329,7 +1394,7 @@ class TritonTemplate(KernelTemplate):
         input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
-        call_sizes: list[sympy.core.symbol.Symbol],
+        call_sizes: Sequence[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
@@ -1341,6 +1406,7 @@ class TritonTemplate(KernelTemplate):
         layout: ir.Layout,
         kwargs: dict[str, Any],
         generate_with_caching,
+        hint_override: Optional[int] = None,
     ) -> Optional[GenerateAndLoadResult]:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -1413,6 +1479,7 @@ class TritonTemplate(KernelTemplate):
                 output_node=fake_out,
                 workspace_arg=workspace_arg,
                 use_jit=False,
+                hint_override=hint_override,
                 **kernel_options,
             )
 
@@ -1529,9 +1596,10 @@ class TritonTemplate(KernelTemplate):
         epilogue_fn_hash: Optional[str] = None,
         subgraphs: Optional[list[ir.Buffer]] = None,
         mutated_inputs: Optional[list[ir.IRNode]] = None,
-        call_sizes: Optional[list[sympy.core.symbol.Symbol]] = None,
+        call_sizes: Optional[Sequence[sympy.core.symbol.Symbol]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
         generate_with_caching=False,
+        hint_override: Optional[int] = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -1576,6 +1644,7 @@ class TritonTemplate(KernelTemplate):
             layout,
             kwargs,
             generate_with_caching and self._cache_codegen_enabled_for_template,
+            hint_override=hint_override,
         )
 
         # May happen as result of dev by 0.
@@ -1597,6 +1666,7 @@ class TritonTemplate(KernelTemplate):
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, result.kernel_args_sizevars_keys),
             fallback=config.unbacked_symint_fallback,
+            hint_override=hint_override,
         )
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
@@ -1620,13 +1690,14 @@ class TritonTemplate(KernelTemplate):
 
         options = result.kernel_options
 
-        def make_kernel_render(out_node):
+        def make_kernel_render(out_node, hint_override: Optional[int] = None):
             assert result is not None
             kernel = self.kernel_type(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
                 workspace_arg=workspace_arg,
                 use_jit=False,
+                hint_override=hint_override,
                 **options,
             )
             render = functools.partial(
@@ -1642,6 +1713,7 @@ class TritonTemplate(KernelTemplate):
             *V.graph.sizevars.size_hints(
                 call_sizes,
                 fallback=config.unbacked_symint_fallback,
+                hint_override=hint_override,
             ),
             kwargs,
         )
@@ -1693,6 +1765,7 @@ class TritonTemplate(KernelTemplate):
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
             allowed_prologue_inps=result.prologue_supported_inputs,
+            hint_override=hint_override,
         )
 
 
@@ -1768,6 +1841,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         mutated_inputs=None,
         workspace_arg: Optional[WorkspaceArg] = None,
         allowed_prologue_inps: Optional[OrderedSet[str]] = None,
+        hint_override: Optional[int] = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
@@ -1787,6 +1861,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.allowed_prologue_inps = (
             allowed_prologue_inps if allowed_prologue_inps is not None else OrderedSet()
         )
+        self.hint_override = hint_override
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
@@ -1903,7 +1978,7 @@ class ExternKernelCaller(ChoiceCaller):
             assert self.choice.op_overload is not None, (
                 "Please provide an op_overload to use ir.FallbackKernel"
             )
-            inner = ir.FallbackKernel.create(
+            inner: ir.IRNode = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
         elif self.choice.kernel_creator is not None:
@@ -2171,6 +2246,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         self._register_default_preprocessing_fns()
 
+        # registers `self.cache_clear(...)` to be called when a fresh Inductor cache is requested
         clear_on_fresh_cache(self)
 
     def _register_default_preprocessing_fns(self):
@@ -2235,13 +2311,26 @@ class AlgorithmSelectorCache(PersistentCache):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
-        @functools.cache
-        def make_benchmark_fn():
-            return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
-
         inputs_key = create_inputs_key(input_nodes)
 
-        def autotune(choices):
+        # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
+        has_autotuned = False
+
+        def benchmark(choices, hint_override: Optional[int] = None):
+            nonlocal has_autotuned
+            # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
+            has_autotuned = True
+            counters["inductor"]["select_algorithm_autotune"] += 1
+            # TODO(nmacchioni): remove this layer of abstraction
+            # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
+            benchmark_fn = self.make_benchmark_fn(
+                choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+            )
+            # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
+            # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
+            return benchmark_fn(choices)
+
+        def autotune(choices, hint_override: Optional[int] = None):
             log.debug("Starting autotuning")
 
             with dynamo_timed(
@@ -2263,13 +2352,13 @@ class AlgorithmSelectorCache(PersistentCache):
                     ),
                 },
             ):
-                return make_benchmark_fn()(choices)
+                return benchmark(choices, hint_override=hint_override)
 
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
             torch._inductor.autotune_process.get_tuning_process_pool()
 
-        def do_autotuning(choices, precompile_fn):
+        def do_autotuning(choices, precompile_fn, hint_override: Optional[int] = None):
             precompile_start_ts = time.time()
             with dynamo_timed(
                 f"{name}_template_precompiling",
@@ -2290,7 +2379,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     candidates,
                     name,
                     inputs_key,
-                    autotune,
+                    lambda choices: autotune(choices, hint_override=hint_override),
+                    hint_override=hint_override,
                 )
                 choices = self.prune_choices_postscreen(
                     choices, timings, name, inputs_key, self.prescreening_cache
@@ -2303,7 +2393,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 choices,
                 name,
                 inputs_key,
-                autotune,
+                lambda choices: autotune(choices, hint_override=hint_override),
+                hint_override=hint_override,
             )
 
             autotune_elapse = time.time() - autotune_start_ts
@@ -2314,11 +2405,8 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 raise NoValidChoicesError
 
-            if make_benchmark_fn.cache_info().currsize:
-                counters["inductor"]["select_algorithm_autotune"] += 1
-
             if (
-                make_benchmark_fn.cache_info().currsize
+                has_autotuned
                 or log.getEffectiveLevel() == logging.DEBUG
                 or config.trace.log_autotuning_results
             ):
@@ -2329,6 +2417,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     autotune_elapse,
                     precompile_elapse,
                     prescreening_elapse,
+                    hint_override=hint_override,
                 )
 
             def profiler_bench_function():
@@ -2340,9 +2429,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     profile_bandwidth_with_do_bench_using_profiling=True,
                     autotune_in_subproc=False,
                 ):
-                    return self.make_benchmark_fn(
-                        choices, input_nodes, layout, input_gen_fns
-                    )(choices)
+                    return benchmark(choices)
 
             for feedback_fn in self.feedback_saver_fns:
                 # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
@@ -2365,8 +2452,16 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
-            def get_timings():
-                timings = do_autotuning(choices, precompile_fn)
+            def get_timings(hint_override: Optional[int] = None):
+                filtered_choices = [
+                    c
+                    for c in choices
+                    if not hasattr(c, "hint_override")
+                    or c.hint_override == hint_override
+                ]
+                timings = do_autotuning(
+                    filtered_choices, precompile_fn, hint_override=hint_override
+                )
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
                     if isinstance(choice, ExternKernelCaller):
@@ -2480,11 +2575,6 @@ class AlgorithmSelectorCache(PersistentCache):
             log.debug("Found all %d timings in cache, returning no_op", len(timings))
             return no_op
 
-        if config.search_autotune_cache and not (
-            config.max_autotune or config.max_autotune_gemm
-        ):
-            return no_op
-
         precompile_key = create_precompile_key(name, inputs_key, choices)
         if precompile_func := self.precompile_cache.get(precompile_key):
             log.debug("Precompile function found in cache, returning it")
@@ -2578,11 +2668,14 @@ class AlgorithmSelectorCache(PersistentCache):
                             "Exception %s for benchmark choice %s",
                             e,
                             futures[future],
-                            exc_info=True,
+                            exc_info=e,
                         )
                     else:
-                        log.error(
-                            "Exception %s for benchmark choice %s", e, futures[future]
+                        log.exception(  # noqa: G202
+                            "Exception %s for benchmark choice %s",
+                            e,
+                            futures[future],
+                            exc_info=e,
                         )
                 else:
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
@@ -2605,6 +2698,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        hint_override: Optional[int] = None,
     ) -> AutotuneArgs:
         """
         Factory method to create AutotuneArgs from a list of ChoiceCallers.
@@ -2614,7 +2708,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # de-duplicate args
         unique_example_inputs = {
-            x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
+            x.get_name(): input_gen_fns.get(
+                i, lambda x: cls.benchmark_example_value(x, hint_override=hint_override)
+            )(x)
             for i, x in enumerate(input_nodes)
         }
         example_inputs = list(unique_example_inputs.values())
@@ -2627,20 +2723,23 @@ class AlgorithmSelectorCache(PersistentCache):
                     V.graph.sizevars.size_hints(
                         input_node.get_size(),
                         fallback=config.unbacked_symint_fallback,
+                        hint_override=hint_override,
                     ),
                     V.graph.sizevars.size_hints(
                         input_node.get_stride(),
                         fallback=config.unbacked_symint_fallback,
+                        hint_override=hint_override,
                     ),
                     V.graph.sizevars.size_hint(
                         input_node.get_layout().offset,
                         fallback=config.unbacked_symint_fallback,
+                        hint_override=hint_override,
                     ),
                 )
             )
             for input_node in input_nodes
         ]
-        out = cls.benchmark_example_value(layout)
+        out = cls.benchmark_example_value(layout, hint_override=hint_override)
         out_extern = torch.as_strided(
             out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
         )
@@ -2749,8 +2848,11 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        hint_override: Optional[int] = None,
     ) -> dict[ChoiceCaller, float]:
-        inputs = cls.get_inputs(choices, input_nodes, layout, input_gen_fns)
+        inputs = cls.get_inputs(
+            choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+        )
         return cls.benchmark_choices(choices, inputs)
 
     @classmethod
@@ -2760,6 +2862,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        hint_override: Optional[int] = None,
     ):
         from . import autotune_process
 
@@ -2769,7 +2872,7 @@ class AlgorithmSelectorCache(PersistentCache):
         triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
 
         timings = cls.benchmark_in_current_process(
-            extern, input_nodes, layout, input_gen_fns
+            extern, input_nodes, layout, input_gen_fns, hint_override=hint_override
         )
         timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
         return timings
@@ -2781,6 +2884,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: list[ir.IRNode],
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
+        hint_override: Optional[int] = None,
     ):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
@@ -2791,6 +2895,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_nodes=input_nodes,
                 layout=layout,
                 input_gen_fns=input_gen_fns,
+                hint_override=hint_override,
             )
         else:
             return functools.partial(
@@ -2798,6 +2903,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_nodes=input_nodes,
                 layout=layout,
                 input_gen_fns=input_gen_fns,
+                hint_override=hint_override,
             )
 
     @staticmethod
@@ -2956,6 +3062,7 @@ class AlgorithmSelectorCache(PersistentCache):
         elapse: float,
         precompile_elapse: float,
         prescreening_elapse: Optional[float] = None,
+        hint_override: Optional[int] = None,
     ):
         V.debug.log_autotuning_results(
             name, input_nodes, timings, elapse, precompile_elapse
@@ -2970,6 +3077,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         V.graph.sizevars.size_hints(
                             n.get_size(),
                             fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
+                            hint_override=hint_override,
                         ),
                     )
                 )
@@ -3057,7 +3165,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
     @staticmethod
-    def benchmark_example_value(node):
+    def benchmark_example_value(node, hint_override: Optional[int] = None):
         """
         Convert an ir.Buffer into a concrete torch.Tensor we can use for
         benchmarking.
@@ -3076,10 +3184,12 @@ class AlgorithmSelectorCache(PersistentCache):
             V.graph.sizevars.size_hints(
                 node.get_size(),
                 fallback=config.unbacked_symint_fallback,
+                hint_override=hint_override,
             ),
             V.graph.sizevars.size_hints(
                 node.get_stride(),
                 fallback=config.unbacked_symint_fallback,
+                hint_override=hint_override,
             ),
             node.get_device(),
             node.get_dtype(),
@@ -3087,6 +3197,7 @@ class AlgorithmSelectorCache(PersistentCache):
             V.graph.sizevars.size_hints(
                 V.graph.get_allocation_size(node),
                 fallback=config.unbacked_symint_fallback,
+                hint_override=hint_override,
             ),
         )
 
