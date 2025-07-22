@@ -10,6 +10,7 @@ from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen.cuda.cutlass_cache import maybe_fetch_ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.scheduler import BaseSchedulerNode
@@ -562,6 +563,16 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         """
 
         ops = self.gen_ops()
+
+        # pre-computation
+        layout_repr: str = str(layout)
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]] = (
+            TensorMeta.from_irnodes(self.input_nodes)
+        )
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]] = (
+            TensorMeta.from_irnodes(self.output_node)
+        )
+
         with dynamo_timed("CUTLASSGemmTemplate.maybe_append_choice"):
             for name, op in ops:
                 for (
@@ -569,7 +580,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 ) in inductor_cuda_config.cutlass_max_profiling_swizzle_options:
                     description = f"{name} swizzle={swizzle}"
                     self.maybe_append_choice(
-                        choices, description=description, op=op, swizzle=swizzle
+                        choices,
+                        op=op,
+                        name=name,
+                        description=description,
+                        input_key=self.cache_key,
+                        layout_repr=layout_repr,
+                        input_tensor_meta=input_tensor_meta,
+                        output_tensor_meta=output_tensor_meta,
+                        swizzle=swizzle,
                     )
 
         if len(ops) == 0:

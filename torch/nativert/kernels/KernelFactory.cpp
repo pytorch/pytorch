@@ -128,8 +128,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
     const torch::nativert::ExecutorConfig& executorConfig,
     const Placement& placement,
     const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
-        pytorchStreamReader,
-    const MakeProxyExecutorFn& makeProxyExecutorFunc) {
+        pytorchStreamReader) {
   std::vector<std::unique_ptr<OpKernel>> nodeKernels;
   std::vector<std::unique_ptr<DelegateExecutor>> delegateExecutors;
   std::vector<ConstFoldingExecution> constFoldingExecutions;
@@ -215,10 +214,12 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
           const auto& subgraph = std::get<std::unique_ptr<Graph>>(attr.value);
           auto executionKernels = initializeNodeKernels(
               *subgraph, weights, executorConfig, placement);
-          CHECK(executionKernels.delegateExecutors.empty())
-              << "HigherOrderKernel does not support delegates";
-          CHECK(executionKernels.constFoldingExecutions.empty())
-              << "HigherOrderKernel does not support const folding";
+          TORCH_CHECK(
+              executionKernels.delegateExecutors.empty(),
+              "HigherOrderKernel does not support delegates");
+          TORCH_CHECK(
+              executionKernels.constFoldingExecutions.empty(),
+              "HigherOrderKernel does not support const folding");
           if (executorConfig.maxParallelOps > 1) {
             graphExecutors.emplace_back(
                 std::unique_ptr<GraphExecutorBase>(new ParallelGraphExecutor(
