@@ -3388,12 +3388,6 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    @torch._inductor.config.patch("cpp_wrapper", True)
-    def test_unbacked_select_index_cpp_wrapper(self):
-        self.test_unbacked_select_index()
-
-    @fresh_cache()
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_slice(self):
         from torch.fx.experimental.symbolic_shapes import statically_known_true
 

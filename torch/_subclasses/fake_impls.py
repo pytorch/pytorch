@@ -559,15 +559,17 @@ def slice_forward(
     if step <= 0:
         raise RuntimeError("slice step must be positive")
 
+    # start, end
+    start_index = 0 if start is None else _compute_slice_index(sizes[dim], start)
+    end_index = sizes[dim] if end is None else _compute_slice_index(sizes[dim], end)
+
     # size
-    start_index = _compute_slice_index(sizes[dim], start)
-    end_index = _compute_slice_index(sizes[dim], end)
     if (
         start_index is not None
         and end_index is not None
         and guard_or_false(end_index >= start_index)
     ):
-        new_size = end_index - start_index
+        new_size = (end_index - start_index + step - 1) // step
     else:
         new_size = shape_env.create_unbacked_symint()
         torch._check_is_size(new_size, max=sizes[dim])
