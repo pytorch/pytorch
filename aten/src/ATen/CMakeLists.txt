@@ -458,7 +458,7 @@ if(LAPACK_FOUND)
     # would not need this at all), some of our libraries (magma in particular)
     # backend to CPU BLAS/LAPACK implementations, and so it is very important
     # we get the *right* implementation, because even if the symbols are the
-    # same, LAPACK implementions may have different calling conventions.
+    # same, LAPACK implementations may have different calling conventions.
     # This caused https://github.com/pytorch/pytorch/issues/7353
     #
     # We do NOT do this on Linux, since we just rely on torch_cpu to

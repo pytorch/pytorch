@@ -262,8 +262,8 @@ post_grad_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType
 post_grad_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Registers a custom joint graph pass.
-joint_custom_pre_pass: Optional[Callable[[torch.fx.Graph], None]] = None
-joint_custom_post_pass: Optional[Callable[[torch.fx.Graph], None]] = None
+joint_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
+joint_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
@@ -388,6 +388,12 @@ bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
 
+bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
+# By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
+bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int]] = (
+    None
+)
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
@@ -438,6 +444,12 @@ force_same_precision: bool = Config(
     env_name_force="TORCHINDUCTOR_FORCE_SAME_PRECISION",
     default=False,
 )
+
+# Size hints for multi-kernel dispatch.
+# A reasonable default value of this config would be [64, 256, 4096]
+# TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
+# as expected before turning it on for everyone.
+multi_kernel_hints: list[int] = []
 
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
@@ -983,7 +995,7 @@ enable_linear_binary_folding = (
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
 # Enable caching codegen of triton templates.
-enable_caching_generated_triton_templates: bool = False
+enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
@@ -991,6 +1003,11 @@ autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 # config specific to codegen/cpp.py
 class cpp:
+    """
+    Settings for cpp backend.
+    This class provides a centralized location for managing cpp backend settings.
+    """
+
     # set to torch.get_num_threads()
     threads = -1
 
@@ -1007,7 +1024,7 @@ class cpp:
     dynamic_threads = os.environ.get("TORCHINDUCTOR_CPP_DYNAMIC_THREADS", "0") == "1"
 
     simdlen: Optional[int] = None
-    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "4096"))
+    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "512"))
 
     cxx: tuple[Literal[None], str] = (
         None,  # download gcc12 from conda-forge if conda is installed
@@ -1106,9 +1123,16 @@ class cpp:
     # Use a small dequant buffer for wgt of woq int4 size as: [q_group_size, Nr]
     use_small_dequant_buffer = False
 
+    force_inline_kernel = (
+        os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
 
-# config specific to codegen/triton.py
+
 class triton:
+    """
+    Config specific to codegen/triton.py
+    """
+
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
@@ -1283,6 +1307,19 @@ class triton:
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
 
+    # (Experimental)
+    # Generate code using the tl.make_tensor_descriptor() API for loads/store
+    # [Note: TMA API Restrictions] Currently the TMA API requires the following:
+    # - For Nvidia GPUs, the compute capability should be >= 9.0
+    # - The innermost stride of a descriptor should be 1
+    # - The size of the block shape in the innermost dimension should load / store
+    #   at least 16 bytes.
+    # - Tensors are 16 byte aligned. Enabling this option therefore requires
+    #   assume_aligned_inputs to also be enabled
+    # TMA descriptors are only going to be generated if the above conditions
+    # can be satisfied, along with any existing requirements for index expressions
+    use_tensor_descriptor = False
+
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
@@ -1356,6 +1393,10 @@ class aot_inductor:
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
 
+    # Default value of use_consts_asm_build is True, it will build by assembly language.
+    # When the value is False, it will build by c++ language.
+    use_consts_asm_build = True
+
     package: bool = False
     package_cpp_only: Optional[bool] = None
 
@@ -1415,6 +1456,13 @@ class aot_inductor:
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
+    #
+    # If package_cpp_only, this name is also used for the target name in CMakelists.txt
+    # The default target name is "aoti_model"
+    #
+    # If compile_standalone, the aoti model class name is f"AOTInductorModel{name}"
+    #
+    # This name can only contain letters, numbers, and underscores.
     model_name_for_generated_files: Optional[str] = None
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
@@ -1558,6 +1606,9 @@ class cuda:
     # Whether to force upload if the key already exists
     # Use this to overwrite and handle cache pollution
     binary_remote_cache_force_write: bool = False
+
+    # Enable caching codegen of cuda templates.
+    enable_caching_codegen: bool = True
 
 
 class rocm:
@@ -1724,8 +1775,11 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
-    # Save mapping info from inductor generated triton kernel to post_grad fx nodes
-    log_inductor_triton_kernel_to_post_grad_node_info: bool = True
+    # Save mapping info from inductor generated triton kernel to post_grad fx nodes to pre_grad fx nodes
+    provenance_tracking = (
+        os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+        or os.environ.get("INDUCTOR_PROVENANCE", "0") == "1"
+    )
 
 
 _save_config_ignore: list[str] = [
@@ -1753,6 +1807,8 @@ _cache_config_ignore_prefix: list[str] = [
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
+    "joint_custom_pre_pass",
+    "joint_custom_post_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache

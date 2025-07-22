@@ -490,6 +490,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
         if device == "cpu":
