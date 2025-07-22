@@ -3424,8 +3424,8 @@ module_db: list[ModuleInfo] = [
                skips=(
                    # No channels_last support for AvgPool1d as it does not take 4D inputs
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   # backward not supported on MPS backend
+                   DecorateInfo(skipMPS, 'TestModule', 'test_non_contiguous_tensors'),)
                ),
     ModuleInfo(torch.nn.BatchNorm1d,
                train_and_eval_differ=True,

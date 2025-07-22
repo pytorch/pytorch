@@ -1915,7 +1915,6 @@ torch.cuda.synchronize()
                 )
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @expectedFailureMPS
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ("max", "avg"):
