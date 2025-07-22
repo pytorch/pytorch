@@ -258,8 +258,39 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         collectives_bucketing = True
     if collectives_bucketing:
+        # Fx collectives bucketing passes require topological sort for the cases:
+        # when bucketed collectives have users before the last collective in the bucket
+        # AND when inputs of bucketed collective have ancestors after the first collective in the bucket.
+        #
+        # In this case we can not manually pick the place for bucketed collective insertion.
+        # But we are guaranteed by the bucketing (independent collectives in the bucket),
+        # that it is possible to reorder nodes to satisfy all ordering requirements.
+        #
+        # --- before bucketing ---
+        # in0 = ...
+        # wait_ag0 = ag(in0)
+        # user0(wait_ag0)
+        # ...
+        # pre_in1 = ...
+        # in1 = transform(pre_in1)
+        # wait_ag1 = ag(in1)
+        # user1(wait_ag1)
+        #
+        # --- after bucketing ---
+        #
+        # in0 = ...
+        # user(wait_ag0) <--- wait_ag0 is defined only after bucketed collective.
+        #
+        # pre_in1 = ...
+        # in1 = transform(pre_in1)
+        # ag_bucket(in0+in1)
+        # wait_bucket
+        # wait_ag0 = wait_bucket[0]
+        # wait_ag1 = wait_bucket[1]
+        # user1(wait_ag1)
+        print(f"XXX PRE_SORT:{gm.graph}")
         stable_topological_sort(gm.graph)
-
+        print(f"XXX POST_SORT:{gm.graph}")
 
     gm.recompile()
     gm.graph.lint()

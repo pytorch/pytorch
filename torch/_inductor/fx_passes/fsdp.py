@@ -63,6 +63,7 @@ def bucket_fsdp_all_gather(
         all_gather_bucket_cap_mb_callback,
         filter_wait_node=is_fsdp_all_gather_wait,
     )
+    print(f"XXX AG_BUCKETS fsdp:66:{ag_buckets}")
     if len(ag_buckets) == 0:
         return
     merge_all_gather_trace(gm, ag_buckets)
