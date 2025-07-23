@@ -1071,7 +1071,7 @@ def placeholder_naming_pass(
                 del constants[name]
 
 
-def output_naming_pass(
+def outputs_naming_pass(
     gm: torch.fx.GraphModule,
     export_graph_signature: "ExportGraphSignature",
     mod: torch.nn.Module,
