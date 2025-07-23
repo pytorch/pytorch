@@ -8,7 +8,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import IncorrectUsage
+from torch._dynamo.exc import IncorrectUsage, Unsupported
 from torch._dynamo.utils import counters
 
 
@@ -671,13 +671,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             fn(p)
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <DecoratorTests.test_nonstrict_trace_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
-  * `torch.utils._pytree.register_constant`
-  * `torch.utils._pytree.register_dataclass`
-  * `torch.utils._pytree.register_pytree_node`
-"""  # NOQA: B950
-            self.assertIn(msg, str(e))
+            self.assertIn("Invalid input type for nonstrict_trace-ed function", str(e))
 
     def test_nonstrict_trace_nested_custom_class_error(self):
         class Point:
@@ -723,13 +717,7 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             fn(torch.ones(10), torch.ones(1))
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <DecoratorTests.test_nonstrict_trace_nested_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
-  * `torch.utils._pytree.register_constant`
-  * `torch.utils._pytree.register_dataclass`
-  * `torch.utils._pytree.register_pytree_node`
-"""  # NOQA: B950
-            self.assertIn(msg, str(e))
+            self.assertIn("Invalid input type for nonstrict_trace-ed function", str(e))
 
     def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
         class State:
@@ -766,12 +754,10 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             fn(x)
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-You are calling a `nonstrict_trace`-ed function with an input that contains an object of type <DecoratorTests.test_nonstrict_newly_constructed_trace_register_constant_type_error.<locals>.State>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region.
-
-Please construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.
-"""  # NOQA: B950
-            self.assertIn(msg, str(e))
+            self.assertIn(
+                "Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
+                str(e),
+            )
 
     def test_nonstrict_trace_object_in_context_error(self):
         class Point:
@@ -814,17 +800,9 @@ Please construct the object _outside_ the `torch.compile` region, or submit an i
             fn(x, y)
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-You are calling a `nonstrict_trace`-ed function where one one of the inputs has been registered with a `pytree_flatten` that puts an object of type <DecoratorTests.test_nonstrict_trace_object_in_context_error.<locals>.Point> into the context.
-
-Please consider modifying that `pytree_flatten` to avoid putting the object into context, and apply one of the following to <DecoratorTests.test_nonstrict_trace_object_in_context_error.<locals>.Point>
-  * `torch.utils._pytree.register_constant`
-  * `torch.utils._pytree.register_dataclass`
-  * `torch.utils._pytree.register_pytree_node`
-
-If the above doesn't work, please subtmit an issue to GitHub.
-"""  # NOQA: B950
-            self.assertIn(msg, str(e))
+            self.assertIn(
+                "Invalid use of pytree_flatten with nonstrict_trace-ed function", str(e)
+            )
 
     def test_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1040,11 +1018,11 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 4)
 
-        try:
-            fn3(torch.randn(4, 5))
-            self.assertFalse(True)
-        except torch._dynamo.exc.Unsupported as e:
-            self.assertIn("Skip calling `torch.compiler.disable()`d function", str(e))
+        cnts.clear()
+        torch._dynamo.reset()
+        fn3(torch.randn(4, 5))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
 
     def test_disable_optimize(self):
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1693,6 +1671,266 @@ If the above doesn't work, please subtmit an issue to GitHub.
             Exception, "Cannot convert patch_dynamo_config args/kwargs to constants."
         ):
             f4(torch.randn(3))
+
+    def test_set_fullgraph(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f1(x):
+            x = x + 1
+            with torch._dynamo.set_fullgraph(False):
+                torch._dynamo.graph_break()
+            return x + 2
+
+        inp = torch.ones(3)
+        self.assertEqual(f1(inp), inp + 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+        @torch.compile(backend=cnts)
+        def f2(x):
+            x = x + 1
+            with torch._dynamo.set_fullgraph(True):
+                torch._dynamo.graph_break()
+            return x + 2
+
+        with self.assertRaises(Unsupported):
+            f2(inp)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f3(x):
+            x = x + 1
+            with torch._dynamo.set_fullgraph(False):
+                torch._dynamo.graph_break()
+                x = x + 2
+                torch._dynamo.graph_break()
+            return x + 4
+
+        cnts.clear()
+        self.assertEqual(f3(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 3)
+
+        def inner_f4(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f4(x):
+            x = x + 1
+            with torch._dynamo.set_fullgraph(False):
+                torch._dynamo.skip_frame()
+                return inner_f4(x)
+
+        cnts.clear()
+        self.assertEqual(f4(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_set_fullgraph_nested(self):
+        # set_fullgraph in a nested frame
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.set_fullgraph(False)
+        def inner_f5(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f5(x):
+            x = x + 1
+            return inner_f5(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f5(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner_f6(x):
+            x = x + 2
+            with torch._dynamo.set_fullgraph(False):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f6(x):
+            x = x + 1
+            return inner_f6(x)
+
+        cnts.clear()
+        self.assertEqual(f6(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 3)
+
+        def inner_f7(x):
+            x = x + 2
+            with torch._dynamo.set_fullgraph(True):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch.compile(backend=cnts, fullgraph=False)
+        def f7(x):
+            x = x + 1
+            return inner_f7(x)
+
+        with self.assertRaises(Unsupported):
+            f7(inp)
+
+    def test_set_fullgraph_nested_with_skip(self):
+        # set_fullgraph in a nested frame with a skipped frame in between
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.set_fullgraph(False)
+        def inner2_f8(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        def inner1_f8(x):
+            with torch._dynamo.set_fullgraph(False):
+                torch._dynamo.skip_frame()
+            return inner2_f8(x)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f8(x):
+            x = x + 1
+            return inner1_f8(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f8(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner2_f9(x):
+            x = x + 2
+            with torch._dynamo.set_fullgraph(True):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.disable(recursive=False)
+        def inner1_f9(x):
+            return inner2_f9(x)
+
+        @torch.compile(backend=cnts, fullgraph=False)
+        def f9(x):
+            x = x + 1
+            return inner1_f9(x)
+
+        with self.assertRaises(Unsupported):
+            f9(inp)
+
+        # test export with set_fullgraph(False) still errors
+
+    def test_set_fullgraph_export(self):
+        @torch._dynamo.set_fullgraph(False)
+        def inner(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        def f(x):
+            x = x + 1
+            return inner(x)
+
+        with self.assertRaises(Unsupported):
+            torch._dynamo.export(f)(torch.ones(3))
+
+    def test_set_fullgraph_nested_deep(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def inner1_f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def inner2_f1(x):
+            return inner1_f1(x)
+
+        def inner3_f1(x):
+            with torch._dynamo.set_fullgraph(False):
+                return inner2_f1(x)
+
+        def inner4_f1(x):
+            return inner3_f1(x)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f1(x):
+            x = x + 4
+            return inner4_f1(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f1(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 4)
+
+        def inner1_f2(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def inner2_f2(x):
+            return inner1_f2(x)
+
+        def inner3_f2(x):
+            with torch._dynamo.set_fullgraph(True):
+                return inner2_f2(x)
+
+        def inner4_f2(x):
+            return inner3_f2(x)
+
+        @torch.compile(backend=cnts, fullgraph=False)
+        def f2(x):
+            x = x + 4
+            return inner4_f2(x)
+
+        with self.assertRaises(Unsupported):
+            f2(inp)
+
+    def test_set_fullgraph_error(self):
+        @torch.compile(backend="eager")
+        def f1():
+            with torch._dynamo.set_fullgraph(foo="bar"):
+                pass
+
+        @torch.compile(backend="eager")
+        def f2():
+            with torch._dynamo.set_fullgraph():
+                pass
+
+        @torch.compile(backend="eager")
+        def f3():
+            with torch._dynamo.set_fullgraph("foo"):
+                pass
+
+        with self.assertRaises(Exception):
+            f1()
+        with self.assertRaises(Exception):
+            f2()
+        with self.assertRaises(Exception):
+            f3()
+
+    def test_nested_compile_fullgraph(self):
+        inp = torch.ones(3)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def inner_f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def f1(x):
+            return inner_f1(x)
+
+        with self.assertRaises(Unsupported):
+            f1(inp)
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def inner_f2(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f2(x):
+            return inner_f2(x)
+
+        self.assertEqual(f2(inp), inp + 3)
 
 
 if __name__ == "__main__":
