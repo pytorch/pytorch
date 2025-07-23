@@ -291,11 +291,16 @@ class GuardManagerWrapper:
         """
         Identify ``tag safe nodes`` and ``tag safe roots`` within a guard tree.
 
+        -----------------------------------------------------------------------
+        tag safe node
+        -----------------------------------------------------------------------
         A *tag safe node* is a ``GuardManager`` whose guarded value satisfies one
         of the following conditions:
 
         1. Immutable value - The value is intrinsically immutable according to
-        ``is_immutable_object``.
+        ``is_immutable_object``. Tensors are considered immutable. To ensure
+        that symbolic guards run, we also check that the GuardManager has no
+        accessors.
 
         2. Nested tag safe dictionary - The value is a ``dict`` whose keys and
         values are all tag safe nodes  (checked recursively).  Such dictionaries
@@ -310,14 +315,21 @@ class GuardManagerWrapper:
         dictionary is enough to guarantee the entire subtree is unchanged, enabling
         a *fast-path* guard check.
 
+        -----------------------------------------------------------------------
+        tag safe root
+        -----------------------------------------------------------------------
         A ``tag safe root`` is a tag safe node whose parent is not tag safe.
         These boundary nodes mark the points where guard evaluation can safely
         prune traversal: if a tag-safe root’s dictionary tag matches, the entire
         subtree beneath it is skipped.
 
-        One small detail is that empty dicts and immutable objects are not
-        marked as tag free roots (they are still marked as tag free nodes). This
-        is mostly for hygiene.
+        One strong requirement for tag safe root is for the guarded object to
+        support weakref. Refer to more details in the Recursive dict tag
+        matching note. In short, we need to save the weakref of the object on
+        first invocation, and check if it is still valid in later iterations, to
+        apply recursive dict tag optimizations. `dict` objects do NOT support
+        weakref. Therefore, as of now, we only mark nn module related guard
+        managers as tag safe roots.
 
         Algorithm
         ---------
@@ -378,7 +390,7 @@ class GuardManagerWrapper:
             # Propagate tag safety upwards. At any time, if a node is marked tag
             # safe, return the current node as tag safe root, discarding the
             # subtree tag safe roots.
-            if node.is_guarded_value_immutable():
+            if node.is_guarded_value_immutable() and node.has_no_accessors():
                 node.mark_tag_safe()
                 return [
                     node,

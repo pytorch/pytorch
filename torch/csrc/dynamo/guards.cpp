@@ -6293,6 +6293,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("is_tag_safe", &GuardManager::is_tag_safe)
       .def("is_tag_safe_root", &GuardManager::is_tag_safe_root)
       .def("type_of_guarded_value", &GuardManager::type_of_guarded_value)
+      .def("has_no_accessors", &GuardManager::has_no_accessors)
       .def(
           "get_accessors",
           &GuardManager::get_accessors,
