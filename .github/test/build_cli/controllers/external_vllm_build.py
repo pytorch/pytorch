@@ -1,17 +1,24 @@
-
-from utils import run, get_post_build_pinned_commit, get_env, Timer, create_directory, delete_directory
+from utils import (
+    run,
+    get_post_build_pinned_commit,
+    get_env,
+    Timer,
+    create_directory,
+    delete_directory,
+)
 import os
+
 
 def build_vllm() -> None:
     print("begin")
-    shared_folder_name="shared"
+    shared_folder_name = "shared"
 
     tag_name = get_env("TAG", "vllm-wheels")
     cuda = get_env("CUDA_VERSION", "12.8.0")
     py = get_env("PYTHON_VERSION", "3.12")
     max_jobs = get_env("MAX_JOBS", "32")
     target = get_env("TARGET", "export-wheels")
-    sccache_bucket_name=get_env("SCCACHE_BUCKET_NAME", "")
+    sccache_bucket_name = get_env("SCCACHE_BUCKET_NAME", "")
     sccache_region_name = get_env("SCCACHE_REGION_NAME", "")
     torch_cuda_arch_list = get_env("TORCH_CUDA_ARCH_LIST", "8.6;8.9")
 
@@ -23,7 +30,10 @@ def build_vllm() -> None:
     with Timer():
         commit = get_post_build_pinned_commit("vllm")
         clone_vllm(commit)
-        run("cp .github/script-v/Dockerfile.nightly_torch  vllm/docker/Dockerfile.nightly_torch", logging=True)
+        run(
+            "cp .github/script-v/Dockerfile.nightly_torch  vllm/docker/Dockerfile.nightly_torch",
+            logging=True,
+        )
 
         create_directory(shared_folder_name)
 
@@ -50,7 +60,7 @@ def build_vllm() -> None:
         run(cmd, cwd="vllm", logging=True, env=env)
 
 
-def clone_vllm(commit:str):
+def clone_vllm(commit: str):
     cwd = "vllm"
 
     # delete the directory if it exists
@@ -59,4 +69,4 @@ def clone_vllm(commit:str):
     # Clone the repo & checkout commit
     run("git clone https://github.com/vllm-project/vllm.git")
     run(f"git checkout {commit}", cwd)
-    run("git submodule update --init --recursive",cwd)
+    run("git submodule update --init --recursive", cwd)

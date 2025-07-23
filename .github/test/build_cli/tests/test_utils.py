@@ -1,4 +1,3 @@
-import os
 import pytest
 from unittest.mock import patch
 import shlex
@@ -11,16 +10,14 @@ from utils import (
     create_directory,
 )
 
+
 class TestRun:
     def test_run_basic(self, mock_subprocess_run):
         """Test that run calls subprocess.run with the correct arguments"""
         cmd = "echo hello"
         run(cmd)
         mock_subprocess_run.assert_called_once_with(
-            shlex.split(cmd),
-            check=True,
-            cwd=None,
-            env=None
+            shlex.split(cmd), check=True, cwd=None, env=None
         )
 
     def test_run_with_cwd(self, mock_subprocess_run):
@@ -29,10 +26,7 @@ class TestRun:
         cwd = "test_dir"
         run(cmd, cwd=cwd)
         mock_subprocess_run.assert_called_once_with(
-            shlex.split(cmd),
-            check=True,
-            cwd=cwd,
-            env=None
+            shlex.split(cmd), check=True, cwd=cwd, env=None
         )
 
     def test_run_with_env(self, mock_subprocess_run):
@@ -41,10 +35,7 @@ class TestRun:
         env = {"TEST_VAR": "test_value"}
         run(cmd, env=env)
         mock_subprocess_run.assert_called_once_with(
-            shlex.split(cmd),
-            check=True,
-            cwd=None,
-            env=env
+            shlex.split(cmd), check=True, cwd=None, env=env
         )
 
     def test_run_with_logging(self, mock_subprocess_run, capsys):
@@ -55,8 +46,11 @@ class TestRun:
         assert f">>> {cmd}" in captured.out
         mock_subprocess_run.assert_called_once()
 
+
 class TestGetPostBuildPinnedCommit:
-    def test_get_post_build_pinned_commit_success(self, mock_path_exists, mock_path_read_text):
+    def test_get_post_build_pinned_commit_success(
+        self, mock_path_exists, mock_path_read_text
+    ):
         """Test successful retrieval of pinned commit"""
         mock_path_exists.return_value = True
         mock_path_read_text.return_value = "abc123\n"
@@ -73,6 +67,7 @@ class TestGetPostBuildPinnedCommit:
 
         with pytest.raises(FileNotFoundError):
             get_post_build_pinned_commit("vllm")
+
 
 class TestGetEnv:
     def test_get_env_existing_var(self, mock_os_environ):
@@ -99,16 +94,17 @@ class TestGetEnv:
 
         assert result == ""
 
+
 class TestCreateDirectory:
     def test_create_directory(self):
         folder_name = "my_folder"
         mocked_path = f"/mocked/abs/{folder_name}"
 
-        with patch("os.path.abspath", return_value=mocked_path) as mock_abspath, \
-            patch("os.path.exists", return_value=True) as mock_exists, \
-            patch("shutil.rmtree") as mock_rmtree, \
-            patch("os.makedirs") as mock_makedirs:
-
+        with patch("os.path.abspath", return_value=mocked_path) as mock_abspath, patch(
+            "os.path.exists", return_value=True
+        ) as mock_exists, patch("shutil.rmtree") as mock_rmtree, patch(
+            "os.makedirs"
+        ) as mock_makedirs:
             create_directory(folder_name)
 
             # abspath should be called twice

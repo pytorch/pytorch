@@ -1,3 +1,3 @@
 from .external import ExternalBuildController
 
-ALL_CONTROLLERS = [ ExternalBuildController]
+ALL_CONTROLLERS = [ExternalBuildController]
