@@ -1940,17 +1940,17 @@ namespace {
         float f32 = at::vec::fp8e5m2_to_fp32_scalar(input);
         uint8_t u8 = at::vec::fp32_to_fp8e5m2_scalar(f32);
       #else
-        float f32 = c10::detail::fp8e5m2_to_fp32_value(input);
-        uint8_t u8 = c10::detail::fp8e5m2_from_fp32_value(f32);
+        float f32 = torch::headeronly::detail::fp8e5m2_to_fp32_value(input);
+        uint8_t u8 = torch::headeronly::detail::fp8e5m2_from_fp32_value(f32);
       #endif
         if (index == 255 || index == 127 || index == 254 || index == 126 || index == 253 || index == 125) {
           // EXPECT_EQ failed to check nan
           EXPECT_TRUE(std::isnan(f32));
         } else {
-          EXPECT_EQ(f32, c10::detail::fp8e5m2_to_fp32_value(input))
+          EXPECT_EQ(f32, torch::headeronly::detail::fp8e5m2_to_fp32_value(input))
               << "Test failed for u8 to float " << input << "\n";
         }
-        EXPECT_EQ(u8, c10::detail::fp8e5m2_from_fp32_value(f32))
+        EXPECT_EQ(u8, torch::headeronly::detail::fp8e5m2_from_fp32_value(f32))
             << "Test failed for float to u8 " << f32 << "\n";
       }
     }
