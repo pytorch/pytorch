@@ -7,8 +7,8 @@ import torch
 import torch.distributed as dist
 from torch.distributed import rpc
 from torch.testing._internal.common_distributed import (
+    exit_if_lt_x_gpu,
     MultiProcessTestCase,
-    TEST_SKIPS,
     tp_transports,
 )
 
@@ -94,8 +94,8 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        if backend == "nccl":
+            exit_if_lt_x_gpu(self.world_size)
         self.init_comms(init_rpc=init_rpc, backend=backend)
         func(self, *args, **kwargs)
         self.destroy_comms(destroy_rpc=init_rpc)
