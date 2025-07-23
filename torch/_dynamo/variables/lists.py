@@ -1257,19 +1257,8 @@ class ListIteratorVariable(IteratorVariable):
         self.index += 1
         return self.items[old_index]
 
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ):
-        if name == "__contains__":
-            assert len(args) == 1
-            assert not kwargs
-            return iter_contains(self.items[self.index :], args[0], tx)
-
-        return super().call_method(tx, name, args, kwargs)
+    def call_obj_hasattr(self, tx, name):
+        return variables.ConstantVariable.create(hasattr(iter([]), name))
 
     def python_type(self):
         return type(iter([]))
