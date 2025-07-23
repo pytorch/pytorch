@@ -111,7 +111,7 @@ class SequentialSampler(Sampler[int]):
     r"""Samples elements sequentially, always in the same order.
 
     Args:
-        data_source (Dataset): dataset to sample from
+        data_source (Sized): data source to sample from. Must implement __len__.
     """
 
     data_source: Sized
