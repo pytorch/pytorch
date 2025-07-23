@@ -3,6 +3,10 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/Stream.h>
 #include <c10/core/impl/GPUTrace.h>
+#include <c10/core/impl/VirtualGuardImpl.h>
+
+#include <mutex>
+#include <new>
 
 namespace c10::CachingDeviceAllocator {
 
@@ -116,6 +120,12 @@ C10_API inline DeviceAllocator* getDeviceAllocator(const DeviceType& t) {
   return device_allocator;
 }
 
+#ifdef __cpp_lib_hardware_interference_size
+using std::hardware_destructive_interference_size;
+#else
+static constexpr std::size_t hardware_destructive_interference_size = 64;
+#endif
+
 template <
     typename T,
     typename B,
@@ -137,7 +147,29 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
   }
 
   at::DataPtr allocate(size_t size) override {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");
+    c10::impl::VirtualGuardImpl impl(T::static_device_type);
+    c10::Device device = impl.getDevice();
+    void* devPtr = nullptr;
+    c10::Stream stream = impl.getStream(device);
+    T::allocate(&devPtr, size, device.index());
+
+    if (size && TORCH_SDT_IS_ENABLED(malloc)) {
+      TORCH_SDT_WITH_SEMAPHORE(malloc, devPtr, device, size, stream.id());
+    }
+
+    return {devPtr, devPtr, deleteFunc, device};
+  }
+
+  void malloc(void** devPtr, c10::DeviceIndex device, size_t size, S stream) {
+    checkDeviceIndex(device);
+    B* block = impls_[device]->malloc(device, size, stream);
+    add_allocated_block(block);
+    *devPtr = (void*)block->ptr;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_memory_allocation(
+          I::static_device_type, reinterpret_cast<uintptr_t>(*devPtr));
+    }
   }
 
   void free(void* ptr) {
@@ -154,6 +186,10 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
           T::static_device_type, reinterpret_cast<uintptr_t>(block->ptr));
     }
     impls_[block->device]->free(block);
+  }
+
+  virtual DeleterFnPtr raw_deleter() const {
+    return &deleteFunc;
   }
 
   void recordStream(const DataPtr& ptr, c10::Stream stream) override {
@@ -201,6 +237,10 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
     }
   }
 
+  bool initialized() override {
+    return !impls_.empty();
+  }
+
  private:
   void checkDeviceIndex(DeviceIndex device_index) const {
     TORCH_CHECK(
@@ -210,11 +250,23 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
         ": did you call init?");
   }
 
+  void add_allocated_block(B* block) {
+    const auto mutex_shard_id = get_mutex_shard_id(block->ptr);
+    std::lock_guard<std::mutex> lock(mutex[mutex_shard_id].m);
+    allocated_blocks[mutex_shard_id][block->ptr] = block;
+  }
+
   static size_t get_mutex_shard_id(void* ptr) {
     return twang_mix64(static_cast<size_t>(ptr)) % kNumMutexShard;
   }
 
+  // Aligns the mutex to avoid false sharing on cache lines.
+  struct alignas(hardware_destructive_interference_size) AlignedMutex {
+    std::mutex m;
+  };
+  // A prime number close to 64, used for sharding to reduce contention.
   static constexpr size_t kNumMutexShard = 67;
+  std::array<AlignedMutex, kNumMutexShard> mutex;
   std::vector<std::unique_ptr<T>> impls_;
 };
 
