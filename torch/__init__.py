@@ -2263,8 +2263,8 @@ from torch._ops import ops as ops  # usort: skip
 from torch._classes import classes as classes  # usort: skip
 
 import importlib.util
+import sys
 import types
-
 # Construct a proper module for torch.classes
 _classes_spec = importlib.util.spec_from_loader(f"{__name__}.classes", loader=None)
 torch_classes_module = importlib.util.module_from_spec(_classes_spec)
@@ -2277,7 +2277,7 @@ for attr in dir(classes):
         except Exception:
             pass # In case some dynamic attributes raise
 
-# # Register the module properly in sys.modules
+# Register the module properly in sys.modules
 sys.modules[f"{__name__}.classes"] = torch_classes_module
 
 sys.modules.setdefault(f"{__name__}.ops", ops)
