@@ -9144,7 +9144,6 @@ class TestNNDeviceType(NNTestCase):
             self._test_module_empty_inputs(transformer_model, [src, tgt])
 
     @onlyNativeDeviceTypes
-    @expectedFailureMPS   # Float64 is not supported
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
@@ -9319,6 +9318,7 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             F.mse_loss(i, t)
 
+    @expectedFailureMPS   # TODO: Fixme, and raise assert on empty tensor
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
