@@ -15,7 +15,6 @@ import logging
 import multiprocessing as python_multiprocessing
 import os
 import queue
-import random
 import threading
 import warnings
 from collections.abc import Callable
@@ -577,8 +576,8 @@ class DataLoader(Generic[_T_co]):
         #        available (available in most of Linux system, but not OSX and Windows).
         #        When os.sched_getaffinity is not available, os.cpu_count() is called instead, but
         #        it doesn't respect cpuset.
-        #        We don't take threading into account since each worker process is single threaded
-        #        at this time.
+        #        We don't take threading into account since each multi-processing worker process is
+        #        single threaded at this time.
         #
         #        We don't set any threading flags (eg. OMP_NUM_THREADS, MKL_NUM_THREADS, etc)
         #        other than `torch.set_num_threads` to 1 in the worker process, if the passing
@@ -852,8 +851,6 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         self._index_queues = []
         self._workers = []
         self._data_queue = None
-        self._pin_memory_thread = None
-        self._pin_memory_thread_done_event = None
 
     def _initialize_pin_memory(self):
         """Initialize pin memory thread and related queues."""
@@ -1050,7 +1047,6 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         else:
             # not found (i.e., didn't break)
             return
-
         self._index_queues[worker_queue_idx].put((self._send_idx, index))
         self._task_info[self._send_idx] = (worker_queue_idx,)
         self._workers_num_tasks[worker_queue_idx] += 1
