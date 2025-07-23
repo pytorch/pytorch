@@ -629,7 +629,7 @@ at::Tensor all_to_all_vdev_2d(
   TORCH_CHECK(ne <= NUM_TILES, "Number of experts must be smaller than NUM_TILES", NUM_TILES);
 
   // Set device context for getting the stream and launching kernels below
-  auto& device = input.device();
+  auto device = input.device();
   TORCH_CHECK(device.type() == at::DeviceType::CUDA &&
       out.device() == device &&
       in_splits.device() == device &&
@@ -763,7 +763,7 @@ at::Tensor all_to_all_vdev_2d_offset(
   TORCH_CHECK(ne <= A2AV_TILE_SIZE, "Number of experts must be smaller than A2AV_TILE_SIZE", A2AV_TILE_SIZE);
 
   // Set device context for getting the stream and launching kernels below
-  auto& device = input.device();
+  auto device = input.device();
   TORCH_CHECK(device.type() == at::DeviceType::CUDA &&
       out.device() == device &&
       in_splits_offsets.device() == device &&
