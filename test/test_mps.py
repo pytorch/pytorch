@@ -12525,14 +12525,32 @@ class TestMetalLibrary(TestCaseMPS):
                                uint idx [[thread_position_in_grid]]) {{
                 out[idx] = c10::metal::simd_sum(inp[idx]);
             }}
+
+            kernel void do_max(device {DTYPE_TO_METAL[dtype]}* out,
+                               constant {DTYPE_TO_METAL[dtype]}* inp,
+                               uint idx [[thread_position_in_grid]]) {{
+                out[idx] = c10::metal::simd_max(inp[idx]);
+            }}
         """)
         x = torch.testing.make_tensor(28, device="mps", dtype=dtype)
         y = torch.empty_like(x)
+        z = torch.empty_like(x)
         lib.do_sum(y, x)
+        lib.do_max(z, x)
         x_sum = x.sum()
+        x_max = x.max()
         max_err = (y - x_sum).abs().max().item()
         self.assertLess(max_err, 1e-2 if dtype == torch.float16 else 1e-5,
                         f"results are {y}, but all elements should have been {x_sum.item()}")
+        self.assertTrue((z == x_max).all().item(),
+                        f"results are {z}, but all elements should have been {x_max.item()}")
+        # Test nan propagation
+        if not dtype.is_floating_point:
+            return
+
+        x[5] = torch.nan
+        lib.do_max(z, x)
+        self.assertTrue(z.isnan().all().item(), "results are {z}, but all elements shold have been nan")
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.bfloat16])
     def test_atomic_add(self, dtype):
