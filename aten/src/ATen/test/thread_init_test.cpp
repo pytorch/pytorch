@@ -3,14 +3,16 @@
 #include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/test_base.h>
 #include <thread>
+#include <gtest/gtest.h>
 
 
 // This checks whether threads can see the global
 // numbers of threads set and also whether the scheduler
 // will throw an exception when multiple threads call
 // their first parallel construct.
+const long size = 1000;
 void test(int given_num_threads) {
-  auto t = at::ones({1000 * 1000}, at::CPU(at::kFloat));
+  auto t = at::ones({size * size}, at::CPU(at::kFloat));
   ASSERT_TRUE(given_num_threads >= 0);
   ASSERT_EQ(at::get_num_threads(), given_num_threads);
   auto t_sum = t.sum();
@@ -19,7 +21,8 @@ void test(int given_num_threads) {
   }
 }
 
-int main() {
+TEST(TestThreadInit, test_thread) {
+
   at::init_num_threads();
 
   at::set_num_threads(4);
@@ -39,6 +42,4 @@ int main() {
   at::set_num_interop_threads(5);
   ASSERT_EQ(at::get_num_interop_threads(), 5);
   ASSERT_ANY_THROW(at::set_num_interop_threads(6));
-
-  return 0;
 }
