@@ -301,18 +301,18 @@ def gen_declaration_and_definition(
     # {"v2" : ["new_arg1"], "v3": ["new_arg2, new_arg3"]}.
     indexed_version_info: dict[int, list[str]] = {1: []}
     for ver_str, new_args in sorted(version_info.items()):
-        assert ver_str.startswith(
-            "v"
-        ), f"Version number for {base_name} is {ver_str}, not starting with 'v'"
+        assert ver_str.startswith("v"), (
+            f"Version number for {base_name} is {ver_str}, not starting with 'v'"
+        )
         try:
             ver_id = int(ver_str[1:])
         except ValueError as e:
             raise AssertionError(
                 f"Version number for {base_name} is {ver_str}, not a valid integer after 'v'"
             ) from e
-        assert (
-            ver_id not in indexed_version_info
-        ), f"{ver_str} for {base_name} has already been defined"
+        assert ver_id not in indexed_version_info, (
+            f"{ver_str} for {base_name} has already been defined"
+        )
         indexed_version_info[ver_id] = new_args
 
     declarations: list[str] = []
@@ -410,7 +410,7 @@ def gen_static_dispatch_backend_call(
 def get_backend_index_for_aoti(
     func: NativeFunction,
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
     extend_aoti_c_shim: bool,
 ) -> BackendIndex | None:
@@ -455,7 +455,7 @@ def get_backend_index_for_aoti(
 def get_header_for_aoti(
     func: NativeFunction,
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
     extend_aoti_c_shim: bool,
 ) -> str | None:
@@ -482,7 +482,7 @@ def gen_c_shim(
     func: NativeFunction,
     version_info: dict[str, list[str]],
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
     extend_aoti_c_shim: bool,
@@ -523,7 +523,7 @@ def gen_c_shim(
 class ShimGenerator:
     inductor_fallback_ops: dict[str, dict[str, list[str]]]
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup]
-    dispatch_key: Optional[DispatchKey]
+    dispatch_key: DispatchKey
     backend_indices: dict[DispatchKey, BackendIndex]
     header: bool  # True to generate .h and False to generate .cpp
     extend_aoti_c_shim: bool
@@ -550,7 +550,7 @@ def gen_aoti_c_shim(
     native_functions: Sequence[NativeFunction],
     inductor_fallback_ops: dict[str, dict[str, list[str]]],
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
     extend_aoti_c_shim: bool,
@@ -644,7 +644,7 @@ def gen_aoti_c_shim(
 
 def gen_aoti_c_shim_files(
     aoti_fm: FileManager,
-    aoti_backends: set[Optional[DispatchKey]],
+    aoti_backends: set[DispatchKey],
     native_functions: Sequence[NativeFunction],
     backend_indices: dict[DispatchKey, BackendIndex],
     structured_native_functions: Sequence[NativeFunctionsGroup],
@@ -678,7 +678,9 @@ def gen_aoti_c_shim_files(
 
         # Use "generic" as the device name when dispatch_key is Undefined
         device_name = (
-            "generic" if dispatch_key is DispatchKey.GenericKey else dispatch_key.lower()
+            "generic"
+            if dispatch_key is DispatchKey.GenericKey
+            else dispatch_key.lower()
         )
 
         # header files were checked in for ABI-compatiblilty checking

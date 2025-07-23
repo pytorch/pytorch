@@ -337,7 +337,10 @@ void boxed_my_fill_(
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
   m.def("my_empty_like(Tensor t) -> Tensor");
-  m.def("my_fill_(Tensor(a!) t, Scalar value) -> Tensor(a!)");
+  // float value because
+  // Use `float` instead of `double` in an operator's schema string.
+  // `float` in schema corresponds to the double type in C++:
+  m.def("my_fill_(Tensor(a!) t, float value) -> Tensor(a!)");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {

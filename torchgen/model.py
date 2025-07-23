@@ -231,7 +231,7 @@ class DispatchKey(Enum):
 
     # GenericKey is not a real DispatchKey
     # It is used for generating generic C shim headers for stable operators
-    GenericKey = auto() 
+    GenericKey = auto()
 
     def __str__(self) -> str:
         return self.name

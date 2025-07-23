@@ -8,15 +8,16 @@ import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Literal, TYPE_CHECKING, TypeVar
+from typing_extensions import assert_never
+
+import yaml
 
 import torchgen.api.dispatcher as dispatcher
 import torchgen.api.meta as meta
 import torchgen.api.native as native
 import torchgen.api.structured as structured
 import torchgen.dest as dest
-
-import yaml
 from torchgen.api import cpp
 from torchgen.api.translate import translate
 from torchgen.api.types import (
@@ -90,7 +91,6 @@ from torchgen.utils import (
     Target,
 )
 from torchgen.yaml_utils import YamlDumper, YamlLoader
-from typing_extensions import assert_never
 
 
 if TYPE_CHECKING:
@@ -1430,9 +1430,9 @@ def get_grouped_by_view_native_functions(
             assert kind not in grouped_by_views[schema]
             grouped_by_views[schema][kind] = f
         else:
-            assert (
-                view_kind not in grouped_by_views[schema]
-            ), f"{view_kind} already in {grouped_by_views[schema].keys()}"
+            assert view_kind not in grouped_by_views[schema], (
+                f"{view_kind} already in {grouped_by_views[schema].keys()}"
+            )
             grouped_by_views[schema][view_kind] = f
 
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
@@ -1480,9 +1480,9 @@ def get_ns_grouped_kernels(
                 native_function_namespaces.add(namespace)
             else:
                 namespace = DEFAULT_KERNEL_NAMESPACE
-            assert (
-                len(native_function_namespaces) <= 1
-            ), f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
+            assert len(native_function_namespaces) <= 1, (
+                f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
+            )
             ns_grouped_kernels[namespace].extend(
                 native_function_decl_gen(f, backend_idx)
             )
@@ -1509,9 +1509,7 @@ def get_native_function_declarations_from_ns_grouped_kernels(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -1701,9 +1699,7 @@ def get_namespaced_declaration(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -2219,7 +2215,7 @@ def gen_source_files(
     per_operator_headers: bool,
     skip_dispatcher_op_registration: bool,
     update_aoti_c_shim: bool,
-    aoti_backends: set[Optional[DispatchKey]],
+    aoti_backends: set[DispatchKey],
     extend_aoti_c_shim: bool,
 ) -> None:
     extra_cuda_headers = """\
@@ -2841,7 +2837,7 @@ def main() -> None:
         DispatchKey.MTIA,
     }
 
-    aoti_backends: set[Optional[DispatchKey]] = {
+    aoti_backends: set[DispatchKey] = {
         DispatchKey.CPU,
         DispatchKey.CUDA,
         DispatchKey.GenericKey,

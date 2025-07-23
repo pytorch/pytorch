@@ -26,14 +26,14 @@ inline Tensor empty_like(const Tensor& self) {
   return to<Tensor>(stack[0]);
 }
 
-
 // We expect this to be the stable version of the fill_.Scalar op
 // with identical semantics to the existing fill_.Scalar op.
 // A subtle nuance is that `value` is typed as a double, but it is
 // actually a Scalar. This is because Scalar.h is currently not
 // header-only.
 inline Tensor fill_(const Tensor& self, double value) {
-  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_generic_fill__Scalar(self, value));
+  auto self_ = self.get();
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_generic_fill__Scalar(self_, value));
   return self;
 }
 
