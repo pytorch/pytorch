@@ -365,7 +365,7 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
     AtenTensorHandle input,
     AtenTensorHandle weight,
-    AtenTensorHandle bias,
+    AtenTensorHandle bias, // optional argument
     int64_t out_channel,
     AtenTensorHandle* out);
 
