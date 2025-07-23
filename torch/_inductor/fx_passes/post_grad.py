@@ -240,7 +240,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
 
         p = (
-            bucket_fsdp_all_gather
+            bucket_fsdp_all_gather  # type: ignore[assignment]
             if config.bucket_all_gathers_fx == "fsdp"
             else bucket_all_gather
         )
