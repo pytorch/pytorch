@@ -2593,6 +2593,11 @@ class GuardManager {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
       _is_empty_dict = PyDict_Size(example_value.ptr()) == 0;
     }
+
+    py::object config_module = py::module_::import("torch._dynamo.config");
+    _max_saved_pointers_for_recursive_dict_tags_check =
+        config_module.attr("max_saved_pointers_for_recursive_dict_tags_check")
+            .cast<uint64_t>();
   }
 
   GuardManager(const GuardManager& m) = delete;
@@ -2641,6 +2646,10 @@ class GuardManager {
 
   std::string type_of_guarded_value() {
     return _type_str;
+  }
+
+  bool is_recursive_dict_tag_matching_disabled() {
+    return _disable_dict_tag_matching;
   }
 
  public:
@@ -2848,9 +2857,8 @@ class GuardManager {
     //      the callback automatically disables dict‑tag matching for the
     //      entire guard manager.
     //    • This guards against aliasing bugs: CPython can recycle a freed
-    //    memory
-    //      address, so a new object might otherwise appear to match an old
-    //      pointer.
+    //      memory address, so a new object might otherwise appear to match an
+    //      old pointer.
     //
     // 5) Guard failure
     //    • If a tag check ever fails for this root, we conservatively disable
@@ -2876,8 +2884,9 @@ class GuardManager {
           // Something changed, very likely the dict tag checking will fail in
           // future. So disable the recursive tag matching.
           _disable_dict_tag_matching = true;
-        } else if (_dict_pointers.size() == 2) {
-          // TODO(recursive-dict-tag) - Add a config.
+        } else if (
+            _dict_pointers.size() ==
+            _max_saved_pointers_for_recursive_dict_tags_check) {
           // Bound the cache size. If there are too many new `value` pointers to
           // be recorded, it is a sign that dict tag matching will never
           // succeed.
@@ -2885,7 +2894,6 @@ class GuardManager {
         } else {
           // Start the recording
           start_recording_dict_pointers(_root, this);
-          // TODO(recursive-dict-tag) - Add a weakref.
           if (_is_dict) {
             record_dict_pointer(_root, value);
           }
@@ -2903,9 +2911,9 @@ class GuardManager {
     if (is_recording) {
       stop_recording_dict_pointers(_root, value, result);
       if (result) {
-        // register_weakref_callback the value poonter
         if (!register_weakref_callback(value)) {
-          throw std::runtime_error("Could not register a callback");
+          throw std::runtime_error(
+              "Could not register a callback for recursive dict tag optimization");
         }
       }
     }
@@ -2926,28 +2934,45 @@ class GuardManager {
   }
 
   bool register_weakref_callback(PyObject* target) {
-    PyObject* capsule = PyCapsule_New(this, "GuardManager*", nullptr);
-    if (!capsule)
+    // Store a weakref on value PyObject, and register a callback which
+    // disables the dict tag optimization if value PyObject gets
+    // deallocated. This guards against aliasing bugs: CPython can recycle a
+    // freed memory address, so a new object might otherwise appear to match
+    // an old pointer.
+
+    // Implementation note - Create a capsule object that will be passed on to
+    // the weakref callback.  The capsule wraps the ``this`` GuardManager
+    // object, so that we can access the C++ object and set
+    // _disable_dict_tag_matching member in the callback.
+
+    // Alternatively, we could have checked that the weakref is valid at
+    // runtime. But that would increase latency on the hot path. So we opted for
+    // the callback option.
+    PyObject* capsule =
+        PyCapsule_New(this, "GuardManager*", nullptr); // new reference
+    if (!capsule) {
       return false;
+    }
 
     static PyMethodDef cb_def = {
         "_guard_manager_gc_callback", // name (unused)
         &GuardManager::disable_dict_tag_matching_callback,
         METH_O,
         "internal weakref callback"};
-    PyObject* py_cb = PyCFunction_NewEx(&cb_def, capsule, nullptr);
-    Py_DECREF(capsule);
+
+    PyObject* py_cb = PyCFunction_New(&cb_def, capsule);
+    Py_DECREF(capsule); // py_cb holds the capsule object
     if (!py_cb) {
       return false;
     }
 
     PyObject* wr = PyWeakref_NewRef(target, py_cb); // new ref
-    Py_DECREF(py_cb); // weakref holds its own ref
+    Py_DECREF(py_cb); // weakref holds py_cb ref
+    // These will be decrefed in destructor
     _tag_safe_keys_weakrefs.push_back(wr);
     return wr != nullptr;
   }
 
-  // TODO(recursive-dict-tag) -  Do we need a destructor for weakrefs?
   virtual bool check_nopybind(FrameLocalsMapping* value) {
     return check_nopybind_template(value);
   }
@@ -3176,6 +3201,7 @@ class GuardManager {
   bool _is_tensor = false;
   std::string _type_str;
   uint64_t _dict_tag{0};
+  uint64_t _max_saved_pointers_for_recursive_dict_tags_check = 0;
 
   // tag safe markers
   bool _is_tag_safe = false;
@@ -6311,6 +6337,9 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("is_tag_safe", &GuardManager::is_tag_safe)
       .def("is_tag_safe_root", &GuardManager::is_tag_safe_root)
       .def("type_of_guarded_value", &GuardManager::type_of_guarded_value)
+      .def(
+          "is_recursive_dict_tag_matching_disabled",
+          &GuardManager::is_recursive_dict_tag_matching_disabled)
       .def(
           "get_accessors",
           &GuardManager::get_accessors,

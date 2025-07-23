@@ -1190,6 +1190,121 @@ class TagSafetyChecks(torch._dynamo.test_case.TestCase):
             opt_fn(torch.randn(4, 4))
 
 
+class RecursiveDictGuardTests(torch._dynamo.test_case.TestCase):
+    def test_disabling(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 4
+
+            def forward(self, x):
+                return x + self.a
+
+        mod = Mod()
+        mod_to_fail = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        x = torch.randn(4, 4)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def basic_hook_test(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_source = LocalSource("mod")
+
+            # Check tagness of mod
+            mod_mgr = builder.get_guard_manager_from_source(mod_source)
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            for _ in range(10):
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            # Let the guard pass but dict matching fail, this should add new cached entry
+            self.assertTrue(guard_wrapper.check({"mod": mod_to_fail, "x": x}))
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            # Let the guard fail, this should disable dict tag optimization as well
+            mod_to_fail.a = 5
+            self.assertFalse(guard_wrapper.check({"mod": mod_to_fail, "x": x}))
+            self.assertTrue(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(basic_hook_test):
+            opt_fn(x)
+
+        # Test that dict tag matching failure leads to disable of dict tag optimization
+        torch.compiler.reset()
+        mod = Mod()
+        mod_to_fail = Mod()
+
+        def disable_on_dict_tag_match_failure(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_source = LocalSource("mod")
+
+            # Check tagness of mod
+            mod_mgr = builder.get_guard_manager_from_source(mod_source)
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            for _ in range(10):
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            # Change the mod attr to cause dict tag matching to fail, this still
+            # get the guard pass. This should disable the dict tag optimization.
+            mod.a = 5
+            mod.a = 4
+            self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            self.assertTrue(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(disable_on_dict_tag_match_failure):
+            opt_fn(x)
+
+        # Test that max size limit breach disables the dict tag optimization
+        torch.compiler.reset()
+        mod = Mod()
+        mod_to_fail = Mod()
+
+        def max_size_test(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_source = LocalSource("mod")
+
+            # Check tagness of mod
+            mod_mgr = builder.get_guard_manager_from_source(mod_source)
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            for _ in range(10):
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            # Let the guard pass but dict matching fail, since cache size is set
+            # to 1, this would cause dict tag optimization to be disabled.
+            self.assertTrue(guard_wrapper.check({"mod": mod_to_fail, "x": x}))
+            self.assertTrue(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with torch._dynamo.config.patch(
+            max_saved_pointers_for_recursive_dict_tags_check=1
+        ):
+            with install_guard_manager_testing_hook(max_size_test):
+                opt_fn(x)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
