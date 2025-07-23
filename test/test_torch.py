@@ -4071,13 +4071,17 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
             torch.ones([]).index_select(0, torch.Tensor([0, 0]).int())
 
-    def test_zerotensor(self, device):
-        supported_ops = [torch.mm, torch.mul, torch.div, torch.add, torch.sub]
-        x = torch._efficientzerotensor((2, 2), device=device)
-        y = torch._efficientzerotensor((2, 2), device=device)
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_zerotensor(self, device, dtype):
+        # TODO Add more ops after support zero tensors
+        supported_ops = [torch.mm, torch.mul, torch.add, torch.sub]
+        x = torch._efficientzerotensor((2, 2), device=device, dtype=dtype)
+        y = torch._efficientzerotensor((2, 2), device=device, dtype=dtype)
         for ops in supported_ops:
             t = ops(x, y)
+            self.assertTrue((t == 0).all().item())
             self.assertEqual(t.device, x.device)
+            self.assertEqual(t.dtype , x.dtype)
             self.assertEqual(t.shape, (2, 2))
 
     # FIXME: find a test suite for the pdist operator
