@@ -334,6 +334,14 @@ void Context::setBenchmarkLimitCuDNN(int b) {
   benchmark_limit_cudnn = b;
 }
 
+bool Context::immediateMiopen() const {
+  return immediate_miopen;
+}
+
+void Context::setImmediateMiopen(bool b) {
+  immediate_miopen = b;
+}
+
 bool Context::allowTF32CuBLAS() const {
 #ifdef USE_ROCM
     const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
