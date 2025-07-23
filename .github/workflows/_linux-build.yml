@@ -289,12 +289,17 @@ jobs:
 
           if [[ ${BUILD_ENVIRONMENT} == *"riscv64"* ]]; then
             docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+            cat /proc/sys/fs/binfmt_misc/qemu-riscv64 2>/dev/null || echo "qemu-riscv64 registration failed"
+            RISCV_DOCKER_ARGS="--privileged"
+          else
+            RISCV_DOCKER_ARGS=
           fi
 
           # detached container should get cleaned up by teardown_ec2_linux
           # Used for JENKINS_USER and DOCKER_SHELL_CMD, which can be empty
           # shellcheck disable=SC2086
           container_name=$(docker run \
+            ${RISCV_DOCKER_ARGS} \
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e PR_NUMBER \
