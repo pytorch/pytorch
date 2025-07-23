@@ -248,11 +248,15 @@ class TupleStrategy(StrategyType):
         return f"TupleStrategy({child_strategies_str})"
 
 
-register_pytree_node(
-    TupleStrategy,
-    lambda node: (node.children, None),
-    lambda children, _: TupleStrategy(tuple(children)),
-)
+try:
+    register_pytree_node(
+        TupleStrategy,
+        lambda node: (node.children, None),
+        lambda children, _: TupleStrategy(tuple(children)),
+    )
+except ValueError:
+    # already registered TupleStrategy, skip
+    pass
 
 
 @dataclass
