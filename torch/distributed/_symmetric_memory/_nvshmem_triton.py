@@ -241,3 +241,42 @@ if has_triton():
             is_pure=False,
             _builder=_builder,
         )
+
+    @core.extern
+    def alltoall(team, dest, source, nelems, _builder=None):  # type: ignore[no-untyped-def]
+        """Perform alltoall operation on NVSHMEM symmetric memory"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [team, dest, source, nelems],
+            {
+                (
+                    core.dtype("int64"),  # team handle
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int64"),  # nelems
+                ): ("nvshmem_longlong_alltoall", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def broadcast(team, dest, source, nelems, pe_root, _builder=None):  # type: ignore[no-untyped-def]
+        """Broadcasts data from a root PE to all other PEs in a team"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [team, dest, source, nelems, pe_root],
+            {
+                (
+                    core.dtype("int64"),  # team handle
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int64"),  # nelems
+                    core.dtype("int64"),  # pe_root
+                ): ("nvshmem_longlong_broadcast", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
