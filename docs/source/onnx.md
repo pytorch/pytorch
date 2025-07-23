@@ -38,18 +38,18 @@ torch.onnx.export(
 )
 ```
 
-## PyTorch2-based ONNX Exporter
+## torch.export-based ONNX Exporter
 
-*The PyTorch2-based ONNX exporter is the newest exporter for PyTorch 2.6 and newer*
+*The torch.export-based ONNX exporter is the newest exporter for PyTorch 2.6 and newer*
 
-PyTorch 2.0 engine is leveraged to hook into Python's frame evaluation API and dynamically rewrite its
-bytecode into an FX Graph. The resulting FX Graph is then polished before it is finally translated into an
-ONNX graph.
+{ref}`torch.export <torch.export>` engine is leveraged to produce a traced graph representing only the Tensor computation of the function in an 
+Ahead-of-Time (AOT) fashion. The resulting traced graph (1) produces normalized operators in the functional 
+ATen operator set (as well as any user-specified custom operators), (2) has eliminated all Python control 
+flow and data structures (with certain exceptions), and (3) records the set of shape constraints needed to 
+show that this normalization and control-flow elimination is sound for future inputs, before it is finally 
+translated into an ONNX graph.
 
-The main advantage of this approach is that the [FX graph](https://pytorch.org/docs/stable/fx.html) is captured using
-bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
-
-{doc}`Learn more about the PyTorch2-based ONNX Exporter <onnx_pt2>`
+{doc}`Learn more about the torch.export-based ONNX Exporter <onnx_pt2>`
 
 ## Contributing / Developing
 
@@ -88,3 +88,29 @@ for tracking purposes -->
 .. py:module:: torch.onnx.symbolic_opset9
 .. py:module:: torch.onnx.utils
 ```
+
+Python API
+----------
+
+.. automodule:: torch.onnx
+
+Functions
+^^^^^^^^^
+
+.. autofunction:: export
+    :noindex:
+.. autofunction:: register_custom_op_symbolic
+.. autofunction:: unregister_custom_op_symbolic
+.. autofunction:: select_model_mode_for_export
+.. autofunction:: is_in_onnx_export
+    :noindex:
+
+Classes
+^^^^^^^
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    JitScalarType

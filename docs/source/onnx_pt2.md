@@ -1,4 +1,4 @@
-# PyTorch2-based ONNX Exporter
+# torch.export-based ONNX Exporter
 
 ```{eval-rst}
 .. automodule:: torch.onnx
@@ -12,12 +12,12 @@
 
 ## Overview
 
-The ONNX exporter leverages PyTorch 2.0 engine to hook into Python's frame evaluation API
-and dynamically rewrite its bytecode into an FX Graph.
-The resulting FX Graph is then polished before it is finally translated into an ONNX graph.
-
-The main advantage of this approach is that the [FX graph](https://pytorch.org/docs/stable/fx.html) is captured using
-bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
+{ref}`torch.export <torch.export>` engine is leveraged to produce a traced graph representing only the Tensor computation of the function in an 
+Ahead-of-Time (AOT) fashion. The resulting traced graph (1) produces normalized operators in the functional 
+ATen operator set (as well as any user-specified custom operators), (2) has eliminated all Python control 
+flow and data structures (with certain exceptions), and (3) records the set of shape constraints needed to 
+show that this normalization and control-flow elimination is sound for future inputs, before it is finally 
+translated into an ONNX graph.
 
 In addition, during the export process, memory usage is significantly reduced.
 
