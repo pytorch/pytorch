@@ -5,9 +5,9 @@ from functools import partial
 from typing import Any
 
 import torch
-import torch._inductor.lookup_table
 import torch.nn as nn
 from torch._inductor import config as inductor_config
+from torch._inductor.lookup_table import _dev_key, lookup_key_suffix
 from torch._inductor.select_algorithm import (
     add_preprocessing_fn,
     clear_preprocessing_fns,
@@ -82,7 +82,7 @@ class BaseE2ELookupTableTest(TestCase):
         torch._dynamo.reset()
         clear_preprocessing_fns()
         self.device = torch.device("cuda")
-        self.dev_key = torch._inductor.lookup_table._dev_key(self.device)
+        self.dev_key = _dev_key(self.device)
         self.original_lookup_table = inductor_config.template_lookup_table
 
     def tearDown(self):
@@ -133,7 +133,7 @@ class BaseE2ELookupTableTest(TestCase):
         """Setup lookup table with given configuration"""
         # following the logic inside torch._inductor.lookup_table.make_lookup_key
 
-        flat_key = f"{self.dev_key}+{operation}+{lookup_key}"
+        flat_key = f"{self.dev_key}+{operation}+{lookup_key}+{lookup_key_suffix()}"
         inductor_config.template_lookup_table = {flat_key: backend_configs}
 
     def run_compiled_model(self, model, tensors, config_patches=None):
