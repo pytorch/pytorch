@@ -183,16 +183,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "DEBUG_bucketing_passes_AFTER_SORT",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
 
     GraphTransformObserver(gm, "move_constructors_to_cuda").apply_graph_pass(
         move_constructors_to_gpu
