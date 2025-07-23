@@ -390,8 +390,15 @@ class GuardManagerWrapper:
             # Propagate tag safety upwards. At any time, if a node is marked tag
             # safe, return the current node as tag safe root, discarding the
             # subtree tag safe roots.
-            if node.is_guarded_value_immutable() and node.has_no_accessors():
-                node.mark_tag_safe()
+            if node.is_guarded_value_immutable():
+                # If the node guards a tensor, mark it tag safe only if there
+                # are no accessors. Presence of accessors means presence of
+                # symbolic shape guards.
+                if node.is_guarded_value_tensor():
+                    if node.has_no_accessors():
+                        node.mark_tag_safe()
+                else:
+                    node.mark_tag_safe()
                 return [
                     node,
                 ]
