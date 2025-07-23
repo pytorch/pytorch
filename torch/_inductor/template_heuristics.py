@@ -602,6 +602,21 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     def get_exhaustive_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.exhaustive_configs)
 
+    def get_persistent_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
+        # TODO(coconutruben): fold this into the normal get_mm_configs and get_exhaustive_mm_configs
+        # to just take in a filter callable
+        persistent_mm_configs = (
+            self.exhaustive_configs
+            if config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+            else self.persistent_mm_configs
+        )
+
+        # num_warps=2 not safe for TMA
+        persistent_mm_configs = [
+            config for config in persistent_mm_configs if config.num_warps != 2
+        ]
+        return partial(self.preprocess_mm_configs, configs=persistent_mm_configs)
+
     def get_conv_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(
             self.preprocess_mm_configs, configs=self.conv_configs, op_name="conv"
