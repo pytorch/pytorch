@@ -2634,7 +2634,7 @@ class GuardManager {
         _is_empty_dict(is_empty_dict),
         _is_immutable(is_immutable),
         _is_nn_module(is_nn_module),
-        _type_str(type_str) {}
+        _type_str(std::move(type_str)) {}
 
   void clone_common(
       RootGuardManager* cloned_root,
@@ -3467,7 +3467,7 @@ class DictGuardManager : public GuardManager {
             is_empty_dict,
             false, // _is_nn_module
             false, // _is_immutable
-            type_of),
+            std::move(type_of)),
         _size(size),
         _expected_type(expected_type),
         _is_exact_dict_type(is_exact_dict_type),
