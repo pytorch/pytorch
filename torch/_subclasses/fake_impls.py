@@ -560,8 +560,16 @@ def slice_forward(
         raise RuntimeError("slice step must be positive")
 
     # start, end
-    start_index = 0 if start is None else _compute_slice_index(sizes[dim], start)
-    end_index = sizes[dim] if end is None else _compute_slice_index(sizes[dim], end)
+    start_index = (
+        0
+        if start is None
+        else _compute_slice_index(sizes[dim], start)
+    )
+    end_index = (
+        sizes[dim]
+        if guard_or_false(end == sys.maxsize) or end is None
+        else _compute_slice_index(sizes[dim], end)
+    )
 
     # size
     new_size = None
@@ -597,6 +605,53 @@ def slice_forward(
         )
     else:
         return self.as_strided(sizes, strides, storage_offset)
+
+
+@register_op_impl(torch.ops.aten.narrow.default)
+def narrow(
+    fake_mode,
+    func,
+    self,
+    dim: int,
+    start: int,
+    length: int,
+):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
+    ndim = self.dim()
+    if ndim == 0:
+        raise RuntimeError("narrow() cannot be applied to a 0-dim tensor.")
+    dim = canonicalize_dim(self.dim(), dim)
+    size = self.size(dim)
+
+    torch._check(
+        sym_and(start <= size, start >= -size),
+        lambda: f"start out of range (expected to be in range of [-{size}, {size}], but got {start})",
+    )
+    torch._check(
+        length >= 0,
+        lambda: f"length must be non-negative, but received {length}",
+    )
+    if start < 0:  # TODO(pianpwk): unbacked-safe narrow
+        start += size
+    torch._check(
+        start + length <= size,
+        lambda: f"start ({start}) + length ({length}) exceeds dimension size ({size})",
+    )
+    return slice_forward(fake_mode, func, self, dim, start, start + length)
+
+
+@register_op_impl(torch.ops.aten.narrow_copy.default)
+def narrow_copy(
+    fake_mode,
+    func,
+    self,
+    dim: int,
+    start: int,
+    length: int,
+):
+    out = narrow(fake_mode, func, self, dim, start, length)
+    return out.clone()
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)

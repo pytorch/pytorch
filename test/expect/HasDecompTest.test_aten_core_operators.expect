@@ -459,7 +459,6 @@ aten::sin_
 aten::sinh
 aten::sinh.out
 aten::sinh_
-aten::slice.Tensor
 aten::slice_scatter
 aten::slice_scatter.out
 aten::special_bessel_j0
