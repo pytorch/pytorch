@@ -363,10 +363,6 @@ class ModularIndexing(sympy.Function):
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
 
-    def _eval_is_positive(self) -> Optional[bool]:
-        p, q = self.args[:2]
-        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
-
 
 class Where(sympy.Function):
     """
@@ -1059,7 +1055,7 @@ class PowByNatural(sympy.Function):
 
 
 # base is assumed to be nonnegative, thereby prevent complex numbers from
-# occuring
+# occurring
 class FloatPow(sympy.Function):
     is_real = True
 
@@ -1304,6 +1300,12 @@ class Identity(sympy.Function):
         # Removes the identity op.
         return self.args[0]
 
+    def __int__(self) -> int:
+        return int(self.args[0])
+
+    def __float__(self) -> float:
+        return float(self.args[0])
+
 
 def make_opaque_unary_fn(name):
     class OpaqueUnaryFn(sympy.Function):
@@ -1313,7 +1315,7 @@ def make_opaque_unary_fn(name):
         constant propagation.  This helps avoid performing transformations
         that are valid for real numbers but are invalid for floating point;
         in particular, while we are willing to make optimizations that change
-        numerics for Tensor compute, we are NOT willing to make optimziations
+        numerics for Tensor compute, we are NOT willing to make optimizations
         that change numerics for size compute.
         """
 

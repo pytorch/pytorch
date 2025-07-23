@@ -396,7 +396,8 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   event->start_time_ = c10::getApproximateTime();
-  event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
+  event->allow_tf32_cublas_ =
+      at::globalContext().float32Precision("cuda", "matmul") == "tf32";
   if (!config_.experimental_config.performance_events.empty()) {
     const size_t n = config_.experimental_config.performance_events.size();
     event->counters_ = std::make_unique<perf_counters_t>(n, 0);
@@ -808,56 +809,58 @@ void generateForwardBackwardLink(
 
 void generateForwardBackwardLinks(
     std::unique_ptr<torch::profiler::impl::kineto::trace_t>& cpu_trace,
-    const std::vector<std::shared_ptr<Result>>& results){
+    const std::vector<std::shared_ptr<Result>>& results) {
 #ifndef USE_KINETO
 }
 #else // USE_KINETO
-    TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == results.size());
+  TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == results.size());
 
-// startThreadId_seqNum to pointer of activity.
-// Low-16bits of startThreadId and low-48bits seqNum are concatenated into
-// one uint64_t variable as key.
+  // startThreadId_seqNum to pointer of activity.
+  // Low-16bits of startThreadId and low-48bits seqNum are concatenated into
+  // one uint64_t variable as key.
 
-std::unordered_map<uint64_t, libkineto::GenericTraceActivity*> tidSeq2activity;
-uint64_t fwd_bwd_link_id = 1;
+  std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>
+      tidSeq2activity;
+  uint64_t fwd_bwd_link_id = 1;
 
-using result_activity_t = std::pair<Result*, libkineto::GenericTraceActivity*>;
-std::vector<result_activity_t> torch_events;
+  using result_activity_t =
+      std::pair<Result*, libkineto::GenericTraceActivity*>;
+  std::vector<result_activity_t> torch_events;
 
-for (const auto idx : c10::irange(cpu_trace->activities.size())) {
-  auto& profiler_result = results[idx];
-  auto& activity = cpu_trace->activities[idx];
+  for (const auto idx : c10::irange(cpu_trace->activities.size())) {
+    auto& profiler_result = results[idx];
+    auto& activity = cpu_trace->activities[idx];
 
-  // add information about an associated forward op, if a sequence number
-  // is available (e.g. during training)
+    // add information about an associated forward op, if a sequence number
+    // is available (e.g. during training)
 
-  profiler_result->visit_if_base<ExtraFields<EventType::TorchOp>>(
-      [&](const auto& e) {
-        if (e.sequence_number_ >= 0) {
-          torch_events.emplace_back(profiler_result.get(), activity.get());
-        }
+    profiler_result->visit_if_base<ExtraFields<EventType::TorchOp>>(
+        [&](const auto& e) {
+          if (e.sequence_number_ >= 0) {
+            torch_events.emplace_back(profiler_result.get(), activity.get());
+          }
+        });
+  }
+
+  // We need to visit the events in chronological order.
+  // So we sort them by end_time_ns_ before processing.
+  std::sort(
+      torch_events.begin(),
+      torch_events.end(),
+      [](const result_activity_t& left, const result_activity_t& right) {
+        auto left_end_time =
+            std::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
+                .end_time_ns_;
+        auto right_end_time = std::get<ExtraFields<EventType::TorchOp>>(
+                                  right.first->extra_fields_)
+                                  .end_time_ns_;
+        return left_end_time < right_end_time;
       });
-}
 
-// We need to visit the events in chronological order.
-// So we sort them by end_time_ns_ before processing.
-std::sort(
-    torch_events.begin(),
-    torch_events.end(),
-    [](const result_activity_t& left, const result_activity_t& right) {
-      auto left_end_time =
-          std::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
-              .end_time_ns_;
-      auto right_end_time =
-          std::get<ExtraFields<EventType::TorchOp>>(right.first->extra_fields_)
-              .end_time_ns_;
-      return left_end_time < right_end_time;
-    });
-
-for (auto& [profiler_result, activity] : torch_events) {
-  generateForwardBackwardLink(
-      *profiler_result, fwd_bwd_link_id, *activity, tidSeq2activity);
-}
+  for (auto& [profiler_result, activity] : torch_events) {
+    generateForwardBackwardLink(
+        *profiler_result, fwd_bwd_link_id, *activity, tidSeq2activity);
+  }
 }
 #endif // USE_KINETO
 
@@ -1013,6 +1016,12 @@ class TransferEvents {
     }
   }
 
+  bool isHiddenEvent(const itrace_t* activity) const {
+    TORCH_INTERNAL_ASSERT(activity != nullptr);
+    // Kineto uses "hidden" metadata to mark events that should be hidden.
+    return activity->getMetadataValue("hidden") == "1";
+  }
+
   std::shared_ptr<Result> resultFromActivity(const itrace_t* activity) {
     TORCH_INTERNAL_ASSERT(activity != nullptr);
 
@@ -1033,7 +1042,7 @@ class TransferEvents {
             {/*id=*/static_cast<uint32_t>(activity->flowId()),
              /*type=*/static_cast<uint32_t>(activity->flowType()),
              /*start=*/activity->flowStart()}});
-
+    event->hidden_ = isHiddenEvent(activity);
     // NB: It's tempting to set `event->kineto_activity_`; however we can only
     // guarantee that the events we passed to Kineto are of type
     // `GenericTraceActivity`. Others may derive from ITraceActivity and thus

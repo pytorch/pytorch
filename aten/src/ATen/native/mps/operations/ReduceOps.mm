@@ -493,7 +493,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
     // Reduction axes
     axes = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
     axes[0] = @0;
-  } else if (!keepdim && use_dim && dim_value.size() > 0) {
+  } else if (!keepdim && use_dim && !dim_value.empty()) {
     int64_t num_reduce_dims = dim_value.size();
     num_output_dims = num_input_dims;
 
@@ -528,7 +528,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
       correction_n *= input_shape[wrap_dim];
     }
     // (3, 4, 5) --> (3, 5)
-  } else if ((keepdim && !use_dim) || (keepdim && use_dim && dim_value.size() <= 0)) {
+  } else if ((keepdim && !use_dim) || (keepdim && use_dim && dim_value.empty())) {
     num_output_dims = 0;
     int64_t num_reduce_dims = 0;
     set_axes(axes, num_reduce_dims, dim_value, input_shape.size());
@@ -540,7 +540,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
       correction_n *= input_shape[i];
     }
     // scalar --> vector case [[1.0034567]]
-  } else if (keepdim && use_dim && dim_value.size() > 0) {
+  } else if (keepdim && use_dim && !dim_value.empty()) {
     int64_t num_reduce_dims = dim_value.size();
     num_output_dims = num_input_dims;
 
@@ -1003,7 +1003,7 @@ Tensor& nansum_out_mps(const Tensor& self,
                        bool keepdim,
                        std::optional<ScalarType> opt_dtype,
                        Tensor& result) {
-  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
+  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum on MPS does not support complex inputs");
   if (c10::isIntegralType(self.scalar_type(), true)) {
     return at::sum_out(result, self, dim, keepdim, opt_dtype);
   }

@@ -62,20 +62,29 @@ extensions = [
     "sphinxcontrib.katex",
     "sphinx_copybutton",
     "sphinx_design",
-    "myst_parser",
+    "myst_nb",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
-    "sphinxext.opengraph",
+    "sphinx_sitemap",
 ]
-
-ogp_site_url = "http://pytorch.org/"
-ogp_image = "https://pytorch.org/assets/images/social-share.jpg"
 
 myst_enable_extensions = [
     "colon_fence",
     "deflist",
     "html_image",
 ]
+
+html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
+sitemap_locales = [None]
+sitemap_excludes = [
+    "search.html",
+    "genindex.html",
+]
+sitemap_url_scheme = "{link}"
+
+html_additional_pages = {
+    "404": "404.html",
+}
 
 # build the templated autosummary files
 autosummary_generate = True
@@ -126,9 +135,10 @@ html_theme_options = {
     "analytics_id": "GTM-T8XT4PS",
     "canonical_url": "https://pytorch.org/docs/stable/",
     "switcher": {
-        "json_url": "https://pytorch.org/docs/pytorch-versions.json",
+        "json_url": "https://docs.pytorch.org/docs/pytorch-versions.json",
         "version_match": switcher_version,
     },
+    "show_toc_level": 2,
     "navigation_with_keys": False,
     "external_links": [
         {
@@ -163,32 +173,13 @@ html_theme_options = {
     "navbar_start": ["version-switcher", "navbar-logo"],
     "navbar_center": ["navbar-nav"],
     "navbar_end": ["search-field-custom", "theme-switcher", "navbar-icon-links"],
-    "header_links_before_dropdown": 4,
+    "header_links_before_dropdown": 6,
     "navbar_persistent": [],
     "use_edit_page_button": True,
     "pytorch_project": "docs",
 }
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
-# For these links to appear in the right nav, there is an override in
-# the theme:
-# pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html#L17
-community_links = [
-    {"url": "/community/index", "name": "PyTorch Governance"},
-    {"url": "/community/design", "name": "PyTorch Design Philosophy"},
-    {
-        "url": "https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions",
-        "name": "The Ultimate Guide to PyTorch Contributions",
-    },
-]
-# For these links to appear in the right nav, there is an override in
-# /pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html
-language_bindings_links = [
-    {"url": "/cpp_index", "name": "C++"},
-    {"url": "https://pytorch.org/javadoc/", "name": "Javadoc"},
-    {"url": "https://github.com/pytorch/multipy", "name": "torch.multiply"},
-]
-
 html_context = {
     "theme_variables": theme_variables,
     "github_url": "https://github.com",
@@ -202,8 +193,6 @@ html_context = {
     # library links are defined in
     # pytorch_sphinx_theme2/pytorch_sphinx_theme2/links.json
     "library_links": theme_variables.get("library_links", []),
-    "community_links": community_links,
-    "language_bindings_links": language_bindings_links,
     "version": version,
     "date_info": {
         "paths_to_skip": ["generated/", "index"],
@@ -531,34 +520,8 @@ coverage_ignore_functions = [
     "graph_pool_handle",
     "is_current_stream_capturing",
     "make_graphed_callables",
-    # torch.cuda.memory
-    "caching_allocator_alloc",
-    "caching_allocator_delete",
-    "change_current_allocator",
-    "empty_cache",
-    "get_allocator_backend",
-    "get_per_process_memory_fraction",
-    "list_gpu_processes",
-    "max_memory_allocated",
-    "max_memory_cached",
-    "max_memory_reserved",
-    "mem_get_info",
-    "memory_allocated",
-    "memory_cached",
-    "memory_reserved",
-    "memory_snapshot",
-    "memory_stats",
-    "memory_stats_as_nested_dict",
-    "host_memory_stats",
-    "host_memory_stats_as_nested_dict",
-    "memory_summary",
-    "reset_accumulated_memory_stats",
-    "reset_accumulated_host_memory_stats",
-    "reset_max_memory_allocated",
-    "reset_max_memory_cached",
+    # torch.mtia.memory
     "reset_peak_memory_stats",
-    "reset_peak_host_memory_stats",
-    "set_per_process_memory_fraction",
     # torch.cuda.nccl
     "all_gather",
     "all_reduce",
@@ -1015,7 +978,6 @@ coverage_ignore_functions = [
     "to_node",
     "wrap_node",
     "sym_sqrt",
-    "sym_ite",
     # torch.fx.experimental.symbolic_shapes
     "bind_symbols",
     "cast_symbool_to_symint_guardless",
@@ -1340,10 +1302,6 @@ coverage_ignore_functions = [
     "scatter_kwargs",
     # torch.nn.parameter
     "is_lazy",
-    # torch.nn.utils.clip_grad
-    "clip_grad_norm",
-    "clip_grad_norm_",
-    "clip_grad_value_",
     # torch.nn.utils.convert_parameters
     "parameters_to_vector",
     "vector_to_parameters",
@@ -1883,31 +1841,9 @@ coverage_ignore_functions = [
     "check_export_model_diff",
     "verify",
     "verify_aten_graph",
-    # torch.optim.adadelta
-    "adadelta",
-    # torch.optim.adagrad
-    "adagrad",
-    # torch.optim.adam
-    "adam",
-    # torch.optim.adamax
-    "adamax",
-    # torch.optim.adamw
-    "adamw",
-    # torch.optim.asgd
-    "asgd",
-    # torch.optim.nadam
-    "nadam",
     # torch.optim.optimizer
     "register_optimizer_step_post_hook",
     "register_optimizer_step_pre_hook",
-    # torch.optim.radam
-    "radam",
-    # torch.optim.rmsprop
-    "rmsprop",
-    # torch.optim.rprop
-    "rprop",
-    # torch.optim.sgd
-    "sgd",
     # torch.optim.swa_utils
     "get_ema_avg_fn",
     "get_ema_multi_avg_fn",
@@ -2299,7 +2235,6 @@ coverage_ignore_classes = [
     "UnsynchronizedAccessError",
     # torch.cuda.memory
     "MemPool",
-    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -2633,6 +2568,9 @@ coverage_ignore_classes = [
     # torch.distributed.checkpoint.filesystem
     "FileSystemReader",
     "FileSystemWriter",
+    # torch.distributed.checkpoint.hf_storage
+    "HuggingFaceStorageReader",
+    "HuggingFaceStorageWriter",
     # torch.distributed.checkpoint.metadata
     "BytesStorageMetadata",
     "ChunkStorageMetadata",
@@ -3153,12 +3091,6 @@ coverage_ignore_classes = [
     # torch.onnx.verification
     "OnnxBackend",
     "OnnxTestCaseRepro",
-    # torch.optim.adadelta
-    "Adadelta",
-    # torch.optim.adagrad
-    "Adagrad",
-    # torch.optim.adam
-    "Adam",
     # torch.optim.adamax
     "Adamax",
     # torch.optim.adamw
@@ -3184,23 +3116,8 @@ coverage_ignore_classes = [
     "ReduceLROnPlateau",
     "SequentialLR",
     "StepLR",
-    # torch.optim.nadam
-    "NAdam",
     # torch.optim.optimizer
     "Optimizer",
-    # torch.optim.radam
-    "RAdam",
-    # torch.optim.rmsprop
-    "RMSprop",
-    # torch.optim.rprop
-    "Rprop",
-    # torch.optim.sgd
-    "SGD",
-    # torch.optim.sparse_adam
-    "SparseAdam",
-    # torch.optim.swa_utils
-    "AveragedModel",
-    "SWALR",
     # torch.overrides
     "BaseTorchFunctionMode",
     "TorchFunctionMode",

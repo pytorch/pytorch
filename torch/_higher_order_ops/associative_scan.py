@@ -31,9 +31,9 @@ aten = torch._ops.ops.aten
 
 
 def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
-    assert (
-        len(args) == 2 * num_leaves
-    ), f"Combin_fn received wrong number of arguments, expected {2 * num_leaves}, but got {len(args)}"
+    assert len(args) == 2 * num_leaves, (
+        f"Combin_fn received wrong number of arguments, expected {2 * num_leaves}, but got {len(args)}"
+    )
     lhs = pytree.tree_unflatten(args[:num_leaves], spec)
     rhs = pytree.tree_unflatten(args[num_leaves:], spec)
     return combine_fn(lhs, rhs)
@@ -79,9 +79,9 @@ class AssociativeScanOp(HigherOrderOperator):
         # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
         # Once this issue is resolved, the assertion should only allow tuples
         # and the tuple cast should be removed
-        assert isinstance(
-            additional_inputs, (tuple, list)
-        ), "additional_inputs must be a tuple."
+        assert isinstance(additional_inputs, (tuple, list)), (
+            "additional_inputs must be a tuple."
+        )
         additional_inputs = (
             tuple(additional_inputs)
             if isinstance(additional_inputs, list)
@@ -133,6 +133,7 @@ def associative_scan(
 
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
+
 
         cumsum = associative_scan(add, x, dim)
 
@@ -377,9 +378,9 @@ def trace_associative_scan(
 
     assert outputs is not None
     outputs = pytree.tree_leaves(outputs)
-    assert len(outputs) == len(
-        xs
-    ), f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
+    assert len(outputs) == len(xs), (
+        f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
+    )
 
     xs_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
         first_slice_copy(x) for x in xs
@@ -434,11 +435,26 @@ def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
 
 @associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
+    from torch._higher_order_ops.utils import _check_alias_and_mutation
+
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next():
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
+        )
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        sample_unwrapped_xs_sliced = [
+            first_slice_copy(inp) for inp in itertools.chain(unwrapped_xs, unwrapped_xs)
+        ]
+        sample_inputs = list(
+            itertools.chain(
+                sample_unwrapped_xs_sliced,
+                unwrapped_additional_inputs,
+            )
+        )
+        _check_alias_and_mutation(
+            combine_fn, sample_inputs, "associative_scan", pre_dispatch
         )
         ret = associative_scan_op(
             functional_combine_fn,

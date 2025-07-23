@@ -1,14 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 import torch
 import torch.distributed.checkpoint as dist_cp
-from torch.distributed._tensor import (
-    distribute_tensor,
-    init_device_mesh,
-    Replicate,
-    Shard,
-    zeros,
-)
 from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,

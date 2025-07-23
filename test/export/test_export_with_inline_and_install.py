@@ -72,17 +72,6 @@ unittest.expectedFailure(
     InlineAndInstallStrictExportTestExport.test_buffer_util_inline_and_install_strict  # noqa: F821
 )
 
-# NOTE: For this test, when we call `LOAD_ATTR`, we fail to realizing the LazyVariableTracker
-# This is because the variable is popped off stack, pushed into TupleVariable (then ConstDictVariable)
-# So, in the first case (not nested return), the LazyVariable is realized at the RETURN_VALUE call;
-# for the second case (nested return), the LazyVariable is not realized until we begin COMPILING_GRAPH
-# As a result, we don't install the variable, so crash when we expect the variable to be installed later
-# Potential fix: We can force the lazy variable tracker to realize; just need to see how this is done for the non
-# nested case
-unittest.expectedFailure(
-    InlineAndInstallStrictExportTestExport.test_constant_output_inline_and_install_strict  # noqa: F821
-)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
