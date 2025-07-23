@@ -24,7 +24,10 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 #include <ATen/native/cuda/GroupMMCommon.cuh>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Werror=unused-but-set-variable"
 #include <cute/tensor.hpp>
+#pragma GCC diagnostic pop
 #include <cutlass/core_io.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm.h>
