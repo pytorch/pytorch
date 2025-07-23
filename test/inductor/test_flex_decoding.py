@@ -1332,6 +1332,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
 
     @supported_platform
+    @skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support SDPA")
     def test_windowed_no_mask_vs_sdpa(self):
         score_mod = _generate_windowed(1000)
         attention = functools.partial(flex_attention, score_mod=score_mod)

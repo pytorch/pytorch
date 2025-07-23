@@ -1695,6 +1695,7 @@ __all__ = [
     "is_bf16_supported",
     "is_current_stream_capturing",
     "is_initialized",
+    "is_tf32_supported",
     "jiterator",
     "list_gpu_processes",
     "make_graphed_callables",

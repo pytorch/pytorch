@@ -70,8 +70,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['y0', 'x0', 'sum_2', 'sum_1', 'z'], \
-['y0_1', 'x0_1', 'sum_4', 'sum_3', 'z_1'], ['y0_2', 'x0_2', 'sum_6', 'sum_5', 'z_2']]]""",
+            """[[['x0', 'y0', 'sum_1', 'sum_2', 'z'], ['x0_1', 'y0_1', 'sum_3', 'sum_4', 'z_1'], ['x0_2', 'y0_2', 'sum_5', 'sum_6', 'z_2']]]""",
         )
 
     def test_get_regions_multiple_region_groups(self):
@@ -104,8 +103,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['y1', 'x1', 'sum_3', 'sum_2', 'z'], ['y1_1', 'x1_1', 'sum_5', 'sum_4', 'z_1'], \
-['y1_2', 'x1_2', 'sum_8', 'sum_7', 'z_2']], [['b', 'cos_1', 'sum_1', 'a', 'c'], ['b_1', 'cos_2', 'sum_6', 'a_1', 'c_1']]]""",
+            """[[['x1', 'y1', 'sum_2', 'sum_3', 'z'], ['x1_1', 'y1_1', 'sum_4', 'sum_5', 'z_1'], ['x1_2', 'y1_2', 'sum_7', 'sum_8', 'z_2']], [['a', 'b', 'cos_1', 'sum_1', 'c'], ['a_1', 'b_1', 'cos_2', 'sum_6', 'c_1']]]""",
         )
 
     def test_no_single_node_regions(self):
@@ -177,8 +175,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['y1', 'sum_1', 'x1', 'o0'], ['y1_1', 'sum_2', 'x1_1', 'o2'], \
-['y1_2', 'sum_3', 'x1_2', 'o4'], ['y1_3', 'sum_4', 'x1_3', 'o5']]]""",
+            """[[['x1', 'y1', 'sum_1', 'o0'], ['x1_1', 'y1_1', 'sum_2', 'o2'], ['x1_2', 'y1_2', 'sum_3', 'o4'], ['x1_3', 'y1_3', 'sum_4', 'o5']]]""",
         )
 
     def test_nested_args(self):
