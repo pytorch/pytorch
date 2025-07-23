@@ -160,15 +160,16 @@ void ProcessGroup::release_resources() {
 
 c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     const std::vector<int>& ranks,
-    const std::optional<std::chrono::milliseconds> timeout,
-    const std::optional<c10::intrusive_ptr<Backend::Options>> opts,
+    const std::optional<std::chrono::milliseconds>& timeout,
+    const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
+    const std::optional<std::string>& name,
     const std::optional<std::string>& desc) {
   TORCH_CHECK(
       ranks.size() > 0,
       "Split ranks cannot be empty. Please provide a non-empty list of ranks to split the group.");
   TORCH_CHECK(
-      ranks.size() < static_cast<size_t>(size_),
-      "the split group's size should be less than the world_size set by init_process_group");
+      ranks.size() <= static_cast<size_t>(size_),
+      "the split group's size should be no larger than the world_size set by init_process_group");
   std::set<int> ranks_set(ranks.begin(), ranks.end());
   TORCH_CHECK(
       ranks_set.size() == ranks.size(),
@@ -176,9 +177,12 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   std::vector<int> sorted_ranks = ranks;
   std::sort(sorted_ranks.begin(), sorted_ranks.end());
   c10::intrusive_ptr<ProcessGroup> newGroup;
-  // TODO: Figure out a better way for split group name.
-  std::string groupName =
-      c10::str(getGroupName(), ":split:", fmt::format("{}", sorted_ranks));
+  std::string groupName = name.has_value()
+      ? name.value()
+      : c10::str(getGroupName(), ":split:", fmt::format("{}", sorted_ranks));
+  c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
+      c10::make_intrusive<PrefixStore>(
+          fmt::format("{}/", groupName), store_->clone()));
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
@@ -189,7 +193,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     backendOpts->group_name = groupName;
     backendOpts->timeout =
         timeout.has_value() ? timeout.value() : backendOpts->timeout;
-    auto splitBackend = parentBackend->split(sorted_ranks, backendOpts);
+    auto splitBackend = parentBackend->split(store, sorted_ranks, backendOpts);
     if (splitBackend == nullptr) {
       continue;
     }
@@ -204,7 +208,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
 
     if (!newGroup) {
       newGroup = c10::make_intrusive<ProcessGroup>(
-          store_->clone(), splitBackend->getRank(), splitBackend->getSize());
+          store, splitBackend->getRank(), splitBackend->getSize());
       newGroup->setDefaultBackend(backendType_);
       newGroup->setGroupName(groupName);
       newGroup->setGroupDesc(groupDesc);
