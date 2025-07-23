@@ -185,7 +185,7 @@ class TestDefaultStager(TestCase):
             use_async_staging=False,
             use_pinned_memory=torch.cuda.is_available(),
             use_shared_memory=False,
-            use_non_blocking_copy=torch.cuda.is_available(),
+            use_non_blocking_copy=torch.accelerator.is_available(),
         )
         stager = DefaultStager(options)
 
