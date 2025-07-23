@@ -1863,28 +1863,43 @@ external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 # - Various template-specific parameters (BLOCK_M, BLOCK_N, etc.)
 #
 # Example:
-# {
-#   "NVIDIA H100+mm+((torch.float16, [128, 64], [64, 1]), (torch.float16, [64, 128], [1, 64]))": [
+# table = {
+#   "NVIDIA H100+mm+((torch.bfloat16, [1024, 1024], [1024, 1]), (torch.bfloat16, [1024, 1024], [1024, 1]))+tf32=False": [
 #     {
 #       "template_id": "mm",
-#       "BLOCK_M": 128,
-#       "BLOCK_N": 128,
-#       "BLOCK_K": 32,
-#       "num_stages": 3,
-#       "num_warps": 8,
-#       "EVEN_K": true,
-#       "ALLOW_TF32": true,
-#       "GROUP_M": 8
+#       "EVEN_K": True,
+#       "ALLOW_TF32": False,
+#       "USE_FAST_ACCUM": False,
+#       "ACC_TYPE": "tl.float32",
+#       "num_stages": 1,
+#       "num_warps": 2,
+#       "BLOCK_M": 32,
+#       "BLOCK_N": 32,
+#       "BLOCK_K": 16,
+#       "hint_override": None,
+#       "GROUP_M": 8,
+#       "template_hash": "0717af5834e39dcca7ea817f896b8d85b4886422da7a3ab5f6911b4cfe568896"
 #     },
 #     {
 #       "template_id": "mm_persistent_tma",
-#       "BLOCK_M": 256,
-#       "BLOCK_N": 128,
-#       "BLOCK_K": 64,
-#       "num_stages": 4,
+#       "EVEN_K": True,
+#       "ALLOW_TF32": False,
+#       "USE_FAST_ACCUM": False,
+#       "ACC_TYPE": "tl.float32",
+#       "num_stages": 3,
 #       "num_warps": 8,
-#       "ALLOW_TF32": True
-#     },
+#       "BLOCK_M": 128,
+#       "BLOCK_N": 128,
+#       "BLOCK_K": 128,
+#       "hint_override": None,
+#       "GROUP_M": 8,
+#       "A_ROW_MAJOR": True,
+#       "B_ROW_MAJOR": True,
+#       "NUM_SMS": 132,
+#       "TMA_SIZE": 128,
+#       "TMA_EXPERIMENTAL_API": True,
+#       "template_hash": "88ec6cbe557df819512c09fa9094e91d1c631130be236800fa695acabfc96996"
+#     }
 #   ]
 # }
 template_lookup_table: Optional[dict[str, list[dict[str, Any]]]] = None

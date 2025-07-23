@@ -5,7 +5,7 @@ from unittest.mock import patch
 import torch
 import torch._inductor.lookup_table
 from torch._inductor import config as inductor_config
-from torch._inductor.lookup_table import lookup_template_configs
+from torch._inductor.lookup_table import lookup_key_suffix, lookup_template_configs
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -121,7 +121,7 @@ class BaseLookupTableTest(TestCase):
     def create_lookup_key(self, device_key, method, lookup_key):
         """Create a lookup key"""
         # following the logic inside torch._inductor.lookup_table.make_lookup_key
-        flat_key = f"{device_key}+{method}+{lookup_key}"
+        flat_key = f"{device_key}+{method}+{lookup_key}+{lookup_key_suffix()}"
         return flat_key
 
     def create_lookup_table_config(
