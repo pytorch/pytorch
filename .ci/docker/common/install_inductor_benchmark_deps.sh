@@ -33,6 +33,8 @@ function install_torchbench() {
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
   popd
+
+  chown -R jenkins torchbench
 }
 
 # Pango is needed for weasyprint which is needed for doctr

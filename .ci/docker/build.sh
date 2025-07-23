@@ -306,6 +306,7 @@ case "$tag" in
     TRITON=yes
     DOCS=yes
     UNINSTALL_DILL=yes
+    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-py3-clang12-executorch)
     ANACONDA_PYTHON_VERSION=3.10
