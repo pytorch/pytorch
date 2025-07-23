@@ -2,7 +2,25 @@ name: Upload test stats
 
 on:
   workflow_run:
-    workflows: [pull, trunk, periodic, periodic-rocm-mi300, inductor, unstable, slow, unstable-periodic, inductor-periodic, rocm, rocm-mi300, inductor-micro-benchmark, inductor-micro-benchmark-x86, inductor-cu124, inductor-rocm, inductor-rocm-mi300, mac-mps]
+    workflows:
+      - pull
+      - trunk
+      - periodic
+      - periodic-rocm-mi300
+      - inductor
+      - unstable
+      - slow
+      - unstable-periodic
+      - inductor-periodic
+      - rocm
+      - rocm-mi300
+      - inductor-micro-benchmark
+      - inductor-micro-benchmark-x86
+      - inductor-cu124
+      - inductor-rocm
+      - inductor-rocm-mi300
+      - mac-mps
+      - linux-aarch64
     types:
       - completed
 

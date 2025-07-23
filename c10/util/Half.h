@@ -414,7 +414,7 @@ struct alignas(2) Half {
 #endif
 };
 
-C10_API inline std::ostream& operator<<(std::ostream& out, const Half& value) {
+inline std::ostream& operator<<(std::ostream& out, const Half& value) {
   out << (float)value;
   return out;
 }

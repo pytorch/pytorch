@@ -461,9 +461,17 @@ inline Tensor _sum_to(
     reduce_dims.push_back(i);
   }
   for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(shape[i - leading_dims], 1)) &&
-        TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(sizes[i], 1))) {
+    if (TORCH_GUARD_OR_FALSE(sym_eq(shape[i - leading_dims], 1)) &&
+        TORCH_GUARD_OR_TRUE(sym_ne(sizes[i], 1))) {
       reduce_dims.push_back(i);
+    } else {
+      // if we assume no reduction due to unbacked we ensure that at runtime.
+      TORCH_MAYBE_SYM_CHECK(
+          sym_eq(shape[i - leading_dims], sizes[i]),
+          "non-reduction path was assumed due to unabcked symbols expected those two sizes to be the same:",
+          shape[i - leading_dims],
+          ", ",
+          sizes[i])
     }
   }
 

@@ -6,12 +6,12 @@ from typing import Union
 import torch
 import torch.nn as nn
 from torch.distributed._composable import checkpoint
-from torch.distributed._tensor import init_device_mesh
 from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
     CheckpointWrapper,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     fully_shard,
@@ -129,7 +129,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_tracker_non_root_forward_backward(self):
         """
-        Tests tracker accracy when running forward/backward through a non-root.
+        Tests tracker accuracy when running forward/backward through a non-root.
         """
         debug = False
         dev = torch.device(torch.cuda.current_device())

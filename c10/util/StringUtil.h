@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -51,11 +52,23 @@ inline std::ostream& _str(std::ostream& ss) {
   return ss;
 }
 
+template <class T, class = std::ostream&>
+struct Streamable : std::false_type {};
+
+template <class T>
+struct Streamable<T, decltype(std::declval<std::ostream&>() << T{})>
+    : std::true_type {};
+
 template <typename T>
 inline std::ostream& _str(std::ostream& ss, const T& t) {
-  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-  ss << t;
-  return ss;
+  if constexpr (std::is_enum_v<T> && !Streamable<T>::value) {
+    // NOLINTNEXTLINE(modernize-type-traits)
+    return _str(ss, static_cast<typename std::underlying_type<T>::type>(t));
+  } else {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+    ss << t;
+    return ss;
+  }
 }
 
 template <typename T>
