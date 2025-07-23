@@ -338,7 +338,6 @@ def estimate_peak_memory(
 
     # incremental memory changes at each step
     memory = [0 for _ in range(len(nodes) + 1)]
-    import torch
 
     # for each buffer, update memory when created and when freed
     for buf_info in buf_info_list:

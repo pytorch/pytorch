@@ -205,7 +205,7 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
         comm_value = [gathered_runtime[key] for gathered_runtime in gathered_runtimes]
         median_runtimes[key] = statistics.median(comm_value)
     comm_cache.cache = median_runtimes
-
+    comm_cache._update_max_size()
     print(
         "comm_cache.max numbers", comm_cache.ag_max_inp_size, comm_cache.rs_max_out_size
     )
@@ -363,10 +363,13 @@ def get_bucketing_plan(
                 + heuristic_info["last_step_rs_comm"]
                 * (1 + config.simplefsdp.relax_ratio)
             )
-            break_comm_size_criteria = (
-                comm_cache.ag_max_inp_size < get_data_size(comm_size_inp)
-                or comm_cache.rs_max_out_size < heuristic_info["this_step_rs_comm_size"]
-            )
+            if not has_reduce_scatter:
+                break_comm_size_criteria = comm_cache.ag_max_inp_size < get_data_size(comm_size_inp)
+            else:
+                break_comm_size_criteria = (
+                    comm_cache.ag_max_inp_size < get_data_size(comm_size_inp)
+                    or comm_cache.rs_max_out_size < heuristic_info["this_step_rs_comm_size"]
+                )
             memory_threshold = get_dynamic_memory_threshold(
                 peak_memory,
                 memories_at_nodes,
