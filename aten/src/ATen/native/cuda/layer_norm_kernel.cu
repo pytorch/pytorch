@@ -24,6 +24,8 @@
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
+#include <ATen/native/cudnn/LayerNorm_v8.h>
+
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/env.h>
 
@@ -1124,6 +1126,15 @@ void LayerNormKernelImplInternal(
   }
 }
 
+inline bool use_cudnn_layernorm(bool gamma, bool beta) {
+  static bool enabled = (c10::utils::check_env("TORCH_CUDNN_LAYERNORM_ENABLED") == true);
+  bool ok = enabled && gamma && beta;
+  if (ok) {
+    TORCH_WARN_ONCE("USING EXPERIMENTAL CUDNN LAYERNORM");
+  }
+  return ok;
+}
+
 void LayerNormKernelImpl(
     const Tensor& X,
     const Tensor& gamma,
@@ -1134,16 +1145,21 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      X.scalar_type(),
-      "LayerNormKernelImpl",
-      [&]() {
-        using acc_t = acc_type<scalar_t, true>;
-        LayerNormKernelImplInternal<scalar_t, acc_t>(
-            X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
-      });
+
+  if (use_cudnn_layernorm(gamma.numel(), beta.numel())) {
+    at::native::raw_cudnn_layernorm_forward_out(X, gamma, beta, eps, mean, rstd, Y, M, N);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        X.scalar_type(),
+        "LayerNormKernelImpl",
+        [&]() {
+          using acc_t = acc_type<scalar_t, true>;
+          LayerNormKernelImplInternal<scalar_t, acc_t>(
+              X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
+        });
+  }
 }
 
 void RmsNormKernelImpl(
