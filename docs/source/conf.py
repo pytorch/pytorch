@@ -93,7 +93,14 @@ numpydoc_show_class_members = False
 # autosectionlabel throws warnings if section names are duplicated.
 # The following tells autosectionlabel to not throw a warning for
 # duplicated section names that are in different documents.
+
 autosectionlabel_prefix_document = True
+
+parallel_write_safe = True
+parallel_read_safe = True
+numfig = True
+# Disable parallel builds
+parallel_workers = 1
 
 # katex options
 #
