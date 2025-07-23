@@ -50,6 +50,7 @@ class _ComputationType(Enum):
     SEND_B = 8
     RECV_B = 9
     FULL_BACKWARD = 10
+    OVERLAP_F_B = 11
 
     def __str__(self):
         str_map = {
@@ -63,6 +64,7 @@ class _ComputationType(Enum):
             _ComputationType.SEND_B: "SEND_B",
             _ComputationType.RECV_B: "RECV_B",
             _ComputationType.FULL_BACKWARD: "B",
+            _ComputationType.OVERLAP_F_B: "OVERLAP_F_B",
         }
         return str_map[self]
 
@@ -88,6 +90,8 @@ class _ComputationType(Enum):
             return _ComputationType.RECV_B
         elif action == "B":
             return _ComputationType.FULL_BACKWARD
+        elif action == "OVERLAP_F_B":
+            return _ComputationType.OVERLAP_F_B
         else:
             raise RuntimeError(f"Invalid computation type {action}")
 
@@ -102,6 +106,7 @@ RECV_F = _ComputationType.RECV_F
 SEND_B = _ComputationType.SEND_B
 RECV_B = _ComputationType.RECV_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
+OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
@@ -119,13 +124,31 @@ class _Action(NamedTuple):
     stage_index: int
     computation_type: _ComputationType
     microbatch_index: Optional[int] = None
+    sub_actions: Optional[list["_Action"]] = None
 
     def __repr__(self):
-        repr = str(self.stage_index)
-        repr += str(self.computation_type)
-        if self.microbatch_index is not None:
-            repr += str(self.microbatch_index)
-        return repr
+        if self.sub_actions is not None:
+            # Format: [subaction_stage, subaction_stage...]Computation_Type[subaction_microbatch, subaction_microbatch,...]
+            stage_parts = [
+                str(sub_action.stage_index) for sub_action in self.sub_actions
+            ]
+            microbatch_parts = [
+                str(sub_action.microbatch_index)
+                if sub_action.microbatch_index is not None
+                else ""
+                for sub_action in self.sub_actions
+            ]
+
+            repr_str = "[" + ",".join(stage_parts) + "]"
+            repr_str += str(self.computation_type)
+            repr_str += "[" + ",".join(microbatch_parts) + "]"
+            return repr_str
+        else:
+            repr_str = str(self.stage_index)
+            repr_str += str(self.computation_type)
+            if self.microbatch_index is not None:
+                repr_str += str(self.microbatch_index)
+            return repr_str
 
     @staticmethod
     def from_str(action_string: str):
@@ -136,6 +159,39 @@ class _Action(NamedTuple):
             e.g. `2F0`, `1UNSHARD`, `3SEND_F1`
         """
         action_string = action_string.strip()
+        if action_string == "":
+            return None
+
+        # Check for sub_actions format: main_action[sub_action1,sub_action2,...]
+        if "[" in action_string and action_string.endswith("]"):
+            # Find the last '[' to separate main action from sub_actions
+            bracket_pos = action_string.rfind("[")
+            main_part = action_string[:bracket_pos]
+            sub_part = action_string[bracket_pos + 1 : -1]  # Remove '[' and ']'
+
+            # Parse main action
+            if match := _action_regex.match(main_part):
+                stage_index, computation_type, microbatch_index = match.groups()
+                main_action_mb = (
+                    int(microbatch_index) if len(microbatch_index) else None
+                )
+
+                # Parse sub_actions
+                sub_actions = []
+                if sub_part.strip():
+                    for sub_str in sub_part.split(","):
+                        sub_action = _Action.from_str(sub_str.strip())
+                        if sub_action is not None:
+                            sub_actions.append(sub_action)
+
+                return _Action(
+                    int(stage_index),
+                    _ComputationType.from_str(computation_type),
+                    main_action_mb,
+                    sub_actions if sub_actions else None,
+                )
+
+        # Handle regular single action format
         if match := _action_regex.match(action_string):
             stage_index, computation_type, microbatch_index = match.groups()
             return _Action(
@@ -1193,40 +1249,82 @@ def _validate_schedule(
         for stage_id in range(num_stages)
     }
     stage_index_to_rank_mapping = {}
+
+    def _process_action(action: _Action, rank: int, step: int):
+        """Process a single action and update stage_actions and stage_index_to_rank_mapping"""
+        s_id = action.stage_index
+        ctype = action.computation_type
+        mb_id = action.microbatch_index
+
+        if ctype == F:
+            stage_actions[s_id][F].add(mb_id)
+        elif ctype == B:
+            if mb_id not in stage_actions[s_id][F]:
+                error_msg = (
+                    f"Rank {rank}, step {step}: Running Full Backward for stage {s_id}, "
+                    f"microbatch {mb_id} without first running Forward"
+                )
+                formatted_schedule = _format_pipeline_order(
+                    actions, error_step_number=step
+                )
+                full_error_msg = (
+                    f"{error_msg}\n\nFull pipeline schedule:\n{formatted_schedule}"
+                )
+                raise AssertionError(full_error_msg)
+            stage_actions[s_id][B].add(mb_id)
+        elif ctype == I:
+            if mb_id not in stage_actions[s_id][F]:
+                error_msg = (
+                    f"Rank {rank}, step {step}: Running Backward Input for stage {s_id}, "
+                    f"microbatch {mb_id} without first running Forward"
+                )
+                formatted_schedule = _format_pipeline_order(
+                    actions, error_step_number=step
+                )
+                full_error_msg = (
+                    f"{error_msg}\n\nFull pipeline schedule:\n{formatted_schedule}"
+                )
+                raise AssertionError(full_error_msg)
+            stage_actions[s_id][I].add(mb_id)
+        elif ctype == W:
+            if mb_id not in stage_actions[s_id][I]:
+                error_msg = (
+                    f"Rank {rank}, step {step}: Running Backward Weight for stage {s_id}, "
+                    f"microbatch {mb_id} without first running Backward Input"
+                )
+                formatted_schedule = _format_pipeline_order(
+                    actions, error_step_number=step
+                )
+                full_error_msg = (
+                    f"{error_msg}\n\nFull pipeline schedule:\n{formatted_schedule}"
+                )
+                raise AssertionError(full_error_msg)
+            stage_actions[s_id][W].add(mb_id)
+
+        if s_id not in stage_index_to_rank_mapping:
+            stage_index_to_rank_mapping[s_id] = rank
+        else:
+            existing_rank = stage_index_to_rank_mapping[s_id]
+            assert rank == existing_rank, (
+                f"Rank {rank}, step {step}: Stage {s_id} is assigned to both rank {rank} and rank {existing_rank}"
+            )
+
     for rank in actions:
-        for action in actions[rank]:
+        for step, action in enumerate(actions[rank]):
             if action is None:
                 continue
             assert isinstance(action, _Action), (
-                f"Got an invalid action: {action}, expected instance of _Action"
+                f"Rank {rank}, step {step}: Got an invalid action: {action}, expected instance of _Action"
             )
-            s_id = action.stage_index
-            ctype = action.computation_type
-            mb_id = action.microbatch_index
-            if ctype == F:
-                stage_actions[s_id][F].add(mb_id)
-            elif ctype == B:
-                assert mb_id in stage_actions[s_id][F], (
-                    f"Running Full Backward for stage {s_id}, microbatch {mb_id} without first running Forward"
-                )
-                stage_actions[s_id][B].add(mb_id)
-            elif ctype == I:
-                assert mb_id in stage_actions[s_id][F], (
-                    f"Running Backward Input for stage {s_id}, microbatch {mb_id} without first running Forward"
-                )
-                stage_actions[s_id][I].add(mb_id)
-            elif ctype == W:
-                assert mb_id in stage_actions[s_id][I], (
-                    f"Running Backward Weight for stage {s_id}, microbatch {mb_id} without first running Backward Input"
-                )
-                stage_actions[s_id][W].add(mb_id)
-            if s_id not in stage_index_to_rank_mapping:
-                stage_index_to_rank_mapping[s_id] = rank
+
+            # Check if action has sub_actions
+            if action.sub_actions is not None:
+                # Process each sub_action instead of the main action
+                for sub_action in action.sub_actions:
+                    _process_action(sub_action, rank, step)
             else:
-                existing_rank = stage_index_to_rank_mapping[s_id]
-                assert rank == existing_rank, (
-                    f"Stage {s_id} is assigned to both rank {rank} and rank {existing_rank}"
-                )
+                # Process the main action normally
+                _process_action(action, rank, step)
 
     for s_id in stage_actions:
         f_mb = len(stage_actions[s_id][F])
@@ -1236,6 +1334,11 @@ def _validate_schedule(
 
         assert f_mb == num_microbatches, (
             f"Got {f_mb} {F} microbatches for stage {s_id}, expected {num_microbatches}"
+        )
+
+        assert i_mb == w_mb, (
+            f"Invalid backward microbatches for stage {s_id}: I and W must have equal counts, \
+            but got I={i_mb}, W={w_mb}"
         )
 
         assert b_mb + (i_mb + w_mb) // 2 == num_microbatches, (
@@ -2403,7 +2506,7 @@ stage modules that have used torch.compile"
                 if actions[rank][timestamp] is not None:
                     temp_action = actions[rank][timestamp]
                     assert temp_action is not None
-                    stage_index, op, microbatch = temp_action
+                    stage_index, op, microbatch, _ = temp_action
                     if not need_bubble(
                         stage_index, op, microbatch, num_stages_global, seen_ops
                     ):

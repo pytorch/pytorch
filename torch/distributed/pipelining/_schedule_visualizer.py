@@ -24,7 +24,7 @@ from torch.distributed.pipelining.stage import PipelineStage
 
 
 def get_schedule_ops(
-    schedule: Union[str, _PipelineSchedule],
+    schedule: Union[str, type[_PipelineSchedule]],
     pp_degree: int,
     num_microbatches: int,
     num_stages_per_rank: Optional[int] = None,
@@ -38,7 +38,7 @@ def get_schedule_ops(
 
     if isinstance(schedule, str):
         schedule_class = get_schedule_class(schedule)
-    elif type(schedule) == _PipelineSchedule:
+    elif issubclass(schedule, _PipelineSchedule):
         schedule_class = schedule
     else:
         raise ValueError(f"Invalid schedule: {schedule}")
@@ -98,6 +98,7 @@ action_type_to_color_mapping = {
     _ComputationType.BACKWARD_INPUT: _ComputationTypeColor("teal", "Backward Input"),
     _ComputationType.BACKWARD_WEIGHT: _ComputationTypeColor("green", "Backward Weight"),
     _ComputationType.FULL_BACKWARD: _ComputationTypeColor("orange", "Full Backward", 2),
+    _ComputationType.OVERLAP_F_B: _ComputationTypeColor("purple", "Overlap F+B", 3),
 }
 
 
@@ -130,33 +131,71 @@ def visualize_schedule(
         draw_position = 0  # Initialize drawing position for each rank
         for action in actions:
             if action is not None:
-                comp_type_color = action_type_to_color_mapping.get(
-                    action.computation_type, _ComputationTypeColor("black")
-                )
-                used_computation.add(action.computation_type)
-                color = comp_type_color.color
-                width = comp_type_color.width
-                # Draw the rectangle to represent the action duration
-                rect = Rectangle(
-                    (draw_position, num_ranks - rank_idx - 1),
-                    width,
-                    1,
-                    facecolor=color,
-                    edgecolor="black",
-                )
-                ax.add_patch(rect)
-                # Draw the text centered within the rectangle
-                ax.text(
-                    draw_position + width / 2,
-                    num_ranks - rank_idx - 1 + 0.5,
-                    str(action),
-                    ha="center",
-                    va="center",
-                    fontsize=font_size,
-                    color="white",
-                )
-                # Increment the drawing position by the width of the current action
-                draw_position += width
+                # Check if action has sub_actions
+                if action.sub_actions is not None:
+                    # For actions with sub_actions, visualize the main action with its special color
+                    comp_type_color = action_type_to_color_mapping.get(
+                        action.computation_type, _ComputationTypeColor("black")
+                    )
+                    used_computation.add(action.computation_type)
+                    color = comp_type_color.color
+                    width = comp_type_color.width
+
+                    # Draw the main action rectangle
+                    rect = Rectangle(
+                        (draw_position, num_ranks - rank_idx - 1),
+                        width,
+                        1,
+                        facecolor=color,
+                        edgecolor="black",
+                        linewidth=2,  # Thicker border for compound actions
+                    )
+                    ax.add_patch(rect)
+
+                    # Draw the text for the main action
+                    ax.text(
+                        draw_position + width / 2,
+                        num_ranks - rank_idx - 1 + 0.5,
+                        str(action),
+                        ha="center",
+                        va="center",
+                        fontsize=font_size,
+                        color="white",
+                        weight="bold",  # Bold text for compound actions
+                    )
+
+                    draw_position += width
+                else:
+                    # Regular action without sub_actions
+                    comp_type_color = action_type_to_color_mapping.get(
+                        action.computation_type, _ComputationTypeColor("black")
+                    )
+                    used_computation.add(action.computation_type)
+                    color = comp_type_color.color
+                    width = comp_type_color.width
+
+                    # Draw the rectangle to represent the action duration
+                    rect = Rectangle(
+                        (draw_position, num_ranks - rank_idx - 1),
+                        width,
+                        1,
+                        facecolor=color,
+                        edgecolor="black",
+                    )
+                    ax.add_patch(rect)
+
+                    # Draw the text centered within the rectangle
+                    ax.text(
+                        draw_position + width / 2,
+                        num_ranks - rank_idx - 1 + 0.5,
+                        str(action),
+                        ha="center",
+                        va="center",
+                        fontsize=font_size,
+                        color="white",
+                    )
+
+                    draw_position += width
             else:
                 draw_position += 1  # Move to the next
             max_draw_position = max(max_draw_position, draw_position)
