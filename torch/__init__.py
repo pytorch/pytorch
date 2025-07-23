@@ -2262,8 +2262,25 @@ from torch import _library as _library, _ops as _ops
 from torch._ops import ops as ops  # usort: skip
 from torch._classes import classes as classes  # usort: skip
 
+import importlib.util
+import types
+
+# Construct a proper module for torch.classes
+_classes_spec = importlib.util.spec_from_loader(f"{__name__}.classes", loader=None)
+torch_classes_module = importlib.util.module_from_spec(_classes_spec)
+
+# Transfer attributes from the original 'classes' object
+for attr in dir(classes):
+    if not attr.startswith("__"):
+        try:
+            setattr(torch_classes_module, attr, getattr(classes, attr))
+        except Exception:
+            pass # In case some dynamic attributes raise
+
+# # Register the module properly in sys.modules
+sys.modules[f"{__name__}.classes"] = torch_classes_module
+
 sys.modules.setdefault(f"{__name__}.ops", ops)
-sys.modules.setdefault(f"{__name__}.classes", classes)
 
 # quantization depends on torch.fx and torch.ops
 # Import quantization
