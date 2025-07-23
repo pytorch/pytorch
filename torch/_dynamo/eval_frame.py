@@ -227,6 +227,8 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
         ) -> ConvertFrameReturn:
             if trace_rules.check(frame.f_code):
                 return ConvertFrameReturn()
+            if not convert_frame.has_tensor_in_frame(frame):
+                return ConvertFrameReturn()
 
             from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 
