@@ -123,7 +123,7 @@ class TestMakeCheckpointer(TestCase):
         # Create async checkpointer using factory function with default parameters
         config: CheckpointerConfig = CheckpointerConfig()
         config.staging_config = CheckpointStagerConfig(
-            use_non_blocking_copy=torch.cuda.is_available(),
+            use_non_blocking_copy=torch.accelerator.is_available(),
             use_pinned_memory=torch.cuda.is_available(),
         )
         checkpointer = make_async_checkpointer(config=config, rank_info=self.rank_info)
