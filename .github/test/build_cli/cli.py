@@ -4,7 +4,7 @@ from controllers import ALL_CONTROLLERS
 class MainController(Controller):
     class Meta:
         label = "base"
-        help = "pt2-bm-cli: PyTorch Benchmark CLI"
+        help = "base for build CLI"
 
 class BuildApp(App):
     class Meta:

@@ -8,6 +8,7 @@ import subprocess
 from typing import Optional
 from time import perf_counter
 import shlex
+import time
 
 def run(cmd: str, cwd: Optional[str] = None, env: Optional[dict] = None, logging: bool=False):
     if logging:
@@ -40,13 +41,11 @@ def delete_directory(name:str):
     else:
         print(f"[INFO] folder {name} does not exists in {f}, skipping")
 
-
 class Timer:
     def __enter__(self):
-        self.start = perf_counter()
+        self.start = time.perf_counter()
         return self
 
     def __exit__(self, *args):
-        self.end = perf_counter()
-        self.interval = self.end - self.start
-        print(f"⏱️ Took {self.interval:.3f} seconds")
+        self.end = time.perf_counter()
+        print(f"Took {self.end - self.start:.3f} seconds")
