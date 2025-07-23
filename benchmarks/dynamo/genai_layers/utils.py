@@ -13,7 +13,8 @@ def benchmark_kernel_in_milliseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
     for _ in range(5):
         func(*args, **kwargs)
-    return benchmarker.benchmark_gpu(lambda: func(*args, **kwargs))
+    with torch.compiler.set_stance("fail_on_recompile"):
+        return benchmarker.benchmark_gpu(lambda: func(*args, **kwargs))
 
 
 @dataclass
@@ -41,9 +42,10 @@ class Performance:
 
 
 class BenchmarkKernel:
-    def __init__(self):
+    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
         self.name = self.__class__.__name__
         self.available_backends: list[str] = []
+        self.compile_mode: str = compile_mode
 
         # mapping from backend to list of performance results
         self.profiling_results: defaultdict[str, list[Performance]] = defaultdict(list)

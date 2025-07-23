@@ -1067,6 +1067,7 @@
     CUDA: baddbmm_out_cuda
     MPS: baddbmm_out_mps
     XPU: baddbmm_out_xpu
+    MTIA: baddbmm_out_mtia
     SparseCsrCUDA: baddbmm_out_sparse_csr_cuda
 
 - func: baddbmm.dtype(Tensor self, Tensor batch1, Tensor batch2, ScalarType out_dtype, *, Scalar beta=1, Scalar alpha=1) -> Tensor
@@ -1376,6 +1377,7 @@
     CUDA: bmm_out_cuda
     MPS: bmm_out_mps
     XPU: bmm_out_xpu
+    MTIA: bmm_out_mtia
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
     SparseCsrCUDA: bmm_out_sparse_csr_cuda
@@ -3438,7 +3440,7 @@
 
 - func: _wrapped_quantized_linear_prepacked(Tensor input, Tensor input_scale, Tensor input_zero_point, Tensor packed_weight, Tensor output_scale, Tensor output_zero_point, int out_channel) -> Tensor
 
-- func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+- func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor? bias) -> Tensor
 
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
 
@@ -7065,6 +7067,7 @@
     CUDA: addmm_out_cuda
     MPS: addmm_out_mps
     XPU: addmm_out_xpu
+    MTIA: addmm_out_mtia
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
     SparseCsrCPU: addmm_out_sparse_compressed_cpu
@@ -8968,7 +8971,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: eq_Scalar_out
+    CPU, CUDA, MTIA: eq_Scalar_out
     MPS: eq_scalar_out_mps
     QuantizedCPU: eq_out_quantized_cpu
   tags: pointwise
@@ -8987,7 +8990,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: eq_Tensor_out
+    CPU, CUDA, MTIA: eq_Tensor_out
     MPS: eq_tensor_out_mps
     QuantizedCPU: eq_out_quantized_cpu
   tags: pointwise
@@ -9380,7 +9383,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: addcmul_out
+    CPU, CUDA, MTIA: addcmul_out
     MPS: addcmul_out_mps
   tags: pointwise
 
@@ -9401,7 +9404,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: addcdiv_out
+    CPU, CUDA, MTIA: addcdiv_out
     MPS: addcdiv_out_mps
   tags: pointwise
 
