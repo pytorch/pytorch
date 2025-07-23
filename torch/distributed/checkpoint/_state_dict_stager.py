@@ -31,7 +31,7 @@ class StateDictStager:
             warnings.warn(
                 "Ignoring pin_memory flag for checkpoint staging as pinning memory"
                 "requires CUDA, but CUDA is not available. ",
-                stacklevel=2
+                stacklevel=2,
             )
             self.pin_memory = False
         else:
