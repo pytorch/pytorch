@@ -154,12 +154,15 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
         for part in parts:
             if part.endswith("]"):
                 index_begin = part.rfind("[")
+                assert isinstance(part, str)
                 assert isinstance(index_begin, int) and index_begin >= 0
                 fn = getattr(fn, part[:index_begin], None)[
                     ast.literal_eval(part[index_begin + 1 : -1])
                 ]
             else:
                 fn = getattr(fn, part)
+    else:
+        raise PackageError(f"Cannot find source for code entry {entry}")
     assert isinstance(fn, types.CodeType)
     return fn
 
