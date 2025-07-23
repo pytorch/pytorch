@@ -750,7 +750,7 @@ class TestMaxAutotune(TestCase):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
 
     @skipIfXpu(
-        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
+        msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
     )
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_cat_max_autotune_triton(self):
@@ -778,7 +778,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(out, m(input_tensor))
 
             if not TEST_WITH_ROCM:
-                FileCheck().check("triton_poi_fused_cat_2.run").run(code[0])
+                FileCheck().check("def triton_poi_fused_add_cat_").run(code[0])
 
     def test_conv3d(self):
         fn = torch.nn.functional.conv3d
@@ -856,6 +856,10 @@ class TestMaxAutotune(TestCase):
     # TODO: fix accuracy failure of the triton template on XPU.
     # and enable this test case.
     @skipIfXpu
+    @unittest.skipIf(
+        os.getenv("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1",
+        "OOM when running with TORCHINDUCTOR_CPP_WRAPPER https://github.com/pytorch/pytorch/issues/126867",
+    )
     def test_non_contiguous_input_mm_plus_mm(self):
         x1 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
         y1 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)
@@ -950,7 +954,6 @@ class TestMaxAutotune(TestCase):
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -998,7 +1001,7 @@ class TestMaxAutotune(TestCase):
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
 
-        if dynamic:
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1012,7 +1015,7 @@ class TestMaxAutotune(TestCase):
         # Test adding epilogue also equivalent to eager
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
         out, code = run_and_get_code(compiled_func, a, b)
-        if dynamic:
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1031,7 +1034,9 @@ class TestMaxAutotune(TestCase):
             lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
         )
         out, code = run_and_get_code(compiled_func, a, b)
-        if dynamic:
+
+        # DecomposeK is not enabled for AMD yet
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1200,7 +1205,7 @@ class TestMaxAutotune(TestCase):
         # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
         # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
         self.assertEqual(generate_and_load_args - 1, make_key_args)
-        self.assertEqual(generate_and_load_args, 16)
+        self.assertEqual(generate_and_load_args, 17)
 
     @fresh_cache()
     @config.patch(
@@ -1288,7 +1293,7 @@ class TestMaxAutotune(TestCase):
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity',
                         'kwargs':{'EVEN_K':False,'ALLOW_TF32':True,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
-                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8}}"""
+                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8},'hint_override':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
@@ -1327,7 +1332,7 @@ class TestMaxAutotune(TestCase):
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','kwargs':{'EVEN_K':False,'ALLOW_TF32':True,
-                    'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8}}"""
+                    'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8},'hint_override':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
@@ -1489,7 +1494,6 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(misses(), 4)
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1581,6 +1585,7 @@ class TestMaxAutotunePrecompile(TestCase):
             op: str,
             inputs: str,
             benchmark: Callable[[Any], dict[ChoiceCaller, float]],
+            hint_override: Optional[int] = None,
         ) -> Optional[dict[ChoiceCaller, float]]:
             if benchmark is not None:
                 return benchmark(choices)
@@ -1634,21 +1639,6 @@ class TestMaxAutotunePrecompile(TestCase):
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
-    @fresh_cache()
-    @config.patch(search_autotune_cache=True)
-    def test_search_autotune_cache(self):
-        def fn(a, b, c):
-            a = (a @ b) @ c
-            a, b, c = (t.to(torch.float16) for t in [a, b, c])
-            return (a @ b) @ c
-
-        fn_c = torch.compile()(fn)
-        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
-        from torch._dynamo.utils import counters
-
-        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
-        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
-
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
     @runOnRocmArch(MI300_ARCH)
     def test_precompilations(self):
@@ -1685,7 +1675,7 @@ class TestMaxAutotuneSubproc(TestCase):
         )()  # a dummy graph to construct the GraphLowering
         graph = GraphLowering(gm)
 
-        # the graph handler is neede to create benchmark example value below
+        # the graph handler is needed to create benchmark example value below
         with V.set_graph_handler(graph):
             buf1 = self._create_buffer("mat1", (2, 3))
             buf2 = self._create_buffer("mat2", (3, 2))
@@ -1725,7 +1715,7 @@ class TestMaxAutotuneSubproc(TestCase):
         )()  # a dummy graph to construct the GraphLowering
         graph = GraphLowering(gm)
 
-        # the graph handler is neede to create benchmark example value below
+        # the graph handler is needed to create benchmark example value below
         with V.set_graph_handler(graph):
             buf1 = self._create_buffer("mat1", (2, 3))
             buf2 = self._create_buffer("mat2", (3, 2))
@@ -2228,7 +2218,7 @@ class TestPrologueFusion(TestCase):
         }
     )
     @skipIfXpu(
-        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
+        msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
     )
     def test_pending_fusions_multiple(self):
         def multi_use(x, y):
@@ -2262,7 +2252,7 @@ class TestPrologueFusion(TestCase):
         }
     )
     @skipIfXpu(
-        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
+        msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
     )
     def test_pending_fusion_pro_and_epi(self):
         def test_multiple_fusions(x):
@@ -2407,8 +2397,8 @@ class TestPrologueFusion(TestCase):
 
         out, code = run_and_get_code(torch.compile(foo), x, y, z)
         self.assertEqual(out, foo(x, y, z), atol=0.05, rtol=0.05)
-        # theres one more dealloc than there should be because of a buffer reuse. TODO:
-        # not sure why disabling buffer reuse doesnt stop
+        # there's one more dealloc than there should be because of a buffer reuse. TODO:
+        # not sure why disabling buffer reuse doesn't stop
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
 
     # XPU have not enabled pad_mm in fx_passes, so there is always one kernel.

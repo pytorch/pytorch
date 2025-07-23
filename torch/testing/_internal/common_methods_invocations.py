@@ -19627,15 +19627,7 @@ op_db: list[OpInfo] = [
            supports_gradgrad=True,
            supports_out=True,
            check_batched_grad=False,
-           skips=(
-               # Expected __torch_dispatch__ for aten::unbind_copy.int_out to return None
-               # but it returned something else instead.
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestProxyTensorOpInfo',
-                   'test_make_fx_symbolic_exhaustive_out'
-               ),
-           )),
+           ),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
@@ -20177,8 +20169,7 @@ op_db: list[OpInfo] = [
            ),
     OpInfo('logcumsumexp',
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
-           backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16),
+           backward_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(

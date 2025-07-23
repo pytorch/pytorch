@@ -21,6 +21,7 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_utils import gradcheck, TEST_XPU
 from torch.utils.cpp_extension import (
+    _get_cuda_arch_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
     CUDA_HOME,
@@ -346,6 +347,35 @@ class TestCppExtensionJIT(common.TestCase):
                 # Ignore any error, e.g. unsupported PTX code on current device
                 # to avoid errors from here leaking into other tests
                 pass
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_non_default_gencode(self):
+        user_arch_flags = ["-gencode=arch=compute_86,code=sm_86"]
+        result = _get_cuda_arch_flags(user_arch_flags)
+
+        self.assertEqual(
+            len(result),
+            0,
+            f"User arch flags should prevent default generation. "
+            f"Expected: [], Got: {result}",
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_default_gencode(self):
+        default_flags = _get_cuda_arch_flags()
+        self.assertGreater(
+            len(default_flags), 0, "No args should generate default flags"
+        )
+
+        non_arch_flags = _get_cuda_arch_flags(["-O2", "--use-fast-math"])
+        self.assertGreater(
+            len(non_arch_flags), 0, "Non-arch flags should still generate defaults"
+        )
+
+        empty_flags = _get_cuda_arch_flags([])
+        self.assertGreater(
+            len(empty_flags), 0, "Empty list should generate default flags"
+        )
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
@@ -1001,7 +1031,7 @@ class TestCppExtensionJIT(common.TestCase):
         t = torch.rand(2).double()
         cpp_tensor_name = r"CPUDoubleType"
 
-        # Without error handling, the warnings cannot be catched
+        # Without error handling, the warnings cannot be caught
         warn_mod = torch.utils.cpp_extension.load_inline(
             name="warn_mod",
             cpp_sources=[source],
@@ -1035,23 +1065,23 @@ class TestCppExtensionJIT(common.TestCase):
         )
 
         with warnings.catch_warnings(record=True) as w:
-            # Catched with no error should be detected
+            # Caught with no error should be detected
             warn_mod.foo(t, 0)
             self.assertEqual(len(w), 1)
 
-            # Catched with cpp error should also be detected
+            # Caught with cpp error should also be detected
             with self.assertRaisesRegex(TypeError, t.type()):
                 warn_mod.foo(t, 1)
             self.assertEqual(len(w), 2)
 
-            # Catched with python error should also be detected
+            # Caught with python error should also be detected
             with self.assertRaisesRegex(
                 SystemError, "bad argument to internal function"
             ):
                 warn_mod.foo(t, 2)
             self.assertEqual(len(w), 3)
 
-            # Catched with pybind error should also be detected
+            # Caught with pybind error should also be detected
             # Note that there is no type name translation for pybind errors
             with self.assertRaisesRegex(KeyError, cpp_tensor_name):
                 warn_mod.foo(t, 3)
