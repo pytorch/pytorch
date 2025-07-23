@@ -29,7 +29,10 @@ __all__ = [
 # FB-internal note: you do NOT have to specify this explicitly specify this if
 # you run on MAST, we will automatically default this to
 # mast:MAST_JOB_NAME:MAST_JOB_VERSION.
-job_id: Optional[str] = Config(env_name_default="TORCH_COMPILE_JOB_ID", default=None)
+job_id: Optional[str] = Config(
+    env_name_default=["TORCH_COMPILE_JOB_ID", "TORCH_COMPILE_STICKY_PGO_KEY"],
+    default=None,
+)
 """
 Semantically, this should be an identifier that uniquely identifies, e.g., a
 training job.  You might have multiple attempts of the same job, e.g., if it was
@@ -74,5 +77,15 @@ This whitelist is dominant over all other flags dynamic=False, force_nn_module_p
 and force_parameter_static_shapes.
 """
 
+unbacked_sources: str = Config(
+    env_name_default="TORCH_COMPILE_UNBACKED_SOURCES", default=""
+)
+"""
+Comma delimited list of sources that should be marked as unbacked. Primarily useful for large
+models with graph breaks where you need intermediate tensors marked unbacked.
+
+This whitelist is dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
+and force_parameter_static_shapes.
+"""
 
 install_config_module(sys.modules[__name__])

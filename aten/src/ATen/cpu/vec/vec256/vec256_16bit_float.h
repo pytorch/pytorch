@@ -3,12 +3,13 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-// Used for shared functions and classes for vec256_bfloat16.h and vec256_half.h.
-// Any functions/classes that are common between those two files should be defined here.
-// Any non-shared functions/classes should be defined in the respective files.
+// Used for shared functions and classes for vec256_bfloat16.h and
+// vec256_half.h. Any functions/classes that are common between those two files
+// should be defined here. Any non-shared functions/classes should be defined in
+// the respective files.
 
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 
 #if defined(CPU_CAPABILITY_AVX2)
 #define SLEEF_STATIC_LIBS
@@ -31,7 +32,6 @@ inline namespace CPU_CAPABILITY {
 #else
 #define SLEEF_CONST_OLD
 #endif
-
 
 // bfloat16 conversion
 static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
@@ -61,7 +61,8 @@ static inline __m128i cvtfp32_bf16(const __m256& src) {
   t_value = _mm256_srli_epi32(t_value, 16);
   // Check NaN before converting back to bf16
   t_value = _mm256_blendv_epi8(nan, t_value, mask);
-  t_value = _mm256_packus_epi32(t_value, t_value);   // t[4-7] t[4-7] t[0-4] t[0-4]
+  t_value =
+      _mm256_packus_epi32(t_value, t_value); // t[4-7] t[4-7] t[0-4] t[0-4]
   t_value = _mm256_permute4x64_epi64(t_value, 0xd8); // 11     01     10     00
   return _mm256_castsi256_si128(t_value);
 }
@@ -90,8 +91,9 @@ static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   t_lo = _mm256_blendv_epi8(nan, t_lo, mask_lo);
   t_hi = _mm256_blendv_epi8(nan, t_hi, mask_hi);
 
-  t_lo = _mm256_packus_epi32(t_lo, t_hi);      // t_hi[4-7] t_lo[4-7] t_hi[0-4] t_lo[0-4]
-  return _mm256_permute4x64_epi64(t_lo, 0xd8); // 11        01        10        00
+  t_lo = _mm256_packus_epi32(
+      t_lo, t_hi); // t_hi[4-7] t_lo[4-7] t_hi[0-4] t_lo[0-4]
+  return _mm256_permute4x64_epi64(t_lo, 0xd8); // 11        01        10 00
 }
 
 static inline __m256i merge_compare_result(const __m256& a, const __m256& b) {
@@ -116,61 +118,78 @@ static inline void cvtfp16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
 }
 
 static inline __m128i cvtfp32_fp16(const __m256& src) {
-  return _mm256_cvtps_ph(
-      src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  return _mm256_cvtps_ph(src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
 }
 
 static inline __m256i cvtfp32_fp16(const __m256& a, const __m256& b) {
-  __m128i lo = _mm256_cvtps_ph(
-      a, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
-  __m128i hi = _mm256_cvtps_ph(
-      b, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  __m128i lo =
+      _mm256_cvtps_ph(a, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  __m128i hi =
+      _mm256_cvtps_ph(b, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   return _mm256_insertf128_si256(_mm256_castsi128_si256(lo), hi, 1);
 }
 
 // dtype conversion between float16/bfloat16 and float32
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+template <
+    typename T,
+    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline void cvt_to_fp32(const __m128i& a, __m256& o);
-template <> inline void cvt_to_fp32<BFloat16>(const __m128i& a, __m256& o) {
+template <>
+inline void cvt_to_fp32<BFloat16>(const __m128i& a, __m256& o) {
   cvtbf16_fp32(a, o);
 }
-template <> inline void cvt_to_fp32<Half>(const __m128i& a, __m256& o) {
+template <>
+inline void cvt_to_fp32<Half>(const __m128i& a, __m256& o) {
   cvtfp16_fp32(a, o);
 }
 
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+template <
+    typename T,
+    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline void cvt_to_fp32(const __m256i& a, __m256& o1, __m256& o2);
-template <> inline void cvt_to_fp32<BFloat16>(const __m256i& a, __m256& o1, __m256& o2) {
+template <>
+inline void cvt_to_fp32<BFloat16>(const __m256i& a, __m256& o1, __m256& o2) {
   cvtbf16_fp32(a, o1, o2);
 }
-template <> inline void cvt_to_fp32<Half>(const __m256i& a, __m256& o1, __m256& o2) {
+template <>
+inline void cvt_to_fp32<Half>(const __m256i& a, __m256& o1, __m256& o2) {
   cvtfp16_fp32(a, o1, o2);
 }
 
-template <typename T, bool is_compare_op = false,
-          typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+template <
+    typename T,
+    bool is_compare_op = false,
+    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline __m256i cvt_from_fp32(const __m256& a, const __m256& b);
-template <> inline __m256i cvt_from_fp32<BFloat16, false>(const __m256& a, const __m256& b) {
+template <>
+inline __m256i cvt_from_fp32<BFloat16, false>(
+    const __m256& a,
+    const __m256& b) {
   return cvtfp32_bf16(a, b);
 }
-template <> inline __m256i cvt_from_fp32<BFloat16, true>(const __m256& a, const __m256& b) {
+template <>
+inline __m256i cvt_from_fp32<BFloat16, true>(const __m256& a, const __m256& b) {
   return merge_compare_result(a, b);
 }
-template <> inline __m256i cvt_from_fp32<Half, false>(const __m256& a, const __m256& b) {
+template <>
+inline __m256i cvt_from_fp32<Half, false>(const __m256& a, const __m256& b) {
   return cvtfp32_fp16(a, b);
 }
-template <> inline __m256i cvt_from_fp32<Half, true>(const __m256& a, const __m256& b) {
+template <>
+inline __m256i cvt_from_fp32<Half, true>(const __m256& a, const __m256& b) {
   return cvtfp32_fp16(a, b);
 }
 
 template <typename T>
 class Vectorized16 {
-static_assert(
-  is_reduced_floating_point_v<T>,
-  "Support only float16 and bfloat16.");
-protected:
+  static_assert(
+      is_reduced_floating_point_v<T>,
+      "Support only float16 and bfloat16.");
+
+ protected:
   __m256i values;
-public:
+
+ public:
   using value_type = uint16_t;
   using size_type = int;
   static constexpr size_type size() {
@@ -182,21 +201,49 @@ public:
     value_type uw = val.x;
     values = _mm256_set1_epi16(uw);
   }
-  Vectorized16(T val1, T val2, T val3, T val4,
-         T val5, T val6, T val7, T val8,
-         T val9, T val10, T val11, T val12,
-         T val13, T val14, T val15, T val16) {
+  Vectorized16(
+      T val1,
+      T val2,
+      T val3,
+      T val4,
+      T val5,
+      T val6,
+      T val7,
+      T val8,
+      T val9,
+      T val10,
+      T val11,
+      T val12,
+      T val13,
+      T val14,
+      T val15,
+      T val16) {
     values = _mm256_setr_epi16(
-        val1.x, val2.x, val3.x, val4.x, val5.x, val6.x, val7.x, val8.x,
-        val9.x, val10.x, val11.x, val12.x, val13.x, val14.x, val15.x, val16.x);
+        val1.x,
+        val2.x,
+        val3.x,
+        val4.x,
+        val5.x,
+        val6.x,
+        val7.x,
+        val8.x,
+        val9.x,
+        val10.x,
+        val11.x,
+        val12.x,
+        val13.x,
+        val14.x,
+        val15.x,
+        val16.x);
   }
   operator __m256i() const {
     return values;
   }
   T& operator[](int idx) = delete;
-  const T& operator[](int idx) const  = delete;
+  const T& operator[](int idx) const = delete;
   int zero_mask() const {
-    // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
+    // returns an integer mask where all zero elements are translated to 1-bit
+    // and others are translated to 0-bit
     __m256i cmp = _mm256_cmpeq_epi16(values, _mm256_set1_epi16(0));
     return _mm256_movemask_epi8(cmp);
   }
@@ -261,20 +308,38 @@ public:
       tmp_values[15] = _mm256_extract_epi16(b.values, 15);
     return loadu(tmp_values);
   }
-  static Vectorized<T> blendv(const Vectorized<T>& a,
-      const Vectorized<T>& b, const Vectorized<T>& mask) {
+  static Vectorized<T> blendv(
+      const Vectorized<T>& a,
+      const Vectorized<T>& b,
+      const Vectorized<T>& mask) {
     return _mm256_blendv_epi8(a.values, b.values, mask.values);
   }
-  template<typename step_t>
-  static Vectorized<T> arange(T base = 0.f, step_t step = static_cast<step_t>(1)) {
+  template <typename step_t>
+  static Vectorized<T> arange(
+      T base = 0.f,
+      step_t step = static_cast<step_t>(1)) {
     return Vectorized<T>(
-      base,             base +      step, base +  2 * step, base +  3 * step,
-      base +  4 * step, base +  5 * step, base +  6 * step, base +  7 * step,
-      base +  8 * step, base +  9 * step, base + 10 * step, base + 11 * step,
-      base + 12 * step, base + 13 * step, base + 14 * step, base + 15 * step);
+        base,
+        base + step,
+        base + 2 * step,
+        base + 3 * step,
+        base + 4 * step,
+        base + 5 * step,
+        base + 6 * step,
+        base + 7 * step,
+        base + 8 * step,
+        base + 9 * step,
+        base + 10 * step,
+        base + 11 * step,
+        base + 12 * step,
+        base + 13 * step,
+        base + 14 * step,
+        base + 15 * step);
   }
-  static Vectorized<T> set(const Vectorized<T>& a,
-      const Vectorized<T>& b, int64_t count = size()) {
+  static Vectorized<T> set(
+      const Vectorized<T>& a,
+      const Vectorized<T>& b,
+      int64_t count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -312,9 +377,10 @@ public:
     return b;
   }
 
-// 'const' type qualifier on return type has no effect, but sleef defines this this way
-// For example `Sleef_exp2f8_u10` signature is `const __m256 (__m256)`
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wignored-qualifiers")
+  // 'const' type qualifier on return type has no effect, but sleef defines this
+  // this way For example `Sleef_exp2f8_u10` signature is `const __m256
+  // (__m256)`
+  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wignored-qualifiers")
   Vectorized<T> map(SLEEF_CONST __m256 (*SLEEF_CONST_OLD vop)(__m256)) const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
@@ -322,7 +388,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wignored-qualifiers")
     const auto o2 = vop(hi);
     return cvt_from_fp32<T>(o1, o2);
   }
-C10_DIAGNOSTIC_POP()
+  C10_DIAGNOSTIC_POP()
   Vectorized<T> isnan() const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
@@ -376,7 +442,7 @@ C10_DIAGNOSTIC_POP()
   Vectorized<T> atanh() const {
     return map(Sleef_atanhf8_u10);
   }
-  Vectorized<T> atan2(const Vectorized<T> &b) const {
+  Vectorized<T> atan2(const Vectorized<T>& b) const {
     __m256 lo, hi;
     __m256 b1, b2;
     cvt_to_fp32<T>(values, lo, hi);
@@ -385,12 +451,11 @@ C10_DIAGNOSTIC_POP()
     auto o2 = Sleef_atan2f8_u10(hi, b2);
     return cvt_from_fp32<T>(o1, o2);
   }
-  Vectorized<T> copysign(const Vectorized<T> &sign) const {
+  Vectorized<T> copysign(const Vectorized<T>& sign) const {
     // copy sign bit (0x8000) from sign and remaining bits from values
     __m256i mask_value = _mm256_set1_epi32(~0x80008000);
     __m256i mask_signbit = _mm256_set1_epi32(0x80008000);
-    return Vectorized<T>(
-      _mm256_or_si256(
+    return Vectorized<T>(_mm256_or_si256(
         _mm256_and_si256(values, mask_value),
         _mm256_and_si256(sign, mask_signbit)));
   }
@@ -423,10 +488,13 @@ C10_DIAGNOSTIC_POP()
   Vectorized<T> expm1() const {
     return map(Sleef_expm1f8_u10);
   }
+  Vectorized<T> fexp_u20() const {
+    return exp();
+  }
   Vectorized<T> exp_u20() const {
     return exp();
   }
-  Vectorized<T> fmod(const Vectorized<T> & q) const {
+  Vectorized<T> fmod(const Vectorized<T>& q) const {
     __m256 x_lo, x_hi;
     cvt_to_fp32<T>(values, x_lo, x_hi);
     __m256 q_lo, q_hi;
@@ -435,7 +503,7 @@ C10_DIAGNOSTIC_POP()
     auto o2 = Sleef_fmodf8(x_hi, q_hi);
     return cvt_from_fp32<T>(o1, o2);
   }
-  Vectorized<T> hypot(const Vectorized<T> &b) const {
+  Vectorized<T> hypot(const Vectorized<T>& b) const {
     __m256 lo, hi;
     __m256 b1, b2;
     cvt_to_fp32<T>(values, lo, hi);
@@ -490,7 +558,7 @@ C10_DIAGNOSTIC_POP()
     const auto o2 = _mm256_loadu_ps(tmp2);
     return cvt_from_fp32<T>(o1, o2);
   }
-  Vectorized<T> igamma(const Vectorized<T> &x) const {
+  Vectorized<T> igamma(const Vectorized<T>& x) const {
     __m256 lo, hi;
     __m256 xlo, xhi;
     cvt_to_fp32<T>(values, lo, hi);
@@ -510,7 +578,7 @@ C10_DIAGNOSTIC_POP()
     return cvt_from_fp32<T>(o1, o2);
   }
 
-  Vectorized<T> igammac(const Vectorized<T> &x) const {
+  Vectorized<T> igammac(const Vectorized<T>& x) const {
     __m256 lo, hi;
     __m256 xlo, xhi;
     cvt_to_fp32<T>(values, lo, hi);
@@ -573,8 +641,10 @@ C10_DIAGNOSTIC_POP()
   Vectorized<T> round() const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
-    auto o1 = _mm256_round_ps(lo, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
-    auto o2 = _mm256_round_ps(hi, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+    auto o1 =
+        _mm256_round_ps(lo, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+    auto o2 =
+        _mm256_round_ps(hi, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
     return cvt_from_fp32<T>(o1, o2);
   }
   Vectorized<T> tan() const {
@@ -616,7 +686,7 @@ C10_DIAGNOSTIC_POP()
     auto o2 = _mm256_div_ps(ones, _mm256_sqrt_ps(hi));
     return cvt_from_fp32<T>(o1, o2);
   }
-  Vectorized<T> pow(const Vectorized<T> &b) const {
+  Vectorized<T> pow(const Vectorized<T>& b) const {
     __m256 lo, hi;
     __m256 b1, b2;
     cvt_to_fp32<T>(values, lo, hi);
@@ -625,8 +695,9 @@ C10_DIAGNOSTIC_POP()
     auto o2 = Sleef_powf8_u10(hi, b2);
     return cvt_from_fp32<T>(o1, o2);
   }
-private:
-  template<typename Op, typename VectorizedType>
+
+ private:
+  template <typename Op, typename VectorizedType>
   Vectorized<T> inline binary_compare(const VectorizedType& b, Op op) const {
     __m256 a_lo, a_hi;
     __m256 b_lo, b_hi;
@@ -634,32 +705,47 @@ private:
     cvt_to_fp32<T>(b.values, b_lo, b_hi);
     auto o1 = op(a_lo, b_lo);
     auto o2 = op(a_hi, b_hi);
-    return cvt_from_fp32<T, /*is_compare_op*/true>(o1, o2);
+    return cvt_from_fp32<T, /*is_compare_op*/ true>(o1, o2);
   }
 
-public:
+ public:
   Vectorized<T> inline operator>(const Vectorized<T>& other) const {
-    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_GT_OQ); });
+    return binary_compare(other, [](__m256 x, __m256 y) {
+      return _mm256_cmp_ps(x, y, _CMP_GT_OQ);
+    });
   }
   Vectorized<T> inline operator<(const Vectorized<T>& other) const {
-    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_LT_OQ); });
+    return binary_compare(other, [](__m256 x, __m256 y) {
+      return _mm256_cmp_ps(x, y, _CMP_LT_OQ);
+    });
   }
   Vectorized<T> inline operator>=(const Vectorized<T>& other) const {
-    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_GE_OQ); });
+    return binary_compare(other, [](__m256 x, __m256 y) {
+      return _mm256_cmp_ps(x, y, _CMP_GE_OQ);
+    });
   }
   Vectorized<T> inline operator<=(const Vectorized<T>& other) const {
-    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_LE_OQ); });
+    return binary_compare(other, [](__m256 x, __m256 y) {
+      return _mm256_cmp_ps(x, y, _CMP_LE_OQ);
+    });
   }
   Vectorized<T> inline operator==(const Vectorized16<T>& other) const {
-    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_EQ_OQ); });
+    return binary_compare(other, [](__m256 x, __m256 y) {
+      return _mm256_cmp_ps(x, y, _CMP_EQ_OQ);
+    });
   }
   Vectorized<T> inline operator!=(const Vectorized16<T>& other) const {
-    return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_NEQ_UQ); });
+    return binary_compare(other, [](__m256 x, __m256 y) {
+      return _mm256_cmp_ps(x, y, _CMP_NEQ_UQ);
+    });
   }
 };
 
-template<typename T, typename Op>
-static inline Vectorized<T> binary_op_as_fp32(const Vectorized<T>& a, const Vectorized<T>& b, Op op) {
+template <typename T, typename Op>
+static inline Vectorized<T> binary_op_as_fp32(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b,
+    Op op) {
   __m256 a_lo, a_hi;
   __m256 b_lo, b_hi;
   cvt_to_fp32<T>(__m256i(a), a_lo, a_hi);
@@ -669,69 +755,78 @@ static inline Vectorized<T> binary_op_as_fp32(const Vectorized<T>& a, const Vect
   return cvt_from_fp32<T>(o1, o2);
 }
 
-#define CONVERT_VECTORIZED_INIT(type, name) \
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(const Vectorized<type>& a) { \
-  __m256 o1, o2; \
-  cvt_to_fp32<type>(__m256i(a), o1, o2); \
-  return std::make_tuple(o1, o2); \
-} \
-inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const Vectorized<float>& b) { \
-  return cvt_from_fp32<type>(__m256(a), __m256(b)); \
-}
+#define CONVERT_VECTORIZED_INIT(type, name)                     \
+  inline std::tuple<Vectorized<float>, Vectorized<float>>       \
+      convert_##name##_float(const Vectorized<type>& a) {       \
+    __m256 o1, o2;                                              \
+    cvt_to_fp32<type>(__m256i(a), o1, o2);                      \
+    return std::make_tuple(o1, o2);                             \
+  }                                                             \
+  inline Vectorized<type> convert_float_##name(                 \
+      const Vectorized<float>& a, const Vectorized<float>& b) { \
+    return cvt_from_fp32<type>(__m256(a), __m256(b));           \
+  }
 
-#define LOAD_FP32_VECTORIZED_INIT(type, name) \
-inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
-  auto values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data)); \
-  __m256 out_values; \
-  cvt_to_fp32<type>(values, out_values); \
-  out = out_values; \
-} \
-\
-inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vectorized<float>& out2) { \
-  auto vec = Vectorized<type>::loadu(data); \
-  __m256 out1_values, out2_values; \
-  cvt_to_fp32<type>(vec, out1_values, out2_values); \
-  out1 = out1_values; \
-  out2 = out2_values; \
-}
+#define LOAD_FP32_VECTORIZED_INIT(type, name)                               \
+  inline void load_fp32_from_##name(                                        \
+      const type* data, Vectorized<float>& out) {                           \
+    auto values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));  \
+    __m256 out_values;                                                      \
+    cvt_to_fp32<type>(values, out_values);                                  \
+    out = out_values;                                                       \
+  }                                                                         \
+                                                                            \
+  inline void load_fp32_from_##name(                                        \
+      const type* data, Vectorized<float>& out1, Vectorized<float>& out2) { \
+    auto vec = Vectorized<type>::loadu(data);                               \
+    __m256 out1_values, out2_values;                                        \
+    cvt_to_fp32<type>(vec, out1_values, out2_values);                       \
+    out1 = out1_values;                                                     \
+    out2 = out2_values;                                                     \
+  }
 
 #else // CPU_CAPABILITY_AVX2
 
-#define CONVERT_NON_VECTORIZED_INIT(type, name) \
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(const Vectorized<type>& a) { \
-  constexpr int64_t K = Vectorized<type>::size(); \
-  __at_align__ float arr[K]; \
-  __at_align__ type arr2[K]; \
-  a.store(arr2); \
-  convert(arr2, arr, K); \
-  return std::make_tuple( \
-      Vectorized<float>::loadu(arr), \
-      Vectorized<float>::loadu(arr + Vectorized<float>::size())); \
-} \
-inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const Vectorized<float>& b) { \
-  constexpr int64_t K = Vectorized<type>::size(); \
-  __at_align__ float arr[K]; \
-  __at_align__ type arr2[K]; \
-  a.store(arr); \
-  b.store(arr + Vectorized<float>::size()); \
-  convert(arr, arr2, K); \
-  return Vectorized<type>::loadu(arr2); \
-}
+#define CONVERT_NON_VECTORIZED_INIT(type, name)                     \
+  inline std::tuple<Vectorized<float>, Vectorized<float>>           \
+      convert_##name##_float(const Vectorized<type>& a) {           \
+    constexpr int64_t K = Vectorized<type>::size();                 \
+    __at_align__ float arr[K];                                      \
+    __at_align__ type arr2[K];                                      \
+    a.store(arr2);                                                  \
+    convert(arr2, arr, K);                                          \
+    return std::make_tuple(                                         \
+        Vectorized<float>::loadu(arr),                              \
+        Vectorized<float>::loadu(arr + Vectorized<float>::size())); \
+  }                                                                 \
+  inline Vectorized<type> convert_float_##name(                     \
+      const Vectorized<float>& a, const Vectorized<float>& b) {     \
+    constexpr int64_t K = Vectorized<type>::size();                 \
+    __at_align__ float arr[K];                                      \
+    __at_align__ type arr2[K];                                      \
+    a.store(arr);                                                   \
+    b.store(arr + Vectorized<float>::size());                       \
+    convert(arr, arr2, K);                                          \
+    return Vectorized<type>::loadu(arr2);                           \
+  }
 
-#define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \
-inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
-  __at_align__ float values[Vectorized<float>::size()]; \
-  for (const auto k : c10::irange(Vectorized<float>::size())) { \
-    values[k] = data[k]; \
-  } \
-  out = Vectorized<float>::loadu(values); \
-} \
-\
-inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vectorized<float>& out2) { \
-  load_fp32_from_##name(data, out1); \
-  data += Vectorized<float>::size(); \
-  load_fp32_from_##name(data, out2); \
-}
+#define LOAD_FP32_NON_VECTORIZED_INIT(type, name)                           \
+  inline void load_fp32_from_##name(                                        \
+      const type* data, Vectorized<float>& out) {                           \
+    __at_align__ float values[Vectorized<float>::size()];                   \
+    for (const auto k : c10::irange(Vectorized<float>::size())) {           \
+      values[k] = data[k];                                                  \
+    }                                                                       \
+    out = Vectorized<float>::loadu(values);                                 \
+  }                                                                         \
+                                                                            \
+  inline void load_fp32_from_##name(                                        \
+      const type* data, Vectorized<float>& out1, Vectorized<float>& out2) { \
+    load_fp32_from_##name(data, out1);                                      \
+    data += Vectorized<float>::size();                                      \
+    load_fp32_from_##name(data, out2);                                      \
+  }
 
 #endif // CPU_CAPABILITY_AVX2
-}} // namespace::at::vec::CPU_CAPABILITY
+} // namespace CPU_CAPABILITY
+} // namespace at::vec

@@ -300,6 +300,21 @@ def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
         ]
     )
 
+    if torch._inductor.config.is_fbcode():
+        if symbolic and num_aliases > 400:
+            from torch._subclasses.fake_tensor import (
+                UnsupportedMutationAliasingException,
+            )
+            from torch._utils_internal import justknobs_check
+
+            msg = f"Encountered {num_aliases} dynamic, aliased/mutated inputs, consider setting dynamic=False"
+
+            if justknobs_check(
+                "pytorch/compiler:aliased_inputs_with_mutation_and_dyn_shapes_killswitch",
+                False,
+            ):
+                raise UnsupportedMutationAliasingException(msg)
+
     with maybe_suppress_guards():
         aliased_fwd_inputs = [fwd_inputs[i] for i in aliased_input_indices]
         actual_aliased_indices = {

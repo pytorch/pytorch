@@ -58,6 +58,7 @@ class CircularPad1d(_CircularPadNd):
         padding (int, tuple): the size of the padding. If is `int`, uses the same
             padding in all boundaries. If a 2-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
+            Note that padding size should be less than or equal to the corresponding input dimension.
 
     Shape:
         - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
@@ -89,7 +90,7 @@ class CircularPad1d(_CircularPadNd):
         super().__init__()
         self.padding = _pair(padding)
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
@@ -107,6 +108,7 @@ class CircularPad2d(_CircularPadNd):
         padding (int, tuple): the size of the padding. If is `int`, uses the same
             padding in all boundaries. If a 4-`tuple`, uses (:math:`\text{padding\_left}`,
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
+            Note that padding size should be less than or equal to the corresponding input dimension.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
@@ -148,7 +150,7 @@ class CircularPad2d(_CircularPadNd):
         super().__init__()
         self.padding = _quadruple(padding)
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 3 and input.dim() != 4:
             raise ValueError(f"expected 3D or 4D input (got {input.dim()}D input)")
 
@@ -168,6 +170,7 @@ class CircularPad3d(_CircularPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`,
             :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`,
             :math:`\text{padding\_front}`, :math:`\text{padding\_back}`)
+            Note that padding size should be less than or equal to the corresponding input dimension.
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
@@ -197,7 +200,7 @@ class CircularPad3d(_CircularPadNd):
         super().__init__()
         self.padding = _ntuple(6)(padding)
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 4 and input.dim() != 5:
             raise ValueError(f"expected 4D or 5D input (got {input.dim()}D input)")
 
@@ -264,7 +267,7 @@ class ConstantPad1d(_ConstantPadNd):
 
     padding: tuple[int, int]
 
-    def __init__(self, padding: _size_2_t, value: float):
+    def __init__(self, padding: _size_2_t, value: float) -> None:
         super().__init__(value)
         self.padding = _pair(padding)
 
@@ -380,6 +383,7 @@ class ReflectionPad1d(_ReflectionPadNd):
         padding (int, tuple): the size of the padding. If is `int`, uses the same
             padding in all boundaries. If a 2-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
+            Note that padding size should be less than the corresponding input dimension.
 
     Shape:
         - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
@@ -476,6 +480,7 @@ class ReflectionPad3d(_ReflectionPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`,
             :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`,
             :math:`\text{padding\_front}`, :math:`\text{padding\_back}`)
+            Note that padding size should be less than the corresponding input dimension.
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
@@ -539,6 +544,7 @@ class ReplicationPad1d(_ReplicationPadNd):
         padding (int, tuple): the size of the padding. If is `int`, uses the same
             padding in all boundaries. If a 2-`tuple`, uses
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
+            Note that the output dimensions must remain positive.
 
     Shape:
         - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
@@ -580,6 +586,7 @@ class ReplicationPad2d(_ReplicationPadNd):
         padding (int, tuple): the size of the padding. If is `int`, uses the same
             padding in all boundaries. If a 4-`tuple`, uses (:math:`\text{padding\_left}`,
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
+            Note that the output dimensions must remain positive.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
@@ -634,6 +641,7 @@ class ReplicationPad3d(_ReplicationPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`,
             :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`,
             :math:`\text{padding\_front}`, :math:`\text{padding\_back}`)
+            Note that the output dimensions must remain positive.
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.

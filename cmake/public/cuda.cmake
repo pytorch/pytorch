@@ -110,7 +110,7 @@ if(CUDA_FOUND)
       # Force CUDA to be processed for again next time
       # TODO: I'm not sure if this counts as an implementation detail of
       # FindCUDA
-      set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
+      set(cuda_version_from_findcuda ${CUDA_VERSION_STRING})
       unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
       # Not strictly necessary, but for good luck.
       unset(CUDA_VERSION CACHE)
@@ -297,7 +297,7 @@ set_property(
     TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
     CUDA::nvrtc caffe2::cuda)
 
-# Add onnx namepsace definition to nvcc
+# Add onnx namespace definition to nvcc
 if(ONNX_NAMESPACE)
   list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=${ONNX_NAMESPACE}")
 else()
@@ -313,7 +313,13 @@ endif()
 # setting nvcc arch flags
 torch_cuda_get_nvcc_gencode_flag(NVCC_FLAGS_EXTRA)
 # CMake 3.18 adds integrated support for architecture selection, but we can't rely on it
-set(CMAKE_CUDA_ARCHITECTURES OFF)
+if(DEFINED CMAKE_CUDA_ARCHITECTURES)
+  message(WARNING
+          "pytorch is not compatible with `CMAKE_CUDA_ARCHITECTURES` and will ignore its value. "
+          "Please configure `TORCH_CUDA_ARCH_LIST` instead.")
+  set(CMAKE_CUDA_ARCHITECTURES OFF)
+endif()
+
 list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
 

@@ -242,11 +242,10 @@ class TestCommunication(FSDPTest):
         # and if `use_no_sync=False`, we only run `num_iters` iterations
         # outside `no_sync()`
         num_iters = 3
-        with patch(
-            "torch.distributed.all_gather_into_tensor"
-        ) as mock_all_gather, patch(
-            "torch.distributed.reduce_scatter_tensor"
-        ) as mock_reduce_scatter:
+        with (
+            patch("torch.distributed.all_gather_into_tensor") as mock_all_gather,
+            patch("torch.distributed.reduce_scatter_tensor") as mock_reduce_scatter,
+        ):
 
             def reset_mocks():
                 mock_all_gather.reset_mock()

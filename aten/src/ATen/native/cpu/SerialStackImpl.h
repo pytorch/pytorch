@@ -67,7 +67,7 @@ void stack_serial_kernel_impl(Tensor& result, TensorListType tensors, int64_t di
 // - tensors dtype is Double or Float
 template <typename TensorListType>
 bool can_use_native_serial_stack_impl(Tensor& result, TensorListType tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
+  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
   const Tensor& first_tensor = tensors[0];
   // stack dimension should be in range [0,firstTensor.dim())
   // dim == firstTensor.dim() is a valid input, but it is handled by default code path
