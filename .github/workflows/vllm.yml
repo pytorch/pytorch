@@ -49,7 +49,7 @@ jobs:
     uses: ./.github/workflows/_linux-vllm-build.yml
     needs: [
       get-label-type,
-      linux-jammy-cuda12.8-cudnn9-py3_12-gcc11-vllm-build
+      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build
     ]
     with:
       build-environment: linux-jammy-cuda12.8-py3_12-gcc11-sm86
