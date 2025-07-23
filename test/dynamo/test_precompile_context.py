@@ -10,6 +10,7 @@ from torch._functorch._aot_autograd.autograd_cache import (
     BundledAOTAutogradCacheArtifact,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_triton
 
 
@@ -27,6 +28,7 @@ class PrecompileContextTests(InductorTestCase):
         PrecompileContext.clear()
 
     @requires_triton()
+    @skipIfRocm
     def test_basic(self):
         """
         Test that after torch.compile, PrecompileContext._new_cache_artifacts length is 1
@@ -63,6 +65,7 @@ class PrecompileContextTests(InductorTestCase):
         )
 
     @requires_triton()
+    @skipIfRocm
     def test_serialize_by_key(self):
         """
         Test that after torch.compile, PrecompileContext._new_cache_artifacts length is 1
