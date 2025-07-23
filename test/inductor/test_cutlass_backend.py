@@ -69,7 +69,29 @@ if HAS_CUDA:
 
 log = logging.getLogger(__name__)
 
-DEFAULT_INST_LEVEL_MM_CONFIG: int = 78
+
+def get_default_inst_level_mm_config() -> int:
+    """
+    Get the default instance level for MM.
+    """
+    from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+
+    assert try_import_cutlass()
+
+    if config.is_fbcode():
+        import python_cutlass
+
+        cutlass_version = python_cutlass.__version__
+    else:
+        import cutlass  # noqa: F401
+
+        cutlass_version = cutlass.__version__
+
+    if cutlass_version == "4.0.0":
+        return 78
+    elif cutlass_version > "4.0.0":
+        return 130
+    raise RuntimeError(f"Unknown cutlass version {cutlass_version}")
 
 
 def _get_path_without_sccache() -> str:
@@ -1604,9 +1626,8 @@ class TestCutlassBackend(TestCase):
 
         # Check render call count: render is called uniquely for each codegen
         # and for each finalized codegen.
-        self.assertEqual(
-            render_call_count, NUM_ITERATIONS + DEFAULT_INST_LEVEL_MM_CONFIG
-        )
+        num_configs = get_default_inst_level_mm_config()
+        self.assertEqual(render_call_count, NUM_ITERATIONS + num_configs)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -2224,7 +2245,9 @@ class TestCutlassBackend(TestCase):
                 args, _ = sa.call_args
                 _, choices, _, __ = args
 
-                self.assertEqual(len(choices), DEFAULT_INST_LEVEL_MM_CONFIG)
+                num_configs = get_default_inst_level_mm_config()
+
+                self.assertEqual(len(choices), num_configs)
 
 
 if __name__ == "__main__":
