@@ -2409,7 +2409,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._lowrank.svd_lowrank",
         "torch._preload_cuda_deps",
         "torch._register_device_module",
-        "torch._running_with_deploy",
         "torch._utils._dummy_type",
         "torch._utils._flatten_dense_tensors",
         "torch._utils._unflatten_dense_tensors",
