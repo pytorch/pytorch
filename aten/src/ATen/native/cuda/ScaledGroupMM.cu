@@ -10,6 +10,7 @@
 // Two warninngs in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Werror=unused-but-set-variable")
 
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
@@ -24,10 +25,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 #include <ATen/native/cuda/GroupMMCommon.cuh>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Werror=unused-but-set-variable"
 #include <cute/tensor.hpp>
-#pragma GCC diagnostic pop
 #include <cutlass/core_io.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm.h>
@@ -47,6 +45,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
