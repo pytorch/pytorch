@@ -30,6 +30,7 @@ def define_torch_headeronly_ovrsource(name, is_mobile):
         public_preprocessor_flags = pp_flags,
         public_raw_headers = native.glob([
             "macros/*.h",
+            "util/*.h",
         ]),
         reexport_all_header_dependencies = False,
         visibility = [

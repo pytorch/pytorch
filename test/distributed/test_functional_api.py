@@ -13,6 +13,7 @@ from functorch import make_fx
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import exit_if_lt_x_gpu
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 
@@ -25,7 +26,7 @@ from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
     requires_nccl,
-    TEST_SKIPS,
+    skip_if_no_gpu,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -476,26 +477,14 @@ if TEST_HPU:
     BACKEND = dist.Backend.HCCL
 
 
-# allows you to check for multiple accelerator irrespective of device type
-# to add new device types to this check simply follow the same format
-# and append an elif with the conditional and appropriate device count function for your new device
-def exit_if_lt_x_accelerators(x):
-    if TEST_CUDA:
-        if torch.cuda.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
-    elif TEST_HPU:
-        if torch.hpu.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-hpu-{x}"].exit_code)
-
-
 def with_comms(func=None):
     if func is None:
         return partial(with_comms)
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        if BACKEND == dist.Backend.NCCL:
+            exit_if_lt_x_gpu(self.world_size)
 
         kwargs["device"] = DEVICE
         self.pg = self.create_pg(device=DEVICE)
@@ -508,9 +497,9 @@ def with_comms(func=None):
 
 
 class TestCollectivesWithDistributedBackend(DistributedTestBase):
+    @skip_if_no_gpu
     @with_comms()
     def test_all_gather_into_tensor_coalesced(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
         tensors = [
             torch.ones([4], device=device),
             torch.ones([4], device=device) + 1,
@@ -582,9 +571,8 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         compiled_allreduce(torch.randn(8, device=device), self.pg)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_no_gpu
     def test_tracing_with_fakepg(self, device=DEVICE):
-        exit_if_lt_x_accelerators(self.world_size)
-
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
@@ -626,9 +614,9 @@ class TestDistributedBackendCollectivesWithWorldSize4(
     def world_size(self):
         return 4
 
+    @skip_if_no_gpu
     @with_comms()
     def test_permute_tensor_with_sub_group(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
         mesh_dim_names = ["dp", "tp"]
 
         mesh_2d = dt.init_device_mesh(
