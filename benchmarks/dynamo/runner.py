@@ -37,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import platform
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from os.path import abspath, exists
@@ -374,6 +375,7 @@ def get_skip_tests(suite, device, is_training: bool):
     original_dir = abspath(os.getcwd())
     module = importlib.import_module(suite)
     os.chdir(original_dir)
+    arch = platform.machine()
 
     if suite == "torchbench":
         skip_tests.update(module.TorchBenchmarkRunner().skip_models)
@@ -383,6 +385,8 @@ def get_skip_tests(suite, device, is_training: bool):
             )
         if device == "cpu":
             skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cpu)
+            if arch == "aarch64":
+                skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cpu_aarch64)
         elif device == "cuda":
             skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cuda)
 
