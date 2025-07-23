@@ -1642,9 +1642,9 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
                     "dispatch_anonymous_definitions": anonymous_definitions[
                         kernel_namespace
                     ],
-                    "static_init_dispatch_registrations": ""
-                    if skip_dispatcher_op_registration
-                    else registration_body,
+                    "static_init_dispatch_registrations": (
+                        "" if skip_dispatcher_op_registration else registration_body
+                    ),
                     "deferred_dispatch_registrations": "",
                     "dispatch_namespace": dispatch_key.lower(),
                     "dispatch_namespaced_definitions": ns_definitions[kernel_namespace],
@@ -2303,9 +2303,9 @@ def gen_source_files(
         )
 
         register_dispatch_key_base_env = {
-            "extra_cuda_headers": extra_cuda_headers
-            if is_cuda_dispatch_key(dispatch_key)
-            else "",
+            "extra_cuda_headers": (
+                extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
+            ),
             "external_backend_headers": "",
             "dispatch_headers": dest.gen_registration_headers(
                 backend_index, per_operator_headers, rocm
@@ -2441,12 +2441,12 @@ def gen_source_files(
     cpu_fm.write(
         "RegisterSchema.cpp",
         lambda: {
-            "aten_schema_registrations": []
-            if skip_dispatcher_op_registration
-            else aten_schema_registrations,
-            "schema_registrations": []
-            if skip_dispatcher_op_registration
-            else schema_registrations,
+            "aten_schema_registrations": (
+                [] if skip_dispatcher_op_registration else aten_schema_registrations
+            ),
+            "schema_registrations": (
+                [] if skip_dispatcher_op_registration else schema_registrations
+            ),
         },
     )
 
@@ -2837,9 +2837,10 @@ def main() -> None:
         DispatchKey.MTIA,
     }
 
-    aoti_backends = {
+    aoti_backends: set[DispatchKey] = {
         DispatchKey.CPU,
         DispatchKey.CUDA,
+        DispatchKey.GenericKey,
     }
 
     # TODO: stop generating CUDA kernels for non-CUDA builds

@@ -207,6 +207,17 @@ if not IS_WINDOWS:
             self.assertEqual(id(out), id(t))
             self.assertEqual(out, torch.zeros_like(t))
 
+        def test_my_fill_(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(3, 4, device=device)
+            fill_value = 42.0
+            out = libtorch_agnostic.ops.my_fill_(t, fill_value)
+
+            self.assertEqual(id(out), id(t))
+            expected = torch.full_like(t, fill_value)
+            self.assertEqual(out, expected)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
