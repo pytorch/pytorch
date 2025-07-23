@@ -19,7 +19,7 @@ build-backend = "setuptools.build_meta"
 name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
-requires-python = ">=3.9,<3.14"
+requires-python = ">=3.9"
 license = "BSD-3-Clause"
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
@@ -41,6 +41,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dynamic = [
     "entry-points",
