@@ -57,7 +57,7 @@ def mock_os_path_exists():
 def mock_os_path_abspath():
     def side_effect(path):
         return f"/mocked/path/{path}"
-        
+
     with patch('os.path.abspath') as mock_abspath:
         mock_abspath.side_effect = side_effect
         yield mock_abspath
