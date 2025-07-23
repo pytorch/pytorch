@@ -78,24 +78,23 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
 .. autofunction:: export
     :noindex:
 
+### Deprecated API
+
 ```{eval-rst}
-.. collapse:: Deprecated API (click to expand)
-   :class: warning
+.. deprecated:: 2.6
+    These functions are deprecated and will be removed in a future version.
 
-   .. deprecated:: 2.6
-      These functions are deprecated and will be removed in a future version.
+.. autofunction:: register_custom_op_symbolic
+.. autofunction:: unregister_custom_op_symbolic
+.. autofunction:: select_model_mode_for_export
+.. autofunction:: is_in_onnx_export
 
-   .. autofunction:: register_custom_op_symbolic
-   .. autofunction:: unregister_custom_op_symbolic
-   .. autofunction:: select_model_mode_for_export
-   .. autofunction:: is_in_onnx_export
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
-   .. autosummary::
-       :toctree: generated
-       :nosignatures:
-       :template: classtemplate.rst
-
-       JitScalarType
+    JitScalarType
 ```
 
 ```{eval-rst}
