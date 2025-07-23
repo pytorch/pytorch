@@ -438,17 +438,17 @@ def convolution(
     dilation = tuple(dilation)
     output_padding = tuple(output_padding)
     if not isinstance(groups, int):
-        groups = V.graph.sizevars.evaluate_static_shape(groups)
+        groups = V.graph.sizevars.guard_int(groups)
     assert isinstance(groups, int)
 
     # Need use hint for triton template since the template does not
     # work with a dynamic shape.
     #
-    # No need to evaluate_static_shape for dilation and output_padding
+    # No need to guard_int for dilation and output_padding
     # since the template is only used when dilation is 1 and output_padding
     # is 0.
-    stride = tuple(V.graph.sizevars.evaluate_static_shapes(stride))
-    padding = tuple(V.graph.sizevars.evaluate_static_shapes(padding))
+    stride = tuple(V.graph.sizevars.guard_int_seq(stride))
+    padding = tuple(V.graph.sizevars.guard_int_seq(padding))
 
     kwargs: ConvLayoutParams = {
         "stride": stride,
@@ -468,9 +468,7 @@ def convolution(
             dim=0,
         )
 
-    out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
-        weight.get_size()
-    )
+    out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_int_seq(weight.get_size())
 
     # Always convert conv1D to 2D for Intel GPU.
     # Only conv2D can be converted to channel last layout,
@@ -539,18 +537,18 @@ def convolution(
     # apply channels last.
     if V.graph.layout_opt and ndim == 2:
         V.graph.num_channels_last_conv += 1
-        x = ir.ExternKernel.require_channels_last(x)
+        x = ir.ExternKernel.require_channels_last(x)  # type: ignore[assignment]
         # TODO maybe we can convert weights to channels last just once before
         # running the model.
-        weight = ir.ExternKernel.require_channels_last(weight)
+        weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
         layout = conv_layout(x, weight, None, **kwargs)
     else:
         layout = conv_layout(x, weight, None, **kwargs)
         req_stride_order = ir.get_stride_order(
             V.graph.sizevars.size_hints(layout.stride)
         )
-        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
-        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
+        x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
+        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
 
     ordered_kwargs_for_cpp_kernel = [
         "stride",
@@ -568,7 +566,7 @@ def convolution(
         args = [x, weight, bias]
         bias.realize()
         bias.freeze_layout()
-        V.graph.sizevars.evaluate_static_shapes(bias.get_size())
+        V.graph.sizevars.guard_int_seq(bias.get_size())
 
     choices = []
     if torch._inductor.utils._use_conv_autotune_backend("ATEN"):

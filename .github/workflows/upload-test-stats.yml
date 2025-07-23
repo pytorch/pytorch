@@ -16,6 +16,7 @@ on:
       - rocm-mi300
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
+      - inductor-cu124
       - inductor-rocm
       - inductor-rocm-mi300
       - mac-mps
