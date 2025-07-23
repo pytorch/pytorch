@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 import json
+import shutil
 import unittest
 from pathlib import Path
 
@@ -38,6 +39,10 @@ def test(self):
 """
         with open(self.callsite_file, "w") as f:
             f.write(callsite_content)
+
+    def tearDown(self):
+        if self.test_data_dir.exists():
+            shutil.rmtree(self.test_data_dir)
 
     def test_case1_new_gb_type(self):
         """Test Case 1: Adding a completely new gb_type to an empty registry."""
@@ -313,18 +318,19 @@ def test(self):
     def test_case6_dynamic_hints_from_variable(self):
         """Test Case 6: Verifies hints can be unpacked from an imported variable."""
         mock_hints_file = self.test_data_dir / "graph_break_hints.py"
-        supportable_string = (
-            "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you "
-            "encounter this graph break often and it is causing performance issues."
-        )
-        mock_hints_content = f'SUPPORTABLE = ["{supportable_string}"]'
-        with open(mock_hints_file, "w") as f:
-            f.write(mock_hints_content)
-
         init_py = self.test_data_dir / "__init__.py"
-        init_py.touch()
+        try:
+            supportable_string = (
+                "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you "
+                "encounter this graph break often and it is causing performance issues."
+            )
+            mock_hints_content = f'SUPPORTABLE = ["{supportable_string}"]'
+            with open(mock_hints_file, "w") as f:
+                f.write(mock_hints_content)
 
-        dynamic_hints_callsite = """from torch._dynamo.exc import unimplemented_v2
+            init_py.touch()
+
+            dynamic_hints_callsite = """from torch._dynamo.exc import unimplemented_v2
 from torch._dynamo import graph_break_hints
 
 def test(self):
@@ -334,53 +340,57 @@ def test(self):
         explanation="testing_with_graph_break_hints",
         hints=[*graph_break_hints.SUPPORTABLE],
     )
-"""
-        with open(self.callsite_file, "w") as f:
-            f.write(dynamic_hints_callsite)
+    """
+            with open(self.callsite_file, "w") as f:
+                f.write(dynamic_hints_callsite)
 
-        with open(self.registry_path) as f:
-            original_content = f.read()
+            with open(self.registry_path) as f:
+                original_content = f.read()
 
-        messages = check_registry_sync(self.test_data_dir, self.registry_path)
+            messages = check_registry_sync(self.test_data_dir, self.registry_path)
 
-        expected_registry = {
-            "GB0000": [
-                {
-                    "Gb_type": "testing_with_graph_break_hints",
-                    "Context": "testing_with_graph_break_hints",
-                    "Explanation": "testing_with_graph_break_hints",
-                    "Hints": [supportable_string],
-                }
-            ]
-        }
-        expected_replacement = (
-            json.dumps(expected_registry, indent=2, ensure_ascii=False) + "\n"
-        )
-        expected_msg = LintMessage(
-            path=str(self.registry_path),
-            line=None,
-            char=None,
-            code=LINTER_CODE,
-            severity=LintSeverity.WARNING,
-            name="Registry sync needed",
-            original=original_content,
-            replacement=expected_replacement,
-            description="Registry sync needed (added 1 new gb_types). Run `lintrunner -a` to apply changes.",
-        )
+            expected_registry = {
+                "GB0000": [
+                    {
+                        "Gb_type": "testing_with_graph_break_hints",
+                        "Context": "testing_with_graph_break_hints",
+                        "Explanation": "testing_with_graph_break_hints",
+                        "Hints": [supportable_string],
+                    }
+                ]
+            }
+            expected_replacement = (
+                json.dumps(expected_registry, indent=2, ensure_ascii=False) + "\n"
+            )
+            expected_msg = LintMessage(
+                path=str(self.registry_path),
+                line=None,
+                char=None,
+                code=LINTER_CODE,
+                severity=LintSeverity.WARNING,
+                name="Registry sync needed",
+                original=original_content,
+                replacement=expected_replacement,
+                description="Registry sync needed (added 1 new gb_types). Run `lintrunner -a` to apply changes.",
+            )
 
-        self.assertEqual(messages, [expected_msg])
+            self.assertEqual(messages, [expected_msg])
 
-        if messages and messages[0].replacement:
-            with open(self.registry_path, "w") as f:
-                f.write(messages[0].replacement)
+            if messages and messages[0].replacement:
+                with open(self.registry_path, "w") as f:
+                    f.write(messages[0].replacement)
 
-        messages_after_fix = check_registry_sync(self.test_data_dir, self.registry_path)
-        self.assertEqual(
-            len(messages_after_fix), 0, "Should have no messages after applying the fix"
-        )
-
-        mock_hints_file.unlink()
-        init_py.unlink()
+            messages_after_fix = check_registry_sync(
+                self.test_data_dir, self.registry_path
+            )
+            self.assertEqual(
+                len(messages_after_fix),
+                0,
+                "Should have no messages after applying the fix",
+            )
+        finally:
+            mock_hints_file.unlink()
+            init_py.unlink()
 
 
 if __name__ == "__main__":
