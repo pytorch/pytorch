@@ -2842,6 +2842,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @parametrize_test("strided", [False, True])
     # Test with both contiguous and non-contiguous inputs.
     @parametrize_test("contiguous", [False, True])
+    @expectedFailureMPS  # No double support
     def test_conv_backend(
         self,
         device,
