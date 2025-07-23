@@ -23,6 +23,11 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.parallel.style import ParallelStyle
+from torch.nn.attention.flex_attention import (
+    _mask_mod_signature,
+    BlockMask,
+    create_block_mask,
+)
 from torch.overrides import TorchFunctionMode
 
 
@@ -64,6 +69,29 @@ class _ContextParallelOptions:
 
 
 _cp_options = _ContextParallelOptions()
+
+
+@dataclass
+class _ContextParallelGlobalVars:
+    # The current context parallel impl requires a record of some info
+    # as global vars. This dataclass stores those variables.
+    # TODO: this var should be able to stored in CP context
+    cp_shard_dim: int = 0
+    # This variable stores the TorchFunctionMode singleton because using multiple TF
+    # instances for dispatching may trigger recompilations
+    torch_function_mode: Optional[TorchFunctionMode] = None
+    # NOTE: call create_block_mask() within TorchFunctionMode would cause error
+    # in create_fw_bw_graph so we need to create it outside FlexAttention dispatch
+    # and store it here
+    cp_block_mask: Optional[BlockMask] = None
+
+
+_cp_global_vars = _ContextParallelGlobalVars()
+
+
+def _set_cp_global_var(name: str, value: Any) -> None:
+    """Set a global variable for context parallelism."""
+    setattr(_cp_global_vars, name, value)
 
 
 def _is_causal_behavior(
@@ -371,9 +399,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(group, dist.ProcessGroup), (
-        "process group must be single dimension"
-    )
+    assert isinstance(
+        group, dist.ProcessGroup
+    ), "process group must be single dimension"
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -1086,6 +1114,62 @@ class _AttentionContextParallel(ParallelStyle):
         return tuple(out)
 
 
+def rewrite_context_parallel_block_mask(
+    block_mask: BlockMask,
+    shard_q_size: int,
+    cp_rank: int,
+    cp_group_size: int,
+    device_type: str,
+) -> BlockMask:
+    def _rewrite_mask_mod(
+        mask_mod: _mask_mod_signature,
+        rank: int,
+        world_size: int,
+        block_size: int,
+        local_q_size: int,
+    ) -> _mask_mod_signature:
+        def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
+            # calculate local block_idx and block_offset
+            local_blk_idx, local_blk_offset = (
+                local_q_idx // block_size,
+                local_q_idx % block_size,
+            )
+            # NOTE: load balancing is not used
+            local_num_blocks = local_q_size // block_size
+            blk_idx = local_num_blocks * rank + local_blk_idx
+            return blk_idx * block_size + local_blk_offset
+
+        return lambda b, h, q_idx, kv_idx: mask_mod(
+            b,
+            h,
+            local_q_idx_to_q_idx(q_idx),
+            kv_idx,
+        )
+
+    Q_LEN, KV_LEN = block_mask.seq_lengths
+    Q_BLOCK_SIZE, KV_BLOCK_SIZE = block_mask.BLOCK_SIZE
+    # TODO: support other KV block sizes
+    assert Q_BLOCK_SIZE == 128
+    assert KV_BLOCK_SIZE == 128
+    mask_mod = block_mask.mask_mod
+
+    # rewrite block_mask's mask_mod
+    cp_mask_mod = _rewrite_mask_mod(
+        mask_mod, cp_rank, cp_group_size, Q_BLOCK_SIZE, shard_q_size
+    )
+
+    cbm = torch.compile(create_block_mask, fullgraph=True)
+    return cbm(
+        cp_mask_mod,
+        1,
+        1,
+        Q_LEN // cp_group_size,
+        KV_LEN,
+        device=device_type,
+        BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
+    )
+
+
 @contextlib.contextmanager
 def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, None]:
     """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
@@ -1117,6 +1201,53 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
 
         return tuple(new_outputs)
 
+    def unshard(x: torch.Tensor, mesh: DeviceMesh, shard_dim: int) -> torch.Tensor:
+        x = x.contiguous()
+        all_xs = [torch.empty_like(x) for _ in range(mesh.size())]
+        ft_c.all_gather_inplace(all_xs, x, mesh)
+        return torch.cat(all_xs, dim=shard_dim)
+
+    class CPFlexAttentionPreOp(torch.autograd.Function):
+        @staticmethod
+        def forward(
+            ctx: Any,
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            device_mesh: DeviceMesh,
+            shard_dim: int,
+        ) -> tuple[Any, ...]:
+            ctx.device_mesh = device_mesh
+            ctx.shard_dim = shard_dim
+
+            # all-gather KV
+            global_key = unshard(
+                key, device_mesh, shard_dim
+            )  # TODO: change the shard_dim
+            global_value = unshard(value, device_mesh, shard_dim)
+
+            return query, global_key, global_value
+
+        @staticmethod
+        def backward(
+            ctx: Any,
+            grad_query: torch.Tensor,
+            grad_key: torch.Tensor,
+            grad_value: torch.Tensor,
+        ) -> tuple[Optional[torch.Tensor], ...]:
+            device_mesh = ctx.device_mesh
+            shard_dim = ctx.shard_dim
+
+            # reduce-scatter KV grads
+            grad_key = ft_c.reduce_scatter_tensor(
+                grad_key, reduceOp="sum", scatter_dim=shard_dim, group=device_mesh
+            )
+            grad_value = ft_c.reduce_scatter_tensor(
+                grad_value, reduceOp="sum", scatter_dim=shard_dim, group=device_mesh
+            )
+
+            return grad_query, grad_key, grad_value, None, None
+
     class DistributeFunction(TorchFunctionMode):
         def __init__(
             self,
@@ -1138,6 +1269,35 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             kwargs: Optional[dict[str, Any]] = None,
         ) -> Any:
             kwargs = kwargs or {}
+
+            # special handler for flex_attention
+            if func == torch._higher_order_ops.flex_attention:
+                query, key, value, score_mod, block_mask = args[:5]
+                assert isinstance(query, torch.Tensor)
+                assert isinstance(key, torch.Tensor)
+                assert isinstance(value, torch.Tensor)
+                # assert isinstance(score_mod, callable)
+                assert isinstance(block_mask, tuple)
+
+                query, global_key, global_value = CPFlexAttentionPreOp.apply(
+                    query,
+                    key,
+                    value,
+                    self._device_mesh,
+                    _cp_global_vars.cp_shard_dim,
+                )
+
+                cp_block_mask = _cp_global_vars.cp_block_mask
+                assert cp_block_mask is not None
+                return func(
+                    query,
+                    global_key,
+                    global_value,
+                    score_mod,
+                    cp_block_mask.as_tuple(),
+                    *args[5:],
+                    **kwargs,
+                )
 
             if func != self._fn:
                 return func(*args, **kwargs)
@@ -1161,12 +1321,17 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
             yield
         _restore_function(F.scaled_dot_product_attention, F)
     elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
-        with DistributeFunction(
-            F.scaled_dot_product_attention,
-            mesh,
-            attention_input_fn,
-            attention_output_fn,
-        ):
+        tf_mode = _cp_global_vars.torch_function_mode
+        if tf_mode is None:
+            tf_mode = DistributeFunction(
+                F.scaled_dot_product_attention,
+                mesh,
+                attention_input_fn,
+                attention_output_fn,
+            )
+            _set_cp_global_var("torch_function_mode", tf_mode)
+
+        with tf_mode:
             with _enable_cp_dispatcher():
                 yield
     else:
