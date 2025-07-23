@@ -1944,9 +1944,23 @@ class InstructionTranslatorBase(
                 # instruction translator. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
+                    # fetch the Python exception
+                    curr_exc = self.exn_vt_stack.get_current_exception()
+                    dynamo_exc = exc.get_dynamo_observed_exception(
+                        curr_exc.python_type()
+                    )
+                    assert isinstance(raised_exception, dynamo_exc)  # sanity check
+
+                    exc_ty = curr_exc.python_type()
+                    args = (
+                        curr_exc.exc_vt.args
+                        if isinstance(curr_exc, UserDefinedExceptionObjectVariable)
+                        else curr_exc.args
+                    )
+
                     unimplemented_v2(
                         gb_type="Observed exception",
-                        context=str(raised_exception),
+                        context=f"raised exception {exc_ty.__name__}({args})",
                         explanation=observed_exn_gb_explanation,
                         hints=[
                             *graph_break_hints.USER_ERROR,
