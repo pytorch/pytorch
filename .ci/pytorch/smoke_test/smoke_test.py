@@ -385,6 +385,28 @@ def smoke_test_compile(device: str = "cpu") -> None:
     x_pt2 = torch.compile(model, mode="max-autotune")(x)
 
 
+def test_nvshmem() -> None:
+    if not torch.cuda.is_available():
+        print("CUDA is not available, skipping NVSHMEM test")
+        return
+
+    # Check if NVSHMEM is compiled in current build
+    try:
+        from torch._C._distributed_c10d import _is_nvshmem_available
+    except ImportError:
+        # Not built with NVSHMEM support.
+        # 2.8 behavior: NVSHMEM is not compiled in current build
+        print("torch not compiled with NVSHMEM")
+        return
+        # 2.9 behavior: NVSHMEM is expected to be compiled in current build
+        # raise RuntimeError("torch not compiled with NVSHMEM")
+
+    print("torch compiled with NVSHMEM")
+
+    # Check if NVSHMEM is available on current system.
+    print(f"NVSHMEM available at run time: {_is_nvshmem_available()}")
+
+
 def smoke_test_modules():
     cwd = os.getcwd()
     for module in MODULES:
