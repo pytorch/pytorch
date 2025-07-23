@@ -134,7 +134,7 @@ jobs:
 
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
-        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ inputs.aws-role-to-assume != ''}}
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
           role-session-name: gha-linux-build
@@ -167,6 +167,20 @@ jobs:
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           MAX_JOBS: 32
         run: |
-          pip install cement
+          pip install cement==3.0.14
           python .github/test/build_cli/cli.py external --target vllm run
           ls
+      - name: Archive artifacts into zip
+        run: |
+          zip -1 -r artifacts.zip shared/
+
+      # by default it will upload the artifacts to <github_org>/<github_repo>/<workflow_id>/<name>-vllm-build
+      # to avoid override the pytorch build artifacts
+      - name: Store Vllm Build Artifacts on S3
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          name: ${{ inputs.build-environment }}-vllm-build
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts.zip
+          s3-bucket: ${{ inputs.s3-bucket }}

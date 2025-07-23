@@ -51,7 +51,7 @@ jobs:
       linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build
     ]
     with:
-      build-environment: linux-jammy-cuda12.8-py3_12-gcc11-sm86
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm86
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.24xlarge
     secrets: inherit
@@ -64,7 +64,7 @@ jobs:
 #      linux-jammy-cuda12.8-cudnn9-py3_12-gcc11-vllm-external-build
 #    ]
 #    with:
-#      build-environment:linux-jammy-cuda12.8-py3_12-gcc11-sm86
+#      build-environment:linux-jammy-cuda12.8-py3.12-gcc11-sm86
 #      docker-image: ${{ needs.linux-jammy-cuda12.8-cudnn9-py3_12-gcc11-vllm-build.outputs.docker-image }}
 #      test-matrix: ${{ needs.linux-jammy-cuda12.8-cudnn9-py3_12-gcc11-vllm-build.outputs.test-matrix }}
 #    secrets: inherit
