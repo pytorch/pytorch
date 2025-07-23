@@ -564,13 +564,18 @@ def slice_forward(
     end_index = sizes[dim] if end is None else _compute_slice_index(sizes[dim], end)
 
     # size
+    new_size = None
     if (
         start_index is not None
         and end_index is not None
-        and guard_or_false(end_index >= start_index)
     ):
-        new_size = (end_index - start_index + step - 1) // step
-    else:
+        if guard_or_false(end_index >= start_index):
+            new_size = (end_index - start_index + step - 1) // step
+        elif guard_or_false(start_index >= end_index):
+            new_size = 0
+
+    # create unbacked if case unknown
+    if new_size is None:
         new_size = shape_env.create_unbacked_symint()
         torch._check_is_size(new_size, max=sizes[dim])
 

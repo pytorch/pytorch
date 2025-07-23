@@ -3054,6 +3054,8 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
 
+    start = ir.SliceView.handle_negative_index(start, dim_size)
+    end = ir.SliceView.handle_negative_index(end, dim_size)
     start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
