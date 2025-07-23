@@ -7533,12 +7533,18 @@ class FallbackKernel(ExternKernelAlloc):
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor) -> FixedLayout:
+        is_pinned = False
+        try:
+            is_pinned = output.is_pinned()
+        except RuntimeError:
+            # dispatch not implemented
+            pass
         return FixedLayout(
             output.device,
             output.dtype,
             convert_shape_to_inductor(output.size()),
             convert_shape_to_inductor(output.stride()),
-            is_pinned=output.is_pinned(),
+            is_pinned=is_pinned,
         )
 
     @classmethod
