@@ -559,7 +559,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
   // zip_filename_str can't be normalize_path_separator, because it should be
   // as index for mz_zip_reader_extract_file_to_file.
-  for (auto zip_filename_str : found_filenames) {
+  for (auto const& zip_filename_str : found_filenames) {
     auto cur_filename = normalize_path_separator(zip_filename_str);
     // Only compile files in the specified model directory
     if (c10::starts_with(cur_filename, model_directory) ||
@@ -584,7 +584,6 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       }
 
       std::string output_file_path = normalize_path_separator(output_path_str);
-
       LOG(INFO) << "Extract file: " << zip_filename_str << " to "
                 << output_file_path;
 
