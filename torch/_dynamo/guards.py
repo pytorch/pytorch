@@ -373,10 +373,6 @@ class GuardManagerWrapper:
 
             if is_subtree_tag_safe:
                 node.mark_tag_safe()
-                # discard the subtree tag safe roots and pass on this node
-                return [
-                    node,
-                ]
             return tag_safe_roots
 
         def visit_manager(node):
@@ -387,9 +383,6 @@ class GuardManagerWrapper:
             for child_mgr in node.get_child_managers():
                 tag_safe_roots.extend(visit(child_mgr))
 
-            # Propagate tag safety upwards. At any time, if a node is marked tag
-            # safe, return the current node as tag safe root, discarding the
-            # subtree tag safe roots.
             if node.is_guarded_value_immutable():
                 # If the node guards a tensor, mark it tag safe only if there
                 # are no accessors. Presence of accessors means presence of
@@ -399,9 +392,6 @@ class GuardManagerWrapper:
                         node.mark_tag_safe()
                 else:
                     node.mark_tag_safe()
-                return [
-                    node,
-                ]
             elif node.is_guarded_value_dict():
                 accessors = node.get_accessors()
                 child_mgrs = node.get_child_managers()
@@ -411,9 +401,6 @@ class GuardManagerWrapper:
                 )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
-                    return [
-                        node,
-                    ]
             elif node.is_guarded_value_nn_module():
                 accessors = node.get_accessors()
                 child_mgrs = node.get_child_managers()
@@ -424,6 +411,8 @@ class GuardManagerWrapper:
                 )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
+                    # Return the current node as tag safe root, discarding the
+                    # subtree tag safe roots.
                     return [
                         node,
                     ]

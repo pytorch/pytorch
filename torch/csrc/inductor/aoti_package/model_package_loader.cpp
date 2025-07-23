@@ -559,7 +559,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
   // zip_filename_str can't be normalize_path_separator, because it should be
   // as index for mz_zip_reader_extract_file_to_file.
-  for (auto zip_filename_str : found_filenames) {
+  for (auto const& zip_filename_str : found_filenames) {
     auto cur_filename = normalize_path_separator(zip_filename_str);
     // Only compile files in the specified model directory
     if (c10::starts_with(cur_filename, model_directory) ||
@@ -588,12 +588,12 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
                 << output_file_path;
 
       // Create the parent directory if it doesn't exist
-      size_t parent_path_idx = output_path_str.find_last_of(k_separator);
+      size_t parent_path_idx = output_file_path.find_last_of(k_separator);
       if (parent_path_idx == std::string::npos) {
         throw std::runtime_error(
-            "Failed to find parent path in " + output_path_str);
+            "Failed to find parent path in " + output_file_path);
       }
-      std::string parent_path = output_path_str.substr(0, parent_path_idx);
+      std::string parent_path = output_file_path.substr(0, parent_path_idx);
       if (!recursive_mkdir(parent_path)) {
         throw std::runtime_error(fmt::format(
             "Failed to create directory {}: {}",
@@ -605,15 +605,15 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       zip_archive.extract_file(zip_filename_str, output_path_str);
 
       // Save the file for bookkeeping
-      size_t extension_idx = output_path_str.find_last_of('.');
+      size_t extension_idx = output_file_path.find_last_of('.');
       if (extension_idx != std::string::npos) {
-        std::string filename_extension = output_path_str.substr(extension_idx);
+        std::string filename_extension = output_file_path.substr(extension_idx);
         if (filename_extension == ".cpp") {
-          cpp_filename = output_path_str;
+          cpp_filename = output_file_path;
         } else if (filename_extension == object_file_ext()) {
-          obj_filenames.push_back(output_path_str);
+          obj_filenames.push_back(output_file_path);
         } else if (filename_extension == extension_file_ext()) {
-          so_filename = output_path_str;
+          so_filename = output_file_path;
         }
       }
     }
