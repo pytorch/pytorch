@@ -929,7 +929,7 @@ class MetalKernel(SIMDKernel):
         wrapper.generate_kernel_call(
             name,
             args,
-            device=torch.device("cpu"),  # TODO: Fix me, MPS does not expose streams now
+            device=torch.device("mps"),
             triton=False,
             arg_types=arg_types,
         )
