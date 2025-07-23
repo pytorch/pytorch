@@ -20,7 +20,7 @@ build-backend = "setuptools.build_meta"
 name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
-requires-python = ">=3.9,<3.14"
+requires-python = ">=3.9"
 # TODO: change to `license = "BSD-3-Clause"` and enable PEP 639 after pinning setuptools>=77
 # FIXME: As of 2025.06.20, it is hard to ensure the minimum version of setuptools in our CI environment.
 # TOML-table-based license deprecated in setuptools>=77, and the deprecation warning will be changed
