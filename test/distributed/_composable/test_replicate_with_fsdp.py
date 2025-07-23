@@ -126,6 +126,7 @@ class ReplicateTest(MultiProcessTestCase):
                 for parameter in layer.parameters():
                     self.assertEqual(parameter.placements, (Shard(dim=0),))
 
+    @skip_if_lt_x_gpu(2)
     def test_replicate_transformer_managed_modules(self):
         """
         This tests that replicate managed modules works properly. In this test we use a Transformer Module with 3 layers,
