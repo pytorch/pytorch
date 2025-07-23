@@ -47,7 +47,7 @@ cls_to_fsdp_cls: dict[type, type] = {}
 
 _ROOT_MODULE_PREFIX = ""
 
-logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
+logger = logging.getLogger("torch.distributed._composable.replicate_with_fsdp")
 
 
 class _ReplicateStateContext:
