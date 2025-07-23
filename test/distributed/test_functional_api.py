@@ -24,8 +24,8 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
-    requires_accelerator_dist_backend,
     TEST_SKIPS,
+    requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -500,7 +500,7 @@ def with_comms(func=None):
         if (
             BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL
         ) and torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-accelerator-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         kwargs["device"] = DEVICE
         self.pg = self.create_pg(device=DEVICE)
