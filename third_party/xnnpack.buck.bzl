@@ -1437,7 +1437,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         labels = labels,
         platform_srcs = [
             (
-                "(arm64|aarch64)$",
+                "(arm64|aarch64)",
                 prod_srcs_for_arch_wrapper("neonfma") + prod_srcs_for_arch_wrapper("neonfma_aarch64"),
             ),
         ] if not is_arvr_mode() else [],
