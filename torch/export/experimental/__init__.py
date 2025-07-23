@@ -2,7 +2,6 @@ import copy
 import dataclasses
 import functools
 import os
-import tempfile
 import types
 import typing
 import typing_extensions
@@ -14,11 +13,15 @@ from torch.export.experimental._utils import _get_main_cpp_file, _get_make_file
 from torch.export.exported_program import _decompose_exported_program
 
 
+_InputT = typing_extensions.ParamSpec("_InputT")
+_RetT = typing.TypeVar("_RetT")
+
+
 __all__ = []  # type: ignore[var-annotated]
 
 
 def _copy_graph_module_and_signature(
-    ep: torch.fx.GraphModule,
+    ep: torch.export.ExportedProgram,
 ) -> tuple[torch.fx.GraphModule, torch.export.graph_signature.ExportGraphSignature]:
     # copy.deepcopy lets the objects override __deepcopy__ methods with graph_copy() and node_copy(),
     # and this can break placeholder names in some particular cases.
@@ -36,7 +39,7 @@ def _copy_graph_module_and_signature(
         for old_node, new_node in zip(old_phs, new_phs):
             new_node.name = old_node.name
 
-    return gm, new_graph_signature  # type: ignore[return-value]
+    return gm, new_graph_signature
 
 
 def _remove_detach_pass(
@@ -81,18 +84,27 @@ def _export_forward_backward(
     return ep._update(gm, new_graph_signature)
 
 
-@typing.no_type_check
-def _sticky_export(forward_func, dynamic_shapes_callback=None):
+def _sticky_export(
+    forward_func: typing.Callable[_InputT, _RetT],
+    dynamic_shapes_callback: typing.Optional[
+        typing.Callable[
+            _InputT,
+            typing.Union[
+                list[typing.Any], dict[str, typing.Any], tuple[typing.Any, ...]
+            ],
+        ]
+    ] = None,
+) -> typing.Callable[_InputT, _RetT]:
     """
     Lazily export the model on first forward call.
     Usage:
         model.forward = _sticky_export(model.forward, dynamic_shapes_callback=callback)
     """
-    model = forward_func.__self__
-    original_forward = forward_func.__func__
+    model = forward_func.__self__  # type: ignore[attr-defined]
+    original_forward = forward_func.__func__  # type: ignore[attr-defined]
 
     @functools.wraps(forward_func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _InputT.args, **kwargs: _InputT.kwargs) -> _RetT:
         # Unpatch forward to avoid recursion during export
         model.forward = types.MethodType(original_forward, model)
 
@@ -107,7 +119,7 @@ def _sticky_export(forward_func, dynamic_shapes_callback=None):
                 kwargs,
                 dynamic_shapes=dynamic_shapes_spec,
             ).module()
-            wrapper._exported_artifact = exported
+            wrapper._exported_artifact = exported  # type: ignore[attr-defined]
         finally:
             # Restore the wrapper after export
             model.forward = wrapper
@@ -121,10 +133,6 @@ def _sticky_export(forward_func, dynamic_shapes_callback=None):
 class _ExportMethod:
     overloads: dict[str, torch.export.ExportedProgram]
     fallbacks: list[torch.export.ExportedProgram]
-
-
-_InputT = typing_extensions.ParamSpec("_InputT")
-_RetT = typing.TypeVar("_RetT")
 
 
 class _ExportPackage:
@@ -352,7 +360,8 @@ class _ExportPackage:
             "aot_inductor.package": True,
             "aot_inductor.package_cpp_only": True,
             "always_keep_tensor_constants": True,
-            "aot_inductor.package_constants_in_so": False,
+            # we'll change this back to False once we enable weight deduping for standalone mode
+            "aot_inductor.package_constants_in_so": standalone,
             "aot_inductor.compile_standalone": standalone,
         }
         aoti_files_map = {}

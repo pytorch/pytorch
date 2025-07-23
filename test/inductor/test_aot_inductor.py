@@ -1456,6 +1456,22 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(self.device), example_inputs)
 
     @skipIfNoFBGEMM
+    def test_quantized_linear_bias_none(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+
+            def forward(self, x):
+                return torch.ops.quantized.linear_dynamic_fp16_unpacked_weight(
+                    x, self.weight, None
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
+    @skipIfNoFBGEMM
     def test_quanatized_int8_linear(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -5677,6 +5693,53 @@ class AOTInductorTestsTemplate:
         )
         self.assertEqual(new_expected, new_output)
 
+    def test_update_constant_buffer_simple(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn((3, 3), device=device)
+
+            def forward(self, a):
+                return a + self.weight
+
+        model = Model(self.device)
+        a = torch.randn((3, 3), device=self.device)
+        example_inputs = (a,)
+
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+
+        # Let's check whether the model has correct constant name mapping.
+        expected_original_fqns = {
+            "L__self___weight": "L__self___weight",
+        }
+        self.assertEqual(
+            expected_original_fqns, runner.get_constant_names_to_original_fqns()
+        )
+
+        test_inputs = torch.randn((3, 3), device=self.device)
+        new_weight = torch.randn((3, 3), device=self.device)
+        model.weight = new_weight
+        attach_weights = {"L__self___weight": new_weight}
+        runner.update_constant_buffer(attach_weights, False, False, False)
+        expected = model(test_inputs)
+
+        def runner_call(*args, **kwargs):
+            call_spec = runner.get_call_spec()  # type: ignore[attr-defined]
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = pytree.tree_flatten((args, kwargs))[0]
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
     def test_update_inactive_constant_buffer(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -6706,6 +6769,7 @@ GPU_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
+    "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
     # No scaled_dot_product_efficient_attention implementation for XPU yet.
     "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
     # No fft implementation for XPU yet.
@@ -6713,8 +6777,6 @@ GPU_TEST_FAILURES = {
 }
 
 MPS_TEST_FAILURES = {
-    # Expected supportedFloatingType(scalar_type) || scalar_type == kInt || scalar_type == kBool
-    "test_index_put_fallback": fail_mps(),
     # aten::_embedding_bag is not currently implemented for the MPS device.
     "test_embedding_bag": fail_mps(),
     # aten::_embedding_bag is not currently implemented for the MPS device.
@@ -6730,20 +6792,16 @@ MPS_TEST_FAILURES = {
     # MPS doesn't support float8
     "test_fp8": fail_mps(),
     "test_fp8_view_of_param": fail_mps(),
-    # Compilation Error
+    # unsupported operator: aten._scaled_dot_product_attention_math_for_mps.default
+    "test_issue_140766": fail_mps(),
+    # cannot initialize a parameter of type 'double' with an rvalue of type 'std::nullptr_t'
     "test_fallback_kernel_with_symexpr_output": fail_mps(),
-    "test_while_loop_with_mixed_device": fail_mps(),
+    # while-loop subgraph calls same kernel as outside. need to figure out how to
+    # either (1) tell outside to initialize a new kernel or (2) generate
+    # subgraph as a separate function, which would(?) cause (1) to happen automatically.
     "test_while_loop_nested": fail_mps(),
-    "test_assert_async": fail_mps(),
+    # correctness issue
     "test_index_put_with_none_index": fail_mps(),
-    "test_size_from_multi_ouptut": fail_mps(),
-    "test_simple_embed_kernel_binary_False": fail_mps(),
-    "test_while_loop_with_mixed_device_dynamic_False": fail_mps(),
-    "test_while_loop_with_mixed_device_dynamic_True": fail_mps(),
-    "test_simple_embed_cubin_False": fail_mps(is_skip=True),
-    "test_simple_embed_cubin_True": fail_mps(is_skip=True),
-    "test_simple_embed_kernel_binary_True": fail_mps(),
-    "test_missing_cubin": fail_mps(),
     # Dynamism
     "test_shifted_constraint_ranges": fail_mps(),
     "test_while_loop_with_sym_expr_cond_dynamic_True": fail_mps(),
@@ -6753,29 +6811,12 @@ MPS_TEST_FAILURES = {
     "test_cond_non_tensor_predicates_dynamic_True": fail_mps(),
     "test_zero_grid_with_unbacked_symbols": fail_mps(),
     "test_reuse_kernel_dynamic": fail_mps(is_skip=True),
-    "test_while_loop_with_parameters": fail_mps(is_skip=True),
     "test_cond_with_parameters": fail_mps(is_skip=True),
     "test_cond_share_predicte": fail_mps(is_skip=True),
-    # SetStorage incorrect
-    "test_small_constant": fail_mps(is_skip=True),
-    "test_free_inactive_buffer": fail_mps(is_skip=True),
-    "test_extract_constants_map": fail_mps(is_skip=True),
-    "test_linear_freezing": fail_mps(is_skip=True),
-    "test_model_modified_weights": fail_mps(is_skip=True),
     # Error device may not be nil
     "test_zero_size_weight": fail_mps(is_skip=True),
-    # Constants update (segfault)
-    "test_update_inactive_constant_buffer": fail_mps(is_skip=True),
-    "test_update_constant_buffer": fail_mps(is_skip=True),
-    "test_so_without_weight": fail_mps(is_skip=True),
-    "test_constant_folding_with_update": fail_mps(is_skip=True),
-    "test_nested_tensor_from_jagged": fail_mps(is_skip=True),
-    "test_issue_140766": fail_mps(is_skip=True),
-    "test_buffer_mutation_and_force_mmap_weights": fail_mps(is_skip=True),
+    # RuntimeError: Cannot compare two tensors on different devices. Got: cpu and mps:0
     "test_aoti_constant_tensor_name_collision": fail_mps(is_skip=True),
-    "test_large_mmaped_weights": fail_mps(is_skip=True),
-    "test_subclasses": fail_mps(is_skip=True),
-    "test_autotune_with_constant_folding": fail_mps(is_skip=True),
     # MPS doesn't support triton
     "test_autotuning_args_reuse": fail_mps(),
     "test_triton_autotuning": fail_mps(),
