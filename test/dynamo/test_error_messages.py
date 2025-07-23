@@ -580,7 +580,7 @@ Observed exception
   Hint: Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: raised exception ExceptionVariable(<class 'RuntimeError'>)
+  Developer debug context: raised exception RuntimeError([ConstantVariable(str: 'test')])
 
 
 from user code:

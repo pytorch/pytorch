@@ -1913,6 +1913,21 @@ class InstructionTranslatorBase(
         self.call_function(fn, [typ, val, tb], {})
 
     def exception_handler(self, raised_exception):
+        def bubble_exception_to_interpreter():
+            # Bubble the exception to the interpreter
+            curr_exc = self.exn_vt_stack.get_current_exception()
+            dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
+            assert isinstance(raised_exception, dynamo_exc)  # sanity check
+            unimplemented_v2(
+                gb_type="Observed exception",
+                context=f"raised exception {curr_exc.python_type_name()}({curr_exc.args})",
+                explanation=observed_exn_gb_explanation,
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         observed_exn_gb_explanation = (
             "Dynamo found no exception handler at the top-level compiled function "
             "when encountering an exception. Exception will propagate outside the compiled region."
@@ -1944,29 +1959,7 @@ class InstructionTranslatorBase(
                 # instruction translator. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    # fetch the Python exception
-                    curr_exc = self.exn_vt_stack.get_current_exception()
-                    dynamo_exc = exc.get_dynamo_observed_exception(
-                        curr_exc.python_type()
-                    )
-                    assert isinstance(raised_exception, dynamo_exc)  # sanity check
-
-                    exc_ty = curr_exc.python_type()
-                    args = (
-                        curr_exc.exc_vt.args
-                        if isinstance(curr_exc, UserDefinedExceptionObjectVariable)
-                        else curr_exc.args
-                    )
-
-                    unimplemented_v2(
-                        gb_type="Observed exception",
-                        context=f"raised exception {exc_ty.__name__}({args})",
-                        explanation=observed_exn_gb_explanation,
-                        hints=[
-                            *graph_break_hints.USER_ERROR,
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
+                    bubble_exception_to_interpreter()
                 raise raised_exception
         else:
             if len(self.block_stack):
@@ -2038,15 +2031,7 @@ class InstructionTranslatorBase(
                 # instruction translator. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    unimplemented_v2(
-                        gb_type="Observed exception",
-                        context=str(raised_exception),
-                        explanation=observed_exn_gb_explanation,
-                        hints=[
-                            *graph_break_hints.USER_ERROR,
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
+                    bubble_exception_to_interpreter()
                 raise raised_exception
 
     def PUSH_EXC_INFO(self, inst):
