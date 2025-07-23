@@ -1172,7 +1172,9 @@ static PyObject* THPModule_benchmarkCuDNN(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setImmediateMiopen(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setImmediateMiopen(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -1184,7 +1186,9 @@ static PyObject* THPModule_setImmediateMiopen(PyObject* _unused, PyObject* arg) 
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_immediateMiopen(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_immediateMiopen(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().immediateMiopen()) {
     Py_RETURN_TRUE;
   }

@@ -3,19 +3,13 @@ import sys
 from contextlib import contextmanager
 
 import torch
-from torch.backends import (
-    __allow_nonbracketed_mutation,
-    ContextProp,
-    PropModule,
-)
+from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
 
 
 def set_flags(
     _immediate=None,
 ):
-    orig_flags = (
-        torch._C._get_miopen_immediate(),
-    )
+    orig_flags = (torch._C._get_miopen_immediate(),)
     if _immediate is not None:
         torch._C._set_miopen_immediate(_immediate)
     return orig_flags
@@ -46,7 +40,9 @@ class MiopenModule(PropModule):
     def __init__(self, m, name):
         super().__init__(m, name)
 
-    immediate = ContextProp(torch._C._get_miopen_immediate, torch._C._set_miopen_immediate)
+    immediate = ContextProp(
+        torch._C._get_miopen_immediate, torch._C._set_miopen_immediate
+    )
 
 
 # This is the sys.modules replacement trick, see
