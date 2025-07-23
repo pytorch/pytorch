@@ -797,6 +797,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
 
 
+@torch.compiler.allow_in_graph
 class _FromTorchTensor(torch.autograd.Function):
     """
     _FromTorchTensor allows autograd to propagate from a normal Tensor to an
