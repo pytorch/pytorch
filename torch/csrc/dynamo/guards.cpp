@@ -2597,7 +2597,13 @@ class GuardManager {
 
   GuardManager(const GuardManager& m) = delete;
   GuardManager& operator=(const GuardManager&) = delete;
-  virtual ~GuardManager() = default;
+
+  virtual ~GuardManager() {
+    for (auto weakref : _tag_safe_keys_weakrefs) {
+      Py_DECREF(weakref);
+    }
+    _tag_safe_keys_weakrefs.clear();
+  }
 
   RootGuardManager* get_root() {
     return _root;
