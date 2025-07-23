@@ -251,14 +251,16 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           # Do not set SCCACHE_S3_KEY_PREFIX to share the cache between all build jobs
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-          SCCACHE_REGION: us-east-1
-          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-          TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
-          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+          SCCACHE_REGION: us-east-1	          SCCACHE_REGION: us-east-1
+          XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}	          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}	          TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}	          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          DOCKER_IMAGE_S390X: ${{ inputs.docker-image-name }}
+          XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}	          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}	          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
         run: |
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
@@ -268,6 +270,7 @@ jobs:
             # if for some reason cleanup action doesn't stop container
             # when job is cancelled
             DOCKER_SHELL_CMD="sleep 12h"
+            
             # since some steps are skipped on s390x, if they are necessary, run them here
             env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
             env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
