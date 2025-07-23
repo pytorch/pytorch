@@ -44,6 +44,25 @@ aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
 
+def _need_scaling() -> bool:
+    if hasattr(torch.version, "hip") and torch.version.hip is not None:
+        gcn_arch_name = torch.cuda.get_device_properties("cuda").gcnArchName
+        _is_ck_supported = False
+        for arch in ["gfx942", "gfx950"]:
+            if arch in gcn_arch_name:
+                _is_ck_supported = True
+        # Check the function exists
+        _preferred_rocm_fa_library = torch.backends.cuda.preferred_rocm_fa_library
+        _CK_BACKEND = torch.backends.cuda._ROCmFABackends["ck"]
+        # Note: it is possible that CK is selected but not compiled in the binary.
+        if _is_ck_supported and _preferred_rocm_fa_library() == _CK_BACKEND:
+            # Unsure about CK's behavior, keep logsumexp untouched
+            return False
+        return True
+    else:
+        return False
+
+
 class _DispatchMode(Enum):
     MONKEY_PATCH = auto()
     TORCH_FUNCTION = auto()
@@ -239,7 +258,7 @@ class _AllToAllRotater(_RingRotater):
 
 class _AllGatherRotater(_RingRotater):
     """
-    Allgather the kv and return the only the requried kv.
+    Allgather the kv and return the only the required kv.
     Only one communication will be done.
     """
 
@@ -277,7 +296,7 @@ def _create_rotater(
     elif method == _RotateMethod.ALL_GATHER:
         return _AllGatherRotater(pg, seq_dim)
     else:
-        raise NotImplementedError(f"Unkonwn method {method}")
+        raise NotImplementedError(f"Unknown method {method}")
 
 
 def _templated_ring_attention(
@@ -339,12 +358,12 @@ def _templated_ring_attention(
 
     First Iteration: Both ranks perform SDPA with their local qkv pairs, similar to the
     no-load-balance case. This iteration corresponds to the `if` of the
-    (`if, `elif`, `else`) in the implemementation.
+    (`if, `elif`, `else`) in the implementation.
 
     Second Iteration: Rank0 now has (q0, q3) and (k1, k2); rank1 has (q1, q2) and
     (k0, k3). For rank0, no computation is needed for q0. However, computations for
     q3k1 and q3k2 are required, so only q3 is used for SDPA. This corresponds to the
-    `else` of the (`if`, `elif`, `else`) in the implemementation.
+    `else` of the (`if`, `elif`, `else`) in the implementation.
     For rank1, k0 is not needed for q1 and q2, so only k3 is used for SDPA. This
     corresponds to the `elif` of (`if`, `elif`, `else`) in the implementation.
 
@@ -446,6 +465,8 @@ def _templated_ring_attention(
             is_causal=is_causal_behavior.value,
             **kwargs,
         )
+        if _need_scaling():
+            logsumexp *= 0.6931471805599453
         sdpa_merger.step(out, logsumexp, partial)
 
     return *sdpa_merger.results(), *rest
@@ -916,7 +937,7 @@ def _distribute_function(
     the inputs and outputs of a function. Similar to ``distribute_module``, this API
     installs hooks to the ``fn`` to convert the inputs and outputs. There are two
     major differences between ``distribute_function`` and ``distribute_module``.
-    First, a function does not have parammeters and buffers, as a result,
+    First, a function does not have parameters and buffers, as a result,
     ``distribute_function`` itself won't convert any parameters/buffers but simply
     install the input and output hooks.  The tensor conversion will happen in the hooks.
     Another difference is an nn.Module subclass can have several instances and each
@@ -932,9 +953,9 @@ def _distribute_function(
             ``fn_module`` is ``torch.nn.functional``.
         device_mesh (:class:`DeviceMesh`): the device mesh that will be used by the
             input and output hooks to distribute the tensors.
-        input_fn (Optioinal[Callable]): the hook to distribute or convert the input
+        input_fn (Optional[Callable]): the hook to distribute or convert the input
             arguments of ``fn``.
-        output_fn (Optioinal[Callable]): the hook to distribute or convert the output
+        output_fn (Optional[Callable]): the hook to distribute or convert the output
             arguments of ``fn``.
     """
 
@@ -989,7 +1010,7 @@ class _AttentionContextParallel(ParallelStyle):
     Applies context parallel optimizations to the attention layer.
 
     This will work for nn.MultiHeadedAttention and custom attention layers that
-    call F.scaled_dotproduct_attention with a simliar signature.
+    call F.scaled_dotproduct_attention with a similar signature.
 
     This expects the `forward` method consumes either:
 
