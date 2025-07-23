@@ -536,7 +536,9 @@ class TestUnbackedSymints(InductorTestCase):
             return (unbacked_size.int(), unbacked_strides.int())
 
         example_inputs = (torch.tensor(16, device=device),)
-        torch.compile(fn, fullgraph=True)(*example_inputs)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
 
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
