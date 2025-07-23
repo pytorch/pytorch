@@ -1,6 +1,6 @@
 # Extending PyTorch with New Accelerators
 
-## Backgrounp
+## Background
 
 The PrivateUse1-based third-party device integration mechanism has become the official path for integrating new devices into PyTorch. Ensuring the usability of this mechanism is crucial for enriching the hardware ecosystem of PyTorch.
 

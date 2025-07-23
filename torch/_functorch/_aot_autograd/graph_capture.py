@@ -23,8 +23,7 @@ from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
 )
-from .schemas import AOTConfig, SubclassMeta, ViewAndMutationMeta
-from .traced_function_transforms import (
+from .graph_capture_wrappers import (
     aot_dispatch_subclass,
     create_functionalized_fn,
     create_joint,
@@ -32,6 +31,7 @@ from .traced_function_transforms import (
     fn_prepped_for_autograd,
     handle_effect_tokens_fn,
 )
+from .schemas import AOTConfig, SubclassMeta, ViewAndMutationMeta
 from .utils import (
     copy_fwd_metadata_to_bw_nodes,
     register_buffer_assignment_hook,
