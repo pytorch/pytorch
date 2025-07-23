@@ -2337,20 +2337,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
-                metadata={
-                    "autotune_strides": ", ".join(
-                        [str(n.get_stride()) for n in input_nodes]
-                    ),
-                    "autotune_dtypes": ", ".join(
-                        [str(n.get_dtype()) for n in input_nodes]
-                    ),
-                    "autotune_shape": ", ".join(
-                        ["x".join(map(str, n.get_size())) for n in input_nodes]
-                    ),
-                    "autotune_offset": ", ".join(
-                        [str(n.get_layout().offset) for n in input_nodes]
-                    ),
-                },
+                metadata=_autotune_metadata(input_nodes),
             ):
                 return benchmark(choices, hint_override=hint_override)
 
@@ -3368,6 +3355,45 @@ class SymbolicGridFn:
 
     def sympy_call(self, *args, **kwargs):
         return self.fn(*args, **kwargs, **self.kwargs_sym)
+
+
+def _autotune_metadata(input_nodes):
+    """Helper function to extract autotune metadata from input nodes."""
+    return {
+        "autotune_strides": ", ".join([str(n.get_stride()) for n in input_nodes]),
+        "autotune_dtypes": ", ".join([str(n.get_dtype()) for n in input_nodes]),
+        "autotune_shape": ", ".join(
+            ["x".join(map(str, n.get_size())) for n in input_nodes]
+        ),
+        "autotune_offset": ", ".join([str(n.get_layout().offset) for n in input_nodes]),
+        # TODO(coconutruben): replace this with taking KernelInputs as the
+        # argument, and extracting those out there directly
+        "autotune_strides_hinted": ", ".join(
+            [
+                str(
+                    V.graph.sizevars.size_hints(
+                        n.get_stride(),
+                        fallback=config.unbacked_symint_fallback,
+                    )
+                )
+                for n in input_nodes
+            ]
+        ),
+        "autotune_shape_hinted": ", ".join(
+            [
+                "x".join(
+                    map(
+                        str,
+                        V.graph.sizevars.size_hints(
+                            n.get_size(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                    )
+                )
+                for n in input_nodes
+            ]
+        ),
+    }
 
 
 # ensure lowering is imported so that `extern_kernels.*` is populated

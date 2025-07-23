@@ -132,6 +132,7 @@ from ..utils import (
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
+    is_function,
     is_function_or_wrapper,
     is_invoke_subgraph,
     is_lru_cache_wrapped_function,
@@ -161,6 +162,7 @@ from .base import (
     VariableTracker,
     VariableTrackerMeta,
 )
+from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -1223,6 +1225,12 @@ class VariableBuilder:
         ) and BuiltinMethodVariable.is_supported_builtin_method(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return BuiltinMethodVariable(value, source=self.source)
+        elif is_function(value) and value in (float.fromhex, float.hex):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return GetAttrVariable(
+                BuiltinVariable(float, source=self.source),
+                value.__name__,
+            )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
