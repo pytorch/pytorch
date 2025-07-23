@@ -752,7 +752,12 @@ class TestMaxAutotune(TestCase):
     @skipIfXpu(
         msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
     )
-    @config.patch(max_autotune_gemm_backends="TRITON")
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "TRITON",
+            "benchmark_epilogue_fusion": False,
+        }
+    )
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)
 
@@ -810,9 +815,9 @@ class TestMaxAutotune(TestCase):
         Check https://github.com/pytorch/pytorch/issues/125437 for more details.
         """
         x = rand_strided(
-            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
+            (50257, 2048), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
-        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
+        y = rand_strided((2048, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x, y):
@@ -825,9 +830,9 @@ class TestMaxAutotune(TestCase):
     def test_non_contiguous_input_addmm(self):
         b = torch.randn((768), dtype=torch.bfloat16, device=GPU_TYPE)
         x = rand_strided(
-            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
+            (50257, 2048), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
-        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
+        y = rand_strided((2048, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x, y):
@@ -839,10 +844,10 @@ class TestMaxAutotune(TestCase):
 
     def test_non_contiguous_input_bmm(self):
         x = rand_strided(
-            (1, 50257, 32768), (0, 1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
+            (1, 50257, 2048), (0, 1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
         y = rand_strided(
-            (1, 32768, 768), (0, 768, 1), dtype=torch.bfloat16, device=GPU_TYPE
+            (1, 2048, 768), (0, 768, 1), dtype=torch.bfloat16, device=GPU_TYPE
         )
 
         @torch.compile(mode="max-autotune")
@@ -856,16 +861,12 @@ class TestMaxAutotune(TestCase):
     # TODO: fix accuracy failure of the triton template on XPU.
     # and enable this test case.
     @skipIfXpu
-    @unittest.skipIf(
-        os.getenv("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1",
-        "OOM when running with TORCHINDUCTOR_CPP_WRAPPER https://github.com/pytorch/pytorch/issues/126867",
-    )
     def test_non_contiguous_input_mm_plus_mm(self):
-        x1 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
-        y1 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)
+        x1 = rand_strided((50257, 2048), (1, 50304), device=GPU_TYPE)
+        y1 = rand_strided((2048, 768), (768, 1), device=GPU_TYPE)
 
-        x2 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
-        y2 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)
+        x2 = rand_strided((50257, 2048), (1, 50304), device=GPU_TYPE)
+        y2 = rand_strided((2048, 768), (768, 1), device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x1, y1, x2, y2):
@@ -1205,7 +1206,7 @@ class TestMaxAutotune(TestCase):
         # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
         # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
         self.assertEqual(generate_and_load_args - 1, make_key_args)
-        self.assertEqual(generate_and_load_args, 16)
+        self.assertEqual(generate_and_load_args, 17)
 
     @fresh_cache()
     @config.patch(
@@ -1293,7 +1294,7 @@ class TestMaxAutotune(TestCase):
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity',
                         'kwargs':{'EVEN_K':False,'ALLOW_TF32':True,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
-                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8}}"""
+                        'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8},'hint_override':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
@@ -1332,7 +1333,7 @@ class TestMaxAutotune(TestCase):
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','kwargs':{'EVEN_K':False,'ALLOW_TF32':True,
-                    'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8}}"""
+                    'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8},'hint_override':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
@@ -1550,6 +1551,25 @@ class TestMaxAutotune(TestCase):
                 if "benchmark_gpu" in counter:
                     self.assertEqual(counters["inductor"][counter], 2)
 
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_mm_k_1(self):
+        def mm(x, y):
+            return x @ y
+
+        for i in range(90, 100):
+            torch._dynamo.reset()
+            a = torch.randn((i, 1), device="cuda", dtype=torch.float32)
+            b = torch.randn((1, i), device="cuda", dtype=torch.float32)
+            compiled_f = torch.compile(mm)
+
+            out, code = run_and_get_code(compiled_f, a, b)
+            torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
+
 
 class TestMaxAutotunePrecompile(TestCase):
     def test_precompilation_threads(self):
@@ -1585,6 +1605,7 @@ class TestMaxAutotunePrecompile(TestCase):
             op: str,
             inputs: str,
             benchmark: Callable[[Any], dict[ChoiceCaller, float]],
+            hint_override: Optional[int] = None,
         ) -> Optional[dict[ChoiceCaller, float]]:
             if benchmark is not None:
                 return benchmark(choices)
