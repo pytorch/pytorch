@@ -213,7 +213,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
   // so the CuDNN gradient semantics have changed between 7.1 and 7.6,
   // this is CuDNN 7.6 only, see PyTorch 1.2 for older CuDNN.
   ctc_loss_desc.setEx(
-      CUDNN_DATA_FLOAT, CUDNN_LOSS_NORMALIZATION_NONE, CUDNN_PROPAGATE_NAN);
+      CUDNN_DATA_FLOAT, CUDNN_LOSS_NORMALIZATION_SOFTMAX, CUDNN_PROPAGATE_NAN);
   TensorDescriptor log_probs_desc{log_probs_t};
   Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   TensorDescriptor grad_desc{grad};
@@ -250,7 +250,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
       workspace_size));
   // Subtract exp(log_probs) from the gradient
   grad.sub_(at::exp(log_probs_t));
-  
+
   return std::make_tuple(costs, grad);
 }
 
@@ -312,7 +312,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
 
   ctc_loss_desc.set_v8_v9(
       CUDNN_DATA_FLOAT,
-      CUDNN_LOSS_NORMALIZATION_NONE,
+      CUDNN_LOSS_NORMALIZATION_SOFTMAX,
       CUDNN_PROPAGATE_NAN,
       255);
   TensorDescriptor log_probs_desc{log_probs_t};
