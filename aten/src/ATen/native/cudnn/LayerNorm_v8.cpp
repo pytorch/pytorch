@@ -68,7 +68,6 @@ using graph_and_tensors_forward = std::tuple<
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // inv_var,
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // scale,
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // bias,
-                                    std::shared_ptr<fe::graph::Tensor_attributes>, // epsilon,
                                     std::shared_ptr<fe::graph::Tensor_attributes> // Y
                         >;
 using graph_and_tensors_backward = std::tuple<
@@ -140,14 +139,13 @@ void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const
   graph_and_tensors_forward graph_and_tensors_forward_values;
   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack;
   if (graph_and_tensors_forward_ptr) {
-    auto [graph, X_fe, mean_fe, inv_variance_fe, scale_fe, bias_fe, epsilon_fe, Y_fe] = *graph_and_tensors_forward_ptr;
+    auto [graph, X_fe, mean_fe, inv_variance_fe, scale_fe, bias_fe, Y_fe] = *graph_and_tensors_forward_ptr;
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack_ = {
       {X_fe, X.data_ptr()},
       {mean_fe, mean->data_ptr()},
       {inv_variance_fe, rstd->data_ptr()},
       {scale_fe, scale.data_ptr()},
       {bias_fe, bias.data_ptr()},
-      {epsilon_fe, &epsilon},
       {Y_fe, Y->data_ptr()}};
     variant_pack = std::move(variant_pack_);
     layernorm_graph = std::move(graph);
@@ -173,11 +171,7 @@ void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const
                                  .set_dim({1, N, 1, 1})
                                  .set_stride({N, 1, N, N})
                                  .set_data_type(get_fe_dtype(bias)));
-    auto epsilon_fe = layernorm_graph->tensor(fe::graph::Tensor_attributes()
-                                    .set_name("epsilon")
-                                    .set_dim({1, 1, 1, 1})
-                                    .set_stride({1, 1, 1, 1})
-                                    .set_data_type(fe::DataType_t::FLOAT));
+    auto epsilon_fe = layernorm_graph->tensor(epsilon);
     auto layernorm_options =
         fe::graph::Layernorm_attributes().set_forward_phase(fe::NormFwdPhase_t::TRAINING).set_epsilon(epsilon_fe);
     auto [Y_fe, mean_fe, inv_variance_fe] = layernorm_graph->layernorm(X_fe, scale_fe, bias_fe, layernorm_options);
@@ -197,10 +191,9 @@ void raw_cudnn_layernorm_forward_out(const Tensor& X, const Tensor& scale, const
       {inv_variance_fe, rstd->data_ptr()},
       {scale_fe, scale.data_ptr()},
       {bias_fe, bias.data_ptr()},
-      {epsilon_fe, &epsilon},
       {Y_fe, Y->data_ptr()}};
     variant_pack = std::move(variant_pack_);
-    auto result = std::make_tuple(layernorm_graph, X_fe, mean_fe, inv_variance_fe, scale_fe, bias_fe, epsilon_fe, Y_fe);
+    auto result = std::make_tuple(layernorm_graph, X_fe, mean_fe, inv_variance_fe, scale_fe, bias_fe, Y_fe);
     layernorm_forward_graph_cache.update(key, result);
   }
   cudnnHandle_t handle = getCudnnHandle();
