@@ -76,8 +76,8 @@
   - .github/ci_commit_pins/audio.txt
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
+  - .github/ci_commit_pins/vllm.txt
   - .ci/docker/ci_commit_pins/triton.txt
-  - .ci/docker/ci_commit_pins/vllm.txt
   approved_by:
   - pytorchbot
   mandatory_checks_name:
@@ -492,6 +492,19 @@
   - srossross
   - chillee
   - zou3519
+  - guilhermeleobas
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Dynamo
+  patterns:
+  - torch/_dynamo/**
+  - torch/csrc/dynamo/**
+  - test/dynamo/**
+  approved_by:
+  - guilhermeleobas
   mandatory_checks_name:
   - EasyCLA
   - Lint
