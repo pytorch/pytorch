@@ -1714,9 +1714,15 @@ class ChromiumEventLogger:
 
     def __init__(self):
         self.tls = threading.local()
+
+        from . import config
+
         # Generate a unique id for this logger, which we can use in scuba to filter down
         # to a single python run.
-        self.id_ = str(uuid.uuid4())
+        if config.pt2_compile_id_prefix:
+            self.id_ = f"{config.pt2_compile_id_prefix}-{uuid.uuid4()}"
+        else:
+            self.id_ = str(uuid.uuid4())
 
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
@@ -2230,7 +2236,7 @@ def torchscript(model, example_inputs, verbose=False):
     return None
 
 
-def getfile(obj):
+def getfile(obj: Any) -> Optional[str]:
     try:
         return inspect.getfile(obj)
     except (TypeError, OSError):
@@ -2432,6 +2438,15 @@ def is_int_specialization_case(value, source):
         or (
             source.guard_source().is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
+        )
+        # integers coming from FSDP modules are considered static. This is
+        # purely empirical and perhaps we should have a better heuristic.
+        or (
+            source.guard_source().is_fsdp_module()
+            and not (
+                config.allow_unspec_int_on_nn_module
+                or config.allow_unspec_int_on_fsdp_module
+            )
         )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()
