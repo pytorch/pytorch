@@ -62,16 +62,25 @@ from ._aot_autograd.functional_utils import (  # noqa: F401
     sync_functional_tensor,
     to_fun,
 )
+from ._aot_autograd.graph_capture_wrappers import (  # noqa: F401
+    aot_dispatch_subclass,
+    create_functional_call,
+    create_functionalized_fn,
+    create_functionalized_rng_ops_wrapper,
+    create_joint,
+    fn_input_mutations_to_outputs,
+    fn_prepped_for_autograd,
+)
+from ._aot_autograd.graph_compile import (  # noqa: F401
+    aot_stage1_graph_capture,
+    aot_stage2_compile,
+    aot_stage2_export,
+)
 from ._aot_autograd.input_output_analysis import (  # noqa: F401
     compute_overlapping_inputs,
     create_graph_signature,
     create_synthetic_base_metadata,
     remove_dupe_metadata,
-)
-from ._aot_autograd.jit_compile_runtime_wrappers import (  # noqa: F401
-    aot_stage1_graph_capture,
-    aot_stage2_compile,
-    aot_stage2_export,
 )
 from ._aot_autograd.logging_utils import (  # noqa: F401
     callback_set,
@@ -117,15 +126,6 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     unwrap_tensor_subclasses_with_indices_to_original,
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
-)
-from ._aot_autograd.traced_function_transforms import (  # noqa: F401
-    aot_dispatch_subclass,
-    create_functional_call,
-    create_functionalized_fn,
-    create_functionalized_rng_ops_wrapper,
-    create_joint,
-    fn_input_mutations_to_outputs,
-    fn_prepped_for_autograd,
 )
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
