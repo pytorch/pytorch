@@ -324,9 +324,9 @@ def _print_readable(
     colored=False,
 ):
     graph = module.graph
-    assert graph is not None and isinstance(
-        graph, torch.fx.Graph
-    ), "print_readable must be used on a module with a graph"
+    assert graph is not None and isinstance(graph, torch.fx.Graph), (
+        "print_readable must be used on a module with a graph"
+    )
 
     verbose_python_code = graph.python_code(
         root_module="self",
@@ -873,9 +873,9 @@ class {module_name}(torch.nn.Module):
             for node in self.graph.nodes
             if "stack_trace" in node.meta
         }
-        dict_without_graph[
-            "_graphmodule_graph_node_meta_stack_trace"
-        ] = node_meta_stack_trace
+        dict_without_graph["_graphmodule_graph_node_meta_stack_trace"] = (
+            node_meta_stack_trace
+        )
 
         generated_module_name = f"fx-generated._{exporter.get_unique_id()}"
         python_code = self.recompile()
@@ -995,7 +995,7 @@ class {module_name}(torch.nn.Module):
     @contextlib.contextmanager
     def _set_replace_hook(self, f):
         """
-        Takes a callable which will be called everytime when we replace a node
+        Takes a callable which will be called every time when we replace a node
         to a new node, or change the node's name. Callable takes three arguments:
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
@@ -1009,7 +1009,7 @@ class {module_name}(torch.nn.Module):
 
     def _register_replace_node_hook(self, f):
         """
-        Takes a callable which will be called everytime when we replace a node
+        Takes a callable which will be called every time when we replace a node
         to a new node, or change the node's name. Callable takes three arguments:
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
@@ -1019,7 +1019,7 @@ class {module_name}(torch.nn.Module):
 
     def _unregister_replace_node_hook(self, f):
         """
-        Takes a callable which was previously registered to be called everytime when we replace a node.
+        Takes a callable which was previously registered to be called every time when we replace a node.
         This function will unregister that callable so it is no longer invoked on node replacement.
         """
         assert callable(f), "create_node hook must be a callable."

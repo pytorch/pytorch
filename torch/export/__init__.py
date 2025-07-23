@@ -1,58 +1,38 @@
-import builtins
-import copy
-import dataclasses
-import inspect
 import os
-import sys
-import typing
 import warnings
 import zipfile
-from collections.abc import Iterator
-from enum import auto, Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Mapping
+from typing import Any, Callable, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
-from torch.fx.passes.infra.pass_manager import PassManager
 from torch.types import FileLike
-from torch.utils._pytree import (
-    FlattenFunc,
-    FromDumpableContextFn,
-    ToDumpableContextFn,
-    UnflattenFunc,
-)
-
-
-if TYPE_CHECKING:
-    # Import the following modules during type checking to enable code intelligence features,
-    # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch._ops import OpOverload
-    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
 
 __all__ = [
+    "AdditionalInputs",
     "Constraint",
-    "Dim",
-    "ExportBackwardSignature",
-    "ExportGraphSignature",
-    "ExportedProgram",
     "CustomDecompTable",
+    "default_decompositions",
+    "Dim",
+    "dims",
+    "draft_export",
+    "export_for_training",
+    "export",
+    "ExportBackwardSignature",
+    "ExportedProgram",
+    "ExportGraphSignature",
+    "FlatArgsAdapter",
+    "load",
     "ModuleCallEntry",
     "ModuleCallSignature",
-    "default_decompositions",
-    "dims",
-    "export",
-    "export_for_training",
-    "load",
     "register_dataclass",
     "save",
+    "ShapesCollection",
     "unflatten",
-    "FlatArgsAdapter",
     "UnflattenedModule",
-    "AdditionalInputs",
-    "draft_export",
 ]
 
 # To make sure export specific custom ops are loaded
@@ -73,12 +53,17 @@ from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
 
+@deprecated(
+    "`torch.export.export_for_training` is deprecated and will be removed in PyTorch 2.10. "
+    "Please use `torch.export.export` instead, which is functionally equivalent.",
+    category=FutureWarning,
+)
 def export_for_training(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: Optional[Mapping[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
@@ -175,9 +160,9 @@ def export_for_training(
 def export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: Optional[Mapping[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
@@ -358,22 +343,24 @@ def save(
         import torch
         import io
 
+
         class MyModule(torch.nn.Module):
             def forward(self, x):
                 return x + 10
 
+
         ep = torch.export.export(MyModule(), (torch.randn(5),))
 
         # Save to file
-        torch.export.save(ep, 'exported_program.pt2')
+        torch.export.save(ep, "exported_program.pt2")
 
         # Save to io.BytesIO buffer
         buffer = io.BytesIO()
         torch.export.save(ep, buffer)
 
         # Save with extra files
-        extra_files = {'foo.txt': b'bar'.decode('utf-8')}
-        torch.export.save(ep, 'exported_program.pt2', extra_files=extra_files)
+        extra_files = {"foo.txt": b"bar".decode("utf-8")}
+        torch.export.save(ep, "exported_program.pt2", extra_files=extra_files)
 
     """
     if not isinstance(ep, ExportedProgram):
@@ -427,18 +414,18 @@ def load(
         import io
 
         # Load ExportedProgram from file
-        ep = torch.export.load('exported_program.pt2')
+        ep = torch.export.load("exported_program.pt2")
 
         # Load ExportedProgram from io.BytesIO object
-        with open('exported_program.pt2', 'rb') as f:
+        with open("exported_program.pt2", "rb") as f:
             buffer = io.BytesIO(f.read())
         buffer.seek(0)
         ep = torch.export.load(buffer)
 
         # Load with extra files.
-        extra_files = {'foo.txt': ''}  # values will be replaced with data
-        ep = torch.export.load('exported_program.pt2', extra_files=extra_files)
-        print(extra_files['foo.txt'])
+        extra_files = {"foo.txt": ""}  # values will be replaced with data
+        ep = torch.export.load("exported_program.pt2", extra_files=extra_files)
+        print(extra_files["foo.txt"])
         print(ep(torch.randn(5)))
     """
     if isinstance(f, (str, os.PathLike)):
@@ -473,7 +460,9 @@ def load(
             SCHEMA_VERSION,  # todo change archive version to schema version
         )
 
-        assert len(version) == len(SCHEMA_VERSION)
+        assert len(version) == len(SCHEMA_VERSION), (
+            "Version in the saved file has incorrect length, double check if the file is generated by torch.export.save()"
+        )
         if version[0] != str(SCHEMA_VERSION[0]):
             raise RuntimeError(
                 f"Serialized version {version} does not match our current "
@@ -530,9 +519,9 @@ def load(
 def draft_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: Optional[Mapping[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
 ) -> ExportedProgram:
@@ -572,24 +561,29 @@ def register_dataclass(
         import torch
         from dataclasses import dataclass
 
+
         @dataclass
         class InputDataClass:
             feature: torch.Tensor
             bias: int
 
+
         @dataclass
         class OutputDataClass:
             res: torch.Tensor
 
+
         torch.export.register_dataclass(InputDataClass)
         torch.export.register_dataclass(OutputDataClass)
+
 
         class Mod(torch.nn.Module):
             def forward(self, x: InputDataClass) -> OutputDataClass:
                 res = x.feature + x.bias
                 return OutputDataClass(res=res)
 
-        ep = torch.export.export(Mod(), (InputDataClass(torch.ones(2, 2), 1), ))
+
+        ep = torch.export.export(Mod(), (InputDataClass(torch.ones(2, 2), 1),))
         print(ep)
 
     """

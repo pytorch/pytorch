@@ -12,10 +12,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
 
+from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
-from torch._inductor.utils import clear_inductor_caches
+from torch._inductor.utils import clear_caches
 from torch.export import Dim
 from torch.testing._internal.logging_utils import log_settings
+from torch.utils import _pytree as pytree
 
 
 try:
@@ -38,7 +40,7 @@ from torch._inductor.exc import InductorError
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
@@ -66,6 +68,8 @@ if HAS_CUDA:
 
 
 log = logging.getLogger(__name__)
+
+DEFAULT_INST_LEVEL_MM_CONFIG: int = 78
 
 
 def _get_path_without_sccache() -> str:
@@ -146,6 +150,13 @@ fp8_config = config.patch(
 )
 
 
+def select_no_algorithm(*args, **kwargs):
+    """
+    Utility function to skip precompilation and autotuning.
+    """
+    raise NoValidChoicesError
+
+
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):
@@ -166,19 +177,19 @@ class TestCutlassBackend(TestCase):
             os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
             super().setUp()
         finally:
-            os.environ[
-                "INDUCTOR_TEST_DISABLE_FRESH_CACHE"
-            ] = old_disable_fresh_cache_envvar
+            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = (
+                old_disable_fresh_cache_envvar
+            )
         torch.random.manual_seed(1234)
 
     def tearDown(self):
         super().tearDown()
-        clear_inductor_caches()
+        clear_caches()
 
     def run_evt_test(self, model, op, shape, num_fusions=1):
         M, N = shape
         a = torch.ones(M, N).cuda().half()
-        b = torch.ones(N, N).cuda().half()
+        b = torch.ones(N, N).cuda().half().t()
         extra_args = gen_args(op, (M, N))
         model = model.cuda()
 
@@ -202,7 +213,7 @@ class TestCutlassBackend(TestCase):
             return a @ b
 
         a = torch.randn(100, 10).cuda().half()
-        b = torch.randn(10, 100).cuda().half()
+        b = torch.randn(100, 10).cuda().half().t()
 
         with config.patch(
             {
@@ -213,10 +224,6 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
-
-            def select_no_algorithm(*args, **kwargs):
-                raise NoValidChoicesError
-
             with mock.patch(
                 "torch._inductor.kernel.mm.autotune_select_algorithm",
                 wraps=select_no_algorithm,
@@ -234,7 +241,10 @@ class TestCutlassBackend(TestCase):
 
         self.assertTrue(try_import_cutlass())
 
-        import cutlass  # noqa: F401
+        if config.is_fbcode():
+            import python_cutlass
+        else:
+            import cutlass as python_cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
 
     def test_cutlass_key(self):
@@ -258,7 +268,7 @@ class TestCutlassBackend(TestCase):
         M, N, K = 4096, 2048, 25728
 
         a = torch.randn(M, K).cuda().half()
-        b = torch.randn(K, N).cuda().half()
+        b = torch.randn(N, K).cuda().half().t()
 
         with config.patch(
             {
@@ -286,7 +296,7 @@ class TestCutlassBackend(TestCase):
         M, N, K = 4096, 2048, 25728
 
         a = torch.randn(M, K).cuda().half()
-        b = torch.randn(K, N).cuda().half()
+        b = torch.randn(N, K).cuda().half().t()
 
         x_shapes = [
             (M, N),
@@ -323,7 +333,7 @@ class TestCutlassBackend(TestCase):
         B, M, N, K = 10, 4096, 2048, 25728
 
         a = torch.randn(B, M, K).cuda().half()
-        b = torch.randn(B, K, N).cuda().half()
+        b = torch.randn(B, N, K).cuda().half().permute(0, 2, 1)
 
         with config.patch(
             {
@@ -355,8 +365,8 @@ class TestCutlassBackend(TestCase):
 
         model = MyModel()
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
-        c = torch.randn(16, 512).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
+        c = torch.randn(512, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -397,8 +407,8 @@ class TestCutlassBackend(TestCase):
 
         model = MyModel()
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
-        c = torch.randn(16, 512).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
+        c = torch.randn(512, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -411,7 +421,9 @@ class TestCutlassBackend(TestCase):
                     2,
                     4,
                 ],  # guarantees > 1 choices
-                "force_disable_caches": True,
+                "fx_graph_cache": False,
+                "fx_graph_remote_cache": False,
+                "autotune_local_cache": False,
             }
         ):
             from torch._inductor.utils import run_and_get_code
@@ -475,13 +487,16 @@ class TestCutlassBackend(TestCase):
             else None
         )
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
-            }
-        ), dynamo_config.patch({"error_on_recompile": dynamic}):
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                    "cuda.cutlass_max_profiling_configs": 2,
+                }
+            ),
+            dynamo_config.patch({"error_on_recompile": dynamic}),
+        ):
             expected = [model(*input) for input in inputs]
             if use_aoti:
                 actual = AOTIRunnerUtil.run_multiple(
@@ -562,15 +577,18 @@ class TestCutlassBackend(TestCase):
         )
         model = MyModel().cuda()
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
-                "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-                "cuda.cutlass_tma_only": True,
-            }
-        ), dynamo_config.patch({"error_on_recompile": dynamic}):
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                    "cuda.cutlass_max_profiling_configs": 2,
+                    "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
+                    "cuda.cutlass_tma_only": True,
+                }
+            ),
+            dynamo_config.patch({"error_on_recompile": dynamic}),
+        ):
             expected = [model(*input) for input in inputs]
             if use_aoti:
                 actual = AOTIRunnerUtil.run_multiple(
@@ -618,13 +636,13 @@ class TestCutlassBackend(TestCase):
         ]
         for x_shape in x_shapes:
             torch._dynamo.reset()
-            clear_inductor_caches()
+            clear_caches()
 
             inputs = [
                 (
                     torch.randn(x_shape(M, N)).cuda().to(dtype),
                     torch.randn(M, K).cuda().to(dtype),
-                    torch.randn(K, N).cuda().to(dtype),
+                    torch.randn(N, K).cuda().to(dtype).t(),
                 )
                 for (M, N, K) in shapes
             ]
@@ -641,13 +659,16 @@ class TestCutlassBackend(TestCase):
                 if dynamic
                 else None
             )
-            with config.patch(
-                {
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                    "cuda.cutlass_max_profiling_configs": 2,
-                }
-            ), dynamo_config.patch({"error_on_recompile": dynamic}):
+            with (
+                config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                        "cuda.cutlass_max_profiling_configs": 2,
+                    }
+                ),
+                dynamo_config.patch({"error_on_recompile": dynamic}),
+            ):
                 expected = [model(*input) for input in inputs]
                 if use_aoti:
                     actual = AOTIRunnerUtil.run_multiple(
@@ -732,7 +753,7 @@ class TestCutlassBackend(TestCase):
             return a @ b
 
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -758,7 +779,7 @@ class TestCutlassBackend(TestCase):
                 ),
             ):
                 a = torch.randn(M, K).cuda().half()
-                b = torch.randn(K, N).cuda().half()
+                b = torch.randn(N, K).cuda().half().t()
                 Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
                 Y = mm(a, b)
                 # we need relaxed numerical limits due to the sheer size of the
@@ -781,10 +802,10 @@ class TestCutlassBackend(TestCase):
         # that allows fusions
         if batch_size is None:
             a = torch.randn(256, 32).cuda()
-            b = torch.randn(32, 256).cuda()
+            b = torch.randn(256, 32).cuda().t()
         else:
             a = torch.randn(batch_size, 256, 32).cuda()
-            b = torch.randn(batch_size, 32, 256).cuda()
+            b = torch.randn(batch_size, 256, 32).cuda().permute(0, 2, 1)
         if fp16:
             a = a.half()
             b = b.half()
@@ -803,9 +824,9 @@ class TestCutlassBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
             actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
-            assert (
-                actual_count == expected_fuse_count
-            ), f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
+            assert actual_count == expected_fuse_count, (
+                f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
+            )
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -923,7 +944,7 @@ class TestCutlassBackend(TestCase):
             }
 
             x = torch.randn(M, K).cuda().half()
-            w = torch.randn(K, N).cuda().half()
+            w = torch.randn(N, K).cuda().half().t()
 
             actual = AOTIRunnerUtil.run(
                 model,
@@ -961,7 +982,7 @@ class TestCutlassBackend(TestCase):
             }
 
             x = torch.randn(M, K).cuda().half()
-            w = torch.randn(K, N).cuda().half()
+            w = torch.randn(N, K).cuda().half().t()
 
             actual = AOTIRunnerUtil.run(
                 model,
@@ -991,7 +1012,7 @@ class TestCutlassBackend(TestCase):
             M, N, K = 200, 5216, 10_432
 
             x = torch.randn(M, K).cuda().half()
-            w = torch.randn(K, N).cuda().half()
+            w = torch.randn(N, K).cuda().half().t()
 
             actual = AOTIRunnerUtil.run(
                 model,
@@ -1060,12 +1081,9 @@ class TestCutlassBackend(TestCase):
 
         x = torch.randn((128, 128)).cuda().half()
         a = torch.randn(128, 128).cuda().half()
-        b = torch.randn(128, 128).cuda().half()
+        b = torch.randn(128, 128).cuda().half().t()
 
-        def select_no_algorithm(*args, **kwargs):
-            raise NoValidChoicesError
-
-        with fresh_inductor_cache():
+        with fresh_cache():
             with config.patch(
                 {
                     "max_autotune": True,
@@ -1092,9 +1110,9 @@ class TestCutlassBackend(TestCase):
                             choice_info = choice.info_dict()
                             op_conf_name = choice_info.get("op_conf_name", "")
                             assert isinstance(op_conf_name, str)
-                            assert (
-                                "pingpong" not in op_conf_name
-                            ), "All pingpong Kernels should have been filtered"
+                            assert "pingpong" not in op_conf_name, (
+                                "All pingpong Kernels should have been filtered"
+                            )
                             cuda_template_count += 1
                     assert cuda_template_count > 0, "No CUDATemplateCaller choices"
 
@@ -1108,12 +1126,9 @@ class TestCutlassBackend(TestCase):
 
         x = torch.randn((128, 128)).cuda().half()
         a = torch.randn(128, 128).cuda().half()
-        b = torch.randn(128, 128).cuda().half()
+        b = torch.randn(128, 128).cuda().half().t()
 
-        def select_no_algorithm(*args, **kwargs):
-            raise NoValidChoicesError
-
-        with fresh_inductor_cache():
+        with fresh_cache():
             with config.patch(
                 {
                     "max_autotune": True,
@@ -1140,9 +1155,9 @@ class TestCutlassBackend(TestCase):
                             choice_info = choice.info_dict()
                             op_conf_name = choice_info.get("op_conf_name", "")
                             assert isinstance(op_conf_name, str)
-                            assert (
-                                "pingpong" in op_conf_name
-                            ), "Only pingpong Kernels should have been allowed"
+                            assert "pingpong" in op_conf_name, (
+                                "Only pingpong Kernels should have been allowed"
+                            )
                             cuda_template_count += 1
                     assert cuda_template_count > 0, "No CUDATemplateCaller choices"
 
@@ -1183,11 +1198,8 @@ class TestCutlassBackend(TestCase):
 
         linear_compiled = torch.compile(linear, backend="inductor")
 
-        def select_no_algorithm(*args, **kwargs):
-            raise NoValidChoicesError
-
         def run_test(use_fast_accum):
-            with fresh_inductor_cache():
+            with fresh_cache():
                 with config.patch(
                     {
                         "max_autotune": True,
@@ -1220,13 +1232,13 @@ class TestCutlassBackend(TestCase):
                                 op_conf_name = choice_info.get("op_conf_name", "")
                                 assert isinstance(op_conf_name, str)
                                 if use_fast_accum:
-                                    assert (
-                                        "fastaccum" in op_conf_name
-                                    ), "Only fastaccum Kernels should have been allowed"
+                                    assert "fastaccum" in op_conf_name, (
+                                        "Only fastaccum Kernels should have been allowed"
+                                    )
                                 else:
-                                    assert (
-                                        "fastaccum" not in op_conf_name
-                                    ), "fastaccum Kernels should have been filtered"
+                                    assert "fastaccum" not in op_conf_name, (
+                                        "fastaccum Kernels should have been filtered"
+                                    )
                                 cuda_template_count += 1
                         assert cuda_template_count > 0, "No CUDATemplateCaller choices"
 
@@ -1263,19 +1275,20 @@ class TestCutlassBackend(TestCase):
             ),
         ]
 
-        def select_no_algorithm(*args, **kwargs):
-            raise NoValidChoicesError
-
-        with fresh_inductor_cache(), config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
-            }
-        ), mock.patch(
-            "torch._inductor.kernel.mm.autotune_select_algorithm",
-            wraps=select_no_algorithm,
-        ) as sa:
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cuda.cutlass_max_profiling_configs": 2,
+                }
+            ),
+            mock.patch(
+                "torch._inductor.kernel.mm.autotune_select_algorithm",
+                wraps=select_no_algorithm,
+            ) as sa,
+        ):
             for input in inputs:
                 A, B = input
                 M, K = A.shape
@@ -1319,22 +1332,23 @@ class TestCutlassBackend(TestCase):
 
         M, N, K = (128, 128, 16)
         A = torch.randn(M, K).cuda().half()
-        B = torch.randn(K, N).cuda().half()
+        B = torch.randn(N, K).cuda().half().t()
 
-        def select_no_algorithm(*args, **kwargs):
-            raise NoValidChoicesError
-
-        with fresh_inductor_cache(), config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
-                "cuda.cutlass_presets": presets,
-            }
-        ), mock.patch(
-            "torch._inductor.kernel.mm.autotune_select_algorithm",
-            wraps=select_no_algorithm,
-        ) as sa:
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cuda.cutlass_presets": presets,
+                }
+            ),
+            mock.patch(
+                "torch._inductor.kernel.mm.autotune_select_algorithm",
+                wraps=select_no_algorithm,
+            ) as sa,
+        ):
             with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
                 torch.compile(torch.mm)(A, B)
 
@@ -1427,7 +1441,7 @@ class TestCutlassBackend(TestCase):
         max_autotune_gemm_backends = "CUTLASS"
 
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -1510,7 +1524,7 @@ class TestCutlassBackend(TestCase):
             return a @ b
 
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -1518,12 +1532,16 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "ATEN,TRITON,CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
                 # needed for log searching
-                "force_disable_caches": True,
+                "fx_graph_cache": False,
+                "fx_graph_remote_cache": False,
             }
         ):
-            with log_settings("+inductor"), self.assertLogs(
-                logger="torch._inductor.codegen.cuda", level=logging.DEBUG
-            ) as test_log:
+            with (
+                log_settings("+inductor"),
+                self.assertLogs(
+                    logger="torch._inductor.codegen.cuda", level=logging.DEBUG
+                ) as test_log,
+            ):
                 Y_compiled = torch.compile(mm, dynamic=False)(a, b)
                 Y = mm(a, b)
                 torch.testing.assert_close(Y_compiled, Y)
@@ -1536,6 +1554,178 @@ class TestCutlassBackend(TestCase):
             assert match, "Expect to find the cutlass configs log"
             num_ops = int(match.group(1))
             self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    def test_maybe_append_choice_caching(self):
+        """
+        Test if maybe_append_choice's caching leads to correct results and
+        shorter maybe_append_choice time.
+        """
+
+        NUM_ITERATIONS = 10
+
+        class TestModule(torch.nn.Module):
+            def forward(self, A, B):
+                for _ in range(NUM_ITERATIONS):
+                    A = A @ B / 32
+                return A
+
+        model = TestModule().cuda()
+        A = torch.randn(1024, 1024, dtype=torch.bfloat16, device="cuda")
+        B = torch.randn(1024, 1024, dtype=torch.bfloat16, device="cuda").t()
+
+        expected = model(A, B)
+
+        # Track render calls
+        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+
+        original_render = CUTLASSGemmTemplate.render
+        render_call_count = 0
+
+        def counting_render(self, *args, **kwargs):
+            nonlocal render_call_count
+            render_call_count += 1
+            return original_render(self, *args, **kwargs)
+
+        with mock.patch.object(CUTLASSGemmTemplate, "render", counting_render):
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                    "cuda.enable_caching_codegen": True,
+                }
+            ):
+                compiled_model = torch.compile(model, fullgraph=True)
+                actual = compiled_model(A, B)
+
+        torch.testing.assert_close(actual, expected)
+
+        # Check render call count: render is called uniquely for each codegen
+        # and for each finalized codegen.
+        self.assertEqual(
+            render_call_count, NUM_ITERATIONS + DEFAULT_INST_LEVEL_MM_CONFIG
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_multiple_mm(self):
+        """
+        Test multiple matrix multiplications with different shapes in a single nn.Module.
+        """
+
+        class MultipleMMModel(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                # First mm with shape (128, 64) @ (64, 32) -> (128, 32)
+                mm1 = a @ b
+                # Second mm with shape (256, 128) @ (128, 64) -> (256, 64)
+                mm2 = c @ d
+                return mm1, mm2
+
+        model = MultipleMMModel().cuda()
+
+        # Create tensors with different shapes
+        a = torch.randn(128, 64).cuda().half()
+        b = torch.randn(32, 64).cuda().half().t()
+        c = torch.randn(256, 128).cuda().half()
+        d = torch.randn(64, 128).cuda().half().t()
+
+        # Track render calls
+        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+
+        original_render = CUTLASSGemmTemplate.render
+        render_call_count = 0
+
+        def counting_render(self, *args, **kwargs):
+            nonlocal render_call_count
+            render_call_count += 1
+            return original_render(self, *args, **kwargs)
+
+        with mock.patch.object(CUTLASSGemmTemplate, "render", counting_render):
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cuda.cutlass_max_profiling_configs": 2,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                    "cuda.enable_caching_codegen": True,
+                }
+            ):
+                # Get expected results
+                expected = model(a, b, c, d)
+
+                # Compile and run
+                compiled_model = torch.compile(model)
+                actual = compiled_model(a, b, c, d)
+
+                # Verify results
+                torch.testing.assert_close(actual, expected)
+
+        num_matmuls = 2
+        self.assertEqual(render_call_count, num_matmuls + num_matmuls * 2)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_multiple_mm_with_dynamic_shape(self):
+        """
+        Test multiple matrix multiplications where one has dynamic shapes.
+        """
+
+        class MultipleMMDynamicModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.c = torch.randn(64, 256).cuda().half()
+                self.d = torch.randn(128, 256).cuda().half().t()
+
+            def forward(self, a, b):
+                # dynamic shape matmul
+                mm1 = a @ b
+                # static shape matmul
+                mm2 = self.c @ self.d
+                return mm1, mm2
+
+        model = MultipleMMDynamicModel().cuda()
+
+        # Create tensors with different shapes
+        a = torch.randn(128, 64).cuda().half()
+        b = torch.randn(32, 64).cuda().half().t()
+
+        # Track render calls
+        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+
+        original_render = CUTLASSGemmTemplate.render
+        render_call_count = 0
+
+        def counting_render(self, *args, **kwargs):
+            nonlocal render_call_count
+            render_call_count += 1
+            return original_render(self, *args, **kwargs)
+
+        with mock.patch.object(CUTLASSGemmTemplate, "render", counting_render):
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cuda.cutlass_max_profiling_configs": 2,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                    "cuda.enable_caching_codegen": True,
+                }
+            ):
+                # Get expected results
+                expected = model(a, b)
+
+                # Compile and run
+                compiled_model = torch.compile(model, dynamic=True)
+                actual = compiled_model(a, b)
+
+                # Verify results
+                torch.testing.assert_close(actual, expected)
+
+        num_matmuls = 2
+        self.assertEqual(render_call_count, num_matmuls + num_matmuls * 2)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1562,7 +1752,7 @@ class TestCutlassBackend(TestCase):
         class TestModel(torch.nn.Module):
             def forward(self, B):
                 A = torch.zeros_like(B)
-                return A @ B
+                return A @ B.t()
 
         M = 1024
         B = torch.randn(M, M).cuda().half()
@@ -1584,7 +1774,7 @@ class TestCutlassBackend(TestCase):
         class TestModel(torch.nn.Module):
             def forward(self, B):
                 A = torch.zeros_like(B)
-                return (A @ B).relu()
+                return (A @ B.t()).relu()
 
         M = 1024
         B = torch.randn(M, M).cuda().half()
@@ -1610,7 +1800,7 @@ class TestCutlassBackend(TestCase):
             def forward(self, B):
                 A = torch.zeros_like(B)
                 for _ in range(100):
-                    A = A @ B
+                    A = A @ B.t()
                 return A
 
         M = 1024
@@ -1630,10 +1820,18 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_compilation_time(self):
+    @parametrize("use_aoti", (False, True))
+    def test_compilation_time(self, use_aoti):
         M = 1024
         A = torch.randn(M, M).cuda().half()
-        B = torch.randn(M, M).cuda().half()
+        B = torch.randn(M, M).cuda().half().t()
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
+
+        model = MyModel().cuda()
+        expected = model(A, B)
 
         start_time = time.time()
         with config.patch(
@@ -1643,7 +1841,15 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_max_profiling_configs": 1,
             }
         ):
-            _ = torch.compile(torch.mm)(A, B)
+            if use_aoti:
+                actual = AOTIRunnerUtil.run(
+                    model,
+                    (A, B),
+                )
+            else:
+                actual = torch.compile(model, fullgraph=True)(A, B)
+
+            torch.testing.assert_close(actual, expected)
         self.assertTrue(time.time() - start_time < 50)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -1670,7 +1876,7 @@ class TestCutlassBackend(TestCase):
         M = 1024
         N = 512
         a = torch.ones(M, N).cuda().half()
-        b = torch.ones(N, N).cuda().half()
+        b = torch.ones(N, N).cuda().half().t()
         extra_args = gen_args(op, (M, N))
         model = TestModel().cuda()
 
@@ -1700,7 +1906,7 @@ class TestCutlassBackend(TestCase):
 
         model = TestModel().cuda()
         a = torch.ones(M, N).cuda().half()
-        b = torch.ones(N, N).cuda().half()
+        b = torch.ones(N, N).cuda().half().t()
         extra_args = gen_args(op, (M, N), dtype=torch.float16)
 
         # baseline is cutlass kernel + triton
@@ -1765,7 +1971,7 @@ class TestCutlassBackend(TestCase):
         for i, shape in enumerate(shapes):
             M, N = shape
             a = torch.ones(M, N).cuda().half()
-            b = torch.ones(N, N).cuda().half()
+            b = torch.ones(N, N).cuda().half().t()
             extra_args = gen_args(op, (M, N))
             model = TestModel().cuda()
 
@@ -1793,7 +1999,7 @@ class TestCutlassBackend(TestCase):
         M = 1024
         N = 512
         a = torch.ones(M, N).cuda().half()
-        b = torch.ones(N, N).cuda().half()
+        b = torch.ones(N, N).cuda().half().t()
         extra_args = gen_args(op, (M, N))
         model = TestModel().cuda()
 
@@ -1807,28 +2013,31 @@ class TestCutlassBackend(TestCase):
 
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("arch", ("90", "100"))
-    @parametrize("cuda_version", ("12.4", "12.6", "12.8"))
+    @parametrize("cuda_version", ("12.4", "12.8"))
     def test_gemm_operation_serialization(self, arch: str, cuda_version: str):
         """
         Testing serialization for GEMM operations generated by CUTLASS.
         This should cover GroupedGemmOperation as well.
         """
         full_ops = _gen_ops_cached(arch, cuda_version)
+        ops = pytree.tree_flatten(full_ops)[0]
+
+        # sanity check
+        self.assertGreater(len(ops), 1000, "Too few ops generated")
+
+        # test if configuration name is unique
+        op_config_names = [op.configuration_name() for op in ops]
+        self.assertEqual(len(op_config_names), len(set(op_config_names)))
 
         serializer = get_cutlass_operation_serializer()
         self.assertIsNotNone(serializer)
 
-        count = 0
-        for ops in full_ops.values():
-            for op_dict in ops.values():
-                for op_list in op_dict.values():
-                    for op in op_list:
-                        count += 1
-                        serialized = serializer.serialize(op)
-                        deserialized = serializer.deserialize(serialized)
-                        self.assertTrue(_check_if_instances_equal(op, deserialized))
-
-        self.assertGreater(count, 1000, "Too few ops generated")
+        serialized_ops = [serializer.serialize(op) for op in ops]
+        deserialized_ops = [
+            serializer.deserialize(serialized_op) for serialized_op in serialized_ops
+        ]
+        for op, deserialized_op in zip(ops, deserialized_ops):
+            self.assertTrue(_check_if_instances_equal(op, deserialized_op))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -1978,6 +2187,44 @@ class TestCutlassBackend(TestCase):
         # the way blocks of results are accumulated (float addition not associative), so
         # setting a small absolute tolerance in these tests
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @parametrize("layout", ("rr", "rc"))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_config_number_post_filtering(
+        self, layout: str, dtype: torch.dtype
+    ) -> None:
+        """
+        Test if cutlass backend produces the same number of configs after filtering.
+        """
+        a = torch.randn(128, 128, dtype=dtype).cuda()
+        b = torch.randn(128, 128, dtype=dtype).cuda()
+        if layout[0] == "c":
+            a = a.t()
+        if layout[1] == "c":
+            b = b.t()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                # needed for log searching
+                "force_disable_caches": True,
+                "cuda.cutlass_max_profiling_swizzle_options": [2],
+            }
+        ):
+            with mock.patch(
+                "torch._inductor.kernel.mm.autotune_select_algorithm",
+                wraps=select_no_algorithm,
+            ) as sa:
+                with self.assertRaisesRegex(
+                    BackendCompilerFailed, r".*NoValidChoicesError.*"
+                ):
+                    _ = torch.compile(torch.mm, dynamic=False)(a, b)
+                args, _ = sa.call_args
+                _, choices, _, __ = args
+
+                self.assertEqual(len(choices), DEFAULT_INST_LEVEL_MM_CONFIG)
 
 
 if __name__ == "__main__":

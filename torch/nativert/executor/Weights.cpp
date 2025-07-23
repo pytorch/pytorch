@@ -16,7 +16,6 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
-#include <c10/util/string_view.h>
 #include <caffe2/serialize/inline_container.h>
 
 namespace torch::nativert {

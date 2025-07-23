@@ -10,7 +10,7 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 :: able to see what our cl.exe commands are (since you can actually
 :: just copy-paste them into a local Windows setup to just rebuild a
 :: single file.)
-:: log sizes are too long, but leaving this here incase someone wants to use it locally
+:: log sizes are too long, but leaving this here in case someone wants to use it locally
 :: set CMAKE_VERBOSE_MAKEFILE=1
 
 
@@ -42,7 +42,7 @@ call choco upgrade -y cmake --no-progress --installargs 'ADD_CMAKE_TO_PATH=Syste
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
-call pip install mkl-include==2021.4.0 mkl-devel==2021.4.0
+call pip install mkl==2024.2.0 mkl-static==2024.2.0 mkl-include==2024.2.0
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 

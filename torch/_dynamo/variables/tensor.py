@@ -316,17 +316,18 @@ class TensorVariable(VariableTracker):
         real_value = getattr(_input_associated_real_value, name)
 
         attr_source = AttrSource(self.source, name)
-        install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
 
         # Typically we'd want to use variable builder here
         # but unfortunately id(real_value.__self__) is not id(<original value>)
         if is_bound_tensor_method(real_value):
+            # No need to install the guard because its a bound tensor method
             from .misc import GetAttrVariable
 
             return GetAttrVariable(
                 self, name, source=attr_source, py_type=type(real_value)
             )
 
+        install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
         return VariableTracker.build(tx, real_value, attr_source)
 
     def method_attr_ndim(self, tx):
@@ -1080,22 +1081,18 @@ class TensorVariable(VariableTracker):
             )
 
     def method___setitem__(self, key, value):
-        def has_bool_key(v):
-            if isinstance(v, TensorVariable):
-                return v.dtype in (torch.bool, torch.int8)
-            elif isinstance(v, variables.TupleVariable):
-                return any(has_bool_key(item) for item in v.items)
-            else:
-                return False
-
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        tx.output.create_proxy(
+        proxy = tx.output.create_proxy(
             "call_function",
             operator.setitem,
             *proxy_args_kwargs([self, key, value], {}),
         )
+
+        if config.use_graph_deduplication or config.track_nodes_for_deduplication:
+            tx.output.region_tracker.add_node_mutation(proxy.node, 0)
+
         return ConstantVariable.create(None)
 
     def method_resize_(self, *args, **kwargs):
@@ -1543,10 +1540,36 @@ class NumpyNdarrayVariable(TensorVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from ..exc import unimplemented_v2
         from ..utils import numpy_method_wrapper
 
         args, kwargs = self.patch_args(name, args, kwargs)
 
+        if name == "astype":
+            from .builtin import BuiltinVariable
+
+            dtype_arg = None
+            if "dtype" in kwargs:
+                dtype_arg = kwargs["dtype"]
+            elif len(args) > 0:
+                dtype_arg = args[0]
+            is_object_str = (
+                isinstance(dtype_arg, ConstantVariable) and dtype_arg.value == "O"
+            )
+            is_object_type = (
+                isinstance(dtype_arg, BuiltinVariable) and dtype_arg.fn is object
+            )
+            if is_object_str or is_object_type:
+                unimplemented_v2(
+                    gb_type="ndarray.astype(object)",
+                    context=f"call_method {self} {name} {args} {kwargs}",
+                    explanation=(
+                        "`ndarray.astype('O')` or `ndarray.astype(object)` is not supported "
+                        "by torch.compile, as there is no equivalent to object type in torch.Tensor. "
+                        "This will be executed eagerly."
+                    ),
+                    hints=[*graph_break_hints.FUNDAMENTAL],
+                )
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)

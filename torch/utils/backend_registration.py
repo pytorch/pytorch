@@ -106,7 +106,7 @@ def _normalization_device(
     elif isinstance(device, str):
         device = torch.device(device)
 
-    # variable devcie can only be torch.device type or int type
+    # variable device can only be torch.device type or int type
     if isinstance(device, torch.device):
         if device.type != custom_backend_name:
             raise RuntimeError(f"Invalid device, must be {custom_backend_name} device")

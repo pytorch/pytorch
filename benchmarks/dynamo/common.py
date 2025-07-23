@@ -22,7 +22,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -51,9 +51,10 @@ from torch._logging.scribe import open_source_signpost
 
 try:
     from torch._dynamo.utils import clone_inputs, graph_break_reasons
-    from torch._inductor.utils import fresh_inductor_cache
+    from torch._inductor.utils import fresh_cache
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _inductor.utils import fresh_cache
 
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
@@ -67,7 +68,7 @@ try:
     import torch_xla
     import torch_xla.core.xla_model as xm
 
-    # This is to woraround the backward issue https://github.com/pytorch/xla/issues/4174
+    # This is to workaround the backward issue https://github.com/pytorch/xla/issues/4174
     torch_xla._XLAC._init_computation_client()
 except ImportError:
     # ignore the error if torch_xla is not installed
@@ -75,7 +76,10 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Sequence
+
+_D = TypeVar("_D", bound=dict[str, Any])
+_T = TypeVar("_T")
 
 
 log = logging.getLogger(__name__)
@@ -270,7 +274,7 @@ DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
 
 # Maps a benchmark model name to a list of status codes. For any listed entry, we'll
-# capture TORCH_COMPILE_DEBUG logs in CI runs and preseve them (i.e., for upload) if
+# capture TORCH_COMPILE_DEBUG logs in CI runs and preserve them (i.e., for upload) if
 # the result status matches one listed.
 CI_PRESERVE_COMPILE_DEBUG = {
     # For example:
@@ -766,7 +770,17 @@ def timed(
     return (time_total, result) if return_result else time_total
 
 
-def _normalize_bench_inputs(example_inputs) -> tuple[tuple[Any], Mapping[str, Any]]:
+@overload
+def _normalize_bench_inputs(example_inputs: _D) -> tuple[tuple[()], _D]: ...
+
+
+@overload
+def _normalize_bench_inputs(
+    example_inputs: Sequence[_T],
+) -> tuple[tuple[_T, ...], dict[str, Any]]: ...
+
+
+def _normalize_bench_inputs(example_inputs):
     # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
     # and consumed like `model(**example_inputs)`.
     # For other benchmarks, example_inputs are formatted as tuple and consumed
@@ -1074,7 +1088,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     times = args.iterations_per_run
 
-    # Use higher tolerance for XLA since XLA cause numerical unstability when
+    # Use higher tolerance for XLA since XLA cause numerical instability when
     # graph size changes
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
@@ -1671,7 +1685,7 @@ class BenchmarkRunner:
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
         self.autocast_arg = {}
-        self.optimizer = None
+        self.optimizer: Optional[torch.optim.Optimizer] = None
         self._args = None
 
     def setup_amp(self, current_device=None):
@@ -1680,7 +1694,7 @@ class BenchmarkRunner:
 
         devices = [current_device] if current_device else self.args.devices
         if self.args.amp:
-            # AMP training can lead to small loss values which can undeflow
+            # AMP training can lead to small loss values which can underflow
             # gradient values returning in zero gradients. To solve this
             # problem, PyTorch introduces GradScaler. GradScaler is a stateful
             # structure, that scales the loss values to prevent underflow. Loss
@@ -1718,7 +1732,7 @@ class BenchmarkRunner:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
                 # Disable multi_tensor_sgd for benchmarking, there isn't a large performance benefit (~1%) to compiling
                 # this optimizer because it is a single foreach add, and increases compile time.
-                # After autotuning and fake tensor caching lands, we can enable, becuase the compile time impact will be lower.
+                # After autotuning and fake tensor caching lands, we can enable, because the compile time impact will be lower.
                 # Fake Tensor caching: https://github.com/pytorch/pytorch/pull/113873
                 # Autotuning: https://github.com/pytorch/pytorch/issues/117447
                 self.optimizer.step = torch._dynamo.disable(self.optimizer.step)
@@ -2823,7 +2837,7 @@ class BenchmarkRunner:
                 )
 
                 # NB: Don't upload them to the benchmark database as they are debugging
-                # infomation. There are also around a million records a day which is
+                # information. There are also around a million records a day which is
                 # wasteful to store
                 write_outputs(
                     filename,
@@ -2881,7 +2895,7 @@ def parse_args(args=None):
     iterations_per_run_help = """
         Run this may iterations for each time measurement. This is mainly used for
         XLA training. We want to run multiple iterations per measurement so the
-        tracing and computation for different iteartions can overlap with each
+        tracing and computation for different iterations can overlap with each
         other. This makes sure we have an accurate xla baseline.
     """
     parser.add_argument(
@@ -3040,7 +3054,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--generate-aot-autograd-stats",
         action="store_true",
-        help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
+        help="Generates AOT Autograd stats like how many graphs are sent to AOT",
     )
     parser.add_argument(
         "--inductor-settings",
@@ -3261,7 +3275,7 @@ def parse_args(args=None):
         "--warm-start-latency",
         "--warm_start_latency",
         action="store_true",
-        help="Run model(s) twice and preseve caches in between to enable a 'warm start' on the 2nd run",
+        help="Run model(s) twice and preserve caches in between to enable a 'warm start' on the 2nd run",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -3416,7 +3430,7 @@ def maybe_fresh_cache(args):
     if not cache_dir_assigned and (
         args.cold_start_latency or args.warm_start_latency or args.ci
     ):
-        return fresh_inductor_cache()
+        return fresh_cache()
     else:
         return contextlib.nullcontext()
 
@@ -3610,7 +3624,7 @@ def run(runner, args, original_dir=None):
 
         torch.backends.mkldnn.deterministic = True
 
-        # Remove randomeness when torch manual seed is called
+        # Remove randomness when torch manual seed is called
         patch_torch_manual_seed()
 
         # Some models e.g. yolov3 assert batch size on n_gpus
