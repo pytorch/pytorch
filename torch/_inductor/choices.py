@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import typing
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -11,6 +11,7 @@ from . import config
 from .codecache import write_text
 from .kernel_inputs import KernelInputs  # noqa: TC001
 from .lookup_table import lookup_template_configs
+from .lookup_table_recorder import record
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
@@ -142,14 +143,23 @@ class InductorChoices:
             template_name=template_name,
             template_hash=template_hash,
         )
-        if lookup_configs is not None:
-            yield from lookup_configs
-            return
+        cgen: Union[
+            list[dict[str, Any]], Generator[dict[str, Any], None, None], None
+        ] = lookup_configs
+        if cgen is None:
+            # Get the appropriate template-specific heuristic, as the lookup table was a miss
+            heuristic = get_template_heuristic(template_name, kernel_inputs.device_type)
+            cgen = heuristic.get_template_configs(kernel_inputs, layout, op_name)
 
-        # Get the appropriate template-specific heuristic
-        heuristic = get_template_heuristic(template_name, kernel_inputs.device_type)
-
-        yield from heuristic.get_template_configs(kernel_inputs, layout, op_name)
+        for c in cgen:
+            record(
+                kernel_inputs=kernel_inputs,
+                op_name=op_name,
+                template_id=template_name,
+                kwargs=c,
+                template_hash=template_hash,
+            )
+            yield c
 
     def triton_kernel_kwargs(
         self,
