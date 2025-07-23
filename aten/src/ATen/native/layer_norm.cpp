@@ -261,30 +261,11 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   return outputs;
 }
 
-Tensor rms_norm_symint(
+std::tuple<Tensor, Tensor> rms_norm_composite(
     const Tensor& input,
-    c10::SymIntArrayRef normalized_shape,
+    IntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
     std::optional<double> eps) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  _check_rms_norm_inputs_symint(input, normalized_shape, weight);
-
-#ifdef USE_MPS
-  if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
-    const Tensor weight = weight_opt.value();
-    const bool any_nested = input.is_nested() || weight.is_nested();
-    const bool any_inputs_require_grad = input.requires_grad() || weight.requires_grad();
-    const bool is_input_fp = isFloatingType(input.scalar_type());
-    const bool is_weight_fp = isFloatingType(weight.scalar_type());
-
-    if (!(GradMode::is_enabled() && any_inputs_require_grad) && !any_nested && is_input_fp && is_weight_fp) {
-      auto eps_val = eps.value_or(std::numeric_limits<double>::epsilon());
-      return at::_fused_rms_norm(input.contiguous(), normalized_shape.size(), weight.contiguous(), eps_val);
-    }
-  }
-#endif
 
   std::vector<int64_t> dims_to_reduce;
   for (const auto i : c10::irange(normalized_shape.size())) {
@@ -321,10 +302,67 @@ Tensor rms_norm_symint(
       upcasted_result = upcasted_result.mul(weight_opt.value());
     }
 
-    return upcasted_result;
+    // if nested do not make contiguous
+    if(input.is_nested() || (weight_opt.has_value() && weight_opt.value().is_nested())){
+      return std::make_tuple(upcasted_result, rqrst_input);
+    }
+
+    if(input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast || input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast3d){
+      return std::make_tuple(upcasted_result, rqrst_input);
+    }
+
+    return std::make_tuple(upcasted_result.contiguous(), rqrst_input.contiguous());
   });
-
-  return result.type_as(input);
-
+  return std::make_tuple(
+    std::get<0>(result).type_as(input), // Cast normalized result to original input type
+    std::get<1>(result)                 // rsqrt_val
+  );
 }
+
+
+Tensor rms_norm_symint(
+    const Tensor& input,
+    c10::SymIntArrayRef normalized_shape,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<double> eps) {
+
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  _check_rms_norm_inputs_symint(input, normalized_shape, weight);
+
+  // composite fallback for channels last
+  if(input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast || input.suggest_memory_format() == c10::MemoryFormat::ChannelsLast3d){
+    return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
+  }
+
+  // composite fallback for complex datatypes
+  if(input.is_complex()){
+    return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
+  }
+
+  if (weight_opt.has_value() && weight_opt.value().defined() && weight_opt.value().dtype() != input.dtype()) {
+    TORCH_WARN_ONCE(
+      "Mismatch dtype between input and module: input dtype = ", input.dtype(),
+      ", module dtype = ", weight_opt.value().dtype(), ", Can not dispatch to fused implementation"
+    );
+    return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
+  }
+
+  #ifdef USE_MPS
+  if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
+    const Tensor weight = weight_opt.value();
+    const bool any_inputs_require_grad = input.requires_grad() || weight.requires_grad();
+
+    if (!(GradMode::is_enabled() && any_inputs_require_grad)) {
+      return std::get<0>(at::_fused_rms_norm(input.contiguous(), IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
+    }
+  }
+
+  if (input.device().type() == DeviceType::MPS){
+    return std::get<0>(rms_norm_composite(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
+  }
+  #endif
+  return std::get<0>(at::_fused_rms_norm(input, IntArrayRef(reinterpret_cast<const int64_t*>(normalized_shape.data()), normalized_shape.size()), weight_opt, eps));
+}
+
 } // namespace at::native

@@ -247,10 +247,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                 "mm",
                 {
                     "template_id": "mm",
-                    # NOTE: This is a template hash for mm_template, if this test
-                    # breaks, update it with the hash in the log
-                    # TODO(coconutruben): once the templates are easy to import, read this out of the template
-                    "template_hash": "e2259f6da1076a7dfd950cf61dcd8d15ed1b63b0680567f292c4f6a22373e84c",
+                    "template_hash": torch._inductor.kernel.mm.mm_template.src_hash,
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 32,
@@ -288,7 +285,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                     # NOTE: This is a template hash for mm_template, if this test
                     # breaks, update it with the hash in the log
                     # TODO(coconutruben): once the templates are easy to import, read this out of the template
-                    "template_hash": "e2259f6da1076a7dfd950cf61dcd8d15ed1b63b0680567f292c4f6a22373e84c",
+                    "template_hash": torch._inductor.kernel.mm.mm_template.src_hash,
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 32,
@@ -305,10 +302,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                 "bmm",
                 {
                     "template_id": "bmm",
-                    # NOTE: This is a template hash for bmm_template, if this test
-                    # breaks, update it with the hash in the log
-                    # TODO(coconutruben): once the templates are easy to import, read this out of the template
-                    "template_hash": "b58cc9f6684a611b935a7127ff8302a0b4ccbba47d047c908fe007873b656fc1",
+                    "template_hash": torch._inductor.kernel.bmm.bmm_template.src_hash,
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 64,
@@ -325,10 +319,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                 "mm_plus_mm",
                 {
                     "template_id": "mm_plus_mm",
-                    # NOTE: This is a template hash for mm_plus_mm_template, if this test
-                    # breaks, update it with the hash in the log
-                    # TODO(coconutruben): once the templates are easy to import, read this out of the template
-                    "template_hash": "d6107cb61c45858d3288133d51917de56bc250f22dbccc31e474c889bd24c2b9",
+                    "template_hash": torch._inductor.kernel.mm_plus_mm.mm_plus_mm_template.src_hash,
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 16,
