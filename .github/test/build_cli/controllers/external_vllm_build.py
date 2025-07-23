@@ -10,10 +10,12 @@ from utils import (
 import os
 
 _DEFAULT_RESULT_PATH = "./results"
+
 def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH) -> None:
     if not artifact_dir:
         artifact_dir = _DEFAULT_RESULT_PATH
 
+    print(f"r artifact dir is {artifact_dir}")
     result_path = get_abs_path(artifact_dir)
     ensure_dir_exists(result_path)
 

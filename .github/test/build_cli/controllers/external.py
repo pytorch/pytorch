@@ -40,7 +40,7 @@ class ExternalBuildController(Controller):
         print(f"[INFO] Plan to save artifacts to: {artifact_dir}")
         match target:
             case "vllm":
-                build_vllm()
+                build_vllm(artifact_dir)
             case _:
                 print(f"[ERROR] Unknown target: {target}")
 
