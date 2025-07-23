@@ -516,6 +516,36 @@ class TestUnbackedSymints(InductorTestCase):
         torch.compile(fn, fullgraph=True)(x)
 
     @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_unbacked_linear_layer_norm_input(self, device):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(387, 128, bias=True, device=device)
+                self.layer_norm1 = torch.nn.LayerNorm(387, device=device)
+                self.layer_norm2 = torch.nn.LayerNorm(128, device=device)
+
+            def forward(self, x, mask):
+                masked_select = x.masked_select(mask)
+                view = masked_select.view(-1, 387)
+
+                linear = self.linear(view)
+                layer_norm1 = self.layer_norm1(view)
+                layer_norm2 = self.layer_norm2(linear)
+                return linear, layer_norm1, layer_norm2
+
+        model = MyModel()
+        inputs = (
+            torch.randn((256, 387), dtype=torch.float, device=device),
+            torch.randint(
+                low=0, high=2, size=(256, 1), dtype=torch.bool, device=device
+            ),
+        )
+
+        actual = torch.compile(model, fullgraph=True)(*inputs)
+        expected = model(*inputs)
+        torch.testing.assert_close(actual, expected)
+
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_to_int(self, device):
         # Tests to_copy to int dtype on tensors with
