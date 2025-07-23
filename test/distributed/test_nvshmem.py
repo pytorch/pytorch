@@ -300,6 +300,119 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             received_chunk = out[start : start + split]
             torch.testing.assert_close(received_chunk, chunk)
 
+    @skipIfRocm
+    def test_all_to_all_vdev_2d_offset(self) -> None:
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        # Number of experts per rank
+        ne = 8
+        nsplits = ne * self.world_size
+
+        # Number of elements for an expert is random between [0, k)
+        k = 10
+        inp_splits = torch.randint(k, (nsplits,), dtype=torch.int64, device=self.device)
+        # Each split up align to k, as the offset, i.e. [0, k, 2k, 3k, ...]
+        inp_offsets = torch.arange(
+            0, k * nsplits, k, dtype=torch.int64, device=self.device
+        )
+
+        # Exchange input splits to get output splits
+        out_splits = torch.zeros_like(inp_splits)
+        # First need to transpose the input splits
+        inp_splits_t = inp_splits.reshape(ne, self.world_size).t().contiguous()
+        dist.all_to_all_single(out_splits, inp_splits_t)
+
+        # Actual number of output elements
+        out_numel = out_splits.sum().item()
+        # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
+        # Remember that we up-align each input split to k?
+        max_inp_numel = k * nsplits
+        # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = self.world_size  # worst case: one rank receives all data
+        max_out_numel = max_inp_numel * overflow_factor
+
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).copy_(
+            torch.randn(max_inp_numel, dtype=dtype, device=self.device)
+        )
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
+        # 2 rows: input splits, input offsets
+        in_splits_offsets = symm_mem.empty(
+            (2, nsplits), dtype=torch.int64, device=self.device
+        )
+        # 2 rows: output splits, output offsets
+        # Initiallizing all values to -1 to check if they are updated
+        out_splits_offsets = symm_mem.empty(
+            (2, nsplits), dtype=torch.int64, device=self.device
+        ).fill_(-1)
+
+        # Row 0 is input splits
+        in_splits_offsets[0].copy_(inp_splits)
+        # Row 1 is input offsets
+        in_splits_offsets[1].copy_(inp_offsets)
+
+        torch.ops.symm_mem.all_to_all_vdev_2d_offset(
+            inp, out, in_splits_offsets, out_splits_offsets, group_name
+        )
+        received_out_splits = out_splits_offsets[0]
+        received_out_offsets = out_splits_offsets[1]
+
+        # Check input splits and offsets -- should not change
+        torch.testing.assert_close(in_splits_offsets[0], inp_splits)
+        torch.testing.assert_close(in_splits_offsets[1], inp_offsets)
+
+        # Check output splits (row 1)
+        torch.testing.assert_close(received_out_splits, out_splits)
+
+        # Check output offsets (row 2)
+        out_offsets = torch.cumsum(out_splits, dim=0)  # inclusive scan
+        # output offsets from `all_to_all_vdev_2d_offset` is exclusive scan
+        self.assertEqual(received_out_offsets[0], 0)
+        torch.testing.assert_close(received_out_offsets[1:], out_offsets[:-1])
+
+        # Check data
+        # Let's "squeeze" the padding out of the input data first
+        inp_chunks = []  # (ne, nranks)
+        for i in range(ne):
+            inp_chunks_e = []  # (nranks,)
+            for j in range(self.world_size):
+                chunk_id = i * self.world_size + j
+                offset = in_splits_offsets[1][chunk_id]
+                chunk = inp[offset : offset + inp_splits[chunk_id]]
+                inp_chunks_e.append(chunk)
+            inp_chunks.append(inp_chunks_e)
+
+        # Transpose the 2D input chunks
+        inp_chunks_t = list(zip(*inp_chunks))
+        # Now it is (nranks, ne), concatenate the e's
+        inp_chunks_t = [torch.cat(row) for row in inp_chunks_t]
+
+        # Create empty output tensors -- each tensor is data to be received from a peer
+        out_splits = out_splits.reshape(self.world_size, ne)
+        # Sum the split sizes of all experts, per peer
+        receive_size_per_peer = out_splits.sum(1)
+        out_chunks = []  # (nranks,)
+        for i in range(self.world_size):
+            out_chunks.append(
+                torch.empty(
+                    receive_size_per_peer[i].item(), dtype=dtype, device=self.device
+                )
+            )
+
+        # All-to-all
+        dist.all_to_all(out_chunks, inp_chunks_t)
+
+        # Concatenate the output chunks received from all peers
+        out_expected = torch.cat(out_chunks)
+        self.assertEqual(out_expected.shape[0], out_numel)
+
+        # Check data
+        torch.testing.assert_close(out_expected, out[:out_numel])
+
 
 if __name__ == "__main__":
     run_tests()
