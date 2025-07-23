@@ -275,7 +275,7 @@ def _get_edge_or_node_to_group_id(
 
             _update_shared_with(input_edge, qspec, shared_with_map)
 
-    # now that we get the sharing relations between all edges and nodes, we can assingn group ids
+    # now that we get the sharing relations between all edges and nodes, we can assign group ids
     cur_group_id = 0
     edge_or_node_to_group_id: dict[EdgeOrNode, int] = {}
     for edge_or_node in shared_with_map.keys():

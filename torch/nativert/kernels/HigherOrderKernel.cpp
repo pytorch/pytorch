@@ -6,8 +6,6 @@
 
 namespace torch::nativert {
 
-using torch::nativert::Graph;
-
 HigherOrderKernel::HigherOrderKernel(
     const Node* node,
     std::vector<std::unique_ptr<GraphExecutorBase>> graphExecutors)
@@ -26,7 +24,7 @@ HigherOrderKernel::HigherOrderKernel(
     opType_ = OpType::WHILE_LOOP;
     // Checking torch.while_loop schema is as expected:
     // torch.while_loop(Graph cond, Graph body, Tensor[] args, Tensor[]
-    // additonal) -> Tensor[]
+    // additional) -> Tensor[]
     TORCH_CHECK_EQ(node_->attributes().size(), 2);
     TORCH_CHECK_EQ(node_->inputs().size(), 2);
   } else if (opName == "run_const_graph") {

@@ -4,6 +4,7 @@
 // 1 bit for the sign, 8 bits for the exponent and 7 bits for the mantissa.
 
 #include <c10/macros/Macros.h>
+#include <c10/util/bit_cast.h>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -67,13 +68,7 @@ inline C10_HOST_DEVICE uint16_t round_to_nearest_even(float src) {
 #endif
     return UINT16_C(0x7FC0);
   } else {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    union {
-      uint32_t U32; // NOLINT(facebook-hte-BadMemberName)
-      float F32; // NOLINT(facebook-hte-BadMemberName)
-    };
-
-    F32 = src;
+    const uint32_t U32 = c10::bit_cast<uint32_t>(src);
     uint32_t rounding_bias = ((U32 >> 16) & 1) + UINT32_C(0x7FFF);
     return static_cast<uint16_t>((U32 + rounding_bias) >> 16);
   }
@@ -111,9 +106,7 @@ struct alignas(2) BFloat16 {
 #endif
 };
 
-C10_API inline std::ostream& operator<<(
-    std::ostream& out,
-    const BFloat16& value) {
+inline std::ostream& operator<<(std::ostream& out, const BFloat16& value) {
   out << (float)value;
   return out;
 }
