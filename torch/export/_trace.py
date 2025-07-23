@@ -49,15 +49,13 @@ from torch._export.utils import (
 )
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
+from torch._functorch._aot_autograd.graph_capture_wrappers import create_functional_call
 from torch._functorch._aot_autograd.input_output_analysis import (
     _graph_input_names,
     _graph_output_names,
 )
 from torch._functorch._aot_autograd.schemas import GraphSignature
 from torch._functorch._aot_autograd.subclass_utils import get_subclass_typing_container
-from torch._functorch._aot_autograd.traced_function_transforms import (
-    create_functional_call,
-)
 from torch._functorch._aot_autograd.utils import (
     create_tree_flattened_fn,
     register_buffer_assignment_hook,
@@ -1725,6 +1723,7 @@ def _export_to_aten_ir_make_fx(
             gm.graph.eliminate_dead_code(_is_impure)
 
         # create graph signature
+        assert out_spec.spec is not None, "out_spec.spec is None!"
         input_names = _graph_input_names(gm)
         output_names = _graph_output_names(gm)
         sig = GraphSignature(
@@ -1739,7 +1738,7 @@ def _export_to_aten_ir_make_fx(
             buffers_to_mutate={},
             user_inputs_to_mutate={},
             in_spec=in_spec,
-            out_spec=out_spec,  # type: ignore[arg-type]
+            out_spec=out_spec.spec,
             backward_signature=None,
             input_tokens=[],
             output_tokens=[],
