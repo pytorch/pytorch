@@ -492,7 +492,7 @@ Optimizing memory usage  with ``PYTORCH_CUDA_ALLOC_CONF``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Use of a caching allocator can interfere with memory checking tools such as
-``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
+``compute-sanitizer``.  To debug memory errors using ``compute-sanitizer``, set
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
 
 The behavior of the caching allocator can be controlled via the environment variable
