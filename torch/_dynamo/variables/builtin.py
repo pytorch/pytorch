@@ -294,9 +294,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.cache
-    def _binops() -> (
-        dict[Callable[..., object], tuple[list[str], Callable[..., object]]]
-    ):
+    def _binops() -> dict[
+        Callable[..., object], tuple[list[str], Callable[..., object]]
+    ]:
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
             operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
@@ -1037,11 +1037,11 @@ class BuiltinVariable(VariableTracker):
         # insert handling for torch function here
         from .builder import SourcelessBuilder
         from .torch_function import (
+            _ensure_builtin_map_populated,
             BUILTIN_TO_TENSOR_FN_MAP,
             BUILTIN_TO_TENSOR_RFN_MAP,
             can_dispatch_torch_function,
             dispatch_torch_function,
-            _ensure_builtin_map_populated,
         )
 
         if can_dispatch_torch_function(tx, args, kwargs):
