@@ -2502,6 +2502,16 @@
   ],
   "GB0251": [
     {
+      "Gb_type": "Unsupported output type for nonstrict_trace-ed function",
+      "Context": "Function: {fn.__name__}",
+      "Explanation": "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, list) are allowed as output. The result of this call contains an unsupported type.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0252": [
+    {
       "Gb_type": "could not find name in object's mro",
       "Context": "name={name}, object type={type(self.value)}, mro={type(self.value).__mro__}",
       "Explanation": "Could not find name `{name}` in mro {type(self.value).__mro__}",
@@ -2511,7 +2521,7 @@
       ]
     }
   ],
-  "GB0252": [
+  "GB0253": [
     {
       "Gb_type": "call_method on generator",
       "Context": "object={self.value}, method={name}, args={args}, kwargs={kwargs}",
@@ -2523,7 +2533,7 @@
       ]
     }
   ],
-  "GB0253": [
+  "GB0254": [
     {
       "Gb_type": "non-const setattr name on user-defined object",
       "Context": "object={self}, name={name}, value={value}",
@@ -2533,7 +2543,7 @@
       ]
     }
   ],
-  "GB0254": [
+  "GB0255": [
     {
       "Gb_type": "attempted to call sourceless user-defined object as a method",
       "Context": "object={self.value}, function={func}, args={args}, kwargs={kwargs}",
@@ -2543,7 +2553,7 @@
       ]
     }
   ],
-  "GB0255": [
+  "GB0256": [
     {
       "Gb_type": "User-defined object with non-function __getattr__",
       "Context": "object={self.value}, name={name}, getattr_fn={getattr_fn}",
@@ -2553,7 +2563,7 @@
       ]
     }
   ],
-  "GB0256": [
+  "GB0257": [
     {
       "Gb_type": "TypedDict with optional keys",
       "Context": "str(self.value)",
@@ -2564,7 +2574,7 @@
       ]
     }
   ],
-  "GB0257": [
+  "GB0258": [
     {
       "Gb_type": "collections.deque() with bad arguments",
       "Context": "args={args}, kwargs={kwargs}",
@@ -2575,7 +2585,7 @@
       ]
     }
   ],
-  "GB0258": [
+  "GB0259": [
     {
       "Gb_type": "collections.deque() with bad iterable argument",
       "Context": "args={args}, kwargs={kwargs}",
@@ -2587,7 +2597,7 @@
       ]
     }
   ],
-  "GB0259": [
+  "GB0260": [
     {
       "Gb_type": "missing args to functools.partial",
       "Context": "",
@@ -2598,7 +2608,7 @@
       ]
     }
   ],
-  "GB0260": [
+  "GB0261": [
     {
       "Gb_type": "User-defined object method with non-function __func__",
       "Context": "object={self.value}, name={name}, method={dynamic_subobj}, method.__self__={dynamic_subobj.__self__}, method.__func__={dynamic_subobj.__func__}",
@@ -2608,7 +2618,7 @@
       ]
     }
   ],
-  "GB0261": [
+  "GB0262": [
     {
       "Gb_type": "unsupported contextlib.* API",
       "Context": "{self.value}",
@@ -2618,7 +2628,7 @@
       ]
     }
   ],
-  "GB0262": [
+  "GB0263": [
     {
       "Gb_type": "attempted to trace contextlib.contextmanager",
       "Context": "args={args}",
