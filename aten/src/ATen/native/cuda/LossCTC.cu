@@ -558,7 +558,7 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
     scalar_t& res = gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * c];
     if (t < input_length && (! zero_infinity || nll != INFINITY)) {
       scalar_t lp = log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * c];
-      res = (std::exp(lp)-std::exp(res + nll - lp)) * gr;
+      res = (-std::exp(res + nll - lp)) * gr;
     }
     else {
       res = 0.;
