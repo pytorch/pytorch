@@ -1816,6 +1816,60 @@ def forward(self, x):
                 self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
         self.assertEqual(counter, 1)
 
+    def test_unbacked_range_serdes(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                torch._check_is_size(n, max=y.size(0) - 1)
+                return torch.empty(n), y[n]
+
+        ep = torch.export.export(
+            Foo(),
+            (torch.tensor([5]), torch.randn(10)),
+            dynamic_shapes={
+                "x": None,
+                "y": (Dim.DYNAMIC,),
+            },
+        )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+
+        # pre-serialize ep
+        pre_shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in ep.graph.nodes]
+        ).shape_env
+        post_shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in loaded_ep.graph.nodes]
+        ).shape_env
+        self.assertEqual(pre_shape_env.var_to_range, post_shape_env.var_to_range)
+
+    def test_backed_size_oblivious_serdes(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y + z.item()
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            ep = torch.export.export(
+                Foo(),
+                (torch.randn(1), torch.randn(1), torch.tensor([5])),
+                dynamic_shapes={
+                    "x": (Dim.DYNAMIC,),
+                    "y": (Dim.DYNAMIC,),
+                    "z": None,
+                },
+            )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in loaded_ep.graph.nodes]
+        ).shape_env
+        s0 = next(iter(ep.graph.nodes)).meta["val"].size(0)
+        self.assertEqual(shape_env.var_to_range[s0.node.expr].lower, 0)
+
 
 if __name__ == "__main__":
     run_tests()
