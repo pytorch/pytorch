@@ -16,12 +16,16 @@ from parameterized import parameterized_class
 
 import torch
 from torch._inductor.codecache import get_kernel_bin_format
-from torch._inductor.package import AOTICompiledModel, load_package, package_aoti
+from torch._inductor.package import load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_cache
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
-from torch.export.pt2_archive._package import load_pt2, load_weights_to_pt2_contents
+from torch.export.pt2_archive._package import (
+    AOTICompiledModel,
+    load_pt2,
+    load_weights_to_pt2_contents,
+)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -152,6 +156,7 @@ class TestAOTInductorPackage(TestCase):
             check=True,
         )
         subprocess.run(["make"], cwd=build_path, check=True)
+
         result = subprocess.run(
             ["./build/main"],
             cwd=base_dir,
@@ -462,15 +467,61 @@ class TestAOTInductorPackage(TestCase):
                     if self.device == GPU_TYPE:
                         self.assertEqual(
                             result.stdout,
-                            "output_tensor1 2  2  2\n 2  2  2\n 2  2  2\n[ CUDAFloatType{3,3} ]\noutput_tensor2 0  0  0\n"
+                            "output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ CUDAFloatType{3,3} ]\noutput_tensor2\n 0  0  0\n"
                             " 0  0  0\n 0  0  0\n[ CUDAFloatType{3,3} ]\n",
                         )
                     else:
                         self.assertEqual(
                             result.stdout,
-                            "output_tensor1 2  2  2\n 2  2  2\n 2  2  2\n[ CPUFloatType{3,3} ]\noutput_tensor2 0  0  0\n"
+                            "output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ CPUFloatType{3,3} ]\noutput_tensor2\n 0  0  0\n"
                             " 0  0  0\n 0  0  0\n[ CPUFloatType{3,3} ]\n",
                         )
+
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
+    @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @skipIfRocm  # doesn't support multi-arch binary
+    @skipIfXpu  # doesn't support multi-arch binary
+    @torch._inductor.config.patch("test_configs.use_libtorch", True)
+    def test_compile_with_exporter_weights(self):
+        self.check_package_cpp_only()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return x
+
+        def default(*args, **kwargs):
+            return None
+
+        example_inputs = (torch.ones(3, 3).to(self.device),)
+
+        package = _ExportPackage()
+        m1 = Model().to(self.device)
+        exporter1 = package._exporter("Model", m1)._define_overload("default", default)
+        exporter1(*example_inputs)
+        expected_res = m1(*example_inputs)
+
+        package_example_inputs = True
+        with (
+            tempfile.TemporaryDirectory() as tmp_dir,
+        ):
+            package._compiled_and_package(
+                tmp_dir + "/package.pt2", True, package_example_inputs
+            )
+
+            # Test compiling generated files
+            self.cmake_compile_and_run(tmp_dir)
+            tensor_model = torch.load(
+                tmp_dir + "/output_tensor1.pt", weights_only=False
+            )
+            true_res = next(iter(tensor_model.parameters()))
+            self.assertEqual(expected_res, true_res)
 
     def test_metadata(self):
         class Model(torch.nn.Module):

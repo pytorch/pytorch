@@ -193,6 +193,9 @@ def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> list
     return [s is None for s in lst]
 
 
+# Intended to make it easier to define function that is
+# either (AOTInput -> AOTInput) or (AOTOutput -> AOTOutput)
+# but not the other combos
 AOTDescriptor = TypeVar("AOTDescriptor", AOTInput, AOTOutput)
 
 
@@ -216,7 +219,7 @@ def unwrap_tensor_subclasses(
     append_symints: bool,
 ) -> tuple[list[FxValue], list[AOTDescriptor]]:
     def flatten_subclass(
-        t: Union[FxValue],
+        t: FxValue,
         desc: AOTDescriptor,
         *,
         out: tuple[list[FxValue], list[AOTDescriptor]],

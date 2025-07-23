@@ -134,6 +134,8 @@ def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     for i, placement in enumerate(spec.placements):
         if placement.is_shard():
             shard_dim = cast(Shard, placement).dim
+            if shard_dim >= len(shape):
+                return False
             shards_map[shard_dim] *= spec.mesh.size(i)
 
     for i, dim_size in enumerate(shape):

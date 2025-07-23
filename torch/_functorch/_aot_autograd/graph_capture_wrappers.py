@@ -404,7 +404,9 @@ def create_joint(
         return final_outs, (
             outs_descs,
             [
-                GradAOTOutput(desc) if i else None
+                # TODO: ideally we do know this is DifferentiableAOTInput
+                # but this is quite an involved refactor
+                GradAOTOutput(desc) if i else None  # type: ignore[arg-type]
                 for i, desc in zip(inputs_needs_grads, primals_descs)
             ],
         )
@@ -1225,17 +1227,10 @@ def aot_dispatch_subclass(
         with maybe_enable_thunkify():
             return inner_fn(flat_fn_maybe_joint, primals, use_trace_joint=False)
 
-    def metadata_fn(*primals: FxValue) -> list[FxValue]:
+    def metadata_fn(*primals: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
         @wraps(fw_only)
         def inner_fw_only(*args):
-            out = fw_only(*args)
-            # I suppose this can potentially false positive if there are no
-            # outputs
-            assert pytree.tree_any(
-                lambda x: isinstance(x, AOTOutput), out
-            ) or not pytree.tree_any(lambda x: isinstance(x, torch.Tensor), out), out
-            # The descs here don't matter, I think!
-            return out
+            return call_and_expect_output_descs(fw_only, args)
 
         return inner_fn(inner_fw_only, primals, use_trace_joint=False)
 

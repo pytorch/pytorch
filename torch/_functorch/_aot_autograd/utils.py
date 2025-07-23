@@ -8,7 +8,8 @@ import operator
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, Union, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -517,7 +518,12 @@ def saved_tensors_hooks_are_inlineable(hooks) -> bool:
     )
 
 
-def without_output_descs(f):
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+_S = TypeVar("_S")
+
+
+def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
     @wraps(f)
     def inner(*args, **kwargs):
         return f(*args, **kwargs)[0]
