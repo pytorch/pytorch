@@ -12,11 +12,11 @@
 
 ## Overview
 
-{ref}`torch.export <torch.export>` engine is leveraged to produce a traced graph representing only the Tensor computation of the function in an 
-Ahead-of-Time (AOT) fashion. The resulting traced graph (1) produces normalized operators in the functional 
-ATen operator set (as well as any user-specified custom operators), (2) has eliminated all Python control 
-flow and data structures (with certain exceptions), and (3) records the set of shape constraints needed to 
-show that this normalization and control-flow elimination is sound for future inputs, before it is finally 
+{ref}`torch.export <torch.export>` engine is leveraged to produce a traced graph representing only the Tensor computation of the function in an
+Ahead-of-Time (AOT) fashion. The resulting traced graph (1) produces normalized operators in the functional
+ATen operator set (as well as any user-specified custom operators), (2) has eliminated all Python control
+flow and data structures (with certain exceptions), and (3) records the set of shape constraints needed to
+show that this normalization and control-flow elimination is sound for future inputs, before it is finally
 translated into an ONNX graph.
 
 In addition, during the export process, memory usage is significantly reduced.

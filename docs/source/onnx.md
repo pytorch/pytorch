@@ -42,14 +42,25 @@ torch.onnx.export(
 
 *The torch.export-based ONNX exporter is the newest exporter for PyTorch 2.6 and newer*
 
-{ref}`torch.export <torch.export>` engine is leveraged to produce a traced graph representing only the Tensor computation of the function in an 
-Ahead-of-Time (AOT) fashion. The resulting traced graph (1) produces normalized operators in the functional 
-ATen operator set (as well as any user-specified custom operators), (2) has eliminated all Python control 
-flow and data structures (with certain exceptions), and (3) records the set of shape constraints needed to 
-show that this normalization and control-flow elimination is sound for future inputs, before it is finally 
+{ref}`torch.export <torch.export>` engine is leveraged to produce a traced graph representing only the Tensor computation of the function in an
+Ahead-of-Time (AOT) fashion. The resulting traced graph (1) produces normalized operators in the functional
+ATen operator set (as well as any user-specified custom operators), (2) has eliminated all Python control
+flow and data structures (with certain exceptions), and (3) records the set of shape constraints needed to
+show that this normalization and control-flow elimination is sound for future inputs, before it is finally
 translated into an ONNX graph.
 
-{doc}`Learn more about the torch.export-based ONNX Exporter <onnx_pt2>`
+{doc}`Learn more about the torch.export-based ONNX Exporter <onnx_export>`
+
+## Frequently Asked Questions
+
+Q: I have exported my LLM model, but its input size seems to be fixed?
+
+  The tracer records the shapes of the example inputs. If the model should accept
+  inputs of dynamic shapes, set ``dynamic_shapes`` when calling :func:`torch.onnx.export`.
+
+Q: How to export models containing loops?
+
+  See {ref}`torch.cond <cond>`.
 
 ## Contributing / Developing
 
@@ -57,11 +68,41 @@ The ONNX exporter is a community project and we welcome contributions. We follow
 [PyTorch guidelines for contributions](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md), but you might
 also be interested in reading our [development wiki](https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter).
 
+
+## Python API
+
+.. automodule:: torch.onnx
+
+### Functions
+
+.. autofunction:: export
+    :noindex:
+
+```{eval-rst}
+.. collapse:: Deprecated API (click to expand)
+   :class: warning
+
+   .. deprecated:: 2.6
+      These functions are deprecated and will be removed in a future version.
+
+   .. autofunction:: register_custom_op_symbolic
+   .. autofunction:: unregister_custom_op_symbolic
+   .. autofunction:: select_model_mode_for_export
+   .. autofunction:: is_in_onnx_export
+
+   .. autosummary::
+       :toctree: generated
+       :nosignatures:
+       :template: classtemplate.rst
+
+       JitScalarType
+```
+
 ```{eval-rst}
 .. toctree::
     :hidden:
 
-    onnx_pt2
+    onnx_export
     onnx_ops
     onnx_verification
 ```
@@ -88,29 +129,3 @@ for tracking purposes -->
 .. py:module:: torch.onnx.symbolic_opset9
 .. py:module:: torch.onnx.utils
 ```
-
-Python API
-----------
-
-.. automodule:: torch.onnx
-
-Functions
-^^^^^^^^^
-
-.. autofunction:: export
-    :noindex:
-.. autofunction:: register_custom_op_symbolic
-.. autofunction:: unregister_custom_op_symbolic
-.. autofunction:: select_model_mode_for_export
-.. autofunction:: is_in_onnx_export
-    :noindex:
-
-Classes
-^^^^^^^
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    JitScalarType
