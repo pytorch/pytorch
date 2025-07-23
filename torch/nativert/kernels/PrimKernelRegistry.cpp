@@ -10,7 +10,7 @@
 
 namespace torch::nativert {
 
-C10_DEFINE_REGISTRY(PrimKernelRegistry, OpKernel, const Node*);
+C10_DEFINE_REGISTRY(PrimKernelRegistry, OpKernel, const Node*)
 
 namespace {
 
@@ -65,11 +65,11 @@ REGISTER_PRIM_KERNEL("prim.ListUnpack", prim_listunpack, {
   for (const auto& [i, ivalue] : c10::enumerate(inputListRef)) {
     KernelOutput(i) = ivalue;
   }
-});
+})
 
 // Noop for input and output
-REGISTER_PRIM_KERNEL("prim.Input", prim_input, {});
-REGISTER_PRIM_KERNEL("prim.Output", prim_output, {});
+REGISTER_PRIM_KERNEL("prim.Input", prim_input, {})
+REGISTER_PRIM_KERNEL("prim.Output", prim_output, {})
 
 namespace {
 

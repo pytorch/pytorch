@@ -63,9 +63,10 @@ _META_FUNCTIONS = {
     "recv_any_source_": lambda *args: create_fakework(args, return_first_arg=False),
 }
 
-lib_impl = torch.library.Library("c10d", "IMPL")  # noqa: TOR901
-for op, meta_func in _META_FUNCTIONS.items():
-    lib_impl.impl(op, meta_func, "Meta")
+if not torch._running_with_deploy():
+    lib_impl = torch.library.Library("c10d", "IMPL")  # noqa: TOR901
+    for op, meta_func in _META_FUNCTIONS.items():
+        lib_impl.impl(op, meta_func, "Meta")
 
 # List of collective operation functions including functional collectives
 # Note: The following collectives might be deprecated soon hence not adding them
