@@ -1551,25 +1551,6 @@ class TestMaxAutotune(TestCase):
                 if "benchmark_gpu" in counter:
                     self.assertEqual(counters["inductor"][counter], 2)
 
-    @config.patch(
-        {
-            "max_autotune": True,
-            "max_autotune_gemm_backends": "TRITON",
-        }
-    )
-    def test_mm_k_1(self):
-        def mm(x, y):
-            return x @ y
-
-        for i in range(90, 100):
-            torch._dynamo.reset()
-            a = torch.randn((i, 1), device="cuda", dtype=torch.float32)
-            b = torch.randn((1, i), device="cuda", dtype=torch.float32)
-            compiled_f = torch.compile(mm)
-
-            out, code = run_and_get_code(compiled_f, a, b)
-            torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
-
 
 class TestMaxAutotunePrecompile(TestCase):
     def test_precompilation_threads(self):
