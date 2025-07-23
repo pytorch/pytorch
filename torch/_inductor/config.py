@@ -485,6 +485,7 @@ fast_autotune = True
 def parse_matmul_gemm_autotune_benchmark_space() -> Union[
     int, Literal["SAME", "DEFAULT"]
 ]:
+    global fast_autotune
     value = os.environ.get("TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE")
     if value is not None:
         value = value.upper()
@@ -494,9 +495,9 @@ def parse_matmul_gemm_autotune_benchmark_space() -> Union[
         try:
             return int(value)
         except ValueError:
-            if torch._inductor.config.fast_autotune:
-                return 1
-            return "SAME"
+            pass
+    if fast_autotune:
+        return 1
     return "SAME"
 
 

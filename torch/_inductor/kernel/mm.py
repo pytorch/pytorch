@@ -714,6 +714,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     dtype_size=dtype.itemsize,
                 )
             )
+            mm_heuristics = V.choices.get_config_heuristics(device_type)
+            mm_configs = mm_heuristics.get_mm_configs()
             default_topk = len(
                 list(
                     mm_configs(
