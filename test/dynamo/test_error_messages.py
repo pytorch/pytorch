@@ -708,6 +708,7 @@ from user code:
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test___build_class__(self):
         x = 3
+
         def fn():
             class Foo:
                 def __init__(self):
