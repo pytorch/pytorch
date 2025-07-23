@@ -86,12 +86,12 @@ def tma_options() -> dict[str, Any]:
 
 
 def persistent_mm_options(mat1, mat2):
-    res = dict(
-        A_ROW_MAJOR=not mat1.layout.is_transposed(),
-        B_ROW_MAJOR=not mat2.layout.is_transposed(),
-        NUM_SMS=get_num_sms(),
-        TMA_SIZE=TMA_DESCRIPTOR_SIZE,
-    )
+    res = {
+        "A_ROW_MAJOR": not mat1.layout.is_transposed(),
+        "B_ROW_MAJOR": not mat2.layout.is_transposed(),
+        "NUM_SMS": get_num_sms(),
+        "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
+    }
     res.update(tma_options())
     return res
 
@@ -157,10 +157,10 @@ def mm_args(
         *b2, n, k2 = mat2.get_size()
     else:
         *b2, k2, n = mat2.get_size()
-    b = [V.graph.sizevars.guard_equals(a, b) for a, b in zip(b1, b2)]
+    b = [V.graph.sizevars.check_equals_and_simplify(a, b) for a, b in zip(b1, b2)]
     if use_4x2_dim:
         k2 = k2 * 2
-    k = V.graph.sizevars.guard_equals(k1, k2)
+    k = V.graph.sizevars.check_equals_and_simplify(k1, k2)
     if layout is None:
         from torch._inductor.ir import FixedLayout
 

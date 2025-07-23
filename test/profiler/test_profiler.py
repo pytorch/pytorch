@@ -27,6 +27,7 @@ import torch.nn as nn
 import torch.optim
 import torch.utils.data
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
+from torch._inductor.utils import is_big_gpu
 from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
@@ -983,6 +984,50 @@ class TestProfiler(TestCase):
             sort_by="self_cuda_time_total", row_limit=-1
         )
         self.assertIn("Total MFLOPs", profiler_output)
+
+    def test_override_time_units(self):
+        US_IN_SECOND = 1000.0 * 1000.0
+        US_IN_MS = 1000.0
+
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(40, 16, 18, 260)
+        with _profile() as prof:
+            model(inputs)
+
+        profiler_output = prof.key_averages().table(time_unit="s")
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+        for event in prof.key_averages():
+            cpu_time_str_s = f"{event.cpu_time / US_IN_SECOND:.3f}s"
+            cpu_time_total_str_s = f"{event.cpu_time_total / US_IN_SECOND:.3f}s"
+            self.assertTrue(cpu_time_str_s in profiler_output)
+            self.assertTrue(cpu_time_total_str_s in profiler_output)
+
+        profiler_output = prof.key_averages().table(time_unit="ms")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+        for event in prof.key_averages():
+            cpu_time_str_ms = f"{event.cpu_time / US_IN_MS:.3f}ms"
+            cpu_time_total_str_ms = f"{event.cpu_time_total / US_IN_MS:.3f}ms"
+            self.assertTrue(cpu_time_str_ms in profiler_output)
+            self.assertTrue(cpu_time_total_str_ms in profiler_output)
+
+        profiler_output = prof.key_averages().table(time_unit="us")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+        for event in prof.key_averages():
+            cpu_time_str_us = f"{event.cpu_time:.3f}us"
+            cpu_time_total_str_us = f"{event.cpu_time_total:.3f}us"
+            self.assertTrue(cpu_time_str_us in profiler_output)
+            self.assertTrue(cpu_time_total_str_us in profiler_output)
 
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
     @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
@@ -3044,6 +3089,53 @@ aten::mm""",
             assert len(key_averages) == 3
             assert "Overload Name" in key_averages.table()
             validate_json(prof)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requries CUDA")
+    def test_profiler_debug_autotuner(self):
+        """
+        This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.
+        """
+        if not is_big_gpu():
+            raise unittest.SkipTest("requires large gpu to max-autotune")
+        in1 = torch.randn((256, 512), device="cuda", dtype=torch.float16)
+        in2 = torch.randn((512, 768), device="cuda", dtype=torch.float16)
+
+        def mm():
+            return torch.mm(in1, in2)
+
+        pb_mm = torch.compile(
+            mm,
+            options={
+                "benchmark_kernel": True,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "profile_bandwidth": True,
+            },
+        )
+        comp_mm = torch.compile(
+            mm,
+            options={
+                "benchmark_kernel": True,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+
+        with profile() as prof1:
+            pb_mm()
+        with profile() as prof2:
+            comp_mm()
+
+        def names(prof):
+            return {
+                ev.name
+                for ev in prof.events()
+                if "mm" in ev.name or "triton" in ev.name
+            }
+
+        n1 = names(prof1)
+        n2 = names(prof2)
+        self.assertEqual(n1, n2)
 
 
 if __name__ == "__main__":
