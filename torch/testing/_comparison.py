@@ -673,7 +673,7 @@ class TensorLikePair(Pair):
         check_dtype: bool = True,
         check_layout: bool = True,
         check_stride: bool = False,
-        tensor_similarity: bool = False, 
+        dice_distance: bool = False, 
         **other_parameters: Any,
     ):
         actual, expected = self._process_inputs(
@@ -893,7 +893,7 @@ class TensorLikePair(Pair):
                 )
 
             compare_fn = bitwise_comp
-        elif self.tensor_similarity:
+        elif self.dice_distance:
             compare_fn = self._compare_tensors_close
         else:
             compare_fn = self._compare_regular_values_close
@@ -1097,7 +1097,8 @@ class TensorLikePair(Pair):
             )
         self._fail(AssertionError, msg)
     
-    def _compare_tensors_close(self,
+    def _compare_tensors_close(
+        self,
         actual: torch.Tensor,
         expected: torch.Tensor,
         *,
@@ -1106,11 +1107,11 @@ class TensorLikePair(Pair):
         equal_nan: bool,
         identifier: Optional[Union[str, Callable[[str], str]]] = None,
     ) -> None:
-        """Checks if two tensors are close overall up to a desired tolerance."""
+        """Checks if two tensors are close overall up to a desired tolerance through dice distance."""
 
         def _tensors_close(actual, expected):
-            numerator = torch.sum(actual * expected)
-            denominator = torch.sum(actual * actual) + torch.sum(expected * expected)
+            numerator = torch.sum(torch.mul(actual, expected))
+            denominator = torch.sum(torch.mul(actual, actual)) + torch.sum(torch.mul(expected, expected))
             if denominator == 0:
                 similarity_score = 1
             similarity_score = 1 - (numerator / denominator)
@@ -1363,7 +1364,7 @@ def assert_close(
     check_layout: bool = True,
     check_stride: bool = False,
     msg: Optional[Union[str, Callable[[str], str]]] = None,
-    tensor_similarity: bool = False, 
+    dice_distance: bool = False, 
 ):
     r"""Asserts that ``actual`` and ``expected`` are close.
 
@@ -1617,7 +1618,7 @@ def assert_close(
         check_layout=check_layout,
         check_stride=check_stride,
         msg=msg,
-        tensor_similarity=tensor_similarity,
+        dice_distance=dice_distance,
     )
 
     if error_metas:
@@ -1672,4 +1673,5 @@ def assert_allclose(
         check_dtype=False,
         check_stride=False,
         msg=msg or None,
+        dice_distance=False,
     )
