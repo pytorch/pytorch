@@ -1799,7 +1799,7 @@
   self: zeros_like(grad)
   result: auto_element_wise
 
-- name: hash_tensor(Tensor self, int[1] dim=[], bool keepdim=False, int mode=0) -> Tensor
+- name: hash_tensor(Tensor self, int[1] dim=[], *, bool keepdim=False, int mode=0) -> Tensor
   output_differentiability: [False]
 
 # DO NOT define a backward for to_dense
