@@ -13626,6 +13626,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 FileCheck().check("cpp_fused_add_0").run(code)
             self.assertEqual(refe_out, test_out)
 
+    def test_triton_kernel_bool_param(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        from torch.testing._internal.triton_utils import add_kernel_with_boolean_param
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                out = torch.zeros_like(x)
+                add_kernel_with_boolean_param[1,](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    out_ptr=out,
+                    n_elements=x.numel(),
+                    add_xy=True,
+                    BLOCK_SIZE=1,
+                )
+                return out
+
+        inputs = (torch.randn(4, device=self.device),)
+        self.common(Model(), inputs)
+
 
 @dataclasses.dataclass
 class TestFailure:
