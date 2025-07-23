@@ -168,7 +168,7 @@ jobs:
           MAX_JOBS: 32
         run: |
           pip install cement==3.0.14
-          python .github/test/build_cli/cli.py external --target vllm run
+          python3 .github/test/build_cli/cli.py external --target vllm run
           ls
       - name: Archive artifacts into zip
         run: |
