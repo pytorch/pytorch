@@ -191,7 +191,7 @@ class AOTInductorTestsTemplate:
             )
 
     def test_triton_kernel_bool_param(self):
-        if self.device != GPU_TYPE:
+        if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
 
         class Model(torch.nn.Module):
