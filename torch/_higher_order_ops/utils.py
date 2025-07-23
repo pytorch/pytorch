@@ -859,7 +859,11 @@ def check_input_alias_and_mutation_return_outputs(
             # the runtime assertions for unbacked symbols.
             new_fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=_get_shape_env(fake_args),
-                allow_non_fake_inputs=False,
+                # In executorch, there's an scalar_to_tensor pass that turns scalar inputs into a tensor constant
+                # e.g. add(a, 1) 1 is turned into a tensor, which becomes a constant tensor attribute in the graph.
+                # We allow non fake inputs for this purpose. This is fine for mutation detection purpose:
+                # inputs are all fake and all mutations/aliasing are still detected.
+                allow_non_fake_inputs=True,
             )
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.

@@ -255,9 +255,9 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
 
     - ``all``: combined statistics across all memory pools.
     - ``large_pool``: statistics for the large allocation pool
-      (as of June 2025, for size >= 1MB allocations).
+      (as of October 2019, for size >= 1MB allocations).
     - ``small_pool``: statistics for the small allocation pool
-      (as of June 2025, for size < 1MB allocations).
+      (as of October 2019, for size < 1MB allocations).
 
     Metric type:
 
