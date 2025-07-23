@@ -385,7 +385,7 @@ def smoke_test_compile(device: str = "cpu") -> None:
     x_pt2 = torch.compile(model, mode="max-autotune")(x)
 
 
-def test_nvshmem() -> None:
+def smoke_test_nvshmem() -> None:
     if not torch.cuda.is_available():
         print("CUDA is not available, skipping NVSHMEM test")
         return
@@ -501,6 +501,8 @@ def main() -> None:
         options.torch_compile_check,
         options.pypi_pkg_check,
     )
+
+    smoke_test_nvshmem()
 
 
 if __name__ == "__main__":
