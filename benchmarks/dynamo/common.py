@@ -447,9 +447,7 @@ def output_json(filename, headers, row):
 
 
 def maybe_detach(t: _T) -> _T:
-    vals, tree = pytree.tree_flatten(t)
-    vals = tuple(v.detach() if isinstance(v, torch.Tensor) else v for v in vals)
-    return pytree.tree_unflatten(vals, tree)
+    return pytree.tree_map_only(torch.Tensor, lambda v: v.detach(), t)
 
 
 def loss_return_hook(loss_fn: Callable[..., Any] = reduce_to_scalar_loss):
