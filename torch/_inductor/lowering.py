@@ -489,11 +489,11 @@ def broadcast_symbolic_shapes(a, b):
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
         if V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(y, 1), size_oblivious=True
+            sympy.Eq(y, 1), fallback_value=False
         ):
             output.append(x)
         elif V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(x, 1), size_oblivious=True
+            sympy.Eq(x, 1), fallback_value=False
         ):
             output.append(y)
         else:
@@ -939,26 +939,14 @@ def broadcast_tensors(*inputs):
     outputs = []
     for x in inputs:
         sizes = x.get_size()
-        if len(sizes) != len(target) or any(
-            (
-                (
-                    V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(a, 1), size_oblivious=True
-                    )
-                    and not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(b, 1), size_oblivious=True
-                    )
-                )
-                or (
-                    not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(a, 1), size_oblivious=True
-                    )
-                    and V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(b, 1), size_oblivious=True
-                    )
-                )
+
+        def is_length_one(size: sympy.Expr):
+            return V.graph.sizevars.shape_env.evaluate_expr(
+                sympy.Eq(size, 1), fallback_value=False
             )
-            for a, b in zip(sizes, target)
+
+        if len(sizes) != len(target) or any(
+            is_length_one(a) != is_length_one(b) for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -6692,7 +6680,6 @@ register_foreach_pointwise(aten._foreach_clamp_max.Scalar, minimum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
 register_foreach_pointwise(aten._foreach_copy, copy)
-foreach_copy = register_foreach_pointwise(aten._foreach_copy, copy)
 
 
 # these are only encountered as outputs of the graph
@@ -6730,9 +6717,6 @@ register_foreach_inplace(
 )
 register_foreach_inplace(
     aten._foreach_div_.Scalar, aten._foreach_div.Scalar, foreach_div_scalar
-)
-register_foreach_inplace(
-    aten._foreach_copy_.default, aten._foreach_copy.default, foreach_copy
 )
 
 
