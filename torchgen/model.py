@@ -84,6 +84,7 @@ FRAGMENT_NAMESPACES = {"quantized", "quantized_decomposed"}
 class DispatchKey(Enum):
     Undefined = 0
     CatchAll = Undefined
+    DummyKey = auto()  # Adding a dummy dispatch key
 
     FPGA = auto()
     MAIA = auto()
