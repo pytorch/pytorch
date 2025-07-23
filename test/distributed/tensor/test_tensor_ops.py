@@ -2,7 +2,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-import torch.distributed._functional_collectives as funcol
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -26,7 +25,7 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_aten_contiguous(self):
         # this op not covered by dtensor_ops
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
         self._test_op(
             mesh,
             lambda x: torch.ops.aten.contiguous(x),
@@ -35,7 +34,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_detach(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         tensor_to_detach = torch.randn(12, 8, requires_grad=True)
@@ -45,7 +44,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_clone(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         specs = [[Replicate()], [Shard(0)]]
         tensor_to_clone = torch.randn(12, 8, requires_grad=True)
         for spec in specs:
@@ -55,8 +54,48 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
 
     @with_comms
-    def test_contiguous(self):
+    def test_copy_(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # basic test
+        src_tensor = torch.randn((12, 12))
+        dst_tensor = torch.zeros(12, 12)
+        src_specs = [[Replicate()], [Shard(0)]]
+        dst_specs = [[Replicate()], [Shard(0)]]
+        for dst_spec, src_spec in zip(dst_specs, src_specs):
+            src_dtensor = distribute_tensor(src_tensor, device_mesh, dst_spec)
+            dst_dtensor = distribute_tensor(dst_tensor, device_mesh, src_spec)
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
+
+        # simple broadcasting
+        src_tensor = torch.randn((128,))
+        dst_tensor = torch.zeros(128, 128)
+        src_specs = [[Replicate()], [Shard(0)]]
+        dst_specs = [[Replicate()], [Shard(1)]]
+        for dst_spec, src_spec in zip(dst_specs, src_specs):
+            src_dtensor = distribute_tensor(src_tensor, device_mesh, src_spec)
+            dst_dtensor = distribute_tensor(dst_tensor, device_mesh, dst_spec)
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
+
+        # The src specs in this case are designed to not be compatible with the dst_specs, redistribute should happen
+        src_tensor = torch.randn((64, 1))
+        dst_tensor = torch.zeros(16, 32, 64, 128)
+        src_specs = [[Shard(1)], [Shard(1)], [Shard(1)], [Shard(1)]]
+        dst_specs = [[Replicate()], [Shard(0)], [Shard(1)], [Shard(2)]]
+        for dst_spec, src_spec in zip(dst_specs, src_specs):
+            src_dtensor = distribute_tensor(src_tensor, device_mesh, src_spec)
+            dst_dtensor = distribute_tensor(dst_tensor, device_mesh, dst_spec)
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.full_tensor(), dst_tensor)
+
+    @with_comms
+    def test_contiguous(self):
+        device_mesh = self.build_device_mesh()
         tensor = torch.rand(3, 5, 6, requires_grad=True)
         sharding = [Shard(0)]
         dist_tensor = DTensor.from_local(tensor, device_mesh, sharding)
@@ -82,7 +121,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_inplace_op(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
         input_tensor = torch.randn((12, 3), device=self.device_type)
         dt_to_add = distribute_tensor(input_tensor, mesh, [Shard(0)])
         dt_to_mul = dt_to_add.clone()
@@ -109,7 +148,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_op_out_variant(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
         input_tensor = torch.randn((12, 3), device=self.device_type)
         sharded_dt_input = distribute_tensor(input_tensor, mesh, [Shard(0)])
         expected_dt = sharded_dt_input.clone() + 3
@@ -130,7 +169,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_empty_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -141,7 +180,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_fill_inplace(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -153,7 +192,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_full_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -164,7 +203,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_ones_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -175,7 +214,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_ones_like_partial_sum(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Partial()]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -188,7 +227,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_fill_inplace_partial_sum(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Partial()]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -204,7 +243,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_zeros_like_partial_sum(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Partial()]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -217,7 +256,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_zero_inplace(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -229,7 +268,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_zeros_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -281,7 +320,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_equal(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor_1 = torch.ones(4, 4)
@@ -331,7 +370,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_new_full(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         global_tensor = torch.randn(12, 8)
@@ -358,7 +397,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_new_empty_strided(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         shard_dim = 1
@@ -403,7 +442,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_scatter(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         # case 1 all replicate: input replicated, index/src replicated, output replicated
@@ -437,7 +476,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_gather(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         # case 1 all replicate: input replicated, index replicated, output replicated
@@ -488,7 +527,7 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_index(self):
         meshes = [
-            DeviceMesh(self.device_type, list(range(self.world_size))),  # 1D mesh
+            self.build_device_mesh(),  # 1D mesh
             # TODO(@azzolini): un-comment when DTensorConverter supports N-D mesh
             # DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, -1)), # 2D mesh
         ]
@@ -638,7 +677,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_where_type_promotion(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))  # 1D mesh
+        mesh = self.build_device_mesh()  # 1D mesh
 
         specs = [[Shard(0)], [Replicate()]]
         for spec in specs:
@@ -650,7 +689,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_dtype_conversion(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
         local_tenor = torch.randn(2, 8, dtype=torch.bfloat16)
@@ -684,7 +723,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_slice(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))  # 1D mesh
+        mesh = self.build_device_mesh()  # 1D mesh
         comm_mode = CommDebugMode()
 
         shard_spec = [Shard(1)]
@@ -722,27 +761,20 @@ class DistTensorOpsTest(DTensorTestBase):
 
     def _test_split_on_partial(self, reduce_op: str, split_size: int, split_dim: int):
         torch.manual_seed(self.rank)
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        mesh = self.build_device_mesh()
 
         partial_tensor = torch.randn(8, 8, device=self.device_type)
-        replicate_tensor = partial_tensor.detach().clone()
-        replicate_tensor = funcol.all_reduce(
-            replicate_tensor, reduce_op, mesh
-        )  # all reduce to full tensor
-        replicate_tensor_list = replicate_tensor.split(split_size, dim=split_dim)
-
         partial_dt = DTensor.from_local(
             local_tensor=partial_tensor,
             device_mesh=mesh,
             placements=[Partial(reduce_op=reduce_op)],
         )
-        partial_dt_list = partial_dt.split(split_size, dim=split_dim)
-
-        replicate_dt_full_tensor_list = [dt.full_tensor() for dt in partial_dt_list]
-        for replicate_tensor, replicate_dt_full_tensor in zip(
-            replicate_tensor_list, replicate_dt_full_tensor_list
-        ):
-            self.assertEqual(replicate_tensor, replicate_dt_full_tensor)
+        self._test_op_on_dtensor(
+            torch.split,
+            partial_dt,
+            split_size,
+            dim=split_dim,
+        )
 
 
 if __name__ == "__main__":

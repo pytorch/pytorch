@@ -52,9 +52,14 @@ from ..create_parameter_op import (
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
-from ..exc import unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
-from ..source import CallFunctionNoArgsSource, SyntheticLocalSource
+from ..source import (
+    AttrSource,
+    CallFunctionNoArgsSource,
+    SyntheticLocalSource,
+    TorchSource,
+)
 from ..utils import (
     check_unspec_or_constant_args,
     guard_if_dyn,
@@ -137,6 +142,7 @@ constant_fold_functions_need_guards = [
     torch.cuda.is_initialized,
     torch.xpu.current_device,
     torch.xpu.is_initialized,
+    torch.autograd._profiler_enabled,
 ]
 
 constant_fold_functions = [
@@ -1154,6 +1160,44 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert ind >= 0 and ind < len(tx.symbolic_torch_function_state.mode_stack)
             return tx.symbolic_torch_function_state.mode_stack[ind]
 
+        @register(torch.get_device_module.__wrapped__)
+        def handle_get_device_module(self, tx, *args, **kwargs):
+            if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
+                unimplemented_v2(
+                    gb_type="improper torch.get_device_module arguments",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="torch.get_device_module accepts 1 optional argument `device`",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
+            try:
+                if kwargs:
+                    device = kwargs["device"].as_python_constant()
+                elif args:
+                    device = args[0].as_python_constant()
+                else:
+                    device = None
+                module = torch.get_device_module(device)
+            except Exception as e:
+                unimplemented_v2(
+                    gb_type="bad device argument to torch.get_device_module",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
+                    hints=[*graph_break_hints.USER_ERROR],
+                    from_exc=e,
+                )
+
+            # need to guard only on no-arg get_device_module
+            if device is None:
+                source = CallFunctionNoArgsSource(self.source)
+                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            # assumes `module` is in the form `torch.xyz`
+            new_source = AttrSource(
+                TorchSource(), module.__name__.rsplit(".", maxsplit=1)[-1]
+            )
+            return VariableTracker.build(tx, module, new_source)
+
         @register(torch.set_default_device)
         def handle_set_default_device(
             self, tx: "InstructionTranslator", *args, **kwargs
@@ -1315,12 +1359,27 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
             # the call and wrap output into a VariableTracker.
             proxy = tx.output.create_proxy("call_function", flat_apply, all_args, {})
-            out_vt = wrap_fx_proxy(tx, proxy)
-            # TODO support more output types
-            # Q: flat_apply will likely pytree_flatten the output for this, then
-            # how do we intercept the output before flatten, and wrap those?
-            # - Maybe we can have `flat_apply` return the output spec, so that
-            #   Dynamo can unflatten and wrap the result.
+            try:
+                # TODO support more output types once `flat_apply` supports
+                # pytree-able output types. We can have Dynamo trace through an
+                # unflatten call (just like we traced through a flatten above)
+                # to rebuild the actual output VT.
+                out_vt = wrap_fx_proxy(tx, proxy)
+            except (
+                # From `handle_traced_output`.
+                torch._dynamo.exc.Unsupported,
+                # From `flat_apply` assert on output type.
+                torch._dynamo.exc.TorchRuntimeError,
+            ):
+                unimplemented_v2(
+                    gb_type="Unsupported output type for nonstrict_trace-ed function",
+                    context=f"Function: {fn.__name__}",
+                    explanation=(
+                        "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, list)"
+                        " are allowed as output. The result of this call contains an unsupported type."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
 
             return out_vt
 
@@ -1335,12 +1394,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
             # constant fold
-            return ConstantVariable.create(
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
+            try:
+                return ConstantVariable.create(
+                    self.as_python_constant()(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    ),
+                )
+            except (OverflowError, TypeError, ValueError) as exc:
+                raise_observed_exception(
+                    type(exc),
+                    tx,
+                    args=list(map(ConstantVariable.create, exc.args)),
+                )
 
         if self.is_tensor_method():
             name = self.value.__name__
