@@ -183,6 +183,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "DEBUG_bucketing_passes_AFTER_SORT",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        ),
+    )
 
     GraphTransformObserver(gm, "move_constructors_to_cuda").apply_graph_pass(
         move_constructors_to_gpu
@@ -197,28 +207,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pass_name = "custom_backend_passes_" + device
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
-    # Keep these last, since they introduces mutation. Look at
-    # ./fx_passes/README.md for a discussion of mutation invariants.
-    GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
-        functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
-    )
-    GraphTransformObserver(
-        gm, "decompose_triton_kernel_wrapper_functional"
-    ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
-    GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
-        decompose_auto_functionalized
-    )
-    if not torch._dynamo.config.skip_fsdp_hooks:
-        GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
-            comms.reinplace_fsdp_all_gather
-        )
-    GraphTransformObserver(gm, "decompose_scan_to_while_loop").apply_gm_pass(
-        decompose_scan_to_while_loop
-    )
-    GraphTransformObserver(gm, "decompose_map_to_while_loop").apply_gm_pass(
-        decompose_map_to_while_loop
-    )
-
     collectives_bucketing: bool = False
     if config.bucket_reduce_scatters_fx != "none":
         from torch._inductor.fx_passes.bucketing import (
@@ -230,8 +218,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             config.bucket_reduce_scatters_fx_bucket_size_determinator
             or bucket_size_determinator
         )
+        from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
+
+        p = (
+            bucket_fsdp_reduce_scatter
+            if config.bucket_reduce_scatters_fx == "fsdp"
+            else bucket_reduce_scatter
+        )
         GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
-            lambda graph: bucket_reduce_scatter(graph.owning_module, d)
+            lambda graph: p(graph.owning_module, d)
         )
         collectives_bucketing = True
 
@@ -257,6 +252,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(graph.owning_module, d)
         )
         collectives_bucketing = True
+
     if collectives_bucketing:
         # Fx collectives bucketing passes require topological sort for the cases:
         # when bucketed collectives have users before the last collective in the bucket
@@ -289,6 +285,28 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # wait_ag1 = wait_bucket[1]
         # user1(wait_ag1)
         stable_topological_sort(gm.graph)
+
+    # Keep these last, since they introduces mutation. Look at
+    # ./fx_passes/README.md for a discussion of mutation invariants.
+    GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
+        functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
+    )
+    GraphTransformObserver(
+        gm, "decompose_triton_kernel_wrapper_functional"
+    ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
+    GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
+        decompose_auto_functionalized
+    )
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
+            comms.reinplace_fsdp_all_gather
+        )
+    GraphTransformObserver(gm, "decompose_scan_to_while_loop").apply_gm_pass(
+        decompose_scan_to_while_loop
+    )
+    GraphTransformObserver(gm, "decompose_map_to_while_loop").apply_gm_pass(
+        decompose_map_to_while_loop
+    )
 
     gm.recompile()
     gm.graph.lint()

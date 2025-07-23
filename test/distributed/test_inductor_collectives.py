@@ -1551,7 +1551,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         ):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
-            print(f"XXX CODE:{code}")
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unnecessary copy is made.
         (FileCheck().check("all_gather_into_tensor_out").run(code))
