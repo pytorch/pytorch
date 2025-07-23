@@ -848,7 +848,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             self.copy_file(export_lib, target_lib)
 
             # In ROCm on Windows case copy rocblas and hipblaslt files into
-            # torch/lib/rocblas/library and torch/lib/hipblaslt/library
+            # torch/lib/rocblas/library and torch/lib/hipblaslt/library and copy libomp140.x86_64.dll to torch/lib directory
             if str2bool(os.getenv("USE_ROCM")):
                 rocm_dir_path = Path(os.environ["ROCM_DIR"])
                 rocm_bin_path = rocm_dir_path / "bin"
@@ -861,6 +861,33 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 target_hipblaslt_dir = target_dir / "hipblaslt"
                 target_hipblaslt_dir.mkdir(parents=True, exist_ok=True)
                 self.copy_tree(hipblaslt_dir, str(target_hipblaslt_dir))
+
+                # Copy libomp140.x86_64.dll to torch/lib since rocalution.dll needs it
+                omp_name = 'libomp140.x86_64.dll'
+                program_files = os.environ["ProgramFiles(x86)"]
+                vswhere_path = program_files + r'\Microsoft Visual Studio\Installer\vswhere.exe'
+                # Getting libomp140.x86_64.dll installation path through `vswhere`
+                cmd = [
+                    vswhere_path,
+                    "-prerelease",
+                    "-latest",
+                    "-find", rf'VC\Redist\MSVC\**\{omp_name}'
+                ]
+                try:
+                    result = subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True, text=True)
+                    dll_paths = result.strip().split('\n')
+                    if not dll_paths:
+                        raise FileNotFoundError("No OpenMP DLL found")
+                    # Get first valid path (latest version)
+                    omp_path = next(p for p in dll_paths if p.strip())
+                    if not os.path.exists(omp_path):
+                        raise FileNotFoundError(f"DLL not found at {omp_path}")
+
+                except subprocess.CalledProcessError as e:
+                    raise RuntimeError(f"vswhere.exe failed: {e.output}") from e
+
+                target_lib = os.path.join(build_lib, "torch", "lib", omp_name)
+                self.copy_file(omp_path, target_lib)
             else:
                 report("The specified environment variable does not exist.")
 
