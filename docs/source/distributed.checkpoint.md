@@ -36,6 +36,11 @@ The entrypoints to load and save a checkpoint are the following:
 ```
 
 ```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.state_dict_saver.AsyncSaveResponse
+  :members:
+```
+
+```{eval-rst}
 .. autofunction::  save
 ```
 
@@ -67,6 +72,16 @@ The following module is also useful for additional customization of the staging 
 
 ```{eval-rst}
 .. autoclass:: torch.distributed.checkpoint.staging.AsyncStager
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.staging.DefaultStager
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.staging.StagingOptions
   :members:
 ```
 

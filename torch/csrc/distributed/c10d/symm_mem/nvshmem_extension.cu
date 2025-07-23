@@ -6,15 +6,22 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
-#include <cuda_awbarrier_primitives.h>
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
 #include <ATen/cuda/cub.cuh>
+
+// NVSHMEM minimum SM arch
+#define _NVSHMEM_MIN_SM_ARCH 700
+
+// Some NVSHMEM device APIs do not compile on older SM archs
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH)
+// Only include host APIs. See nvshmem.h for details.
+#define NVSHMEM_HOSTLIB_ONLY
+#endif  // Must be done before nvshmem.h is included
+
 #include <nvshmem.h>
+#include <nvshmemx.h>
 
 namespace c10d::nvshmem_extension {
-
-using c10d::symmetric_memory::StoreExchange;
-static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 
 #define THREADS_PER_BLOCK 512
 #define WARP_SIZE 32
@@ -43,74 +50,16 @@ bool is_nvshmem_available() {
   return is_available == 1;
 }
 
-// Bootstrap based on user's setting for NCCL
-// Long term, this may be a bit unclean; short term, it improves UX
-void maybe_initialize_env_vars() {
-  auto nccl_socket_if_name = c10::utils::get_env("NCCL_SOCKET_IFNAME");
-  auto nccl_hca_list = c10::utils::get_env("NCCL_IB_HCA");
-  auto nccl_ib_gid_index = c10::utils::get_env("NCCL_IB_GID_INDEX");
-  auto nvshmem_socket_if_name =
-      c10::utils::get_env("NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME");
-  auto nvshmem_hca_list = c10::utils::get_env("NCCL_IB_HCA");
-  auto nvshmem_ib_gid_index = c10::utils::get_env("NVSHMEM_IB_GID_INDEX");
-
-  if (!nvshmem_socket_if_name.has_value() && nccl_socket_if_name.has_value()) {
-    c10::utils::set_env(
-        "NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME", nccl_socket_if_name->c_str());
-  }
-  if (!nvshmem_hca_list.has_value() && nccl_hca_list.has_value()) {
-    c10::utils::set_env("NVSHMEM_ENABLE_NIC_PE_MAPPING", "1");
-    c10::utils::set_env("NVSHMEM_HCA_LIST", nccl_hca_list->c_str());
-  }
-  if (!nvshmem_ib_gid_index.has_value() && nccl_ib_gid_index.has_value()) {
-    c10::utils::set_env("NVSHMEM_IB_GID_INDEX", nccl_ib_gid_index->c_str());
-  }
-}
-
-void initialize_nvshmem_with_store(
-    c10::intrusive_ptr<c10d::Store> store,
-    int rank,
-    int world_size) {
-  static bool is_initialized = false;
-  if (is_initialized) {
-    return;
-  }
-
-  maybe_initialize_env_vars();
-
-  nvshmemx_uniqueid_t unique_id;
-  TORCH_CHECK(
-      nvshmemx_get_uniqueid(&unique_id) == 0, "nvshmemx_get_uniqueid failed");
-
-  // Using an existing store_all_gather due to laziness.
-  // TODO(yifu): should use broadcast
-  auto unique_ids = storeExchange.all_gather(store, rank, world_size, unique_id);
-
-  nvshmemx_init_attr_t attr;
-  nvshmemx_set_attr_uniqueid_args(rank, world_size, &unique_ids[0], &attr);
-
-  TORCH_CHECK(
-      nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr) == 0,
-      "nvshmemx_init_attr failed");
-
-  is_initialized = true;
-
-  // Print version
-  int major, minor;
-  ::nvshmem_info_get_version(&major, &minor);
-  LOG(INFO) << "NVSHMEM is available, version: " << major << "." << minor;
-}
-
 // Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 void nvshmemx_cumodule_init(uintptr_t module) {
   auto cumodule = reinterpret_cast<CUmodule>(module);
-  TORCH_CHECK(
-    ::nvshmemx_cumodule_init(cumodule) == 0,
+  NVSHMEM_CHECK(
+    ::nvshmemx_cumodule_init(cumodule),
     "nvshmemx_cumodule_init failed");
 }
 
-std::unordered_map<std::string, nvshmem_team_t> group_name_to_team_;
+static std::unordered_map<std::string, nvshmem_team_t> group_name_to_team_;
 
 nvshmem_team_t group_to_team(
     const std::string& group_name,
@@ -126,7 +75,7 @@ nvshmem_team_t group_to_team(
   }
 
   nvshmem_team_t team;
-  TORCH_CHECK(
+  NVSHMEM_CHECK(
       nvshmem_team_split_strided(
           NVSHMEM_TEAM_WORLD,
           global_ranks[0],
@@ -134,7 +83,8 @@ nvshmem_team_t group_to_team(
           global_ranks.size(),
           nullptr,
           0,
-          &team) == 0);
+          &team),
+          "nvshmem_team_split_strided failed");
   group_name_to_team_[group_name] = team;
   TORCH_CHECK(team != NVSHMEM_TEAM_INVALID);
   return team;
@@ -165,6 +115,21 @@ void nvshmem_put(at::Tensor& tensor, int64_t peer) {
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_putmem_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, peer, stream);
+}
+
+void nvshmem_get(at::Tensor& tensor, int64_t peer) {
+  // TODO: support non-contiguous tensors
+  TORCH_CHECK(tensor.is_contiguous(),
+      "get op currently supports contiguous tensors only");
+  // TODO: rendezvous should remember the group name
+  auto hdl = c10d::symmetric_memory::rendezvous(tensor, "0");
+  auto rank = hdl->get_rank();
+  void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
+  auto buffer_size = tensor.numel() * tensor.element_size();
+
+  c10::cuda::CUDAGuard guard(tensor.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  nvshmemx_getmem_on_stream(tensor.data_ptr(), buffer_ptr, buffer_size, peer, stream);
 }
 
 at::Tensor nvshmem_all_to_all(
@@ -219,6 +184,9 @@ __device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
 // - output splits (OUT) and
 // - source offsets (OUT).
 __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npes) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   auto input_splits = in_out_splits;
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
@@ -238,12 +206,16 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npe
   }
   // This barrier ensures that all remote PEs see the updated values
   nvshmemx_barrier_all_block();
+#endif
 }
 
 // This kernel is used to do the actual data exchange.
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
 // `stride` is the stride at dim 0, unit in byte.
 __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
   int bid = blockIdx.x;
@@ -278,6 +250,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   if (bid == 0 && tid < npes) {
     source_offsets[tid] = peer_offsets[tid];
   }
+#endif
 }
 
 at::Tensor all_to_all_vdev(
@@ -377,15 +350,18 @@ at::Tensor all_to_all_vdev(
  * `npes`: the number of PEs.
  * `ne`: the number of experts.
  * `input_dim0`: the size of dim 0 of the input tensor.
+ * `rank_is_row_in` is a boolean flag indicating whether the input has ranks as row or experts as row.
 */
 
 /* Template parameters:
  * `HAS_IN_OFFSETS` is a boolean flag indicating whether `in_splits_offsets` has offsets (2nd row) or not.
- * `RANK_MAJOR_IN` is a boolean flag indicating whether the input is rank-major or expert-major.
 */
 
-template <bool HAS_IN_OFFSETS, bool RANK_MAJOR_IN>
-__global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* out_splits_offsets, int mype, int npes, int ne, size_t input_dim0) {
+template <bool HAS_IN_OFFSETS>
+__global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* out_splits_offsets, int mype, int npes, int ne, size_t input_dim0, bool rank_is_row_in) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   int nsplits = npes * ne;
   auto input_splits = in_splits_offsets;
   auto output_splits = out_splits_offsets;
@@ -403,7 +379,7 @@ __global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* o
     __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
     auto sum_of_splits = prefixSum(peer_offsets, input_splits, nsplits);
     __syncthreads();;
-    CUDA_KERNEL_ASSERT(sum_of_splits <= input_dim0);
+    CUDA_KERNEL_ASSERT(sum_of_splits <= input_dim0 && "sum of splits is larger than input dim\n");
     // Redirect the input splits to the calculated result
     input_offsets = peer_offsets;
   }
@@ -411,11 +387,11 @@ __global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* o
   // Use 1 block to do the exchange
   if (tid < nsplits) {
     int peer, e, dst_offset;
-    if (RANK_MAJOR_IN) {
+    if (rank_is_row_in) {
       peer = tid / ne;
       e = tid % ne;
       dst_offset = e * npes + mype;
-    } else {  // EXPERT_MAJOR_IN
+    } else {  // expert is row in input
       peer = tid % npes;
       e = tid / npes;
       dst_offset = mype * ne + e;
@@ -423,12 +399,13 @@ __global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* o
     // This does a transpose from rank-major order to expert-major order
     // (or vice versa).
     auto split_val = input_splits[tid];
-    CUDA_KERNEL_ASSERT(split_val >= 0);
+    CUDA_KERNEL_ASSERT(split_val >= 0 && "split value is negative\n");
     nvshmem_int64_p(source_offsets + dst_offset, input_offsets[tid], peer);
     nvshmem_int64_p(output_splits + dst_offset, split_val, peer);
   }
   // This barrier ensures that all remote PEs see the updated values
   nvshmemx_barrier_all_block();
+#endif
 }
 
 // This is an warp-scope, exclusive prefix sum. When called by a block of
@@ -473,11 +450,14 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
 // For meaning of `mype` and `npes`, see the docstring of `all_to_all_vdev_2d`.
 // `major_align` is the alignment at dim 0, unit in element. If 0, no alignment is needed.
 
-// `rank_major_out` is a boolean flag indicating whether the output is rank-major or expert-major.
-// In shuffle case, rank_major_out = false, major_size = ne, minor_size = npes.
-// In combine case, rank_major_out = true, major_size = npes, minor_size = ne.
+// `rank_is_row_out` is a boolean flag indicating whether the output has ranks as rows or experts as rows.
+// In dispatch case, rank_is_row_out = false, major_size = ne, minor_size = npes.
+// In combine case, rank_is_row_out = true, major_size = npes, minor_size = ne.
 
-__global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_splits, int64_t* out_splits_offsets, size_t stride, int minor_size, int major_size, int64_t major_align, bool rank_major_out) {
+__global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_splits, int64_t* out_splits_offsets, size_t stride, int minor_size, int major_size, int64_t major_align, bool rank_is_row_out) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   int nsplits = minor_size * major_size;
   auto output_splits = out_splits_offsets;
   auto source_offsets = out_splits_offsets + nsplits;
@@ -495,10 +475,10 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
   // TODO: currently it is assumed that the number of PE's is smaller than
   // `A2AV_TILE_SIZE` bc the warp-scope prefix sum can only handle up to
   // WARP_SIZE elements
-  CUDA_KERNEL_ASSERT(minor_size <= A2AV_TILE_SIZE);
+  CUDA_KERNEL_ASSERT(minor_size <= A2AV_TILE_SIZE && "minor_size is too large\n");
   // Similarly, the number of experts per rank is also assumed to be smaller
   // than `NUM_TILES`
-  CUDA_KERNEL_ASSERT(major_size <= NUM_TILES);
+  CUDA_KERNEL_ASSERT(major_size <= NUM_TILES && "major_size is too large\n");
 
   // Total length of each tile
   __shared__ int64_t len_per_tile[NUM_TILES];
@@ -550,12 +530,13 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
       (char*)recv_data + write_offset,
       (char*)send_data + source_offset,
       peer_size,
-      rank_major_out ? row : col);  // peer
+      rank_is_row_out ? row : col);  // peer
   }
   // Write out the output offsets (to the scratchpad line)
   if (bid == 0 && tid < nsplits) {
     source_offsets[tid] = tile_prefix_sums[tid / minor_size][tid % minor_size];
   }
+#endif
 }
 
 at::Tensor all_to_all_vdev_2d(
@@ -648,11 +629,18 @@ at::Tensor all_to_all_vdev_2d(
   TORCH_CHECK(ne <= NUM_TILES, "Number of experts must be smaller than NUM_TILES", NUM_TILES);
 
   // Set device context for getting the stream and launching kernels below
-  c10::cuda::CUDAGuard guard(input.device());
+  auto& device = input.device();
+  TORCH_CHECK(device.type() == at::DeviceType::CUDA &&
+      out.device() == device &&
+      in_splits.device() == device &&
+      out_splits_offsets.device() == device,
+      "all tensor arguments must be on the same CUDA device");
+  c10::cuda::CUDAGuard guard(device);
   auto stream = at::cuda::getCurrentCUDAStream();
 
   // Exchange output splits and source offsets
   auto input_dim0 = input.size(0);
+  bool rank_is_row_in = true;
   // Use collective launch because kernel involves nvshmem barrier
   void* args0[] = {
       &in_splits_ptr,
@@ -660,9 +648,10 @@ at::Tensor all_to_all_vdev_2d(
       &rank,
       &world_size,
       &ne,
-      &input_dim0};
+      &input_dim0,
+      &rank_is_row_in};
   nvshmemx_collective_launch(
-      (const void*)exchangeSplitAndOffset_2d<false, true>,  // false: input offsets not provided, true: rank-major in
+      (const void*)exchangeSplitAndOffset_2d<false>,  // false: input offsets not provided
       dim3(1),
       dim3(THREADS_PER_BLOCK),
       args0,
@@ -676,7 +665,7 @@ at::Tensor all_to_all_vdev_2d(
 
   // Stride at dim 0
   size_t stride_bytes = input.stride(0) * input.element_size();
-  bool rank_major_out = false;
+  bool rank_is_row_out = !rank_is_row_in;
 
   // All to all data exchange
   void* args1[] = {
@@ -688,7 +677,7 @@ at::Tensor all_to_all_vdev_2d(
       &world_size,
       &ne,
       &major_align_val,
-      &rank_major_out};
+      &rank_is_row_out};
   nvshmemx_collective_launch(
       (const void*)allToAllV_2d,
       dim3(num_blocks),
@@ -708,10 +697,10 @@ at::Tensor all_to_all_vdev_2d_offset(
   /* Perform a 2D AllToAllv shuffle operation, with input split and offset
    * information provided on device. The input offsets are not required to be
    * exact prefix sum of the input splits, i.e. paddings are allowed between the
-   * splitted chunks. The paddings, however, will not be transferred to peer
+   * split chunks. The paddings, however, will not be transferred to peer
    * ranks.
 
-   * In Mixure of Experts models, this operation can be used to combine tokens
+   * In Mixture of Experts models, this operation can be used to combine tokens
    * processed by experts on parallel ranks. This operation can be viewed as an
    * "reverse" operation to the `all_to_all_vdev_2d` operation (which shuffles
    * tokens to experts).
@@ -774,11 +763,18 @@ at::Tensor all_to_all_vdev_2d_offset(
   TORCH_CHECK(ne <= A2AV_TILE_SIZE, "Number of experts must be smaller than A2AV_TILE_SIZE", A2AV_TILE_SIZE);
 
   // Set device context for getting the stream and launching kernels below
-  c10::cuda::CUDAGuard guard(input.device());
+  auto& device = input.device();
+  TORCH_CHECK(device.type() == at::DeviceType::CUDA &&
+      out.device() == device &&
+      in_splits_offsets.device() == device &&
+      out_splits_offsets.device() == device,
+      "all tensor arguments must be on the same CUDA device");
+  c10::cuda::CUDAGuard guard(device);
   auto stream = at::cuda::getCurrentCUDAStream();
 
   // Exchange output splits and source offsets
   auto input_dim0 = input.size(0);
+  bool rank_is_row_in = false;
   // Use collective launch because kernel involves nvshmem barrier
   void* args0[] = {
       &in_splits_offsets_ptr,
@@ -786,9 +782,10 @@ at::Tensor all_to_all_vdev_2d_offset(
       &rank,
       &world_size,
       &ne,
-      &input_dim0};
+      &input_dim0,
+      &rank_is_row_in};
   nvshmemx_collective_launch(
-      (const void*)exchangeSplitAndOffset_2d<true, false>,  // true: input offsets provided, false: not rank-major in
+      (const void*)exchangeSplitAndOffset_2d<true>,  // true: input offsets provided
       dim3(1),
       dim3(THREADS_PER_BLOCK),
       args0,
@@ -802,7 +799,7 @@ at::Tensor all_to_all_vdev_2d_offset(
 
   // Stride at dim 0
   size_t stride_bytes = input.stride(0) * input.element_size();
-  bool rank_major_out = true;
+  bool rank_is_row_out = !rank_is_row_in;
 
   // All to all data exchange
   void* args1[] = {
@@ -814,7 +811,7 @@ at::Tensor all_to_all_vdev_2d_offset(
       &ne,
       &world_size,
       &major_align_val,
-      &rank_major_out};
+      &rank_is_row_out};
   nvshmemx_collective_launch(
       (const void*)allToAllV_2d,
       dim3(num_blocks),
@@ -830,6 +827,7 @@ at::Tensor all_to_all_vdev_2d_offset(
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
   m.impl("nvshmem_put", c10d::nvshmem_extension::nvshmem_put);
+  m.impl("nvshmem_get", c10d::nvshmem_extension::nvshmem_get);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
   m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);

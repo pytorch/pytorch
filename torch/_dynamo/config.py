@@ -398,7 +398,7 @@ use_numpy_random_stream = False
 enable_cpp_guard_manager = True
 
 # Use C++ guard manager for symbolic shapes
-enable_cpp_symbolic_shape_guards = False
+enable_cpp_symbolic_shape_guards = not is_fbcode()
 
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
@@ -541,6 +541,10 @@ fake_tensor_cache_crosscheck_enabled = (
 # Disables inference mode for fake tensor prop during compilation. At runtime,
 # the inference_mode is still respected.
 fake_tensor_disable_inference_mode = True
+
+# Experimental feature for running automatic caching precompile.
+# Enables automatic DynamoCache save/load
+caching_precompile = False
 
 # Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
 # Note: AOTAutograd will still trace and partition an AOT backward graph local to that
