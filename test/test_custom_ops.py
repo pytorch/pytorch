@@ -2388,6 +2388,12 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         loss.backward()
         self.assertEqual(x.grad, temp)
 
+        # Using a non-existent DSO is a quick way to trigger an OSError,
+        # which can be used to not break BC.
+        def test_load_library(self):
+            with self.assertRaisesRegex(OSError, "Could not load this library"):
+                torch.ops.load_library("libnoexist.so")
+
 
 def op_with_incorrect_schema(testcase, name):
     lib = testcase.lib()
