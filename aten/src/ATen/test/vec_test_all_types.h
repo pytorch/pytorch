@@ -1127,12 +1127,12 @@ void test_binary_fp8(
             float res_scalar = _mm512_cvtss_f32(res_fp32_512);
             if (is_bit_wise) {
                 EXPECT_EQ(static_cast<bool>(ref_res_scalar), static_cast<bool>(res_scalar))
-                    << "Test failed for input0: " << c10::detail::fp8e5m2_to_fp32_value(f8_0.x)
-                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
+                    << "Test failed for input0: " << torch::headeronly::detail::fp8e5m2_to_fp32_value(f8_0.x)
+                    << " input1: " << torch::headeronly::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
             } else {
                 EXPECT_EQ(ref_res_scalar, res_scalar)
-                    << "Test failed for input0: " << c10::detail::fp8e5m2_to_fp32_value(f8_0.x)
-                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
+                    << "Test failed for input0: " << torch::headeronly::detail::fp8e5m2_to_fp32_value(f8_0.x)
+                    << " input1: " << torch::headeronly::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
             }
         }
       }
