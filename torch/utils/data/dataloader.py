@@ -855,6 +855,43 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         self._pin_memory_thread = None
         self._pin_memory_thread_done_event = None
 
+    def _initialize_pin_memory(self):
+        """Initialize pin memory thread and related queues."""
+        if self._pin_memory:
+            self._pin_memory_thread_done_event = threading.Event()
+
+            # Queue is not type-annotated
+            self._data_queue = queue.Queue()  # type: ignore[var-annotated]
+            current_device = -1
+            if self._pin_memory_device == "cuda":
+                current_device = torch.cuda.current_device()
+            elif self._pin_memory_device == "xpu":
+                current_device = torch.xpu.current_device()
+            elif self._pin_memory_device == torch._C._get_privateuse1_backend_name():
+                custom_device_mod = getattr(
+                    torch, torch._C._get_privateuse1_backend_name()
+                )
+                current_device = custom_device_mod.current_device()
+            elif self._pin_memory_device is None:
+                current_device = torch.accelerator.current_device_index()
+            pin_memory_thread = threading.Thread(
+                target=_utils.pin_memory._pin_memory_loop,
+                args=(
+                    self._worker_result_queue,
+                    self._data_queue,
+                    current_device,
+                    self._pin_memory_thread_done_event,
+                    self._pin_memory_device,
+                ),
+            )
+            pin_memory_thread.daemon = True
+            pin_memory_thread.start()
+            # Similar to workers (see comment above), we only register
+            # pin_memory_thread once it is started.
+            self._pin_memory_thread = pin_memory_thread
+        else:
+            self._data_queue = self._worker_result_queue  # type: ignore[assignment]
+
     def _reset(self, loader, first_iter=False):
         super()._reset(loader, first_iter)
         self._send_idx = 0  # idx of the next task to be sent to workers
@@ -1237,40 +1274,7 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
             self._index_queues.append(index_queue)
             self._workers.append(w)
 
-        if self._pin_memory:
-            self._pin_memory_thread_done_event = threading.Event()
-
-            # Queue is not type-annotated
-            self._data_queue = queue.Queue()  # type: ignore[var-annotated]
-            current_device = -1
-            if self._pin_memory_device == "cuda":
-                current_device = torch.cuda.current_device()
-            elif self._pin_memory_device == "xpu":
-                current_device = torch.xpu.current_device()
-            elif self._pin_memory_device == torch._C._get_privateuse1_backend_name():
-                custom_device_mod = getattr(
-                    torch, torch._C._get_privateuse1_backend_name()
-                )
-                current_device = custom_device_mod.current_device()
-            elif self._pin_memory_device is None:
-                current_device = torch.accelerator.current_device_index()
-            pin_memory_thread = threading.Thread(
-                target=_utils.pin_memory._pin_memory_loop,
-                args=(
-                    self._worker_result_queue,
-                    self._data_queue,
-                    current_device,
-                    self._pin_memory_thread_done_event,
-                    self._pin_memory_device,
-                ),
-            )
-            pin_memory_thread.daemon = True
-            pin_memory_thread.start()
-            # Similar to workers (see comment above), we only register
-            # pin_memory_thread once it is started.
-            self._pin_memory_thread = pin_memory_thread
-        else:
-            self._data_queue = self._worker_result_queue  # type: ignore[assignment]
+        self._initialize_pin_memory()
 
         self._reset(loader, first_iter=True)
 
@@ -1688,29 +1692,7 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
             self._index_queues.append(index_queue)
             self._workers.append(w)
 
-        if self._pin_memory:
-            self._pin_memory_thread_done_event = threading.Event()
-
-            # Queue is not type-annotated
-            self._data_queue = queue.Queue()  # type: ignore[var-annotated]
-            current_device_id = torch.accelerator.current_device_index()
-            pin_memory_thread = threading.Thread(
-                target=_utils.pin_memory._pin_memory_loop,
-                args=(
-                    self._worker_result_queue,
-                    self._data_queue,
-                    current_device_id,
-                    self._pin_memory_thread_done_event,
-                    self._pin_memory_device,
-                ),
-            )
-            pin_memory_thread.daemon = True
-            pin_memory_thread.start()
-            # Similar to workers (see comment above), we only register
-            # pin_memory_thread once it is started.
-            self._pin_memory_thread = pin_memory_thread
-        else:
-            self._data_queue = self._worker_result_queue  # type: ignore[assignment]
+        self._initialize_pin_memory()
 
         # In some rare cases, persistent workers (daemonic processes)
         # would be terminated before `__del__` of iterator is invoked
