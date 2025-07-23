@@ -546,6 +546,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = model(*inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_to_int(self, device):
         # Tests to_copy to int dtype on tensors with
