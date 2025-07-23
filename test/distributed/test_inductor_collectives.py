@@ -2,7 +2,7 @@
 import datetime
 import functools
 import unittest
-from collections import defaultdict
+from collections import Counter
 from typing import Optional
 from unittest.mock import patch
 
@@ -651,7 +651,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         class TrackingMode(TorchDispatchMode):
             def __init__(self):
                 super().__init__()
-                self.ops_counter = defaultdict(int)
+                self.ops_counter = Counter()
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 if kwargs is None:
