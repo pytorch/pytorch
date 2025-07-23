@@ -1643,9 +1643,6 @@ class AotCodeCompiler:
         """
         generated_files: list[Union[str, Weights]] = additional_files  # type: ignore[assignment]
 
-        if sys.platform == "win32":
-            raise RuntimeError("AotCodeCompiler not yet supported for inductor")
-
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
         picked_vec_isa = pick_vec_isa()
