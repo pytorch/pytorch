@@ -308,7 +308,7 @@ def _package_exported_programs(
         return
 
     if isinstance(exported_programs, ExportedProgram):
-        exported_programs = {"model", exported_programs}  # type: ignore[assignment]
+        exported_programs = {"model": exported_programs}
 
     assert isinstance(exported_programs, dict)
 
