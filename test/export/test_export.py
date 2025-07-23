@@ -932,7 +932,6 @@ graph():
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
-    @testing.expectedFailureCppSerDes  # Cpp Ser/Der seems to fail parsing complicated guards
     def test_export_statically_known_true(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -1588,9 +1587,6 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(m(*args), ep.module()(*args))
 
-    @testing.expectedFailureCppSerDes  #  AssertionError: 0 not in VR[2, int_oo]
-    @testing.expectedFailureSerDer  #  AssertionError: 0 not in VR[2, int_oo]
-    @testing.expectedFailureSerDerNonStrict  #  AssertionError: 0 not in VR[2, int_oo]
     def test_cond_access_identical_symint_closure(self):
         class Example2(torch.nn.Module):
             def forward(self, x, trigger, target):
@@ -5082,7 +5078,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    @testing.expectedFailureCppSerDes  # cpp Ser/Der not handling complicated symbols
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 
@@ -8876,10 +8871,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
-    # TODO(pianpwk) blocker: https://github.com/pytorch/pytorch/issues/151809
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureCppSerDes
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -13629,9 +13620,6 @@ graph():
         ):
             ep.module()(torch.randn(10), torch.tensor(2))
 
-    @testing.expectedFailureCppSerDes  # TODO: When we deserialize we somehow hardcode sympy.lower to 2
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureSerDer
     @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_baddbmm(self):
         class M(torch.nn.Module):
