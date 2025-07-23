@@ -1090,7 +1090,7 @@ class TagSafetyChecks(torch._dynamo.test_case.TestCase):
             outer_safe_source = DictGetItemSource(outer_source, "safe")
             outer_safe_mgr = builder.get_guard_manager_from_source(outer_safe_source)
             self.assertTrue(outer_safe_mgr.is_tag_safe())
-            self.assertTrue(outer_safe_mgr.is_tag_safe_root())
+            self.assertFalse(outer_safe_mgr.is_tag_safe_root())
 
             # Check tagness of outer["unsafe"]
             outer_unsafe_source = DictGetItemSource(outer_source, "unsafe")
@@ -1106,7 +1106,7 @@ class TagSafetyChecks(torch._dynamo.test_case.TestCase):
                 outer_terminal_source
             )
             self.assertTrue(outer_terminal_mgr.is_tag_safe())
-            self.assertTrue(outer_terminal_mgr.is_tag_safe_root())
+            self.assertFalse(outer_terminal_mgr.is_tag_safe_root())
 
             # Check tagness of outer["safe"]["nested_dict"]
             outer_safe_nested_source = DictGetItemSource(
