@@ -78,7 +78,6 @@ uv pip install --system -r requirements/common.txt
 
 # must put before installing xformers, so it can install the correct version of xfomrers.
 ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
-ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 # Build xformers with cuda and torch nightly
 # following official xformers guidance: https://github.com/facebookresearch/xformers#build
@@ -89,7 +88,7 @@ ARG XFORMERS_COMMIT=f2de641ef670510cadab099ce6954031f52f191c
 
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
-     --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/uv \
     echo 'git clone xformers...' \
     && git clone https://github.com/facebookresearch/xformers.git --recursive \
     && cd xformers \
@@ -104,7 +103,9 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system xformers-dist/*.whl --verbose
 
-RUN mkdir -p /export/xformers-dist && cp /xformers-dist/*.whl /export/xformers-dist/
+RUN mkdir -p /export/xformers-dist && cp /workspace/xformers-dist/*.whl /export/xformers-dist/
+
+RUN ls
 
 # build can take a long time, and the torch nightly version fetched from url can be different in next docker stage.
 # track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
@@ -146,6 +147,8 @@ ENV MAX_JOBS=${max_jobs}
 ARG nvcc_threads=2
 ENV NVCC_THREADS=$nvcc_threads
 
+RUN echo "MAX_JOBS is ${MAX_JOBS}"
+
 ARG USE_SCCACHE
 ARG SCCACHE_BUCKET_NAME=vllm-build-sccache
 ARG SCCACHE_REGION_NAME=us-west-2
@@ -180,8 +183,6 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
         mkdir -p .deps && \
         python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38; \
     fi
-
-RUN mkdir -p /export/vllm-dist && cp /workspace/dist/*.whl /export/vllm-dist/
 
 #################### WHEEL BUILD IMAGE ####################
 
@@ -232,6 +233,7 @@ RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 # get the nightly torch version used in the build to make sure the version is the same
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 
+# change to wheel
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128
 
@@ -246,6 +248,7 @@ RUN --mount=type=bind,from=base,src=/workspace/xformers-dist,target=/vllm-worksp
     uv pip install --system /vllm-workspace/xformers-dist/*.whl --verbose
 
 ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
+ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 # install package for build flashinfer
 # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
@@ -288,17 +291,6 @@ RUN python3 use_existing_torch.py
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/common.txt
 
-################### VLLM INSTALLED IMAGE ####################
-FROM vllm-base  AS export-wheel-stage
-
-# build wheels like xformers, flashinfer etc.
-# ensure final wheels are in predictable paths:
-# - /workspace/xformers-dist/
-# - /workspace/flashinfer-dist/
-# - /workspace/dist/
-
-
-
 #################### UNITTEST IMAGE #############################
 FROM vllm-base as test
 COPY tests/ tests/
@@ -322,7 +314,6 @@ ENV HF_HUB_ENABLE_HF_TRANSFER 1
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/nightly_torch_test.txt
 
-RUN mkdir -p /export/flashinfer-dist && cp /flashinfer-dist/*.whl /export/flashinfer-dist/
 
 # Logging to confirm the torch versions
 RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'
@@ -333,9 +324,9 @@ RUN pip freeze
 #################### UNITTEST IMAGE #############################
 
 #################### EXPORT STAGE ####################
-FROM scratch as export
+FROM scratch as export-wheels
 
 # Just copy the wheels we prepared in previous stages
 COPY --from=base /workspace/xformers-dist /export/xformers-dist
-COPY --from=build /export/vllm-dist /export/vllm-dist
-COPY --from=test /flashinfer-dist /export/flashinfer-dist
+COPY --from=build /workspace/dist /export/vllm-dist
+COPY --from=vllm-base /vllm-workspace/flashinfer-dist /export/flashinfer-dist

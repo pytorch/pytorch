@@ -7,10 +7,6 @@ on:
         required: true
         type: string
         description: Top-level label for what's being built/tested.
-      docker-image-name:
-        required: true
-        type: string
-        description: Name of the base docker image to build with.
       build-generates-artifacts:
         required: false
         type: boolean
@@ -26,7 +22,7 @@ on:
       cuda-arch-list:
         required: false
         type: string
-        default: "5.2"
+        default: "8.6"
         description: |
           List of CUDA architectures CI build should target.
       runner_prefix:
@@ -106,7 +102,6 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -122,8 +117,20 @@ jobs:
         with:
           no-sudo: true
 
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+
+      - name: Setup Python
+        if: matrix.runner == 'B200'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
 
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
@@ -132,13 +139,6 @@ jobs:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
           role-session-name: gha-linux-build
           aws-region: us-east-1
-
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download pytorch build artifacts
         uses: ./.github/actions/download-build-artifacts
@@ -152,7 +152,7 @@ jobs:
         uses: ./.github/actions/download-td-artifacts
 
       - name: Build external project
-        id: build
+        id: build-wheels
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -165,5 +165,8 @@ jobs:
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+          MAX_JOBS: 32
         run: |
-          
+          pip install cement
+          python .github/test/build_cli/cli.py external --target vllm run
+          ls

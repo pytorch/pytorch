@@ -44,22 +44,14 @@ jobs:
     secrets: inherit
 
   linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-external-build:
-    name: cuda12.8-py3.12-gcc11-sm86
-    uses: ./.github/workflows/_linux-external-build.yml
+    name: build-vllm
+    uses: ./.github/workflows/_linux-vllm-build.yml
     needs: [
       get-label-type,
       linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-build
     ]
-
-  linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-test:
-    name: cuda12.8-py3.13-gcc9-sm86
-    uses: ./.github/workflows/_linux-test.yml
-    needs: [
-      linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-build,
-      linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-external-build
-    ]
     with:
-      build-environment:linux-jammy-cuda12.8-py3.12-gcc11-sm86
-      docker-image: ${{ needs.linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm-build.outputs.test-matrix }}
-    secrets: inherit
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm86
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.24xlarge
+
