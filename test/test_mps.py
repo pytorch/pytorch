@@ -8013,6 +8013,18 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
+    @serialTest()
+    def test_rand_2b_raises(self):
+        if MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("Crashes on MacOS-13")
+        int32_max = torch.iinfo(torch.int32).max
+        with self.assertRaises(RuntimeError):
+            # This used to crash with NDArray dimension length > INT_MAX
+            x = torch.randint(0, 10, (int32_max + 1,), dtype=torch.int8, device='mps')
+        x = torch.randint(0, 10, (int32_max,), dtype=torch.int8, device='mps')
+        self.assertEqual(x.numel(), int32_max)
+        del x
+
 
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
@@ -9256,6 +9268,18 @@ class TestSDPA(TestCaseMPS):
 
     def test_sdpa_mask_fp16_L6_S17_NH23_HS121(self):
         self._test_sdpa_mask(torch.float16, 7, 17, 23, 121)
+
+    # Regression test from: https://github.com/pytorch/pytorch/issues/156707
+    @parametrize("dtype", [torch.float16, torch.float32])
+    def test_sdpa_full_mask(self, dtype):
+        q = torch.randn(1, 1, 2, 4, dtype=dtype)
+        k = torch.randn(1, 1, 2, 4, dtype=dtype)
+        v = torch.randn(1, 1, 2, 4, dtype=dtype)
+        mask = torch.tensor([[[[False, False], [True, True]]]], dtype=torch.bool)
+
+        out_cpu = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        out_mps = F.scaled_dot_product_attention(q.to('mps'), k.to('mps'), v.to('mps'), attn_mask=mask.to('mps'))
+        self._compare_tensors(out_mps.cpu(), out_cpu)
 
     @parametrize("dtype", [torch.float16, torch.float32])
     def test_sdpa_3d_input(self, dtype):

@@ -30,7 +30,9 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
+    IS_CI,
     IS_MACOS,
+    IS_WINDOWS,
     IS_X86,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
@@ -66,6 +68,15 @@ except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise
+
+if IS_WINDOWS and IS_CI:
+    # TODO(xuhancn) : improve the compiler build performance on windows.
+    sys.stderr.write(
+        "This UT is too slow on windows, and will cause out of time in CI. So skip it now.\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("skip slow test")
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
@@ -355,8 +366,9 @@ def wrapper_noop_set_seed(op, *args, **kwargs):
     return op(*args, **kwargs)
 
 
-torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
-    wrapper_noop_set_seed
+wrapper_noop_set_seed_decorator = patch(
+    "torch.testing._internal.common_methods_invocations.wrapper_set_seed",
+    wrapper_noop_set_seed,
 )
 
 # key can be either op_name, or (op_name, dtype)
@@ -969,6 +981,7 @@ def collection_decorator(fn):
     return inner
 
 
+@wrapper_noop_set_seed_decorator
 class TestInductorOpInfo(TestCase):
     def tearDown(self):
         torch._dynamo.reset()

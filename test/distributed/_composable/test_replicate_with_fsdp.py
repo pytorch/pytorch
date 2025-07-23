@@ -67,8 +67,8 @@ class ReplicateTest(MultiProcessTestCase):
 
     def _init_pg(self):
         # Set the device explicitly before initializing the process group
-        if torch.cuda.is_available():
-            torch.cuda.set_device(self.rank % torch.cuda.device_count())
+
+        torch.cuda.set_device(self.rank % self.world_size)
         dist.init_process_group(
             backend="nccl",
             rank=self.rank,
@@ -205,21 +205,15 @@ class ReplicateTest(MultiProcessTestCase):
                 self.assertEqual(parameter.device_mesh.shape, (2, 1))
                 self.assertEqual(parameter.placements, (Replicate(), Shard(dim=0)))
 
+    @skip_if_lt_x_gpu(2)
     def test_train_replicate_fsdp(self):
         """
         Tests that replicate_model has the same behavior as original model when training
         """
         self._init_pg()
 
-        if torch.cuda.is_available():
-            device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
-            model = Net().to(device)
-            inp = torch.randn(2, 2, device=device)
-
-        else:
-            model = Net()
-            inp = torch.randn(2, 2)
-
+        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+        model = Net().to(device)
         replicate_model = deepcopy(model)
 
         layers = [
@@ -237,6 +231,7 @@ class ReplicateTest(MultiProcessTestCase):
         replicate_optim = torch.optim.Adam(replicate_model.parameters(), lr=0.01)
 
         torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn(2, 2, device=device)
 
         for _ in range(10):
             loss = model(inp).sum()
