@@ -2155,6 +2155,7 @@ class Scheduler:
             )
         if config.reorder_for_compute_comm_overlap:
             from torch._logging import trace_structured
+
             trace_structured(
                 "artifact",
                 metadata_fn=lambda: {

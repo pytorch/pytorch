@@ -183,8 +183,10 @@ def _group_name(snode, with_bufs=False) -> str:
             ret += f"{list(snode.get_buffer_names())}"
     return ret
 
+
 def _is_fake_dep(d):
     return isinstance(d, WeakDep) and d.is_fake
+
 
 def _reorder_communication_preserving_peak_memory_internal(
     snodes: list[BaseSchedulerNode],
@@ -299,7 +301,9 @@ def _reorder_communication_preserving_peak_memory_internal(
                 # We can have multiple deps with the same name.
                 # As we ignore WeakDep(is_fake=True) =>
                 # filter them out first to avoid overwriting  of real dep.
-                data_deps = {d.name: d for d in group.unmet_dependencies if not _is_fake_dep(d)}
+                data_deps = {
+                    d.name: d for d in group.unmet_dependencies if not _is_fake_dep(d)
+                }
 
                 candidate_outs = candidate.get_outputs()
                 data_dep = None
@@ -711,14 +715,16 @@ def _sink_waits_iterative_internal(
                 # We can have multiple deps with the same name.
                 # As we ignore WeakDep(is_fake=True) =>
                 # filter them out first to avoid overwriting  of real dep.
-                data_deps = {d.name: d for d in candidate.unmet_dependencies if not _is_fake_dep(d)}
+                data_deps = {
+                    d.name: d
+                    for d in candidate.unmet_dependencies
+                    if not _is_fake_dep(d)
+                }
 
                 group_outs = group.get_outputs()
                 data_dep = None
                 for o in group_outs:
                     if d := data_deps.get(o.get_name(), None):
-                        if isinstance(d, WeakDep) and d.is_fake:
-                            continue
                         data_dep = d
                         break
                 # 1. If we have data_dep - we can not swap => trying to group
