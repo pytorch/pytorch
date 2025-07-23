@@ -1,0 +1,68 @@
+name: rocm-mi355
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 30 9 * * *  # about 2:30am PDT
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  target-determination:
+    if: github.repository_owner == 'pytorch'
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    permissions:
+      id-token: write
+      contents: read
+
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-noble-rocm-py3_12-build:
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    name: linux-noble-rocm-py3.12-mi355
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-noble-rocm-py3.12-mi355
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-alpha-py3
+      sync-tag: rocm-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi355.2" },
+        ]}
+    secrets: inherit
+
+  linux-noble-rocm-py3_12-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: linux-noble-rocm-py3.12-mi355
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-noble-rocm-py3_12-build
+      - target-determination
+    with:
+      build-environment: linux-noble-rocm-py3.12-mi355
+      docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
+      tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor"
+    secrets: inherit
