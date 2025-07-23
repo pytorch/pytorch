@@ -128,7 +128,7 @@ ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 # Install setuptools and wheel for python 3.12/3.13
 RUN for cpython_version in "cp312-cp312" "cp313-cp313" "cp313-cp313t"; do \
-    /opt/python/${cpython_version}/bin/python -m pip install "setuptools>=77.0.0" "packaging>=24.2" wheel; \
+    /opt/python/${cpython_version}/bin/python -m pip install setuptools wheel; \
     done;
 
 

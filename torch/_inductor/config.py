@@ -574,6 +574,9 @@ realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8
+realize_acc_reads_size_threshold: Optional[int] = (
+    None  # TODO(xuanzh): harden this to make it non optional
+)
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
@@ -1024,7 +1027,7 @@ class cpp:
     dynamic_threads = os.environ.get("TORCHINDUCTOR_CPP_DYNAMIC_THREADS", "0") == "1"
 
     simdlen: Optional[int] = None
-    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "4096"))
+    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "512"))
 
     cxx: tuple[Literal[None], str] = (
         None,  # download gcc12 from conda-forge if conda is installed
@@ -1506,11 +1509,11 @@ class cuda:
 
     # Path to the CUTLASS repo root directory.
     # The default path only works under PyTorch local development environment.
-    cutlass_dir = os.environ.get(
-        "TORCHINDUCTOR_CUTLASS_DIR",
-        os.path.abspath(
-            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
-        ),
+    cutlass_dir = os.path.realpath(
+        os.environ.get(
+            "TORCHINDUCTOR_CUTLASS_DIR",
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/"),
+        )
     )
 
     # Configures the maximum number of CUTLASS configs to profile in max_autotune.
@@ -1606,6 +1609,9 @@ class cuda:
     # Whether to force upload if the key already exists
     # Use this to overwrite and handle cache pollution
     binary_remote_cache_force_write: bool = False
+
+    # Enable caching codegen of cuda templates.
+    enable_caching_codegen: bool = True
 
 
 class rocm:
