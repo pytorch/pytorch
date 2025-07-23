@@ -2,6 +2,7 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Stream.h>
+#include <c10/core/impl/GPUTrace.h>
 
 namespace c10::CachingDeviceAllocator {
 
@@ -115,44 +116,89 @@ C10_API inline DeviceAllocator* getDeviceAllocator(const DeviceType& t) {
   return device_allocator;
 }
 
-template <typename T>
-struct CachingDeviceAllocatorInterface : public DeviceAllocator {
-  CachingDeviceAllocatorInterface() : impls_(std::make_unique<T>()) {}
+template <
+    typename T,
+    typename B,
+    c10::DeleterFnPtr deleteFunc,
+    typename BaseDeviceAllocator = c10::DeviceAllocator>
+struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
+  B* get_allocated_block(void* ptr, bool remove = false) {
+    const auto mutex_shard_id = get_mutex_shard_id(ptr);
+    std::lock_guard<std::mutex> lock(mutex[mutex_shard_id].m);
+    auto it = allocated_blocks[mutex_shard_id].find(ptr);
+    if (it == allocated_blocks[mutex_shard_id].end()) {
+      return nullptr;
+    }
+    Block* block = it->second;
+    if (remove) {
+      allocated_blocks[mutex_shard_id].erase(it);
+    }
+    return block;
+  }
 
   at::DataPtr allocate(size_t size) override {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");
   }
 
-  void free(void* ctx) {
-    impl_->free(ctx);
+  void free(void* ptr) {
+    if (!ptr) {
+      return;
+    }
+    B* block = get_allocated_block(ptr, true /* remove */);
+    if (!block) {
+      TORCH_CHECK(false, "invalid device pointer: ", ptr);
+    }
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_memory_deallocation(
+          T::static_device_type, reinterpret_cast<uintptr_t>(block->ptr));
+    }
+    impls_[block->device]->free(block);
   }
 
-  template <typename S>
-  bool record_event(void* ptr, void* ctx, S stream) {
-    return impl_->record_event(ptr, ctx, stream);
+  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
+    if (!ptr.get()) {
+      return;
+    }
+    if (ptr.get_deleter() != &deleteFunc) {
+      return;
+    }
+
+    B* block = get_allocated_block(ptr.get());
+    TORCH_CHECK(block, "No allocated block can be found.");
+    device_allocators[block->device]->recordStream(block, stream);
   }
 
-  void empty_cache() {
+  void empty_cache(MempoolId_t mempool_id = {0, 0}) override {
     for (auto& impl : impls_) {
-      impl->emptyCache();
+      impl->emptyCache(mempool_id);
     }
   }
 
-  void copy_data(void* dest, const void* src, std::size_t count)
-      const override {
-    impl_->copy_data(dest, src, count);
+  DeviceStats getDeviceStats(c10::DeviceIndex device) override {
+    return impls_[device]->getDeviceStats();
   }
 
-  DeviceStats getDeviceStats() {
-    return impl_->getStats();
+  void resetAccumulatedStats(c10::DeviceIndex device) override {
+    checkDeviceIndex(device);
+    impls_[device]->resetAccumulatedStats();
   }
 
-  void resetAccumulatedStats() {
-    impl_->resetAccumulatedStats();
+  void resetPeakStats(c10::DeviceIndex device) override {
+    checkDeviceIndex(device);
+    impls_[device]->resetPeakStats();
   }
 
-  void resetPeakStats() {
-    impl_->resetPeakStats();
+  // Initializes the per-device allocator implementations based on the given
+  // device count. This method must be called before any allocator is used.
+  void init(c10::DeviceIndex device_count) {
+    const auto size = static_cast<c10::DeviceIndex>(impls_.size());
+    if (size < device_count) {
+      impls_.resize(device_count);
+      for (const auto& i : c10::irange(size, device_count)) {
+        impls_[i] = std::make_unique<T>(i);
+      }
+    }
   }
 
  private:
@@ -164,6 +210,11 @@ struct CachingDeviceAllocatorInterface : public DeviceAllocator {
         ": did you call init?");
   }
 
+  static size_t get_mutex_shard_id(void* ptr) {
+    return twang_mix64(static_cast<size_t>(ptr)) % kNumMutexShard;
+  }
+
+  static constexpr size_t kNumMutexShard = 67;
   std::vector<std::unique_ptr<T>> impls_;
 };
 
@@ -173,7 +224,78 @@ struct CachingDeviceAllocatorInterface : public DeviceAllocator {
  *
  */
 
-template <typename S, typename E, typename B = Block<S>>
+struct ExpandableSegment;
+struct BlockPool;
+
+template <typename S>
+struct DeviceBlock {
+  c10::DeviceIndex device; // gpu
+  S stream; // allocation stream
+  ska::flat_hash_set<S> stream_uses; // streams on which the block was used
+  size_t size; // block size in bytes
+  size_t requested_size; // memory originally requested
+  BlockPool* pool{nullptr}; // owning memory pool
+  void* ptr{nullptr}; // memory address
+  bool allocated{false}; // in-use flag
+  bool mapped{true}; // is the virtual address range this Block references
+  // backed by physical pages. Always true when
+  // expandable_segment_ is null. When false
+  // This Block will be aligned to the segment size
+  // of its expandable_segment_.
+  DeviceBlock* prev{nullptr}; // prev block if split from a larger allocation
+  DeviceBlock* next{nullptr}; // next block if split from a larger allocation
+  int event_count{0}; // number of outstanding CUDA events
+  int64_t gc_count_base{0}; // get_free_blocks_call_count when Block is inserted
+  std::shared_ptr<GatheredContext> context_when_allocated;
+  // only set for the first block in the segment (when prev == null)
+  // this records the frame information when cudaMalloc was called
+  // whereas context_when_allocated records the last time we handed this
+  // memory out from our cache.
+  std::shared_ptr<GatheredContext> context_when_segment_allocated;
+
+  ExpandableSegment* expandable_segment_{nullptr};
+
+  DeviceBlock(
+      c10::DeviceIndex device,
+      S stream,
+      size_t size,
+      BlockPool* pool,
+      void* ptr)
+      : device(device),
+        stream(stream),
+        size(size),
+        requested_size(0),
+        pool(pool),
+        ptr(ptr) {}
+
+  // constructor for search key
+  DeviceBlock(c10::DeviceIndex device, S stream, size_t size)
+      : device(device), stream(stream), size(size), requested_size(0) {}
+
+  size_t gc_count() {
+    TORCH_INTERNAL_ASSERT(pool);
+    return static_cast<int>(pool->get_free_blocks_call_count - gc_count_base);
+  }
+
+  bool is_split() const {
+    return (prev != nullptr) || (next != nullptr);
+  }
+
+  void splice(DeviceBlock* before, DeviceBlock* after) {
+    if (before) {
+      TORCH_INTERNAL_ASSERT(before->next == after);
+      before->next = this;
+    }
+    prev = before;
+    if (after) {
+      TORCH_INTERNAL_ASSERT(after->prev == before);
+      after->prev = this;
+    }
+    next = after;
+  }
+};
+
+template <typename S, typename E, typename B = DeviceBlock<S>>
 struct CachingDeviceAllocatorImpl {
   virtual ~CachingDeviceAllocatorImpl() = default;
 
