@@ -598,12 +598,13 @@ def convolution(
             choices.append(aten_conv1x1_via_mm.bind(args, layout))
 
         conv_configs = V.choices.get_conv_configs(device_type)
+        dtype = x.get_dtype()
 
         for cfg in conv_configs(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
             in_chan,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             if ndim == 2:
                 conv2d_template.maybe_append_choice(

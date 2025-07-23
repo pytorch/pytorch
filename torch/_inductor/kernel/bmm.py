@@ -276,10 +276,14 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     device_type = ir.get_device_type(mat1)
     bmm_configs = V.choices.get_base_mm_configs(device_type)
+    dtype = mat1.get_dtype()
 
     if use_triton_template(layout):
         for config in bmm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             bmm_template.maybe_append_choice(
                 choices,
