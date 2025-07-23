@@ -9,76 +9,40 @@
 
 namespace at {
 
-  /*
-  * The goal of ZeroTensors is to replace the undefined tensors used in the forward
-  * and backward mode AD which are currently materialized to a tensor full of zeros
-  * with a new type of zero tensor that use O(1) memory (tensors with a storage
-  * pointing to nullptr). Having undefined tensors is a common occurrence in the
-  * forward mode AD. Currently these undefined tensors are materialized to zero
-  * tensors. Not only the materialization is wasteful, but the cases where
-  * computationally heavy operations like matrix multiplies are called for these
-  * tensors along with some non-zero tensors provide opportunities for perf
-  * improvement. With zero tensors, expensive operations like matmul on zero
-  * tensors will become O(1).
+ /*
+  * ZeroTensor, use O(1) memory (tensors with a storage pointing to nullptr),
+  * are primarily used to represent undefined gradients in forward AD.
   *
-  * Note that as of writing this, ZeroTensors do not propagate nans or other
-  * extreme values. This is rooted in how the kernels are implemented for
-  * ZeroTensors. For example, ZT * (non-ZT) = ZT, i.e., we don't check whether the
-  * non-ZT has nans for example.
+  * ZeroTensors do not propagate nans or other extreme values. This is rooted in
+  * how the kernels are implemented for ZeroTensors. For example, ZT * (non-ZT) = ZT, i.e.,
+  * we don't check whether the non-ZT has nans for example.
   *
   * Design:
   *
-  * 1. ZeroTensors are regular tensors with TensorOptions (as usual), and a storage
-  *    pointing to nullptr (aliasing semantic is correctly maintained), and a
-  *    ZeroTensor dispatch key set.
+  * 1. ZeroTensors are regular tensors with TensorOptions, a storage
+  *    pointing to nullptr and a ZeroTensor dispatch key set.
   *
-  * 2. Zero tensors are immutable.
-  *     - As a result, in-place operations on these tensors will be disallowed. This is
-  *       done to prevent data race in the case of multithreading (when two threads try
-  *       to read the same zero tensor and materialize it in-place).
-  *     - Zero tensors shouldn’t be passed as an output tensor in out= operations.
+  * 2. ZeroTensors are immutable.
+  *     - This is done to prevent data race in the case of multithreading
+  *       (when two threads try to read the same zero tensor and materialize it in-place).
   *
-  * 3. Similar to Conjugate and Negative dispatch keys, ZeroTensor keys also has a
-  *    corresponding boxed fallback for dispatch key resolution. Most functions will
-  *    use this fallback if the ZeroTensor key is set on one or more inputs. A select
-  *    few functions that are registered as fallthrough kernels or have a special
-  *    kernel registered in native_functions.yaml will bypass this fallback (mul,
-  *    matmul, tensor views, etc.).
-  *     - This fallback materializes each ZeroTensor in the following way:
-  *       at::zeros({}, tensor.options()).expand(tensor.sizes()); where tensor is an
-  *       efficient zero tensor (tensor with ZeroTensor dispatch key set)
-  *     - If there’s a mutable ZeroTensor , then we simply error out to avoid the race
-  *       condition (as mentioned above).
-  *
-  * 4. ZeroTensors are handled below autograd. This is necessary because we want the
-  *    materialization to happen below the autograd to ensure gradients are populated
-  *    on the correct tensors.
+  * 3. ZeroTensor has a boxed fallback that will be dispatched to any ops that don't
+  *    have special ZeroTensor handling. This fallback materializes each ZeroTensor to
+  *    `at::zeros({}, tensor.options()).expand(tensor.sizes())`.
+
+  * 4. ZeroTensors are handled above autograd. This is necessary because fallback
+  *    operations are not differentiable.
   *     - Example: Consider add in the case it was using the fallback: zerotensor_a + b.
   *       zerotensor_a would be materialized to c=torch.zeros_like(zerotensor_a) after
   *       passing through the fallback. If this happens above the autograd, then the
   *       gradients would be populated on c instead of zerotensor_a.
   *
   * 5. The grad field is always populated with an honest to goodness tensor. This
-  *    materialization of zero tensors will happen in:
-  *     - AcccumulateGrad for Backward Mode AD.
+  *    materialization of ZeroTensors will happen in:
+  *     - AccumulateGrad for Backward Mode AD.
   *     - will never be required for ForwardMode AD.
-  *       - This is because if all the tangents were undefined (efficient zero tensors),
+  *       - This is because if all the tangents were undefined (efficient ZeroTensors),
   *         no computation will be performed (this is ensured via an existing pre-check).
-  *       - If one or more tangent is non-zero (undefined), then even if the Jacobian is
-  *         zero, we never get an efficient zero tensor as an output (since we don’t
-  *         compute efficient zero tensors in Jacobian computation, i.e., Jacobian can
-  *         never be a ZeroTensor). This will not be true anymore if ZeroTensors were
-  *         exposed in the Python API.
-  *
-  * 6. torch.mul(efficient_zero_tensor, other) will return an efficient_zero_tensor.
-  *    We aim to add similar specialized handling for other relevant functions based
-  *    on: https://fb.quip.com/Dv5hARK0xyTo
-  *
-  * 7. All instance of zeros_like should be replaced with a call to
-  *    _efficientzerotensor. This would ensure that we are taking maximally
-  *    optimizing the performance wherever we can (combined with not using ZeroTensor
-  *    fallback for functions where the function computation can be short circuited
-  *    with the added information that one of the inputs is a zero tensor).
   */
   // ZeroTensors are designed to be immutable. Thus, we error out when an in-place operation is performed on ZeroTensors
   static void zeroTensorFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
