@@ -143,6 +143,8 @@ def _transfer_meta(
             for k, v in old_node.meta.items()
             if k in torch.fx.proxy._COPY_META_FIELDS
         )
+    if "stack_trace" in old_node.meta:
+        new_meta["stack_trace"] = old_node.meta["stack_trace"]
 
 
 class Match:
