@@ -176,9 +176,11 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten._weight_int4pack_mm_with_scales_and_zeros.default": {},
 }
 
-# Operators in this list will be added to c_shim_generic.{h/cpp}.
-# Unlike other c_shims, operators in this file do not bypass the dispatcher.
 # Operators in this list are intended to be used in torch/csrc/stable/ops.h
-generic_fallback_ops: list[str] = [
+# Unlike other c_shims, operators in this file do not bypass the dispatcher.
+# The same BC rules apply as inductor_fallback_ops.
+# `python torchgen/gen.py --update-aoti-c-shim` will automatically generate
+# c_shim_generic.{h/cpp} based on the list below.
+generic_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.fill_.Scalar": {},
-]
+}

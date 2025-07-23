@@ -2744,11 +2744,6 @@ def main() -> None:
         action="store_true",
         help="Generate MTIA registration code when set",
     )
-    parser.add_argument(
-        "--aoti-generic",
-        action="store_true",
-        help="Generate generic (non-backend-specific) AOTInductor C shim code",
-    )
 
     # TODO: --op-registration-whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
@@ -2849,6 +2844,7 @@ def main() -> None:
     aoti_backends: set[Optional[DispatchKey]] = {
         DispatchKey.CPU,
         DispatchKey.CUDA,
+        DispatchKey.GenericKey,
     }
 
     # TODO: stop generating CUDA kernels for non-CUDA builds
@@ -2877,10 +2873,6 @@ def main() -> None:
 
         if DispatchKey.MTIA in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MTIA)]
-
-    if options.aoti_generic:
-        aoti_backends = {DispatchKey.DummyKey}
-        # aoti_backends.add(DispatchKey.DummyKey)
 
     if options.backend_whitelist:
         dispatch_keys = [

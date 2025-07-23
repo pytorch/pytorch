@@ -6,7 +6,7 @@ import textwrap
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 
-from torchgen.aoti.fallback_ops import inductor_fallback_ops
+from torchgen.aoti.fallback_ops import generic_fallback_ops, inductor_fallback_ops
 from torchgen.api.types import DispatcherSignature
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
 from torchgen.context import method_with_native_function
@@ -415,15 +415,18 @@ def get_backend_index_for_aoti(
     extend_aoti_c_shim: bool,
 ) -> BackendIndex | None:
     backend_index = None
-    # Handle the case when dispatch_key is DummyKey (generic)
-    if dispatch_key is DispatchKey.DummyKey:
+    # Handle the case when dispatch_key is GenericKey (generic)
+    if dispatch_key is DispatchKey.GenericKey:
         return None
 
-    if backend_indices[dispatch_key].has_kernel(func) or (
-        func.structured_delegate is not None
-        and func.structured_delegate in func_group_mapping
-        and backend_indices[dispatch_key].has_kernel(
-            func_group_mapping[func.structured_delegate]
+    if dispatch_key in backend_indices and (
+        backend_indices[dispatch_key].has_kernel(func)
+        or (
+            func.structured_delegate is not None
+            and func.structured_delegate in func_group_mapping
+            and backend_indices[dispatch_key].has_kernel(
+                func_group_mapping[func.structured_delegate]
+            )
         )
     ):
         backend_index = backend_indices[dispatch_key]
@@ -460,7 +463,7 @@ def get_header_for_aoti(
         func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
     )
     if backend_index is None:
-        if dispatch_key is DispatchKey.DummyKey:
+        if dispatch_key is DispatchKey.GenericKey:
             return f"#include <ATen/ops/{func.root_name}.h>"
         return None
 
@@ -488,12 +491,12 @@ def gen_c_shim(
         func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
     )
 
-    if backend_index is None and dispatch_key is not DispatchKey.DummyKey:
+    if backend_index is None and dispatch_key is not DispatchKey.GenericKey:
         return None
 
     schema = func.func
     device = (
-        "generic" if dispatch_key is DispatchKey.DummyKey else dispatch_key.lower()
+        "generic" if dispatch_key is DispatchKey.GenericKey else dispatch_key.lower()
     )
     backend_call = gen_static_dispatch_backend_call(
         func,
@@ -569,11 +572,13 @@ def gen_aoti_c_shim(
         )
     )
     device = (
-        "generic" if dispatch_key is DispatchKey.DummyKey else dispatch_key.lower()
+        "generic"
+        if dispatch_key is None or dispatch_key is DispatchKey.GenericKey
+        else dispatch_key.lower()
     )
     include_device_functions = (
         "#include <ATen/Functions.h>"
-        if dispatch_key is DispatchKey.DummyKey
+        if dispatch_key is DispatchKey.GenericKey
         else f"#include <ATen/{str(dispatch_key)}Functions.h>"
     )
     warning = """
@@ -655,10 +660,17 @@ def gen_aoti_c_shim_files(
                 break
 
     for dispatch_key in aoti_backends:
+        # Use generic_fallback_ops for the generic backend, inductor_fallback_ops for others
+        fallback_ops_dict = (
+            generic_fallback_ops
+            if dispatch_key is DispatchKey.GenericKey
+            else inductor_fallback_ops
+        )
+
         fallbacks = {}
         for func in native_functions:
             op_name = get_fallback_op_name(func)
-            if op_name in inductor_fallback_ops:
+            if op_name in fallback_ops_dict:
                 fallbacks[op_name] = func
         fallback_native_functions = tuple(
             value for _, value in sorted(fallbacks.items())
@@ -666,7 +678,7 @@ def gen_aoti_c_shim_files(
 
         # Use "generic" as the device name when dispatch_key is Undefined
         device_name = (
-            "generic" if dispatch_key is DispatchKey.DummyKey else dispatch_key.lower()
+            "generic" if dispatch_key is DispatchKey.GenericKey else dispatch_key.lower()
         )
 
         # header files were checked in for ABI-compatiblilty checking
