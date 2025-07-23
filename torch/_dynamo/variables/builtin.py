@@ -1271,6 +1271,19 @@ class BuiltinVariable(VariableTracker):
                     args[1:],
                 )
 
+        if self.fn is float and len(args) == 1 and name in ("fromhex", "hex"):
+            if isinstance(args[0], ConstantVariable):
+                try:
+                    fn = getattr(float, name)
+                    res = fn(args[0].as_python_constant())
+                    return variables.ConstantVariable.create(res)
+                except (OverflowError, ValueError) as e:
+                    raise_observed_exception(
+                        type(e),
+                        tx,
+                        args=list(map(ConstantVariable.create, e.args)),
+                    )
+
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
             return variables.ConstantVariable(None)

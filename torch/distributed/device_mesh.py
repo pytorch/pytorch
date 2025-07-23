@@ -644,11 +644,15 @@ else:
 
         def __repr__(self) -> str:
             device_mesh_repr = (
-                f"DeviceMesh('{self.device_type}', {self.mesh.tolist()})"
-                if not self.mesh_dim_names
-                else f"DeviceMesh('{self.device_type}', {self.mesh.tolist()}, mesh_dim_names={self.mesh_dim_names})"
+                f"({', '.join(f'{k}={v}' for k, v in zip(self.mesh_dim_names, self.mesh.shape))})"
+                if self.mesh_dim_names
+                else f"{tuple(self.mesh.shape)}"
             )
-            return device_mesh_repr
+            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, device: '{self.device_type}', stride: {self.mesh.stride()}"
+            # We only print the mesh tensor if the debug mode is turned on.
+            if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "") == "DETAIL":
+                device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
+            return f"{device_mesh_repr})"
 
         def __hash__(self):
             # lazily compute hash
@@ -1007,7 +1011,7 @@ else:
             required for distributed communications behind the scene.
 
         Args:
-            device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
+            device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like", "xpu".
                 Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.
