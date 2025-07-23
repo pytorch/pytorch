@@ -87,6 +87,7 @@ from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import (
     ALIGN_BYTES,
+    IndentedBuffer,
     clear_on_fresh_cache,
     is_linux,
     is_windows,
@@ -1621,6 +1622,196 @@ class CudaKernelParamCache:
         return cls.cache.keys()
 
 
+def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
+    def _pad_to_alignment(raw_bytes: bytes) -> bytes:
+        padded_bytes = raw_bytes.ljust(
+            (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
+            b"\x00",
+        )
+        return padded_bytes
+
+    # This serializes the tensor's untyped_storage to bytes by accessing
+    # the raw data of the underlying structure.
+    import ctypes
+
+    if t.numel() == 0:
+        return b""
+
+    if t.is_mkldnn:
+        data_ptr = torch.ops.mkldnn.data_ptr(t)
+        nbytes = torch.ops.mkldnn._nbytes(t)
+    else:
+        t_cpu = t.untyped_storage().cpu()
+        data_ptr = t_cpu.data_ptr()
+        nbytes = t_cpu.nbytes()
+
+    raw_array = ctypes.cast(
+        data_ptr,
+        ctypes.POINTER(ctypes.c_ubyte * nbytes),
+    )
+    raw_bytes = bytes(raw_array.contents)
+    return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
+
+
+def _compile_consts(consts: bytes, platform: str, mutating: bool, device_type: str, aot_mode: bool, specified_sub_dir: Path | str, use_relative_path: bool) -> str:
+    # Load from aot_inductor, and update the value on demand.
+    use_asm_build: bool = config.aot_inductor.use_consts_asm_build
+    section_attr = ""
+
+    if platform == "linux":
+        if mutating:
+            # .data section is between .text and .bss. When the size of .data is large,
+            # during the linking, the relocation of .text against .bss may overflow.
+            # Rename it to .ldata so that it won't be in between the .text and .bss section
+            if len(consts) > 2_000_000_000:
+                raise ValueError(
+                    "Models with buffer mutation included doesn't support constants greater than 2GB!"
+                )
+            section_attr = '.ldata, "aw"'
+        else:
+            section_attr = '.lrodata, "a"'
+        symbol_prefix = ""
+    elif platform == "darwin":
+        section_attr = "__DATA,__data"
+        symbol_prefix = "_"
+    elif platform == "win32":
+        symbol_prefix = ""
+        # ASM build is not supported on Windows, force use CPP build.
+        use_asm_build = False
+    else:
+        raise RuntimeError(f"Unsupported platform: {platform}")
+
+    # Intel compiler failed to compile this manually constructed assembly file.
+    # Switch XPU to use consts cpp build.
+    if device_type == "xpu":
+        use_asm_build = False
+
+    is_large_consts = len(consts) > 1024
+
+    def format_consts_to_asm(
+        consts: bytes,
+        align_bytes: int,
+        symbol_prefix: str,
+        is_large_consts: bool,
+    ) -> tuple[str, str]:
+        consts_asm = f"\t.section\t{section_attr}\n"
+        consts_asm += f"\t.balign {align_bytes}\n"
+        consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
+        consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
+        if not is_large_consts:
+            for c in consts:
+                consts_asm += f"\t.byte {c}\n"
+            # Add one element even if constants are empty
+            # Otherwise assembler will not put them in data section
+            if not consts:
+                consts_asm += "\t.space 1\n"
+        else:
+            consts_asm += "\t.quad 0x1234567899abcdef\n"
+            consts_asm += f"\t.space {len(consts) - 8}\n"
+        consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
+        consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+        return consts_asm, "weights.S"
+
+    # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
+    def format_consts_to_cpp(
+        consts: bytes, align_bytes: int, symbol_prefix: str
+    ) -> tuple[str, str]:
+        consts_size = len(consts)
+        asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))\t\n\
+#else\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n\
+#endif\t\n\
+\t\n\
+ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
+        const_cpp = asan_attr
+        const_cpp += f"alignas({align_bytes}) extern "
+        const_cpp += f"unsigned char {symbol_prefix}_binary_constants_bin_start[{consts_size}] = {{\t\n"
+        count_bytes = 0
+        for c in consts:
+            const_cpp += f"{c}, "
+            count_bytes = count_bytes + 1
+            if count_bytes % 16 == 0:
+                const_cpp += "\t\n"
+        const_cpp += "};\t\n"
+        const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
+        return const_cpp, "weights.cpp"
+
+    if use_asm_build:
+        consts_code, code_ext = format_consts_to_asm(
+            consts, ALIGN_BYTES, symbol_prefix, is_large_consts
+        )
+    else:
+        consts_code, code_ext = format_consts_to_cpp(
+            consts, ALIGN_BYTES, symbol_prefix
+        )
+
+    _, consts_s = write(
+        consts_code,
+        code_ext,
+        specified_dir=str(specified_sub_dir),
+        key=config.aot_inductor.model_name_for_generated_files,
+    )
+    consts_s = Path(consts_s)
+    object_build_options = CppTorchDeviceOptions(
+        device_type=device_type,
+        aot_mode=aot_mode,
+        compile_only=True,
+        use_relative_path=use_relative_path,
+    )
+    object_builder = CppBuilder(
+        name=str(consts_s.stem),
+        sources=str(consts_s),
+        output_dir=str(consts_s.parent),
+        BuildOption=object_build_options,
+    )
+    consts_o = object_builder.get_target_file_path()
+    object_builder.build()
+
+    if is_large_consts and use_asm_build:
+        with open(consts_o, "r+b") as f:
+            f.seek(0)
+            hdr = f.read(1024)
+            # Search for magic number and write the actual data over it
+            start_idx = hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
+            assert start_idx != -1
+            f.seek(start_idx)
+            pos = 0
+            while pos < len(consts):
+                rc = f.write(consts[pos:])
+                pos += rc
+
+    # Remove the .S file to save space
+    os.remove(consts_s)
+
+    return consts_o
+
+
+def generate_aot_consts_mapping(weights_config: dict[str, Any], model_name: str) -> str:
+    ib = IndentedBuffer()
+    ib.writelines(
+        [
+            '#include <unordered_map>',
+            '#include <string>\n',
+            'namespace torch::aot_inductor {',
+            f'const std::unordered_map<std::string, int>& get_{model_name}_consts_mapping() {{',
+            '  static const std::unordered_map<std::string, int> index = {'
+        ]
+    )
+
+    for weight_name, val in weights_config.items():
+
+        start_offset, size, shape, stride, tensor_offset = val
+    
+        ib.writelines([f'    {{"{weight_name}", {start_offset}}},'])
+    ib.writelines(['  };'])
+    ib.writelines(['  return index;'])
+    ib.writelines(['}'])
+    ib.writelines(['}  // namespace torch::aot_inductor'])
+
+    return ib.getvalue()
+
+
 class AotCodeCompiler:
     """
     Compile AOT Inductor generated code.
@@ -1789,136 +1980,6 @@ class AotCodeCompiler:
             specified_sub_dir.mkdir(exist_ok=True)
         cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
 
-        def _compile_consts(consts: bytes, platform: str) -> str:
-            # Load from aot_inductor, and update the value on demand.
-            use_asm_build: bool = config.aot_inductor.use_consts_asm_build
-
-            if platform == "linux":
-                if graph.mutated_buffers & OrderedSet(graph.constants.keys()):
-                    # .data section is between .text and .bss. When the size of .data is large,
-                    # during the linking, the relocation of .text against .bss may overflow.
-                    # Rename it to .ldata so that it won't be in between the .text and .bss section
-                    if len(consts) > 2_000_000_000:
-                        raise ValueError(
-                            "Models with buffer mutation included doesn't support constants greater than 2GB!"
-                        )
-                    section_attr = '.ldata, "aw"'
-                else:
-                    section_attr = '.lrodata, "a"'
-                symbol_prefix = ""
-            elif platform == "darwin":
-                section_attr = "__DATA,__data"
-                symbol_prefix = "_"
-            elif platform == "win32":
-                symbol_prefix = ""
-                # ASM build is not supported on Windows, force use CPP build.
-                use_asm_build = False
-            else:
-                raise RuntimeError(f"Unsupported platform: {platform}")
-
-            # Intel compiler failed to compile this manually constructed assembly file.
-            # Switch XPU to use consts cpp build.
-            if device_type == "xpu":
-                use_asm_build = False
-
-            is_large_consts = len(consts) > 1024
-
-            def format_consts_to_asm(
-                consts: bytes,
-                align_bytes: int,
-                symbol_prefix: str,
-                is_large_consts: bool,
-            ) -> tuple[str, str]:
-                consts_asm = f"\t.section\t{section_attr}\n"
-                consts_asm += f"\t.balign {align_bytes}\n"
-                consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
-                consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
-                if not is_large_consts:
-                    for c in consts:
-                        consts_asm += f"\t.byte {c}\n"
-                    # Add one element even if constants are empty
-                    # Otherwise assembler will not put them in data section
-                    if not consts:
-                        consts_asm += "\t.space 1\n"
-                else:
-                    consts_asm += "\t.quad 0x1234567899abcdef\n"
-                    consts_asm += f"\t.space {len(consts) - 8}\n"
-                consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
-                consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
-                return consts_asm, "S"
-
-            # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
-            def format_consts_to_cpp(
-                consts: bytes, align_bytes: int, symbol_prefix: str
-            ) -> tuple[str, str]:
-                consts_size = len(consts)
-                asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
-#define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))\t\n\
-#else\t\n\
-#define ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n\
-#endif\t\n\
-\t\n\
-ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
-                const_cpp = asan_attr
-                const_cpp += f"alignas({align_bytes}) extern "
-                const_cpp += f"unsigned char {symbol_prefix}_binary_constants_bin_start[{consts_size}] = {{\t\n"
-                count_bytes = 0
-                for c in consts:
-                    const_cpp += f"{c}, "
-                    count_bytes = count_bytes + 1
-                    if count_bytes % 16 == 0:
-                        const_cpp += "\t\n"
-                const_cpp += "};\t\n"
-                const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
-                return const_cpp, "cpp"
-
-            if use_asm_build:
-                consts_code, code_ext = format_consts_to_asm(
-                    consts, ALIGN_BYTES, symbol_prefix, is_large_consts
-                )
-            else:
-                consts_code, code_ext = format_consts_to_cpp(
-                    consts, ALIGN_BYTES, symbol_prefix
-                )
-
-            _, consts_s = write(
-                consts_code,
-                code_ext,
-                specified_dir=str(specified_sub_dir),
-            )
-            consts_s = Path(consts_s)
-            object_build_options = CppTorchDeviceOptions(
-                device_type=device_type,
-                aot_mode=graph.aot_mode,
-                compile_only=True,
-                use_relative_path=use_relative_path,
-            )
-            object_builder = CppBuilder(
-                name=str(consts_s.stem),
-                sources=str(consts_s),
-                output_dir=str(consts_s.parent),
-                BuildOption=object_build_options,
-            )
-            consts_o = object_builder.get_target_file_path()
-            object_builder.build()
-
-            if is_large_consts and use_asm_build:
-                with open(consts_o, "r+b") as f:
-                    f.seek(0)
-                    hdr = f.read(1024)
-                    # Search for magic number and write the actual data over it
-                    start_idx = hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
-                    assert start_idx != -1
-                    f.seek(start_idx)
-                    pos = 0
-                    while pos < len(consts):
-                        rc = f.write(consts[pos:])
-                        pos += rc
-
-            # Remove the .S file to save space
-            os.remove(consts_s)
-
-            return consts_o
 
         from torch.utils._filelock import FileLock
 
@@ -1977,36 +2038,6 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 if name not in graph.folded_constants
             )
 
-            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
-                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
-                    padded_bytes = raw_bytes.ljust(
-                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
-                        b"\x00",
-                    )
-                    return padded_bytes
-
-                # This serializes the tensor's untyped_storage to bytes by accessing
-                # the raw data of the underlying structure.
-                import ctypes
-
-                if t.numel() == 0:
-                    return b""
-
-                if t.is_mkldnn:
-                    data_ptr = torch.ops.mkldnn.data_ptr(t)
-                    nbytes = torch.ops.mkldnn._nbytes(t)
-                else:
-                    t_cpu = t.untyped_storage().cpu()
-                    data_ptr = t_cpu.data_ptr()
-                    nbytes = t_cpu.nbytes()
-
-                raw_array = ctypes.cast(
-                    data_ptr,
-                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
-                )
-                raw_bytes = bytes(raw_array.contents)
-                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
-
             if config.aot_inductor.package_constants_in_so:
                 serialized_weights = b"".join(
                     _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
@@ -2016,6 +2047,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
             else:
                 serialized_weights = b""
 
+            use_mmap_weights = False
             if config.aot_inductor.package_constants_on_disk:
                 # We need to return a storage key here because the original value tensor might be a clone
                 weights_dict = Weights(
@@ -2029,13 +2061,13 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                     }
                 )
                 generated_files.append(weights_dict)
+            else:
+                consts_size = len(serialized_weights)
 
-            consts_size = len(serialized_weights)
-
-            # TODO: Fix mmap weights with cuda
-            use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
-            if config.aot_inductor.force_mmap_weights:
-                use_mmap_weights = True
+                # TODO: Fix mmap weights with cuda
+                use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
+                if config.aot_inductor.force_mmap_weights:
+                    use_mmap_weights = True
 
             compile_command: dict[str, Any] = {
                 "aot_mode": graph.aot_mode,
@@ -2125,7 +2157,8 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 )
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
 
-            consts_o = _compile_consts(aot_constants, sys.platform)
+            mutating = len(graph.mutated_buffers & OrderedSet(graph.constants.keys())) > 0
+            consts_o = _compile_consts(aot_constants, sys.platform, mutating, device_type, graph.aot_mode, specified_sub_dir, use_relative_path)
             custom_obj_idx = 0
             # Note that custom_objs_config.json file is different from the model_constants_config.json file produced
             # in package_sigmoid(). The keys in custom_objs_config.json directly correspond to the arg name in extern
@@ -2269,7 +2302,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                         f_weights.write(struct.pack("q", magic_number))
 
                     generated_files.append(weight_file)
-                else:
+                elif not config.aot_inductor.package_constants_on_disk:
                     # TODO: unify to always use mmap_weights
                     generated_files.append(consts_o)
                     so_builder.save_src_to_cmake(cmake_path, consts_o)

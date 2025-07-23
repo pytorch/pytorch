@@ -8,6 +8,7 @@ import zipfile
 from dataclasses import dataclass
 from typing import Any, IO, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
+import sys
 
 import torch
 import torch.utils._pytree as pytree
@@ -271,31 +272,83 @@ def _package_aoti_files(
     if len(all_weights) > 0:
         # Dedup weights
         grouped_tensors: list[OrderedSet[tuple[str, str]]] = group_weights(all_weights)
+        complete_tensors: list[torch.Tensor] = []
         for idx, group in enumerate(grouped_tensors):
-            filename = f"{WEIGHT_FILENAME_PREFIX}{idx}"
+            # filename = f"{WEIGHT_FILENAME_PREFIX}{idx}"
             model_name, weight_name = get_complete(group, all_weights)
             complete_tensor, _ = all_weights[model_name].get_weight(weight_name)
-            buffer = io.BytesIO()
-            torch.save(complete_tensor, buffer, pickle_protocol=pickle_protocol)
-            archive_writer.write_bytes(
-                os.path.join(WEIGHTS_DIR, filename), buffer.getvalue()
-            )
+            complete_tensors.append(complete_tensor)
+
+            # store tensor as a separate file
+            # buffer = io.BytesIO()
+            # torch.save(complete_tensor, buffer, pickle_protocol=pickle_protocol)
+            # archive_writer.write_bytes(
+            #     os.path.join(WEIGHTS_DIR, filename), buffer.getvalue()
+            # )
+
+        from torch._inductor.codecache import _to_bytes, _compile_consts, generate_aot_consts_mapping
+        from torch._inductor import config as inductor_config
+        all_cuda = all([t.is_cuda for t in complete_tensors])
+        weight_bytes = []
+        offset = 0
+        for idx, group in enumerate(grouped_tensors):
+            weight_byte =  _to_bytes(complete_tensors[idx], all_cuda)
+            weight_bytes.append(weight_byte)
+            size = len(weight_byte)
+
             for model_name, weight_name in group:
                 _, w_property = all_weights[model_name].get_weight(weight_name)
                 weights_configs[model_name][weight_name] = (
-                    filename,
+                    offset, # new
+                    size,  # new
                     w_property.shape,
                     w_property.stride,
                     w_property.offset,
                 )
+            offset += size
+        
+        # complete_tensors: list[torch.Tensor]
+
+        aot_constants = b"".join(t for t in  weight_bytes)
+
+        # TODO: determine device type more carefully
+        device_type = "cpu"
+        if all_cuda:    
+            device_type = "cuda"
+        # Meta internal AOTInductor CPU
+        use_relative_path = (
+            inductor_config.is_fbcode() and device_type == "cpu"
+        )
+        specified_sub_dir = WEIGHTS_DIR
+        # TODO: determing if any constant is mutating
+        mutating = False
+        consts_o = _compile_consts(aot_constants, sys.platform, mutating, device_type, True, specified_sub_dir, use_relative_path)
+        # move consts_o into archive
+        archive_writer.write_file(
+                os.path.join(WEIGHTS_DIR, "deduped_weights.o"),
+                consts_o,
+        )
 
         for model_name, weights_config in weights_configs.items():
+            aot_consts_mapping = generate_aot_consts_mapping(weights_config, model_name)
+            new_filepath = os.path.join(AOTINDUCTOR_DIR, model_name, "aot_consts_mapping.h")
             archive_writer.write_string(
-                os.path.join(AOTINDUCTOR_DIR, model_name, "weights_config.json"),
-                json.dumps(weights_config),
+                str(new_filepath),
+                aot_consts_mapping,
             )
-            logger.debug("packaging weights_config for model %s", model_name)
-            logger.debug(weights_config)
+        # with open(consts_o, "rb") as f:
+        #     consts_o_data = f.read()
+        # archive_writer.write_bytes(
+        #     os.path.join(WEIGHTS_DIR, "deduped_weights.o"), consts_o_data
+        # )
+
+        # for model_name, weights_config in weights_configs.items():
+        #     archive_writer.write_string(
+        #         os.path.join(AOTINDUCTOR_DIR, model_name, "weights_config.json"),
+        #         json.dumps(weights_config),
+        #     )
+        #     logger.debug("packaging weights_config for model %s", model_name)
+        #     logger.debug(weights_config)
 
 
 def _package_exported_programs(

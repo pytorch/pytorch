@@ -360,9 +360,9 @@ class _ExportPackage:
             "aot_inductor.package": True,
             "aot_inductor.package_cpp_only": True,
             "always_keep_tensor_constants": True,
-            # we'll change this back to False once we enable weight deduping for standalone mode
-            "aot_inductor.package_constants_in_so": standalone,
+            "aot_inductor.package_constants_in_so": False,
             "aot_inductor.compile_standalone": standalone,
+            "aot_inductor.package_constants_on_disk": standalone,
         }
         aoti_files_map = {}
         model_names = []

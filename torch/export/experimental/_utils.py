@@ -54,6 +54,9 @@ def _get_main_cpp_file(
         ib.writeline(
             f'#include "{package_name}/data/aotinductor/{model_name}/{model_name}.h"'
         )
+        ib.writeline(
+            f'#include "{package_name}/data/aotinductor/{model_name}/aot_consts_mapping.h"'
+        )
 
     ib.newline()
     for model_name in model_names:
@@ -132,7 +135,8 @@ def _get_main_cpp_file(
                         f"    std::move(constants_array{i + 1}),",
                         "    device_str,",
                         f'    "{package_name}/data/aotinductor/{model_name}/");',
-                        f"model{i + 1}->load_constants();",
+                        f'auto model{i + 1}_mapping = torch::aot_inductor::get_{model_name}_consts_mapping();',
+                        f"model{i + 1}->load_dedup_constants(model{i + 1}_mapping);",
                     ]
                 )
 
@@ -201,7 +205,9 @@ def _get_make_file(package_name: str, model_names: list[str], cuda: bool) -> str
     for model_name in model_names:
         ib.writeline(f"add_subdirectory({package_name}/data/aotinductor/{model_name}/)")
 
-    ib.writeline("\nadd_executable(main main.cpp)")
+    ib.newline()
+    # TODO: make this optional depending on dedup weights flag
+    ib.writeline(f"add_executable(main main.cpp {package_name}/data/weights/deduped_weights.o)")
     if cuda:
         ib.writeline("target_compile_definitions(main PRIVATE USE_CUDA)")
 

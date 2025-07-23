@@ -382,6 +382,80 @@ class AOTInductorModelBase {
     }
   }
 
+  void load_dedup_constants(const std::unordered_map<std::string, int>& offsets) {
+    if (include_weights) {
+      std::cout << "Please call load_constants() instead \n";
+      return;
+    }
+    size_t num_constants = this->num_constants();
+    size_t num_folded_constants = this->num_folded_constants();
+    constants_map_->reserve(num_constants);
+
+    std::vector<size_t> constants_internal_offset(
+        num_constants - num_folded_constants);
+    size_t blob_size = 0;
+    compute_constant_blob(blob_size, constants_internal_offset);
+    
+#if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
+    constant_blob_ = RAII_gpuMalloc(blob_size);
+#else
+    constant_blob_ = RAII_cpuMalloc(blob_size);
+#endif
+
+    for (size_t i = 0; i < num_constants; i++) {
+      bool from_folded = this->constant_from_folded(i);
+      if (from_folded) {
+        continue;
+      }
+      std::string name = this->constant_name(i);
+      std::string original_fqn = this->constant_original_fqn(i);
+      // storate tensor offset in blob
+      int storage_offset = offsets.at(original_fqn);
+      size_t data_size = this->constant_data_size(i);
+      uint8_t* internal_ptr = (data_size != 0)
+          ? constant_ptr(
+                constants_internal_offset[i],
+                storage_offset,
+                data_size,
+                /* skip_copy = */ false)
+          : nullptr;
+
+      // Create at::Tensor from copied memory.
+      auto dtype = this->constant_dtype(i);
+      auto ndim = this->constant_ndim(i);
+      auto size = this->constant_shape(i);
+      auto stride = this->constant_stride(i);
+#ifdef USE_MPS
+      auto offset = this->constant_offset(i) +
+          (constants_internal_offset[i] / aoti_torch_dtype_element_size(dtype));
+#else
+      auto offset = this->constant_offset(i);
+#endif
+      auto layout = this->constant_layout(i);
+      auto opaque_metadata_ptr = this->opaque_metadata(i);
+      auto opaque_metadata_size = this->opaque_metadata_size(i);
+
+      AtenTensorHandle tensor_handle = nullptr;
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
+          internal_ptr,
+          ndim,
+          size,
+          stride,
+          offset,
+          dtype,
+          device_type_,
+          device_idx_,
+          &tensor_handle,
+          layout,
+          opaque_metadata_ptr,
+          opaque_metadata_size));
+      constants_map_->emplace(std::move(name), tensor_handle);
+    }
+    if (constants_map_) {
+      this->update_constants_array_from_map();
+    }
+  }
+
   RAIIDataPtr&& release_constant_blob() {
     return std::move(constant_blob_);
   }
