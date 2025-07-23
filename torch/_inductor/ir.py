@@ -7002,7 +7002,7 @@ class DeviceCopy(ExternKernelOut):
         is_source_pinned = (
             x_device.type == "cpu" and device.type == "cuda" and non_blocking
         )
-        if is_source_pinned:
+        if is_source_pinned and is_storage_and_layout(x):
             x.get_layout().is_pinned = True
         return DeviceCopy(
             FlexibleLayout(
