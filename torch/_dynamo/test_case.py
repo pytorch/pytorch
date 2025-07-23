@@ -204,5 +204,6 @@ class CPythonTestCase(TestCase):
         cls._stack.enter_context(  # type: ignore[attr-defined]
             config.patch(
                 enable_trace_unittest=True,
+                enable_trace_load_build_class=True,
             ),
         )
