@@ -9,6 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, NamedTuple
 
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
@@ -264,12 +265,7 @@ if __name__ == "__main__":
         repo_root / "torch" / "_dynamo" / "graph_break_registry.json"
     )
 
-    try:
-        import torch._dynamo
-
-        default_dynamo_dir = Path(torch._dynamo.__file__).parent
-    except ImportError:
-        default_dynamo_dir = repo_root / "torch" / "_dynamo"
+    default_dynamo_dir = repo_root / "torch" / "_dynamo"
 
     parser = argparse.ArgumentParser(
         description="Auto-sync graph break registry with source code"
