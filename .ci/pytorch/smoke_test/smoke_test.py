@@ -395,11 +395,12 @@ def test_nvshmem() -> None:
         from torch._C._distributed_c10d import _is_nvshmem_available
     except ImportError:
         # Not built with NVSHMEM support.
-        # 2.8 behavior: NVSHMEM is not compiled in current build
-        print("torch not compiled with NVSHMEM")
-        return
-        # 2.9 behavior: NVSHMEM is expected to be compiled in current build
-        # raise RuntimeError("torch not compiled with NVSHMEM")
+        # torch is not compiled with NVSHMEM prior to 2.9
+        if torch.__version__ < "2.9":
+            return
+        else:
+            # After 2.9: NVSHMEM is expected to be compiled in current build
+            raise RuntimeError("torch not compiled with NVSHMEM") from None
 
     print("torch compiled with NVSHMEM")
 
