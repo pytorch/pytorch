@@ -7574,6 +7574,12 @@ if not TEST_MKL:
                     {torch.float32: tol(atol=6e-05, rtol=4e-06)}
                 ),
             ),
+            decorate(
+                "nn.functional.conv2d",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
+                ),
+            ),
         }
     )
 
