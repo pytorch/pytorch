@@ -3331,8 +3331,10 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
         patch_config(config_patches, "aot_inductor.package_cpp_only", True)
         # Standlaone AOTInductor needs to embed the kernel code in the binary
         patch_config(config_patches, "aot_inductor.embed_kernel_binary", True)
-        # Default to use multi-arch kernel codegen
-        patch_config(config_patches, "aot_inductor.emit_multi_arch_kernel", True)
+        # Default to use multi-arch kernel codegen for non-rocm GPU
+        patch_config(
+            config_patches, "aot_inductor.emit_multi_arch_kernel", not torch.version.hip
+        )
         patch_config(
             config_patches, "aot_inductor.model_name_for_generated_files", "aoti_model"
         )
