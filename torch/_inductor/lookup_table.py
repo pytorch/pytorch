@@ -116,6 +116,14 @@ def _inputs_lookup_key(input_nodes: list[Any]) -> str:
     )
 
 
+def lookup_key_suffix() -> str:
+    """
+    This is suffix we append to every lookup key to help us
+    control for the Inductor environment as a whole
+    """
+    return f"tf32={bool(torch.backends.cuda.matmul.allow_tf32)}"
+
+
 def make_lookup_key(input_nodes: list[Any], op_name: str) -> Optional[str]:
     """
     Create a flattened lookup key from input nodes and operation name.
@@ -142,7 +150,7 @@ def make_lookup_key(input_nodes: list[Any], op_name: str) -> Optional[str]:
     input_key = _inputs_lookup_key(input_nodes)
 
     # Create the flattened lookup key
-    return f"{dev_key}+{op_name}+{input_key}"
+    return f"{dev_key}+{op_name}+{input_key}+{lookup_key_suffix()}"
 
 
 def lookup_template_configs(
