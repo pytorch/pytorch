@@ -14,7 +14,6 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
 import torch.nn.functional as F
 from torch import nn
-from torch._prims_common import DeviceLikeType
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import (
     distribute_module,
@@ -400,9 +399,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(group, dist.ProcessGroup), (
-        "process group must be single dimension"
-    )
+    assert isinstance(
+        group, dist.ProcessGroup
+    ), "process group must be single dimension"
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -1147,19 +1146,6 @@ def rewrite_context_parallel_block_mask(
             kv_idx,
         )
 
-    def _create_block_mask(
-        mask_mod: _mask_mod_signature,
-        B: int,
-        H: int,
-        M: int,
-        N: int,
-        device: DeviceLikeType,
-        BLOCK_SIZE: Union[int, tuple[int, int]],
-    ) -> BlockMask:
-        return create_block_mask(
-            mask_mod, B, H, M, N, device=device, BLOCK_SIZE=BLOCK_SIZE
-        )
-
     Q_LEN, KV_LEN = block_mask.seq_lengths
     Q_BLOCK_SIZE, KV_BLOCK_SIZE = block_mask.BLOCK_SIZE
     # TODO: support other KV block sizes
@@ -1172,12 +1158,13 @@ def rewrite_context_parallel_block_mask(
         mask_mod, cp_rank, cp_group_size, Q_BLOCK_SIZE, shard_q_size
     )
 
-    return _create_block_mask(
+    cbm = torch.compile(create_block_mask, fullgraph=True)
+    return cbm(
         cp_mask_mod,
-        B=1,
-        H=1,
-        M=Q_LEN // cp_group_size,
-        N=KV_LEN,
+        1,
+        1,
+        Q_LEN // cp_group_size,
+        KV_LEN,
         device=device_type,
         BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
     )
@@ -1285,7 +1272,6 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
 
             # special handler for flex_attention
             if func == torch._higher_order_ops.flex_attention:
-                # raise NotImplementedError("flex_attention is not supported yet.")
                 query, key, value, score_mod, block_mask = args[:5]
                 assert isinstance(query, torch.Tensor)
                 assert isinstance(key, torch.Tensor)
