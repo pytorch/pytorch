@@ -21,8 +21,14 @@ from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, Sy
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import config, ir
-from ..utils import _align, DeferredLineBase, LineContext, normalize_name
+from .. import config, cpp_builder, ir
+from ..utils import (
+    _align,
+    aoti_model_name_from_config,
+    DeferredLineBase,
+    LineContext,
+    normalize_name,
+)
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -58,15 +64,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.device = "cpu"
         # must be initialized prior to calling super().__init__()
         self.included_devices: OrderedSet[str] = OrderedSet()
-        self.model_class_name_suffix = (
-            config.aot_inductor.model_name_for_generated_files
-            if config.aot_inductor.compile_standalone
-            else ""
-        )
+        self.model_class_name_suffix = ""
+        if config.aot_inductor.compile_standalone:
+            self.model_class_name_suffix = aoti_model_name_from_config()
         self.aoti_model_class_name = f"AOTInductorModel{self.model_class_name_suffix}"
-
         super().__init__()
-
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
         self.ending = ";"
@@ -117,7 +119,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # e.g. const double** is possible, but not const double* const*.  This means
         # that an array containing pointers must _already_ be properly const-qualified
         # by the c_type, and not add additional const-ness.
-        ptr_call = "data()" if force_mutable or c_type.endswith("*") else "cbegin()"
+        # MSVC does not support implicitly converting a const iterator to a const pointer.
+        ptr_call = (
+            "data()"
+            if force_mutable or c_type.endswith("*") or cpp_builder.is_msvc_cl()
+            else "cbegin()"
+        )
         return (
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )

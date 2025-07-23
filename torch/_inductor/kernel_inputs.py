@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import Sequence  # noqa: TC003
-from typing import Any, Optional
-
-import sympy  # noqa: TC002
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch._inductor.config
 from torch._inductor import ir
 from torch._inductor.virtualized import V
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import sympy
 
 
 class KernelInputs:
@@ -42,7 +45,9 @@ class KernelInputs:
         """
         if reorder is None:
             return self._input_nodes
-
+        assert len(self._input_nodes) == len(reorder), (
+            f"Reorder length mismatch: {len(self._input_nodes)} vs {len(reorder)}"
+        )
         return [self._input_nodes[i] for i in reorder]
 
     @property
@@ -103,7 +108,7 @@ class KernelInputs:
             for node in self._input_nodes
         )
 
-    def strides_symbolic(self) -> tuple[tuple[sympy.core.numbers.Integer, ...], ...]:
+    def strides_symbolic(self) -> tuple[tuple[sympy.Integer, ...], ...]:
         """
         Get the symbolic strides of all input nodes.
 
@@ -183,11 +188,7 @@ class MMKernelInputs(KernelInputs):
 
     def mnk_symbolic(
         self,
-    ) -> tuple[
-        sympy.core.numbers.Integer,
-        sympy.core.numbers.Integer,
-        sympy.core.numbers.Integer,
-    ]:
+    ) -> tuple[sympy.Integer, sympy.Integer, sympy.Integer]:
         """
         Get the symbolic M, N, K dimensions for matrix multiplication.
         Handles both 2D (MM) and 3D (BMM) tensors.
