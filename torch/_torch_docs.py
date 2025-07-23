@@ -5021,7 +5021,7 @@ Alias for :func:`torch.gt`.
 add_docstr(
     torch.hash_tensor,
     r"""
-hash_tensor(input, mode=0) -> Tensor
+hash_tensor(input, *, mode=0) -> Tensor
 
 Returns a hash of all elements in the :attr:`input` tensor.
 
@@ -5044,7 +5044,7 @@ Example::
     >>> torch.hash_tensor(a)
     tensor(13822780554648485888, dtype=torch.uint64)
 
-.. function:: hash_tensor(input, dim, keepdim=False, mode=0) -> Tensor
+.. function:: hash_tensor(input, dim, *, keepdim=False, mode=0) -> Tensor
    :noindex:
 
 Returns the hash of each row of the :attr:`input` tensor in the given
