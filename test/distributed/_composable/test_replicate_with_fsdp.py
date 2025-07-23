@@ -67,7 +67,7 @@ class ReplicateTest(MultiProcessTestCase):
 
     def _init_pg(self):
         # Set the device explicitly before initializing the process group
-        torch.cuda.set_device(self.rank % torch.cuda.device_count())
+        torch.cuda.set_device(self.rank % self.world_size)
         dist.init_process_group(
             backend="nccl",
             rank=self.rank,
