@@ -111,16 +111,22 @@ def _maybe_compile_and_run_fn(fn, *args):
 
 
 def reenter_make_fx(fn):
+    from torch._guards import detect_fake_mode
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+    from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
     @functools.wraps(fn)
     def wrapped(*args):
         assert _CURRENT_MAKE_FX_TRACER is not None, (
             "Cannot reenter make_fx when we're not under a make_fx tracing session"
         )
-        return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+        gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args
         )
+        if (fake_mode := detect_fake_mode()) and fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(gm, fake_mode.shape_env, "reenter_make_fx")
+            gm.recompile()
+        return gm
 
     return wrapped
 
@@ -236,6 +242,7 @@ def check_meta_consistency(
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
+    _old_capture_scalar_outputs = torch._dynamo.config.capture_scalar_outputs
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
     # the top-level frame produces no graph, the default behavior is to fallback to eager.
     # Then when it encounters an inner function, it will try to trace that function again, which is unnecessary.
@@ -249,10 +256,12 @@ def _set_compilation_env():
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
         torch._dynamo.config.allow_empty_graphs = True
+        torch._dynamo.config.capture_scalar_outputs = True
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
         torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
+        torch._dynamo.config.capture_scalar_outputs = _old_capture_scalar_outputs
 
 
 # The invariant here is that we always trace the branch with fake tensor
@@ -852,11 +861,15 @@ def check_input_alias_and_mutation_return_outputs(
 
         # Clone the fake args to avoid mutating the original fake args
         with ExitStack() as ctx_stack:
-            # We need to re-use prev_fake_mode's shape env to resolve
+            # We need to reuse prev_fake_mode's shape env to resolve
             # the runtime assertions for unbacked symbols.
             new_fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=_get_shape_env(fake_args),
-                allow_non_fake_inputs=False,
+                # In executorch, there's an scalar_to_tensor pass that turns scalar inputs into a tensor constant
+                # e.g. add(a, 1) 1 is turned into a tensor, which becomes a constant tensor attribute in the graph.
+                # We allow non fake inputs for this purpose. This is fine for mutation detection purpose:
+                # inputs are all fake and all mutations/aliasing are still detected.
+                allow_non_fake_inputs=True,
             )
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
