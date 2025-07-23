@@ -725,7 +725,8 @@
       "Context": "",
       "Explanation": "Dynamo does not support tracing classes that are defined in the compiled region.",
       "Hints": [
-        "Move the class definition out of the compiled region.",
+        "Move the class definition out of the compiled region or set ",
+        "`torch._dynamo.config.enable_trace_load_build_class=True`.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -2505,6 +2506,16 @@
       "Gb_type": "Unsupported output type for nonstrict_trace-ed function",
       "Context": "Function: {fn.__name__}",
       "Explanation": "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, list) are allowed as output. The result of this call contains an unsupported type.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0252": [
+    {
+      "Gb_type": "Invalid call to __build_class__",
+      "Context": "Non-constant args to __build_class__: {args} {kwargs}",
+      "Explanation": "Encountered TypeError when trying to handle op __build_class__",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

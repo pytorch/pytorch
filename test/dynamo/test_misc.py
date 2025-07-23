@@ -12427,6 +12427,60 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, get_foo()), opt_fn(x, get_foo()))
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class__(self):
+        @torch.compile(fullgraph=True)
+        def fn(t):
+            class NonTensor:
+                def __init__(self, t):
+                    self.t = t
+
+                def compute(self):
+                    return self.t.sin()
+
+            obj = NonTensor(t)
+            return obj.compute()
+
+        t = torch.randn(2)
+        res = fn(t)
+        self.assertEqual(res, t.sin())
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_return___build_class__(self):
+        @torch.compile(fullgraph=True)
+        def fn(t):
+            class NonTensor:
+                def __init__(self, t):
+                    self.t = t
+
+                def compute(self):
+                    return self.t.sin()
+
+            return NonTensor, t.sin()
+
+        t = torch.randn(2)
+        cls, res = fn(t)
+        self.assertEqual(res, t.sin())
+        self.assertEqual(cls.__name__, "NonTensor")
+
+    @unittest.expectedFailure
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_return_obj___build_class__(self):
+        @torch.compile(fullgraph=True)
+        def fn(t):
+            class NonTensor:
+                def __init__(self, t):
+                    self.t = t
+
+                def compute(self):
+                    return self.t.sin()
+
+            return NonTensor(t)
+
+        t = torch.randn(2)
+        obj = fn(t)
+        self.assertEqual(obj.compute(), t.sin())
+
     def test_dunder_weakref(self):
         class Foo:
             pass

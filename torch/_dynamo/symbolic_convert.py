@@ -2803,15 +2803,20 @@ class InstructionTranslatorBase(
         self.push(self.load_builtin_from_argval("AssertionError"))
 
     def LOAD_BUILD_CLASS(self, inst):
-        unimplemented_v2(
-            gb_type="LOAD_BUILD_CLASS bytecode not supported",
-            context="",
-            explanation="Dynamo does not support tracing classes that are defined in the compiled region.",
-            hints=[
-                "Move the class definition out of the compiled region.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
+        if torch._dynamo.config.enable_trace_load_build_class:
+            self.push(self.load_builtin_from_argval("__build_class__"))
+        else:
+            # Odd things happens to Dynamo when we trace LOAD_BUILD_CLASS. Graph break for now
+            unimplemented_v2(
+                gb_type="LOAD_BUILD_CLASS bytecode not supported",
+                context="",
+                explanation="Dynamo does not support tracing classes that are defined in the compiled region.",
+                hints=[
+                    "Move the class definition out of the compiled region or set "
+                    "`torch._dynamo.config.enable_trace_load_build_class=True`.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)

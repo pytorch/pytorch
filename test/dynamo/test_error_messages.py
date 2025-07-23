@@ -694,10 +694,37 @@ Call to `torch._dynamo.graph_break()`
             """\
 LOAD_BUILD_CLASS bytecode not supported
   Explanation: Dynamo does not support tracing classes that are defined in the compiled region.
-  Hint: Move the class definition out of the compiled region.
+  Hint: Move the class definition out of the compiled region or set `torch._dynamo.config.enable_trace_load_build_class=True`.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
   Developer debug context:
+
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    class Foo:""",
+        )
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class__(self):
+        x = 3
+
+        def fn():
+            class Foo:
+                def __init__(self):
+                    self.x = x
+
+            return Foo
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Invalid call to __build_class__
+  Explanation: Encountered TypeError when trying to handle op __build_class__
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: Non-constant args to __build_class__: (NestedUserFunctionVariable(), ConstantVariable(str: 'Foo')) {}
 
 
 from user code:

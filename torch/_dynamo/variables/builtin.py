@@ -21,6 +21,7 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
+import builtins
 import contextlib
 import functools
 import inspect
@@ -43,6 +44,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
+    _NOTHING,
     AttributeMutationError,
     ObservedAttributeError,
     raise_observed_exception,
@@ -1337,6 +1339,30 @@ class BuiltinVariable(VariableTracker):
 
     call_int = _call_int_float
     call_float = _call_int_float
+
+    def call___build_class__(self, tx, *args, **kwargs):
+        def fail(args, kwargs, exc=_NOTHING):
+            unimplemented_v2(
+                gb_type="Invalid call to __build_class__",
+                context=f"Non-constant args to __build_class__: {args} {kwargs}",
+                explanation="Encountered TypeError when trying to handle op __build_class__",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                from_exc=exc,
+            )
+
+        try:
+            fn = args[0].get_function()
+        except NotImplementedError as e:
+            fail(args, kwargs, exc=e)
+
+        if check_constant_args(args[1:], kwargs):
+            r = builtins.__build_class__(
+                fn,  # type: ignore[possibly-undefined]
+                *[a.as_python_constant() for a in args[1:]],
+            )
+            return VariableTracker.build(tx, r)
+        else:
+            fail(args, kwargs)
 
     def call_bool(self, tx: "InstructionTranslator", arg):
         # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.

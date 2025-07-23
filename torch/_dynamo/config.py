@@ -411,6 +411,9 @@ enable_trace_contextlib = True
 # Enable tracing through unittest
 enable_trace_unittest = False
 
+# Enable tracing LOAD_BUILD_CLASS bytecode
+enable_trace_load_build_class = False
+
 # Enable tracing generator functions lazily. If False, Dynamo will exhaust
 # generators upon first execution. And if True, the generator will be accessed lazily
 enable_faithful_generator_behavior = True
