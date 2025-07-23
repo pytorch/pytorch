@@ -178,8 +178,8 @@ class NVSHMEMAll2AllTest(MultiProcContinousTest):
         overflow_factor = self.world_size  # worst case: one rank receives all data
         max_out_numel = max_inp_numel * overflow_factor
 
-        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).fill_(
-            self.rank
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).copy_(
+            torch.randn(max_inp_numel, dtype=dtype, device=self.device)
         )
         out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
         in_out_splits = symm_mem.empty(
@@ -243,8 +243,8 @@ class NVSHMEMAll2AllTest(MultiProcContinousTest):
         overflow_factor = self.world_size  # worst case: one rank receives all data
         max_out_numel = max_inp_numel * overflow_factor
 
-        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).fill_(
-            self.rank
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).copy_(
+            torch.randn(max_inp_numel, dtype=dtype, device=self.device)
         )
         out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
         in_splits = symm_mem.empty(
