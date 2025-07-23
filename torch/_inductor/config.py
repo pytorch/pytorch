@@ -1450,12 +1450,12 @@ class aot_inductor:
     precompile_headers: bool = not is_fbcode()
 
     # Embed generated kernel binary files into model.so
-    embed_kernel_binary: Optional[bool] = None
+    embed_kernel_binary: bool = False
 
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
-    emit_multi_arch_kernel: Optional[bool] = None
+    emit_multi_arch_kernel: bool = False
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
@@ -1509,11 +1509,11 @@ class cuda:
 
     # Path to the CUTLASS repo root directory.
     # The default path only works under PyTorch local development environment.
-    cutlass_dir = os.environ.get(
-        "TORCHINDUCTOR_CUTLASS_DIR",
-        os.path.abspath(
-            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
-        ),
+    cutlass_dir = os.path.realpath(
+        os.environ.get(
+            "TORCHINDUCTOR_CUTLASS_DIR",
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/"),
+        )
     )
 
     # Configures the maximum number of CUTLASS configs to profile in max_autotune.
@@ -1841,10 +1841,6 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
-
-    # If set to True, AOTI-generated CMakelists.txt will still use libtorch
-    # for unit testing
-    use_libtorch = False
 
 
 if TYPE_CHECKING:
