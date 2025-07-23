@@ -20,6 +20,7 @@ def partialclass(cls, *args, **kwargs):  # noqa: D103
 
 Adam = partialclass(optim.Adam, foreach=True)
 AdamW = partialclass(optim.AdamW, foreach=True)
+Muon = partialclass(optim.Muon, foreach=True)
 NAdam = partialclass(optim.NAdam, foreach=True)
 SGD = partialclass(optim.SGD, foreach=True)
 RAdam = partialclass(optim.RAdam, foreach=True)

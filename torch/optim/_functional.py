@@ -11,6 +11,7 @@ from .adam import adam  # type: ignore[attr-defined]  # noqa: F401
 from .adamax import adamax  # type: ignore[attr-defined]  # noqa: F401
 from .adamw import adamw  # type: ignore[attr-defined]  # noqa: F401
 from .asgd import asgd  # type: ignore[attr-defined]  # noqa: F401
+from .muon import muon  # type: ignore[attr-defined]  # noqa: F401
 from .nadam import nadam  # type: ignore[attr-defined]  # noqa: F401
 from .radam import radam  # type: ignore[attr-defined]  # noqa: F401
 from .rmsprop import rmsprop  # type: ignore[attr-defined]  # noqa: F401

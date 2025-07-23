@@ -15,6 +15,7 @@ from torch.optim.adamax import Adamax as Adamax
 from torch.optim.adamw import AdamW as AdamW
 from torch.optim.asgd import ASGD as ASGD
 from torch.optim.lbfgs import LBFGS as LBFGS
+from torch.optim.muon import Muon as Muon
 from torch.optim.nadam import NAdam as NAdam
 from torch.optim.optimizer import Optimizer as Optimizer
 from torch.optim.radam import RAdam as RAdam
@@ -52,6 +53,7 @@ __all__ = [
     "ASGD",
     "LBFGS",
     "lr_scheduler",
+    "Muon",
     "NAdam",
     "Optimizer",
     "RAdam",
