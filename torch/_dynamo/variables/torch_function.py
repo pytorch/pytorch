@@ -136,7 +136,10 @@ BUILTIN_TO_TENSOR_RFN_MAP = {}
 
 def populate_builtin_to_tensor_fn_map():
     global BUILTIN_TO_TENSOR_FN_MAP
-
+    if len(BUILTIN_TO_TENSOR_FN_MAP) > 0:
+        # Only populate once; after there are elements present no need to
+        # repopulate
+        return
     most_recent_func = None
 
     class GetMethodMode(BaseTorchFunctionMode):
@@ -188,21 +191,6 @@ def populate_builtin_to_tensor_fn_map():
                 assert most_recent_func is not None
                 if most_recent_func != BUILTIN_TO_TENSOR_FN_MAP[op]:
                     BUILTIN_TO_TENSOR_RFN_MAP[op] = most_recent_func
-
-
-# Defer population until first use to avoid circular imports;
-# May happen if we call export with a "meta" device
-# in that case, when we try to initialize dynamo module, we
-# get a circular import because this map - see:
-# https://github.com/pytorch/pytorch/issues/158120 for more details
-_builtin_map_populated = True
-
-
-def _ensure_builtin_map_populated():
-    global _builtin_map_populated
-    if not _builtin_map_populated:
-        populate_builtin_to_tensor_fn_map()
-        _builtin_map_populated = True
 
 
 banned_attrs = [

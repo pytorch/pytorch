@@ -1037,11 +1037,11 @@ class BuiltinVariable(VariableTracker):
         # insert handling for torch function here
         from .builder import SourcelessBuilder
         from .torch_function import (
-            _ensure_builtin_map_populated,
             BUILTIN_TO_TENSOR_FN_MAP,
             BUILTIN_TO_TENSOR_RFN_MAP,
             can_dispatch_torch_function,
             dispatch_torch_function,
+            populate_builtin_to_tensor_fn_map,
         )
 
         if can_dispatch_torch_function(tx, args, kwargs):
@@ -1049,7 +1049,7 @@ class BuiltinVariable(VariableTracker):
             # export serde does not handle method descriptors today
             if not tx.export:
                 # Ensure the builtin maps are populated before accessing them
-                _ensure_builtin_map_populated()
+                populate_builtin_to_tensor_fn_map()
                 # Use sourceless builder, we built the map ourselves
                 if not isinstance(args[0], TensorVariable):
                     if self.fn in BUILTIN_TO_TENSOR_RFN_MAP:
