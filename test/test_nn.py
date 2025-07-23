@@ -8900,6 +8900,7 @@ class TestNNDeviceType(NNTestCase):
             Y_cpu = group_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
+    @expectedFailureMPS  # Double is not supported on MPS
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
     def test_pad(self, device, dtype):
@@ -8931,6 +8932,7 @@ class TestNNDeviceType(NNTestCase):
             out.fill_(4)
             self.assertTrue(torch.all(torch.abs(inputs) < 2))
 
+    @expectedFailureMPS  # Unsupported float64/complex128
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
     def test_ReplicationPad_empty(self, device, dtype):
@@ -9098,6 +9100,7 @@ class TestNNDeviceType(NNTestCase):
                     _test_module_empty_input(self, encoder_layer, input, check_size=False)
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
     def test_TransformerEncoder_empty(self, device):
         for batch_first, input_shape in [(True, (0, 10, 512)),
@@ -9108,6 +9111,7 @@ class TestNNDeviceType(NNTestCase):
             _test_module_empty_input(self, transformer_encoder, input, check_size=False)
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
     def test_TransformerDecoderLayer_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
@@ -9118,6 +9122,7 @@ class TestNNDeviceType(NNTestCase):
             self._test_module_empty_inputs(decoder_layer, [tgt, memory])
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
     def test_TransformerDecoder_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
@@ -9129,6 +9134,7 @@ class TestNNDeviceType(NNTestCase):
             self._test_module_empty_inputs(transformer_decoder, [tgt, memory])
 
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
+    @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
     def test_Transformer_empty(self, device):
         for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
@@ -9138,6 +9144,7 @@ class TestNNDeviceType(NNTestCase):
             self._test_module_empty_inputs(transformer_model, [src, tgt])
 
     @onlyNativeDeviceTypes
+    @expectedFailureMPS   # Float64 is not supported
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
@@ -9264,6 +9271,7 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
+    @expectedFailureMPS  # Unimplemented margin_loss
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_MarginLoss_empty(self, device, dtype):
@@ -10020,6 +10028,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("mode", ["bilinear", "bicubic"])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @expectedFailureMPS  # double device type
     @onlyNativeDeviceTypes
     def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
         # Forward AD does not support XLA because XLA tensors don't have storage
@@ -10089,6 +10098,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("num_channels", [3, 5])
     @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic"])
     @parametrize_test("dtype", integral_types() + floating_types())
+    @expectedFailureMPS  # Error message is wrong
     @onlyNativeDeviceTypes
     def test_upsamplingBiMode2d_nonsupported_dtypes(self, device, antialias, num_channels, mode, dtype):
         x = torch.ones(1, num_channels, 32, 32, dtype=dtype, device=device)
@@ -11411,6 +11421,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradcheck(F.hardsigmoid, (inputs,)))
 
     # currently fails on XLA
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @onlyNativeDeviceTypes
     def test_hardswish_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device, dtype=torch.double) - 0.5) * 10
@@ -11618,6 +11629,7 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_simple_average(device, dtype, torch.float)
 
     @onlyNativeDeviceTypes
+    @expectedFailureMPS  # Unsupported Border padding mode
     @dtypes(torch.float, torch.double)
     def test_grid_sample_nan_inf(self, device, dtype):
         input = torch.zeros([1, 1, 3, 3], device=device, dtype=dtype)
