@@ -111,16 +111,22 @@ def _maybe_compile_and_run_fn(fn, *args):
 
 
 def reenter_make_fx(fn):
+    from torch._guards import detect_fake_mode
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+    from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
     @functools.wraps(fn)
     def wrapped(*args):
         assert _CURRENT_MAKE_FX_TRACER is not None, (
             "Cannot reenter make_fx when we're not under a make_fx tracing session"
         )
-        return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+        gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args
         )
+        if (fake_mode := detect_fake_mode()) and fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(gm, fake_mode.shape_env, "reenter_make_fx")
+            gm.recompile()
+        return gm
 
     return wrapped
 
@@ -859,7 +865,11 @@ def check_input_alias_and_mutation_return_outputs(
             # the runtime assertions for unbacked symbols.
             new_fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=_get_shape_env(fake_args),
-                allow_non_fake_inputs=False,
+                # In executorch, there's an scalar_to_tensor pass that turns scalar inputs into a tensor constant
+                # e.g. add(a, 1) 1 is turned into a tensor, which becomes a constant tensor attribute in the graph.
+                # We allow non fake inputs for this purpose. This is fine for mutation detection purpose:
+                # inputs are all fake and all mutations/aliasing are still detected.
+                allow_non_fake_inputs=True,
             )
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
