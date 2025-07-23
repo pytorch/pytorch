@@ -9542,6 +9542,7 @@ class TestNNDeviceType(NNTestCase):
                     verify_reduction_scalars(input, reduction, output)
 
     # verify that bogus reduction strings are errors
+    @expectedFailureMPS  # CTCLoss unimplemented
     @onlyNativeDeviceTypes
     def test_invalid_reduction_strings(self, device):
         input = torch.randn(3, 5, requires_grad=True, device=device)
@@ -12742,6 +12743,7 @@ if __name__ == '__main__':
         F.threshold(x, 0.5, 0.5, inplace=True)
         F.threshold_(x, 0.5, 0.5)
 
+    @expectedFailureMPS  # Double is unsupported
     @onlyNativeDeviceTypes
     def test_triplet_margin_with_distance_loss_default_parity(self, device):
         # Test for `nn.TripletMarginWithDistanceLoss` and
@@ -12776,6 +12778,7 @@ if __name__ == '__main__':
             self.assertTrue(gradcheck(lambda a, p, n: loss_op(a, p, n),
                             (anchor, positive, negative)))
 
+    @expectedFailureMPS  # Double is unsupported
     @onlyNativeDeviceTypes
     def test_triplet_margin_with_distance_loss(self, device):
         # Test for parity between `nn.TripletMarginWithDistanceLoss` and
