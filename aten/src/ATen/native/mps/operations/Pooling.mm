@@ -266,13 +266,13 @@ using PoolSizes = std::tuple<int32_t,
                              std::vector<int32_t>,
                              std::vector<int32_t>,
                              std::vector<int32_t>,
-                             std::vector<int32_t>>;
+                             std::optional<std::vector<int32_t>>>;
 
 static PoolSizes process_pool_sizes(const Tensor& input,
                                     IntArrayRef kernel_size,
                                     IntArrayRef stride,
                                     IntArrayRef padding,
-                                    IntArrayRef dilation,
+                                    std::optional<IntArrayRef> dilation_opt,
                                     bool ceil_mode,
                                     const int32_t pooling_dims,
                                     const std::string& op_name) {
@@ -306,18 +306,22 @@ static PoolSizes process_pool_sizes(const Tensor& input,
               pooling_dims,
               " ints");
 
-  TORCH_CHECK(dilation.size() == 1 || dilation.size() == pooling_dims,
-              op_name,
-              ": dilation must be either a single int, or a tuple of ",
-              pooling_dims,
-              " ints");
+  if (dilation_opt.has_value()) {
+    auto dilation = dilation_opt.value();
+    TORCH_CHECK(dilation.size() == 1 || dilation.size() == pooling_dims,
+                op_name,
+                ": dilation must be either a single int, or a tuple of ",
+                pooling_dims,
+                " ints");
+  }
 
   int32_t leading_dims = input.dim() - pooling_dims;
 
   const auto kernel_size_expanded = copy_and_maybe_expand(kernel_size, pooling_dims);
   const auto stride_expanded = copy_and_maybe_expand(stride.empty() ? kernel_size : stride, pooling_dims);
   const auto padding_expanded = copy_and_maybe_expand(padding, pooling_dims);
-  const auto dilation_expanded = copy_and_maybe_expand(dilation, pooling_dims);
+  const auto dilation_expanded = dilation_opt.has_value() ? copy_and_maybe_expand(dilation_opt.value(), pooling_dims)
+                                                          : std::vector<int32_t>(pooling_dims, 1);
 
   for (const auto dim : c10::irange(pooling_dims)) {
     TORCH_CHECK(padding_expanded[dim] >= 0, op_name, ": pad must be non-negative");
@@ -363,7 +367,12 @@ static PoolSizes process_pool_sizes(const Tensor& input,
     output_size[leading_dims + dim] = output_pooling_size[dim];
   }
 
-  return PoolSizes(dims, output_size, kernel_size_expanded, stride_expanded, padding_expanded, dilation_expanded);
+  return PoolSizes(dims,
+                   output_size,
+                   kernel_size_expanded,
+                   stride_expanded,
+                   padding_expanded,
+                   dilation_opt.has_value() ? std::make_optional(dilation_expanded) : std::nullopt);
 }
 
 static void max_pool_with_indices_out_mps_template(const Tensor& output,
@@ -376,8 +385,10 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
                                                    bool ceil_mode,
                                                    const int32_t pooling_dims,
                                                    const std::string& op_name) {
-  auto [dims, output_size, kernel_size, stride, padding, dilation] =
+  auto [dims, output_size, kernel_size, stride, padding, dilation_opt] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, _dilation, ceil_mode, pooling_dims, op_name);
+  TORCH_INTERNAL_ASSERT(dilation_opt.has_value());
+  auto dilation = dilation_opt.value();
   const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
   const bool return_indices = indices.defined();
 
@@ -443,7 +454,7 @@ static void max_pool_with_indices_backward_out_mps_template(Tensor& grad_input,
                                                             bool ceil_mode,
                                                             const int32_t pooling_dims,
                                                             const std::string& op_name) {
-  auto [dims, output_size, kernel_size, stride, padding, dilation] =
+  auto [dims, output_size, kernel_size, stride, padding, dilation_opt] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, _dilation, ceil_mode, pooling_dims, op_name);
 
   const auto memory_format = input.suggest_memory_format();
@@ -602,99 +613,6 @@ static void avg_pool2d_template(const Tensor& input,
                   op_name);
 }
 
-using AvgPoolSizes =
-    std::tuple<int32_t, std::vector<int64_t>, std::vector<int32_t>, std::vector<int32_t>, std::vector<int32_t>>;
-
-// TODO: Should be able to reuse the above `process_pool_sizes`, by making `dilation` optional.
-static AvgPoolSizes process_avg_pool_sizes(const Tensor& input,
-                                           IntArrayRef kernel_size,
-                                           IntArrayRef stride,
-                                           IntArrayRef padding,
-                                           bool ceil_mode,
-                                           const int32_t pooling_dims,
-                                           const std::string& op_name) {
-  TORCH_INTERNAL_ASSERT(pooling_dims == 1 || pooling_dims == 2 || pooling_dims == 3);
-
-  const int32_t dims = input.dim();
-
-  TORCH_CHECK(dims == pooling_dims + 1 || dims == pooling_dims + 2,
-              op_name,
-              ": non-empty ",
-              pooling_dims + 1,
-              "D or ",
-              pooling_dims + 2,
-              "D (batch mode) tensor expected for input");
-
-  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == pooling_dims,
-              op_name,
-              ": kernel_size must either be a single int, or a tuple of ",
-              pooling_dims,
-              " ints");
-
-  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
-              op_name,
-              ": stride must either be omitted, a single int, or a tuple of ",
-              pooling_dims,
-              " ints");
-
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
-              op_name,
-              ": padding must either be a single int, or a tuple of ",
-              pooling_dims,
-              " ints");
-
-  int32_t leading_dims = input.dim() - pooling_dims;
-
-  const auto kernel_size_expanded = copy_and_maybe_expand(kernel_size, pooling_dims);
-  const auto stride_expanded = copy_and_maybe_expand(stride.empty() ? kernel_size : stride, pooling_dims);
-  const auto padding_expanded = copy_and_maybe_expand(padding, pooling_dims);
-
-  for (const auto dim : c10::irange(pooling_dims)) {
-    TORCH_CHECK(padding_expanded[dim] >= 0, op_name, ": pad must be non-negative");
-    TORCH_CHECK(padding_expanded[dim] * 2 <= kernel_size_expanded[dim],
-                op_name,
-                ": pad should be at most half of effective kernel size");
-  }
-
-  for (const auto dim : c10::irange(static_cast<int>(leading_dims == 2), dims)) {
-    TORCH_CHECK(input.size(dim) > 0, op_name, ": Expected input's non-batch dimensions to have positive length");
-  }
-
-  // According to the documentation, the output size of each pooling dimension
-  // follows this basic formula:
-  // (in_size + 2 * padding - (kernel_size - 1) - 1) / stride + 1
-
-  std::vector<int64_t> output_pooling_size(pooling_dims);
-
-  for (const auto dim : c10::irange(pooling_dims)) {
-    int64_t out_size =
-        (input.size(leading_dims + dim) + 2 * padding_expanded[dim] - (kernel_size_expanded[dim] - 1)) - 1;
-
-    if (ceil_mode) {
-      out_size += stride_expanded[dim] - 1;
-    }
-
-    out_size = out_size / stride_expanded[dim] + 1;
-
-    if (ceil_mode) {
-      if (((out_size - 1) * stride_expanded[dim]) >= (input.size(leading_dims + dim) + padding_expanded[dim])) {
-        out_size -= 1;
-      }
-    }
-    output_pooling_size[dim] = out_size;
-  }
-
-  std::vector<int64_t> output_size(dims);
-  for (const auto dim : c10::irange(leading_dims)) {
-    output_size[dim] = input.size(dim);
-  }
-  for (const auto dim : c10::irange(pooling_dims)) {
-    output_size[leading_dims + dim] = output_pooling_size[dim];
-  }
-
-  return AvgPoolSizes(dims, output_size, kernel_size_expanded, stride_expanded, padding_expanded);
-}
-
 static void avg_pool_out_mps_template(const Tensor& output,
                                       const Tensor& input,
                                       IntArrayRef _kernel_size,
@@ -705,8 +623,8 @@ static void avg_pool_out_mps_template(const Tensor& output,
                                       std::optional<int64_t> divisor_override,
                                       const int32_t pooling_dims,
                                       const std::string& op_name) {
-  auto [dims, output_size, kernel_size, stride, padding] =
-      process_avg_pool_sizes(input, _kernel_size, _stride, _padding, ceil_mode, pooling_dims, op_name);
+  auto [dims, output_size, kernel_size, stride, padding, _] =
+      process_pool_sizes(input, _kernel_size, _stride, _padding, std::nullopt, ceil_mode, pooling_dims, op_name);
 
   const auto memory_format = input.suggest_memory_format();
   output.resize_(output_size, memory_format);
