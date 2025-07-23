@@ -120,7 +120,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # that an array containing pointers must _already_ be properly const-qualified
         # by the c_type, and not add additional const-ness.
         # MSVC does not support implicitly converting a const iterator to a const pointer.
-        ptr_call = "data()" if force_mutable or c_type.endswith("*") or cpp_builder.is_msvc_cl() else "cbegin()"
+        ptr_call = (
+            "data()"
+            if force_mutable or c_type.endswith("*") or cpp_builder.is_msvc_cl()
+            else "cbegin()"
+        )
         return (
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
