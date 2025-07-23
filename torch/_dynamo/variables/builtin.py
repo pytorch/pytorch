@@ -577,7 +577,14 @@ class BuiltinVariable(VariableTracker):
 
         def create_cmp_op_handlers(op):
             def compare_by_value(tx: "InstructionTranslator", a, b):
-                return ConstantVariable(op(a.value, b.value))
+                try:
+                    return ConstantVariable(op(a.value, b.value))
+                except TypeError as exc:
+                    raise_observed_exception(
+                        type(exc),
+                        tx,
+                        args=list(map(ConstantVariable.create, exc.args)),
+                    )
 
             result: list[
                 tuple[

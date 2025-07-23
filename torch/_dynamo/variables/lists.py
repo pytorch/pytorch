@@ -639,10 +639,12 @@ class ListVariable(CommonListMethodsVariable):
                 else:
                     key = key.as_python_constant()
 
-                if key >= len(self.items) or key < -len(self.items):
-                    msg = ConstantVariable.create("list index out of range")
-                    raise_observed_exception(IndexError, tx, args=[msg])
-                self.items[key] = value
+                try:
+                    self.items[key] = value
+                except (IndexError, TypeError) as e:
+                    raise_observed_exception(
+                        type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                    )
             return ConstantVariable.create(None)
 
         if name == "sort" and self.is_mutable():
