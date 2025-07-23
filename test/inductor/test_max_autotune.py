@@ -1500,6 +1500,7 @@ class TestMaxAutotune(TestCase):
 
     @fresh_cache()
     @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
