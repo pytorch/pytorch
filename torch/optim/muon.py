@@ -5,25 +5,17 @@ import torch
 from torch import Tensor
 
 from .optimizer import (
-    _capturable_doc,
-    _default_to_fused_or_foreach,
-    _differentiable_doc,
     _disable_dynamo_if_unsupported,
-    _foreach_doc,
-    _fused_doc,
-    _get_scalar_dtype,
-    _get_value,
+    _get_scalar_dtype,  
     _maximize_doc,
     _params_doc,
-    _stack_if_compiling,
     _to_scalar,
-    _use_grad_for_differentiable,
-    _view_as_real,
     Optimizer,
     ParamsT,
 )
 
 __all__ = ["Muon", "muon"]
+
 
 def _zeropower_via_newtonschulz5(G: Tensor, steps: int) -> Tensor:
     """
@@ -54,114 +46,6 @@ def _zeropower_via_newtonschulz5(G: Tensor, steps: int) -> Tensor:
     return X
 
 
-def _single_tensor_muon(
-    param: Tensor,
-    grad: Tensor,
-    momentum_buf: Tensor,
-    *,
-    lr: Union[float, Tensor],
-    weight_decay: float,
-    momentum: float,
-    nesterov: bool,
-    ns_steps: int,
-    maximize: bool,
-):
-    r"""Functional API that performs a single tensor Muon algorithm computation."""
-    
-    grad = grad if not maximize else -grad
-    
-    # Apply weight decay
-    if weight_decay != 0:
-        param.mul_(1 - lr * weight_decay)
-    
-    # Update momentum buffer
-    momentum_buf.lerp_(grad, 1 - momentum)
-    
-    # Choose update based on nesterov
-    if nesterov:
-        update = grad.lerp_(momentum_buf, momentum)
-    else:
-        update = momentum_buf
-    
-    # Reshape for 2D if needed (conv filters)
-    original_shape = update.shape
-    if update.ndim == 4:
-        update = update.view(len(update), -1)
-    elif update.ndim < 2:
-        # Skip orthogonalization for 1D parameters
-        param.add_(update, alpha=-lr)
-        return
-    
-    # Newton-Schulz orthogonalization
-    if update.ndim >= 2:
-        update = _zeropower_via_newtonschulz5(update, steps=ns_steps)
-        # Scale factor
-        scale = max(1, update.size(-2) / update.size(-1))**0.5
-        update = update * scale
-    
-    # Reshape back to original shape
-    update = update.reshape(original_shape)
-    
-    # Apply update
-    param.add_(update, alpha=-lr)
-
-
-def _multi_tensor_muon(
-    params: list[Tensor],
-    grads: list[Tensor],
-    momentum_bufs: list[Tensor],
-    *,
-    lr: Union[float, Tensor],
-    weight_decay: float,
-    momentum: float,
-    nesterov: bool,
-    ns_steps: int,
-    maximize: bool,
-):
-    r"""Functional API that performs Muon algorithm computation in a multi-tensor fashion."""
-    
-    if len(params) == 0:
-        return
-    
-    for i, param in enumerate(params):
-        grad = grads[i] if not maximize else -grads[i]
-        momentum_buf = momentum_bufs[i]
-        
-        # Apply weight decay
-        if weight_decay != 0:
-            param.mul_(1 - lr * weight_decay)
-        
-        # Update momentum buffer
-        momentum_buf.lerp_(grad, 1 - momentum)
-        
-        # Choose update based on nesterov
-        if nesterov:
-            update = grad.lerp_(momentum_buf, momentum)
-        else:
-            update = momentum_buf
-        
-        # Reshape for 2D if needed (conv filters)
-        original_shape = update.shape
-        if update.ndim == 4:
-            update = update.view(len(update), -1)
-        elif update.ndim < 2:
-            # Skip orthogonalization for 1D parameters
-            param.add_(update, alpha=-lr)
-            continue
-        
-        # Newton-Schulz orthogonalization
-        if update.ndim >= 2:
-            update = _zeropower_via_newtonschulz5(update, steps=ns_steps)
-            # Scale factor
-            scale = max(1, update.size(-2) / update.size(-1))**0.5
-            update = update * scale
-        
-        # Reshape back to original shape
-        update = update.reshape(original_shape)
-        
-        # Apply update
-        param.add_(update, alpha=-lr)
-
 class Muon(Optimizer):
     def __init__(
         self,
@@ -172,18 +56,11 @@ class Muon(Optimizer):
         nesterov: bool = True,
         ns_steps: int = 5,
         *,
-        maximize: bool = False,
         foreach: Optional[bool] = None,
-        capturable: bool = False,
-        differentiable: bool = False,
+        maximize: bool = False,
     ):
-        if isinstance(lr, Tensor):
-            if foreach and not capturable:
-                raise ValueError(
-                    "lr as a Tensor is not supported for capturable=False and foreach=True"
-                )
-            if lr.numel() != 1:
-                raise ValueError("Tensor lr must be 1-element")
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= weight_decay:
@@ -199,10 +76,8 @@ class Muon(Optimizer):
             "momentum": momentum,
             "nesterov": nesterov,
             "ns_steps": ns_steps,
-            "maximize": maximize,
             "foreach": foreach,
-            "capturable": capturable,
-            "differentiable": differentiable,
+            "maximize": maximize,
         }
         super().__init__(params, defaults)
 
@@ -213,8 +88,11 @@ class Muon(Optimizer):
             group.setdefault("ns_steps", 5)
             group.setdefault("maximize", False)
             group.setdefault("foreach", None)
-            group.setdefault("capturable", False)
-            group.setdefault("differentiable", False)
+            for p in group["params"]:
+                p_state = self.state.get(p, [])
+                if len(p_state) != 0 and not torch.is_tensor(p_state["step"]):
+                    step_val = float(p_state["step"])
+                    p_state["step"] = torch.tensor(step_val, dtype=_get_scalar_dtype())
 
     def _init_group(
         self,
@@ -222,23 +100,36 @@ class Muon(Optimizer):
         params_with_grad,
         grads,
         momentum_bufs,
+        state_steps,
     ):
         for p in group["params"]:
-            if p.grad is not None:
-                params_with_grad.append(p)
-                if p.grad.is_sparse:
-                    raise RuntimeError("Muon does not support sparse gradients")
-                grads.append(p.grad)
+            if p.grad is None:
+                continue
+            if torch.is_complex(p):
+                raise RuntimeError("Muon does not support complex parameters")
+            if p.grad.is_sparse:
+                raise RuntimeError("Muon does not support sparse gradients")
 
-                state = self.state[p]
-                if len(state) == 0:
-                    state["momentum_buffer"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
-                
-                momentum_bufs.append(state["momentum_buffer"])
+            params_with_grad.append(p)
+            grads.append(p.grad)
 
-    @_use_grad_for_differentiable
+            state = self.state[p]
+
+            # State initialization
+            if len(state) == 0:
+                # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
+                # This is because kernel launches are costly on CUDA and XLA.
+                state["step"] = torch.tensor(0.0, dtype=_get_scalar_dtype())
+                # Momentum buffer
+                state["momentum_buffer"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+
+            momentum_bufs.append(state["momentum_buffer"])
+            state_steps.append(state["step"])
+        return False  # has_complex
+
+    @torch.no_grad()
     def step(self, closure=None):
         """Perform a single optimization step.
 
@@ -257,27 +148,31 @@ class Muon(Optimizer):
             params_with_grad: list[Tensor] = []
             grads: list[Tensor] = []
             momentum_bufs: list[Tensor] = []
+            state_steps: list[Tensor] = []
 
-            self._init_group(
+            has_complex = self._init_group(
                 group,
                 params_with_grad,
                 grads,
                 momentum_bufs,
+                state_steps,
             )
 
             muon(
                 params_with_grad,
                 grads,
                 momentum_bufs,
+                state_steps,
                 lr=group["lr"],
                 weight_decay=group["weight_decay"],
                 momentum=group["momentum"],
                 nesterov=group["nesterov"],
                 ns_steps=group["ns_steps"],
-                maximize=group["maximize"],
                 foreach=group["foreach"],
-                capturable=group["capturable"],
-                differentiable=group["differentiable"],
+                maximize=group["maximize"],
+                grad_scale=getattr(self, "grad_scale", None),
+                found_inf=getattr(self, "found_inf", None),
+                has_complex=has_complex,
             )
 
         return loss
@@ -287,11 +182,13 @@ def muon(
     params: list[Tensor],
     grads: list[Tensor],
     momentum_bufs: list[Tensor],
+    state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     foreach: Optional[bool] = None,
-    capturable: bool = False,
-    differentiable: bool = False,
+    grad_scale: Optional[Tensor] = None,
+    found_inf: Optional[Tensor] = None,
+    has_complex: bool = False,
     *,
     lr: Union[float, Tensor],
     weight_decay: float,
@@ -303,27 +200,20 @@ def muon(
     r"""Functional API that performs Muon algorithm computation.
     See :class:`~torch.optim.Muon` for details.
     """
-    
-    # Respect when the user inputs False/True for foreach. We only want to change
-    # the default when it has not been user-specified.
-    if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
-        )
-        # Do not flip on foreach for the unsupported case where lr is a Tensor and capturable=False.
-        if foreach and isinstance(lr, Tensor) and not capturable:
-            foreach = False
-    if foreach is None:
-        foreach = False
-
-    # this check is slow during compilation, so we skip it
-    # if it's strictly needed we can add this check back in dynamo
     if not torch.compiler.is_compiling() and not all(
-        isinstance(t, torch.Tensor) for t in momentum_bufs
+        isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(
-            "API has changed, `momentum_bufs` argument must be a list of tensors"
+            "`state_steps` argument must contain a list of singleton tensors"
         )
+
+    if foreach is None:
+        if torch.jit.is_scripting():
+            foreach = False
+        else:
+            foreach = len(params) > 0 and all(
+                torch.is_same_size(params[0], p) for p in params[1:]
+            )
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -333,30 +223,147 @@ def muon(
     else:
         func = _single_tensor_muon
 
-    if len(params) == 1:
-        func(
-            params[0],
-            grads[0],
-            momentum_bufs[0],
-            lr=lr,
-            weight_decay=weight_decay,
-            momentum=momentum,
-            nesterov=nesterov,
-            ns_steps=ns_steps,
-            maximize=maximize,
-        )
+    func(
+        params,
+        grads,
+        momentum_bufs,
+        state_steps,
+        lr=lr,
+        weight_decay=weight_decay,
+        momentum=momentum,
+        nesterov=nesterov,
+        ns_steps=ns_steps,
+        maximize=maximize,
+        grad_scale=grad_scale,
+        found_inf=found_inf,
+        has_complex=has_complex,
+    )
+
+
+def _single_tensor_muon(
+    params: list[Tensor],
+    grads: list[Tensor],
+    momentum_bufs: list[Tensor],
+    state_steps: list[Tensor],
+    *,
+    lr: Union[float, Tensor],
+    weight_decay: float,
+    momentum: float,
+    nesterov: bool,
+    ns_steps: int,
+    maximize: bool,
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
+    has_complex: bool,
+):
+    for i, param in enumerate(params):
+        grad = grads[i] if not maximize else -grads[i]
+        momentum_buf = momentum_bufs[i]
+        step_t = state_steps[i]
+        
+        # update step
+        step_t += 1
+
+        # Apply weight decay
+        if weight_decay != 0:
+            param.mul_(1 - lr * weight_decay)
+
+        # Update momentum buffer
+        momentum_buf.lerp_(grad, 1 - momentum)
+
+        # Choose update based on nesterov
+        if nesterov:
+            update = grad.lerp_(momentum_buf, momentum)
+        else:
+            update = momentum_buf
+
+        # Handle different tensor dimensions
+        original_shape = update.shape
+        if update.ndim == 4:
+            # 4D convolutional filters: flatten last 3 dimensions
+            update = update.view(len(update), -1)
+        elif update.ndim < 2:
+            # 1D parameters: skip orthogonalization
+            param.add_(update, alpha=-lr)
+            continue
+
+        # Newton-Schulz orthogonalization for 2D+ tensors
+        if update.ndim >= 2:
+            update = _zeropower_via_newtonschulz5(update, steps=ns_steps)
+            # Scale factor
+            scale = max(1, update.size(-2) / update.size(-1))**0.5
+            update = update * scale
+
+        # Reshape back to original shape
+        update = update.reshape(original_shape)
+
+        # Apply update
+        param.add_(update, alpha=-lr)
+
+
+def _multi_tensor_muon(
+    params: list[Tensor],
+    grads: list[Tensor],
+    momentum_bufs: list[Tensor],
+    state_steps: list[Tensor],
+    *,
+    lr: Union[float, Tensor],
+    weight_decay: float,
+    momentum: float,
+    nesterov: bool,
+    ns_steps: int,
+    maximize: bool,
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
+    has_complex: bool,
+):
+    if len(params) == 0:
+        return
+
+    # Update steps
+    torch._foreach_add_(state_steps, 1)
+
+    # Handle maximize
+    if maximize:
+        grads = torch._foreach_neg(grads)
+
+    # Apply weight decay
+    if weight_decay != 0:
+        torch._foreach_mul_(params, 1 - lr * weight_decay)
+
+    # Update momentum buffers
+    torch._foreach_lerp_(momentum_bufs, grads, 1 - momentum)
+
+    # Choose updates based on nesterov
+    if nesterov:
+        updates = torch._foreach_lerp(grads, momentum_bufs, momentum)
     else:
-        func(
-            params,
-            grads,
-            momentum_bufs,
-            lr=lr,
-            weight_decay=weight_decay,
-            momentum=momentum,
-            nesterov=nesterov,
-            ns_steps=ns_steps,
-            maximize=maximize,
-        )
+        updates = [buf.clone() for buf in momentum_bufs]
+
+    # Process each parameter individually for orthogonalization
+    for i, (param, update) in enumerate(zip(params, updates)):
+        original_shape = update.shape
+        if update.ndim == 4:
+            # 4D convolutional filters: flatten last 3 dimensions
+            update = update.view(len(update), -1)
+        elif update.ndim < 2:
+            # 1D parameters: skip orthogonalization
+            param.add_(update, alpha=-lr)
+            continue
+
+        # Newton-Schulz orthogonalization for 2D+ tensors
+        if update.ndim >= 2:
+            update = _zeropower_via_newtonschulz5(update, steps=ns_steps)
+            # Scale factor
+            scale = max(1, update.size(-2) / update.size(-1))**0.5
+            update = update * scale
+
+        # Reshape back to original shape
+        update = update.reshape(original_shape)
+        updates[i] = update
+
+    # Apply updates
+    torch._foreach_add_(params, updates, alpha=-lr)
 
 
 Muon.__doc__ = (
@@ -394,9 +401,8 @@ Muon.__doc__ = (
         nesterov (bool, optional): enables Nesterov momentum (default: True)
         ns_steps (int, optional): number of Newton-Schulz iteration steps (default: 5)
         {_maximize_doc}
-        {_foreach_doc}
-        {_capturable_doc}
-        {_differentiable_doc}
+        foreach (bool, optional): whether to use the foreach implementation
+            (default: None)
     """
     + r"""
 
