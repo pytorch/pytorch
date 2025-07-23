@@ -384,6 +384,7 @@
   - leslie-fang-intel
   - jgong5
   - EikanWang
+  - CaoE
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -435,6 +436,7 @@
   approved_by:
   - leslie-fang-intel
   - jgong5
+  - CaoE
   mandatory_checks_name:
   - EasyCLA
   - Lint

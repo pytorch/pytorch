@@ -8,9 +8,8 @@
 #include <c10/util/Enumerate.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/StringUtil.h>
-#include <c10/util/string_view.h>
-#include <torch/nativert/executor/Placement.h> // @manual
-#include <torch/nativert/graph/TensorMeta.h> // @manual
+#include <torch/nativert/executor/Placement.h>
+#include <torch/nativert/graph/TensorMeta.h>
 
 namespace torch::nativert {
 
@@ -40,7 +39,7 @@ size_t expectImpl(
   TORCH_CHECK(
       expected == actual,
       fmt::format(
-          "Parser error: expected '{}' at postition {}, but found '{}'.",
+          "Parser error: expected '{}' at position {}, but found '{}'.",
           expected,
           curPos,
           actual));
@@ -55,7 +54,7 @@ size_t expectImpl(std::string_view source, char expected, size_t curPos) {
   }
   TORCH_CHECK(
       expected == source[curPos],
-      "Parser error: expected '{}' at postition {}, but found '{}'.",
+      "Parser error: expected '{}' at position {}, but found '{}'.",
       expected,
       curPos,
       source[curPos]);
@@ -282,7 +281,7 @@ void Node::applyDevicePlacement(const Placement& placement) {
       auto device = std::get<c10::Device>(attribute.value);
       auto targetDevice =
           placement.getMappedDevice(std::get<c10::Device>(attribute.value));
-      if (!torch::nativert::isSameDevice(targetDevice, device)) {
+      if (!isSameDevice(targetDevice, device)) {
         LOG(INFO) << "Overriding " << device.str() << " to "
                   << targetDevice.str() << " for node " << *this;
         attribute.value = targetDevice;
@@ -1283,7 +1282,7 @@ std::unique_ptr<Graph> Parser::parse() {
   }
   // For graph textual format, it should be safe to assume all
   // inputs/outputs are from users.
-  graph_->setSignature(torch::nativert::GraphSignature{signature_});
+  graph_->setSignature(GraphSignature{signature_});
   graph_->finalize();
   graph_->lint();
   // TODO: Might have some source left over, should check it if so.
@@ -1370,7 +1369,7 @@ std::string_view Parser::parseUntil(
   return source_.substr(start, curPos_ - start);
 }
 
-// Parse a strng, including the outer quotes
+// Parse a string, including the outer quotes
 std::string_view Parser::parseString() {
   size_t start = curPos_;
   expect('"');
