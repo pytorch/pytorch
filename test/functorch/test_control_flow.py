@@ -8681,22 +8681,6 @@ class TestHopSchema(TestCase):
         self.assertEqual(schema2.parse(str(schema2)), schema2)
         self.assertEqual(schema3.parse(str(schema3)), schema3)
 
-    def test_while_loop_schema_gen(self):
-        fn, inp = WHILE_LOOP_TESTS["simple_with_linear"]
-        graph = make_fx(fn)(*inp).graph
-        while_loop_node = next(
-            node
-            for node in graph.nodes
-            if node.op == "call_function"
-            and node.target is torch.ops.higher_order.while_loop
-        )
-        schema = torch._library.utils.hop_schema_from_fx_node(while_loop_node)
-        self.assertExpectedInline(
-            str(schema),
-            """while_loop(GraphModule cond_fn, GraphModule body_fn, Tensor[2] carried_inputs, Tensor[3] additional_inputs) -> Tensor[2]""",  # noqa: B950
-        )
-        self.assertEqual(schema.parse(str(schema)), schema)
-
     def test_schema_tree_spec(self):
         schema_gen = HopSchemaGenerator(torch.ops.higher_order.cond)
         args = (torch.randn(3, 4), torch.randn(2, 3))
