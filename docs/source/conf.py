@@ -207,6 +207,37 @@ templates_path = [
 ]
 # TODO: document these and remove them from here.
 
+autosummary_filename_map = {
+    'torch.nn.utils.prune.identity': 'torch.nn.utils.prune.identity_function',
+    'torch.nn.utils.prune.Identity': 'torch.nn.utils.prune.Identity_class',
+    'torch.optim.adamw.adamw': 'torch.optim.adamw.adamw_function',
+    'torch.optim.adamw.AdamW': 'torch.optim.adamw.AdamW_class',
+    'torch.optim.asgd.asgd': 'torch.optim.asgd.asgd_function',
+    'torch.optim.asgd.ASGD': 'torch.optim.asgd.ASGD_class',
+    'torch.optim.nadam.nadam': 'torch.optim.nadam.nadam_function',
+    'torch.optim.nadam.NAdam': 'torch.optim.nadam.NAdam_class',
+    'torch.optim.radam.radam': 'torch.optim.radam.radam_function',
+    'torch.optim.radam.RAdam': 'torch.optim.radam.RAdam_class',
+    'torch.optim.rmsprop.rmsprop': 'torch.optim.rmsprop.rmsprop_function',
+    'torch.optim.rmsprop.RMSprop': 'torch.optim.rmsprop.RMSprop_class',
+    'torch.optim.rprop.rprop': 'torch.optim.rprop.rprop_function',
+    'torch.optim.rprop.Rprop': 'torch.optim.rprop.Rprop_class',
+    'torch.optim.sgd.sgd': 'torch.optim.sgd.sgd_function',
+    'torch.optim.sgd.SGD': 'torch.optim.sgd.SGD_class',
+    'torch.optim.adadelta.adadelta': 'torch.optim.adadelta.adadelta_function',
+    'torch.optim.adadelta.Adadelta': 'torch.optim.adadelta.Adadelta_class',
+    'torch.optim.adagrad.adagrad': 'torch.optim.adagrad.adagrad_function',
+    'torch.optim.adagrad.Adagrad': 'torch.optim.adagrad.Adagrad_class',
+    'torch.optim.adam.adam': 'torch.optim.adam.adam_function',
+    'torch.optim.adam.Adam': 'torch.optim.adam.Adam_class',
+    'torch.optim.adamax.adamax': 'torch.optim.adamax.adamax_function',
+    'torch.optim.adamax.Adamax': 'torch.optim.adamax.Adamax_class',
+    'torch.mtia.stream': 'torch.mtia.stream_function',
+    'torch.mtia.Stream': 'torch.mtia.Stream_class',
+    'torch.cpu.stream': 'torch.cpu.stream_function',
+    'torch.cpu.Stream': 'torch.cpu.Stream_class'
+}
+
 coverage_ignore_functions = [
     # torch
     "typename",
