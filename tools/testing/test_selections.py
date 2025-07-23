@@ -9,8 +9,13 @@ from typing import Callable, TYPE_CHECKING
 from tools.stats.import_test_stats import get_disabled_tests
 from tools.testing.test_run import ShardedTest, TestRun
 
-from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import TEST_CUDA
+
+try:
+    from torch.testing._internal.common_cuda import SM80OrLater
+    from torch.testing._internal.common_utils import TEST_CUDA
+except ImportError:
+    TEST_CUDA = False
+    SM80OrLater = False
 
 
 if TYPE_CHECKING:
