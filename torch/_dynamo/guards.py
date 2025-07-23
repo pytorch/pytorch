@@ -419,10 +419,7 @@ class GuardManagerWrapper:
 
         tag_safe_roots = visit(self.root)
         for node in tag_safe_roots:
-            if (
-                not node.is_guarded_value_immutable()
-                and not node.is_guarded_value_empty_dict()
-            ):
+            if node.is_guarded_value_nn_module():
                 node.mark_tag_safe_root()
 
     def populate_diff_guard_manager(self):
