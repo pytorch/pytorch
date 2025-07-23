@@ -1475,10 +1475,9 @@ def _dynamo_dist_per_rank_init(
     if not fake_pg:
         torch.accelerator.set_device_index(rank)
 
+    device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu" 
     if backend is None:
-        backend = c10d.get_default_backend_for_device(
-            torch.accelerator.current_accelerator().type
-        )
+        backend = c10d.get_default_backend_for_device(device_type)
 
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "6789"
