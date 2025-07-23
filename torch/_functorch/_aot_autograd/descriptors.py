@@ -317,6 +317,13 @@ for ease of understanding the data flow:
 import dataclasses
 
 
+# TODO: the is_* predicates are a little suspicious because (1) they're not
+# used by anything and (2) they always report False even when a parameter got
+# swizzled into a view base or deduped with a non-parameter.  It is pretty
+# difficult to exercise these cases but it's not clear if you will write code
+# that works correctly in those cases.
+
+
 @dataclasses.dataclass(frozen=True)
 class AOTInput:
     """Describes where an input from an AOTAutograd produced FX graph comes from"""
@@ -325,13 +332,20 @@ class AOTInput:
         raise NotImplementedError("Subclasses must implement expr()")
 
     def is_param(self) -> bool:
+        """True if this input is a parameter or derived from a parameter (e.g., subclass attr)"""
         return False
 
     def is_buffer(self) -> bool:
+        """True if this input is a buffer or derived from a buffer (e.g., subclass attr)"""
         return False
 
     def is_tangent(self) -> bool:
+        """True if this input is a tangent or derived from a tangent (e.g., subclass attr)"""
         return False
+
+
+# Note: Currently, our typing discipline for differentiable versus not is not
+# very good, so feel free to rely on runtime tests instead.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -348,6 +362,7 @@ class AOTOutput:
         raise NotImplementedError("Subclasses must implement expr()")
 
     def is_grad(self) -> bool:
+        """True if this output is a grad or derived from a grad (e.g., subclass attr)"""
         return False
 
 
@@ -535,16 +550,20 @@ class PhiloxBackwardBaseOffsetAOTInput(AOTInput):
 class ForwardTokenAOTInput(AOTInput):
     """The world token which is threaded through side-effectful operations"""
 
+    idx: int
+
     def expr(self) -> str:
-        return "__forward_token"
+        return f"__forward_token{self.idx}"
 
 
 @dataclasses.dataclass(frozen=True)
 class BackwardTokenAOTInput(AOTInput):
     """The world token which is threaded through side-effectful operations, for backwards"""
 
+    idx: int
+
     def expr(self) -> str:
-        return "__backward_token"
+        return f"__backward_token{self.idx}"
 
 
 # Technically the "output" here is redundant, tangents always correspond to
@@ -557,6 +576,9 @@ class TangentAOTInput(DifferentiableAOTInput):
     """An input to the joint graph representing the tangent of an output."""
 
     output: DifferentiableAOTOutput
+
+    def __post_init__(self) -> None:
+        assert isinstance(self.output, DifferentiableAOTOutput)
 
     def expr(self) -> str:
         return f"__output_tangent({self.output.expr()})"
@@ -603,13 +625,14 @@ class IntermediateBaseAOTOutput(DifferentiableAOTOutput):
         return f"__intermediate_base({self.base_of.expr()})"
 
 
-# TODO: it's a little dodgy this is differentiable lol
+# TODO: it's a little dodgy this is differentiable lol, but we do generate
+# these BEFORE autograd is handled
 @dataclasses.dataclass(frozen=True)
 class MetadataMutationAOTOutput(DifferentiableAOTOutput):
-    # TODO: we're not recording detailed information about this
+    idx: int
 
     def expr(self) -> str:
-        return "__aliased_arg_with_metadata_mutation"
+        return f"__aliased_arg_with_metadata_mutation{self.idx}"
 
 
 # NB: this is marked differentiable as it /would/ be differentiable if we
@@ -620,6 +643,9 @@ class GradAOTOutput(DifferentiableAOTOutput):
     """An output representing the computed gradient for a differentiable input, in the joint graph"""
 
     grad_of: DifferentiableAOTInput
+
+    def __post_init__(self) -> None:
+        assert isinstance(self.grad_of, DifferentiableAOTInput)
 
     def expr(self) -> str:
         return f"__grad({self.grad_of.expr()})"
@@ -648,16 +674,20 @@ class PhiloxUpdatedBackwardOffsetAOTOutput(AOTOutput):
 class ForwardTokenAOTOutput(AOTOutput):
     """The world token output for side-effectful calls, returned so we cannot DCE it, forward only"""
 
+    idx: int
+
     def expr(self) -> str:
-        return "__forward_token"
+        return f"__forward_token{self.idx}"
 
 
 @dataclasses.dataclass(frozen=True)
 class BackwardTokenAOTOutput(AOTOutput):
     """The world token output for side-effectful calls, returned so we cannot DCE it, backward only"""
 
+    idx: int
+
     def expr(self) -> str:
-        return "__backward_token"
+        return f"__backward_token{self.idx}"
 
 
 # These are seemingly symmetric with their AOTInput counterparts.  The way to

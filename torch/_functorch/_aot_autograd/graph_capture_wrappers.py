@@ -1097,8 +1097,12 @@ def handle_effect_tokens_fn(
 
             f_fwd_out_tokens = [from_fun(t) for t in fwd_out_tokens]
             f_bwd_out_tokens = [from_fun(t) for t in bwd_out_tokens]
-            f_fwd_out_tokens_descs = [ForwardTokenAOTOutput() for _ in fwd_out_tokens]
-            f_bwd_out_tokens_descs = [BackwardTokenAOTOutput() for _ in bwd_out_tokens]
+            f_fwd_out_tokens_descs = [
+                ForwardTokenAOTOutput(i) for i in range(len(fwd_out_tokens))
+            ]
+            f_bwd_out_tokens_descs = [
+                BackwardTokenAOTOutput(i) for i in range(len(bwd_out_tokens))
+            ]
 
             meta.num_backward_tokens = len(bwd_out_tokens)
             return (
@@ -1112,14 +1116,17 @@ def handle_effect_tokens_fn(
         out_tokens = [from_fun(t) for t in functional_tensor_mode._tokens.values()]
         # TODO: can probably do a little more resolution here
         out_tokens_descs = [
-            ForwardTokenAOTOutput() for _ in functional_tensor_mode._tokens.values()
+            ForwardTokenAOTOutput(i)
+            for i in range(len(functional_tensor_mode._tokens.values()))
         ]
         return ((*out_tokens, *outs), (*out_tokens_descs, *outs_descs))
 
     # Additionally pass in tokens as inputs
     # See Note [Side-Effectful Tokens in AOTAutograd]
     additional_fwd_token_inputs = [torch.tensor([])] * num_tokens
-    additional_fwd_token_inputs_descs = [ForwardTokenAOTInput()] * num_tokens
+    additional_fwd_token_inputs_descs = [
+        ForwardTokenAOTInput(i) for i in range(num_tokens)
+    ]
 
     if trace_joint:
         args = ([*additional_fwd_token_inputs, *args[0]], *args[1:])

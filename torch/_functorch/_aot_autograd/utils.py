@@ -8,7 +8,7 @@ import operator
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional, Union, TypeVar
+from typing import Any, Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
