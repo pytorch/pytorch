@@ -292,7 +292,7 @@ def _hash_sourcelines(m: types.ModuleType, firstlineno: int, lastlineno: int) ->
 def _compile_frame_context(
     code: types.CodeType,
 ) -> contextlib.AbstractContextManager[None]:
-    from torch._dynamo.convert_frame import get_compile_id
+    from torch._dynamo.convert_frame import get_compile_id, log_dynamo_start
     from torch._guards import compile_context, CompileContext
 
     # Each code represents a new compile frame
@@ -304,6 +304,7 @@ def _compile_frame_context(
     def _ctx() -> Iterator[None]:
         increment_frame()
         compile_id = get_compile_id(frame_state={})
+        log_dynamo_start(code)
         with (
             compile_context(CompileContext(compile_id)),
             dynamo_timed(
@@ -561,7 +562,6 @@ class CompilePackage:
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
-        from torch._dynamo.convert_frame import log_dynamo_start
 
         from .output_graph import get_builtins_dict
 
@@ -572,7 +572,6 @@ class CompilePackage:
                 if entry.has_compile_id
                 else contextlib.nullcontext()
             )
-            log_dynamo_start(code)
             with context:
                 module = sys.modules[entry.python_module]
                 for alias, module_name in entry.import_sources.items():
