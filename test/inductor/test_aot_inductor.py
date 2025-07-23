@@ -57,7 +57,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     MACOS_VERSION,
     parametrize,
-    run_tests,
     skipIfMPS,
     skipIfRocm,
     skipIfWindows,
