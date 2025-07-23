@@ -837,7 +837,7 @@ static void registerMonitoringCallback() {
   auto monitoring =
       THPObjectPtr(PyObject_GetAttrString(sys_module, "monitoring"));
   if (!monitoring) {
-    TORCH_WARN("Failed to get monitoring from sys moudle.");
+    TORCH_WARN("Failed to get monitoring from sys module.");
     PyErr_Clear();
     return;
   }
@@ -895,7 +895,7 @@ static void unregisterMonitoringCallback() {
   auto monitoring =
       THPObjectPtr(PyObject_GetAttrString(sys_module, "monitoring"));
   if (!monitoring) {
-    TORCH_WARN("Failed to get monitoring from sys moudle.");
+    TORCH_WARN("Failed to get monitoring from sys module.");
     PyErr_Clear();
     return;
   }
