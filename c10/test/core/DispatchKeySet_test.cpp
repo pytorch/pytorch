@@ -404,7 +404,7 @@ TEST(DispatchKeySet, TestBackendComponentToString) {
     auto k = static_cast<BackendComponent>(i);
     auto res = std::string(toString(k));
     ASSERT_FALSE(res == "UNKNOWN_BACKEND_BIT");
-    ASSERT_FALSE(seen_strings.count(res) > 0);
+    ASSERT_FALSE(seen_strings.contains(res));
     seen_strings.insert(res);
   }
 }
@@ -439,7 +439,7 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
     } else {
       ASSERT_TRUE(res.find("Unknown") == std::string::npos) << i;
     }
-    ASSERT_TRUE(seen_strings.count(res) == 0);
+    ASSERT_TRUE(!seen_strings.contains(res));
     seen_strings.insert(res);
   }
 }
