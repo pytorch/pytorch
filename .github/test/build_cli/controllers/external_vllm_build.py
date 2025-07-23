@@ -1,17 +1,23 @@
 from utils import (
+    ensure_dir_exists,
+    remove_dir,
     run,
     get_post_build_pinned_commit,
     get_env,
     Timer,
-    create_directory,
-    delete_directory,
+    get_abs_path
 )
 import os
 
+_DEFAULT_RESULT_PATH = "./results"
+def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH) -> None:
+    if not artifact_dir:
+        artifact_dir = _DEFAULT_RESULT_PATH
 
-def build_vllm() -> None:
-    print("begin")
-    shared_folder_name = "shared"
+    result_path = get_abs_path(artifact_dir)
+    ensure_dir_exists(result_path)
+
+    print(f"Target artifact dir path is {result_path}")
 
     tag_name = get_env("TAG", "vllm-wheels")
     cuda = get_env("CUDA_VERSION", "12.8.0")
@@ -35,8 +41,6 @@ def build_vllm() -> None:
             logging=True,
         )
 
-        create_directory(shared_folder_name)
-
         env = os.environ.copy()
 
         # run docker build for target stage `export-wheels` with output
@@ -44,7 +48,7 @@ def build_vllm() -> None:
         # in the host machine.
         cmd = f"""
         docker buildx build \
-        --output type=local,dest=../{shared_folder_name} \
+        --output type=local,dest={result_path} \
         -f docker/Dockerfile.nightly_torch \
         --build-arg max_jobs={max_jobs} \
         --build-arg CUDA_VERSION={cuda} \
@@ -64,7 +68,7 @@ def clone_vllm(commit: str):
     cwd = "vllm"
 
     # delete the directory if it exists
-    delete_directory(cwd)
+    remove_dir(cwd)
 
     # Clone the repo & checkout commit
     run("git clone https://github.com/vllm-project/vllm.git")

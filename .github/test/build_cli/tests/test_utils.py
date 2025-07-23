@@ -2,14 +2,13 @@ import pytest
 from unittest.mock import patch
 import shlex
 
-
 from utils import (
     run,
     get_post_build_pinned_commit,
     get_env,
-    create_directory,
+    force_create_dir,
+    ensure_dir_exists,
 )
-
 
 class TestRun:
     def test_run_basic(self, mock_subprocess_run):
@@ -95,20 +94,56 @@ class TestGetEnv:
         assert result == ""
 
 
-class TestCreateDirectory:
-    def test_create_directory(self):
+class TestForceCreateDir:
+    def test_force_create_dir(self):
+        folder_name = "my_folder"
+        mocked_path = f"/mocked/abs/{folder_name}"
+
+        with patch("os.path.abspath", return_value=mocked_path) as mock_abspath, \
+             patch("os.path.exists", side_effect=[True, False]) as mock_exists, \
+             patch("shutil.rmtree") as mock_rmtree, \
+             patch("os.makedirs") as mock_makedirs:
+
+            force_create_dir(folder_name)
+
+            assert mock_abspath.call_count == 2
+            assert mock_exists.call_count == 2
+            mock_exists.assert_any_call(mocked_path)
+            mock_rmtree.assert_called_once_with(mocked_path)
+            mock_makedirs.assert_called_once_with(mocked_path, exist_ok=True)
+
+
+class TestEnsureDirExists:
+    def test_ensure_dir_exists_when_dir_does_not_exist(self):
+        """Test ensure_dir_exists creates directory when it doesn't exist"""
+        folder_name = "my_folder"
+        mocked_path = f"/mocked/abs/{folder_name}"
+
+        with patch("os.path.abspath", return_value=mocked_path) as mock_abspath, patch(
+            "os.path.exists", return_value=False
+        ) as mock_exists, patch("os.makedirs") as mock_makedirs, patch(
+            "builtins.print"
+        ) as mock_print:
+            ensure_dir_exists(folder_name)
+
+            mock_abspath.assert_called_once_with(folder_name)
+            mock_exists.assert_called_once_with(mocked_path)
+            mock_makedirs.assert_called_once_with(mocked_path, exist_ok=True)
+            mock_print.assert_called_once_with(f"[INFO] Creating directory: {mocked_path}")
+
+    def test_ensure_dir_exists_when_dir_exists(self):
+        """Test ensure_dir_exists doesn't create directory when it already exists"""
         folder_name = "my_folder"
         mocked_path = f"/mocked/abs/{folder_name}"
 
         with patch("os.path.abspath", return_value=mocked_path) as mock_abspath, patch(
             "os.path.exists", return_value=True
-        ) as mock_exists, patch("shutil.rmtree") as mock_rmtree, patch(
-            "os.makedirs"
-        ) as mock_makedirs:
-            create_directory(folder_name)
+        ) as mock_exists, patch("os.makedirs") as mock_makedirs, patch(
+            "builtins.print"
+        ) as mock_print:
+            ensure_dir_exists(folder_name)
 
-            # abspath should be called twice
-            assert mock_abspath.call_count == 2
+            mock_abspath.assert_called_once_with(folder_name)
             mock_exists.assert_called_once_with(mocked_path)
-            mock_rmtree.assert_called_once_with(mocked_path)
-            mock_makedirs.assert_called_once_with(mocked_path, exist_ok=True)
+            mock_makedirs.assert_not_called()
+            mock_print.assert_called_once_with(f"[INFO] Directory already exists: {mocked_path}")

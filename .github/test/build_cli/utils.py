@@ -29,23 +29,38 @@ def get_env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 
 
-def create_directory(foldername: str):
-    shared_wheels_path = os.path.abspath(foldername)
+def force_create_dir(path: str):
+    """
+    Forcefully create a fresh directory.
+    If the directory exists, it will be removed first.
+    """
+    remove_dir(path)
+    ensure_dir_exists(path)
 
-    delete_directory(shared_wheels_path)
-
-    print(f"[INFO] Creating fresh directory: {shared_wheels_path}")
-    os.makedirs(shared_wheels_path, exist_ok=True)
-
-
-def delete_directory(name: str):
-    f = os.path.abspath(name)
-    if os.path.exists(f):
-        print(f"[INFO] Removing existing directory: {f}")
-        shutil.rmtree(f)
+def ensure_dir_exists(path: str):
+    """
+    Ensure the directory exists. Create it if necessary.
+    """
+    abs_path = get_abs_path(path)
+    if not os.path.exists(abs_path):
+        print(f"[INFO] Creating directory: {abs_path}")
+        os.makedirs(abs_path, exist_ok=True)
     else:
-        print(f"[INFO] folder {name} does not exists in {f}, skipping")
+        print(f"[INFO] Directory already exists: {abs_path}")
 
+def remove_dir(path: str):
+    """
+    Remove a directory if it exists.
+    """
+    abs_path = get_abs_path(path)
+    if os.path.exists(abs_path):
+        print(f"[INFO] Removing directory: {abs_path}")
+        shutil.rmtree(abs_path)
+    else:
+        print(f"[INFO] Directory not found (skipped): {abs_path}")
+
+def get_abs_path(path:str):
+    return os.path.abspath(path)
 
 class Timer:
     def __enter__(self):

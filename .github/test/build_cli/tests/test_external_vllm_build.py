@@ -1,5 +1,4 @@
 from unittest.mock import patch, call, MagicMock
-
 from controllers.external_vllm_build import build_vllm, clone_vllm
 
 
@@ -27,7 +26,7 @@ class TestCloneVllm:
     ):
         """Test that clone_vllm deletes the directory if it exists"""
         with patch(
-            "controllers.external_vllm_build.delete_directory"
+            "controllers.external_vllm_build.remove_dir"
         ) as mock_delete, patch(
             "controllers.external_vllm_build.run"
         ):  # Mock run to prevent actual git operations
@@ -41,7 +40,10 @@ class TestCloneVllm:
 
 
 class TestBuildVllm:
+
     def test_build_vllm_default_env(self):
+        mocked_path = f"/mocked/abs/test"
+
         """Test build_vllm with default environment variables"""
         # Setup
         with patch(
@@ -49,16 +51,16 @@ class TestBuildVllm:
         ) as mock_get_commit, patch(
             "controllers.external_vllm_build.clone_vllm"
         ) as mock_clone, patch(
-            "controllers.external_vllm_build.create_directory"
+            "controllers.external_vllm_build.ensure_dir_exists"
         ) as mock_create_dir, patch(
             "controllers.external_vllm_build.Timer"
         ) as mock_timer_class, patch(
-            "builtins.print"
-        ) as mock_print, patch(
             "controllers.external_vllm_build.run"
         ) as mock_run, patch(
             "controllers.external_vllm_build.os.environ.copy", return_value={}
-        ):
+        ), patch("os.path.abspath", return_value=mocked_path) as mock_abspath:
+
+            print("111 elaine")
             # Setup the Timer mock to be used as a context manager
             mock_timer = MagicMock()
             mock_timer_class.return_value = mock_timer
@@ -75,7 +77,7 @@ class TestBuildVllm:
             # Check that the correct functions were called
             mock_get_commit.assert_called_once_with("vllm")
             mock_clone.assert_called_once_with("test-commit")
-            mock_create_dir.assert_called_once_with("shared")
+            mock_create_dir.assert_called_once_with(mocked_path)
             mock_timer.__enter__.assert_called_once()
             mock_timer.__exit__.assert_called_once()
 
@@ -88,7 +90,7 @@ class TestBuildVllm:
 
             # Verify the docker command contains expected arguments
             assert "docker buildx build" in docker_cmd
-            assert "--output type=local,dest=../shared" in docker_cmd
+            assert "--output type=local,dest=/mocked/abs/test" in docker_cmd
             assert "-f docker/Dockerfile.nightly_torch" in docker_cmd
             assert "--build-arg max_jobs=32" in docker_cmd
             assert "--build-arg CUDA_VERSION=12.8.0" in docker_cmd
@@ -108,12 +110,8 @@ class TestBuildVllm:
         ) as mock_get_commit, patch(
             "controllers.external_vllm_build.clone_vllm"
         ) as mock_clone, patch(
-            "controllers.external_vllm_build.create_directory"
-        ) as mock_create_dir, patch(
-            "controllers.external_vllm_build.Timer"
-        ) as mock_timer_class, patch(
-            "builtins.print"
-        ) as mock_print, patch(
+            "controllers.external_vllm_build.ensure_dir_exists"
+        ) as mock_create_dir,patch(
             "controllers.external_vllm_build.run"
         ) as mock_run, patch(
             "controllers.external_vllm_build.os.environ.copy", return_value={}
@@ -139,7 +137,9 @@ class TestBuildVllm:
                 # Check that the correct functions were called
                 mock_get_commit.assert_called_once_with("vllm")
                 mock_clone.assert_called_once_with("test-commit")
-                mock_create_dir.assert_called_once_with("shared")
+
+                called_path = mock_create_dir.call_args[0][0]
+                assert "results" in called_path, f"Expected 'results' in path, got: {called_path}"
 
                 # Check that the correct commands were run
                 assert (
@@ -163,3 +163,42 @@ class TestBuildVllm:
                 assert "-t custom-tag" in docker_cmd
                 assert docker_cmd_call[1].get("cwd") == "vllm"
                 assert docker_cmd_call[1].get("logging") is True
+
+    def test_build_vllm_with_customized_dir_input(self):
+
+        """Test build_vllm with default environment variables"""
+        # Setup
+        with patch(
+            "controllers.external_vllm_build.get_post_build_pinned_commit"
+        ) as mock_get_commit, patch(
+            "controllers.external_vllm_build.clone_vllm"
+        ) as mock_clone, patch(
+            "controllers.external_vllm_build.ensure_dir_exists"
+        ) as mock_create_dir, patch(
+            "controllers.external_vllm_build.Timer"
+        ) as mock_timer_class, patch(
+            "controllers.external_vllm_build.run"
+        ) as mock_run, patch(
+            "controllers.external_vllm_build.os.environ.copy", return_value={}
+        ), patch("os.path.abspath",  side_effect=lambda x: f"/mocked_prefix/{x}") as mock_abspath:
+
+            # Setup the Timer mock to be used as a context manager
+            mock_timer = MagicMock()
+            mock_timer_class.return_value = mock_timer
+
+            # Setup the Timer mock to be used as a context manager
+            mock_timer = MagicMock()
+            mock_timer_class.return_value = mock_timer
+
+            mock_get_commit.return_value = "test-commit"
+
+            # Call the function
+            build_vllm("test-input")
+
+
+            # Check the docker build command
+            docker_cmd_call = mock_run.call_args_list[1]
+            docker_cmd = docker_cmd_call[0][0]
+
+            # Verify the docker command contains expected arguments
+            assert f"--output type=local,dest=/mocked_prefix/test-input" in docker_cmd

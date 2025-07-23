@@ -17,6 +17,17 @@ class ExternalBuildController(Controller):
                     "dest": "target",
                     "choices": ["vllm"],
                 },
+
+            ),
+            (
+                ["--artifact-dir"],
+                {
+                    "help": "Path to a local folder where artifacts from external builds will be stored",
+                    "dest": "artifact_dir",
+                    "default":"./results",
+                    "type": str,
+                    "required": False,
+                },
             )
         ]
 
@@ -24,6 +35,9 @@ class ExternalBuildController(Controller):
     def run(self):
         target = self.app.pargs.target
         print(f"[INFO] Target: {target}")
+        artifact_dir = self.app.pargs.artifact_dir
+
+        print(f"[INFO] Plan to save artifacts to: {artifact_dir}")
         match target:
             case "vllm":
                 build_vllm()
