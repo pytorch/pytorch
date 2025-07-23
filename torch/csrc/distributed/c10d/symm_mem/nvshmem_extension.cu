@@ -345,14 +345,13 @@ at::Tensor all_to_all_vdev(
 // - input splits (IN)
 // - output splits (OUT) and
 // - source offsets (OUT).
-__global__ void exchangeSplitAndOffset_2d(int64_t* in_out_splits, int mype, int npes, int ne, size_t input_dim0) {
+__global__ void exchangeSplitAndOffset_2d(int64_t* input_splits, int64_t* out_splits_offsets, int mype, int npes, int ne, size_t input_dim0) {
 #if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
 #else
   int nsplits = npes * ne;
-  auto input_splits = in_out_splits;
-  auto output_splits = in_out_splits + nsplits;
-  auto source_offsets = in_out_splits + nsplits * 2;
+  auto output_splits = out_splits_offsets;
+  auto source_offsets = out_splits_offsets + nsplits;
   int tid = threadIdx.x;
 
   __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
@@ -418,13 +417,13 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
 // `stride` is the stride at dim 0, unit in byte.
 // For meaning of `mype` and `npes`, see the docstring of `all_to_all_vdev_2d`.
-__global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes, int ne, int64_t major_align) {
+__global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_splits, int64_t* out_splits_offsets, size_t stride, int mype, int npes, int ne, int64_t major_align) {
 #if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
 #else
   int nsplits = npes * ne;
-  auto output_splits = in_out_splits + nsplits;
-  auto source_offsets = in_out_splits + nsplits * 2;
+  auto output_splits = out_splits_offsets;
+  auto source_offsets = out_splits_offsets + nsplits;
   int bid = blockIdx.x;
   int tid = threadIdx.x;
 
@@ -501,7 +500,8 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_s
 at::Tensor all_to_all_vdev_2d(
     at::Tensor& input,
     at::Tensor& out,
-    at::Tensor& in_out_splits,
+    at::Tensor& in_splits,
+    at::Tensor& out_splits_offsets,
     std::string group_name,
     std::optional<int64_t> major_align) {
   /* Perform a 2D AllToAllv shuffle operation using NVSHMEM, with split information provided on device.
@@ -542,7 +542,8 @@ at::Tensor all_to_all_vdev_2d(
   */
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
-  auto splits_hdl = c10d::symmetric_memory::rendezvous(in_out_splits, group_name);
+  auto in_splits_hdl = c10d::symmetric_memory::rendezvous(in_splits, group_name);
+  auto out_splits_offsets_hdl = c10d::symmetric_memory::rendezvous(out_splits_offsets, group_name);
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
   // TODO: world_size is currently limited by the number of elements in a WarpScan.
@@ -554,28 +555,34 @@ at::Tensor all_to_all_vdev_2d(
 
   void* input_ptr = input_hdl->get_buffer_ptrs()[rank];
   void* output_ptr = out_hdl->get_buffer_ptrs()[rank];
-  int64_t* splits_ptr = (int64_t*)(splits_hdl->get_buffer_ptrs()[rank]);
+  int64_t* in_splits_ptr = (int64_t*)(in_splits_hdl->get_buffer_ptrs()[rank]);
+  int64_t* out_splits_offsets_ptr = (int64_t*)(out_splits_offsets_hdl->get_buffer_ptrs()[rank]);
 
   // Shape checks
-  auto split_shape = in_out_splits.sizes();
-  TORCH_CHECK(in_out_splits.is_contiguous()
+  TORCH_CHECK(in_splits.is_contiguous()
+      && out_splits_offsets.is_contiguous()
       && input.is_contiguous()
       && out.is_contiguous(),
-      "input, out and in_out_splits must be contiguous");
-  TORCH_CHECK(split_shape.size() == 2
-      && split_shape[0] == 3
-      && split_shape[1] % world_size == 0,
-      "in_out_splits must be 2D with 3 rows, "
+      "input, out, in_splits and out_splits_offsets must be contiguous");
+  auto in_split_shape = in_splits.sizes();
+  auto out_split_shape = out_splits_offsets.sizes();
+  TORCH_CHECK(out_split_shape.size() == 2
+      && out_split_shape[0] == 2
+      && out_split_shape[1] == in_split_shape[0]
+      && in_split_shape[0] % world_size == 0,
+      "out_splits_offsets must be 2D with 2 rows, "
       "each row must be a multiple of world_size");
 
   // Consistency checks
   TORCH_CHECK(input.dtype() == out.dtype()
       && input.stride(0) == out.stride(0),
       "input and out must have the same dtype and same stride at dim 0");
-  TORCH_CHECK(in_out_splits.scalar_type() == at::kLong, "in_out_splits must be int64");
+  TORCH_CHECK(in_splits.scalar_type() == at::kLong
+      && out_splits_offsets.scalar_type() == at::kLong,
+      "splits and offsets must be int64");
 
   // Number of experts per rank
-  int ne = split_shape[1] / world_size;
+  int ne = in_split_shape[0] / world_size;
   constexpr int NUM_TILES = THREADS_PER_BLOCK / A2AV_TILE_SIZE;
   TORCH_CHECK(ne <= NUM_TILES, "Number of experts must be smaller than NUM_TILES", NUM_TILES);
 
@@ -587,7 +594,8 @@ at::Tensor all_to_all_vdev_2d(
   auto input_dim0 = input.size(0);
   // Use collective launch because kernel involves nvshmem barrier
   void* args0[] = {
-      &splits_ptr,
+      &in_splits_ptr,
+      &out_splits_offsets_ptr,
       &rank,
       &world_size,
       &ne,
@@ -612,7 +620,8 @@ at::Tensor all_to_all_vdev_2d(
   void* args1[] = {
       &input_ptr,
       &output_ptr,
-      &splits_ptr,
+      &in_splits_ptr,
+      &out_splits_offsets_ptr,
       &stride_bytes,
       &rank,
       &world_size,
