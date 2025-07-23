@@ -294,14 +294,12 @@ Install PyTorch
 
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-python -m pip install -r requirements-build.txt
 python -m pip install --no-build-isolation -v -e .
 ```
 
 **On macOS**
 
 ```bash
-python -m pip install -r requirements-build.txt
 python -m pip install --no-build-isolation -v -e .
 ```
 
@@ -520,7 +518,7 @@ on [our website](https://pytorch.org/get-started/previous-versions).
 
 ## Getting Started
 
-Three-pointers to get you started:
+Three pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
