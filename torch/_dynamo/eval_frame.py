@@ -679,8 +679,7 @@ class _TorchDynamoContext:
 
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
-            assert self._package is not None
-            if not self._package.is_initialized():
+            if self._package is not None and not self._package.is_initialized():
                 result = DynamoCache.load(fn)
                 if result is None:
                     # Create a fresh CompilePackage
@@ -1705,7 +1704,7 @@ def export(
     _log_export_usage: bool = True,
     constraints: Optional[list[Constraint]] = None,
     **extra_kwargs: Any,
-) -> Callable[[tuple[Any, Any]], ExportResult]:
+) -> Callable[..., ExportResult]:
     """
     Export an input function f to a format that can be executed outside of PyTorch using the FX graph.
 
@@ -2273,10 +2272,10 @@ class TorchPatcher:
         fn: Callable[..., Any],
     ) -> Callable[..., Any]:
         def inner_fn(*args: Any, **kwargs: Any) -> Any:
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, module="torch.distributed"
-            )
-            return fn(*args, **kwargs)
+            with torch._logging.hide_warnings(
+                torch._logging._internal.user_warning_filter
+            ):
+                return fn(*args, **kwargs)
 
         return inner_fn
 

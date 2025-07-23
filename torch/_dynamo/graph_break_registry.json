@@ -859,6 +859,14 @@
     },
     {
       "Gb_type": "Observed exception",
+      "Context": "raised exception {exc_ty.__name__}({args})",
+      "Explanation": "observed_exn_gb_explanation",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    },
+    {
+      "Gb_type": "Observed exception",
       "Context": "str(raised_exception)",
       "Explanation": "observed_exn_gb_explanation",
       "Hints": [
@@ -2505,6 +2513,16 @@
       "Explanation": "`ndarray.astype('O')` or `ndarray.astype(object)` is not supported by torch.compile, as there is no equivalent to object type in torch.Tensor. This will be executed eagerly.",
       "Hints": [
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB0251": [
+    {
+      "Gb_type": "Unsupported output type for nonstrict_trace-ed function",
+      "Context": "Function: {fn.__name__}",
+      "Explanation": "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, list) are allowed as output. The result of this call contains an unsupported type.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ]
