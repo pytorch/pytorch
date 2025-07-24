@@ -149,10 +149,13 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
-function install_xformer(){
-  build_xformers_from_source() {
-  local commit="f2de641ef670510cadab099ce6954031f52f191c"
-  pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/xformers
+function install_xformers(){
+  pip_build_and_install "git+https://github.com/facebookresearch/xformers.git@v0.0.30" dist/xformers
+}
+
+function install_flashinfer(){
+  export FLASHINFER_ENABLE_SM90=1
+  pip_build_and_install "git+https://github.com/flashinfer-ai/flashinfer@v0.2.6.post1" dist/flashinfer
 }
 
 function install_torchaudio() {

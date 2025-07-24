@@ -323,11 +323,7 @@ else
     fi
 
     if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *xformers* ]]; then
-      install_xformer
-    fi
-
-    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *xformers* ]]; then
-      install_flashinfer
+      install_xformers
     fi
 
     if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
