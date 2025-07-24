@@ -545,7 +545,7 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 
     shape_env = fake_mode.shape_env
 
@@ -567,7 +567,7 @@ def slice_forward(
     )
     end_index = (
         sizes[dim]
-        if guard_or_false(end == sys.maxsize) or end is None
+        if statically_known_true(end == sys.maxsize) or end is None
         else _compute_slice_index(sizes[dim], end)
     )
 
