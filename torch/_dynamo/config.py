@@ -282,6 +282,13 @@ force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 # Defaults to False for BC.
 allow_unspec_int_on_nn_module = False
 
+# Mirrors `allow_unspec_int_on_nn_module`, but for FSDP: for <=2.8 versions,
+# integer attributes on FSDP modules were treated as dynamic, while the same
+# attributes on plain nn.Modules were static. We unified the behaviour by making
+# FSDP ints static too. Set this flag to True to restore the legacy dynamic
+# handling if needed.
+allow_unspec_int_on_fsdp_module = False
+
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 3 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_optimizer", Dynamo will automatically
@@ -605,6 +612,9 @@ automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
 _unsafe_skip_fsdp_module_guards = (
     os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
 )
+
+# Common prefix to append to the id of each compile run to filter out data
+pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", None)
 
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
