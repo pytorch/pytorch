@@ -2606,7 +2606,7 @@ class GuardManager {
 
   virtual ~GuardManager() {
     for (auto weakref : _tag_safe_keys_weakrefs) {
-      Py_DECREF(weakref);
+      Py_CLEAR(weakref);
     }
     _tag_safe_keys_weakrefs.clear();
   }
@@ -2927,6 +2927,9 @@ class GuardManager {
   static PyObject* disable_dict_tag_matching_callback(
       PyObject* self_capsule,
       PyObject* weakref) {
+    if (!PyCapsule_IsValid(self_capsule, "GuardManager*")) {
+      Py_RETURN_NONE;
+    }
     GuardManager* guard_manager = static_cast<GuardManager*>(
         PyCapsule_GetPointer(self_capsule, "GuardManager*"));
     if (guard_manager)
