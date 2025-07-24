@@ -185,9 +185,15 @@ class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
                     post_grad_graphs,
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu", arg4_1: "f32[3][1]cpu"):
-        # No stacktrace found for following nodes
+        # Custom comment for test
         foo_default = torch.ops.mylib.foo.default(arg2_1, [arg3_1, arg4_1], arg1_1, 2, arg0_1);  arg2_1 = arg3_1 = arg4_1 = arg1_1 = arg0_1 = foo_default = None
         return ()""",  # noqa: B950
+                    ignore_comments=True,
+                )
+
+                # stack trace should be in post_grad_graph
+                self.assertTrue(
+                    "code: torch.ops.mylib.foo(x, y, z, 2, n)" in post_grad_graphs,
                 )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
@@ -328,10 +334,16 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                     post_grad_graphs,
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu"):
-        # No stacktrace found for following nodes
+        # Custom comment for test
         foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  \
 arg2_1 = arg3_1 = arg1_1 = arg0_1 = foo_default = None
         return ()""",
+                    ignore_comments=True,
+                )
+
+                # stack trace should be in post_grad_graph
+                self.assertTrue(
+                    "code: torch.ops.mylib.foo(x, y, z, 2, n)" in post_grad_graphs,
                 )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
