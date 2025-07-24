@@ -171,8 +171,8 @@ else:
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
 
             flatten_dims_in_root = [
-                not_none(root_mesh.mesh_dim_names).index(mesh_dim_name)
-                for mesh_dim_name in not_none(device_mesh.mesh_dim_names)
+                not_none(root_mesh.mesh_dim_names).index(flatten_mesh_dim_name)
+                for flatten_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
             ]
 
             if not mesh_dim_name:
