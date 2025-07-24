@@ -704,12 +704,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if not dims_are_int(dims):
             log.debug("mm_autoheuristic: not all dims are int, skipping")
         else:
+            new_m, new_n, new_k = dims
             search_space = V.choices.get_mm_configs_search_space(device_type)
             preliminary_choices = list(
                 search_space(
-                    m,
-                    n,
-                    k,
+                    new_m,
+                    new_n,
+                    new_k,
                     **mm_config_kwargs(
                         device_type, _is_large_block_for_cpu, dtype.itemsize
                     ),
@@ -720,9 +721,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
             default_topk = len(
                 list(
                     mm_configs(
-                        m,
-                        n,
-                        k,
+                        new_m,
+                        new_n,
+                        new_k,
                         **mm_config_kwargs(
                             device_type, _is_large_block_for_cpu, dtype.itemsize
                         ),
@@ -731,9 +732,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
             # applies ml filtering/ranking
             preliminary_choices = V.choices.filter_triton_mm_choices(
-                m,
-                n,
-                k,
+                new_m,
+                new_n,
+                new_k,
                 mat1,
                 mat2,
                 layout,
@@ -1389,16 +1390,10 @@ def mm_autoheuristic(
 
 def get_size_hints(mat1, mat2, m, n, k):
     if not isinstance(m, int) or not isinstance(k, int):
-        (m, k) = V.graph.sizevars.size_hints(
-            mat1.get_size(),
-            fallback=torch._inductor.config.unbacked_symint_fallback,
-        )
+        (m, k) = V.graph.sizevars.size_hints( mat1.get_size(), fallback=torch._inductor.config.unbacked_symint_fallback,)
 
     if not isinstance(n, int) or not isinstance(k, int):
-        (k, n) = V.graph.sizevars.size_hints(
-            mat2.get_size(),
-            fallback=torch._inductor.config.unbacked_symint_fallback,
-        )
+        (k, n) = V.graph.sizevars.size_hints( mat2.get_size(), fallback=torch._inductor.config.unbacked_symint_fallback,)
     return m, n, k
 
 

@@ -200,7 +200,7 @@ class ModelWrapper:
             model_path = self._get_device_model_path("NVIDIA H100")
 
         start_time = time.time()
-        self.model: NeuralNetwork = torch._inductor.aoti_load_package(model_path)
+        self.model = torch._inductor.aoti_load_package(model_path)
         end_time = time.time()
 
         log.info(
