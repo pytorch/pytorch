@@ -8,6 +8,7 @@
 class GreenContext {
 public:
     GreenContext(int device_id, unsigned int num_sms) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
         CUdevice device;
         C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuDeviceGet_(&device, device_id));
 
@@ -44,7 +45,9 @@ public:
         // Convert to regular context
         C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxFromGreenCtx_(&context_, green_ctx_));
         TORCH_INTERNAL_ASSERT(context_, "Green ctx conversion to regular ctx failed!");
-        TORCH_WARN("FINISH CONVERT");
+#else
+	TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+#endif
     }
 
     static std::unique_ptr<GreenContext> create(int device_id, unsigned int num_sms) {
@@ -89,7 +92,11 @@ public:
     }
 
     ~GreenContext() noexcept {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
         C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuGreenCtxDestroy_(green_ctx_));
+#else
+        TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+#endif
     }
 
     // Get the underlying CUDA context
@@ -100,12 +107,12 @@ public:
 
     // Make this context current
     void makeCurrent() {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
         auto current_stream = c10::cuda::getCurrentCUDAStream();
         parent_stream_ = current_stream.stream();
         cudaEvent_t ev;
         C10_CUDA_CHECK(cudaEventCreate(&ev));
         C10_CUDA_CHECK(cudaEventRecord(ev, current_stream));
-        TORCH_WARN("STARTING PUSH");
         CUcontext current = nullptr;
         uint32_t version;
         C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxGetCurrent_(&current));
@@ -115,17 +122,19 @@ public:
 
           C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxPushCurrent_(context_));
         }
-        TORCH_WARN("FINISH PUSH");
         // currently hardcoes the new green context to use the default stream
         // TODO(eqy): consider creating a new stream if e.g., it allows interop
         // with CUDA Graph captures etc.
         C10_CUDA_CHECK(cudaStreamWaitEvent(NULL, ev, 0));
         c10::cuda::setCurrentCUDAStream(c10::cuda::getDefaultCUDAStream());
         C10_CUDA_CHECK(cudaEventDestroy(ev));
-        // C10_CUDA_CHECK(cudaStreamWaitEvent(
+#else
+        TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+#endif
     }
 
     void popCurrent() {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
         // see above note about stream being hardcoded to the default stream
         cudaEvent_t ev;
         C10_CUDA_CHECK(cudaEventCreate(&ev));
@@ -135,6 +144,9 @@ public:
         TORCH_INTERNAL_ASSERT(popped == context_, "expected popped context to be the current ctx");
         C10_CUDA_CHECK(cudaStreamWaitEvent(parent_stream_, ev, 0));
         C10_CUDA_CHECK(cudaEventDestroy(ev));
+#else
+        TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+#endif
     }
 
 private:
