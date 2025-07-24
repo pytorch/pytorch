@@ -145,7 +145,7 @@ class _DynamoCodeCacheEntry:
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
     assert len(entry.function_names) == 1
-    fn = sys.modules[entry.python_module]
+    fn: Any = sys.modules[entry.python_module]
     parts = entry.function_names[0].split(".")
     for part in parts:
         fn = getattr(fn, part)
@@ -158,7 +158,7 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
                 attr = getattr(fn, part[:index_begin], None)
                 if attr is None:
                     raise PackageError(f"Cannot find source for code entry {entry}")
-                fn = [ast.literal_eval(part[index_begin + 1 : -1])]
+                fn = attr[ast.literal_eval(part[index_begin + 1 : -1])]
             else:
                 fn = getattr(fn, part)
     else:
