@@ -1254,9 +1254,6 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         return self.compiler_fn(gm, example_inputs)
 
 
-# TODO: not sure if the variadic is right, we'll see when we get to joint
-
-
 class FlatFn(Protocol):
     def __call__(self, *args: FxValue) -> list[FxValue]: ...
 

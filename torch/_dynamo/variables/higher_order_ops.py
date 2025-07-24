@@ -1241,8 +1241,28 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     cloned_carry.proxy.node.meta["example_value"].constant = None
                     return cloned_carry
 
-            new_operands_seq = [
-                unspecialize_carried_inputs(tx, carry) for carry in operands_seq
+            # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
+            cond_operands_seq = [
+                unspecialize_carried_inputs(
+                    tx,
+                    (
+                        carry.call_method(tx, "clone", args=(), kwargs={})
+                        if isinstance(carry, TensorVariable)
+                        else carry
+                    ),
+                )
+                for carry in operands_seq
+            ]
+            body_operands_seq = [
+                unspecialize_carried_inputs(
+                    tx,
+                    (
+                        carry.call_method(tx, "clone", args=(), kwargs={})
+                        if isinstance(carry, TensorVariable)
+                        else carry
+                    ),
+                )
+                for carry in operands_seq
             ]
 
         # create cond subgrpahs
@@ -1253,7 +1273,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             cond_fn,
-            new_operands_seq + additional_inputs_seq,
+            cond_operands_seq + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
@@ -1318,7 +1338,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             body_fn,
-            new_operands_seq + additional_inputs_seq,
+            body_operands_seq + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
