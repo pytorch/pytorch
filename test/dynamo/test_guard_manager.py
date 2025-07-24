@@ -68,7 +68,8 @@ def less_match_verbose_code_parts(expected):
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
     def test_global_state_guard(self):
-        guard = guards.GLOBAL_STATE(["global_state_check"])
+        root = RootGuardManager()
+        guard = guards.GLOBAL_STATE(root, ["global_state_check"])
         self.assertTrue(guard(None))
         with set_default_dtype(torch.double):
             self.assertFalse(guard(None))
@@ -109,7 +110,9 @@ num_guards_executed=0)
             self.assertEqual(guards.reason(), "grad_mode ")
 
     def test_python_lambda_leaf_guard(self):
+        root = RootGuardManager()
         const_guard = guards.LAMBDA_GUARD(
+            root,
             functools.partial(equals_match, expected=5),
             equals_match_verbose_code_parts(5),
         )
@@ -118,15 +121,16 @@ num_guards_executed=0)
         self.assertFalse(const_guard("foo"))
 
     def test_type_guard(self):
+        root = RootGuardManager()
         foo = 4
-        guard = guards.TYPE_MATCH(id_type(foo), ["type(x) == int"])
+        guard = guards.TYPE_MATCH(root, id_type(foo), ["type(x) == int"])
 
         self.assertTrue(guard(5))
         self.assertTrue(guard(4))
         self.assertFalse(guard("foo"))
 
         foo = {"a": 1}
-        guard = guards.TYPE_MATCH(id_type(foo), ["type(x) == dict"])
+        guard = guards.TYPE_MATCH(root, id_type(foo), ["type(x) == dict"])
         self.assertTrue(guard(foo))
         self.assertTrue(guard({}))
         self.assertFalse(guard(5))
@@ -139,30 +143,32 @@ num_guards_executed=0)
 
         foo = Foo(1, 2)
 
-        guard = guards.TYPE_MATCH(id_type(foo), ["type(x) == Foo"])
+        guard = guards.TYPE_MATCH(root, id_type(foo), ["type(x) == Foo"])
         self.assertTrue(guard(foo))
         self.assertFalse(guard({}))
         self.assertFalse(guard(5))
         self.assertFalse(guard("foo"))
 
     def test_id_guard(self):
+        root = RootGuardManager()
         foo = 4
-        guard = guards.ID_MATCH(id(foo), ["id(x) == id(foo)"])
+        guard = guards.ID_MATCH(root, id(foo), ["id(x) == id(foo)"])
 
         self.assertTrue(guard(foo))
         self.assertFalse(guard(5))
         self.assertFalse(guard("foo"))
 
         foo = {"a": 1}
-        guard = guards.ID_MATCH(id(foo), ["id(x) == id(foo)"])
+        guard = guards.ID_MATCH(root, id(foo), ["id(x) == id(foo)"])
         self.assertTrue(guard(foo))
         self.assertFalse(guard({"a": 1}))
         self.assertFalse(guard({}))
         self.assertFalse(guard(5))
 
     def test_equals_guard(self):
+        root = RootGuardManager()
         foo = 4
-        guard = guards.EQUALS_MATCH(foo, ["x == 4"])
+        guard = guards.EQUALS_MATCH(root, foo, ["x == 4"])
 
         self.assertTrue(guard(4))
         self.assertFalse(guard(5))
@@ -170,7 +176,7 @@ num_guards_executed=0)
 
         # tuple
         foo = (1, 2, 3)
-        guard = guards.EQUALS_MATCH(foo, ["x == foo"])
+        guard = guards.EQUALS_MATCH(root, foo, ["x == foo"])
         self.assertTrue(guard(foo))
         self.assertTrue(guard((1, 2, 3)))
         self.assertFalse(guard((1, 2, 3, 4)))
@@ -178,21 +184,22 @@ num_guards_executed=0)
 
         # list
         foo = [1, 2, 3]
-        guard = guards.EQUALS_MATCH(foo, ["x == foo"])
+        guard = guards.EQUALS_MATCH(root, foo, ["x == foo"])
         self.assertTrue(guard(foo))
         self.assertTrue(guard([1, 2, 3]))
         self.assertFalse(guard([1, 2, 3, 4]))
 
         # type
         foo = int
-        guard = guards.EQUALS_MATCH(foo, ["x == foo"])
+        guard = guards.EQUALS_MATCH(root, foo, ["x == foo"])
         self.assertTrue(guard(foo))
         self.assertTrue(guard(int))
         self.assertFalse(guard(float))
 
     def test_default_device_guard(self):
+        root = RootGuardManager()
         foo = 1
-        guard = guards.DEFAULT_DEVICE(["cpu device"])
+        guard = guards.DEFAULT_DEVICE(root, ["cpu device"])
         self.assertTrue(guard(foo))
 
         try:
@@ -202,12 +209,15 @@ num_guards_executed=0)
             torch.set_default_device(None)
 
     def test_length_check_guard(self):
+        root = RootGuardManager()
         foo = [1, 2, 3]
-        guard = guards.LENGTH_CHECK(len(foo), ["len(x) == len(foo)"])
+        guard = guards.LENGTH_CHECK(root, len(foo), ["len(x) == len(foo)"])
         self.assertTrue(guard(foo))
         self.assertFalse(guard([]))
 
     def test_no_hasattr_guard(self):
+        root = RootGuardManager()
+
         class Bar:
             def __init__(self) -> None:
                 self.bar = 2
@@ -220,7 +230,7 @@ num_guards_executed=0)
 
         foo = Foo()
 
-        guard = guards.NO_HASATTR("foo", ["hasattr(x, 'foo') == False"])
+        guard = guards.NO_HASATTR(root, "foo", ["hasattr(x, 'foo') == False"])
         self.assertTrue(guard(bar))
         self.assertFalse(guard(foo))
 
@@ -258,8 +268,9 @@ num_guards_executed=0)
         self.assertFalse(guard_manager.check(f_locals_unaliased))
 
     def test_dict_version_guard(self):
+        root = RootGuardManager()
         foo = {"a": 1, "b": 2}
-        guard = guards.DICT_VERSION(foo, ["x.version == foo.version"])
+        guard = guards.DICT_VERSION(root, foo, ["x.version == foo.version"])
 
         self.assertTrue(guard(foo))
         self.assertFalse(guard(dict(foo)))
@@ -269,8 +280,9 @@ num_guards_executed=0)
         self.assertFalse(guard({}))
 
     def test_dynamic_indices_guard(self):
-        guard1 = guards.DYNAMIC_INDICES(set(), ["x.size(0) == y.size(0)"])
-        guard2 = guards.DYNAMIC_INDICES(set({0, 1}), ["x.size(0) == y.size(0)"])
+        root = RootGuardManager()
+        guard1 = guards.DYNAMIC_INDICES(root, set(), ["x.size(0) == y.size(0)"])
+        guard2 = guards.DYNAMIC_INDICES(root, set({0, 1}), ["x.size(0) == y.size(0)"])
 
         x = torch.randn(4)
         self.assertTrue(guard1(x))
@@ -368,18 +380,20 @@ num_guards_executed=0)
         self.assertFalse(guard_manager.check_verbose(f_locals_unaliased).result)
 
     def test_weakref_alive_guard(self):
+        root = RootGuardManager()
         x = torch.rand(3, 4)
         weakref_x = weakref.ref(x)
 
-        guard = guards.NOT_NONE(["weakref_x is not None"])
+        guard = guards.NOT_NONE(root, ["weakref_x is not None"])
         self.assertTrue(guard(weakref_x()))
         del x
         self.assertFalse(guard(weakref_x()))
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_call_function_no_args_guard(self):
+        root = RootGuardManager()
         x = torch.cuda.current_device()
-        guard = guards.EQUALS_MATCH(x, [0])
+        guard = guards.EQUALS_MATCH(root, x, [0])
         self.assertTrue(guard(0))
         self.assertFalse(guard(1))
         self.assertFalse(guard(2))
@@ -697,15 +711,16 @@ num_guards_executed=0)
         self.assertTrue("Test" in debug_info.verbose_code_parts[0])
 
     def test_dict_contains_guard(self):
+        root = RootGuardManager()
         foo = {"a": 1, "b": 2}
-        guard = guards.DICT_CONTAINS(True, "a", ["has a"])
+        guard = guards.DICT_CONTAINS(root, True, "a", ["has a"])
 
         self.assertTrue(guard(foo))
         self.assertTrue(guard({"a": 1, "b": 2}))
         self.assertFalse(guard({"b": 2, "c": 3}))
         self.assertFalse(guard({}))
 
-        guard = guards.DICT_CONTAINS(False, "c", ["not has c"])
+        guard = guards.DICT_CONTAINS(root, False, "c", ["not has c"])
         self.assertTrue(guard(foo))
         self.assertTrue(guard({"a": 1, "b": 2}))
         self.assertFalse(guard({"b": 2, "c": 3}))
@@ -796,7 +811,7 @@ num_guards_executed=0)
         except ImportError:
             from utils import install_guard_manager_testing_hook
 
-        def hook(guard_wrapper, f_locals):
+        def hook(guard_wrapper, f_locals, builder):
             root = guard_wrapper.root
 
             # Check full cloning works as expected
@@ -836,7 +851,7 @@ num_guards_executed=0)
             from utils import install_guard_manager_testing_hook
         counter = 0
 
-        def hook(guard_wrapper, f_locals):
+        def hook(guard_wrapper, f_locals, builder):
             nonlocal counter
             root = guard_wrapper.root
             diff_guard_root = guard_wrapper.diff_guard_root
@@ -881,6 +896,65 @@ num_guards_executed=0)
 
             foo = (10.0, 11)
             opt_fn(x, foo, bar)
+
+
+class TypePropagationTests(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(skip_tensor_guards_with_matching_dict_tags=True)
+    def test_basic_types(self):
+        class Foo:
+            def __init__(self):
+                self.x = {"a": 2}
+                self.y = torch.randn(4)
+                self.z = {}
+
+        foo = Foo()
+
+        mod = torch.nn.Linear(4, 4)
+
+        def fn(x):
+            return x + foo.x["a"] + foo.y + mod(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import AttrSource, DictGetItemSource, LocalSource
+
+            foo_source = LocalSource("foo")
+            foo_x_source = AttrSource(foo_source, "x")
+
+            self.assertTrue(builder.get(foo_source.name()) is foo)
+            self.assertTrue(builder.get(foo_x_source.name()) is foo.x)
+
+            # Check types of foo.x
+            foo_x_mgr = builder.get_guard_manager_from_source(foo_x_source)
+            self.assertTrue(foo_x_mgr.is_guarded_value_dict())
+
+            # Check types of foo.x["a"]
+            foo_x_a_source = DictGetItemSource(foo_x_source, "a")
+            foo_x_a_mgr = builder.get_guard_manager_from_source(foo_x_a_source)
+            self.assertTrue(foo_x_a_mgr.is_guarded_value_immutable())
+
+            # Check types of foo.y
+            foo_y_source = AttrSource(foo_source, "y")
+            foo_y_mgr = builder.get_guard_manager_from_source(foo_y_source)
+            self.assertTrue(foo_y_mgr.is_guarded_value_immutable())
+
+            # Check types of foo.z
+            foo_z_source = AttrSource(foo_source, "z")
+            foo_z_mgr = builder.get_guard_manager_from_source(foo_z_source)
+            self.assertTrue(foo_z_mgr.is_guarded_value_empty_dict())
+
+            # Check types of mod
+            mod_source = LocalSource("mod")
+            mod_mgr = builder.get_guard_manager_from_source(mod_source)
+            self.assertTrue(mod_mgr.is_guarded_value_nn_module())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(torch.randn(4, 4))
 
 
 if __name__ == "__main__":

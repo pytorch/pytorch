@@ -23,6 +23,7 @@ class Embedding(nn.Embedding):
     Attributes:
         weight: fake quant module for weight
     """
+
     _FLOAT_MODULE = nn.Embedding
 
     def __init__(
@@ -137,6 +138,7 @@ class EmbeddingBag(nn.EmbeddingBag):
     Attributes:
         weight: fake quant module for weight
     """
+
     _FLOAT_MODULE = nn.EmbeddingBag
 
     def __init__(

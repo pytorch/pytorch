@@ -139,6 +139,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["device"]["cpu"]
 
     @property
+    def skip_models_for_cpu_aarch64(self):
+        return self._skip["device"]["cpu_aarch64"]
+
+    @property
     def skip_models_for_cuda(self):
         return self._skip["device"]["cuda"]
 
@@ -438,6 +442,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.bfloat16:
             if name in self._tolerance["higher_bf16"]:
                 return 1e-2, cosine
+            elif current_device == "xpu" and name in self._tolerance["higher_bf16_xpu"]:
+                return 8 * 1e-2, cosine
 
         if is_training and (current_device == "cuda" or current_device == "xpu"):
             tolerance = 1e-3

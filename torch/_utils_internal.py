@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import tempfile
+import typing_extensions
 from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
@@ -28,20 +29,14 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
         StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
-# to have a central place for overrideable behavior. The motivating
+# to have a central place for overridable behavior. The motivating
 # use is the FB build environment, where this source file is replaced
 # by an equivalent.
 
-if torch._running_with_deploy():
-    # __file__ is meaningless in the context of frozen torch used in torch deploy.
-    # setting empty torch_parent should allow below functions to operate without crashing,
-    # but it's unclear if there is a valid use case for them in the context of deploy.
-    torch_parent = ""
+if os.path.basename(os.path.dirname(__file__)) == "shared":
+    torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 else:
-    if os.path.basename(os.path.dirname(__file__)) == "shared":
-        torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    else:
-        torch_parent = os.path.dirname(os.path.dirname(__file__))
+    torch_parent = os.path.dirname(os.path.dirname(__file__))
 
 
 def get_file_path(*path_components: str) -> str:
@@ -210,8 +205,11 @@ def is_fb_unit_test() -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def max_clock_rate():
+    """
+    unit: MHz
+    """
     if not torch.version.hip:
         from triton.testing import nvsmi
 
@@ -282,3 +280,54 @@ def record_chromium_event_internal(
 
 def profiler_allow_cudagraph_cupti_lazy_reinit_cuda12():
     return True
+
+
+def deprecated():
+    """
+    When we deprecate a function that might still be in use, we make it internal
+    by adding a leading underscore. This decorator is used with a private function,
+    and creates a public alias without the leading underscore, but has a deprecation
+    warning. This tells users "THIS FUNCTION IS DEPRECATED, please use something else"
+    without breaking them, however, if they still really really want to use the
+    deprecated function without the warning, they can do so by using the internal
+    function name.
+    """
+
+    def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
+        # Validate naming convention – single leading underscore, not dunder
+        if not (func.__name__.startswith("_")):
+            raise ValueError(
+                "@deprecate must decorate a function whose name "
+                "starts with a single leading underscore (e.g. '_foo') as the api should be considered internal for deprecation."
+            )
+
+        public_name = func.__name__[1:]  # drop exactly one leading underscore
+        module = sys.modules[func.__module__]
+
+        # Don't clobber an existing symbol accidentally.
+        if hasattr(module, public_name):
+            raise RuntimeError(
+                f"Cannot create alias '{public_name}' -> symbol already exists in {module.__name__}. \
+                 Please rename it or consult a pytorch developer on what to do"
+            )
+
+        warning_msg = f"{func.__name__[1:]} is DEPRECATED, please consider using an alternative API(s). "
+
+        # public deprecated alias
+        alias = typing_extensions.deprecated(
+            warning_msg, category=UserWarning, stacklevel=1
+        )(func)
+
+        alias.__name__ = public_name
+
+        # Adjust qualname if nested inside a class or another function
+        if "." in func.__qualname__:
+            alias.__qualname__ = func.__qualname__.rsplit(".", 1)[0] + "." + public_name
+        else:
+            alias.__qualname__ = public_name
+
+        setattr(module, public_name, alias)
+
+        return func
+
+    return decorator

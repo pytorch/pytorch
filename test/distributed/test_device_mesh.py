@@ -490,8 +490,9 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
         # Create shard groups (e.g. (0, 1, 2, 3), (4, 5, 6, 7))
         # and assign the correct shard group to each rank
-        shard_rank_lists = list(range(0, self.world_size // 2)), list(
-            range(self.world_size // 2, self.world_size)
+        shard_rank_lists = (
+            list(range(0, self.world_size // 2)),
+            list(range(self.world_size // 2, self.world_size)),
         )
         shard_groups = (
             new_group(shard_rank_lists[0]),
@@ -664,6 +665,10 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(hsdp_mesh_1.mesh.tolist(), hsdp_group[hsdp_group_idx])
         self.assertEqual(hsdp_mesh_2.mesh.tolist(), hsdp_group[hsdp_group_idx])
         self.assertEqual(hsdp_mesh_1, hsdp_mesh_2)
+
+        # Test slicing out 1D mesh from a sub-2D mesh.
+        shard_mesh = hsdp_mesh_2["Shard"]
+        self.assertEqual(shard_mesh.mesh.tolist(), shard_group[shard_group_idx])
 
     @with_comms
     def test_cache_and_reuse_submesh_slice_result(self):

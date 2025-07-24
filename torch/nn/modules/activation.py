@@ -91,7 +91,7 @@ class Threshold(Module):
     def forward(self, input: Tensor) -> Tensor:
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"threshold={self.threshold}, value={self.value}{inplace_str}"
 
@@ -127,7 +127,7 @@ class ReLU(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
@@ -185,7 +185,7 @@ class RReLU(Module):
 
     def __init__(
         self, lower: float = 1.0 / 8, upper: float = 1.0 / 3, inplace: bool = False
-    ):
+    ) -> None:
         super().__init__()
         self.lower = lower
         self.upper = upper
@@ -194,7 +194,7 @@ class RReLU(Module):
     def forward(self, input: Tensor) -> Tensor:
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"lower={self.lower}, upper={self.upper}{inplace_str}"
 
@@ -297,7 +297,7 @@ class ReLU6(Hardtanh):
         >>> output = m(input)
     """
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__(0.0, 6.0, inplace)
 
     def extra_repr(self) -> str:
@@ -426,7 +426,7 @@ class SiLU(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
@@ -465,7 +465,7 @@ class Mish(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
@@ -977,13 +977,14 @@ def _is_make_fx_tracing():
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information from different representation subspaces.
 
-    .. note::
-        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
-        for an in depth discussion of the performant building blocks PyTorch offers for building your own
-        transformer layers.
-
-    Method described in the paper:
-    `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    This MultiheadAttention layer implements the original architecture described
+    in the `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_ paper. The
+    intent of this layer is as a reference implementation for foundational understanding
+    and thus it contains only limited features relative to newer architectures.
+    Given the fast pace of innovation in transformer-like architectures, we recommend
+    exploring this `tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+    to build efficient layers from building blocks in core or using higher
+    level libraries from the `PyTorch Ecosystem <https://landscape.pytorch.org/>`_.
 
     Multi-Head Attention is defined as:
 
@@ -1076,9 +1077,9 @@ class MultiheadAttention(Module):
         self.dropout = dropout
         self.batch_first = batch_first
         self.head_dim = embed_dim // num_heads
-        assert (
-            self.head_dim * num_heads == self.embed_dim
-        ), "embed_dim must be divisible by num_heads"
+        assert self.head_dim * num_heads == self.embed_dim, (
+            "embed_dim must be divisible by num_heads"
+        )
 
         if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(
@@ -1117,7 +1118,7 @@ class MultiheadAttention(Module):
 
         self._reset_parameters()
 
-    def _reset_parameters(self):
+    def _reset_parameters(self) -> None:
         if self._qkv_same_embed_dim:
             xavier_uniform_(self.in_proj_weight)
         else:
@@ -1275,8 +1276,10 @@ class MultiheadAttention(Module):
         elif query.is_nested and (
             key_padding_mask is not None or attn_mask is not None
         ):
-            why_not_fast_path = "supplying both src_key_padding_mask and src_mask at the same time \
+            why_not_fast_path = (
+                "supplying both src_key_padding_mask and src_mask at the same time \
                                  is not supported with NestedTensor input"
+            )
         elif torch.is_autocast_enabled():
             why_not_fast_path = "autocast is enabled"
 
@@ -1514,7 +1517,7 @@ class PReLU(Module):
         self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs))
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         torch.nn.init.constant_(self.weight, self.init)
 
     def forward(self, input: Tensor) -> Tensor:
@@ -1616,7 +1619,7 @@ class Softmin(Module):
     def forward(self, input: Tensor) -> Tensor:
         return F.softmin(input, self.dim, _stacklevel=5)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return f"dim={self.dim}"
 
 
@@ -1751,5 +1754,5 @@ class LogSoftmax(Module):
     def forward(self, input: Tensor) -> Tensor:
         return F.log_softmax(input, self.dim, _stacklevel=5)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return f"dim={self.dim}"
