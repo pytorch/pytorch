@@ -1,3 +1,4 @@
+import subprocess
 from utils import (
     ensure_dir_exists,
     force_create_dir,
@@ -13,6 +14,14 @@ import os
 
 _DEFAULT_RESULT_PATH = "./results"
 _VLLM_TEMP_FOLDER = "tmp"
+_BUILDER_NAME = "localbuilder"
+
+def local_image_exists(image:str):
+    try:
+        subprocess.check_output(["docker", "image", "inspect", image], stderr=subprocess.DEVNULL)
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 def prepare_artifact_dir(path: str):
     if not path:
@@ -34,8 +43,8 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_
     result_path = prepare_artifact_dir(artifact_dir)
     print(f"Target artifact dir path is {result_path}")
 
-    tag_name = get_env("TAG", "vllm-wheels")
-    cuda = get_env("CUDA_VERSION", "12.8.0")
+    tag_name = get_env("TAG", "vllm-wheels-x")
+    cuda = get_env("CUDA_VERSION", "12.8.1")
     py = get_env("PYTHON_VERSION", "3.12")
     max_jobs = get_env("MAX_JOBS", "32")
     target = get_env("TARGET", "export-wheels")
@@ -66,9 +75,19 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_
             print(f"constructing TORCH_WHEELS_PATH {_VLLM_TEMP_FOLDER}")
             docker_torch_arg = f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"
 
+
         base_image_arg = ""
+        disable_pull = "--pull=true"
         if base_image:
             base_image_arg = f"--build-arg BASE_IMAGE={base_image}"
+            if local_image_exists(base_image):
+                print(f"[INFO] Found local image: {base_image_arg}")
+                disable_pull="--pull=false"
+
+            else:
+                print(f"[INFO] Local image {base_image_arg} not found, using default remote behavior")
+
+            # Optional: you can still force remote buildx context if needed
         env = os.environ.copy()
 
         # run docker build for target stage `export-wheels` with output
@@ -78,6 +97,8 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_
         docker buildx build \
         --output type=local,dest={result_path} \
         -f docker/Dockerfile.nightly_torch \
+        {disable_pull} \
+        --no-cache \
         {docker_torch_arg} \
         {base_image_arg} \
         --build-arg max_jobs={max_jobs} \
