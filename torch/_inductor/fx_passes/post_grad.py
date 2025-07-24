@@ -1724,6 +1724,7 @@ class ConstructorMoverPass:
         if movable_cpu_placeholders:
             for node in movable_cpu_placeholders:
                 pass
+            node = next(iter(reversed(movable_cpu_placeholders)))
             last_node = node
             unsqueezed_nodes = []
             for elem in movable_cpu_placeholders:

@@ -76,6 +76,7 @@
   - .github/ci_commit_pins/audio.txt
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
+  - .github/ci_commit_pins/vllm.txt
   - .ci/docker/ci_commit_pins/triton.txt
   approved_by:
   - pytorchbot
@@ -125,21 +126,6 @@
   - svekars
   - sekyondaMeta
   - AlannaBurke
-  mandatory_checks_name:
-  - EasyCLA
-  - Lint
-  - pull
-
-- name: Mobile
-  patterns:
-  - ios/**
-  - android/**
-  - test/mobile/**
-  approved_by:
-  - linbinyu
-  - IvanKobzarev
-  - dreiss
-  - raziel
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -491,6 +477,19 @@
   - srossross
   - chillee
   - zou3519
+  - guilhermeleobas
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Dynamo
+  patterns:
+  - torch/_dynamo/**
+  - torch/csrc/dynamo/**
+  - test/dynamo/**
+  approved_by:
+  - guilhermeleobas
   mandatory_checks_name:
   - EasyCLA
   - Lint
