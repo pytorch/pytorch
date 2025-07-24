@@ -1001,7 +1001,7 @@ elseif(USE_CUDA)
     # 3. Let CMake find it in the default system paths, e.g. /usr/local.
     find_library(NVSHMEM_HOST_LIB
       # In pip install case, the lib suffix is `.so.3` instead of `.so`
-      NAMES nvshmem_host nvshmem_host.so.3
+      NAMES nvshmem_host libnvshmem_host.so.3 NAMES_PER_DIR
       HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
       PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
       DOC "The location of NVSHMEM host library.")
@@ -1027,24 +1027,24 @@ elseif(USE_CUDA)
 
     # Linking with nvshmem requires the source binary to be built with -rdc
     # which is not viable for libtorch_cuda. So we isolate the linking of
-    # nvshmem in nvshmem_extension.
-    add_library(nvshmem_extension SHARED
+    # nvshmem in torch_nvshmem.
+    add_library(torch_nvshmem SHARED
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
     )
-    set_target_properties(nvshmem_extension PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-    target_compile_options(nvshmem_extension PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
-    target_compile_options(nvshmem_extension PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
-    target_link_libraries(nvshmem_extension PRIVATE
+    set_target_properties(torch_nvshmem PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    target_compile_options(torch_nvshmem PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
+    target_compile_options(torch_nvshmem PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
+    target_link_libraries(torch_nvshmem PRIVATE
         ${NVSHMEM_HOST_LIB}
         ${NVSHMEM_DEVICE_LIB}
     )
     target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
-    target_compile_definitions(nvshmem_extension PUBLIC USE_NVSHMEM)
-    target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
-    install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
+    target_compile_definitions(torch_nvshmem PUBLIC USE_NVSHMEM)
+    target_link_libraries(torch_cuda PRIVATE torch_nvshmem)
+    install(TARGETS torch_nvshmem EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   else()
     message(STATUS "NVSHMEM not found, not building with NVSHMEM support.")
   endif()
@@ -1092,17 +1092,10 @@ elseif(USE_CUDA)
         torch_cuda
     )
     if($ENV{ATEN_STATIC_CUDA})
-      if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
-        target_link_libraries(torch_cuda_linalg PRIVATE
-            CUDA::cusolver_static
-            ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-        )
-      elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
-        target_link_libraries(torch_cuda_linalg PRIVATE
-            CUDA::cusolver_static
-            ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
-        )
-      endif()
+    target_link_libraries(torch_cuda_linalg PRIVATE
+        CUDA::cusolver_static
+        ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+    )
     else()
       target_link_libraries(torch_cuda_linalg PRIVATE
           CUDA::cusolver

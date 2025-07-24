@@ -1455,17 +1455,6 @@ def flex_attention(
     num_consumer_groups, num_buffers_warp_spec = 0, 0
 
     for conf in configs:
-        if (
-            SPARSE_KV_BLOCK_SIZE % conf.block_n != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_m != 0
-        ):
-            if len(configs) == 1:
-                raise ValueError(
-                    f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We "
-                    f"got Q_BLOCK_SIZE={SPARSE_Q_BLOCK_SIZE} and KV_BLOCK_SIZE={SPARSE_KV_BLOCK_SIZE}."
-                )
-            continue
-
         cur_kernel_options = original_kernel_options.copy()
         # Performance tuning
         # Triton parameters
@@ -1492,6 +1481,20 @@ def flex_attention(
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        if (
+            cur_kernel_options["SPARSE_KV_BLOCK_SIZE"] % cur_kernel_options["BLOCK_N"]
+            != 0
+            or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"] % cur_kernel_options["BLOCK_M"]
+            != 0
+        ):
+            if len(configs) == 1:
+                raise ValueError(
+                    f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We "
+                    f"got Q_BLOCK_SIZE={cur_kernel_options['SPARSE_Q_BLOCK_SIZE']} and "
+                    f"KV_BLOCK_SIZE={cur_kernel_options['SPARSE_KV_BLOCK_SIZE']}."
+                )
+            continue
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:

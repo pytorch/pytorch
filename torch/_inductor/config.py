@@ -425,9 +425,6 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
-# disable decomposek autotune choice for gemm
-disable_decompose_k = os.environ.get("TORCHINDUCTOR_DISABLE_DECOMPOSE_K") == "1"
-
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
 
@@ -444,6 +441,12 @@ force_same_precision: bool = Config(
     env_name_force="TORCHINDUCTOR_FORCE_SAME_PRECISION",
     default=False,
 )
+
+# Size hints for multi-kernel dispatch.
+# A reasonable default value of this config would be [64, 256, 4096]
+# TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
+# as expected before turning it on for everyone.
+multi_kernel_hints: list[int] = []
 
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
@@ -568,6 +571,9 @@ realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8
+realize_acc_reads_size_threshold: Optional[int] = (
+    None  # TODO(xuanzh): harden this to make it non optional
+)
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
@@ -989,7 +995,7 @@ enable_linear_binary_folding = (
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
 # Enable caching codegen of triton templates.
-enable_caching_generated_triton_templates: bool = False
+enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
@@ -997,6 +1003,11 @@ autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 # config specific to codegen/cpp.py
 class cpp:
+    """
+    Settings for cpp backend.
+    This class provides a centralized location for managing cpp backend settings.
+    """
+
     # set to torch.get_num_threads()
     threads = -1
 
@@ -1013,7 +1024,7 @@ class cpp:
     dynamic_threads = os.environ.get("TORCHINDUCTOR_CPP_DYNAMIC_THREADS", "0") == "1"
 
     simdlen: Optional[int] = None
-    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "4096"))
+    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "512"))
 
     cxx: tuple[Literal[None], str] = (
         None,  # download gcc12 from conda-forge if conda is installed
@@ -1111,6 +1122,10 @@ class cpp:
 
     # Use a small dequant buffer for wgt of woq int4 size as: [q_group_size, Nr]
     use_small_dequant_buffer = False
+
+    force_inline_kernel = (
+        os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
 
 
 class triton:
@@ -1298,7 +1313,7 @@ class triton:
     # - For Nvidia GPUs, the compute capability should be >= 9.0
     # - The innermost stride of a descriptor should be 1
     # - The size of the block shape in the innermost dimension should load / store
-    # atleast 16 bytes.
+    #   at least 16 bytes.
     # - Tensors are 16 byte aligned. Enabling this option therefore requires
     #   assume_aligned_inputs to also be enabled
     # TMA descriptors are only going to be generated if the above conditions
@@ -1326,6 +1341,17 @@ class triton:
     # For testing it's helpful to be able to assert that none of the configs fail.
     # Note: it may also need to be used with config.compile_threads = 1
     disallow_failing_autotune_kernels_TESTING_ONLY = False
+
+    # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
+    num_decompose_k_splits = int(
+        os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
+    )
+
+    # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
+    # it as an autotuning choice for all matmuls
+    decompose_k_threshold = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
+    )
 
 
 class aot_inductor:
@@ -1491,11 +1517,11 @@ class cuda:
 
     # Path to the CUTLASS repo root directory.
     # The default path only works under PyTorch local development environment.
-    cutlass_dir = os.environ.get(
-        "TORCHINDUCTOR_CUTLASS_DIR",
-        os.path.abspath(
-            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
-        ),
+    cutlass_dir = os.path.realpath(
+        os.environ.get(
+            "TORCHINDUCTOR_CUTLASS_DIR",
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/"),
+        )
     )
 
     # Configures the maximum number of CUTLASS configs to profile in max_autotune.
@@ -1591,6 +1617,9 @@ class cuda:
     # Whether to force upload if the key already exists
     # Use this to overwrite and handle cache pollution
     binary_remote_cache_force_write: bool = False
+
+    # Enable caching codegen of cuda templates.
+    enable_caching_codegen: bool = True
 
 
 class rocm:
@@ -1757,8 +1786,11 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
-    # Save mapping info from inductor generated triton kernel to post_grad fx nodes
-    log_inductor_triton_kernel_to_post_grad_node_info: bool = True
+    # Save mapping info from inductor generated triton kernel to post_grad fx nodes to pre_grad fx nodes
+    provenance_tracking = (
+        os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+        or os.environ.get("INDUCTOR_PROVENANCE", "0") == "1"
+    )
 
 
 _save_config_ignore: list[str] = [
