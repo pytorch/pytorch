@@ -474,13 +474,20 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.Grap
             )
         ]
 
+    if ep.graph_signature.backward_signature is not None:
+        _, out_spec = pytree.tree_flatten(
+            (None,) * len(ep.graph_signature.output_specs)
+        )
+    else:
+        out_spec = ep.call_spec.out_spec
+
     assert ep.call_spec.in_spec is not None
     new_gm = _unlift(
         new_gm,
         lifted_inputs,
         mutated_outputs,
         ep.call_spec.in_spec,
-        ep.call_spec.out_spec,
+        out_spec,
         forward_arg_names=forward_arg_names,
     )
     unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints, ep)
