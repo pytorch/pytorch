@@ -53,6 +53,7 @@ from torch._functorch._aot_autograd.subclass_parametrization import (
 )
 from torch._functorch.aot_autograd import (
     aot_export_module,
+    GraphOutputName,
     make_boxed_func,
     SerializableAOTDispatchCompiler,
 )
@@ -429,7 +430,7 @@ def _unlift_graph(
 
     from torch.export._unlift import _unlift
 
-    outputs = list(gm.graph.nodes)[-1].args[0]
+    outputs: tuple[torch.fx.Node, ...] = tuple(gm.graph.output_node().args[0])  # type: ignore[arg-type]
     mutated_outputs = []
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
@@ -438,10 +439,11 @@ def _unlift_graph(
         value: Optional[Union[FQN, GraphInputName]] = None
 
         if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
-            if out.name in buffer_mutations:
-                value = buffer_mutations[out.name]
-            elif out.name in user_input_mutations:
-                value = user_input_mutations[out.name]
+            name = GraphOutputName(out.name)
+            if name in buffer_mutations:
+                value = buffer_mutations[name]
+            elif name in user_input_mutations:
+                value = user_input_mutations[name]
 
         mutated_outputs.append(value)
 
@@ -451,8 +453,6 @@ def _unlift_graph(
         mutated_outputs,
         pytree.LeafSpec(),
         None,
-        state_dict,
-        {},
     )
     return unlifted_gm
 
@@ -909,10 +909,37 @@ def _compile_fx_inner(
             else:
                 log.debug("Failed to generate FX cache key")
 
+        if torch._functorch.config.bundled_autograd_cache:
+            assert mb_compiled_graph is None
+            assert cache_info is None
+            # When using bundled autograd cache, we still want
+            # to use the TritonBundler, but we don't want to save
+            # the results here. The results will get saved directly
+            # to AOTAutogradCache.
+            TritonBundler.begin_compile()
+            try:
+                mb_compiled_graph = fx_codegen_and_compile(
+                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                )
+                assert mb_compiled_graph is not None
+                (
+                    triton_bundle,
+                    triton_bundler_meta,
+                ) = TritonBundler.collect()
+                mb_compiled_graph.set_triton_bundle(triton_bundle)
+            except (ShortenTraceback, SkipFrame):
+                raise
+            except Exception as e:
+                raise InductorError(e, currentframe()).with_traceback(
+                    e.__traceback__
+                ) from None
+            finally:
+                TritonBundler.end_compile()
+
         # CACHE BYPASS: Compile the graph, don't save it to the cache
         # (this can happen either because cache was disabled, or we
         # determined the input is uncacheable)
-        if cache_info is None or cache_info["cache_state"] == "bypass":
+        elif cache_info is None or cache_info["cache_state"] == "bypass":
             assert mb_compiled_graph is None
             log.debug(
                 "FX cache bypass reason: %s",

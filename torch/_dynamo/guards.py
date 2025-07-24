@@ -166,7 +166,7 @@ from .utils import (
 )
 
 
-guard_manager_testing_hook_fn: Optional[Callable[[Any, Any], Any]] = None
+guard_manager_testing_hook_fn: Optional[Callable[[Any, Any, Any], Any]] = None
 
 try:
     import numpy as np
@@ -311,6 +311,7 @@ class GuardManagerWrapper:
         s = t + ": source=" + source
         if accessor_str:
             s += ", " + accessor_str
+        s += f", type={guard_manager.type_of_guarded_value()}"
         return s
 
     def construct_dict_manager_string(self, mgr, body):
@@ -2966,7 +2967,7 @@ class CheckFunctionManager:
 
             if guard_manager_testing_hook_fn is not None:
                 guard_manager_testing_hook_fn(
-                    self.guard_manager, output_graph.local_scope
+                    self.guard_manager, output_graph.local_scope, builder
                 )
 
             # NB for developers: n_iters is chosen to be 1 to prevent excessive
