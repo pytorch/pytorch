@@ -194,7 +194,11 @@ class ModelWrapper:
             device_name = torch.cuda.get_device_name()
         model_path = self._get_device_model_path(device_name)
         # check to see if model_path exists
+        # TODO remove
+        print("Loading NN Kernel Prediction Model from ", model_path)
+        print("Model path exists: ", os.path.exists(model_path))
         if not os.path.exists(model_path):
+            print("Model path does not exist: %s", model_path)
             # Fall back to h100 model
             # eventually we should check is_big_gpu() and use another default model for non big gpus
             model_path = self._get_device_model_path("NVIDIA H100")
