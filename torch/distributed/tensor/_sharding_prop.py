@@ -274,8 +274,10 @@ class ShardingPropagator:
             elif (
                 isinstance(spec, (list, tuple))
                 and len(spec) > 0
-                and isinstance(spec[0], DTensorSpec)
+                # and isinstance(spec[0], DTensorSpec)  # TODO: not always true. For example, aten.index.Tensor can have args: [None, DTensorSpec]
+                and any(isinstance(s, DTensorSpec) for s in spec)
             ):
+                print(f"tuple: {spec}")
                 # tensor list create tuple strategy
                 tuple_strategy = [spec_to_strategy(s) for s in spec]
                 tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
@@ -325,7 +327,9 @@ class ShardingPropagator:
 
         if op_schema.op in self.op_strategy_funcs:
             # wrap the op_schema with op strategy for sharding strategy propagation
+            print(f"op_schema: {op_schema}")
             strategy_schema = self._wrap_with_op_strategy(op_schema)
+            print(f"strategy_schema: {strategy_schema}")
 
             # run sharding strategy propagation/generation
             op_strategy = self.op_strategy_funcs[op_schema.op](strategy_schema)
