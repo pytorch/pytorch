@@ -2247,6 +2247,7 @@ coverage_ignore_classes = [
     "interval",
     "less_than",
     "multinomial",
+    "mixture_same_family",
     "stack",
     # torch.distributions.transforms
     "AffineTransform",
