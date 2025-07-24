@@ -13,13 +13,25 @@ from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valg
 __all__ = ["Timer", "timer", "Language"]
 
 
-if torch.accelerator.is_available():
-    def timer() -> float:
-        torch.accelerator.synchronize()
-        return timeit.default_timer()
-else:
-    timer = timeit.default_timer
+class LazyTimer:
+    def __init__(self) -> None:
+        self._impl: Optional[Callable[[], float]] = None
 
+    def __call__(self) -> float:
+        if self._impl is None:
+            if torch.accelerator.is_available():
+                def _accelerator_timer() -> float:
+                    torch.accelerator.synchronize()
+                    return timeit.default_timer()
+                self._impl = _accelerator_timer
+            else:
+                self._impl = timeit.default_timer
+        return self._impl()
+
+_lazy_timer = LazyTimer()
+
+def timer() -> float:
+    return _lazy_timer()
 
 class Language(enum.Enum):
     PYTHON = 0
