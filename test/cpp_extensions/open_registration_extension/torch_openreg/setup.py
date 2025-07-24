@@ -4,13 +4,27 @@ import shutil
 import subprocess
 import sys
 import sysconfig
-from distutils.command.clean import clean
+import platform
 
+from distutils.command.clean import clean
 from setuptools import Extension, find_packages, setup
 
 
 PACKAGE_NAME = "torch_openreg"
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
+
+# Env Variables
+IS_LINUX = platform.system() == "Linux"
+IS_DARWIN = platform.system() == "Darwin"
+IS_WINDOWS = platform.system() == "Windows"
+
+def make_relative_rpath_args(path):
+    if IS_DARWIN:
+        return ["-Wl,-rpath,@loader_path/" + path]
+    elif IS_WINDOWS:
+        return []
+    else:
+        return ["-Wl,-rpath,$ORIGIN/" + path]
 
 
 def get_pytorch_dir():
@@ -74,7 +88,7 @@ def main():
             extra_compile_args=["-g", "-Wall", "-Werror"],
             libraries=["torch_bindings"],
             library_dirs=[os.path.join(BASE_DIR, "torch_openreg/lib")],
-            extra_link_args=["-Wl,-rpath,$ORIGIN/lib"],
+            extra_link_args=[*make_relative_rpath_args("lib")],
         )
     ]
 
