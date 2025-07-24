@@ -1,10 +1,10 @@
 import multiprocessing
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import sysconfig
-import platform
 
 from distutils.command.clean import clean
 from setuptools import Extension, find_packages, setup

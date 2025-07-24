@@ -913,10 +913,6 @@ def _test_autoload(test_directory, options, enable=True):
 
 
 def run_test_with_openreg(test_module, test_directory, options):
-    # TODO(FFFrog): Will remove this later when windows/macos are supported.
-    if not IS_LINUX:
-        return 0
-
     openreg_dir = os.path.join(
         test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
