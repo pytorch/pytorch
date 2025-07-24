@@ -139,11 +139,14 @@ ncclRedOpRAII getNcclReduceOp(
           return unpackPreMulSum<at::Half, ncclHalf>(reduceOp, comm);
         case ncclFloat:
           return unpackPreMulSum<float, ncclFloat>(reduceOp, comm);
+        case ncclBfloat16:
+          return unpackPreMulSum<float, ncclBfloat16>(reduceOp, comm);
         case ncclDouble:
           return unpackPreMulSum<double, ncclDouble>(reduceOp, comm);
         default:
           C10_THROW_ERROR(
-              TypeError, "PreMulSum Data type must be half, float, or double");
+              TypeError,
+              "PreMulSum Data type must be half, float, bfloat16 or double");
           return ncclRedOp_t{};
       }
 #else
@@ -516,11 +519,9 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // DEFAULT_FLAGS = cudaEventDisableTiming.
   if (cudaEventCacheEnabled) {
     ncclStartEvent_ = enableTiming
-        ? ProcessGroupNCCL::CUDAEventCache::get(device.index())
-              ->create(enableTiming)
+        ? CUDAEventCache::get(device.index())->create(enableTiming)
         : nullptr;
-    ncclEndEvent_ = ProcessGroupNCCL::CUDAEventCache::get(device.index())
-                        ->create(enableTiming);
+    ncclEndEvent_ = CUDAEventCache::get(device.index())->create(enableTiming);
   } else {
     ncclStartEvent_ = enableTiming
         ? std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault)
@@ -857,61 +858,6 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   }
 }
 
-ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
-
-// CUDA event is used to record the start/end of one Work.
-// Instead of let the CUDA event gets destroyed, we now reuse it after the Work
-// has been erased from workMetaList_.
-// This is to avoid the potential deadlock caused by CudaEventDestroy.
-std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
-    bool timing) {
-  // Register the deleter as a callback when the WorkNCCL object is destroyed.
-  // Each deleter keeps a ref count to the cache object, so that even when
-  // the thread that creates the cache is gone, the cache object won't be
-  // destroyed until all the events in the cache are destroyed (ref number drops
-  // to zero).
-  auto deleter = [cache = shared_from_this(),
-                  timing](at::cuda::CUDAEvent* event) {
-    std::lock_guard<std::mutex> lock(cache->cacheMutex_);
-    // We put the event back to the cache deque once the WorkNCCL object is
-    // destroyed.
-    cache->eventsArray_[timing ? 1 : 0].push_back(event);
-  };
-  at::cuda::CUDAEvent* event = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(cacheMutex_);
-    auto& events = eventsArray_[timing ? 1 : 0];
-    // If we still have events in the cache, we reuse it. Otherwise, we create a
-    // new one.
-    if (!events.empty()) {
-      event = events.front();
-      events.pop_front();
-    } else {
-      event = new at::cuda::CUDAEvent(
-          timing ? cudaEventDefault : cudaEventDisableTiming);
-    }
-  }
-  return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
-}
-
-std::shared_ptr<ProcessGroupNCCL::CUDAEventCache> ProcessGroupNCCL::
-    CUDAEventCache::get(at::DeviceIndex device) {
-  // A per-thread singleton of device-to-CUDAEventCache map.
-  // Map is needed because events cannot be reused across devices.
-  // Per-thread ownership is needed to support multi-threaded case (instead of
-  // multi-process case).
-  static thread_local std::
-      map<at::DeviceIndex, std::shared_ptr<ProcessGroupNCCL::CUDAEventCache>>
-          cacheDeviceMap;
-  // Check if device has already been in the map, if not, add a new entry
-  auto it = cacheDeviceMap.find(device);
-  if (it == cacheDeviceMap.end()) {
-    cacheDeviceMap.emplace(
-        device, std::make_shared<ProcessGroupNCCL::CUDAEventCache>());
-  }
-  return cacheDeviceMap[device];
-}
-
 static std::atomic<size_t> process_group_id = 0;
 
 constexpr const char* MULTI_DEVICE_ERROR_MSG =
@@ -1119,12 +1065,7 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
     LOG(ERROR) << logPrefix()
                << "No parent communicator exists for nocolor split";
   }
-  NCCLComm::split(
-      comm.get(),
-      NCCL_SPLIT_NOCOLOR,
-      rank_,
-      options_->config,
-      options_->global_ranks_in_group);
+  NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
 #endif // NCCL_HAS_COMM_SPLIT
 }
 
@@ -1311,6 +1252,57 @@ void ProcessGroupNCCL::waitForPendingWorks() {
 
 void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
+    const std::vector<int>& ranks,
+    const c10::intrusive_ptr<Backend::Options>& opts) {
+  auto deviceIdx = guessDeviceId();
+  TORCH_CHECK(
+      deviceIdx >= 0,
+      "ProcessGroupNCCL::split: rank ",
+      rank_,
+      " has no device is bound to this rank.");
+  auto device = at::Device(at::DeviceType::CUDA, deviceIdx);
+  auto it = std::find(ranks.begin(), ranks.end(), rank_);
+  int groupRank;
+  if (it == ranks.end()) {
+    // This rank is not in the new group, so no_color split should be called
+    performNocolorSplit(device);
+    return nullptr;
+  } else {
+    groupRank = std::distance(ranks.begin(), it);
+  }
+
+  auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
+  TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
+
+  // TODO: we need to get rid of globalRanksInGroup eventually.
+  std::vector<uint64_t> globalRanksInGroup;
+  for (auto rank : ranks) {
+    globalRanksInGroup.emplace_back(groupRanks()[rank]);
+  }
+  ncclOpts->split_from =
+      c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
+  ncclOpts->global_ranks_in_group = std::move(globalRanksInGroup);
+  auto color = genNcclSplitColor(ranks);
+  ncclOpts->split_color = color;
+  auto pg = c10::make_intrusive<ProcessGroupNCCL>(
+      store_->clone(), groupRank, ranks.size(), ncclOpts);
+  pg->eagerConnectSingleDevice(device);
+  return c10::static_intrusive_pointer_cast<Backend>(pg);
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::merge(
+    const c10::intrusive_ptr<Store>& store,
+    const c10::intrusive_ptr<Backend::Options>& opts,
+    const int& rank,
+    const int& size) {
+  auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
+  TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
+  auto pg = c10::make_intrusive<ProcessGroupNCCL>(
+      store->clone(), rank, size, ncclOpts);
+  return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
 bool ProcessGroupNCCL::waitForFutureOrTimeout(
@@ -1708,6 +1700,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::join() {
 
 void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   c10::setThreadName("pt_nccl_heartbt");
+  STATIC_SCOPED_WAIT_COUNTER(
+      pytorch.ProcessGroupNCCL__HeartbeatMonitor__runLoop);
 
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
@@ -2035,6 +2029,7 @@ void ProcessGroupNCCL::Watchdog::join() {
 
 void ProcessGroupNCCL::Watchdog::run() {
   c10::setThreadName("pt_nccl_watchdg");
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__Watchdog__run);
 
   try {
     VLOG(2) << pg_->logPrefix() << "Process group watchdog thread started!";
@@ -3013,11 +3008,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
         LOG(INFO) << logPrefix() << "Splitting NCCL communicator from "
                   << parentComm->repr();
         ncclComm = NCCLComm::split(
-            parentComm.get(),
-            options_->split_color,
-            rank,
-            options_->config,
-            options_->global_ranks_in_group);
+            parentComm.get(), options_->split_color, rank, options_->config);
       }
     }
   }

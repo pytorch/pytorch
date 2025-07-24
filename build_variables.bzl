@@ -518,6 +518,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/control_collectives/StoreCollectives.cpp",
     "torch/csrc/distributed/c10d/control_plane/Handlers.cpp",
     "torch/csrc/distributed/c10d/control_plane/WorkerServer.cpp",
+    "torch/csrc/distributed/c10d/cuda/StreamBlock.cpp",
     "torch/csrc/distributed/c10d/debug.cpp",
     "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
     "torch/csrc/distributed/c10d/logger.cpp",
@@ -601,6 +602,7 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
     "torch/nativert/executor/ExecutionFrame.cpp",
+    "torch/nativert/executor/Executor.cpp",
     "torch/nativert/executor/GraphExecutorBase.cpp",
     "torch/nativert/executor/ConstantFolder.cpp",
     "torch/nativert/executor/OpKernel.cpp",
@@ -623,6 +625,10 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/memory/AliasAnalyzer.cpp",
     "torch/nativert/executor/memory/LayoutPlanner.cpp",
     "torch/nativert/executor/memory/LayoutManager.cpp",
+    "torch/nativert/kernels/KernelRegistry.cpp",
+    "torch/nativert/kernels/NativeKernels.cpp",
+    "torch/nativert/kernels/GeneratedStaticDispatchKernels.cpp",
+    "torch/nativert/kernels/GeneratedNativeStaticDispatchKernels.cpp",
 ]
 
 torch_mobile_tracer_sources = [
@@ -732,7 +738,9 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
+    "torch/csrc/distributed/c10d/cuda/CUDAEventCache.cpp",
     "torch/csrc/distributed/c10d/cuda/utils.cpp",
+    "torch/csrc/distributed/c10d/cuda/StreamBlock.cu",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu",

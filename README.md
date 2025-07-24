@@ -200,7 +200,7 @@ If you want to compile with CUDA support, [select a supported version of CUDA fr
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v8.5 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
-Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/backend/latest/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
+Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/backend/latest/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver, and NVIDIA hardware.
 
 If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.  If
@@ -228,6 +228,7 @@ If you want to disable Intel GPU support, export the environment variable `USE_X
 Other potentially useful environment variables may be found in `setup.py`.
 
 #### Get the PyTorch Source
+
 ```bash
 git clone https://github.com/pytorch/pytorch
 cd pytorch
@@ -279,24 +280,27 @@ conda install -c conda-forge libuv=1.39
 ```
 
 #### Install PyTorch
+
 **On Linux**
 
 If you're compiling for AMD ROCm then first run this command:
+
 ```bash
 # Only run this if you're compiling for ROCm
 python tools/amd_build/build_amd.py
 ```
 
 Install PyTorch
+
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 **On macOS**
 
 ```bash
-python3 setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 **On Windows**
@@ -308,7 +312,7 @@ If you want to build legacy python code, please refer to [Building on legacy cod
 In this mode PyTorch computations will run on your CPU, not your GPU.
 
 ```cmd
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
@@ -329,7 +333,6 @@ Additional libraries such as
 
 You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
 
-
 ```cmd
 cmd
 
@@ -349,8 +352,7 @@ for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\
 :: [Optional] If you want to override the CUDA host compiler
 set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
 
-python setup.py develop
-
+python -m pip install --no-build-isolation -v -e .
 ```
 
 **Intel GPU builds**
@@ -372,7 +374,7 @@ if defined CMAKE_PREFIX_PATH (
     set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library"
 )
 
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 ##### Adjust Build Options (Optional)
@@ -382,6 +384,7 @@ the following. For example, adjusting the pre-detected directories for CuDNN or 
 with such a step.
 
 On Linux
+
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 CMAKE_ONLY=1 python setup.py build
@@ -389,6 +392,7 @@ ccmake build  # or cmake-gui build
 ```
 
 On macOS
+
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ CMAKE_ONLY=1 python setup.py build
@@ -514,7 +518,7 @@ on [our website](https://pytorch.org/get-started/previous-versions).
 
 ## Getting Started
 
-Three-pointers to get you started:
+Three pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)

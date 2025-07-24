@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 # To run:
-# TORCH_SYMMMEM=NVSHMEM python test/distributed/test_nvshmem.py
+# python test/distributed/test_nvshmem.py
 
 
 import torch
@@ -11,6 +11,7 @@ from torch.testing._internal.common_distributed import MultiProcContinousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
@@ -32,6 +33,7 @@ device_module = torch.get_device_module(device_type)
 
 @instantiate_parametrized_tests
 @requires_nvshmem()
+@requires_cuda_p2p_access()
 class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
@@ -87,6 +89,29 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
                 tensor, torch.zeros(numel, dtype=dtype, device=self.device)
             )
         else:
+            dist.barrier()
+
+    @skipIfRocm
+    def test_nvshmem_get(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        symm_mem.rendezvous(tensor, group=group_name)
+
+        if self.rank == 0:
+            torch.ops.symm_mem.nvshmem_get(tensor, 1)
+            # TODO: remove after we have wait_signal
+            dist.barrier()
+            torch.testing.assert_close(
+                tensor, torch.ones(numel, dtype=dtype, device=self.device)
+            )
+        else:
+            # handle.wait_signal(src_rank=0)
+            # TODO: remove after we have wait_signal
             dist.barrier()
 
     @skipIfRocm
@@ -206,22 +231,23 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             self.rank
         )
         out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
-        # 3 rows: input splits, output splits, output offsets
+        in_splits = symm_mem.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        ).copy_(inp_splits)
+        # 2 rows: output splits, output offsets
         # Initiallizing all values to -1 to check if they are updated
-        in_out_splits = symm_mem.empty(
-            (3, nsplits), dtype=torch.int64, device=self.device
+        out_splits_offsets = symm_mem.empty(
+            (2, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
-        # Row 0 is input splits
-        in_out_splits[0].copy_(inp_splits)
 
         torch.ops.symm_mem.all_to_all_vdev_2d(
-            inp, out, in_out_splits, group_name, major_align=align
+            inp, out, in_splits, out_splits_offsets, group_name, major_align=align
         )
-        received_out_splits = in_out_splits[1]
-        received_out_offsets = in_out_splits[2]
+        received_out_splits = out_splits_offsets[0]
+        received_out_offsets = out_splits_offsets[1]
 
         # Check input splits (row 0) -- should not change
-        torch.testing.assert_close(in_out_splits[0], inp_splits)
+        torch.testing.assert_close(in_splits, inp_splits)
 
         # Check output splits (row 1)
         torch.testing.assert_close(received_out_splits, out_splits_t.reshape(-1))

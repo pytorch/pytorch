@@ -489,11 +489,11 @@ def broadcast_symbolic_shapes(a, b):
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
         if V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(y, 1), size_oblivious=True
+            sympy.Eq(y, 1), fallback_value=False
         ):
             output.append(x)
         elif V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(x, 1), size_oblivious=True
+            sympy.Eq(x, 1), fallback_value=False
         ):
             output.append(y)
         else:
@@ -939,26 +939,14 @@ def broadcast_tensors(*inputs):
     outputs = []
     for x in inputs:
         sizes = x.get_size()
-        if len(sizes) != len(target) or any(
-            (
-                (
-                    V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(a, 1), size_oblivious=True
-                    )
-                    and not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(b, 1), size_oblivious=True
-                    )
-                )
-                or (
-                    not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(a, 1), size_oblivious=True
-                    )
-                    and V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(b, 1), size_oblivious=True
-                    )
-                )
+
+        def is_length_one(size: sympy.Expr):
+            return V.graph.sizevars.shape_env.evaluate_expr(
+                sympy.Eq(size, 1), fallback_value=False
             )
-            for a, b in zip(sizes, target)
+
+        if len(sizes) != len(target) or any(
+            is_length_one(a) != is_length_one(b) for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -2538,7 +2526,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
+        is_aligned_tensor = ir.is_aligned_realized_tensor_hint(arg, ALIGNMENT)
+        if is_aligned_tensor:
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
@@ -2546,7 +2535,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if (
             isinstance(arg, IRNode)
             and arg.maybe_get_stride() is not None
-            and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
+            and is_aligned_tensor
         ):
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
@@ -2590,7 +2579,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
             return ir.ExternKernel.require_exact_strides(arg, out_strides)
 
-        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
+        if is_aligned_tensor:
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
@@ -2598,7 +2587,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if (
             isinstance(arg, IRNode)
             and arg.maybe_get_stride() is not None
-            and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
+            and is_aligned_tensor
         ):
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
@@ -3177,6 +3166,7 @@ def _full(fill_value, device, dtype, size):
     )
 
 
+@register_lowering(aten.full_like, type_promotion_kind=None)
 def full_like(x, fill_value, **kwargs):
     return create_tensor_like(tensor_constructor(fill_value))(x, **kwargs)
 
@@ -5074,7 +5064,28 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
-        sample = samples_loader([*prefix, ndims - 1 - dim])
+        # Handle indexing for samples tensor correctly for different input dimensions
+        # samples tensor always has shape (N, C, 2) for fractional_max_pool2d where:
+        # - N=1 for 3D inputs (C,H,W), N=batch_size for 4D inputs (N,C,H,W)
+        # - C=num_channels
+        # - 2 for the two spatial dimensions (height, width)
+        samples_shape = samples.get_size()
+
+        if len(samples_shape) == 3:  # Expected: (N, C, 2)
+            if len(prefix) == 1:
+                # 3D input case: prefix=(channel,), samples=(1, C, 2)
+                # Access: samples[0, channel, dim]
+                sample = samples_loader([0, prefix[0], ndims - 1 - dim])
+            elif len(prefix) >= 2:
+                # 4D+ input case: prefix=(batch, channel, ...), samples=(batch, C, 2)
+                # Access: samples[batch, channel, dim]
+                sample = samples_loader([prefix[0], prefix[1], ndims - 1 - dim])
+            else:
+                # Edge case - shouldn't happen for valid fractional pooling
+                sample = samples_loader([0, 0, ndims - 1 - dim])
+        else:
+            # Fallback for unexpected tensor shapes
+            sample = samples_loader([*prefix, ndims - 1 - dim])
         i_expr = ops.index_expr(i, samples.get_dtype())
         diff = ops.index_expr(in_sz - kernel_sz, torch.int64)
         out_sz_expr = ops.index_expr(out_sz - 1, torch.int64)
@@ -6118,17 +6129,6 @@ def mutate_to(changed, val, unsafe_alias=False):
 @register_lowering(aten.fill_)
 def fill_(x, fill_value):
     return mutate_to(x, full_like(x, fill_value))
-
-
-@register_lowering(prims.fill, type_promotion_kind=None)
-def prims_fill(x, fill_value):
-    dtype = x.get_dtype()
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=dtype,
-        inner_fn=lambda _: ops.constant(fill_value, dtype),
-        ranges=list(x.get_size()),
-    )
 
 
 @register_lowering(aten.copy_, type_promotion_kind=None)

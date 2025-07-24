@@ -1,47 +1,73 @@
-[project]
-name = "torch"
-requires-python = ">=3.9"
-license = {text = "BSD-3-Clause"}
-dynamic = [
-    "authors",
-    "classifiers",
-    "entry-points",
-    "dependencies",
-    "description",
-    "keywords",
-    "optional-dependencies",
-    "readme",
-    "scripts",
-    "version",
-]
-
-[project.urls]
-Homepage = "https://pytorch.org/"
-Documentation = "https://pytorch.org/docs/"
-Source = "https://github.com/pytorch/pytorch"
-Forum = "https://discuss.pytorch.org/"
-
+# Package ######################################################################
 
 [build-system]
 requires = [
-    # After 75.8.2 dropped dep disttools API. Please fix
-    # API temporarily restored and shim used. Please fix
-    # Setuptools will drop support for setup.py past 80
-    # min version for recursive glob package data support
-    "setuptools>=62.3.0,<80.0",
-    "wheel",
-    "astunparse",
-    "cmake",
+    # 70.1.0: min version for integrated bdist_wheel command from wheel package
+    # 77.0.0: min version for SPDX expression support for project.license
+    "setuptools>=70.1.0,<80.0",
+    "cmake>=3.27",
     "ninja",
     "numpy",
     "packaging",
     "pyyaml",
     "requests",
+    "six",  # dependency chain: NNPACK -> PeachPy -> six
     "typing-extensions>=4.10.0",
 ]
-# Use legacy backend to import local packages in setup.py
-build-backend = "setuptools.build_meta:__legacy__"
+build-backend = "setuptools.build_meta"
 
+[project]
+name = "torch"
+description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
+readme = "README.md"
+requires-python = ">=3.9"
+# TODO: change to `license = "BSD-3-Clause"` and enable PEP 639 after pinning setuptools>=77
+# FIXME: As of 2025.06.20, it is hard to ensure the minimum version of setuptools in our CI environment.
+# TOML-table-based license deprecated in setuptools>=77, and the deprecation warning will be changed
+# to an error on 2026.02.18. See also: https://github.com/pypa/setuptools/issues/4903
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
+keywords = ["pytorch", "machine learning"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dynamic = [
+    "entry-points",
+    "dependencies",
+    "scripts",
+    "version",
+]
+
+[project.urls]
+Homepage = "https://pytorch.org"
+Repository = "https://github.com/pytorch/pytorch"
+Documentation = "https://pytorch.org/docs"
+"Issue Tracker" = "https://github.com/pytorch/pytorch/issues"
+Forum = "https://discuss.pytorch.org"
+
+[project.optional-dependencies]
+optree = ["optree>=0.13.0"]
+opt-einsum = ["opt-einsum>=3.3"]
+pyyaml = ["pyyaml"]
+
+# Linter tools #################################################################
 
 [tool.black]
 line-length = 88
@@ -60,11 +86,9 @@ multi_line_output = 3
 include_trailing_comma = true
 combine_as_imports = true
 
-
 [tool.usort.known]
 first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
-
 
 [tool.ruff]
 line-length = 88
@@ -106,6 +130,7 @@ ignore = [
     "E741",
     "EXE001",
     "F405",
+    "FURB122", # writelines
     # these ignores are from flake8-logging-format; please fix!
     "G101",
     # these ignores are from ruff NPY; please fix!
@@ -128,6 +153,7 @@ ignore = [
     "SIM117",
     "SIM118",
     "UP007", # keep-runtime-typing
+    "UP045", # keep-runtime-typing
     "TC006",
 ]
 select = [
@@ -208,6 +234,10 @@ select = [
     "UP",
     "YTT",
 ]
+
+[tool.ruff.lint.pyupgrade]
+# Preserve types, even if a file imports `from __future__ import annotations`.
+keep-runtime-typing = true
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = [

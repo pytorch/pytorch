@@ -1379,7 +1379,7 @@ def get_default_backend_for_device(device: Union[str, torch.device]) -> str:
     Return the default backend for the given device.
 
     Args:
-        Union[str, torch.device]: The device to get the default backend for.
+        device (Union[str, torch.device]): The device to get the default backend for.
 
     Returns:
         The default backend for the given device as a lower case string.
@@ -1568,12 +1568,12 @@ def init_process_group(
     Args:
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            ``nccl``, ``ucc``, or one that is registered by a third-party
+            ``nccl``, ``ucc``, ``xccl`` or one that is registered by a third-party
             plugin.
             Since 2.6, if ``backend`` is not provided, c10d will use a backend
             registered for the device type indicated by the `device_id` kwarg
             (if provided). The known default registrations today are: ``nccl``
-            for ``cuda``, ``gloo`` for ``cpu``.
+            for ``cuda``, ``gloo`` for ``cpu``, ``xccl`` for ``xpu``.
             If neither ``backend`` nor ``device_id`` is provided, c10d will
             detect the accelerator on the run-time machine and use a backend
             registered for that detected accelerator (or ``cpu``).
@@ -1584,6 +1584,8 @@ def init_process_group(
             process must have exclusive access to every GPU it uses, as sharing
             GPUs between processes can result in deadlock or NCCL invalid usage.
             ``ucc`` backend is experimental.
+            Default backend for the device can be queried with
+            :func:`get_default_backend_for_device`.
         init_method (str, optional): URL specifying how to initialize the
                                      process group. Default is "env://" if no
                                      ``init_method`` or ``store`` is specified.
@@ -2819,6 +2821,8 @@ def broadcast(
     opts.rootRank = group_src
     opts.rootTensor = 0
     opts.asyncOp = async_op
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
     work = group.broadcast([tensor], opts)
     if async_op:
         return work

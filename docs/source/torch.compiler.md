@@ -36,7 +36,7 @@ TorchDynamo requires a backend that converts the captured graphs into a fast
 machine code. Different backends can result in various optimization gains.
 The default backend is called TorchInductor, also known as *inductor*,
 TorchDynamo has a list of supported backends developed by our partners,
-which can be see by running `torch.compiler.list_backends()` each of which
+which can be seen by running `torch.compiler.list_backends()` each of which
 with its optional dependencies.
 
 Some of the most commonly used backends include:
@@ -56,8 +56,6 @@ Some of the most commonly used backends include:
      - CUDA graphs with AOT Autograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
    * - ``torch.compile(m, backend="ipex")``
      - Uses IPEX on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
-   * - ``torch.compile(m, backend="onnxrt")``
-     - Uses ONNX Runtime for training on CPU/GPU. :doc:`Read more <onnx_dynamo_onnxruntime_backend>`
 ```
 
 **Inference-only backends**

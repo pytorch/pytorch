@@ -1843,6 +1843,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(graph.disable_cudagraphs_reason, None)
         self.assertEqual(graph.device_types, {"cuda"})
 
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
     def test_triton_interpret(self):
         import subprocess
 
@@ -1855,7 +1856,7 @@ import torch
 def foo(x):
     return x + 1
 
-# somehow gives different results.. still, check that it doesnt error
+# somehow gives different results.. still, check that it doesn't error
 foo(torch.rand([256], device="cuda"))
 """
         subprocess.run([sys.executable, "-c", script], check=True)
@@ -2096,6 +2097,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertIn("znumel", code)
 
     @xfailIfPy312Plus  # https://github.com/pytorch/pytorch/issues/142032
+    @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         target_size = (8, 2)
         mem_eff_temporal_upsampling_interp_chunks = 2

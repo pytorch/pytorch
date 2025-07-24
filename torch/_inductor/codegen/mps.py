@@ -433,6 +433,10 @@ class MetalOverrides(OpOverrides):
             "chebyshev_polynomial_w",
             "hermite_polynomial_h",
             "hermite_polynomial_he",
+            "shifted_chebyshev_polynomial_t",
+            "shifted_chebyshev_polynomial_u",
+            "shifted_chebyshev_polynomial_v",
+            "shifted_chebyshev_polynomial_w",
         ]:
             setattr(
                 cls,
@@ -925,7 +929,7 @@ class MetalKernel(SIMDKernel):
         wrapper.generate_kernel_call(
             name,
             args,
-            device=torch.device("cpu"),  # TODO: Fix me, MPS does not expose streams now
+            device=torch.device("mps"),
             triton=False,
             arg_types=arg_types,
         )

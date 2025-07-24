@@ -232,7 +232,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Popping from an empty torch function mode stack",
+            "Attempted to pop from empty torch function mode stack",
             lambda: fn(torch.ones(2, 2)),
         )
 

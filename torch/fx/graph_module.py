@@ -30,7 +30,6 @@ from .graph import (
 __all__ = [
     "reduce_graph_module",
     "reduce_package_graph_module",
-    "reduce_deploy_graph_module",
     "GraphModule",
 ]
 
@@ -144,18 +143,6 @@ def reduce_package_graph_module(
     importer: PackageImporter, body: dict[Any, Any], generated_module_name: str
 ) -> torch.nn.Module:
     forward = importer.import_module(generated_module_name).forward
-    return _deserialize_graph_module(forward, body)
-
-
-@compatibility(is_backward_compatible=True)
-def reduce_deploy_graph_module(
-    importer: PackageImporter, body: dict[Any, Any], import_block: str
-) -> torch.nn.Module:
-    ns = {}
-    ns["__builtins__"] = importer.patched_builtins
-    fn_src = body.get("_code")
-    assert fn_src is not None
-    forward = _forward_from_src(import_block + fn_src, ns)
     return _deserialize_graph_module(forward, body)
 
 
@@ -853,14 +840,6 @@ class {module_name}(torch.nn.Module):
 
     # Passing Tracer as argument allows subclasses extending fx.GraphModule
     # define their own Tracer (extending fx.Tracer).
-    def __reduce_deploy__(self, importer: Importer):
-        dict_without_graph = self.__dict__.copy()
-        dict_without_graph["_graphmodule_cls_name"] = self.__class__.__name__
-        del dict_without_graph["_graph"]
-
-        python_code = self.recompile()
-        import_block = _format_import_block(python_code.globals, importer)
-        return (reduce_deploy_graph_module, (dict_without_graph, import_block))
 
     def __reduce_package__(self, exporter: PackageExporter):
         dict_without_graph = self.__dict__.copy()
@@ -995,7 +974,7 @@ class {module_name}(torch.nn.Module):
     @contextlib.contextmanager
     def _set_replace_hook(self, f):
         """
-        Takes a callable which will be called everytime when we replace a node
+        Takes a callable which will be called every time when we replace a node
         to a new node, or change the node's name. Callable takes three arguments:
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
@@ -1009,7 +988,7 @@ class {module_name}(torch.nn.Module):
 
     def _register_replace_node_hook(self, f):
         """
-        Takes a callable which will be called everytime when we replace a node
+        Takes a callable which will be called every time when we replace a node
         to a new node, or change the node's name. Callable takes three arguments:
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
@@ -1019,7 +998,7 @@ class {module_name}(torch.nn.Module):
 
     def _unregister_replace_node_hook(self, f):
         """
-        Takes a callable which was previously registered to be called everytime when we replace a node.
+        Takes a callable which was previously registered to be called every time when we replace a node.
         This function will unregister that callable so it is no longer invoked on node replacement.
         """
         assert callable(f), "create_node hook must be a callable."

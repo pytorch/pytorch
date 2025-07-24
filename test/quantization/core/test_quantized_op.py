@@ -154,6 +154,32 @@ def _get_random_tensor_and_q_params(shapes, rand_scale, torch_type):
         X_scale = 1e-10
     return X, X_scale, X_zero_point
 
+def _quantize_fp8e4m3(t: torch.Tensor, channelwise: bool, scale: Optional[torch.Tensor] = None):
+    quant_max = torch.finfo(torch.float8_e4m3fn).max
+    eps = torch.Tensor([torch.finfo(torch.float32).eps])
+    if channelwise:
+        scale = scale or t.reshape(t.shape[0], -1).abs().max(-1)[0] / quant_max
+        scale = torch.max(scale, eps)
+        scale_reshape = scale.reshape((-1,) + (1,) * (t.dim() - 1))
+        qt = t / scale_reshape
+    else:
+        scale = scale or t.abs().max().reshape([1]) / quant_max
+        scale = torch.max(scale, eps) if isinstance(scale, torch.Tensor) else max(scale, eps.item())
+        qt = t / scale
+    qt = qt.to(torch.float8_e4m3fn)
+    return qt, scale
+
+def _dequantize_fp8e4m3(qt: torch.Tensor, scale: torch.Tensor):
+    dqt = qt.float()
+    if scale.numel() == 1:
+        # per tensor
+        dqt = dqt * scale
+    else:
+        # per channel
+        scale_reshape = scale.reshape((-1,) + (1,) * (qt.dim() - 1))
+        dqt = dqt * scale_reshape
+    return dqt
+
 class TestQuantizedOps(TestCase):
 
     """Helper function to test quantized activation functions."""
@@ -3524,14 +3550,15 @@ class TestDynamicQuantizedOps(TestCase):
             (2, 4),         # batch_size
             (4, 5),     # input_channels
             (4, 7),      # output_channels
+            (True, False),         # bias None or not
         )
-        for batch_size, input_channels, output_channels in options:
+        for batch_size, input_channels, output_channels, bias_is_none in options:
             pack_op = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16
             linear_op = torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight
 
             x = torch.randn(batch_size, input_channels)
             w = torch.randn(output_channels, input_channels)
-            bias = torch.randn(output_channels)
+            bias = torch.randn(output_channels) if not bias_is_none else None
 
             w_packed = pack_op(w)
             out = linear_op(x, w_packed, bias, output_channels)
@@ -3564,6 +3591,18 @@ class TestDynamicQuantizedOps(TestCase):
         compiled_out = compiled(x, w, b)
 
         self.assertEqual(ref_out, compiled_out)
+
+        def func(X, W):
+            packed_W = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16(W)
+            return torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight(X, packed_W, None, W.size(0))
+
+        ref_out = func(x, w)
+
+        compiled = torch.compile(func)
+        compiled_out = compiled(x, w)
+
+        self.assertEqual(ref_out, compiled_out)
+
 
     """Tests the correctness of the dynamic quantized lstm/gru."""
 
@@ -4678,32 +4717,6 @@ class TestQuantizedLinear(TestCase):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_pt2e_helper(qlinear, "add_relu")
 
-    def _quantize_fp8e4m3(self, t: torch.Tensor, channelwise: bool, scale: Optional[torch.Tensor] = None):
-        quant_max = torch.finfo(torch.float8_e4m3fn).max
-        eps = torch.Tensor([torch.finfo(torch.float32).eps])
-        if channelwise:
-            scale = scale or t.reshape(t.shape[0], -1).abs().max(-1)[0] / quant_max
-            scale = torch.max(scale, eps)
-            scale_reshape = scale.reshape((-1,) + (1,) * (t.dim() - 1))
-            qt = t / scale_reshape
-        else:
-            scale = scale or t.abs().max().reshape([1]) / quant_max
-            scale = torch.max(scale, eps) if isinstance(scale, torch.Tensor) else max(scale, eps.item())
-            qt = t / scale
-        qt = qt.to(torch.float8_e4m3fn)
-        return qt, scale
-
-    def _dequantize_fp8e4m3(self, qt: torch.Tensor, scale: torch.Tensor):
-        dqt = qt.float()
-        if scale.numel() == 1:
-            # per tensor
-            dqt = dqt * scale
-        else:
-            # per channel
-            scale_reshape = scale.reshape((-1,) + (1,) * (qt.dim() - 1))
-            dqt = dqt * scale_reshape
-        return dqt
-
     def _test_qlinear_fp8_helper(
         self,
         qlinear_op,
@@ -4737,16 +4750,16 @@ class TestQuantizedLinear(TestCase):
                     x2_scale, x2_zp = 0.3, 0
                 x = torch.rand(batch_size, (ic + 1), ic) * 10 if input_dim == 3 else torch.rand(batch_size, ic) * 10
                 w = torch.rand(oc, ic) * 10
-                qx, x_scale = self._quantize_fp8e4m3(x, channelwise=False)
-                qw, w_scales = self._quantize_fp8e4m3(w, channelwise=weight_quant_per_channel)
+                qx, x_scale = _quantize_fp8e4m3(x, channelwise=False)
+                qw, w_scales = _quantize_fp8e4m3(w, channelwise=weight_quant_per_channel)
                 if use_bias:
                     b = torch.rand(oc) * 10
                 else:
                     b = None
 
                 # compute reference result
-                x_ref = self._dequantize_fp8e4m3(qx, x_scale)
-                w_ref = self._dequantize_fp8e4m3(qw, w_scales)
+                x_ref = _dequantize_fp8e4m3(qx, x_scale)
+                w_ref = _dequantize_fp8e4m3(qw, w_scales)
                 y_ref = linear_op(x_ref, w_ref, b)
 
                 # compute fp8 linear
@@ -4766,8 +4779,8 @@ class TestQuantizedLinear(TestCase):
                         y_ref = F.gelu(y_ref, approximate=post_op_algo)
                 elif post_op in ("sum", "sum_relu"):
                     x2 = torch.rand_like(y_ref)
-                    x2_q, x2_scale = self._quantize_fp8e4m3(x2, channelwise=False)
-                    x2_dq = self._dequantize_fp8e4m3(x2_q, x2_scale)
+                    x2_q, x2_scale = _quantize_fp8e4m3(x2, channelwise=False)
+                    x2_dq = _dequantize_fp8e4m3(x2_q, x2_scale)
                     unary_post_op = "relu" if post_op == "sum_relu" else "none"
                     binary_alpha = 1.0  # we only support alpha=1.0 now
                     # if output_dtype is fp32 or bf16, accumulate on x2
@@ -4806,7 +4819,7 @@ class TestQuantizedLinear(TestCase):
 
                 # Compare results
                 if output_dtype is None:
-                    y_ref = self._quantize_fp8e4m3(y_ref, False, used_y_scale)[0]
+                    y_ref = _quantize_fp8e4m3(y_ref, False, used_y_scale)[0]
                 else:
                     y_ref = y_ref.to(output_dtype)
 
@@ -7490,10 +7503,10 @@ class TestQuantizedConv(TestCase):
                 qconv_output_dtype=output_dtype,
             )
 
-    # Test qconv with post op silu
+    # Test qconv with post op swish
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
-    def test_qconv2d_silu_pt2e(self):
+    def test_qconv2d_swish_pt2e(self):
         input_channels_per_group = 2
         output_channels_per_group = 2
         groups_list = [1, 10]
@@ -7814,6 +7827,330 @@ class TestQuantizedConv(TestCase):
                 use_channelwise=use_channelwise,
                 qconv_output_dtype=output_dtype,
             )
+
+    def _make_qconv_tensors_fp8(
+        self, batch_size, input_channels_per_group, input_feature_map_shape,
+        output_channels_per_group, groups, kernels, strides, pads, dilations,
+        use_bias, use_channelwise, use_transpose,
+        device=torch.device("cpu"),
+    ):
+        assert not (use_channelwise and use_transpose), \
+               "Cannot generate channelwise qconv_transpose_tensors "
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        # Padded input size should be at least as big as dilated kernel
+        kernels = _single(kernels)
+        strides = _single(strides)
+        pads = _single(pads)
+        dilations = _single(dilations)
+        for i in range(len(kernels)):
+            assume(input_feature_map_shape[i] + 2 * pads[i]
+                   >= dilations[i] * (kernels[i] - 1) + 1)
+        # the operator expects them in the format
+        # (output_channels, input_channels/groups, kernel_d, kernel_h, kernel_w)
+        # (input_channels, output_channels/groups, kernel_d, kernel_h, kernel_w)
+        if use_transpose:
+            output_shape = (input_channels, output_channels_per_group,)
+        else:
+            output_shape = (output_channels, input_channels_per_group,)
+
+        X = torch.rand(
+            (batch_size, input_channels,) + input_feature_map_shape,
+            device=device,
+        )
+        X_q, X_scale = _quantize_fp8e4m3(X, channelwise=False)
+        W = torch.randn(output_shape + kernels, device=device) * 0.1
+        W_q, W_scale = _quantize_fp8e4m3(W, channelwise=use_channelwise)
+        bias_float = torch.randn((output_channels,), device=device) if use_bias else None
+
+        return X, W, X_q, W_q, X_scale, W_scale, bias_float
+
+    def _test_qconv_impl_cpu_tensor_fp8(
+        self,
+        qconv,
+        qconv_prepack,
+        conv_op,
+        input_channels_per_group=2,
+        input_feature_map_shape=(),
+        output_channels_per_group=2,
+        groups=1,
+        kernels=3,
+        strides=(),
+        pads=(),
+        dilations=(),
+        Y_scale=0.02,
+        use_bias=True,
+        post_op=PointwisePostOp(),
+        use_channelwise=True,
+        X2_scale=0.02,
+        qconv_output_dtype=None,  # None, torch.float32, torch.bfloat16
+        weight_in_channel_last_format=False,
+    ):
+        # We assume FP8 quantization is always symmetric
+        fp32_output = True if qconv_output_dtype is torch.float32 else False
+        bfloat16_output = True if qconv_output_dtype is torch.bfloat16 else False
+        if fp32_output or bfloat16_output:
+            Y_scale = 1.0
+            X2_scale = 1.0
+        batch_size = 3
+        device = torch.device("cpu")
+        use_transpose = False
+        X, W, X_q, W_q, X_scale, W_scale, bias_float = self._make_qconv_tensors_fp8(
+            batch_size,
+            input_channels_per_group,
+            input_feature_map_shape,
+            output_channels_per_group,
+            groups,
+            kernels,
+            strides,
+            pads,
+            dilations,
+            use_bias,
+            use_channelwise,
+            use_transpose,
+            device=device,
+        )
+        # Assign weights
+        dqW = _dequantize_fp8e4m3(W_q, W_scale)
+        dqX = _dequantize_fp8e4m3(X_q, X_scale)
+        conv_op.weight = torch.nn.Parameter(dqW, requires_grad=False)
+        conv_op.bias = (
+            torch.nn.Parameter(bias_float, requires_grad=False) if use_bias else None
+        )
+        result_ref = conv_op(dqX)
+        X2 = None
+        X2_q = None
+        X2_scale = 1.0
+
+        if post_op.binary_attr == "sum":
+            X2_dtype = qconv_output_dtype if qconv_output_dtype else torch.float32
+            X2 = torch.rand_like(result_ref, device=device, dtype=X2_dtype)
+            if qconv_output_dtype is None:
+                X2_q, X2_scale = _quantize_fp8e4m3(X2, channelwise=False)
+                X2_dq = _dequantize_fp8e4m3(X2_q, X2_scale)
+                X2_scale = X2_scale.item()
+            else:
+                X2_dq = X2
+            result_ref = result_ref + X2_dq
+            if post_op.unary_attr == "relu":
+                relu = torch.nn.ReLU()
+                result_ref = relu(result_ref)
+        elif post_op.unary_attr == "relu":
+            assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
+            relu = torch.nn.ReLU()
+            result_ref = relu(result_ref)
+        elif post_op.unary_attr == "hardtanh":
+            assert not use_transpose, "Cannot fuse hardtanh with ConvTranspose"
+            assert len(post_op.scalars) == 2, "For post op hardtanh, expect 2 parameters passed in"
+            hardtanh = torch.nn.Hardtanh(min_val=post_op.scalars[0], max_val=post_op.scalars[1])
+            result_ref = hardtanh(result_ref)
+        elif post_op.unary_attr == "hardswish":
+            assert not use_transpose, "Cannot fuse hardswish with ConvTranspose"
+            hardswish = torch.nn.Hardswish()
+            result_ref = hardswish(result_ref)
+        elif post_op.unary_attr == "swish":
+            assert not use_transpose, "Cannot fuse silu with ConvTranspose"
+            silu = torch.nn.SiLU()
+            result_ref = silu(result_ref)
+
+        # Quantize reference results for comparison
+        if qconv_output_dtype is None:
+            Y_scale_t = torch.Tensor([Y_scale]).to(device)
+            # Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
+            result_ref = result_ref.div(Y_scale_t).half().to(torch.float8_e4m3fn)
+        else:
+            result_ref = result_ref.to(qconv_output_dtype)
+
+        # Calculate the result for PT2E path
+        if weight_in_channel_last_format:
+            if W_q.dim() == 5:
+                W_q = W_q.to(memory_format=torch.channels_last_3d)
+            elif W_q.dim() == 4:
+                W_q = W_q.to(memory_format=torch.channels_last)
+
+        X_scale_scalar = X_scale.item()
+        packed_weight = qconv_prepack(
+            W_q,
+            W_scale,
+            X_scale_scalar,
+            0,  # X_zero_point
+            strides,
+            pads,
+            dilations,
+            groups,
+            X_q.size(),
+        )
+
+        if post_op.binary_attr == "sum":
+            accum = (
+                X2_q.contiguous(memory_format=torch.channels_last)
+                if X2_q is not None
+                else X2.contiguous(memory_format=torch.channels_last)
+            )
+            result = qconv(
+                X_q,
+                X_scale_scalar,
+                0,  # X_zero_point
+                packed_weight,
+                W_scale,
+                torch.zeros([], dtype=torch.int8),  # W_zero_point
+                accum,
+                bias_float,
+                strides,
+                pads,
+                dilations,
+                groups,
+                Y_scale,
+                0,  # Y_zero_point
+                qconv_output_dtype,
+                X2_scale,
+                0,  # X2_zero_point
+                post_op.binary_attr,
+                post_op.alpha,
+                post_op.unary_attr,
+                post_op.scalars,
+                post_op.algorithm,
+            )
+        else:
+            result = qconv(
+                X_q,
+                X_scale_scalar,
+                0,  # X_zero_point
+                packed_weight,
+                W_scale,
+                torch.zeros([], dtype=torch.int8),  # W_zero_point
+                bias_float,
+                strides,
+                pads,
+                dilations,
+                groups,
+                Y_scale,
+                0,  # Y_zero_point
+                qconv_output_dtype,
+                post_op.unary_attr,
+                post_op.scalars,
+                post_op.algorithm,
+            )
+        if fp32_output or bfloat16_output:
+            self.assertTrue(result.dtype == qconv_output_dtype)
+
+        assert torch.allclose(result.float(), result_ref.float(), atol=1e-6)
+
+    def _test_qconv_fp8_helper(self, nd, pointwise_post_op):
+        # nd = 1,2,3 -> conv1d/2d/3d
+        if pointwise_post_op.binary_attr != "none":
+            # Only conv2d supports binary post op
+            assert nd == 2
+        groups_list = [1, 3]
+        input_channels_per_group = 2
+        output_channels_per_group = 2
+        length = 4
+        kernel = 3
+        stride = 1
+        pad = 1
+        dilation = 1
+        use_bias_list = [False, True]
+        use_channelwise_list = [False, True]
+        output_dtype_list = [None, torch.float32, torch.bfloat16]
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
+        for groups, use_bias, use_channelwise, output_dtype in options:
+            if output_dtype is not None and not (use_bias and use_channelwise):
+                # Remove some test combination to reduce UT test time
+                continue
+            conv_mod = getattr(torch.nn, f"Conv{nd}d")(
+                input_channels_per_group * groups,
+                output_channels_per_group * groups,
+                kernel,
+                stride,
+                pad,
+                dilation,
+                groups,
+            )
+            qconv = (
+                torch.ops.onednn.qconv_pointwise
+                if pointwise_post_op.binary_attr == "none"
+                else torch.ops.onednn.qconv2d_pointwise.binary
+            )
+            qconv_prepack = torch.ops.onednn.qconv_prepack
+            self._test_qconv_impl_cpu_tensor_fp8(
+                qconv,
+                qconv_prepack,
+                conv_mod,
+                input_channels_per_group=input_channels_per_group,
+                input_feature_map_shape=(length,) * nd,
+                output_channels_per_group=output_channels_per_group,
+                groups=groups,
+                kernels=[kernel] * nd,
+                strides=[stride] * nd,
+                pads=[pad] * nd,
+                dilations=[dilation] * nd,
+                use_bias=use_bias,
+                post_op=pointwise_post_op,
+                use_channelwise=use_channelwise,
+                qconv_output_dtype=output_dtype,
+            )
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv1d_fp8(self):
+        pointwise_post_op = PointwisePostOp()
+        self._test_qconv_fp8_helper(1, pointwise_post_op)
+
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv1d_relu_fp8(self):
+        pointwise_post_op = PointwisePostOp(unary_attr="relu")
+        self._test_qconv_fp8_helper(1, pointwise_post_op)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_fp8(self):
+        pointwise_post_op = PointwisePostOp()
+        self._test_qconv_fp8_helper(2, pointwise_post_op)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_relu_fp8(self):
+        pointwise_post_op = PointwisePostOp(unary_attr="relu")
+        self._test_qconv_fp8_helper(2, pointwise_post_op)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_hardtanh_fp8(self):
+        pointwise_post_op = PointwisePostOp(unary_attr="hardtanh", scalars=[0.0, 6.0])
+        self._test_qconv_fp8_helper(2, pointwise_post_op)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_swish_fp8(self):
+        pointwise_post_op = PointwisePostOp(unary_attr="swish")
+        self._test_qconv_fp8_helper(2, pointwise_post_op)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_hardswish_fp8(self):
+        pointwise_post_op = PointwisePostOp(unary_attr="hardswish")
+        self._test_qconv_fp8_helper(2, pointwise_post_op)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_sum_fp8(self):
+        pointwise_post_op = PointwisePostOp(binary_attr="sum")
+        self._test_qconv_fp8_helper(2, pointwise_post_op)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv2d_sum_relu_fp8(self):
+        pointwise_post_op = PointwisePostOp(binary_attr="sum", unary_attr="relu")
+        self._test_qconv_fp8_helper(2, pointwise_post_op)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv3d_fp8(self):
+        pointwise_post_op = PointwisePostOp()
+        self._test_qconv_fp8_helper(3, pointwise_post_op)
+
 
 
 class TestPadding(TestCase):

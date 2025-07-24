@@ -19,7 +19,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   llm-td:
@@ -201,6 +203,7 @@ jobs:
           { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" }
         ]}
     secrets: inherit
 
@@ -236,6 +239,7 @@ jobs:
           { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" }
         ]}
     secrets: inherit
 
@@ -309,21 +313,6 @@ jobs:
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.test-matrix }}
-    secrets: inherit
-
-  linux-jammy-py3-clang12-mobile-build:
-    name: linux-jammy-py3-clang12-mobile-build
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3-clang12-mobile-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3-clang15-asan
-      build-generates-artifacts: false
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
     secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_9-clang12-build:
