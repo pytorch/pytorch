@@ -13,6 +13,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
     requires_cuda_with_enough_memory,
+    serialTest,
 )
 
 
@@ -211,6 +212,7 @@ class InplacePaddingTest(TestCase):
 
     @requires_cuda_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
+    @serialTest()
     def test_linear_and_cel(self):
         # Use nan for torch.empty
         torch.use_deterministic_algorithms(True)
