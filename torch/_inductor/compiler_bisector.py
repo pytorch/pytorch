@@ -301,7 +301,6 @@ class CompilerBisector:
 
     @classmethod
     def get_system_counter(cls, name: str, increment: bool = True) -> int:
-        global subsystem_call_counter
         curr = subsystem_call_counter[name]
         if increment:
             subsystem_call_counter[name] += 1

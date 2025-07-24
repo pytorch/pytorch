@@ -252,7 +252,6 @@ class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
         param_name_to_hook_count = collections.defaultdict(int)
 
         def hook(param_name: str, param: torch.Tensor) -> None:
-            nonlocal param_name_to_hook_count
             param_name_to_hook_count[param_name] += 1
 
         model = MLP(8)

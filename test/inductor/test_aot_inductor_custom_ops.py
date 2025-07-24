@@ -398,8 +398,6 @@ class AOTInductorTestsTemplate:
         class TestRefMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 kwargs = kwargs if kwargs else {}
-                nonlocal inps
-                nonlocal test_self
                 nonlocal sentinel_seen
                 if func is torch.ops.aoti_custom_ops.custom_add.default:
                     # inputs should be deallocated by this point
@@ -512,6 +510,7 @@ CUDA_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(),
     "test_quanatized_int8_linear": fail_cuda(),
+    "test_quantized_linear_bias_none": fail_cuda(),
 }
 
 

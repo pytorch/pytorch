@@ -3948,7 +3948,6 @@ class CompiledAutograd1(torch.nn.Module):
                 pack_count = 0
 
                 def pack(x):
-                    nonlocal pack_count
                     path = f"{d}/{pack_count}.pt"
                     torch.save(x, path)
                     return path
@@ -4173,7 +4172,6 @@ class CompiledAutograd1(torch.nn.Module):
         post_grad_graphs = []
 
         def post_grad_pass(graph):
-            nonlocal post_grad_graphs
             post_grad_graphs.append(graph)
             return graph
 

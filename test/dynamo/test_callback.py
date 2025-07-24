@@ -68,11 +68,9 @@ class CallbackTests(TestCase):
         order = []
 
         def on_start(args: CallbackArgs):
-            nonlocal order
             order.append(f"start={args}")
 
         def on_end(args: CallbackArgs):
-            nonlocal order
             order.append(f"end={args}")
 
         torch._dynamo.callback.on_compile_start(on_start)

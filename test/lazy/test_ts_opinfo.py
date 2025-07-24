@@ -206,7 +206,6 @@ class TestLazyOpInfo(TestCase):
                 l.append(op.variant_test_name)
             return ".".join(l)
 
-        global HAS_SYMINT_SUFFIX, FALLBACK_LIST
         samples = op.sample_inputs("lazy", dtype, requires_grad=False)
         sample = next(iter(samples))
         args = [sample.input] + list(sample.args)

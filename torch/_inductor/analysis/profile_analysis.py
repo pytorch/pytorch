@@ -49,8 +49,6 @@ def register_adapter(
     AdapterType,
 ]:
     def decorator(func: AdapterType) -> AdapterType:
-        global _adapters_map
-
         if isinstance(aten, str):
             adapters_map[aten] = func
         else:
