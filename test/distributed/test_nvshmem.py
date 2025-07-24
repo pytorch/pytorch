@@ -231,22 +231,23 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             self.rank
         )
         out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
-        # 3 rows: input splits, output splits, output offsets
-        # Initializing all values to -1 to check if they are updated
-        in_out_splits = symm_mem.empty(
-            (3, nsplits), dtype=torch.int64, device=self.device
+        in_splits = symm_mem.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        ).copy_(inp_splits)
+        # 2 rows: output splits, output offsets
+        # Initiallizing all values to -1 to check if they are updated
+        out_splits_offsets = symm_mem.empty(
+            (2, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
-        # Row 0 is input splits
-        in_out_splits[0].copy_(inp_splits)
 
         torch.ops.symm_mem.all_to_all_vdev_2d(
-            inp, out, in_out_splits, group_name, major_align=align
+            inp, out, in_splits, out_splits_offsets, group_name, major_align=align
         )
-        received_out_splits = in_out_splits[1]
-        received_out_offsets = in_out_splits[2]
+        received_out_splits = out_splits_offsets[0]
+        received_out_offsets = out_splits_offsets[1]
 
         # Check input splits (row 0) -- should not change
-        torch.testing.assert_close(in_out_splits[0], inp_splits)
+        torch.testing.assert_close(in_splits, inp_splits)
 
         # Check output splits (row 1)
         torch.testing.assert_close(received_out_splits, out_splits_t.reshape(-1))

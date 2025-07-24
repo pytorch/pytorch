@@ -52,6 +52,7 @@ from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.common import (
+    custom_backend_codegen_configs,
     custom_backend_passes,
     init_backend_registration,
 )
@@ -854,6 +855,13 @@ class FxGraphHashDetails:
             map(self._get_custom_pass_detail, custom_backend_passes.values())
         )
 
+        # Save custom inductor codegen configs
+        self.custom_backend_codegen_configs = {
+            device: custom_config.save_config_portable(ignore_private_configs=False)
+            for device, custom_config in custom_backend_codegen_configs.items()
+            if custom_config is not None
+        }
+
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
@@ -1635,9 +1643,6 @@ class AotCodeCompiler:
         """
         generated_files: list[Union[str, Weights]] = additional_files  # type: ignore[assignment]
 
-        if sys.platform == "win32":
-            raise RuntimeError("AotCodeCompiler not yet supported for inductor")
-
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
         picked_vec_isa = pick_vec_isa()
@@ -2171,40 +2176,44 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
 
             cubins_o = []
             asm_files = []
-            ld, objcopy = get_ld_and_objcopy(use_relative_path)
-            for kernel_name, value in CudaKernelParamCache.cache.items():
-                if asm_file := value["asm"]:
-                    asm_files.append(asm_file)
+            if not _IS_WINDOWS:
+                ld, objcopy = get_ld_and_objcopy(use_relative_path)
+                for kernel_name, value in CudaKernelParamCache.cache.items():
+                    if asm_file := value["asm"]:
+                        asm_files.append(asm_file)
 
-                cubin_file = value[get_cpp_wrapper_cubin_path_name()]
-                if config.aot_inductor.emit_multi_arch_kernel and device_type == "cuda":
-                    current_arch = _nvcc_arch_as_compile_option()
-                    cmd = (
-                        f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
-                        # Triton only allows generating PTX version as same as the current arch
-                        f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
-                        # Include SASS for the current specific arch
-                        f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
-                    )
-                    try:
-                        subprocess.run(
-                            cmd.split(),
-                            capture_output=True,
-                            text=True,
-                            check=True,
+                    cubin_file = value[get_cpp_wrapper_cubin_path_name()]
+                    if (
+                        config.aot_inductor.emit_multi_arch_kernel
+                        and device_type == "cuda"
+                    ):
+                        current_arch = _nvcc_arch_as_compile_option()
+                        cmd = (
+                            f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
+                            # Triton only allows generating PTX version as same as the current arch
+                            f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
+                            # Include SASS for the current specific arch
+                            f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                         )
-                    except subprocess.CalledProcessError as e:
-                        print(
-                            f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
-                            file=sys.stderr,
-                        )
-                        raise
+                        try:
+                            subprocess.run(
+                                cmd.split(),
+                                capture_output=True,
+                                text=True,
+                                check=True,
+                            )
+                        except subprocess.CalledProcessError as e:
+                            print(
+                                f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                                file=sys.stderr,
+                            )
+                            raise
 
-                if config.aot_inductor.embed_kernel_binary:
-                    # Embed cubin files into model.so using objcopy
-                    cubins_o.append(
-                        convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
-                    )
+                    if config.aot_inductor.embed_kernel_binary:
+                        # Embed cubin files into model.so using objcopy
+                        cubins_o.append(
+                            convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
+                        )
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(

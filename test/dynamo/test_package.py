@@ -20,6 +20,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
 
@@ -431,6 +432,7 @@ def add(x, y):
 
     @parametrize("device", ("cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
+    @skipIfRocm
     def test_automatic_dynamo_autotune_cache(self, device):
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("Requires CUDA/Triton")
