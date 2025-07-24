@@ -242,7 +242,11 @@ autosummary_filename_map = {
     'torch.mtia.stream': 'torch.mtia.stream_function',
     'torch.mtia.Stream': 'torch.mtia.Stream_class',
     'torch.cpu.stream': 'torch.cpu.stream_function',
-    'torch.cpu.Stream': 'torch.cpu.Stream_class'
+    'torch.cpu.Stream': 'torch.cpu.Stream_class',
+    'torch.cuda.stream': 'torch.cuda.stream_function',
+    'torch.cuda.Stream': 'torch.cuda.Stream_class',
+    'torch.xpu.stream': 'torch.xpu.stream_function',
+    'torch.xpu.Stream': 'torch.xpu.Stream_class',
 }
 
 coverage_ignore_functions = [
