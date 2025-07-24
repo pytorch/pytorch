@@ -1303,9 +1303,7 @@ class ListIteratorVariable(IteratorVariable):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> "VariableTracker":
-        # TODO: does this need a check like the following (from ListVariable)?
-        # if self.python_type() is not type(iter([])):
-        #     return super().call_obj_hasattr(tx, name)
+        assert self.python_type() == iter([])
         return variables.ConstantVariable.create(hasattr(iter([]), name))
 
 
