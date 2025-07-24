@@ -1469,7 +1469,7 @@ def get_kernel(
 
     This function retrieves the kernel that would be executed for a given
     operator and dispatch key combination. The returned SafeKernelFunction
-    can be used to call the kernel directly.
+    can be used to call the kernel in a boxed fashion.
 
     Args:
         op: Operator name (along with the overload) or OpOverload object

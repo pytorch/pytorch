@@ -625,7 +625,6 @@ void initDispatchBindings(PyObject* module) {
                 op.schema(),
                 std::move(args),
                 kwargs,
-                // FIXME: Do we need to pass self here?
                 /*self=*/std::nullopt);
             self.callBoxed(op, keyset, &stack);
             return torch::jit::createPyObjectForStack(std::move(stack));
