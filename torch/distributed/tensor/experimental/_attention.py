@@ -44,6 +44,25 @@ aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
 
+def _need_scaling() -> bool:
+    if hasattr(torch.version, "hip") and torch.version.hip is not None:
+        gcn_arch_name = torch.cuda.get_device_properties("cuda").gcnArchName
+        _is_ck_supported = False
+        for arch in ["gfx942", "gfx950"]:
+            if arch in gcn_arch_name:
+                _is_ck_supported = True
+        # Check the function exists
+        _preferred_rocm_fa_library = torch.backends.cuda.preferred_rocm_fa_library
+        _CK_BACKEND = torch.backends.cuda._ROCmFABackends["ck"]
+        # Note: it is possible that CK is selected but not compiled in the binary.
+        if _is_ck_supported and _preferred_rocm_fa_library() == _CK_BACKEND:
+            # Unsure about CK's behavior, keep logsumexp untouched
+            return False
+        return True
+    else:
+        return False
+
+
 class _DispatchMode(Enum):
     MONKEY_PATCH = auto()
     TORCH_FUNCTION = auto()
@@ -446,6 +465,8 @@ def _templated_ring_attention(
             is_causal=is_causal_behavior.value,
             **kwargs,
         )
+        if _need_scaling():
+            logsumexp *= 0.6931471805599453
         sdpa_merger.step(out, logsumexp, partial)
 
     return *sdpa_merger.results(), *rest
