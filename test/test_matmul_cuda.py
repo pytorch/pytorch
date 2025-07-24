@@ -496,7 +496,8 @@ class TestMatmulCuda(TestCase):
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major):
+    @parametrize("max_autotune", [False, True])
+    def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
         torch._dynamo.reset()
 
         device = "cuda"
@@ -506,12 +507,18 @@ class TestMatmulCuda(TestCase):
         align = 16 // dtype_AB.itemsize
 
         f_ref = torch._grouped_mm
+
+        options = {}
+        if max_autotune:
+            options.update(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                }
+            )
         f = torch.compile(
             f_ref,
-            options={
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-            },
+            options=options,
         )
 
         if op == "2d/2d":
@@ -1417,8 +1424,16 @@ class TestFP8Matmul(TestCase):
                 ]
 
                 self.assertEqual(no_carveout, no_carveout_again)
-                self.assertNotEqual(no_carveout, carveout_66)
-                self.assertNotEqual(carveout_66, carveout_0)
+                capability = torch.cuda.get_device_capability()
+                if capability == (10, 0):
+                    # expected failure
+                    # CUTLASS only supports SM carveout via green contexts on SM100
+                    self.assertEqual(no_carveout, carveout_66)
+                    self.assertEqual(carveout_66, carveout_0)
+                else:
+                    # correct behavior
+                    self.assertNotEqual(no_carveout, carveout_66)
+                    self.assertNotEqual(carveout_66, carveout_0)
 
     def test_pack_uint4(self):
         """
