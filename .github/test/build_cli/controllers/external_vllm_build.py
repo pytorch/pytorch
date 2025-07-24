@@ -48,8 +48,8 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_
     py = get_env("PYTHON_VERSION", "3.12")
     max_jobs = get_env("MAX_JOBS", "32")
     target = get_env("TARGET", "export-wheels")
-    sccache_bucket_name = get_env("SCCACHE_BUCKET_NAME", "")
-    sccache_region_name = get_env("SCCACHE_REGION_NAME", "")
+    sccache_bucket_name = get_env("SCCACHE_BUCKET", "")
+    sccache_region_name = get_env("SCCACHE_REGION", "")
     torch_cuda_arch_list = get_env("TORCH_CUDA_ARCH_LIST", "8.6;8.9")
 
     use_sccache = "0"

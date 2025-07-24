@@ -41,6 +41,7 @@ jobs:
         { include: [
           { config: "vllm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
+      build-additional-packages:"vision audio torchao"
     secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build:
