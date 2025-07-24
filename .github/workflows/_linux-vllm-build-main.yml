@@ -12,6 +12,10 @@ on:
         type: boolean
         default: true
         description: If set, upload generated build artifacts.
+      docker-image:
+        required: true
+        type: string
+        description: Docker image to run in.
       sync-tag:
         required: false
         type: string
@@ -81,14 +85,6 @@ on:
         description: |
           FB app token to write to scribe endpoint
 
-    outputs:
-      docker-image:
-        value: ${{ jobs.build.outputs.docker-image }}
-        description: The docker image containing the built PyTorch.
-      test-matrix:
-        value: ${{ jobs.build.outputs.test-matrix }}
-        description: An optional JSON description of what test configs to run later on.
-
 jobs:
   build:
     environment: ${{ github.ref == 'refs/heads/main' && 'scribe-protected' || startsWith(github.ref, 'refs/heads/release/') && 'scribe-protected' || contains(github.event.pull_request.labels.*.name, 'ci-scribe') && 'scribe-pr' || '' }}
@@ -96,9 +92,6 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner_prefix}}${{ inputs.runner }}
     timeout-minutes: 240
-    outputs:
-      docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -124,9 +117,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-
       - name: Setup Python
-        if: matrix.runner == 'B200'
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
@@ -139,6 +130,46 @@ jobs:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
           role-session-name: gha-linux-build
           aws-region: us-east-1
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && matrix.runner != 'B200'
+
+      - name: configure aws credentials
+        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          role-session-name: gha-linux-test
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        if: ${{ inputs.aws-role-to-assume != '' && matrix.runner == 'B200' }}
+        id: login-ecr
+        continue-on-error: true
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        with:
+          docker-image-name: ${{ inputs.docker-image }}
+
+      - name: Use following to pull public copy of the image
+        id: print-ghcr-mirror
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        shell: bash
+        run: |
+          tag=${ECR_DOCKER_IMAGE##*:}
+          echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Download pytorch build artifacts
         uses: ./.github/actions/download-build-artifacts
@@ -166,11 +197,13 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           MAX_JOBS: 32
+          DOCKER_IMAGE: ${{ inputs.docker-image }}
         run: |
           python3 --version
           python3 -m pip install cement==3.0.14
-          python3 .github/test/build_cli/cli.py external --target vllm --artifact-dir shared run
+          docker images
           ls
+          python3 .github/test/build_cli/cli.py external --target vllm --artifact-dir shared --torch-whl-dir dst --base-image "$DOCKER_IMAGE"
       - name: Archive artifacts into zip
         run: |
           zip -1 -r artifacts.zip shared/

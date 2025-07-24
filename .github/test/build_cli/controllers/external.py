@@ -37,6 +37,16 @@ class ExternalBuildController(Controller):
                     "type": str,
                     "required": False,
                 },
+            ),
+            (
+                ["--base-image"],
+                {
+                    "help": "Path to a local folder where artifacts from external builds will be stored",
+                    "dest": "base_image",
+                    "default":"",
+                    "type": str,
+                    "required": False,
+                },
             )
         ]
 
@@ -44,14 +54,14 @@ class ExternalBuildController(Controller):
     def run(self):
         pargs = self.app.pargs
         target =  pargs.target
+        base_image = pargs.base_image
         torch_whl_dir = pargs.torch_whl_dir
         print(f"[INFO] Target: {target}")
         artifact_dir = self.app.pargs.artifact_dir
         if target ==  "vllm":
-            build_vllm(artifact_dir, torch_whl_dir)
+            build_vllm(artifact_dir, torch_whl_dir, base_image)
         else:
             print(f"[ERROR] Unknown target: {target}")
-
     @ex(help="Show detailed help for a build target")
     def help(self):
         target = self.app.pargs.target

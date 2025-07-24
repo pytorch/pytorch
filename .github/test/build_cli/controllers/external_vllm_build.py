@@ -30,7 +30,7 @@ def get_torch_whl_path(path:str):
         print("no torch whl path detected, vllm will be built using torch nightly")
     return torch_whl_abs_path
 
-def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="") -> None:
+def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_image="") -> None:
     result_path = prepare_artifact_dir(artifact_dir)
     print(f"Target artifact dir path is {result_path}")
 
@@ -66,6 +66,9 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="") -> No
             print(f"constructing TORCH_WHEELS_PATH {_VLLM_TEMP_FOLDER}")
             docker_torch_arg = f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"
 
+        base_image_arg = ""
+        if base_image:
+            base_image_arg = f"--build-arg BASE_IMAGE={base_image}"
         env = os.environ.copy()
 
         # run docker build for target stage `export-wheels` with output
@@ -76,6 +79,7 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="") -> No
         --output type=local,dest={result_path} \
         -f docker/Dockerfile.nightly_torch \
         {docker_torch_arg} \
+        {base_image_arg} \
         --build-arg max_jobs={max_jobs} \
         --build-arg CUDA_VERSION={cuda} \
         --build-arg PYTHON_VERSION={py} \

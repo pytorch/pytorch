@@ -86,7 +86,7 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     echo "[INFO] Done listing" && \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/torch*.whl >/dev/null 2>&1; then \
         echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
-        uv pip install --system /tmp/torch_wheels/torch*.whl; \
+        RUN uv pip install --system "/tmp/torch_wheels/torch*.whl[opt-einsum]"; \
     elif [ -n "$PINNED_TORCH_VERSION" ]; then \
         echo "[INFO] Installing pinned torch nightly version: $PINNED_TORCH_VERSION"; \
         uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
