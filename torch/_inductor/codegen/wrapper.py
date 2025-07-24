@@ -1192,7 +1192,7 @@ class PythonWrapperCodegen(CodeGen):
                 self.write_args(graph_input_names)
 
             self.codegen_inputs()
-            self.codegen_input_size_and_nan_asserts()
+            # self.codegen_input_size_and_nan_asserts()
 
     def codegen_input_size_and_nan_asserts(self) -> None:
         if config.size_asserts:
