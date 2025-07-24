@@ -388,7 +388,7 @@ class GuardManagerWrapper:
                 # are no accessors. Presence of accessors means presence of
                 # symbolic shape guards.
                 if node.is_guarded_value_tensor():
-                    if node.has_no_accessors():
+                    if node.has_no_accessors() and not node.has_object_aliasing_guard():
                         node.mark_tag_safe()
                 else:
                     node.mark_tag_safe()
