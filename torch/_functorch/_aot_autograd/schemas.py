@@ -1042,13 +1042,28 @@ class AOTState:
 
 class CompilerWrapper:
     """
-    A wrapper around the inputs and outputs to the compiler_fn. We separate these into two parts:
+    AOTAutograd needs to do many transformations to the calling convention of the user function
+    it is tracing, e.g., deduplicating inputs, unpacking subclasses, etc.  CompilerWrapper lets
+    us factor these into compositional stages so we can handle each transformation incrementally
+    instead of having to do it all at once.
 
-    1. The prologue, which edits the input to the compiler_fn(flat_fn, flat_args, etc)
-    2. The epilogue, which edits the outputs of the compiler_fn (compiled_fn, real arguments)
+    Since there is a calling convention change, there are two parts to the wrpaper:
 
-    Each wrapper below should be implemented as a CompilerWrapper, so that we can facilitate
-    caching on the compiled output, and re-wrapping the output via epilogues.
+    1. The prologue, which is about compile-time behavior: given this original function, what
+       is the new function with modified calling convention that we should trace with AOTAutograd
+       to get the FX graph we will do joint passes, partitioning and ultimate Inductor compilation on?
+       We get (flat_fn, flat_args), the original function under trace and inputs we were
+       going to feed it, and produce a new function and new inputs to feed it.
+
+    2. The epilogue, which is about run-time behavior: we have now compiled the modified calling
+       convention function, we need to wrap it so that we have a new function that has the
+       original calling convention of the original function, so that our users can call it
+       at the old signature they expected.  We get (compiled_fn, real arguments), the newly
+       compiled function we need to wrap.
+
+    Note about caching: we do NOT directly serialize the runtime wrappers; instead, they
+    are reapplied to compiled_fn after we have finished deserializing the compiled_fn.
+
     Extra metadata that is needed to compute pre or post compile can be passed in via attributes.
     """
 
@@ -1069,6 +1084,61 @@ class CompilerWrapper:
         fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
         """
         return flat_fn, flat_args, fw_metadata
+
+    def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
+        """
+        Given an output of the compiler, wrap it with information received from prologue.
+        Args:
+        compiled_fn: Callable after calling compiler_fn
+        aot_config: AOTConfig after calling prologue
+        runtime_metadata: ViewAndMutationMeta after calling all wrappers's pre_compile steps.
+        Example:
+
+        def wrapped_compiled_fn(args):
+            # do something with args, aot_config, fw_metadata
+            return compiled_fn(args)
+
+        return wrapped_compiled_fn
+        """
+        return compiled_fn
+
+
+class InductorWrapper:
+    """
+    This is sort of like CompilerWrapper, but it happens at a different part of the lifecycle:
+    it talks about transformations we do to the traced and partitioned FX graph before we
+    send it to the Inductor compiler.
+
+    Once again, there are two parts:
+
+    1. The prologue, which "modifies" the FX graph before we send it to
+       Inductor.  I say "modifies" because... we don't really actually do
+       anything nontrivial in either of our two implementations.
+    2. The epilogue, which modifies the compiled function produced by Inductor
+
+    Although hypothetically these wrappers could be used compositionally in a centralized
+    wrappers list, in practice they seem to just be invoked manually when needed.
+
+    NB: The flat_args input is sometimes mutated.  This is probably naughty but whatever.
+    """
+
+    def pre_compile(
+        self,
+        fw_module: torch.fx.GraphModule,
+        flat_args: list[Tensor],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ) -> None:
+        """
+        Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
+        Args:
+        flat_fn: The function to compile
+        flat_args: Metadata from example inputs of the function to compile
+        aot_config: AOTConfig passed in at compile time
+        fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
+        """
+        return
 
     def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
         """
