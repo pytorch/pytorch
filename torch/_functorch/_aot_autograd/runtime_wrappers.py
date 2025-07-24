@@ -1178,8 +1178,12 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 return (*out, *aliased_args_with_metadata_mutations), (
                     *out_descs,
                     *(
-                        [MetadataMutationAOTOutput()]
-                        * len(self.aliased_arg_idx_with_metadata_mutations)
+                        [
+                            MetadataMutationAOTOutput(i)
+                            for i in range(
+                                len(self.aliased_arg_idx_with_metadata_mutations)
+                            )
+                        ]
                     ),
                 )
             else:

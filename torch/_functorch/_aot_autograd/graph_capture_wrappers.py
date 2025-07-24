@@ -404,7 +404,9 @@ def create_joint(
         return final_outs, (
             outs_descs,
             [
-                GradAOTOutput(desc) if i else None
+                # TODO: ideally we do know this is DifferentiableAOTInput
+                # but this is quite an involved refactor
+                GradAOTOutput(desc) if i else None  # type: ignore[arg-type]
                 for i, desc in zip(inputs_needs_grads, primals_descs)
             ],
         )
@@ -1095,8 +1097,12 @@ def handle_effect_tokens_fn(
 
             f_fwd_out_tokens = [from_fun(t) for t in fwd_out_tokens]
             f_bwd_out_tokens = [from_fun(t) for t in bwd_out_tokens]
-            f_fwd_out_tokens_descs = [ForwardTokenAOTOutput() for _ in fwd_out_tokens]
-            f_bwd_out_tokens_descs = [BackwardTokenAOTOutput() for _ in bwd_out_tokens]
+            f_fwd_out_tokens_descs = [
+                ForwardTokenAOTOutput(i) for i in range(len(fwd_out_tokens))
+            ]
+            f_bwd_out_tokens_descs = [
+                BackwardTokenAOTOutput(i) for i in range(len(bwd_out_tokens))
+            ]
 
             meta.num_backward_tokens = len(bwd_out_tokens)
             return (
@@ -1110,14 +1116,17 @@ def handle_effect_tokens_fn(
         out_tokens = [from_fun(t) for t in functional_tensor_mode._tokens.values()]
         # TODO: can probably do a little more resolution here
         out_tokens_descs = [
-            ForwardTokenAOTOutput() for _ in functional_tensor_mode._tokens.values()
+            ForwardTokenAOTOutput(i)
+            for i in range(len(functional_tensor_mode._tokens.values()))
         ]
         return ((*out_tokens, *outs), (*out_tokens_descs, *outs_descs))
 
     # Additionally pass in tokens as inputs
     # See Note [Side-Effectful Tokens in AOTAutograd]
     additional_fwd_token_inputs = [torch.tensor([])] * num_tokens
-    additional_fwd_token_inputs_descs = [ForwardTokenAOTInput()] * num_tokens
+    additional_fwd_token_inputs_descs = [
+        ForwardTokenAOTInput(i) for i in range(num_tokens)
+    ]
 
     if trace_joint:
         args = ([*additional_fwd_token_inputs, *args[0]], *args[1:])
@@ -1225,17 +1234,10 @@ def aot_dispatch_subclass(
         with maybe_enable_thunkify():
             return inner_fn(flat_fn_maybe_joint, primals, use_trace_joint=False)
 
-    def metadata_fn(*primals: FxValue) -> list[FxValue]:
+    def metadata_fn(*primals: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
         @wraps(fw_only)
         def inner_fw_only(*args):
-            out = fw_only(*args)
-            # I suppose this can potentially false positive if there are no
-            # outputs
-            assert pytree.tree_any(
-                lambda x: isinstance(x, AOTOutput), out
-            ) or not pytree.tree_any(lambda x: isinstance(x, torch.Tensor), out), out
-            # The descs here don't matter, I think!
-            return out
+            return call_and_expect_output_descs(fw_only, args)
 
         return inner_fn(inner_fw_only, primals, use_trace_joint=False)
 
