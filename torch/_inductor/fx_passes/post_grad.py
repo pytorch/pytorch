@@ -1231,18 +1231,44 @@ def decompose_auto_functionalized(graph):
 
     graph_pass.apply(graph)
 
-    # We need to remove the get_attr registered for _constant_schema and the
-    # auto_functioanlized's graph module (it's replaced with original ) when auto_functionalize a hop.
-    _to_remove = []
+    # Remove unused get_attr nodes and their corresponding attributes from the graph module.
+    # When auto_functionalizing a hop, we need to clean up get_attr nodes for _constant_schema
+    # and the auto_functionalized graph module that are no longer referenced.
+    unused_get_attr_nodes = []
+    removable_attrs: OrderedSet[torch.fx.node.Target] = OrderedSet()
+    protected_attrs: OrderedSet[torch.fx.node.Target] = OrderedSet()
+
+    # First pass: identify unused get_attr nodes and track attribute usage
     for node in graph.nodes:
-        if node.op == "get_attr" and len(node.users) == 0:
-            _to_remove.append(node)
-            if hasattr(graph.owning_module, node.target) and isinstance(
-                getattr(graph.owning_module, node.target), torch.fx.GraphModule
+        if node.op != "get_attr":
+            continue
+
+        if len(node.users) == 0:
+            # Node is unused, mark for removal
+            unused_get_attr_nodes.append(node)
+
+            # Check if the attribute can be removed from the module
+            if (
+                hasattr(graph.owning_module, node.target)
+                and isinstance(
+                    getattr(graph.owning_module, node.target), torch.fx.GraphModule
+                )
+                and node.target not in protected_attrs
             ):
-                delattr(graph.owning_module, node.target)
-    for node in _to_remove:
+                removable_attrs.add(node.target)
+        else:
+            # Node is used, protect its attribute from removal
+            if node.target in removable_attrs:
+                removable_attrs.remove(node.target)
+            protected_attrs.add(node.target)
+
+    # Second pass: clean up unused nodes and attributes
+    for node in unused_get_attr_nodes:
         graph.erase_node(node)
+
+    for attr_name in removable_attrs:
+        assert isinstance(attr_name, str)
+        delattr(graph.owning_module, attr_name)
 
     graph.lint()
 
