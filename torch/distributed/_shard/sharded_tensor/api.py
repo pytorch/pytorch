@@ -298,7 +298,7 @@ class ShardedTensor(ShardedTensorBase):
         # Initialize RPC if available.
         if self._init_rrefs:
             with _sharded_tensor_lock:
-                global _sharded_tensor_current_id
+                global _sharded_tensor_current_id, _sharded_tensor_map
                 self._sharded_tensor_id = _sharded_tensor_current_id
                 _sharded_tensor_map[self._sharded_tensor_id] = weakref.ref(self)
                 _sharded_tensor_current_id += 1
@@ -313,6 +313,7 @@ class ShardedTensor(ShardedTensorBase):
     def __del__(self):
         # Clean up the global map.
         with _sharded_tensor_lock:
+            global _sharded_tensor_current_id, _sharded_tensor_map
             if (
                 hasattr(self, "_sharded_tensor_id")
                 and self._sharded_tensor_id in _sharded_tensor_map

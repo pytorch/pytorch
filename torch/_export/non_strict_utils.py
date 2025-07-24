@@ -365,6 +365,7 @@ def make_fake_inputs(
         # a toplevel TracingContext with a fake mode, so we do not want to
         # create another fake mode.
         fake_mode = context.fake_mode
+        assert fake_mode is not None
     else:
         if isinstance(nn_module.forward, functools.partial):
             # functools handles nesting by itself, no need to recurse
@@ -452,6 +453,7 @@ def _flatten_dynamic_shapes(
     flat_shapes = []
 
     def _tree_map_helper(path, t, shape):
+        nonlocal flat_shapes
         flat_shapes.append(shape)
 
     _tree_map_with_path(_tree_map_helper, combined_args, dynamic_shapes)
@@ -851,7 +853,7 @@ def _fakify_script_objects(
     mod: torch.nn.Module,
     args: Sequence[Any],
     kwargs: dict[Any, Any],
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
+    fake_mode: Optional[torch._subclasses.fake_tensor.FakeTensorMode],
 ):
     # This context manager is used to fakify script objects into FakeScriptObject.
     # Inputs:

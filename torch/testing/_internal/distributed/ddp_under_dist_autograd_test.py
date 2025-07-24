@@ -314,6 +314,7 @@ shutdown_signal = threading.Condition()
 
 
 def set_shutdown_signal():
+    global shutdown_signal
     with shutdown_signal:
         shutdown_signal.notify()
 
@@ -344,6 +345,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
             # new_group needs to be called on ranks.
             dist.new_group(TRAINER_RANKS)
 
+        global shutdown_signal
         with shutdown_signal:
             shutdown_signal.wait()
         gLogger.info("Exiting remote worker.")
@@ -365,6 +367,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
 
         gLogger.info("Waiting for shutdown signal on trainer #%s...", rank)
 
+        global shutdown_signal
         with shutdown_signal:
             shutdown_signal.wait()
         gLogger.info("Exiting the trainer #%s...", rank)
