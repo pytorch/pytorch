@@ -3,15 +3,15 @@
 # use 12.8 due to FlashAttention issue with cuda 12.6 (https://github.com/vllm-project/vllm/issues/15435#issuecomment-2775924628)
 # -------- CONFIG ARG --------
 ARG CUDA_VERSION=12.8.1
-ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 
-#################### BASE BUILD IMAGE ####################
-# prepare basic build environment
-FROM ${BASE_IMAGE} AS base
-ARG CUDA_VERSION=12.8.0
+From nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 as default
+ARG CUDA_VERSION=12.8.1
 ARG PYTHON_VERSION=3.12
 ARG TARGETPLATFORM
 ENV DEBIAN_FRONTEND=noninteractive
+
+RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
+    echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
 
 # install Python and other dependencies if it does not existed
 RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
@@ -58,6 +58,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Reference: https://github.com/astral-sh/uv/pull/1694
 ENV UV_HTTP_TIMEOUT=500
 
+ARG TORCH_WHEELS_PATH="./requirements"
+
 RUN apt-get update && \
     apt-get install -y libopenblas-base libopenmpi-dev libcudnn9-cuda-12
 
@@ -82,11 +84,23 @@ RUN uv pip install --system \
 
 RUN find /usr/local -name "libnccl.so*"
 ENV LD_LIBRARY_PATH="/usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib:/usr/lib/x86_64-linux-gnu/nvshmem/12:$LD_LIBRARY_PATH"
+
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
 # this won't be needed for future versions of this docker image
 # or future versions of triton.
 RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
+
+#################### BASE BUILD IMAGE ####################
+# prepare basic build environment
+FROM default AS base
+
+# install uv for faster pip installs if not existed
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if ! python3 -m uv --version >/dev/null 2>&1; then \
+        python3 -m pip install uv; \
+    fi
+ENV UV_HTTP_TIMEOUT=500
 
 WORKDIR /workspace
 
@@ -102,8 +116,6 @@ RUN python3 use_existing_torch.py
 # change to a different vllm folder if this does not exist anymore
 ARG TORCH_WHEELS_PATH="./requirements"
 ARG PINNED_TORCH_VERSION
-
-
 
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     --mount=type=cache,target=/root/.cache/uv \
@@ -124,7 +136,6 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     fi && \
     echo "[INFO] Installing torchvision and torchaudio from nightly" && \
     uv pip install --system torchvision torchaudio --no-deps --index-url https://download.pytorch.org/whl/nightly/cu128
-
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system numba==0.61.2
@@ -251,64 +262,31 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
 
 ################### VLLM INSTALLED IMAGE ####################
 # Setup clean environment for vLLM and its dependencies for test and api server using ubuntu22.04 with AOT flashinfer
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS vllm-base
+
+FROM default AS vllm-base
 # prepare for environment starts
-ARG CUDA_VERSION=12.8.0
-ARG PYTHON_VERSION=3.12
 WORKDIR /vllm-workspace
-ENV DEBIAN_FRONTEND=noninteractive
-ARG TARGETPLATFORM
 
 # get the nightly torch version used in the build to make sure the version is the same
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 COPY --from=build /workspace/dist ./tmp/vllm-dist
-
-RUN cat torch_build_versions.txt
-
-RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
-    echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
-
-# Install Python and other dependencies
-RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
-    && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
-    && apt-get update -y \
-    && apt-get install -y ccache software-properties-common git curl wget sudo vim python3-pip \
-    && apt-get install -y ffmpeg libsm6 libxext6 libgl1 \
-    && for i in 1 2 3; do \
-        add-apt-repository -y ppa:deadsnakes/ppa && break || \
-        { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
-    done \
-    && apt-get update -y \
-    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv libibverbs-dev \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
-    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
-    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
-    && curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
-    && python3 --version && python3 -m pip --version
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    python3 -m pip install uv
-
-# This timeout (in seconds) is necessary when installing some dependencies via uv since it's likely to time out
-# Reference: https://github.com/astral-sh/uv/pull/1694
-ENV UV_HTTP_TIMEOUT=500
-
-# Workaround for https://github.com/openai/triton/issues/2507 and
-# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
-# this won't be needed for future versions of this docker image
-# or future versions of triton.
-RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
-
 RUN echo "[DEBUG] Listing current directory before torch install step:" && \
     ls -al && \
     echo "[DEBUG] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
 
+RUN cat torch_build_versions.txt
+
+# install uv for faster pip installs if not existed
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if ! python3 -m uv --version >/dev/null 2>&1; then \
+        python3 -m pip install uv; \
+    fi
+ENV UV_HTTP_TIMEOUT=500
 
 # default mount file as placeholder, this just avoid the mount error
 # change to a different vllm folder if this does not exist anymore
 ARG TORCH_WHEELS_PATH="./requirements"
-
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     --mount=type=cache,target=/root/.cache/uv \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/torch*.whl >/dev/null 2>&1; then \
@@ -333,11 +311,9 @@ RUN --mount=type=bind,from=base,src=/workspace/xformers-dist,target=/vllm-worksp
 ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
-
 # install package for build flashinfer
 # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
 RUN pip install setuptools==75.6.0 packaging==23.2 ninja==1.11.1.3 build==1.2.2.post1
-
 
 # build flashinfer for torch nightly from source around 10 mins
 # release version: v0.2.2.post1
@@ -407,7 +383,7 @@ RUN pip freeze
 #################### UNITTEST IMAGE #############################
 
 #################### EXPORT STAGE ####################
-FROM scratch as export-wheels
+FROM test as export-wheels
 
 # Just copy the wheels we prepared in previous stages
 COPY --from=base /workspace/xformers-dist /wheels/xformers-dist

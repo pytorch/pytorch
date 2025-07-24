@@ -197,7 +197,7 @@ jobs:
           python3 -m pip install cement==3.0.14
           docker images
           ls
-          python3 .github/test/build_cli/cli.py external --target vllm --artifact-dir shared --torch-whl-dir dst --base-image "$DOCKER_IMAGE" run
+          python3 .github/test/build_cli/cli.py external --target vllm --artifact-dir shared --torch-whl-dir "$(pwd)/dst" --base-image "$DOCKER_IMAGE" run
       - name: Archive artifacts into zip
         run: |
           zip -1 -r artifacts.zip shared/

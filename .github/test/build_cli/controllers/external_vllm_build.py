@@ -43,6 +43,9 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_
     result_path = prepare_artifact_dir(artifact_dir)
     print(f"Target artifact dir path is {result_path}")
 
+    print("CWD:", os.getcwd())
+    print("List dir:", os.listdir("."))
+
     tag_name = get_env("TAG", "vllm-wheels-x")
     cuda = get_env("CUDA_VERSION", "12.8.1")
     py = get_env("PYTHON_VERSION", "3.12")
