@@ -253,7 +253,7 @@ void insertTracingNodes(Block* block, ProfilingRecord* pr, TracingData& td) {
       for (size_t j = 0; j < outputs_size; j++) {
         auto& iiv = iivs[j];
         if (iiv.isTensor()) {
-          auto t = iiv.toTensor();
+          const auto& t = iiv.toTensor();
           auto type = t.defined() ? tensorTypeInCurrentExecutionContext(t)
                                   : TensorType::get();
           tracer->outputs().at(j)->setType(type);
