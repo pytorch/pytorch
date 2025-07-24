@@ -526,7 +526,9 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
     Returns:
         A string containing the documentation URL if found, otherwise None.
     """
-    GRAPH_BREAK_SITE_URL = "https://pytorch-labs.github.io/compile-graph-break-site/gb/"
+    GRAPH_BREAK_SITE_URL = (
+        "https://pytorch-labs.github.io/compile-graph-break-site/gb/"  # @lint-ignore
+    )
 
     registry = _load_graph_break_registry()
 
