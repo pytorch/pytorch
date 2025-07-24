@@ -998,8 +998,6 @@ class TestIndexing(TestCase):
     )
     @serialTest(TEST_CUDA)
     def test_index_put_accumulate_large_tensor(self, device):
-        if device.startswith("mps"):
-            raise unittest.SkipTest("Crash with max number of dimentions")
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
         dt = torch.int8
