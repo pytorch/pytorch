@@ -686,7 +686,7 @@ def logging_manager(*, debug: bool = False) -> Generator[logging.Logger, None, N
         logging_record_exception(e)
         print(f"log file: {log_file}")
         sys.exit(1)
-    except BaseException as e:
+    except BaseException as e:  # noqa: B036
         # You could logging.debug here to suppress the backtrace
         # entirely, but there is no reason to hide it from technically
         # savvy users.
