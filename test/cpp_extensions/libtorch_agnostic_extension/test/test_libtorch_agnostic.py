@@ -208,11 +208,11 @@ if not IS_WINDOWS:
             self.assertEqual(id(out), id(t))
             self.assertEqual(out, torch.zeros_like(t))
 
-        def test_my_fill_(self, device):
+        def test_fill_infinity(self, device):
             import libtorch_agnostic
 
             t = torch.rand(3, 4, device=device)
-            out = libtorch_agnostic.ops.my_fill_(t)
+            out = libtorch_agnostic.ops.fill_infinity(t)
 
             self.assertEqual(id(out), id(t))
             expected = torch.full_like(t, math.inf)
