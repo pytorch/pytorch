@@ -18,7 +18,7 @@ from torch.utils._sympy.printers import CppPrinter as _CppPrinter
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from .. import ir
+from .. import config, ir
 from ..dependencies import Dep
 from ..loop_body import LoopBody
 from ..scheduler import BaseSchedulerNode, SchedulerBuffer
@@ -774,3 +774,9 @@ def template_fusion_with_epilogues_supported(
         if n.node is not None
     ]
     return _template_fusion_supported(template_outputs, epilogue_nodes)
+
+
+def _use_cpp_gemm_strategy(strategy: str) -> bool:
+    return strategy.upper() in [
+        x.strip() for x in config.cpp.cpp_gemm_transverse_strategy.upper().split(",")
+    ]
