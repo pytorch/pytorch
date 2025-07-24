@@ -100,7 +100,6 @@ def iter_(fn_or_iterable, sentinel=_SENTINEL_MISSING, /):  # type: ignore[no-unt
                 i = 0
                 while True:
                     try:
-                        # Can this execute user code?
                         yield iterable.__getitem__(i)
                         i += 1
                     except IndexError:
