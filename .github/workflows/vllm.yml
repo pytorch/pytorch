@@ -34,6 +34,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
+      build-additional-packages:"vision audio torchao"
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm86
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
       cuda-arch-list: '8.6'
@@ -41,7 +42,7 @@ jobs:
         { include: [
           { config: "vllm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
-      build-additional-packages:"vision audio torchao"
+
     secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build:
@@ -52,6 +53,7 @@ jobs:
       linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build
     ]
     with:
+      build-additional-packages:"vision audio torchao"
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm86
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       docker-image: ${{ needs.linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build.outputs.docker-image }}

@@ -133,14 +133,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 RUN mkdir -p /export/xformers-dist && cp /workspace/xformers-dist/*.whl /export/xformers-dist/
 
-RUN ls
-
 # build can take a long time, and the torch nightly version fetched from url can be different in next docker stage.
 # track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
 RUN cat torch_build_versions.txt
 
 RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
+RUN ls
 
 # cuda arch list used by torch
 # can be useful for `test`
@@ -152,6 +151,7 @@ ARG vllm_fa_cmake_gpu_arches='80-real;90-real'
 ENV VLLM_FA_CMAKE_GPU_ARCHES=${vllm_fa_cmake_gpu_arches}
 
 #################### BASE BUILD IMAGE ####################
+
 
 #################### WHEEL BUILD IMAGE ####################
 FROM base AS build
@@ -229,9 +229,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 ARG TARGETPLATFORM
 
 # get the nightly torch version used in the build to make sure the version is the same
-COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
+COPY --from=base /workspace/torch_build_versions.txt /torch_build_versions.txt
 COPY --from=build /workspace/dist /tmp/vllm-dist
 
+RUN ls
 
 RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
     echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
@@ -271,7 +272,7 @@ RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 RUN echo "[DEBUG] Listing current directory before torch install step:" && \
     ls -al && \
     echo "[DEBUG] Showing torch_build_versions.txt content:" && \
-    cat torch_build_versions.txt
+    cat /torch_build_versions.txt
 
 
 # default mount file as placeholder, this just avoid the mount error
