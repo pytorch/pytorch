@@ -1772,13 +1772,9 @@ class CppBuilder:
         """
 
         definitions = " ".join(self._build_option.get_definitions())
-        if config.aot_inductor.compile_standalone:
-            if config.test_configs.use_libtorch:
-                add_target = f"add_library({self._target_name} STATIC)"
-            else:
-                add_target = f"add_executable({self._target_name} ${{CMAKE_CURRENT_SOURCE_DIR}}/main.cpp)"
-        else:
-            add_target = f"add_library({self._target_name} SHARED)"
+        target_library_type = (
+            "STATIC" if config.aot_inductor.compile_standalone else "SHARED"
+        )
 
         contents = textwrap.dedent(
             f"""
@@ -1786,8 +1782,8 @@ class CppBuilder:
             project({self._target_name} LANGUAGES CXX)
             set(CMAKE_CXX_STANDARD 17)
 
-            # Set target
-            {add_target}
+            # Set a library target
+            add_library({self._target_name} {target_library_type})
 
             """
         )
@@ -1825,11 +1821,11 @@ class CppBuilder:
         else:
             # When compile_standalone is True, use TorchStandalone instead of Torch
             contents += textwrap.dedent(
-                """
+                f"""
                 find_package(TorchStandalone REQUIRED)
                 # Set up include directories to find headers at the correct paths
-                target_include_directories(cos PRIVATE ${TorchStandalone_INCLUDE_DIRS})
-                target_include_directories(cos PRIVATE ${TorchStandalone_INCLUDE_DIRS}/standalone)
+                target_include_directories({self._target_name} PRIVATE ${{TorchStandalone_INCLUDE_DIRS}})
+                target_include_directories({self._target_name} PRIVATE ${{TorchStandalone_INCLUDE_DIRS}}/standalone)
 
                 """
             )
