@@ -756,7 +756,7 @@ Tensor scaled_dot_product_attention(
       }
       // For the CPU case we do not need to pad the last dim
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
-          query_, key, value, dropout_p, is_causal, attn_mask, scale));
+          query_, key, value, dropout_p, is_causal, attn_mask, scale, enable_gqa));
     }
     case SDPBackend::efficient_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
@@ -933,7 +933,8 @@ _scaled_dot_product_flash_attention_cpu(
     double dropout_p,
     bool is_causal,
     const std::optional<Tensor>& attn_mask,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    bool enable_gqa) {
   const auto dtype = query.scalar_type();
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(2);

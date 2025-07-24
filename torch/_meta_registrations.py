@@ -6006,6 +6006,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
     is_causal: bool = False,
     attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
+    enable_gqa: bool = False,
 ):
     batch_size = query.size(0)
     num_heads = query.size(1)
