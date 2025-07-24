@@ -55,9 +55,7 @@ Note:
 
 Note:
     This operator supports complex data types i.e. ``complex32, complex64, complex128``.
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -106,9 +104,7 @@ Note:
 
 Note:
     This operator supports complex data types i.e. ``complex32, complex64, complex128``.
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -159,9 +155,7 @@ Note:
 
 Note:
     This operator supports complex data types i.e. ``complex32, complex64, complex128``.
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -208,9 +202,7 @@ See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -251,9 +243,7 @@ See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -296,9 +286,7 @@ See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 
 Note:
     {cudnn_reproducibility_note}
-""".format(
-        **reproducibility_notes, **tf32_notes
-    )
+""".format(**reproducibility_notes, **tf32_notes)
     + r"""
 
 Args:
@@ -395,12 +383,12 @@ See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
 Args:
     input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
-    kernel_size: size of the pooling region. Can be a single number or a
+    kernel_size: size of the pooling region. Can be a single number, a single-element tuple or a
       tuple `(kH, kW)`
-    stride: stride of the pooling operation. Can be a single number or a
+    stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padH, padW)`. Default: 0
+      single number, a single-element tuple or a tuple `(padH, padW)`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -2335,9 +2323,7 @@ Shape:
     - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
     - Bias: :math:`(out\_features)` or :math:`()`
     - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
-""".format(
-        **sparse_support_notes
-    ),
+""".format(**sparse_support_notes),
 )
 
 
@@ -2535,13 +2521,13 @@ def embedding(
         )
     if padding_idx is not None:
         if padding_idx > 0:
-            assert padding_idx < weight.size(
-                0
-            ), "Padding_idx must be within num_embeddings"
+            assert padding_idx < weight.size(0), (
+                "Padding_idx must be within num_embeddings"
+            )
         elif padding_idx < 0:
-            assert padding_idx >= -weight.size(
-                0
-            ), "Padding_idx must be within num_embeddings"
+            assert padding_idx >= -weight.size(0), (
+                "Padding_idx must be within num_embeddings"
+            )
             padding_idx = weight.size(0) + padding_idx
     else:
         padding_idx = -1
@@ -4701,7 +4687,7 @@ def interpolate(  # noqa: F811
         )
 
     # "area" mode always requires an explicit size rather than scale factor.
-    # Re-use the recompute_scale_factor code path.
+    # Reuse the recompute_scale_factor code path.
     if mode == "area" and output_size is None:
         recompute_scale_factor = True
 
@@ -4776,9 +4762,7 @@ def interpolate(  # noqa: F811
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
         if not torch.jit.is_scripting():
-            if torch.are_deterministic_algorithms_enabled() and (
-                input.is_cuda or input.is_xpu
-            ):
+            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
@@ -4790,6 +4774,16 @@ def interpolate(  # noqa: F811
         )
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
+        # Two levels are necessary to prevent TorchScript from touching
+        # are_deterministic_algorithms_enabled.
+        if not torch.jit.is_scripting():
+            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+                # Use slow decomp whose backward will be in terms of index_put
+                # importlib is required because the import cannot be top level
+                # (cycle) and cannot be nested (TS doesn't support)
+                return importlib.import_module(
+                    "torch._decomp.decompositions"
+                )._upsample_linear_vec(input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_trilinear3d(
             input, output_size, align_corners, scale_factors
         )
@@ -4921,7 +4915,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
         This is equivalent with
         ``nn.functional.interpolate(..., mode='bilinear', align_corners=True)``.
 
-    Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` fo
+    Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` for
     volumetric (5 dimensional) inputs.
 
     Args:
@@ -5800,15 +5794,15 @@ def _in_projection(
         Eq,
         Ev,
     ), f"expecting value weights shape of {(Eq, Ev)}, but got {w_v.shape}"
-    assert b_q is None or b_q.shape == (
-        Eq,
-    ), f"expecting query bias shape of {(Eq,)}, but got {b_q.shape}"
-    assert b_k is None or b_k.shape == (
-        Eq,
-    ), f"expecting key bias shape of {(Eq,)}, but got {b_k.shape}"
-    assert b_v is None or b_v.shape == (
-        Eq,
-    ), f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
+    assert b_q is None or b_q.shape == (Eq,), (
+        f"expecting query bias shape of {(Eq,)}, but got {b_q.shape}"
+    )
+    assert b_k is None or b_k.shape == (Eq,), (
+        f"expecting key bias shape of {(Eq,)}, but got {b_k.shape}"
+    )
+    assert b_v is None or b_v.shape == (Eq,), (
+        f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
+    )
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
@@ -5914,9 +5908,7 @@ scaled_dot_product_attention = _add_docstr(
     Note:
 
         {cudnn_reproducibility_note}
-    """.format(
-        **reproducibility_notes
-    )
+    """.format(**reproducibility_notes)
     + r"""
     Args:
         query (Tensor): Query tensor; shape :math:`(N, ..., Hq, L, E)`.
@@ -6026,9 +6018,9 @@ def _mha_shape_check(
             )
             if attn_mask.dim() == 3:
                 expected_shape = (num_heads, query.shape[0], key.shape[0])
-                assert (
-                    attn_mask.shape == expected_shape
-                ), f"Expected `attn_mask` shape to be {expected_shape} but got {attn_mask.shape}"
+                assert attn_mask.shape == expected_shape, (
+                    f"Expected `attn_mask` shape to be {expected_shape} but got {attn_mask.shape}"
+                )
     else:
         raise AssertionError(
             f"query should be unbatched 2D or batched 3D tensor but received {query.dim()}-D query tensor"
@@ -6116,11 +6108,6 @@ def multi_head_attention_forward(
     is_causal: bool = False,
 ) -> tuple[Tensor, Optional[Tensor]]:
     r"""Forward method for MultiHeadAttention.
-
-    .. note::
-        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
-        for an in depth discussion of the performant building blocks PyTorch offers for building your own
-        transformer layers.
 
     See :class:`torch.nn.MultiheadAttention` for details.
 
@@ -6294,45 +6281,45 @@ def multi_head_attention_forward(
             # longer causal.
             is_causal = False
 
-    assert (
-        embed_dim == embed_dim_to_check
-    ), f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
+    assert embed_dim == embed_dim_to_check, (
+        f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
+    )
     if isinstance(embed_dim, torch.Tensor):
         # embed_dim can be a tensor when JIT tracing
         head_dim = embed_dim.div(num_heads, rounding_mode="trunc")
     else:
         head_dim = embed_dim // num_heads
-    assert (
-        head_dim * num_heads == embed_dim
-    ), f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
+    assert head_dim * num_heads == embed_dim, (
+        f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
+    )
     if use_separate_proj_weight:
         # allow MHA to have different embedding dimensions when separate projection weights are used
-        assert (
-            key.shape[:2] == value.shape[:2]
-        ), f"key's sequence and batch dims {key.shape[:2]} do not match value's {value.shape[:2]}"
+        assert key.shape[:2] == value.shape[:2], (
+            f"key's sequence and batch dims {key.shape[:2]} do not match value's {value.shape[:2]}"
+        )
     else:
-        assert (
-            key.shape == value.shape
-        ), f"key shape {key.shape} does not match value shape {value.shape}"
+        assert key.shape == value.shape, (
+            f"key shape {key.shape} does not match value shape {value.shape}"
+        )
 
     #
     # compute in-projection
     #
     if not use_separate_proj_weight:
-        assert (
-            in_proj_weight is not None
-        ), "use_separate_proj_weight is False but in_proj_weight is None"
+        assert in_proj_weight is not None, (
+            "use_separate_proj_weight is False but in_proj_weight is None"
+        )
         q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
     else:
-        assert (
-            q_proj_weight is not None
-        ), "use_separate_proj_weight is True but q_proj_weight is None"
-        assert (
-            k_proj_weight is not None
-        ), "use_separate_proj_weight is True but k_proj_weight is None"
-        assert (
-            v_proj_weight is not None
-        ), "use_separate_proj_weight is True but v_proj_weight is None"
+        assert q_proj_weight is not None, (
+            "use_separate_proj_weight is True but q_proj_weight is None"
+        )
+        assert k_proj_weight is not None, (
+            "use_separate_proj_weight is True but k_proj_weight is None"
+        )
+        assert v_proj_weight is not None, (
+            "use_separate_proj_weight is True but v_proj_weight is None"
+        )
         if in_proj_bias is None:
             b_q = b_k = b_v = None
         else:
@@ -6393,23 +6380,23 @@ def multi_head_attention_forward(
         k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
-        assert (
-            static_k.size(0) == bsz * num_heads
-        ), f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
-        assert (
-            static_k.size(2) == head_dim
-        ), f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
+        assert static_k.size(0) == bsz * num_heads, (
+            f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
+        )
+        assert static_k.size(2) == head_dim, (
+            f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
+        )
         k = static_k
     if static_v is None:
         v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
-        assert (
-            static_v.size(0) == bsz * num_heads
-        ), f"expecting static_v.size(0) of {bsz * num_heads}, but got {static_v.size(0)}"
-        assert (
-            static_v.size(2) == head_dim
-        ), f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
+        assert static_v.size(0) == bsz * num_heads, (
+            f"expecting static_v.size(0) of {bsz * num_heads}, but got {static_v.size(0)}"
+        )
+        assert static_v.size(2) == head_dim, (
+            f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
+        )
         v = static_v
 
     # add zero attention along batch dimension (now first)
@@ -6456,9 +6443,9 @@ def multi_head_attention_forward(
         _B, _Nt, E = q.shape
         q_scaled = q * math.sqrt(1.0 / float(E))
 
-        assert not (
-            is_causal and attn_mask is None
-        ), "FIXME: is_causal not implemented for need_weights"
+        assert not (is_causal and attn_mask is None), (
+            "FIXME: is_causal not implemented for need_weights"
+        )
 
         if attn_mask is not None:
             attn_output_weights = torch.baddbmm(

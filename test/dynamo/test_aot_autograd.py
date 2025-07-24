@@ -1213,7 +1213,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch(donated_buffer=True)
     def test_donated_buffer1(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         @torch.compile()
         def relu(x):
@@ -1233,9 +1233,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer2(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        # we will re-use the graph for g across f1 and f2
+        # we will reuse the graph for g across f1 and f2
         @torch.compile()
         def g(activation, param2):
             return torch.matmul(activation, param2)
@@ -1255,9 +1255,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer3(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        # we will re-use the graph for g across f1 and f2
+        # we will reuse the graph for g across f1 and f2
         @torch.compile()
         def g(activation, param2):
             return torch.matmul(activation, param2)
@@ -1278,7 +1278,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer4(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
@@ -1309,7 +1309,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer5(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         @torch.compile()
         def f(x, z):
@@ -1346,7 +1346,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             #    SymNodeVariable() is not a constant
             return
 
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         def fn(x):
             p = torch.nn.Parameter(x + 123)
