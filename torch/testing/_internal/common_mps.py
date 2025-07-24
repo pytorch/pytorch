@@ -390,6 +390,7 @@ if torch.backends.mps.is_available():
             "gcd": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
+            "hash_tensor": None,
             "heaviside": None,
             "igamma": None,
             "igammac": None,
@@ -541,13 +542,6 @@ if torch.backends.mps.is_available():
             # round not working properly for float16 and bfloat16
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
-            # atomic operations not supported
-            "_unsafe_masked_index_put_accumulate": [
-                torch.int8,
-                torch.uint8,
-                torch.int16,
-                torch.int64,
-            ],
         }
 
         if MACOS_VERSION < 14.0:
@@ -641,12 +635,6 @@ if torch.backends.mps.is_available():
                 torch.float32,
                 torch.float16,
                 torch.bfloat16,
-            ],
-            "index_put": [
-                torch.uint8,
-                torch.int8,
-                torch.int16,
-                torch.int64,
             ],
             # zero to negative integer powers are undefined
             "__rpow__": [torch.int8, torch.int16, torch.int32, torch.int64],
