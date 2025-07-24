@@ -1282,7 +1282,6 @@ def compute_unbacked_bindings(
         return None
 
     fs = shape_env.pending_fresh_unbacked_symbols
-
     pending = set(fs)
     if not pending:
         return None
@@ -4810,7 +4809,6 @@ class ShapeEnv:
         )
         self.counter["create_unbacked_symbol"] += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
-            print(f"adding {symbol}")
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
@@ -6265,7 +6263,7 @@ class ShapeEnv:
                 return
             self._resimplify_floor_div_axioms = False
             new_items = {}
-            for k, v in axioms.items():
+            for k, v in list(axioms.items()):
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
                 # to the shapeEnv. This handles such issue but its not ideal. This is the only expression
                 # simplification that depends on the global state of shape env.
