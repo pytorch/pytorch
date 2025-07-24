@@ -154,14 +154,13 @@ def my_zero_(t) -> Tensor:
     return torch.ops.libtorch_agnostic.my_zero_.default(t)
 
 
-def my_fill_(t, value) -> Tensor:
+def my_fill_(t) -> Tensor:
     """
-    Fills the tensor with the specified value in-place
+    Fills the tensor with inf.
 
     Args:
         t: Tensor to fill
-        value: Scalar value to fill the tensor with
 
     Returns: The modified tensor (same as input)
     """
-    return torch.ops.libtorch_agnostic.my_fill_.default(t, value)
+    return torch.ops.libtorch_agnostic.my_fill_.default(t)
