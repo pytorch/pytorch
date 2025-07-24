@@ -739,3 +739,11 @@ class DummyAOTOutput(AOTOutput):
 
     def expr(self) -> str:
         return f"__dummy{self.idx}"
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedForBackwardsAOTOutput(AOTOutput):
+    idx: int
+
+    def expr(self) -> str:
+        return f"__saved_for_backwards_{self.idx}"
