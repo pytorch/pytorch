@@ -570,6 +570,13 @@ def lazy_register_extern_choice(fn):
 
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
+aten_mm_dtype = ExternKernelChoice(
+    torch.mm,
+    "at::_mm_out_dtype_cuda",
+    name="mm_dtype",
+    op_overload=aten.mm.dtype_out,
+)
+
 aten_addmm = ExternKernelChoice(
     torch.addmm, "at::addmm_out", op_overload=aten.addmm.default
 )
@@ -661,11 +668,14 @@ def decomposeK(a, b, k_splits):
 
 
 @register_lowering(aten.mm, type_promotion_kind=None)
-def tuned_mm(mat1, mat2, *, layout=None):
+@register_lowering(aten.mm.dtype, type_promotion_kind=None)
+def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    m, n, k, layout, mat1, mat2 = mm_args(
+        mat1, mat2, layout=layout, out_dtype=out_dtype
+    )
     device_type = ir.get_device_type(mat1)
     name = "mm"
 
@@ -688,9 +698,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
         )
 
     # options to tune from
-    choices = (
-        [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
-    )
+    if out_dtype:
+        assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
+        aten_func = aten_mm_dtype.bind((mat1, mat2), aten_layout, out_dtype=out_dtype)
+    else:
+        aten_func = aten_mm.bind((mat1, mat2), aten_layout)
+
+    choices = [aten_func] if use_aten_gemm_kernels() else []
     static_shape, is_nonzero = _is_static_problem(layout)
 
     mm_configs = V.choices.get_base_mm_configs(device_type)

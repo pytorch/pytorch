@@ -3778,6 +3778,54 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_mm_out_dtype(self):
+        if self.device != "cuda":
+            self.skipTest("out_dtype is only supported on CUDA")
+
+        # Test bf16 -> fp32 (upcast to higher precision)
+        def fn_bf16_to_fp32(a, b, bias):
+            out = torch.mm(a, b, out_dtype=torch.float32)
+            out = out + bias
+            return out
+
+        self.common(
+            fn_bf16_to_fp32,
+            (
+                torch.randn(64, 128, dtype=torch.bfloat16),
+                torch.randn(128, 64, dtype=torch.bfloat16),
+                torch.randn(64, dtype=torch.float32),
+            ),
+            check_lowp=False,
+        )
+
+        # Test with different shapes
+        self.common(
+            fn_bf16_to_fp32,
+            (
+                torch.randn(1, 256, dtype=torch.bfloat16),
+                torch.randn(256, 128, dtype=torch.bfloat16),
+                torch.randn(128, dtype=torch.float32),
+            ),
+            check_lowp=False,
+        )
+
+        # Test float16 -> float32
+        def fn_fp16_to_fp32(a, b, bias):
+            out = torch.mm(a, b, out_dtype=torch.float32)
+            out = out + bias
+            return out
+
+        if torch.cuda.get_device_capability()[0] >= 7:
+            self.common(
+                fn_fp16_to_fp32,
+                (
+                    torch.randn(32, 64, dtype=torch.float16),
+                    torch.randn(64, 32, dtype=torch.float16),
+                    torch.randn(32, dtype=torch.float32),
+                ),
+                check_lowp=False,
+            )
+
     @skipIfPy312  # segfaults
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_mixed_mm(self):

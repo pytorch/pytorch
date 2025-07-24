@@ -2238,7 +2238,7 @@ def meta__fused_moving_avg_obs_fq_helper(
     return (torch.empty_like(self), mask)
 
 
-@register_meta(aten.mm)
+@register_meta([aten.mm.default, aten.mm.out])
 @out_wrapper(exact_dtype=True)
 def meta_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
@@ -2250,6 +2250,19 @@ def meta_mm(a, b):
         lambda: f"a and b must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
     )
     return a.new_empty(N, P)
+
+
+@register_meta(aten.mm.dtype)
+def meta_mm_dtype(a, b, out_dtype):
+    torch._check(a.dim() == 2, lambda: "a must be 2D")
+    torch._check(b.dim() == 2, lambda: "b must be 2D")
+    N, M1 = a.shape
+    M2, P = b.shape
+    torch._check(
+        M1 == M2,
+        lambda: f"a and b must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
+    )
+    return torch.empty(N, P, dtype=out_dtype, device=a.device)
 
 
 def _compute_reduction_shape(self, dims, keepdim):
