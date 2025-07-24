@@ -2474,6 +2474,7 @@ Args:
     value (float): the value to fill with
 
 Example::
+
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float)
     >>> index = torch.tensor([0, 2])
     >>> x.index_fill_(1, index, -1)
@@ -2525,7 +2526,7 @@ using the reduction given by the ``reduce`` argument. For example, if ``dim == 0
 row of ``source`` is multiplied by the ``j``\ th row of :attr:`self`. If
 :obj:`include_self="True"`, the values in the :attr:`self` tensor are included
 in the reduction, otherwise, rows in the :attr:`self` tensor that are accumulated
-to are treated as if they were filled with the reduction identites.
+to are treated as if they were filled with the reduction identities.
 
 The :attr:`dim`\ th dimension of ``source`` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
@@ -4393,11 +4394,12 @@ For a 3-D tensor, :attr:`self` is updated as::
 
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
-:attr:`self`, :attr:`index` and :attr:`src` (if it is a Tensor) should all have
-the same number of dimensions. It is also required that
+It is also required that
 ``index.size(d) <= src.size(d)`` for all dimensions ``d``, and that
 ``index.size(d) <= self.size(d)`` for all dimensions ``d != dim``.
-Note that ``index`` and ``src`` do not broadcast.
+Note that ``input`` and ``index`` do not broadcast against each other for NPUs,
+so when running on NPUs, :attr:`input` and :attr:`index` must have the same number of dimensions.
+Standard broadcasting occurs in all other cases.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive.
@@ -4524,6 +4526,8 @@ For a 3-D tensor, :attr:`self` is updated as::
 dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``. Note that ``index`` and ``src`` do not broadcast.
+When :attr:`index` is empty, we always return the original tensor
+without further error checking.
 
 Note:
     {forward_reproducibility_note}
@@ -5216,6 +5220,13 @@ Here are the ways to call ``to``:
 
     Args:
         {memory_format}
+
+.. note::
+
+    According to `C++ type conversion rules <https://en.cppreference.com/w/cpp/language/implicit_conversion.html>`_,
+    converting floating point value to integer type will truncate the fractional part.
+    If the truncated value cannot fit into the target type (e.g., casting ``torch.inf`` to ``torch.long``),
+    the behavior is undefined and the result may vary across platforms.
 
 .. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
    :noindex:
@@ -6871,6 +6882,7 @@ The returned tensor and :attr:`self` share the same underlying storage.
 Returns :attr:`self` if :attr:`self` is a real-valued tensor tensor.
 
 Example::
+
     >>> x=torch.randn(4, dtype=torch.cfloat)
     >>> x
     tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
@@ -6890,6 +6902,7 @@ The returned tensor and :attr:`self` share the same underlying storage.
     :func:`imag` is only supported for tensors with complex dtypes.
 
 Example::
+
     >>> x=torch.randn(4, dtype=torch.cfloat)
     >>> x
     tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
@@ -6923,6 +6936,7 @@ matrix multiplication, it is necessary to use ``int32`` indexing in order
 to avoid downcasting and potentially losing information.
 
 Example::
+
     >>> csr = torch.eye(5,5).to_sparse_csr()
     >>> csr.crow_indices()
     tensor([0, 1, 2, 3, 4, 5], dtype=torch.int32)
@@ -6943,6 +6957,7 @@ matrix multiplication, it is necessary to use ``int32`` indexing in order
 to avoid downcasting and potentially losing information.
 
 Example::
+
     >>> csr = torch.eye(5,5).to_sparse_csr()
     >>> csr.col_indices()
     tensor([0, 1, 2, 3, 4], dtype=torch.int32)

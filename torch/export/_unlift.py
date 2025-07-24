@@ -16,6 +16,7 @@ from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.traceback import NodeSource, NodeSourceAction
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
 from ._tree_utils import reorder_kwargs
@@ -115,6 +116,13 @@ def _unlift_inputs_as_getattr(
                 metadata = input_node.meta
                 gm.graph.erase_node(input_node)
                 getattr_node.meta = metadata
+                getattr_node.meta["from_node"] = [
+                    NodeSource(
+                        input_node,
+                        "ExportedProgram.module().unlift()",
+                        [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
+                    )
+                ]
                 unlifted_name_to_node[lifted_node] = getattr_node
 
     return unlifted_name_to_node, input_name_to_node
@@ -130,12 +138,7 @@ def _insert_copy_for_mutations(
     Find the all the buffers and inputs that were mutated and insert copy_
     operators to reflect mutations.
     """
-    output_node = None
-    for node in gm.graph.nodes:
-        if node.op == "output":
-            output_node = node
-            break
-    assert output_node is not None
+    output_node = gm.graph.output_node()
     outputs = pytree.tree_flatten(output_node.args)[0]
     assert len(outputs) == len(mutated_outputs)
 
@@ -161,17 +164,24 @@ def _insert_copy_for_mutations(
             )
             return_nodes_to_copy[return_node] = copy_node
 
-    output_args = [
+    output_args = tuple(
         return_nodes_to_copy[node] if node in return_nodes_to_copy else node
         for node in user_output_nodes
-    ]
+    )
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
-        new_output = gm.graph.output(tuple(output_args))
+        new_output = gm.graph.output(output_args)
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
         new_output.name = output_node.name
         new_output.meta.update(output_node.meta)
+        new_output.meta["from_node"] = [
+            NodeSource(
+                output_node,
+                "ExportedProgram.module().unlift()",
+                [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
+            )
+        ]
 
 
 def _get_codegen(
@@ -184,19 +194,18 @@ def _get_codegen(
     """
     if forward_arg_names:
         names = forward_arg_names
+    elif (
+        in_spec.type == tuple
+        and in_spec.num_children == 2
+        and in_spec.children_specs[0].type == tuple
+        and in_spec.children_specs[1].type == dict
+    ):
+        # if in_spec contains the args (tuple) and kwargs (dict)
+        names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
+        # add kwarg names
+        names.extend(in_spec.children_specs[1].context)
     else:
-        if (
-            in_spec.type == tuple
-            and in_spec.num_children == 2
-            and in_spec.children_specs[0].type == tuple
-            and in_spec.children_specs[1].type == dict
-        ):
-            # if in_spec contains the args (tuple) and kwargs (dict)
-            names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
-            # add kwarg names
-            names.extend(in_spec.children_specs[1].context)
-        else:
-            names = [f"arg_{i}" for i in range(in_spec.num_children)]
+        names = [f"arg_{i}" for i in range(in_spec.num_children)]
 
     return _PyTreeCodeGen(
         _PyTreeInfo(
@@ -213,8 +222,6 @@ def _unlift(
     mutated_outputs: Sequence[Optional[str]],
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
-    state_dict: dict[str, Any],
-    constants: dict[str, Any],
     forward_arg_names: Optional[list[str]] = None,
 ):
     """
@@ -354,7 +361,7 @@ def _create_stateful_graph_module(
     for constant_fqn in ep.graph_signature.lifted_tensor_constants:
         # Sometimes, the constant can require gradient, this is probably a bug in user code,
         # e.g. `self.const = torch.randn(2, 2, requires_grad=True)`.
-        # We call detach on the constant_val since they're tensor contants and we don't need to
+        # We call detach on the constant_val since they're tensor constants and we don't need to
         # compute their gradients anyway.
         # Users should properly register it as parameter if they want it to require gradient.
         buffer = stateful_gm.get_buffer(constant_fqn)
@@ -412,7 +419,7 @@ def _create_stateful_graph_module(
     return stateful_gm
 
 
-def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Module:
+def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.GraphModule:
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":
         ep = _remove_effect_tokens(ep)
@@ -446,14 +453,34 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         for out_spec in ep.graph_signature.output_specs
     ]
 
+    source_node_dict = {
+        node.name: node for node in ep.graph.nodes if node.op != "placeholder"
+    }
+    # placeholder node name might change after deepcopy
+    placeholder_source_node_dict = {
+        node.target: node for node in ep.graph.nodes if node.op == "placeholder"
+    }
+    for node in new_gm.graph.nodes:
+        source_node = None
+        if node.op == "placeholder":
+            source_node = placeholder_source_node_dict.get(node.target)
+        else:
+            source_node = source_node_dict.get(node.name)
+        node.meta["from_node"] = [
+            NodeSource(
+                source_node,
+                "ExportedProgram.module()",
+                NodeSourceAction.CREATE,
+            )
+        ]
+
+    assert ep.call_spec.in_spec is not None
     new_gm = _unlift(
         new_gm,
         lifted_inputs,
         mutated_outputs,
         ep.call_spec.in_spec,
         ep.call_spec.out_spec,
-        ep.state_dict,
-        ep.constants,
         forward_arg_names=forward_arg_names,
     )
     unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints, ep)

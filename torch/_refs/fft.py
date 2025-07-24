@@ -313,7 +313,8 @@ def _canonicalize_fft_shape_and_dim_args(
 
         # Translate any -1 values in shape to the default length
         ret_shape = tuple(
-            s if s != -1 else input_sizes[d] for (s, d) in zip(shape, ret_dims)  # type: ignore[possibly-undefined]
+            s if s != -1 else input_sizes[d]
+            for (s, d) in zip(shape, ret_dims)  # type: ignore[possibly-undefined]
         )
     elif dim is None:
         # No shape, no dim
