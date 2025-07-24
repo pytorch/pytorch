@@ -1,10 +1,16 @@
 # Owner(s): ["module: dynamo"]
 
+import pickle
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._functorch
-from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
+from torch._dynamo.precompile_context import (
+    EditablePrecompileCacheArtifact,
+    PrecompileCacheArtifact,
+    PrecompileContext,
+)
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
     BundledAOTAutogradCacheArtifact,
@@ -42,8 +48,8 @@ class PrecompileContextTests(InductorTestCase):
         result = compiled_fn(x)
         result.sum().backward()
         self.assertEqual(len(PrecompileContext._new_cache_artifacts_by_key), 2)
-
         self.assertEqual(len(PrecompileContext._new_cache_artifacts), 0)
+
         result = PrecompileContext.serialize()
         assert result is not None
         serialized, cache_info = result
@@ -87,6 +93,58 @@ class PrecompileContextTests(InductorTestCase):
         assert result is not None
         _, cache_info = result
         self.assertEqual(len(cache_info.precompile_aot_autograd_artifacts), 1)
+
+    @requires_triton()
+    def test_editable(self):
+        """
+        Test that after torch.compile, PrecompileContext._new_cache_artifacts length is 1
+        """
+
+        def simple_function(x):
+            return x.sin() + x.cos()
+
+        compiled_fn = torch.compile(simple_function)
+
+        # Run the compiled function
+        x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
+        result = compiled_fn(x)
+        result.sum().backward()
+        self.assertEqual(len(PrecompileContext._new_cache_artifacts_by_key), 2)
+        # Find the key for the artifact of type "precompile_aot_autograd"
+        key = next(
+            k
+            for k, v in PrecompileContext._new_cache_artifacts_by_key.items()
+            if isinstance(v, EditablePrecompileCacheArtifact)
+        )
+
+        def edit_fn(x):
+            x._my_private_field = 42
+            return x
+
+        PrecompileContext.edit_artifact(key, edit_fn)
+
+        result = PrecompileContext.serialize_artifact_by_key(key)
+        assert isinstance(result, BundledAOTAutogradCacheArtifact)
+        self.assertEqual(result.key, key)
+
+        self.assertEqual(len(PrecompileContext._new_cache_artifacts), 0)
+        result = PrecompileContext.serialize()
+        assert result is not None
+        artifacts, cache_info = result
+        self.assertEqual(len(cache_info.precompile_aot_autograd_artifacts), 1)
+
+        deserialized = PrecompileContext.deserialize(artifacts)
+        assert deserialized is not None
+        aot_autograd_artifacts = deserialized["precompile_aot_autograd"]
+        assert len(aot_autograd_artifacts) == 1
+        entry = aot_autograd_artifacts[0]
+        assert isinstance(entry, BundledAOTAutogradCacheArtifact)
+        raw_entry = pickle.loads(entry.content)
+        self.assertEqual(raw_entry._my_private_field, 42)
+        # Now that we've serialized, there should be no new cache artifacts
+        self.assertEqual(
+            len(PrecompileContext._new_cache_artifacts["precompile_aot_autograd"]), 0
+        )
 
 
 if __name__ == "__main__":
