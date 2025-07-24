@@ -209,21 +209,19 @@ class TestDecomp(NNTestCase):
 
     @parametrize("dtype", [torch.float, torch.bfloat16])
     def test_dynamic_shape_mm(self, device, dtype):
-        # fudge = 5
-        # rtol = default_rtol[dtype] * fudge
-        # atol = default_atol[dtype] * fudge
+        # Test that the mm decomp does not evaluate expressions for dynamic shapes
+
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(shape_env=shape_env)
 
-        # Only test decomp for cpu, else result is NotImplemented
+        # Only test decomp for cpu to match fake tensors from dynamo
         if device != "cpu":
             return
 
         for t_size in ts_list:
             ((a1_0, a1_1, a2_0, a2_1)) = t_size
 
-            # Create the real tensor
-
+            # Create the fake tensors
             t1 = create_fake_tensor_with_dynamic_size(
                 rand_math_tensor((a1_0, a1_1), dtype=dtype, device=device),
                 fake_mode,
@@ -243,28 +241,29 @@ class TestDecomp(NNTestCase):
 
             r = mm(t1, t2)
 
+            # Make sure all symints are not evaluated
+            new_t1_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int
+                for d in t1.size()
+            ]
+            new_t2_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int
+                for d in t2.size()
+            ]
+            self.assertTrue(
+                all(
+                    og_t1_expr_types[i] == new_t1_expr_types[i]
+                    for i in range(len(og_t1_expr_types))
+                )
+            )
+            self.assertTrue(
+                all(
+                    og_t2_expr_types[i] == new_t2_expr_types[i]
+                    for i in range(len(og_t2_expr_types))
+                )
+            )
+
             if r is not NotImplemented:
-                # Make sure all symints are not evaluated
-                new_t1_expr_types = [
-                    type(d.node.expr) if type(d) is torch.SymInt else int
-                    for d in t1.size()
-                ]
-                new_t2_expr_types = [
-                    type(d.node.expr) if type(d) is torch.SymInt else int
-                    for d in t2.size()
-                ]
-                self.assertTrue(
-                    all(
-                        og_t1_expr_types[i] == new_t1_expr_types[i]
-                        for i in range(len(og_t1_expr_types))
-                    )
-                )
-                self.assertTrue(
-                    all(
-                        og_t2_expr_types[i] == new_t2_expr_types[i]
-                        for i in range(len(og_t2_expr_types))
-                    )
-                )
                 # Check that the output is well formed
                 self.assertEqual(t1.size(0), r.size(0))
                 self.assertEqual(t2.size(1), r.size(1))
