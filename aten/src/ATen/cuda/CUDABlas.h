@@ -114,6 +114,7 @@ bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<Dtype> alpha_val,
+    at::opmath_type<Dtype> beta_val,
     const Dtype* mat1_ptr,
     int64_t mat1_ld,
     const Dtype* mat2_ptr,
@@ -121,7 +122,8 @@ bool gemm_and_bias(
     const Dtype* bias,
     C_Dtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
+    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None,
+    bool bias2d = false);
 
 void int8_gemm(
     bool transpose_mat1,
