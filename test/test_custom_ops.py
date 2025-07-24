@@ -1905,7 +1905,7 @@ Dynamic shape operator
         op = self.get_op(qualname)
 
         with self.assertRaisesRegex(RuntimeError, r"already has .*Meta implementation"):
-            torch.library.register_fake(qualname, func=foo_impl, lib=self.lib())
+            torch.library.register_fake(qualname, foo_impl, lib=self.lib())
 
     def test_abstract_impl_on_existing_op_with_CompositeImplicitAutograd(self):
         lib = self.lib()
@@ -1919,7 +1919,7 @@ Dynamic shape operator
         op = self.get_op(qualname)
 
         with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
-            torch.library.register_fake(qualname, func=foo_impl, lib=self.lib())
+            torch.library.register_fake(qualname, foo_impl, lib=self.lib())
 
     def test_abstract_impl_on_existing_op_with_CompositeExplicitAutograd(self):
         lib = self.lib()
@@ -1932,7 +1932,7 @@ Dynamic shape operator
         lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
         op = self.get_op(qualname)
 
-        torch.library.register_fake(qualname, func=lambda x: x.sum(), lib=self.lib())
+        torch.library.register_fake(qualname, lambda x: x.sum(), lib=self.lib())
         with torch._subclasses.FakeTensorMode():
             x = torch.randn(10)
             result = op(x)
@@ -2388,11 +2388,13 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         loss.backward()
         self.assertEqual(x.grad, temp)
 
-        # Using a non-existent DSO is a quick way to trigger an OSError,
-        # which can be used to not break BC.
-        def test_load_library(self):
-            with self.assertRaisesRegex(OSError, "Could not load this library"):
-                torch.ops.load_library("libnoexist.so")
+    # Using a non-existent DSO is a quick way to trigger an OSError,
+    # which can be used to not break BC.
+    def test_load_library(self):
+        with self.assertRaisesRegex(
+            OSError, "Could not load this library: .*libnoexist.so"
+        ):
+            torch.ops.load_library("libnoexist.so")
 
 
 def op_with_incorrect_schema(testcase, name):
