@@ -632,7 +632,7 @@ def _get_optimization_cflags(
                         with open("/proc/cpuinfo") as f:
                             cpuinfo = f.read()
                     except FileNotFoundError:
-                        # fallback to prtconf (useful for some AIX/Linux distros)
+                        # fallback to prtconf
                         try:
                             cpuinfo = subprocess.check_output(
                                 [
