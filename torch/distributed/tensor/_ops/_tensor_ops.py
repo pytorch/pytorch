@@ -963,6 +963,39 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
     return op_strategy
 
 
+@register_op_strategy(
+    aten.index.Tensor, schema_info=RuntimeSchemaInfo(needs_pytree=True)
+)
+def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    NOTE: the sharding strategy for index.Tensor is not fully exploited yet.
+    We only acceptable the sharding where the ``self`` tensor and ``indices`` tensor
+    list are both replicated.
+    """
+    # NOTE: somehow `op_schema.args_strategy` is not a good fit because it flattens
+    # and filters out the `None` values. So we use `op_schema.args_schema` instead.
+    self_strategy, indices_tuple_strategy = op_schema.args_schema
+    assert isinstance(self_strategy, OpStrategy)
+    assert isinstance(indices_tuple_strategy, TupleStrategy)
+    # `indices_tuple_strategy` only includes non-tailing `None`s?
+    assert len(indices_tuple_strategy.children) <= self_strategy.ndim
+
+    indices_acceptable_shardings: list[Optional[Placement]] = [
+        Replicate() if index_strategy is not None else None
+        for index_strategy in indices_tuple_strategy.children
+    ]
+    single_mesh_acceptable_input_shardings: list[Optional[Placement]] = [
+        Replicate(),  # output
+        Replicate(),  # self
+    ] + indices_acceptable_shardings
+
+    return expand_to_full_mesh_op_strategy(
+        mesh=self_strategy.mesh,
+        op_schema=op_schema,
+        single_mesh_dim_strategies=[single_mesh_acceptable_input_shardings],
+    )
+
+
 @register_prop_rule(aten.index.Tensor, schema_info=RuntimeSchemaInfo(needs_pytree=True))
 def prop_index(op_schema: OpSchema) -> OutputSharding:
     """
