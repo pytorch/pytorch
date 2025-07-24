@@ -320,13 +320,11 @@ class TORCH_API OperatorEntry final {
   // dispatch key.
   void updateDispatchTableEntry_(
       const c10::Dispatcher& dispatcher,
-      DispatchKey dispatch_key,
-      bool invalidateTokens = false);
+      DispatchKey dispatch_key);
   // Like above, but also handles alias dispatch keys.
   void updateDispatchTable_(
       const c10::Dispatcher& dispatcher,
-      DispatchKey dispatch_key,
-      bool invalidateTokens = false);
+      DispatchKey dispatch_key);
   // Like above, but for ALL entries in the dispatch table.
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
   // Retrieves a pointer to AnnotatedKernel at

@@ -545,62 +545,6 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 class TestCustomOp(CustomOpTestCaseBase):
     test_ns = "_test_custom_op"
 
-    def test_deploy_interaction(self):
-        # run in a different process to avoid parallel issues when we monkeypatch torch._running_with_deploy
-        script = """
-import torch
-torch._running_with_deploy = lambda: True
-
-# creating the library is a no-op, so you can DEF multiple times
-m1 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
-m2 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
-
-m = torch.library.Library("aten", "FRAGMENT")  # noqa: TOR901
-
-# define is a no-op
-m.define("foobarbaz9996(Tensor x) -> Tensor")
-assert not hasattr(torch.ops.aten, "foobarbaz9996"), "m.define should have been a noop"
-
-def sin_override(x):
-    raise AssertionError("m.impl should have been a noop")
-
-# impl is a no-op
-m.impl("sin", sin_override, "CompositeImplicitAutograd")
-x = torch.randn(3)
-y = torch.sin(x)
-
-# should be a no-op
-@torch.library.custom_op("mylib::foobar", mutates_args={})
-def foobar(x: torch.Tensor) -> torch.Tensor:
-    return x.sin()
-
-# should be a no-op
-@foobar.register_fake
-def _(x):
-    return torch.empty_like(x)
-
-# should be a no-op
-m2.define("foobarbaz9996(Tensor x) -> Tensor")
-
-# should be a no-op
-@torch.library.register_fake("mylib4392::foobarbaz9996")
-def _(x):
-    return torch.empty_like(x)
-        """
-        script = script.strip()
-        env = os.environ.copy()
-        try:
-            subprocess.check_output(
-                [sys.executable, "-c", script],
-                stderr=subprocess.STDOUT,
-                # On Windows, opening the subprocess with the default CWD makes `import torch`
-                # fail, so just set CWD to this script's directory
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-                env=env,
-            )
-        except subprocess.CalledProcessError as e:
-            self.fail(msg=("Subprocess exception:\n" + e.output.decode("utf-8")))
-
     @requires_compile
     def test_functionalize_error(self):
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib:
@@ -4292,27 +4236,42 @@ Please use `add.register_fake` to add an fake impl.""",
 
         original_kernel = torch.library.get_kernel("aten::arange.start", "CPU")
         expected_result1, expected_result2 = torch.ones(5), torch.arange(0, 6)
-        expected_result3, expected_result4 = torch.ones(5), torch.empty(5).fill_(2)
+        expected_result3, expected_result4, expected_result5 = (
+            torch.ones(5),
+            torch.arange(0, 6),
+            torch.ones(5).fill_(2),
+        )
 
-        with torch.library._scoped_library("aten", "IMPL") as lib1:
-            lib1.impl(
-                "arange.start", partial(conditional_arange_cpu1, original_kernel), "CPU"
-            )
+        with torch.library._scoped_library("aten", "IMPL") as lib2:
+            with torch.library._scoped_library("aten", "IMPL") as lib1:
+                lib1.impl(
+                    "arange.start",
+                    partial(conditional_arange_cpu1, original_kernel),
+                    "CPU",
+                )
 
-            self.assertEqual(torch.arange(0, 5), expected_result1)
-            self.assertEqual(torch.arange(0, 6), expected_result2)
+                self.assertEqual(torch.arange(0, 5), expected_result1)
+                self.assertEqual(torch.arange(0, 6), expected_result2)
+                new_original_kernel = torch.library.get_kernel(
+                    "aten::arange.start", "CPU"
+                )
+                lib2.impl(
+                    "arange.start",
+                    partial(conditional_arange_cpu2, new_original_kernel),
+                    "CPU",
+                    allow_override=True,
+                )
 
-            # Test doesn't work because you can't register 2 kernels to the same dispatch key/op twice from python
-            # with torch.library._scoped_library("aten", "IMPL") as lib2:
-            #     new_original_kernel = torch.library.get_kernel("aten::arange.start", "CPU")
-            #     lib2.impl("arange.start", partial(conditional_arange_cpu2, new_original_kernel), "CPU")
+                self.assertEqual(torch.arange(0, 5), expected_result3)
+                self.assertEqual(torch.arange(0, 6), expected_result4)
+                self.assertEqual(torch.arange(1, 6), expected_result5)
 
-            #     self.assertEqual(torch.arange(0, 5), expected_result3)
-            #     self.assertEqual(torch.arange(0, 6), expected_result4)
+            # The kernel should now be invalidated after destroying lib1
+            with self.assertRaisesRegex(RuntimeError, "has been invalidated"):
+                torch.arange(0, 5)
 
-            # # The kernel should now be invalidated after exiting the scoped_library context
-            # with self.assertRaisesRegex(RuntimeError, "has been invalidated"):
-            #     torch.arange(0, 5)
+            # Should still work after destroying lib1
+            self.assertEqual(torch.arange(1, 6), expected_result5)
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
