@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         operator as operator,
         os as os,
         pytree as pytree,
+        struct as struct,
         sys as sys,
     )
 
