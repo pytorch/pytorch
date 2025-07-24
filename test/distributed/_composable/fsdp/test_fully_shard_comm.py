@@ -1210,7 +1210,6 @@ class TestFullyShardPrefetch(FSDPTest):
         self, orig_unshard: Callable, events: list[EventType]
     ) -> Callable:
         def unshard_with_record(self, *args, **kwargs):
-            nonlocal events
             if (
                 self._all_gather_result is None
                 and self._sharded_state != ShardedState.UNSHARDED
@@ -1224,7 +1223,6 @@ class TestFullyShardPrefetch(FSDPTest):
         self, orig_reshard: Callable, events: list[EventType]
     ) -> Callable:
         def reshard_with_record(self, *args, **kwargs):
-            nonlocal events
             if (
                 self._training_state == TrainingState.FORWARD
                 and not self._reshard_after_forward
@@ -1239,7 +1237,6 @@ class TestFullyShardPrefetch(FSDPTest):
         self, orig_post_backward: Callable, events: list[EventType]
     ) -> Callable:
         def post_backward_with_record(self, *args, **kwargs):
-            nonlocal events
             ret = orig_post_backward(self, *args, **kwargs)
             # Use training state after running post-backward to check that the
             # state is transitioned to `POST_BACKWARD` as expected

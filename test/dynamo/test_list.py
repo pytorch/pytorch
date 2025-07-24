@@ -350,7 +350,7 @@ class ListTests(TupleTests):
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            global lst
+            global lst  # noqa: F824
             del lst[1]
             return x.sin()
 

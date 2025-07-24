@@ -412,14 +412,12 @@ class skip_data:
         self.materialize_fake_tensors = materialize_fake_tensors
 
     def __enter__(self):
-        global _serialization_tls
         self._old_skip_data = _serialization_tls.skip_data
         self._old_materialize_fake_tensors = _serialization_tls.materialize_fake_tensors
         _serialization_tls.skip_data = True
         _serialization_tls.materialize_fake_tensors = self.materialize_fake_tensors
 
     def __exit__(self, type, value, tb):
-        global _serialization_tls
         _serialization_tls.skip_data = self._old_skip_data
         _serialization_tls.materialize_fake_tensors = self._old_materialize_fake_tensors
 
@@ -973,7 +971,6 @@ def save(
             )
             return
     else:
-        global _serialization_tls
         if _serialization_tls.skip_data:
             raise RuntimeError(
                 "Cannot use skip_data=True with _use_new_zipfile_serialization=False"
@@ -1236,7 +1233,6 @@ def _save(
         name = f"data/{key}"
         storage = serialized_storages[key]
         num_bytes = storage.nbytes()
-        global _serialization_tls
         if _serialization_tls.skip_data:
             zip_file.write_record_metadata(name, num_bytes)
         else:
@@ -1967,7 +1963,7 @@ def _load(
         current_offset to the start of the next zipfile header by incrementing
         it by numel and the data descriptor size.
         """
-        nonlocal current_offset, offsets
+        nonlocal current_offset
         if name in offsets:
             storage_offset = offsets[name]
             return storage_offset
@@ -2117,7 +2113,6 @@ def _load(
     unpickler.persistent_load = persistent_load
     # Needed for tensors where storage device and rebuild tensor device are
     # not connected (wrapper subclasses and tensors rebuilt using numpy)
-    global _serialization_tls
     _serialization_tls.map_location = map_location
     result = unpickler.load()
     _serialization_tls.map_location = None

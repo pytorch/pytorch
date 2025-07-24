@@ -1086,12 +1086,10 @@ class TestModuleGlobalHooks(TestCase):
         module = nn.Sigmoid()
 
         def removable_hook(m, input):
-            nonlocal handle
             handle.remove()
             return input
 
         def removable_hook_2(m, input):
-            nonlocal handle_2
             handle_2.remove()
             return input
 
@@ -1121,12 +1119,10 @@ class TestModuleGlobalHooks(TestCase):
         module = nn.Sigmoid()
 
         def removable_hook(m, input, output):
-            nonlocal handle
             handle.remove()
             return output
 
         def removable_hook_2(m, input, output):
-            nonlocal handle_2
             handle_2.remove()
             return output
 

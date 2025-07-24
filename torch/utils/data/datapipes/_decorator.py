@@ -96,7 +96,6 @@ class non_deterministic:
             raise TypeError(f"{arg} can not be decorated by non_deterministic")
 
     def __call__(self, *args, **kwargs):
-        global _determinism
         #  Decorate IterDataPipe
         if self.cls is not None:
             if _determinism:
@@ -125,7 +124,6 @@ class non_deterministic:
                 "deterministic_fn of `non_deterministic` decorator is required "
                 f"to return a boolean value, but {type(res)} is found"
             )
-        global _determinism
         if _determinism and res:
             raise TypeError(
                 f"{self.cls.__name__} is non-deterministic with the inputs, but you set "  # type: ignore[union-attr]
@@ -198,7 +196,6 @@ def runtime_validation(f):
 
     @wraps(f)
     def wrapper(self):
-        global _runtime_validation_enabled
         if not _runtime_validation_enabled:
             yield from f(self)
         else:

@@ -1396,7 +1396,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             counter = 0
 
             def function():
-                nonlocal counter
+                nonlocal counter  # noqa: F824
                 # for now, only support reads from closure cells
                 # TODO(future PR): support writes as well
                 counter + 1

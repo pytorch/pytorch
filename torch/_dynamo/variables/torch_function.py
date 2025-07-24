@@ -135,8 +135,6 @@ BUILTIN_TO_TENSOR_RFN_MAP = {}
 
 
 def populate_builtin_to_tensor_fn_map():
-    global BUILTIN_TO_TENSOR_FN_MAP
-
     most_recent_func = None
 
     class GetMethodMode(BaseTorchFunctionMode):

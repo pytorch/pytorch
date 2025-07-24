@@ -618,7 +618,6 @@ class _World:
 
         TODO don't expose the map, expose fine grained ops
         """
-        global _pg_map
         return _pg_map
 
     @property
@@ -628,7 +627,6 @@ class _World:
 
         TODO don't expose the map, expose fine grained ops
         """
-        global _pg_names
         return _pg_names
 
     @property
@@ -638,7 +636,6 @@ class _World:
 
         TODO don't expose the map, expose fine grained ops
         """
-        global _pg_group_ranks
         return _pg_group_ranks
 
     @property
@@ -648,7 +645,6 @@ class _World:
 
         TODO don't expose the map, expose fine grained ops
         """
-        global _pg_backend_config
         return _pg_backend_config
 
     @property
@@ -658,7 +654,6 @@ class _World:
 
         TODO don't expose group_count, use something else instead
         """
-        global _group_count
         return _group_count
 
     @group_count.setter
@@ -669,12 +664,10 @@ class _World:
 
     @property
     def tags_to_pg(self) -> dict[str, list[ProcessGroup]]:
-        global _tags_to_pg
         return _tags_to_pg
 
     @property
     def pg_to_tag(self) -> dict[ProcessGroup, str]:
-        global _pg_to_tag
         return _pg_to_tag
 
     @property
@@ -1636,9 +1629,6 @@ def init_process_group(
         "cpu:gloo,cuda:custom_backend".
 
     """
-
-    global _world
-
     global _backend
     global _default_pg_init_method
 
@@ -1867,8 +1857,6 @@ def _new_process_group_helper(
 
     This function is called with ``global_ranks_in_group == []`` for the default group.
     """
-    global _world
-
     if group_name in _world.pg_names.values():
         raise ValueError(
             "The specified group name has already been "
@@ -2152,8 +2140,6 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
                                         groups including the default one will
                                         be destroyed.
     """
-    global _world
-
     if group == GroupMember.NON_GROUP_MEMBER:
         return
 
@@ -2245,8 +2231,6 @@ def _abort_process_group(group: Optional[ProcessGroup] = None):
         automatically handle errors or timeouts for you including aborting the
         ProcessGroup.
     """
-    global _world
-
     if group == GroupMember.NON_GROUP_MEMBER:
         return
 
@@ -4946,7 +4930,6 @@ def _process_group_color(ranks: list[int]) -> int:
 
 def _process_group_name(ranks, use_hashed_name):
     # Create name for a process group.
-    global _world
     if use_hashed_name:
         pg_name = _hash_ranks_to_str(ranks)
     else:
@@ -5016,7 +4999,6 @@ def split_group(
     if split_ranks is None:
         raise ValueError("split_ranks cannot be None")
 
-    global _world
     default_pg = _get_default_group()
     device_id = default_pg.bound_device_id
     if not device_id:
@@ -5281,8 +5263,6 @@ def _new_group_with_tag(
     :: N.B. The mechanism is experimental and tied to the functional collectives effort, see
     ``torch.distributed._functional_collectives`` for reference on how to use it.
     """
-    global _world
-
     default_pg = _get_default_group()
     if device_id is None:
         device_id = default_pg.bound_device_id
