@@ -231,23 +231,7 @@ Weights::Weights(
   }
 }
 
-std::unordered_map<std::string, at::Tensor> Weights::parameters() const {
-  std::unordered_map<std::string, at::Tensor> result;
-  for (const auto& name : graph_->signature().parameters()) {
-    result.emplace(name, allValues_.at(std::string(name)));
-  }
-  return result;
-}
-
-std::unordered_map<std::string, at::Tensor> Weights::buffers() const {
-  std::unordered_map<std::string, at::Tensor> result;
-  for (const auto& name : graph_->signature().buffers()) {
-    result.emplace(name, allValues_.at(std::string(name)));
-  }
-  return result;
-}
-
-std::unordered_map<std::string, at::Tensor> Weights::attributes() const {
+std::unordered_map<std::string, at::Tensor> Weights::allValues() const {
   return allValues_;
 }
 

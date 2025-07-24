@@ -56,11 +56,7 @@ class Weights {
   c10::IValue getCustomObj(const std::string& name) const;
   c10::IValue getCustomObjByFileName(const std::string& name) const;
 
-  std::unordered_map<std::string, at::Tensor> parameters() const;
-
-  std::unordered_map<std::string, at::Tensor> buffers() const;
-
-  std::unordered_map<std::string, at::Tensor> attributes() const;
+  std::unordered_map<std::string, at::Tensor> allValues() const;
 
   void loadStateDict(
       const std::unordered_map<std::string, c10::IValue>& stateDict);
