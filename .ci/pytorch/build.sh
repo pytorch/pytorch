@@ -322,6 +322,14 @@ else
       install_torchao
     fi
 
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *xformers* ]]; then
+      install_xformer
+    fi
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *xformers* ]]; then
+      install_flashinfer
+    fi
+
     if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
       echo "Checking that xpu is compiled"
       pushd dist/

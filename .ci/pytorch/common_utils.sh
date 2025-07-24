@@ -149,6 +149,12 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function install_xformer(){
+  build_xformers_from_source() {
+  local commit="f2de641ef670510cadab099ce6954031f52f191c"
+  pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/xformers
+}
+
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
