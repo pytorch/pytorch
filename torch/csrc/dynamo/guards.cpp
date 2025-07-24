@@ -2598,6 +2598,24 @@ class GuardManager {
   }
 
  public:
+  // relational guard helpers
+  void set_has_object_aliasing_guard() {
+    _has_object_aliasing_guard = true;
+  }
+
+  void set_has_no_tensor_aliasing_guard() {
+    _has_no_tensor_aliasing_guard = true;
+  }
+
+  bool has_object_aliasing_guard() {
+    return _has_object_aliasing_guard;
+  }
+
+  bool has_no_tensor_aliasing_guard() {
+    return _has_no_tensor_aliasing_guard;
+  }
+
+ public:
   // type related helpers
   bool is_guarded_value_immutable() {
     return _is_immutable;
@@ -2953,6 +2971,10 @@ class GuardManager {
   // to enable fail fast for the next check.
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
+  // relational guard helpers
+  bool _has_object_aliasing_guard = false;
+  bool _has_no_tensor_aliasing_guard = false;
+
   bool _is_dict = false;
   bool _is_empty_dict = false;
   bool _is_immutable = false;
@@ -3004,6 +3026,17 @@ class RootGuardManager : public GuardManager {
  public:
   // This is the root node, set its _root member to nullptr
   RootGuardManager() : GuardManager(this, "L") {}
+
+  void add_no_tensor_aliasing_guard(
+      std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard) {
+    // stash a pointer to the _no_tensor_alising_guard
+    _no_tensor_aliasing_guard = no_tensor_aliasing_guard;
+    this->add_relational_guard_resetter(std::move(no_tensor_aliasing_guard));
+  }
+
+  std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard() {
+    return _no_tensor_aliasing_guard;
+  }
 
   // Adds the relational guard resetter
   void add_relational_guard_resetter(
@@ -3225,6 +3258,9 @@ class RootGuardManager : public GuardManager {
   // We init LocalState only when this flag it set. This flag is set during
   // TENSOR_MATCH guard init.
   bool _init_local_state = false;
+
+  // Pointer to the no tensor relational guard
+  std::shared_ptr<RelationalGuard> _no_tensor_aliasing_guard;
 };
 
 /*
@@ -5500,6 +5536,9 @@ void install_object_aliasing_guard(
   // the newly added relational guard when the guard eval fails.
   x->get_root()->add_relational_guard_resetter(guard);
 
+  x->set_has_object_aliasing_guard();
+  y->set_has_object_aliasing_guard();
+
   // In case the guard is a DictGuardManager, OBJECT_ALIASING guard is a
   // permitted guard.
   x->add_permitted_leaf_guard(guard);
@@ -5522,9 +5561,10 @@ void install_no_tensor_aliasing_guard(
   // the newly added relational guard when the guard eval fails.
   py::cast<GuardManager*>(guard_managers[0])
       ->get_root()
-      ->add_relational_guard_resetter(guard);
+      ->add_no_tensor_aliasing_guard(guard);
   for (const auto& guard_manager : guard_managers) {
     py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
+    py::cast<GuardManager*>(guard_manager)->set_has_no_tensor_aliasing_guard();
   }
 }
 
@@ -6003,6 +6043,8 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
       .def("fail_count", &GuardManager::fail_count)
+      .def(
+          "has_object_aliasing_guard", &GuardManager::has_object_aliasing_guard)
       .def(
           "is_guarded_value_immutable",
           &GuardManager::is_guarded_value_immutable)
