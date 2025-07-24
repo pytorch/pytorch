@@ -334,7 +334,6 @@ KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
           std::forward<Lambda>(lambda)));
 }
 
-
 inline bool KernelToken::isValid() const {
   return valid_.load(std::memory_order_acquire);
 }
@@ -342,7 +341,6 @@ inline bool KernelToken::isValid() const {
 inline void KernelToken::invalidate() {
   valid_.store(false, std::memory_order_release);
 }
-
 
 inline SafeKernelFunction::SafeKernelFunction(const KernelFunction* kernel)
     : kernel_(kernel ? *kernel : KernelFunction()),
