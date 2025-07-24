@@ -141,7 +141,32 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
-  auto gridSampler3DPSO = lib.getPipelineStateForFunc("grid_sampler_3d_" + mps::scalarToMetalTypeString(input));
+
+  // Kernel selection logic
+  bool use_vectorized = false;
+
+  // Environment variable override (useful for development/benchmarking)
+  const char* env_kernel = std::getenv("PYTORCH_MPS_GRID_SAMPLER_3D_KERNEL");
+  if (env_kernel) {
+    if (std::string(env_kernel) == "vectorized") {
+      use_vectorized = true;
+    }
+  } else {
+    // Adaptive kernel selection based on tensor size and characteristics
+    int64_t output_elements = input.size(0) * input.size(1) * grid.size(1) * grid.size(2) * grid.size(3);
+
+    // Use vectorized kernel for larger tensors (> 1M elements) or when width is large enough
+    use_vectorized = (output_elements > 1000000) || (grid.size(3) >= 64);
+  }
+
+  std::string kernel_name;
+  if (use_vectorized) {
+    kernel_name = "grid_sampler_3d_vectorized_" + mps::scalarToMetalTypeString(input);
+  } else {
+    kernel_name = "grid_sampler_3d_" + mps::scalarToMetalTypeString(input);
+  }
+
+  auto gridSampler3DPSO = lib.getPipelineStateForFunc(kernel_name);
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -218,9 +243,21 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
                   output_strides,
                   grid_strides);
 
-      // Dispatch threads: (out_W, out_H*out_D, N*C)
-      [computeEncoder dispatchThreads:MTLSizeMake(out_W, out_H * out_D, N * C)
-                threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
+      const uint32_t TILE_SIZE = 16;
+      MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_SIZE, TILE_SIZE, 1);
+
+      MTLSize threadsPerGrid;
+      if (use_vectorized) {
+        // For vectorized kernel: each thread processes 4 elements in width dimension
+        const uint32_t ELEMS_PER_THREAD = 4;
+        threadsPerGrid = MTLSizeMake((out_W + ELEMS_PER_THREAD - 1) / ELEMS_PER_THREAD, out_H * out_D, N * C);
+      } else {
+        // For standard kernel: one thread per output element
+        threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N * C);
+      }
+
+      [computeEncoder dispatchThreads:threadsPerGrid
+                threadsPerThreadgroup:threadsPerThreadgroup];
 
       getMPSProfiler().endProfileKernel(gridSampler3DPSO);
     }
