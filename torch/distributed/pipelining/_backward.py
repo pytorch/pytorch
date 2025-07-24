@@ -241,9 +241,7 @@ def stage_backward_weight(
         for grads_tuple, intermediate in zip(
             param_group["grads"], param_group["intermediates"]
         ):
-            non_none_grads = [
-                g for g in grads_tuple if g is not None and isinstance(g, torch.Tensor)
-            ]
+            non_none_grads = [g for g in grads_tuple if g is not None]
             if non_none_grads:
                 summed_grad = sum(non_none_grads)
                 valid_edges.append(GradientEdge(intermediate, 0))
