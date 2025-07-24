@@ -72,6 +72,7 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
 ### API Reference
 
 ```{eval-rst}
+.. automodule:: torch.onnx
 .. autofunction:: torch.onnx.export
   :noindex:
 ```
