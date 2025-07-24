@@ -27,6 +27,7 @@ class PythonWrapperMtia(PythonWrapperCodegen):
         partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ):
         if is_subgraph:
+            # Delegate to the parent class to handle the case of subgraph
             return PythonWrapperCodegen.create(
                 is_subgraph, subgraph_name, parent_wrapper, partition_signatures
             )

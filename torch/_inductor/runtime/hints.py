@@ -157,8 +157,7 @@ class DeviceProperties(typing.NamedTuple):
                 # TODO: Fetch the actual value from ioreg
                 multi_processor_count = 8
             elif device_type == "mtia":
-                # TODO: Fetch and return the actual value
-                multi_processor_count = 8
+                multi_processor_count = 64
             else:
                 raise
         return cls(
