@@ -2,8 +2,8 @@
 
 # use 12.8 due to FlashAttention issue with cuda 12.6 (https://github.com/vllm-project/vllm/issues/15435#issuecomment-2775924628)
 # -------- CONFIG ARG --------
-ARG CUDA_VERSION=12.8.0
-ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04
+ARG CUDA_VERSION=12.8.2
+ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 
 #################### BASE BUILD IMAGE ####################
 # prepare basic build environment
@@ -13,10 +13,11 @@ ARG PYTHON_VERSION=3.12
 ARG TARGETPLATFORM
 ENV DEBIAN_FRONTEND=noninteractive
 
+RUN echo "elaine 1"
 
 # install Python and other dependencies if it does not existed
 RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
-      echo "🔧 Installing Python ${PYTHON_VERSION}..." && \
+      echo "Installing Python ${PYTHON_VERSION}..." && \
       echo 'tzdata tzdata/Areas select America' | debconf-set-selections && \
       echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections && \
       apt-get update -y && \
@@ -36,18 +37,16 @@ RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHO
    fi \
    && python3 --version && python3 -m pip --version
 
-# Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
+# Upgrade to GCC 11 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
 # as it was causing spam when compiling the CUTLASS kernels
 # Ensure gcc >= 10 to avoid CUTLASS issues (bug 92519)
-RUN if ! gcc --version | grep -E 'gcc.+(1[0-9]|[2-9][0-9])' >/dev/null; then \
-      echo "Installing GCC 10..."; \
-      apt-get update && apt-get install -y gcc-10 g++-10 && \
-      update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 && \
-      update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100; \
-    else \
-      echo "✅ GCC already >= 10, using system default."; \
-    fi \
- && gcc --version
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository ppa:ubuntu-toolchain-r/test && \
+    apt-get update && \
+    apt-get install -y gcc-11 g++-11 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
 
 # install uv for faster pip installs
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -77,32 +76,27 @@ RUN python3 use_existing_torch.py
 # change to a different vllm folder if this does not exist anymore
 ARG TORCH_WHEELS_PATH="./requirements"
 ARG PINNED_TORCH_VERSION
-
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     --mount=type=cache,target=/root/.cache/uv \
-    echo "[INFO] Listing /tmp/torch_wheels content:" && \
-    ls -al /tmp/torch_wheels && \
-    echo "[INFO] Done listing" && \
-    if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/pytorch*.whl >/dev/null 2>&1; then \
-        echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
-        uv pip install --system /tmp/torch_wheels/pytorch*.whl; \
-    elif [ -n "$PINNED_TORCH_VERSION" ]; then \
-        echo "[INFO] Installing pinned torch nightly version: $PINNED_TORCH_VERSION"; \
-        uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
-    else \
-        echo "[INFO] Installing torch nightly with latest one"; \
-        uv pip install --system torch --index-url https://download.pytorch.org/whl/nightly/cu128; \
-    fi && \
-    echo "[INFO] Installing torchvision and torchaudio from nightly" && \
-    uv pip install --system torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    if [ -n "$PINNED_TORCH_VERSION" ]; then \
-      pkgs="$PINNED_TORCH_VERSION"; \
-    else \
-      pkgs="torch torchaudio torchvision"; \
-    fi && \
-    uv pip install --system $pkgs --index-url https://download.pytorch.org/whl/nightly/cu128
+    bash -c '\
+        echo "[INFO] Listing /tmp/torch_wheels content:" && \
+        ls -al /tmp/torch_wheels && \
+        echo "[INFO] Done listing" && \
+        if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && \
+           [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/torch*.whl >/dev/null 2>&1; then \
+            echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
+            apt-get update && \
+            apt-get install -y libopenmpi-dev libopenmpi3 libhwloc-dev libomp-dev && \
+            uv pip install --system /tmp/torch_wheels/torch*.whl; \
+        elif [ -n "$PINNED_TORCH_VERSION" ]; then \
+            echo "[INFO] Installing pinned torch nightly version: $PINNED_TORCH_VERSION"; \
+            uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        else \
+            echo "[INFO] Installing torch nightly with latest one"; \
+            uv pip install --system torch --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        fi && \
+        echo "[INFO] Installing torchvision and torchaudio from nightly" && \
+        uv pip install --system torchvision torchaudio --no-deps --index-url https://download.pytorch.org/whl/nightly/cu128'
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system numba==0.61.2
@@ -120,7 +114,6 @@ ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 # todo(elainewy): cache xformers build result for faster build
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
-ARG XFORMERS_COMMIT=f2de641ef670510cadab099ce6954031f52f191c
 
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
@@ -128,7 +121,6 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     echo 'git clone xformers...' \
     && git clone https://github.com/facebookresearch/xformers.git --recursive \
     && cd xformers \
-    && git checkout ${XFORMERS_COMMIT} \
     && git submodule update --init --recursive \
     && echo 'finish git clone xformers...' \
     && rm -rf build \
@@ -148,6 +140,8 @@ RUN ls
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
 RUN cat torch_build_versions.txt
 
+RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
+
 # cuda arch list used by torch
 # can be useful for `test`
 # explicitly set the list to avoid issues with torch 2.2
@@ -156,6 +150,7 @@ RUN cat torch_build_versions.txt
 # Override the arch list for flash-attn to reduce the binary size
 ARG vllm_fa_cmake_gpu_arches='80-real;90-real'
 ENV VLLM_FA_CMAKE_GPU_ARCHES=${vllm_fa_cmake_gpu_arches}
+
 #################### BASE BUILD IMAGE ####################
 
 #################### WHEEL BUILD IMAGE ####################
@@ -275,15 +270,13 @@ COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 # change to a different vllm folder if this does not exist anymore
 ARG TORCH_WHEELS_PATH="./requirements"
 
-
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     --mount=type=cache,target=/root/.cache/uv \
-
-    if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/pytorch*.whl >/dev/null 2>&1; then \
+    if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/torch*.whl >/dev/null 2>&1; then \
         echo "[INFO] Reinstalling torch from host wheel"; \
-        uv pip install --system /torch_wheels/pytorch*.whl; \
+        uv pip install --system /tmp/torch_wheels/torch*.whl; \
         echo "[INFO] Installing torchvision/torchaudio from torch_build_versions.txt"; \
-        grep -i '^torchvision\|^torchaudio' /torch_build_versions.txt | xargs uv pip install --system --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        uv pip install --system --no-deps $(grep -i '^torchvision\|^torchaudio' /torch_build_versions.txt) --index-url https://download.pytorch.org/whl/nightly/cu128;\
     else \
         echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
         uv pip install --system $(cat /torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
