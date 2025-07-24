@@ -72,7 +72,7 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="") -> No
         # this mount the root directory of the stage to targeted shared folder
         # in the host machine.
         cmd = f"""
-        docker buildx build --no-cache \
+        docker buildx build \
         --output type=local,dest={result_path} \
         -f docker/Dockerfile.nightly_torch \
         {docker_torch_arg} \
