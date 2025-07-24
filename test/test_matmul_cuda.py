@@ -1071,6 +1071,7 @@ class TestFP8MatmulCuda(TestCase):
             sqnr = compute_error(C_ref, C)
             assert sqnr.item() > 22.0
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     def test_blockwise_mxfloat8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
