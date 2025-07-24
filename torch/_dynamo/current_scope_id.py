@@ -26,7 +26,6 @@ _current_scope_id = threading.local()
 
 
 def current_scope_id() -> int:
-    global _current_scope_id
     if not hasattr(_current_scope_id, "value"):
         _current_scope_id.value = 1
     return _current_scope_id.value
@@ -34,7 +33,6 @@ def current_scope_id() -> int:
 
 @contextlib.contextmanager
 def enter_new_scope() -> Generator[None, None, None]:
-    global _current_scope_id
     try:
         _current_scope_id.value = current_scope_id() + 1
         yield
