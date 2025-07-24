@@ -31,30 +31,20 @@ runs:
     # retry this step several time similar to how checkout-pytorch GHA does
     - name: Cleanup workspace
       if: always()
-      uses: nick-fields/retry@v3.0.0
       env:
         EXTRA_DELETE_DIR: ${{ inputs.extra-delete-dir }}
-      with:
-        shell: powershell
-        timeout_minutes: 5
-        max_attempts: 3
-        retry_wait_seconds: 90
-        command: |
-          $VerbosePreference = "Continue"
-          $ErrorActionPreference = "Continue"
-          if ($env:EXTRA_DELETE_DIR) {
-              # It's ok to fail to clean up the extra directory on Windows as it only contains
-              # the build artifacts and doesn't take up much space, i.e. /c/5053411580/build-results
-              try {
-                  Remove-Item -Path $env:EXTRA_DELETE_DIR -Recurse -Force -ErrorAction Stop
-              }
-              catch {
-                  # Equivalent to "|| true" - continue even if removal fails
-                  Write-Verbose "Failed to remove extra directory: $($_.Exception.Message)"
-              }
-          }
-          # Remove all items in current directory
-          Remove-Item -Path "./*" -Recurse -Force -ErrorAction Stop
+      shell: bash
+      run: |
+        set +e
+        set -x
+
+        if [ -n "${EXTRA_DELETE_DIR}" ]; then
+          # It's ok to fail to clean up the extra directory on Windows as it only contains
+          # the build artifacts and doesn't take up much space, i.e. /c/5053411580/build-results
+          rm -rf "${EXTRA_DELETE_DIR}" || true
+        fi
+
+        rm -rf ./*
 
     - name: Print all processes locking the runner workspace
       continue-on-error: true
