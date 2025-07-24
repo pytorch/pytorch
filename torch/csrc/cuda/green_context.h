@@ -1,38 +1,19 @@
 #pragma once
+#include <c10/cuda/driver_api.h>
 #include <cuda.h>
 #include <memory>
 #include <stdexcept>
 #include <vector>
 
-class CudaError : public std::runtime_error {
-public:
-    explicit CudaError(CUresult error, const char* call) 
-        : std::runtime_error(formatError(error, call)) {}
-
-private:
-    static std::string formatError(CUresult error, const char* call) {
-        const char* str;
-        cuGetErrorString(error, &str);
-        return std::string(call) + " failed with error " + str;
-    }
-};
-
-#define CUDA_CHECK(call) do { \
-    CUresult result = call; \
-    if (result != CUDA_SUCCESS) { \
-        throw CudaError(result, #call); \
-    } \
-} while(0)
-
 class GreenContext {
 public:
     GreenContext(int device_id, unsigned int num_sms) {
         CUdevice device;
-        CUDA_CHECK(cuDeviceGet(&device, device_id));
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuDeviceGet_(&device, device_id));
 
         // Get device resources
         CUdevResource device_resource;
-        CUDA_CHECK(cuDeviceGetDevResource(device, &device_resource, CU_DEV_RESOURCE_TYPE_SM));
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuDeviceGetDevResource_(device, &device_resource, CU_DEV_RESOURCE_TYPE_SM));
 
         // Split resources
         std::vector<CUdevResource> result(1);
@@ -40,7 +21,7 @@ public:
         unsigned int nb_groups = 1;
         CUdevResource remaining;
         
-        CUDA_CHECK(cuDevSmResourceSplitByCount(
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuDevSmResourceSplitByCount_(
             result_data,
             &nb_groups,
             &device_resource,
@@ -55,13 +36,13 @@ public:
 
         // Generate resource descriptor
         CUdevResourceDesc desc;
-        CUDA_CHECK(cuDevResourceGenerateDesc(&desc, result_data, 1));
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuDevResourceGenerateDesc_(&desc, result_data, 1));
 
         // Create green context
-        CUDA_CHECK(cuGreenCtxCreate(&green_ctx_, desc, device, CU_GREEN_CTX_DEFAULT_STREAM));
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuGreenCtxCreate_(&green_ctx_, desc, device, CU_GREEN_CTX_DEFAULT_STREAM));
 
         // Convert to regular context
-        CUDA_CHECK(cuCtxFromGreenCtx(&context_, green_ctx_));
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxFromGreenCtx_(&context_, green_ctx_));
     }
 
     static std::unique_ptr<GreenContext> create(int device_id, unsigned int num_sms) {
@@ -102,12 +83,7 @@ public:
     }
 
     ~GreenContext() noexcept {
-        if (green_ctx_) {
-            CUresult result = cuGreenCtxDestroy(green_ctx_);
-            if (result != CUDA_SUCCESS) {
-                fprintf(stderr, "Failed to destroy green context: %d\n", result);
-            }
-        }
+	C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuGreenCtxDestroy_(green_ctx_));
     }
 
     // Get the underlying CUDA context
@@ -118,7 +94,7 @@ public:
 
     // Make this context current
     void makeCurrent() {
-        CUDA_CHECK(cuCtxSetCurrent(context_));
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxSetCurrent_(context_));
     }
 
 private:
