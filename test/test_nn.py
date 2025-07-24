@@ -9298,7 +9298,6 @@ class TestNNDeviceType(NNTestCase):
         batch = 1
         classes = 128
         x = torch.randn(batch, classes, requires_grad=True, device=device, dtype=dtype)
-        x.requires_grad = True
         y = torch.randint(low=0, high=classes, size=(batch,), device=device, dtype=torch.long)
         x_cpu = x.detach().clone().cpu()
         y_cpu = y.detach().clone().cpu()
