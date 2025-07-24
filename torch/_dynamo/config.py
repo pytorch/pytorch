@@ -549,7 +549,7 @@ fake_tensor_disable_inference_mode = True
 
 # Experimental feature for running automatic caching precompile.
 # Enables automatic DynamoCache save/load
-caching_precompile = False
+caching_precompile = os.environ.get("TORCH_CACHING_PRECOMPILE", "0") == "1"
 
 # Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
 # Note: AOTAutograd will still trace and partition an AOT backward graph local to that
@@ -561,6 +561,13 @@ caching_precompile = False
 # This flag will also lift certain restrictions during the forward trace such as
 # registering backward hooks on tensors contained within the compiled region.
 compiled_autograd = False
+
+
+# Checks if we should graph break when seeing nn parameter constructors
+# in dynamo; this is so that we clearly fail and ask users to move outside
+# the function as opposed to trying to support the ctor with unclear semantics
+# See https://github.com/pytorch/pytorch/issues/157452 for more context
+graph_break_on_nn_param_ctor = True
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: dict[str, Any] = {}
