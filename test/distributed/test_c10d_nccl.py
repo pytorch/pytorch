@@ -2630,7 +2630,7 @@ class WorkHookTest(MultiProcessTestCase):
         durations: list[float] = []
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
-            nonlocal num_hook_fired
+            nonlocal num_hook_fired, durations
             num_hook_fired += 1
             durations.append(work_info.active_duration.total_seconds())
 
@@ -2658,7 +2658,7 @@ class WorkHookTest(MultiProcessTestCase):
         durations: list[float] = []
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
-            nonlocal num_hook_fired
+            nonlocal num_hook_fired, durations
             num_hook_fired += 1
             durations.append(work_info.active_duration.total_seconds())
 
@@ -2700,6 +2700,7 @@ class WorkHookTest(MultiProcessTestCase):
         durations: dict[OpType, list[float]] = {}
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
+            nonlocal num_hook_fired, durations
             op_type = work_info.op_type
             if op_type not in num_hook_fired:
                 num_hook_fired[op_type] = 0
@@ -2757,6 +2758,7 @@ class WorkHookTest(MultiProcessTestCase):
         durations: dict[OpType, list[float]] = {}
 
         def hook(work_info: torch._C._distributed_c10d.WorkInfo):
+            nonlocal num_hook_fired, durations
             op_type = work_info.op_type
             if op_type not in num_hook_fired:
                 num_hook_fired[op_type] = 0

@@ -59,9 +59,10 @@ parallel_reduction_count = 0
 def reset() -> None:
     global generated_kernel_count
     global generated_cpp_vec_kernel_count
-    global num_bytes_accessed
+    global num_bytes_accessed, nodes_num_elem
     global ir_nodes_pre_fusion
     global cpp_to_dtype_count
+    global cpp_outer_loop_fused_inner_counts
     global num_comprehensive_padding
     global num_matches_for_scatter_upon_const_tensor
     global num_loop_reordering
