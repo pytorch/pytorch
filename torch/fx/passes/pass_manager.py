@@ -4,6 +4,8 @@ from functools import wraps
 from inspect import unwrap
 from typing import Callable, Optional
 
+import torch
+
 
 logger = logging.getLogger(__name__)
 
@@ -250,4 +252,7 @@ class PassManager:
         out = source
         for _pass in self.passes:
             out = _pass(out)
+            # Release cache is necessary because the pass might perform actions (e.g
+            # accuracy validation) that will take up more and more GPU memory.
+            torch.cuda.empty_cache()
         return out
