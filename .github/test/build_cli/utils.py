@@ -70,3 +70,9 @@ class Timer:
     def __exit__(self, *args):
         self.end = time.perf_counter()
         print(f"Took {self.end - self.start:.3f} seconds")
+
+def get_existing_abs_path(path: str) -> str:
+    abs_path = os.path.abspath(path)
+    if not os.path.exists(abs_path):
+        raise FileNotFoundError(f"Path does not exist: {abs_path}")
+    return abs_path

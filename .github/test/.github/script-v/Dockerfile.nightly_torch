@@ -13,6 +13,7 @@ ARG PYTHON_VERSION=3.12
 ARG TARGETPLATFORM
 ENV DEBIAN_FRONTEND=noninteractive
 
+
 # install Python and other dependencies if it does not existed
 RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
       echo "🔧 Installing Python ${PYTHON_VERSION}..." && \
@@ -72,8 +73,29 @@ COPY pyproject.toml pyproject.toml
 # install build and runtime dependencies without stable torch version
 RUN python3 use_existing_torch.py
 
-# install torch nightly
+# default mount file as placeholder, this just avoid the mount error
+# change to a different vllm folder if this does not exist anymore
+ARG TORCH_WHEELS_PATH="./requirements"
 ARG PINNED_TORCH_VERSION
+
+RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
+    --mount=type=cache,target=/root/.cache/uv \
+    echo "[INFO] Listing /tmp/torch_wheels content:" && \
+    ls -al /tmp/torch_wheels && \
+    echo "[INFO] Done listing" && \
+    if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/pytorch*.whl >/dev/null 2>&1; then \
+        echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
+        uv pip install --system /tmp/torch_wheels/pytorch*.whl; \
+    elif [ -n "$PINNED_TORCH_VERSION" ]; then \
+        echo "[INFO] Installing pinned torch nightly version: $PINNED_TORCH_VERSION"; \
+        uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
+    else \
+        echo "[INFO] Installing torch nightly with latest one"; \
+        uv pip install --system torch --index-url https://download.pytorch.org/whl/nightly/cu128; \
+    fi && \
+    echo "[INFO] Installing torchvision and torchaudio from nightly" && \
+    uv pip install --system torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -n "$PINNED_TORCH_VERSION" ]; then \
       pkgs="$PINNED_TORCH_VERSION"; \
@@ -248,9 +270,24 @@ RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 # get the nightly torch version used in the build to make sure the version is the same
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 
-# change to wheel
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# default mount file as placeholder, this just avoid the mount error
+# change to a different vllm folder if this does not exist anymore
+ARG TORCH_WHEELS_PATH="./requirements"
+
+
+RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
+    --mount=type=cache,target=/root/.cache/uv \
+
+    if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/pytorch*.whl >/dev/null 2>&1; then \
+        echo "[INFO] Reinstalling torch from host wheel"; \
+        uv pip install --system /torch_wheels/pytorch*.whl; \
+        echo "[INFO] Installing torchvision/torchaudio from torch_build_versions.txt"; \
+        grep -i '^torchvision\|^torchaudio' /torch_build_versions.txt | xargs uv pip install --system --index-url https://download.pytorch.org/whl/nightly/cu128; \
+    else \
+        echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
+        uv pip install --system $(cat /torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
+    fi
 
 # install the vllm wheel
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/vllm-workspace/vllm-dist \

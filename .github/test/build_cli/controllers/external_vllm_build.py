@@ -1,24 +1,37 @@
 from utils import (
     ensure_dir_exists,
+    force_create_dir,
     remove_dir,
     run,
     get_post_build_pinned_commit,
     get_env,
     Timer,
-    get_abs_path
+    get_abs_path,
+    get_existing_abs_path,
 )
 import os
 
 _DEFAULT_RESULT_PATH = "./results"
+_VLLM_TEMP_FOLDER = "tmp"
 
-def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH) -> None:
-    if not artifact_dir:
-        artifact_dir = _DEFAULT_RESULT_PATH
+def prepare_artifact_dir(path: str):
+    if not path:
+        path = _DEFAULT_RESULT_PATH
+    abs_path = get_abs_path(path)
+    ensure_dir_exists(abs_path)
+    return abs_path
 
-    print(f"r artifact dir is {artifact_dir}")
-    result_path = get_abs_path(artifact_dir)
-    ensure_dir_exists(result_path)
+def get_torch_whl_path(path:str):
+    torch_whl_abs_path = ""
+    if path:
+        torch_whl_abs_path = get_existing_abs_path(path)
+        print(f"torch wheel path is {torch_whl_abs_path}")
+    else:
+        print("no torch whl path detected, vllm will be built using torch nightly")
+    return torch_whl_abs_path
 
+def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="") -> None:
+    result_path = prepare_artifact_dir(artifact_dir)
     print(f"Target artifact dir path is {result_path}")
 
     tag_name = get_env("TAG", "vllm-wheels")
@@ -38,10 +51,20 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH) -> None:
     with Timer():
         commit = get_post_build_pinned_commit("vllm")
         clone_vllm(commit)
+
         run(
             "cp .github/script-v/Dockerfile.nightly_torch  vllm/docker/Dockerfile.nightly_torch",
             logging=True,
         )
+        docker_torch_arg = ""
+        if torch_whl_dir:
+            torch_whl_abs_path = get_torch_whl_path(torch_whl_dir)
+            # copy the torch wheel in tmp folder into the vllm's build context directory
+            tmp_file = get_abs_path(f"./vllm/{_VLLM_TEMP_FOLDER}")
+            force_create_dir(tmp_file)
+            run(f"cp -a {torch_whl_abs_path}/. {tmp_file}",logging=True)
+            print(f"constructing TORCH_WHEELS_PATH {_VLLM_TEMP_FOLDER}")
+            docker_torch_arg = f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"
 
         env = os.environ.copy()
 
@@ -52,6 +75,7 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH) -> None:
         docker buildx build \
         --output type=local,dest={result_path} \
         -f docker/Dockerfile.nightly_torch \
+        {docker_torch_arg} \
         --build-arg max_jobs={max_jobs} \
         --build-arg CUDA_VERSION={cuda} \
         --build-arg PYTHON_VERSION={py} \

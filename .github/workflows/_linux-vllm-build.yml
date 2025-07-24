@@ -167,6 +167,7 @@ jobs:
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           MAX_JOBS: 32
         run: |
+          python3 --version
           python3 -m pip install cement==3.0.14
           python3 .github/test/build_cli/cli.py external --target vllm --artifact-dir shared run
           ls
