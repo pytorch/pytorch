@@ -218,10 +218,11 @@ class InductorChoices:
         So the [XBLOCK, RBLOCK] block becomes a [RBLOCK] block and XBLOCK is forced to be always 1.
         Strangely this is faster than a [1, RBLOCK] block in some cases.
         """
-        return (
-            features.get_reduction_hint() == ReductionHint.INNER
-            and V.graph.sizevars.statically_known_geq(features.reduction_numel, 256)
-        )
+        return False
+        #return (
+        #    features.get_reduction_hint() == ReductionHint.INNER
+        #    and V.graph.sizevars.statically_known_geq(features.reduction_numel, 256)
+        #)
 
     @staticmethod
     def reduction_split_factor(
