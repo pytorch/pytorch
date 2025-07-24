@@ -586,7 +586,7 @@ static void set_tensor_attr_with_capsule(
     py::capsule& capsule,
     const char* attr_name) {
   std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
-      /*ignore_hermetic_tls=*/false);
+      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
   auto obj = mb_obj.value();
@@ -986,4 +986,8 @@ py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
 
 c10::impl::PyInterpreter* getPyInterpreter() {
   return torch::detail::self_interpreter.get();
+}
+
+bool isMainPyInterpreter() {
+  return torch::detail::self_interpreter.is_main_interpreter();
 }

@@ -50,7 +50,7 @@ flatbuffers==24.12.23
 hypothesis==5.35.1
 # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 #Description: advanced library for generating parametrized tests
-#Pinned versions: 5.35.1
+#Pinned versions: 3.44.6, 4.53.2
 #test that import: test_xnnpack_integration.py, test_pruning_op.py, test_nn.py
 
 junitparser==2.1.1
@@ -307,7 +307,7 @@ pytest-cpp==2.3.0
 #Pinned versions: 2.3.0
 #test that import:
 
-z3-solver==4.15.1.0
+z3-solver==4.12.6.0
 #Description: The Z3 Theorem Prover Project
 #Pinned versions:
 #test that import:
@@ -363,10 +363,9 @@ pwlf==2.2.1
 
 
 # To build PyTorch itself
-packaging>=24.2
 pyyaml
 pyzstd
-setuptools>=77.0.0
+setuptools>=70.1.0
 six
 
 scons==4.5.2 ; platform_machine == "aarch64"
