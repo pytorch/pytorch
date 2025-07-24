@@ -98,7 +98,6 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_
         --output type=local,dest={result_path} \
         -f docker/Dockerfile.nightly_torch \
         {disable_pull} \
-        --no-cache \
         {docker_torch_arg} \
         {base_image_arg} \
         --build-arg max_jobs={max_jobs} \
