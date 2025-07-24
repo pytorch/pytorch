@@ -281,10 +281,11 @@ class TestExportAPIDynamo(common_utils.TestCase):
                 # Use GELU activation function
                 return torch.nn.functional.gelu(input, approximate="tanh")
 
-        input = torch.randn(1, 3, 4, 4)
+        input = (torch.randn(1, 3, 4, 4),)
         onnx_program_op18 = torch.onnx.export(
             GeluModel(),
             input,
+            opset_version=18,
             dynamo=True,
         )
         all_nodes_op18 = [n.op_type for n in onnx_program_op18.model.graph]
