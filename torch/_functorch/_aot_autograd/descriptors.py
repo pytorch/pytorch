@@ -1,6 +1,3 @@
-import dataclasses
-
-
 """
 AOTAutograd descriptors are a path-like data structure (similar to pytree
 paths and sources) that describe the semantic meaning of an input/output to FX
@@ -18,14 +15,14 @@ Before we talk about the precise semantics, it's helpful to look at some
 examples to get some intuition for the meaning of descriptors.  Here are some
 input descriptors you might find on the joint FX graph:
 
-- PlainAOTInput(idx=0) - the first input from the original callable, as is
+* PlainAOTInput(idx=0) - the first input from the original callable, as is
 
-- ParamAOTInput(target="mod.weight") - the parameter with FQN mod.weight
+* ParamAOTInput(target="mod.weight") - the parameter with FQN mod.weight
 
-- TangentAOTInput(output=PlainAOTOutput(idx=1)) - the input tangent
+* TangentAOTInput(output=PlainAOTOutput(idx=1)) - the input tangent
   corresponding to the gradients for the second output in the forward graph
 
-- ViewBaseAOTInput(base_of=PlainAOTInput(idx=0)) - it turned out the first
+* ViewBaseAOTInput(base_of=PlainAOTInput(idx=0)) - it turned out the first
   input was actually a (differentiable) view of a tensor which aliased with
   another input tensor.  We replaced this input with a single input for the
   base of all of these inputs, replacing the original inputs (one of which is
@@ -35,7 +32,7 @@ input descriptors you might find on the joint FX graph:
   the views outside of the compiled region (assuming you aren't mutating this
   tensor).
 
-- SubclassGetAttrAOTInput(base=AOTInput(idx=0), attr="inner") - this tensor
+* SubclassGetAttrAOTInput(base=AOTInput(idx=0), attr="inner") - this tensor
   corresponds to the "inner" tensor from the tensor subclass that is at the
   first index.  In general, joint graphs from AOTAutograd never take tensor
   subclasses as inputs; they are always unpacked into their constituent plain
@@ -45,25 +42,25 @@ input descriptors you might find on the joint FX graph:
 
 Here are some output descriptors you might find on the Joint FX graph:
 
-- PlainAOTOutput(idx=0) - the first output from the original forward function,
+* PlainAOTOutput(idx=0) - the first output from the original forward function,
   as is
 
-- GradAOTOutput(grad_of=PlainAOTInput(idx=1)) - the computed gradient for the
+* GradAOTOutput(grad_of=PlainAOTInput(idx=1)) - the computed gradient for the
   second input to the graph, an output of the backward graph
 
-- InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=0)) - when the first
+* InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=0)) - when the first
   input is mutated, the new value to be copied into the first input of the
-  graph.  Sometimes, these outputs can be elided and the copy_ is done directly
+  graph.  Sometimes, these outputs can be elided and the ``copy_`` is done directly
   in the graph (controlled by keep_input_mutations), but if the input
   mutation must be differentiated through we always generate an output like this
 
-- IntermediateBaseAOTOutput(base_of=PlainAOTOutput(idx=0)) - if we return
+* IntermediateBaseAOTOutput(base_of=PlainAOTOutput(idx=0)) - if we return
   multiple outputs which alias each other, we instead replace them with a single
   output tensor representing the base of all the aliases.  This output indicates
   it is the base for /one/ of those original outputs.  If this is undesirable in
   the joint graph, clone all outputs before returning from the graph.
 
-- SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), idx="inner") - this
+* SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), idx="inner") - this
   tensor correspondings to the inner tensor of the first original output which
   is a tensor subclass.  This and other subclass components of that output will
   get repacked into a tensor subclass.
@@ -79,7 +76,7 @@ OK, let's formally define a descriptor.  Intuitively, suppose we have::
 
 Then the descriptor for input[i] to graph describes a function fin_i such that::
 
-    fin_i(args) == in_transform(args)[i],
+    fin_i(args) == in_transform(args)[i]
 
 and the descriptor for output[j] from graph describes a function fout_j such that::
 
@@ -92,9 +89,9 @@ outputs (inverse data flow!)
 We haven't said anything about what these transformations actually do.  There
 are three major transformations AOTAutograd does (performed in this order):
 
-- View/mutation handling
-- Autograd
-- Subclasses
+* View/mutation handling
+* Autograd
+* Subclasses
 
 So intuitively, descriptors are built like this:
 
@@ -172,40 +169,53 @@ Descriptor index
 Here is a list of all AOTInput/AOTOutput, organized by how likely you need to
 handle them:
 
-- AOTInput
-  - Important:
-    - PlainAOTInput (the primals!)
-    - ParamAOTInput
-    - TangentAOTInput
-    - SubclassGetAttrAOTInput et al. (if you use subclasses)
-  - View related (can be eliminated by cloning inputs to graph; if you don't
+* AOTInput
+
+  * Important:
+
+    * PlainAOTInput (the primals!)
+    * ParamAOTInput
+    * TangentAOTInput
+    * SubclassGetAttrAOTInput et al. (if you use subclasses)
+
+  * View related (can be eliminated by cloning inputs to graph; if you don't
     eliminate them, make sure to handle pairing them with GradAOTOutput):
-    - ViewBaseAOTInput
-    - SyntheticBaseAOTInput
-  - Non-tensor, mostly just ignore them:
-    - DummyAOTInput
-    - PhiloxForwardSeedAOTInput
-    - PhiloxForwardBaseOffsetAOTInput
-    - PhiloxBackwardSeedAOTInput
-    - PhiloxBackwardBaseOffsetAOTInput
-    - ForwardTokenAOTInput
-    - BackwardTokenAOTInput
-- AOTOutput
-  - Important:
-    - PlainAOTOutput
-    - GradAOTOutput
-    - SubclassGetAttrAOTOutput et al. (if you use subclasses)
-  - More obscure (if not eliminated, make sure you handle pairing them with
+
+    * ViewBaseAOTInput
+    * SyntheticBaseAOTInput
+
+  * Non-tensor, mostly just ignore them:
+
+    * DummyAOTInput
+    * PhiloxForwardSeedAOTInput
+    * PhiloxForwardBaseOffsetAOTInput
+    * PhiloxBackwardSeedAOTInput
+    * PhiloxBackwardBaseOffsetAOTInput
+    * ForwardTokenAOTInput
+    * BackwardTokenAOTInput
+
+* AOTOutput
+
+  * Important:
+
+    * PlainAOTOutput
+    * GradAOTOutput
+    * SubclassGetAttrAOTOutput et al. (if you use subclasses)
+
+  * More obscure (if not eliminated, make sure you handle pairing them with
     TangentAOTInput):
-    - InputMutationAOTOutput (can be eliminated if mutations are non-differentiable)
-    - IntermediateBaseAOTOutput (can be eliminated by cloning outputs of graph)
-    - MetadataMutationAOTOutput (uhh, just don't mutate metadata?)
-  - Non-tensor, mostly just ignore them:
-    - PhiloxUpdatedForwardOffsetAOTOutput
-    - PhiloxUpdatedBackwardOffsetAOTOutput
-    - ForwardTokenAOTOutput
-    - BackwardTokenAOTOutput
-    - DummyAOTOutput
+
+    * InputMutationAOTOutput (can be eliminated if mutations are non-differentiable)
+    * IntermediateBaseAOTOutput (can be eliminated by cloning outputs of graph)
+    * MetadataMutationAOTOutput (uhh, just don't mutate metadata?)
+
+  * Non-tensor, mostly just ignore them:
+
+    * PhiloxUpdatedForwardOffsetAOTOutput
+    * PhiloxUpdatedBackwardOffsetAOTOutput
+    * ForwardTokenAOTOutput
+    * BackwardTokenAOTOutput
+    * DummyAOTOutput
 
 For convenience, we also have DifferentiableAOTInput and
 DifferentiableAOTOutput to help you classify which inputs/outputs can be
@@ -241,63 +251,77 @@ As of July 2025, here is an exhaustive description of how inputs/outputs
 traverse the wrappers from AOTAutograd, and what descriptors can be introduced
 at these phases.
 
-```
-                            Build wrappers (FLOWS DOWN)         Run trace (FLOWS UP)
--------------------------------------------------------------------------------------------------
-Begin                       PlainAOTInput                       (n/a)
-                            ParamAOTInput
+::
 
-Precompile dedupe           (remove dupes)                      (nothing)
+                                Build wrappers (FLOWS DOWN)         Run trace (FLOWS UP)
+    -------------------------------------------------------------------------------------------------
+    Begin                       PlainAOTInput                       (n/a)
+                                ParamAOTInput
 
-Precompile synthetic base   SyntheticBaseAOTInput               MetadataMutationAOTOutput
-                            ViewBaseAOTInput
+    Precompile dedupe           (remove dupes)                      (nothing)
 
-Forward metadata trace      PlainAOTOutput                      (n/a)
-                            MetadataMutationAOTOutput
+    Precompile synthetic base   SyntheticBaseAOTInput               MetadataMutationAOTOutput
+                                ViewBaseAOTInput
 
-Prepare for autograd        (nothing)                           InputMutationAOTOutput
-                                                                IntermediateBaseAOTOutput
+    Forward metadata trace      PlainAOTOutput                      (n/a)
+                                MetadataMutationAOTOutput
 
-Create joint                TangentAOTInput                     GradAOTOutput
-                            w/ InputMutationAOTOutput
-                            w/ IntermediateBaseAOTOutput
+    Prepare for autograd        (nothing)                           InputMutationAOTOutput
+                                                                    IntermediateBaseAOTOutput
 
-Precompile subclass         SubclassGetAttrAOTInput et al.      SubclassGetAttrAOTOutput et al.
+    Create joint                TangentAOTInput                     GradAOTOutput
+                                w/ InputMutationAOTOutput
+                                w/ IntermediateBaseAOTOutput
 
-Effect tokens               ForwardTokenAOTInput                ForwardTokenAOTOutput
-                            BackwardTokenAOTInput               BackwardTokenAOTOutput
+    Precompile subclass         SubclassGetAttrAOTInput et al.      SubclassGetAttrAOTOutput et al.
 
-End                         (n/a)                               PlainAOTOutput
-```
+    Effect tokens               ForwardTokenAOTInput                ForwardTokenAOTOutput
+                                BackwardTokenAOTInput               BackwardTokenAOTOutput
 
-It can be helful to separately write down the input flow and the output flow
+    End                         (n/a)                               PlainAOTOutput
+
+It can be helpful to separately write down the input flow and the output flow
 for ease of understanding the data flow:
 
-- Input desc propagation (happens as we build wrappers)
-  - [IN] Begin with original calling convention (PlainAOTInput, ParamAOTInput)
-  - [IN] Precompile dedupe: (removes duplicate AOTInputs)
-  - [IN] Precompile synthetic base: SyntheticBaseAOTInput, ViewBaseAOTInput
-  - Forward metadata trace (mini output desc propagation)
-    - [OUT] Original output convention: PlainAOTOutput
-    - [OUT] Precompile synthetic base: MetadataMutationAOTOutput
-  - [IN] Prepare for autograd: (nothing)
-  - [IN] Create joint: TangentAOTInput (potentially w/
-         IntermediateBaseAOTOutput, InputMutationAOTOutput)
-  - [IN] Precompile subclass: SubclassGetAttrAOTInput et al.
-  - [IN] Effect tokens: ForwardTokenAOTInput, BackwardTokenAOTInput
+* Input desc propagation (happens as we build wrappers)
+
+  * [IN] Begin with original calling convention (PlainAOTInput, ParamAOTInput)
+  * [IN] Precompile dedupe: (removes duplicate AOTInputs)
+  * [IN] Precompile synthetic base: SyntheticBaseAOTInput, ViewBaseAOTInput
+  * Forward metadata trace (mini output desc propagation)
+
+    * [OUT] Original output convention: PlainAOTOutput
+    * [OUT] Precompile synthetic base: MetadataMutationAOTOutput
+
+  * [IN] Prepare for autograd: (nothing)
+  * [IN] Create joint: TangentAOTInput (potentially w/
+    IntermediateBaseAOTOutput, InputMutationAOTOutput)
+  * [IN] Precompile subclass: SubclassGetAttrAOTInput et al.
+  * [IN] Effect tokens: ForwardTokenAOTInput, BackwardTokenAOTInput
     (Note: BackwardTokenAOTInput is technically generated not by a wrapper but
     actually done by token_discovery which implicitly adds extra arguments
     to the FX trace on-the-fly.)
-- Trigger a trace with the modified inputs on the wrapper
-- Output desc propagation (happens as we unwind from the user function call in trace)
-  - [OUT] Begin with original calling convention: PlainAOTOutput
-  - [OUT] Effect tokens: ForwardTokenAOTOutput, BackwardTokenAOTOutput
-  - [OUT] Precompile subclass: SubclassGetAttrAOTOutput et al.
-  - [OUT] Create joint: GradAOTOutput
-  - [OUT] Prepare for autograd: InputMutationAOTOutput, IntermediateBaseAOTOutput
-  - [OUT] Precompile synthetic base: MetadataMutationAOTOutput
-  - [OUT] Precompile dedupe: (nothing)
+
+* Trigger a trace with the modified inputs on the wrapper
+* Output desc propagation (happens as we unwind from the user function call in trace)
+
+  * [OUT] Begin with original calling convention: PlainAOTOutput
+  * [OUT] Effect tokens: ForwardTokenAOTOutput, BackwardTokenAOTOutput
+  * [OUT] Precompile subclass: SubclassGetAttrAOTOutput et al.
+  * [OUT] Create joint: GradAOTOutput
+  * [OUT] Prepare for autograd: InputMutationAOTOutput, IntermediateBaseAOTOutput
+  * [OUT] Precompile synthetic base: MetadataMutationAOTOutput
+  * [OUT] Precompile dedupe: (nothing)
 """
+
+import dataclasses
+
+
+# TODO: the is_* predicates are a little suspicious because (1) they're not
+# used by anything and (2) they always report False even when a parameter got
+# swizzled into a view base or deduped with a non-parameter.  It is pretty
+# difficult to exercise these cases but it's not clear if you will write code
+# that works correctly in those cases.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -306,6 +330,22 @@ class AOTInput:
 
     def expr(self) -> str:
         raise NotImplementedError("Subclasses must implement expr()")
+
+    def is_param(self) -> bool:
+        """True if this input is a parameter or derived from a parameter (e.g., subclass attr)"""
+        return False
+
+    def is_buffer(self) -> bool:
+        """True if this input is a buffer or derived from a buffer (e.g., subclass attr)"""
+        return False
+
+    def is_tangent(self) -> bool:
+        """True if this input is a tangent or derived from a tangent (e.g., subclass attr)"""
+        return False
+
+
+# Note: Currently, our typing discipline for differentiable versus not is not
+# very good, so feel free to rely on runtime tests instead.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -320,6 +360,10 @@ class AOTOutput:
 
     def expr(self) -> str:
         raise NotImplementedError("Subclasses must implement expr()")
+
+    def is_grad(self) -> bool:
+        """True if this output is a grad or derived from a grad (e.g., subclass attr)"""
+        return False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -342,6 +386,28 @@ class ParamAOTInput(DifferentiableAOTInput):
 
     def expr(self) -> str:
         return f"self.get_parameter({self.target!r})"
+
+    def is_param(self) -> bool:
+        return True
+
+    def is_buffer(self) -> bool:
+        return False
+
+
+@dataclasses.dataclass(frozen=True)
+class BufferAOTInput(DifferentiableAOTInput):
+    """The input is a buffer, whose FQN is target"""
+
+    target: str
+
+    def expr(self) -> str:
+        return f"self.get_buffer({self.target!r})"
+
+    def is_param(self) -> bool:
+        return False
+
+    def is_buffer(self) -> bool:
+        return True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -386,6 +452,15 @@ class SubclassGetAttrAOTInput(AOTInput):
 
     def expr(self) -> str:
         return f"{self.base.expr()}.{self.attr}"
+
+    def is_param(self) -> bool:
+        return self.base.is_param()
+
+    def is_buffer(self) -> bool:
+        return self.base.is_buffer()
+
+    def is_tangent(self) -> bool:
+        return self.base.is_tangent()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -475,16 +550,20 @@ class PhiloxBackwardBaseOffsetAOTInput(AOTInput):
 class ForwardTokenAOTInput(AOTInput):
     """The world token which is threaded through side-effectful operations"""
 
+    idx: int
+
     def expr(self) -> str:
-        return "__forward_token"
+        return f"__forward_token{self.idx}"
 
 
 @dataclasses.dataclass(frozen=True)
 class BackwardTokenAOTInput(AOTInput):
     """The world token which is threaded through side-effectful operations, for backwards"""
 
+    idx: int
+
     def expr(self) -> str:
-        return "__backward_token"
+        return f"__backward_token{self.idx}"
 
 
 # Technically the "output" here is redundant, tangents always correspond to
@@ -496,10 +575,16 @@ class BackwardTokenAOTInput(AOTInput):
 class TangentAOTInput(DifferentiableAOTInput):
     """An input to the joint graph representing the tangent of an output."""
 
-    output: "AOTOutput"
+    output: DifferentiableAOTOutput
+
+    def __post_init__(self) -> None:
+        assert isinstance(self.output, DifferentiableAOTOutput)
 
     def expr(self) -> str:
         return f"__output_tangent({self.output.expr()})"
+
+    def is_tangent(self) -> bool:
+        return True
 
 
 # ------------
@@ -540,13 +625,14 @@ class IntermediateBaseAOTOutput(DifferentiableAOTOutput):
         return f"__intermediate_base({self.base_of.expr()})"
 
 
-# TODO: it's a little dodgy this is differentiable lol
+# TODO: it's a little dodgy this is differentiable lol, but we do generate
+# these BEFORE autograd is handled
 @dataclasses.dataclass(frozen=True)
 class MetadataMutationAOTOutput(DifferentiableAOTOutput):
-    # TODO: we're not recording detailed information about this
+    idx: int
 
     def expr(self) -> str:
-        return "__aliased_arg_with_metadata_mutation"
+        return f"__aliased_arg_with_metadata_mutation{self.idx}"
 
 
 # NB: this is marked differentiable as it /would/ be differentiable if we
@@ -556,10 +642,16 @@ class MetadataMutationAOTOutput(DifferentiableAOTOutput):
 class GradAOTOutput(DifferentiableAOTOutput):
     """An output representing the computed gradient for a differentiable input, in the joint graph"""
 
-    grad_of: AOTInput
+    grad_of: DifferentiableAOTInput
+
+    def __post_init__(self) -> None:
+        assert isinstance(self.grad_of, DifferentiableAOTInput)
 
     def expr(self) -> str:
         return f"__grad({self.grad_of.expr()})"
+
+    def is_grad(self) -> bool:
+        return True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -582,16 +674,20 @@ class PhiloxUpdatedBackwardOffsetAOTOutput(AOTOutput):
 class ForwardTokenAOTOutput(AOTOutput):
     """The world token output for side-effectful calls, returned so we cannot DCE it, forward only"""
 
+    idx: int
+
     def expr(self) -> str:
-        return "__forward_token"
+        return f"__forward_token{self.idx}"
 
 
 @dataclasses.dataclass(frozen=True)
 class BackwardTokenAOTOutput(AOTOutput):
     """The world token output for side-effectful calls, returned so we cannot DCE it, backward only"""
 
+    idx: int
+
     def expr(self) -> str:
-        return "__backward_token"
+        return f"__backward_token{self.idx}"
 
 
 # These are seemingly symmetric with their AOTInput counterparts.  The way to
@@ -607,6 +703,9 @@ class SubclassGetAttrAOTOutput(AOTOutput):
 
     def expr(self) -> str:
         return f"{self.base.expr()}.{self.attr}"
+
+    def is_grad(self) -> bool:
+        return self.base.is_grad()
 
 
 @dataclasses.dataclass(frozen=True)

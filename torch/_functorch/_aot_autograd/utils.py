@@ -518,7 +518,13 @@ def saved_tensors_hooks_are_inlineable(hooks) -> bool:
     )
 
 
-def without_output_descs(f):
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+_S = TypeVar("_S")
+
+
+def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
+    @wraps(f)
     @simple_wraps(f)
     def inner(*args, **kwargs):
         return f(*args, **kwargs)[0]

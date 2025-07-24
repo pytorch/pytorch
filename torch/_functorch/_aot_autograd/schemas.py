@@ -1195,6 +1195,10 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # has a specific calling convention that can be relied upon by external
     # callers.  In other situations, the calling convention is unspecified and
     # only aot_stage2_compile knows how to deal with them.
+    #
+    # TODO: don't call this graph, it's a GraphModule
+    # TODO: should we return a GraphModule here??  More convenient for
+    # printing, I guess?
     graph: torch.fx.GraphModule
 
     # When compiling with autograd support, this is the joint_inputs, which is
@@ -1254,9 +1258,6 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         return self.compiler_fn(gm, example_inputs)
 
 
-# TODO: not sure if the variadic is right, we'll see when we get to joint
-
-
 class FlatFn(Protocol):
     def __call__(self, *args: FxValue) -> list[FxValue]: ...
 
@@ -1281,3 +1282,25 @@ class JointTraceFn(Protocol):
         tuple[list[FxValue], list[Optional[Tensor]]],
         tuple[list[AOTOutput], list[Optional[AOTOutput]]],
     ]: ...
+
+
+@dataclass
+class JointWithDescriptors:
+    _aot_state: AOTState
+    _aot_graph_capture: AOTGraphCapture
+
+    # The exact order parameters and buffers are expected to be passed into
+    # the final compiled function.  Parameters before buffers.
+    params_spec: list[str]
+    buffers_spec: list[str]
+
+    in_spec: pytree.TreeSpec
+    out_spec: pytree.TreeSpec
+
+    @property
+    def graph_module(self):
+        return self._aot_graph_capture.graph
+
+    @graph_module.setter
+    def graph_module(self, value):
+        self._aot_graph_capture.graph = value
