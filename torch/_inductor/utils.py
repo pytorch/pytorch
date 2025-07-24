@@ -1124,6 +1124,7 @@ def fresh_cache(
                 # Let's not fail if we can't clean up the temp dir. Also note that for
                 # Windows, we can't delete the loaded modules because the module binaries
                 # are open.
+                ignore_errors=True if is_windows() else False,
                 onerror=lambda func, path, exc_info: log.warning(
                     "Failed to remove temporary cache dir at %s",
                     inductor_cache_dir,
