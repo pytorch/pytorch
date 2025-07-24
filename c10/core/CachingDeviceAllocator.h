@@ -120,6 +120,11 @@ C10_API inline DeviceAllocator* getDeviceAllocator(const DeviceType& t) {
   return device_allocator;
 }
 
+constexpr size_t kSmallBuffer =
+    2097152; // "small" allocations are packed in 2 MiB blocks
+const size_t kLargeBuffer =
+    20971520; // "large" allocations may be packed in 20 MiB blocks
+
 #ifdef __cpp_lib_hardware_interference_size
 using std::hardware_destructive_interference_size;
 #else
@@ -276,42 +281,77 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
  *
  */
 
+template <typename B>
+struct BlockComparatorSize {
+  bool operator()(const B* a, const B* b) const {
+    if (a->size != b->size) {
+      return a->size < b->size;
+    }
+    if (a->stream != b->stream) {
+      return (uintptr_t)a->stream < (uintptr_t)b->stream;
+    }
+    return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
+  }
+};
+
+template <typename B>
+struct BlockComparatorAddress {
+  bool operator()(const B* a, const B* b) const {
+    if (a->stream != b->stream) {
+      return (uintptr_t)a->stream < (uintptr_t)b->stream;
+    }
+    return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
+  }
+};
+
+// Forward declaration
+template <typename B>
+class PrivatePool;
+
+template <typename B>
+struct BlockPool {
+  BlockPool(bool small, PrivatePool<B>* private_pool = nullptr)
+      : blocks(BlockComparatorSize<B>),
+        unmapped(BlockComparatorAddress<B>),
+        is_small(small),
+        owner_PrivatePool(private_pool) {}
+
+  // Do not insert a Block to blocks directly; use insert_into_blocks(),
+  // instead.
+  std::set<B*, BlockComparatorSize<B>> blocks;
+  std::set<B*, BlockComparatorAddress<B>> unmapped;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+  const bool is_small;
+  PrivatePool<B>* owner_PrivatePool;
+  int64_t get_free_blocks_call_count{0};
+
+  // Add a Block into blocks set with updating gc counter.
+  std::pair<typename std::set<B*, BlockComparatorSize<B>>::iterator, bool>
+  insert_into_blocks(B* block) {
+    block->gc_count_base = get_free_blocks_call_count;
+    return blocks.insert(block);
+  }
+
+  MempoolId_t owner_MempoolId() const {
+    if (owner_PrivatePool) {
+      return owner_PrivatePool->id;
+    } else {
+      return {0, 0};
+    }
+  }
+};
+
 struct ExpandableSegment;
-struct BlockPool;
 
 template <typename S>
 struct DeviceBlock {
-  c10::DeviceIndex device; // gpu
-  S stream; // allocation stream
-  ska::flat_hash_set<S> stream_uses; // streams on which the block was used
-  size_t size; // block size in bytes
-  size_t requested_size; // memory originally requested
-  BlockPool* pool{nullptr}; // owning memory pool
-  void* ptr{nullptr}; // memory address
-  bool allocated{false}; // in-use flag
-  bool mapped{true}; // is the virtual address range this Block references
-  // backed by physical pages. Always true when
-  // expandable_segment_ is null. When false
-  // This Block will be aligned to the segment size
-  // of its expandable_segment_.
-  DeviceBlock* prev{nullptr}; // prev block if split from a larger allocation
-  DeviceBlock* next{nullptr}; // next block if split from a larger allocation
-  int event_count{0}; // number of outstanding CUDA events
-  int64_t gc_count_base{0}; // get_free_blocks_call_count when Block is inserted
-  std::shared_ptr<GatheredContext> context_when_allocated;
-  // only set for the first block in the segment (when prev == null)
-  // this records the frame information when cudaMalloc was called
-  // whereas context_when_allocated records the last time we handed this
-  // memory out from our cache.
-  std::shared_ptr<GatheredContext> context_when_segment_allocated;
-
-  ExpandableSegment* expandable_segment_{nullptr};
+  using Block = DeviceBlock<S>; // Convenience alias for self-reference
 
   DeviceBlock(
       c10::DeviceIndex device,
       S stream,
       size_t size,
-      BlockPool* pool,
+      BlockPool<Block>* pool,
       void* ptr)
       : device(device),
         stream(stream),
@@ -324,7 +364,7 @@ struct DeviceBlock {
   DeviceBlock(c10::DeviceIndex device, S stream, size_t size)
       : device(device), stream(stream), size(size), requested_size(0) {}
 
-  size_t gc_count() {
+  size_t gc_count() const {
     TORCH_INTERNAL_ASSERT(pool);
     return static_cast<int>(pool->get_free_blocks_call_count - gc_count_base);
   }
@@ -333,7 +373,7 @@ struct DeviceBlock {
     return (prev != nullptr) || (next != nullptr);
   }
 
-  void splice(DeviceBlock* before, DeviceBlock* after) {
+  void splice(Block* before, Block* after) {
     if (before) {
       TORCH_INTERNAL_ASSERT(before->next == after);
       before->next = this;
@@ -345,6 +385,255 @@ struct DeviceBlock {
     }
     next = after;
   }
+
+  c10::DeviceIndex device; // gpu
+  S stream; // allocation stream
+  ska::flat_hash_set<S> stream_uses; // streams on which the block was used
+  size_t size; // block size in bytes
+  size_t requested_size; // memory originally requested
+  BlockPool<DeviceBlock<S>>* pool{nullptr}; // owning memory pool
+  void* ptr{nullptr}; // memory address
+  bool allocated{false}; // in-use flag
+  bool mapped{true}; // is the virtual address range this Block references
+  // backed by physical pages. Always true when
+  // expandable_segment_ is null. When false
+  // This Block will be aligned to the segment size
+  // of its expandable_segment_.
+  Block* prev{nullptr}; // prev block if split from a larger allocation
+  Block* next{nullptr}; // next block if split from a larger allocation
+  int event_count{0}; // number of outstanding CUDA events
+  int64_t gc_count_base{0}; // get_free_blocks_call_count when Block is inserted
+  std::shared_ptr<GatheredContext> context_when_allocated;
+  // only set for the first block in the segment (when prev == null)
+  // this records the frame information when cudaMalloc was called
+  // whereas context_when_allocated records the last time we handed this
+  // memory out from our cache.
+  std::shared_ptr<GatheredContext> context_when_segment_allocated;
+
+  ExpandableSegment* expandable_segment_{nullptr};
+};
+
+template <typename B>
+struct PrivatePool {
+  PrivatePool(MempoolId_t id, DeviceAllocator* allocator = nullptr)
+      : id(std::move(id)),
+        allocator_(allocator),
+        large_blocks(/*small=*/false, this),
+        small_blocks(/*small=*/true, this) {}
+  C10_DISABLE_COPY_AND_ASSIGN(PrivatePool);
+  PrivatePool(PrivatePool&&) = delete;
+  PrivatePool& operator=(PrivatePool&&) = delete;
+  ~PrivatePool() = default;
+
+  MempoolId_t id{0, 0};
+  // Number of live graphs using this pool
+  int use_count{1};
+  // Number of unfreed device allocation made for this pool. When use_count and
+  // deviceMalloc_count drop to zero, we can delete this PrivatePool from
+  // graph_pools.
+  int deviceMalloc_count{0};
+  // Instead of maintaining private BlockPools here, I could stuff all blocks
+  // (private or no) into the top-level large_blocks and small_blocks, and
+  // distinguish private blocks by adding a "pool id" check above the stream
+  // check in BlockComparator. BlockComparator is performance- critical though,
+  // I'd rather not add more logic to it.
+  DeviceAllocator* allocator_;
+  BlockPool<B> large_blocks;
+  BlockPool<B> small_blocks;
+
+ public:
+  DeviceAllocator* allocator() {
+    return allocator_;
+  }
+};
+
+// Represents a contiguous virtual memory segment mapped for allocation.
+struct SegmentRange {
+  SegmentRange(void* p, size_t s, bool is_small)
+      : ptr_(static_cast<char*>(p)),
+        size_(s),
+        // Use 2 MiB pages for small segments, 20 MiB pages for large segments.
+        segment_size_(is_small ? kSmallBuffer : kLargeBuffer) {}
+
+  template <bool is_open_interval = true>
+  size_t begin() const {
+    if constexpr (is_open_interval) {
+      return segmentLeft(ptr_);
+    } else {
+      return segmentRight(ptr_);
+    }
+  }
+
+  template <bool is_open_interval = true>
+  size_t end() const {
+    if constexpr (is_open_interval) {
+      return segmentRight(ptr_ + size_);
+    } else {
+      return segmentLeft(ptr_ + size_);
+    }
+  }
+
+private:
+  char* ptr_;          // Starting address of the mapped range.
+  size_t size_;        // Size in bytes of the mapped range.
+  size_t segment_size_; // Page size used for the segment (2 MiB or 20 MiB).
+};
+
+struct ExpandableSegment {
+  virtual ExpandableSegment(
+      c10::DeviceIndex device,
+      std::optional<c10::Stream> stream,
+      size_t address_space_size,
+      size_t segment_size,
+      std::vector<c10::DeviceIndex> peers) = 0;
+  C10_DISABLE_COPY_AND_ASSIGN(ExpandableSegment);
+  ExpandableSegment(ExpandableSegment&&) = delete;
+  ExpandableSegment operator=(ExpandableSegment&&) = delete;
+
+  // Maps a virtual memory range to physical memory.
+  //
+  // `range.start` must be aligned to `segment_size_`.
+  // The returned range may be larger than requested if `range.size` is not
+  // aligned to `segment_size_`.
+  //
+  // Return:
+  // - A valid `SegmentRange` representing the actual mapped memory.
+  // - If the return range has `.size() == 0`, it indicates out-of-memory (OOM).
+  //
+  // Must be implemented by subclasses.
+  virtual SegmentRange map(SegmentRange range) = 0;
+
+  virtual SegmentRange unmap(SegmentRange range) {
+    auto begin = segmentRight(range.ptr);
+    auto end = segmentLeft(range.ptr + range.size);
+    if (begin >= end) {
+      return SegmentRange{range.ptr, 0};
+    }
+    unmapHandles(begin, end);
+    return rangeFromHandles(begin, end);
+  }
+
+ private:
+  char* ptr() const {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return reinterpret_cast<char*>(ptr_);
+  }
+
+  size_t size() const {
+    return max_handles_ * segment_size_;
+  }
+
+  void addPeer(c10::DeviceIndex device) {
+    peers_.push_back(device);
+    forEachAllocatedRange(
+        [&](size_t begin, size_t end) { setAccess(device, begin, end); });
+  }
+
+  ~ExpandableSegment() {
+    forEachAllocatedRange(
+        [&](size_t begin, size_t end) { unmapHandles(begin, end); });
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
+        ptr_, segment_size_ * max_handles_));
+  }
+
+ private:
+  void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
+    CUmemAccessDesc desc;
+    desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+    desc.location.id = static_cast<int>(device);
+    desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
+        ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
+  }
+
+  void mapAndSetAccess(size_t begin, size_t end) {
+    for (auto i : c10::irange(begin, end)) {
+      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemMap_(
+          ptr_ + i * segment_size_,
+          segment_size_,
+          0,
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+          handles_.at(i).value().handle,
+          0ULL));
+    }
+    setAccess(device_, begin, end);
+    for (auto p : peers_) {
+      setAccess(p, begin, end);
+    }
+  }
+
+  void unmapHandles(size_t begin, size_t end) {
+    // note: unlike cudaFree, MemUnmap and MemRelease do
+    // not appear to synchronize in all cases, so we have to wait for the
+    // stream to finish before this memory is truly free.
+
+    // cannot call c10::cuda::stream_synchronize because
+    // it might grab the GIL which can lead to a deadlock
+    // Locking order must be GIL -> Allocator Lock
+    if (stream_) {
+      C10_CUDA_CHECK(cudaStreamSynchronize(*stream_));
+    } else {
+      cuda::CUDAGuard device_guard(device_);
+      C10_CUDA_CHECK(cudaDeviceSynchronize());
+    }
+    for (auto i : c10::irange(begin, end)) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      Handle h = handles_.at(i).value();
+      handles_.at(i) = std::nullopt;
+      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
+          ptr_ + segment_size_ * i, segment_size_));
+      if (h.shareable_handle) {
+        close(std::get<int>(*h.shareable_handle));
+      }
+      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
+    }
+    trimHandles();
+  }
+  void trimHandles() {
+    while (!handles_.empty() && !handles_.back()) {
+      handles_.pop_back();
+    }
+  }
+  void forEachAllocatedRange(const std::function<void(size_t, size_t)>& fn) {
+    size_t start = 0;
+    for (auto i : c10::irange(handles_.size())) {
+      if (handles_.at(i) && (i == 0 || !handles_.at(i - 1))) {
+        start = i;
+      }
+      if (handles_.at(i) && (i + 1 == handles_.size() || !handles_.at(i + 1))) {
+        fn(start, i + 1);
+      }
+    }
+  }
+  size_t numSegments(size_t size) {
+    return (size + segment_size_ - 1) / segment_size_;
+  }
+  size_t segmentLeft(char* p) {
+    auto size = p - ptr();
+    return size / segment_size_;
+  }
+  size_t segmentRight(char* p) {
+    auto size = p - ptr();
+    return numSegments(size);
+  }
+  SegmentRange rangeFromHandles(size_t begin, size_t end) {
+    return SegmentRange(
+        ptr() + segment_size_ * begin, segment_size_ * (end - begin));
+  }
+  c10::DeviceIndex device_;
+  std::optional<cudaStream_t> stream_;
+  CUdeviceptr ptr_{};
+  size_t segment_size_;
+  size_t max_handles_;
+  struct Handle {
+    CUmemGenericAllocationHandle handle;
+    std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
+  };
+  std::vector<std::optional<Handle>> handles_;
+  // devices on which this memory should be mapped in addition
+  // to the device where the physical memory lives (device_).
+  std::vector<c10::DeviceIndex> peers_;
 };
 
 template <typename S, typename E, typename B = DeviceBlock<S>>
