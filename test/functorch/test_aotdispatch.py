@@ -98,6 +98,7 @@ from torch.testing._internal.optests import (
 )
 from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 USE_TORCHVISION = False
@@ -990,6 +991,110 @@ metadata incorrectly.
 """,  # noqa: F541
         ):
             new_out.sum().backward()
+
+    def test_nested_subclasses_non_homogenous(self):
+        def f(x):
+            x_elem = x.elem
+            x_metadata = x.constant_attribute
+            return x_metadata * x_elem * x.sin().cos()
+
+        a = torch.ones(4, requires_grad=True)
+        a2 = a.detach().clone().requires_grad_()
+        a3 = a.detach().clone().requires_grad_()
+        a4 = a.detach().clone().requires_grad_()
+        aa = TwoTensor(a, a2)
+        aa2 = TwoTensor(a3, a4)
+        custom_aa = ConstantExtraMetadataTensor(aa)
+        custom_aa.constant_attribute = 6
+        custom_aa2 = ConstantExtraMetadataTensor(aa2)
+        custom_aa2.constant_attribute = 6
+
+        out_eager = f(custom_aa)
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out = compiled_f(custom_aa2)
+
+        self.assertTrue(isinstance(out, TwoTensor))
+        self.assertTrue(isinstance(out.a, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(out.b, ConstantExtraMetadataTensor))
+        self.assertTrue(torch.allclose(out_eager, out))
+
+        out_eager.sum().backward()
+        out.sum().backward()
+
+        self.assertTrue(torch.allclose(custom_aa.grad, custom_aa2.grad))
+        self.assertTrue(isinstance(custom_aa2.grad, TwoTensor))
+        self.assertTrue(isinstance(custom_aa2.grad.a, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(custom_aa2.grad.b, ConstantExtraMetadataTensor))
+
+    def test_subclasses_mixed(self):
+        def f(x, y):
+            x_metadata = x.constant_attribute
+            out_a = x_metadata * x * y.a
+            out_b = x * y.a * y.b
+            return TwoTensor(out_a, out_b)
+
+        a = torch.ones(4, requires_grad=False)
+        a2 = a.clone()
+        custom_a = ConstantExtraMetadataTensor(a)
+        custom_a.constant_attribute = 5
+        custom_a2 = ConstantExtraMetadataTensor(a2)
+        custom_a2.constant_attribute = 5
+
+        b = torch.ones(4, requires_grad=False)
+        b2 = b.clone()
+        b3 = b.clone()
+        b4 = b.clone()
+        bb = TwoTensor(b, b2)
+        bb2 = TwoTensor(b3, b4)
+
+        out_eager = f(custom_a, bb)
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out = compiled_f(custom_a2, bb2)
+
+        self.assertTrue(torch.allclose(out_eager, out))
+        self.assertTrue(isinstance(out, TwoTensor))
+        self.assertTrue(isinstance(out.a, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(out.b, ConstantExtraMetadataTensor))
+
+    def test_subclasses_mixed_mode(self):
+        def f(x):
+            return x.sin().cos()
+
+        class AddConstantMetadataMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = func(*args, **(kwargs or {}))
+                if ConstantExtraMetadataTensor not in types:
+                    out = ConstantExtraMetadataTensor(out)
+                    out.constant_attribute = 5
+                return out
+
+        a = torch.ones(4, requires_grad=True)
+        a2 = a.detach().clone().requires_grad_()
+        a3 = a.detach().clone().requires_grad_()
+        a4 = a.detach().clone().requires_grad_()
+        aa = TwoTensor(a, a2)
+        aa2 = TwoTensor(a3, a4)
+
+        with AddConstantMetadataMode():
+            out_eager = f(aa)
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+
+        with AddConstantMetadataMode():
+            out = compiled_f(aa2)
+
+        self.assertTrue(isinstance(out, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(out.elem, TwoTensor))
+        self.assertTrue(torch.allclose(out_eager, out))
+
+        out_eager.sum().backward()
+        out.sum().backward()
+
+        self.assertTrue(torch.allclose(aa.grad, aa2.grad))
+        self.assertTrue(isinstance(aa2.grad, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(aa2.grad.elem, TwoTensor))
 
     @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     def test_custom_tensor_metadata(self):
