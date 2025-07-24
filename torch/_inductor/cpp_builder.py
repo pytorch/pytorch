@@ -1074,6 +1074,19 @@ def _get_openmp_args(
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
 
+def _get_libstdcxx_args() -> tuple[list[str], list[str]]:
+    """
+    For fbcode cpu case, we should link stdc++ instead assuming the binary where dlopen is executed is built with dynamic stdc++.
+    """
+    lib_dir_paths: list[str] = []
+    libs: list[str] = []
+    if config.is_fbcode():
+        lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
+        libs.append("stdc++")
+
+    return lib_dir_paths, libs
+
+
 def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
     macros = []
     if use_mmap_weights:
@@ -1089,6 +1102,15 @@ def get_cpp_torch_options(
     use_relative_path: bool,
     use_mmap_weights: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """
+    This function is used to get the build args of torch related build options.
+    1. Torch include_directories, libraries, libraries_directories.
+    2. Python include_directories, libraries, libraries_directories.
+    3. OpenMP related.
+    4. Torch MACROs.
+    5. MISC
+    6. Return the build args
+    """
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -1269,6 +1291,13 @@ def get_cpp_torch_device_options(
     aot_mode: bool = False,
     compile_only: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """
+    This function is used to get the build args of device related build options.
+    1. Device include_directories, libraries, libraries_directories.
+    2. Device MACROs.
+    3. MISC
+    4. Return the build args
+    """
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -1288,6 +1317,8 @@ def get_cpp_torch_device_options(
 
     include_dirs = cpp_extension.include_paths(device_type)
     libraries_dirs = cpp_extension.library_paths(device_type)
+    if not config.is_fbcode():
+        libraries += ["c10"]
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1326,6 +1357,14 @@ def get_cpp_torch_device_options(
                 if not compile_only:
                     # Only add link args, when compile_only is false.
                     passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+
+        if device_type == "cpu":
+            (
+                stdcxx_lib_dir_paths,
+                stdcxx_libs,
+            ) = _get_libstdcxx_args()
+            libraries_dirs += stdcxx_lib_dir_paths
+            libraries += stdcxx_libs
 
     if config.aot_inductor.custom_op_libs:
         libraries += config.aot_inductor.custom_op_libs

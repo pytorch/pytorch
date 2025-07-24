@@ -16,10 +16,8 @@ Classes:
 """
 
 import abc
-import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from logging import getLogger
 from typing import Any, TypeVar, Union
 
 import torch
@@ -29,9 +27,6 @@ from .types import STATE_DICT
 
 
 T = TypeVar("T")
-
-logger = getLogger()
-logger.setLevel(logging.INFO)
 
 
 class CheckpointStager(abc.ABC):
