@@ -48,7 +48,6 @@ _valueT: BaseCppType | None = None
 # have different IR representations.  (Though, arguably, after unification they
 # shouldn't!)
 def getValueT() -> BaseCppType:
-    global _valueT
     if not _valueT:
         raise NotImplementedError(
             "The value type needs to be set with setValueT() in run_gen_lazy_tensor()"

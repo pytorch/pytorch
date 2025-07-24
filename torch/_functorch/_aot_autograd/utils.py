@@ -179,7 +179,6 @@ def create_tree_flattened_fn(fn, args, kwargs=None) -> tuple[Callable, PytreeThu
         # The input are flattened tensor args. Prepare the args in the
         # order that original function expects. Add static args as well.
         # They will appear as tensor constants in the traced graph.
-        nonlocal out_spec
         args, kwargs = pytree.tree_unflatten(flat_args, tensor_args_spec)
         tree_out = fn(*args, **kwargs)
         flat_out, spec = pytree.tree_flatten(tree_out)

@@ -3538,14 +3538,14 @@ exit(2)
             try:
                 with torch.cuda.stream(stream):
                     mem = torch.cuda.caching_allocator_alloc(1024)
-            except BaseException:
+            except BaseException:  # noqa: B036
                 if mem is None:
                     return
             try:
                 torch.cuda.caching_allocator_delete(mem)
                 mem = None
                 return None
-            except BaseException:
+            except BaseException:  # noqa: B036
                 pass
 
         def throws_on_cuda_event(capture_error_mode):

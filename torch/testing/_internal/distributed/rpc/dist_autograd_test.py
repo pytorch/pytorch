@@ -51,9 +51,6 @@ requires_grad_tensor = torch.ones(3, 3, requires_grad=True)
 # we don't need a lock here since the GIL is held while executing remote
 # python UDFs, so access is serialized across several workers.
 def _set_rpc_done(ctx_id, rank_distance):
-    global rpc_done
-    global ctx_ids
-    global known_context_ids
     rpc_done[rank_distance] = True
     ctx_ids[rank_distance] = ctx_id
     known_context_ids.add(ctx_id)
@@ -150,7 +147,6 @@ def my_py_nested_call(t1, t2, dst, world_size, hops):
 # nodes. This helper allows timeout_seconds for those RPCs to be completed, and
 # ensures that all the contexts have been cleaned up in that timeframe.any
 def _all_contexts_cleaned_up(timeout_seconds=10):
-    global known_context_ids
     start = time.time()
     context_id_to_raised = set()
     while (

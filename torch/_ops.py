@@ -744,7 +744,6 @@ def _get_current_dispatch_mode_pre_dispatch():
 
 
 def mode_stack_state_for_pre_dispatch():
-    global _mode_stack_state_for_pre_dispatch
     return _mode_stack_state_for_pre_dispatch
 
 
@@ -752,17 +751,14 @@ cached_ops: set["OpOverload"] = set()
 
 
 def add_cached_op(op_overload):
-    global cached_ops
     cached_ops.add(op_overload)
 
 
 def reset_cached_ops():
-    global cached_ops
     cached_ops.clear()
 
 
 def get_cached_ops():
-    global cached_ops
     return cached_ops
 
 

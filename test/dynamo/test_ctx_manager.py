@@ -1832,7 +1832,7 @@ class GraphModule(torch.nn.Module):
         def create_ctx():
             @contextmanager
             def ctx(x):
-                nonlocal z
+                nonlocal z  # noqa: F824
                 nonlocal k
                 try:
                     k = 100
@@ -1867,7 +1867,7 @@ class GraphModule(torch.nn.Module):
         def create_ctx():
             @contextmanager
             def ctx(x):
-                nonlocal z
+                nonlocal z  # noqa: F824
                 nonlocal k
                 try:
                     yield x.sin()
@@ -1964,7 +1964,7 @@ class GraphModule(torch.nn.Module):
         def create_ctx():
             @contextmanager
             def ctx(x):
-                global z_glb, k_glb
+                global z_glb, k_glb  # noqa: F824
                 try:
                     yield x.sin()
                 finally:
@@ -2190,7 +2190,7 @@ class GraphModule(torch.nn.Module):
 
         @contextlib.contextmanager
         def whoo(x):
-            nonlocal z
+            nonlocal z  # noqa: F824
             try:
                 z.append(x)
                 yield x.sin()
