@@ -61,8 +61,8 @@ def fail_minimal_arrayref_interface(is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: error: ‘complex64’ was not declared in this scope
     "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
-    "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
-    "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
+    "test_conv_freezing": fail_minimal_arrayref_interface(),
+    "test_deconv_freezing": fail_minimal_arrayref_interface(),
     "test_cond_nested": fail_minimal_arrayref_interface(),
     "test_cond_simple": fail_minimal_arrayref_interface(),
     "test_cond_symint_input": fail_minimal_arrayref_interface(),
@@ -97,8 +97,8 @@ CPU_TEST_FAILURES = {
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
-    "test_freezing": fail_minimal_arrayref_interface(is_skip=True),
-    "test_linear_freezing": fail_minimal_arrayref_interface(is_skip=True),
+    "test_freezing": fail_minimal_arrayref_interface(),
+    "test_linear_freezing": fail_minimal_arrayref_interface(),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.

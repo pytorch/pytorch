@@ -2095,7 +2095,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         cloned_gm.recompile()
         runner = torch.fx.Interpreter(cloned_gm)
-        returned_outputs = runner.run(example_inputs)
+        returned_outputs = runner.run(*example_inputs)
         # Extract and store the grid for autotuning
         if len(grid_inputs) > 0:
             grid_outputs = returned_outputs[len(kwargs_inputs) :]

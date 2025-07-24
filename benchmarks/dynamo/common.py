@@ -2950,7 +2950,7 @@ def parse_args(args=None):
     )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
-        "--freezing", action="store_true", help="turn on freezing", default=False
+        "--freezing", action="store_true", help="turn on freezing", default=None
     )
     parser.add_argument(
         "--inductor-config",

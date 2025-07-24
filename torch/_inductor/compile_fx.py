@@ -13,7 +13,7 @@ import time
 import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
@@ -1843,20 +1843,15 @@ def compile_fx_aot(
 ) -> Union[list[Union[str, Weights]], str]:
     assert isinstance(model_, GraphModule), model_
 
-    # [See NOTE] Unwrapping subclasses AOT
-    unwrap_tensor_subclass_parameters(model_)
+    if config_patches is None:
+        config_patches = {}
 
-    config_patches: dict[str, Any] = (
-        {"cpp_wrapper": True}
-        if config_patches is None
-        else {**config_patches, "cpp_wrapper": True}
-    )
+    config_patches["cpp_wrapper"] = True
+    config_patches["freezing"] = config.freezing is None or config.freezing
 
-    output_path = config_patches.get(
+    if output_path := config_patches.get(
         "aot_inductor.output_path", config.aot_inductor.output_path
-    )
-
-    if output_path:
+    ):
         assert not output_path.endswith(".pt2"), (
             "The output path for aot_compile should not have an extension with .pt2 "
             "this is for specifying the output path for the .so in AOTInductor. "
@@ -1864,10 +1859,7 @@ def compile_fx_aot(
             "into a pt2, please call `torch._inductor.aoti_compile_and_package`."
         )
     else:
-        config_patches = {
-            **config_patches,
-            "aot_inductor.output_path": code_hash(model_.code),
-        }
+        config_patches["aot_inductor.output_path"] = code_hash(model_.code)
 
     from .utils import maybe_aoti_standalone_config
 
@@ -1976,7 +1968,11 @@ def fw_compiler_freezing(
         if tracing_context.fw_metadata:
             static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
-    with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+    with (
+        mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+        if fake_mode
+        else nullcontext()
+    ):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
@@ -2441,6 +2437,13 @@ def compile_fx(
             is_valid_aoti_model_name()
 
             with functorch_config.patch(unlift_effect_tokens=True):
+                # Any model transformations involving torch.fx.Transformer (including
+                # one of the pre_grad passes above) erase the tensor unwrapping by
+                # returning a new GraphModule without the necessary member variables.
+                # Thus, we unwrap tensor subclasses as late as possible (since it's
+                # required by aot_export_module).
+                unwrap_tensor_subclass_parameters(model_)
+
                 gm, graph_signature = aot_export_module(
                     model_,
                     example_inputs_,

@@ -4042,12 +4042,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if (
                     len(non_constexpr_signature(signature)) == 4
                 ):  # input, output and 2 args
-                    tile_hint = "tile_hint=TileHint.SQUARE,"
+                    tile_hint = " tile_hint=TileHint.SQUARE,"
                 else:
-                    tile_hint = "tile_hint=TileHint.DEFAULT,"
+                    tile_hint = " tile_hint=TileHint.DEFAULT,"
             heuristics_line = f"""
                 @triton_heuristics.{self._get_heuristic()}(
-                    size_hints={size_hints!r}, {tile_hint}
+                    size_hints={size_hints!r},{tile_hint}
                     filename=__file__,
                     triton_meta={triton_meta!r},
                     inductor_meta={inductor_meta!r},

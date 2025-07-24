@@ -956,7 +956,7 @@ disable_cpp_codegen = False
 # Freezing will attempt to inline weights as constants in optimization
 # and run constant folding and other optimizations on them. After freezing, weights
 # can no longer be updated.
-freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
+freezing: Optional[bool] = get_tristate_env("TORCHINDUCTOR_FREEZING")
 
 # Make freezing invalidate the eager Parameters of nn modules, to avoid memory overhead
 # of potentially keeping multiple copies of weights.
