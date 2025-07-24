@@ -1,332 +1,385 @@
 # The vLLM Dockerfile is used to construct vLLM image against torch nightly that can be directly used for testing
 
-# for torch nightly, cuda >=12.6 is required,
 # use 12.8 due to FlashAttention issue with cuda 12.6 (https://github.com/vllm-project/vllm/issues/15435#issuecomment-2775924628)
-ARG CUDA_VERSION=12.8.0
-#
-#################### BASE BUILD IMAGE ####################
-# prepare basic build environment
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04 AS base
-ARG CUDA_VERSION=12.8.0
-ARG PYTHON_VERSION=3.12
-ARG TARGETPLATFORM
-ENV DEBIAN_FRONTEND=noninteractive
-# Install Python and other dependencies
-RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
-    && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
-    && apt-get update -y \
-    && apt-get install -y ccache software-properties-common git curl sudo \
-    && for i in 1 2 3; do \
-        add-apt-repository -y ppa:deadsnakes/ppa && break || \
-        { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
-    done \
-    && apt-get update -y \
-    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
-    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
-    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
-    && curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
-    && python3 --version \
-    && python3 -m pip --version
-# Install uv for faster pip installs
-RUN --mount=type=cache,target=/root/.cache/uv \
-    python3 -m pip install uv
+# -------- CONFIG ARG --------
+    ARG CUDA_VERSION=12.8.0
+    ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu20.04
 
-# This timeout (in seconds) is necessary when installing some dependencies via uv since it's likely to time out
-# Reference: https://github.com/astral-sh/uv/pull/1694
-ENV UV_HTTP_TIMEOUT=500
-
-# Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
-# as it was causing spam when compiling the CUTLASS kernels
-RUN apt-get install -y gcc-10 g++-10
-RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 110 --slave /usr/bin/g++ g++ /usr/bin/g++-10
-RUN <<EOF
-gcc --version
-EOF
-
-# Workaround for https://github.com/openai/triton/issues/2507 and
-# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
-# this won't be needed for future versions of this docker image
-# or future versions of triton.
-RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
-
-WORKDIR /workspace
-
-# install build and runtime dependencies
-COPY requirements/common.txt requirements/common.txt
-COPY use_existing_torch.py use_existing_torch.py
-COPY pyproject.toml pyproject.toml
-
-# install build and runtime dependencies without stable torch version
-RUN python3 use_existing_torch.py
-
-# install torch nightly
-ARG PINNED_TORCH_VERSION
-RUN --mount=type=cache,target=/root/.cache/uv \
-    if [ -n "$PINNED_TORCH_VERSION" ]; then \
-      pkgs="$PINNED_TORCH_VERSION"; \
-    else \
-      pkgs="torch torchaudio torchvision"; \
-    fi && \
-    uv pip install --system $pkgs --index-url https://download.pytorch.org/whl/nightly/cu128
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system numba==0.61.2
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-uv pip install --system -r requirements/common.txt
-
-# must put before installing xformers, so it can install the correct version of xfomrers.
-ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
-
-# Build xformers with cuda and torch nightly
-# following official xformers guidance: https://github.com/facebookresearch/xformers#build
-# todo(elainewy): cache xformers build result for faster build
-ARG max_jobs=16
-ENV MAX_JOBS=${max_jobs}
-ARG XFORMERS_COMMIT=f2de641ef670510cadab099ce6954031f52f191c
-
-ENV CCACHE_DIR=/root/.cache/ccache
-RUN --mount=type=cache,target=/root/.cache/ccache \
-    --mount=type=cache,target=/root/.cache/uv \
-    echo 'git clone xformers...' \
-    && git clone https://github.com/facebookresearch/xformers.git --recursive \
-    && cd xformers \
-    && git checkout ${XFORMERS_COMMIT} \
-    && git submodule update --init --recursive \
-    && echo 'finish git clone xformers...' \
-    && rm -rf build \
-    && python3 setup.py bdist_wheel --dist-dir=../xformers-dist --verbose \
-    && cd .. \
-    && rm -rf xformers
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system xformers-dist/*.whl --verbose
-
-RUN mkdir -p /export/xformers-dist && cp /workspace/xformers-dist/*.whl /export/xformers-dist/
-
-RUN ls
-
-# build can take a long time, and the torch nightly version fetched from url can be different in next docker stage.
-# track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
-RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
-RUN cat torch_build_versions.txt
-
-# cuda arch list used by torch
-# can be useful for `test`
-# explicitly set the list to avoid issues with torch 2.2
-# see https://github.com/pytorch/pytorch/pull/123243
-
-# Override the arch list for flash-attn to reduce the binary size
-ARG vllm_fa_cmake_gpu_arches='80-real;90-real'
-ENV VLLM_FA_CMAKE_GPU_ARCHES=${vllm_fa_cmake_gpu_arches}
-#################### BASE BUILD IMAGE ####################
-
-#################### WHEEL BUILD IMAGE ####################
-FROM base AS build
-ARG TARGETPLATFORM
-
-# This timeout (in seconds) is necessary when installing some dependencies via uv since it's likely to time out
-# Reference: https://github.com/astral-sh/uv/pull/1694
-ENV UV_HTTP_TIMEOUT=500
-
-COPY . .
-
-RUN python3 use_existing_torch.py
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -r requirements/build.txt
-
-ARG GIT_REPO_CHECK=0
-RUN --mount=type=bind,source=.git,target=.git \
-    if [ "$GIT_REPO_CHECK" != "0" ]; then bash tools/check_repo.sh ; fi
-
-# Max jobs used by Ninja to build extensions
-ARG max_jobs=16
-ENV MAX_JOBS=${max_jobs}
-ARG nvcc_threads=2
-ENV NVCC_THREADS=$nvcc_threads
-
-RUN echo "MAX_JOBS is ${MAX_JOBS}"
-
-ARG USE_SCCACHE
-ARG SCCACHE_BUCKET_NAME=vllm-build-sccache
-ARG SCCACHE_REGION_NAME=us-west-2
-ARG SCCACHE_S3_NO_CREDENTIALS=0
-
-# if USE_SCCACHE is set, use sccache to speed up compilation
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=.git,target=.git \
-    if [ "$USE_SCCACHE" = "1" ]; then \
-        echo "Installing sccache..." \
-        && curl -L -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz \
-        && tar -xzf sccache.tar.gz \
-        && sudo mv sccache-v0.8.1-x86_64-unknown-linux-musl/sccache /usr/bin/sccache \
-        && rm -rf sccache.tar.gz sccache-v0.8.1-x86_64-unknown-linux-musl \
-        && export SCCACHE_BUCKET=${SCCACHE_BUCKET_NAME} \
-        && export SCCACHE_REGION=${SCCACHE_REGION_NAME} \
-        && export SCCACHE_S3_NO_CREDENTIALS=${SCCACHE_S3_NO_CREDENTIALS} \
-        && export SCCACHE_IDLE_TIMEOUT=0 \
-        && export CMAKE_BUILD_TYPE=Release \
-        && sccache --show-stats \
-        && python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38 \
-        && sccache --show-stats; \
-    fi
-
-ENV CCACHE_DIR=/root/.cache/ccache
-RUN --mount=type=cache,target=/root/.cache/ccache \
-    --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=.git,target=.git  \
-    if [ "$USE_SCCACHE" != "1" ]; then \
-        # Clean any existing CMake artifacts
-        rm -rf .deps && \
-        mkdir -p .deps && \
-        python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38; \
-    fi
-
-#################### WHEEL BUILD IMAGE ####################
-
-################### VLLM INSTALLED IMAGE ####################
-# Setup clean environment for vLLM and its dependencies for test and api server using ubuntu22.04 with AOT flashinfer
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS vllm-base
-# prepare for environment starts
-ARG CUDA_VERSION=12.8.0
-ARG PYTHON_VERSION=3.12
-WORKDIR /vllm-workspace
-ENV DEBIAN_FRONTEND=noninteractive
-ARG TARGETPLATFORM
-
-RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
-    echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
-
-# Install Python and other dependencies
-RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
-    && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
-    && apt-get update -y \
-    && apt-get install -y ccache software-properties-common git curl wget sudo vim python3-pip \
-    && apt-get install -y ffmpeg libsm6 libxext6 libgl1 \
-    && for i in 1 2 3; do \
-        add-apt-repository -y ppa:deadsnakes/ppa && break || \
-        { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
-    done \
-    && apt-get update -y \
-    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv libibverbs-dev \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
-    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
-    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
-    && curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
-    && python3 --version && python3 -m pip --version
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    python3 -m pip install uv
-
-# This timeout (in seconds) is necessary when installing some dependencies via uv since it's likely to time out
-# Reference: https://github.com/astral-sh/uv/pull/1694
-ENV UV_HTTP_TIMEOUT=500
-
-# Workaround for https://github.com/openai/triton/issues/2507 and
-# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
-# this won't be needed for future versions of this docker image
-# or future versions of triton.
-RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
-
-# get the nightly torch version used in the build to make sure the version is the same
-COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
-
-# change to wheel
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128
-
-# install the vllm wheel
-RUN --mount=type=bind,from=build,src=/workspace/dist,target=/vllm-workspace/vllm-dist \
-    --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system vllm-dist/*.whl --verbose
-
-# install xformers again for the new environment
-RUN --mount=type=bind,from=base,src=/workspace/xformers-dist,target=/vllm-workspace/xformers-dist \
-    --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system /vllm-workspace/xformers-dist/*.whl --verbose
-
-ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
-ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
-
-# install package for build flashinfer
-# see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
-RUN pip install setuptools==75.6.0 packaging==23.2 ninja==1.11.1.3 build==1.2.2.post1
+    #################### BASE BUILD IMAGE ####################
+    # prepare basic build environment
+    FROM ${BASE_IMAGE} AS base
+    ARG CUDA_VERSION=12.8.0
+    ARG PYTHON_VERSION=3.12
+    ARG TARGETPLATFORM
+    ENV DEBIAN_FRONTEND=noninteractive
 
 
-# build flashinfer for torch nightly from source around 10 mins
-# release version: v0.2.2.post1
-# todo(elainewy): cache flashinfer build result for faster build
-ENV CCACHE_DIR=/root/.cache/ccache
-RUN --mount=type=cache,target=/root/.cache/ccache \
-    --mount=type=cache,target=/root/.cache/uv \
-    echo "git clone flashinfer..." \
-    && git clone --recursive https://github.com/flashinfer-ai/flashinfer.git \
-    && cd flashinfer \
-    && git checkout v0.2.2.post1 \
-    && git submodule update --init --recursive \
-    && echo "finish git clone flashinfer..." \
-    && rm -rf build \
-    && export TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list} \
-    && FLASHINFER_ENABLE_AOT=1 python3 setup.py bdist_wheel --dist-dir=../flashinfer-dist --verbose \
-    && cd .. \
-    && rm -rf flashinfer
+    # install Python and other dependencies if it does not existed
+    RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
+          echo "🔧 Installing Python ${PYTHON_VERSION}..." && \
+          echo 'tzdata tzdata/Areas select America' | debconf-set-selections && \
+          echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections && \
+          apt-get update -y && \
+          apt-get install -y ccache software-properties-common git curl sudo && \
+          for i in 1 2 3; do \
+            add-apt-repository -y ppa:deadsnakes/ppa && break || \
+            { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
+          done && \
+          apt-get update -y && \
+          apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv && \
+          update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
+          update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} && \
+          ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config && \
+          curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}; \
+       else \
+          echo "Python ${PYTHON_VERSION} already present, skipping setup."; \
+       fi \
+       && python3 --version && python3 -m pip --version
 
-# install flashinfer
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system flashinfer-dist/*.whl --verbose
+    # Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
+    # as it was causing spam when compiling the CUTLASS kernels
+    # Ensure gcc >= 10 to avoid CUTLASS issues (bug 92519)
+    RUN if ! gcc --version | grep -E 'gcc.+(1[0-9]|[2-9][0-9])' >/dev/null; then \
+          echo "Installing GCC 10..."; \
+          apt-get update && apt-get install -y gcc-10 g++-10 && \
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 && \
+          update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100; \
+        else \
+          echo "✅ GCC already >= 10, using system default."; \
+        fi \
+     && gcc --version
 
-# install common packages
-COPY requirements/common.txt requirements/common.txt
-COPY use_existing_torch.py use_existing_torch.py
-COPY pyproject.toml pyproject.toml
+    # install uv for faster pip installs
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        python3 -m pip install uv
 
-COPY examples examples
-COPY benchmarks benchmarks
-COPY ./vllm/collect_env.py .
+    # This timeout (in seconds) is necessary when installing some dependencies via uv since it's likely to time out
+    # Reference: https://github.com/astral-sh/uv/pull/1694
+    ENV UV_HTTP_TIMEOUT=500
 
+    # Workaround for https://github.com/openai/triton/issues/2507 and
+    # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
+    # this won't be needed for future versions of this docker image
+    # or future versions of triton.
+    RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 
-RUN python3 use_existing_torch.py
-RUN --mount=type=cache,target=/root/.cache/uv \
+    WORKDIR /workspace
+
+    # install build and runtime dependencies
+    COPY requirements/common.txt requirements/common.txt
+    COPY use_existing_torch.py use_existing_torch.py
+    COPY pyproject.toml pyproject.toml
+
+    # install build and runtime dependencies without stable torch version
+    RUN python3 use_existing_torch.py
+
+    # default mount file as placeholder, this just avoid the mount error
+    # change to a different vllm folder if this does not exist anymore
+    ARG TORCH_WHEELS_PATH="./requirements"
+    ARG PINNED_TORCH_VERSION
+
+    RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
+        --mount=type=cache,target=/root/.cache/uv \
+        echo "[INFO] Listing /tmp/torch_wheels content:" && \
+        ls -al /tmp/torch_wheels && \
+        echo "[INFO] Done listing" && \
+        if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/pytorch*.whl >/dev/null 2>&1; then \
+            echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
+            uv pip install --system /tmp/torch_wheels/pytorch*.whl; \
+        elif [ -n "$PINNED_TORCH_VERSION" ]; then \
+            echo "[INFO] Installing pinned torch nightly version: $PINNED_TORCH_VERSION"; \
+            uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        else \
+            echo "[INFO] Installing torch nightly with latest one"; \
+            uv pip install --system torch --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        fi && \
+        echo "[INFO] Installing torchvision and torchaudio from nightly" && \
+        uv pip install --system torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        if [ -n "$PINNED_TORCH_VERSION" ]; then \
+          pkgs="$PINNED_TORCH_VERSION"; \
+        else \
+          pkgs="torch torchaudio torchvision"; \
+        fi && \
+        uv pip install --system $pkgs --index-url https://download.pytorch.org/whl/nightly/cu128
+
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        uv pip install --system numba==0.61.2
+
+    RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/common.txt
 
-#################### UNITTEST IMAGE #############################
-FROM vllm-base as test
-COPY tests/ tests/
-
-# install build and runtime dependencies without stable torch version
-COPY requirements/nightly_torch_test.txt requirements/nightly_torch_test.txt
-
-# This timeout (in seconds) is necessary when installing some dependencies via uv since it's likely to time out
-# Reference: https://github.com/astral-sh/uv/pull/1694
-ENV UV_HTTP_TIMEOUT=500
-
-# install development dependencies (for testing)
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -e tests/vllm_test_utils
-
-# enable fast downloads from hf (for testing)
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system hf_transfer
-ENV HF_HUB_ENABLE_HF_TRANSFER 1
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -r requirements/nightly_torch_test.txt
+    # must put before installing xformers, so it can install the correct version of xfomrers.
+    ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
+    ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 
-# Logging to confirm the torch versions
-RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'
+    # Build xformers with cuda and torch nightly
+    # following official xformers guidance: https://github.com/facebookresearch/xformers#build
+    # todo(elainewy): cache xformers build result for faster build
+    ARG max_jobs=16
+    ENV MAX_JOBS=${max_jobs}
+    ARG XFORMERS_COMMIT=f2de641ef670510cadab099ce6954031f52f191c
 
-# Logging to confirm all the packages are installed
-RUN pip freeze
+    ENV CCACHE_DIR=/root/.cache/ccache
+    RUN --mount=type=cache,target=/root/.cache/ccache \
+        --mount=type=cache,target=/root/.cache/uv \
+        echo 'git clone xformers...' \
+        && git clone https://github.com/facebookresearch/xformers.git --recursive \
+        && cd xformers \
+        && git checkout ${XFORMERS_COMMIT} \
+        && git submodule update --init --recursive \
+        && echo 'finish git clone xformers...' \
+        && rm -rf build \
+        && python3 setup.py bdist_wheel --dist-dir=../xformers-dist --verbose \
+        && cd .. \
+        && rm -rf xformers
 
-#################### UNITTEST IMAGE #############################
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        uv pip install --system xformers-dist/*.whl --verbose
 
-#################### EXPORT STAGE ####################
-FROM scratch as export-wheels
+    RUN mkdir -p /export/xformers-dist && cp /workspace/xformers-dist/*.whl /export/xformers-dist/
 
-# Just copy the wheels we prepared in previous stages
-COPY --from=base /workspace/xformers-dist /export/xformers-dist
-COPY --from=build /workspace/dist /export/vllm-dist
-COPY --from=vllm-base /vllm-workspace/flashinfer-dist /export/flashinfer-dist
+    RUN ls
+
+    # build can take a long time, and the torch nightly version fetched from url can be different in next docker stage.
+    # track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
+    RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
+    RUN cat torch_build_versions.txt
+
+    # cuda arch list used by torch
+    # can be useful for `test`
+    # explicitly set the list to avoid issues with torch 2.2
+    # see https://github.com/pytorch/pytorch/pull/123243
+
+    # Override the arch list for flash-attn to reduce the binary size
+    ARG vllm_fa_cmake_gpu_arches='80-real;90-real'
+    ENV VLLM_FA_CMAKE_GPU_ARCHES=${vllm_fa_cmake_gpu_arches}
+    #################### BASE BUILD IMAGE ####################
+
+    #################### WHEEL BUILD IMAGE ####################
+    FROM base AS build
+    ARG TARGETPLATFORM
+
+    # This timeout (in seconds) is necessary when installing some dependencies via uv since it's likely to time out
+    # Reference: https://github.com/astral-sh/uv/pull/1694
+    ENV UV_HTTP_TIMEOUT=500
+
+    COPY . .
+
+    RUN python3 use_existing_torch.py
+
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        uv pip install --system -r requirements/build.txt
+
+    ARG GIT_REPO_CHECK=0
+    RUN --mount=type=bind,source=.git,target=.git \
+        if [ "$GIT_REPO_CHECK" != "0" ]; then bash tools/check_repo.sh ; fi
+
+    # Max jobs used by Ninja to build extensions
+    ARG max_jobs=16
+    ENV MAX_JOBS=${max_jobs}
+    ARG nvcc_threads=2
+    ENV NVCC_THREADS=$nvcc_threads
+
+    ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
+    ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
+
+    ARG USE_SCCACHE
+    ARG SCCACHE_BUCKET_NAME=vllm-build-sccache
+    ARG SCCACHE_REGION_NAME=us-west-2
+    ARG SCCACHE_S3_NO_CREDENTIALS=0
+
+    # if USE_SCCACHE is set, use sccache to speed up compilation
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        --mount=type=bind,source=.git,target=.git \
+        if [ "$USE_SCCACHE" = "1" ]; then \
+            echo "Installing sccache..." \
+            && curl -L -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz \
+            && tar -xzf sccache.tar.gz \
+            && sudo mv sccache-v0.8.1-x86_64-unknown-linux-musl/sccache /usr/bin/sccache \
+            && rm -rf sccache.tar.gz sccache-v0.8.1-x86_64-unknown-linux-musl \
+            && export SCCACHE_BUCKET=${SCCACHE_BUCKET_NAME} \
+            && export SCCACHE_REGION=${SCCACHE_REGION_NAME} \
+            && export SCCACHE_S3_NO_CREDENTIALS=${SCCACHE_S3_NO_CREDENTIALS} \
+            && export SCCACHE_IDLE_TIMEOUT=0 \
+            && export CMAKE_BUILD_TYPE=Release \
+            && sccache --show-stats \
+            && python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38 \
+            && sccache --show-stats; \
+        fi
+
+    ENV CCACHE_DIR=/root/.cache/ccache
+    RUN --mount=type=cache,target=/root/.cache/ccache \
+        --mount=type=cache,target=/root/.cache/uv \
+        --mount=type=bind,source=.git,target=.git  \
+        if [ "$USE_SCCACHE" != "1" ]; then \
+            # Clean any existing CMake artifacts
+            rm -rf .deps && \
+            mkdir -p .deps && \
+            python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38; \
+        fi
+
+    #################### WHEEL BUILD IMAGE ####################
+
+    ################### VLLM INSTALLED IMAGE ####################
+    # Setup clean environment for vLLM and its dependencies for test and api server using ubuntu22.04 with AOT flashinfer
+    FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS vllm-base
+    # prepare for environment starts
+    ARG CUDA_VERSION=12.8.0
+    ARG PYTHON_VERSION=3.12
+    WORKDIR /vllm-workspace
+    ENV DEBIAN_FRONTEND=noninteractive
+    ARG TARGETPLATFORM
+
+    RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
+        echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
+
+    # Install Python and other dependencies
+    RUN echo 'tzdata tzdata/Areas select America' | debconf-set-selections \
+        && echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections \
+        && apt-get update -y \
+        && apt-get install -y ccache software-properties-common git curl wget sudo vim python3-pip \
+        && apt-get install -y ffmpeg libsm6 libxext6 libgl1 \
+        && for i in 1 2 3; do \
+            add-apt-repository -y ppa:deadsnakes/ppa && break || \
+            { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
+        done \
+        && apt-get update -y \
+        && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv libibverbs-dev \
+        && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
+        && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
+        && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
+        && curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
+        && python3 --version && python3 -m pip --version
+
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        python3 -m pip install uv
+
+    # This timeout (in seconds) is necessary when installing some dependencies via uv since it's likely to time out
+    # Reference: https://github.com/astral-sh/uv/pull/1694
+    ENV UV_HTTP_TIMEOUT=500
+
+    # Workaround for https://github.com/openai/triton/issues/2507 and
+    # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
+    # this won't be needed for future versions of this docker image
+    # or future versions of triton.
+    RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
+
+    # get the nightly torch version used in the build to make sure the version is the same
+    COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
+
+
+    # default mount file as placeholder, this just avoid the mount error
+    # change to a different vllm folder if this does not exist anymore
+    ARG TORCH_WHEELS_PATH="./requirements"
+
+
+    RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
+        --mount=type=cache,target=/root/.cache/uv \
+
+        if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/pytorch*.whl >/dev/null 2>&1; then \
+            echo "[INFO] Reinstalling torch from host wheel"; \
+            uv pip install --system /torch_wheels/pytorch*.whl; \
+            echo "[INFO] Installing torchvision/torchaudio from torch_build_versions.txt"; \
+            grep -i '^torchvision\|^torchaudio' /torch_build_versions.txt | xargs uv pip install --system --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        else \
+            echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
+            uv pip install --system $(cat /torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        fi
+
+    # install the vllm wheel
+    RUN --mount=type=bind,from=build,src=/workspace/dist,target=/vllm-workspace/vllm-dist \
+        --mount=type=cache,target=/root/.cache/uv \
+        uv pip install --system vllm-dist/*.whl --verbose
+
+    # install xformers again for the new environment
+    RUN --mount=type=bind,from=base,src=/workspace/xformers-dist,target=/vllm-workspace/xformers-dist \
+        --mount=type=cache,target=/root/.cache/uv \
+        uv pip install --system /vllm-workspace/xformers-dist/*.whl --verbose
+
+    ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
+    ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
+
+
+    # install package for build flashinfer
+    # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
+    RUN pip install setuptools==75.6.0 packaging==23.2 ninja==1.11.1.3 build==1.2.2.post1
+
+
+    # build flashinfer for torch nightly from source around 10 mins
+    # release version: v0.2.2.post1
+    # todo(elainewy): cache flashinfer build result for faster build
+    ENV CCACHE_DIR=/root/.cache/ccache
+    RUN --mount=type=cache,target=/root/.cache/ccache \
+        --mount=type=cache,target=/root/.cache/uv \
+        echo "git clone flashinfer..." \
+        && git clone --recursive https://github.com/flashinfer-ai/flashinfer.git \
+        && cd flashinfer \
+        && git checkout v0.2.2.post1 \
+        && git submodule update --init --recursive \
+        && echo "finish git clone flashinfer..." \
+        && rm -rf build \
+        && export TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list} \
+        && FLASHINFER_ENABLE_AOT=1 python3 setup.py bdist_wheel --dist-dir=../flashinfer-dist --verbose \
+        && cd .. \
+        && rm -rf flashinfer
+
+    # install flashinfer
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        uv pip install --system flashinfer-dist/*.whl --verbose
+
+    # install common packages
+    COPY requirements/common.txt requirements/common.txt
+    COPY use_existing_torch.py use_existing_torch.py
+    COPY pyproject.toml pyproject.toml
+
+    COPY examples examples
+    COPY benchmarks benchmarks
+    COPY ./vllm/collect_env.py .
+
+
+    RUN python3 use_existing_torch.py
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        uv pip install --system -r requirements/common.txt
+
+    #################### UNITTEST IMAGE #############################
+    FROM vllm-base as test
+    COPY tests/ tests/
+
+    # install build and runtime dependencies without stable torch version
+    COPY requirements/nightly_torch_test.txt requirements/nightly_torch_test.txt
+
+    # This timeout (in seconds) is necessary when installing some dependencies via uv since it's likely to time out
+    # Reference: https://github.com/astral-sh/uv/pull/1694
+    ENV UV_HTTP_TIMEOUT=500
+
+    # install development dependencies (for testing)
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        uv pip install --system -e tests/vllm_test_utils
+
+    # enable fast downloads from hf (for testing)
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        uv pip install --system hf_transfer
+    ENV HF_HUB_ENABLE_HF_TRANSFER 1
+
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        uv pip install --system -r requirements/nightly_torch_test.txt
+
+
+    # Logging to confirm the torch versions
+    RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'
+
+    # Logging to confirm all the packages are installed
+    RUN pip freeze
+
+    #################### UNITTEST IMAGE #############################
+
+    #################### EXPORT STAGE ####################
+    FROM scratch as export-wheels
+
+    # Just copy the wheels we prepared in previous stages
+    COPY --from=base /workspace/xformers-dist /wheels/xformers-dist
+    COPY --from=build /workspace/dist /wheels/vllm-dist
+    COPY --from=vllm-base /vllm-workspace/flashinfer-dist /wheels/flashinfer-dist
