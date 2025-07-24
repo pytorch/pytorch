@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 
 // Two warninngs in Cutlass included header files
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Werror=unused-but-set-variable")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
@@ -544,3 +545,4 @@ void f8f8bf16_grouped_mm(
 }
 
 } // namespace at::cuda::detail
+C10_DIAGNOSTIC_POP()
