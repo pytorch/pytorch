@@ -94,6 +94,18 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
+  {%- if branches == "main" and config["gpu_arch_type"] == "cuda" and config["gpu_arch_version"] == "12.8" %}
+  !{{ config["build_name"] }}-llvm-test:  # LLVM Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - !{{ config["build_name"] }}-build
+      - get-label-type
+   runs_on: linux.4xlarge
+   steps:
+     - name: Print Hello World
+       run: echo "Hello World"
+  {%- endif %}
+
   {%- if config["gpu_arch_type"] != "cuda-aarch64" %}
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}

@@ -176,7 +176,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
             arches=["12.6", "12.8", "12.9"],
-            python_versions=["3.9"],
+            python_versions=["3.12"],
         ),
         branches="main",
     ),
