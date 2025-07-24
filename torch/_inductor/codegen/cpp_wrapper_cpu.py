@@ -21,7 +21,7 @@ from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, Sy
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import config, ir
+from .. import config, cpp_builder, ir
 from ..utils import (
     _align,
     aoti_model_name_from_config,
@@ -119,7 +119,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # e.g. const double** is possible, but not const double* const*.  This means
         # that an array containing pointers must _already_ be properly const-qualified
         # by the c_type, and not add additional const-ness.
-        ptr_call = "data()" if force_mutable or c_type.endswith("*") else "cbegin()"
+        # MSVC does not support implicitly converting a const iterator to a const pointer.
+        ptr_call = (
+            "data()"
+            if force_mutable or c_type.endswith("*") or cpp_builder.is_msvc_cl()
+            else "cbegin()"
+        )
         return (
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
@@ -630,10 +635,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
-                    # Weights are stored in constants_ and owned by RAIIAtenTensorHandle there.
+                    # Weights are stored in constants_ and owned by ConstantHandle there.
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     self.prefix.writeline(
-                        f"""[[maybe_unused]] auto {constants_key} = constants_->at({idx});"""
+                        f"""[[maybe_unused]] auto& {constants_key} = constants_->at({idx});"""
                     )
                 else:
                     # Append constants as inputs to the graph
@@ -1595,13 +1600,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             dtype_code,
             device_type,
             device_idx,
-            str(int(is_pinned)),
             f"&{handle_name}",
         ]
 
         self.wrapper_call.writeline(f"AtenTensorHandle {handle_name};")
+        pinned_str = "_pinned" if is_pinned else ""
         self.wrapper_call.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided{pinned_str}({', '.join(args)}));"
         )
 
         if allocation_size != size:

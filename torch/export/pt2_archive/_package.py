@@ -308,7 +308,7 @@ def _package_exported_programs(
         return
 
     if isinstance(exported_programs, ExportedProgram):
-        exported_programs = {"model", exported_programs}  # type: ignore[assignment]
+        exported_programs = {"model": exported_programs}
 
     assert isinstance(exported_programs, dict)
 
@@ -562,6 +562,8 @@ def load_pt2(
         A ``PT2ArchiveContents`` object which contains all the objects in the PT2.
     """
 
+    from torch._inductor.cpp_builder import normalize_path_separator
+
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.readable() and f.seekable())
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
@@ -600,6 +602,9 @@ def load_pt2(
                 file_end = file[
                     len(AOTINDUCTOR_DIR) :
                 ]  # remove data/aotinductor/ prefix
+                file_end = normalize_path_separator(
+                    file_end
+                )  # Win32 need normalize path before split.
                 model_name = file_end.split("/")[
                     0
                 ]  # split "model_name/...cpp" into "model_name"

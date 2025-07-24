@@ -619,13 +619,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             dtype_code,
             device_type,
             device_idx,
-            str(int(is_pinned)),
             f"&{name}_handle",
         ]
 
         self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
+        pinned_str = "_pinned" if is_pinned else ""
         self.wrapper_call.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided{pinned_str}({', '.join(args)}));"
         )
 
         return f"RAIIAtenTensorHandle {name}({name}_handle);"

@@ -536,8 +536,19 @@ def check_model(
         correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
+    # Allow assert_equal to be a custom function, instead of True or False, for
+    # cases where differences may not indicate incorrectness.
     if assert_equal:
-        self.assertEqual(
+        if callable(assert_equal):
+
+            def custom_assert_with_self(*args, **kwargs):
+                assert_equal(self, *args, **kwargs)
+
+            assert_equal_fn = custom_assert_with_self
+        else:
+            assert_equal_fn = self.assertEqual
+
+        assert_equal_fn(
             actual,
             correct,
             atol=atol,
@@ -546,6 +557,7 @@ def check_model(
             exact_dtype=exact_dtype,
         )
         # In case of input mutations, check that inputs are the same
+        # (This never uses a custom assert_equal fn.)
         self.assertEqual(
             ref_inputs,
             example_inputs,
@@ -13626,6 +13638,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 FileCheck().check("cpp_fused_add_0").run(code)
             self.assertEqual(refe_out, test_out)
 
+    def test_triton_kernel_bool_param(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        from torch.testing._internal.triton_utils import add_kernel_with_boolean_param
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                out = torch.zeros_like(x)
+                add_kernel_with_boolean_param[1,](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    out_ptr=out,
+                    n_elements=x.numel(),
+                    add_xy=True,
+                    BLOCK_SIZE=1,
+                )
+                return out
+
+        inputs = (torch.randn(4, device=self.device),)
+        self.common(Model(), inputs)
+
     @requires_gpu()
     @parametrize("use_cat", [True, False])
     def test_copy_non_blocking_is_pinned(self, use_cat):
@@ -13635,7 +13669,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             for a in a_list:
                 a_cpu = a.to(device="cpu", non_blocking=True)
-                a_to_cpu_event = torch.cuda.Event()
+                a_to_cpu_event = torch.Event()
                 a_to_cpu_event.record()
                 a_cpu_list.append(a_cpu)
                 a_to_cpu_event_list.append(a_to_cpu_event)
@@ -13656,7 +13690,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         with torch.profiler.profile(
             activities=[
-                torch.profiler.ProfilerActivity.CUDA,
+                getattr(torch.profiler.ProfilerActivity, GPU_TYPE.upper()),
             ],
         ) as p:
             outputs_compiled = f_compiled(inputs)
@@ -13668,6 +13702,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         profile_output = str(p.key_averages())
         print(profile_output)
         self.assertFalse("Pageable" in profile_output)
+>>>>>>> 2c2f9eb8c8d ([inductor] allocate non-blocking copy destinations in pinned memory (#155121))
 
 
 @dataclasses.dataclass
