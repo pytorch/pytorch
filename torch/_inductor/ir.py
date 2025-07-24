@@ -7540,7 +7540,9 @@ class FallbackKernel(ExternKernelAlloc):
     @classmethod
     def create(cls, kernel: _OpOverloads, *args: Any, **kwargs: Any) -> FallbackKernel:
         """Create an instance of FallbackKernel from an _OpOverloads"""
-        fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
+        fake_incorrect_kernels = (
+            aten._fused_moving_avg_obs_fq_helper_functional.default,
+        )
         if kernel not in fake_incorrect_kernels:
             context = cast(AbstractContextManager[None], V.graph.fake_mode)
         else:
