@@ -2,7 +2,7 @@
 
 Summary:
 - Graph breaks in nested functions can result in hard-to-understand compiler behavior, which we document below
-- A nested graph break results in $O(N)$ duplicate graph break behavior
+- A nested graph break results in {math}`\mathcal O(N)` duplicate graph break behavior
 
 Recall that when `torch.compile` is applied to a function, any nested function calls are also traced.
 A **nested graph break** refers to any graph break that happens in a nested function call.
@@ -186,6 +186,6 @@ In summary, nested graph breaks are handled by:
 - Calling the second-level function, which gets automatically compiled as a top-level function
 - Resuming tracing after the second-level function call
 
-Note that the runtime of handling this graph break is $O(NK)$, where $N$ is the nesting depth,
-and $K$ is the number of instructions from the top-level function to the graph break.
-We end up tracing $O(N^2)$ frames, and we trace the same graph break $O(N)$ times.
+Note that the runtime of handling this graph break is {math}`\mathcal O(NK)`, where {math}`N` is the nesting depth,
+and {math}`K` is the number of instructions from the top-level function to the graph break.
+We end up tracing {math}`\mathcal O(N^2)` frames, and we trace the same graph break {math}`\mathcal O(N)` times.
