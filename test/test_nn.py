@@ -9292,6 +9292,25 @@ class TestNNDeviceType(NNTestCase):
                 mod(x, y)
 
     @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_MarginLoss_race(self, device, dtype):
+        loss = torch.nn.MultiMarginLoss().to(device)
+        batch = 1
+        classes = 128
+        x = torch.randn(batch, classes, requires_grad=True, device=device, dtype=dtype)
+        y = torch.randint(low=0, high=classes, size=(batch,), device=device, dtype=torch.long)
+        x_cpu = x.detach().clone().cpu()
+        y_cpu = y.detach().clone().cpu()
+        out = loss(x, y)
+        out.backward()
+        x_cpu = x.detach().clone().cpu()
+        x_cpu.requires_grad = True
+        y_cpu = y.detach().clone().cpu()
+        out_cpu = loss.cpu()(x_cpu, y_cpu)
+        out_cpu.backward()
+        self.assertEqual(x_cpu.grad, x.grad.cpu())
+
+    @onlyCUDA
     def test_MarginLoss_warnings(self, device):
         model = torch.nn.Linear(128, 22, device=device)
         loss = torch.nn.MultiMarginLoss()
