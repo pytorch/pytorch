@@ -459,6 +459,11 @@ REGISTER_MAX_POOL_OP(bool);
 REGISTER_MAX_POOL_BACKWARD_OP(float);
 REGISTER_MAX_POOL_BACKWARD_OP(half);
 
+#if __METAL_VERSION__ >= 310
+REGISTER_MAX_POOL_OP(bfloat);
+REGISTER_MAX_POOL_BACKWARD_OP(bfloat);
+#endif
+
 #define REGISTER_AVG_POOL_OP(DTYPE)                                       \
   template [[host_name("avg_pool_" #DTYPE)]] kernel void avg_pool<DTYPE>( \
       constant DTYPE * input [[buffer(0)]],                               \
@@ -476,7 +481,5 @@ REGISTER_AVG_POOL_OP(uchar);
 REGISTER_AVG_POOL_OP(bool);
 
 #if __METAL_VERSION__ >= 310
-REGISTER_MAX_POOL_OP(bfloat);
-REGISTER_MAX_POOL_BACKWARD_OP(bfloat);
 REGISTER_AVG_POOL_OP(bfloat);
 #endif

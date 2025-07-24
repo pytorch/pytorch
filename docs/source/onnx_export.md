@@ -1,4 +1,4 @@
-# TorchDynamo-based ONNX Exporter
+# torch.export-based ONNX Exporter
 
 ```{eval-rst}
 .. automodule:: torch.onnx
@@ -12,16 +12,14 @@
 
 ## Overview
 
-The ONNX exporter leverages TorchDynamo engine to hook into Python's frame evaluation API
-and dynamically rewrite its bytecode into an FX Graph.
-The resulting FX Graph is then polished before it is finally translated into an ONNX graph.
+{ref}`torch.export <torch.export>` engine is leveraged to produce a traced graph representing only the Tensor computation of the function in an
+Ahead-of-Time (AOT) fashion. The resulting traced graph (1) produces normalized operators in the functional
+ATen operator set (as well as any user-specified custom operators), (2) has eliminated all Python control
+flow and data structures (with certain exceptions), and (3) records the set of shape constraints needed to
+show that this normalization and control-flow elimination is sound for future inputs, before it is finally
+translated into an ONNX graph.
 
-The main advantage of this approach is that the [FX graph](https://pytorch.org/docs/stable/fx.html) is captured using
-bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
-
-In addition, during the export process, memory usage is significantly reduced compared to the TorchScript-enabled exporter.
-See the {doc}`memory usage documentation <onnx_dynamo_memory_usage>` for more information.
-
+In addition, during the export process, memory usage is significantly reduced.
 
 ## Dependencies
 
@@ -113,16 +111,6 @@ The ONNX model may then be serialized into a [Protobuf file](https://protobuf.de
   onnx_program.save("mlp.onnx")
 ```
 
-## Use the same model to compare with the TorchScript-enabled exporter
-
-The biggest difference between the TorchScript-enabled exporter and the TorchDynamo-based exporter is that the latter
-requires dynamic_shapes to be the same tree structure as the input, while the former
-requires the dynamic_shapes to be a single and flatten dictionary.
-
-```{code-block} python
-  torch.onnx.export(model,(tensor_input, dict_input, list_input), "mlp.onnx", dynamic_axes={"tensor_input":{0: "batch_size"}, "tensor_x": {0: "batch_size"}, "list_input_index_0": {0: "batch_size"}}, input_names=input_names, output_names=output_names)
-```
-
 ## Inspecting the ONNX model using GUI
 
 You can view the exported model using [Netron](https://netron.app/).
@@ -139,10 +127,6 @@ Function {func}`torch.onnx.export` should be called a second time with
 parameter ``report=True``. A markdown report is generated to help the user
 to resolve the issue.
 
-```{toctree}
-:hidden:
-onnx_dynamo_memory_usage
-```
 ## Metadata
 
 During ONNX export, each ONNX node is annotated with metadata that helps trace its origin and context from the original PyTorch model. This metadata is useful for debugging, model inspection, and understanding the mapping between PyTorch and ONNX graphs.
@@ -258,7 +242,7 @@ Each initialized value, input, output has the following metadata:
 .. autofunction:: torch.onnx.export
 .. autoclass:: torch.onnx.ONNXProgram
     :members:
-.. autofunction:: is_in_onnx_export
+.. autofunction:: torch.onnx.is_in_onnx_export
 .. autoclass:: torch.onnx.OnnxExporterError
     :members:
 .. autofunction:: torch.onnx.enable_fake_mode
