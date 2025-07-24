@@ -111,16 +111,22 @@ def _maybe_compile_and_run_fn(fn, *args):
 
 
 def reenter_make_fx(fn):
+    from torch._guards import detect_fake_mode
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+    from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
     @functools.wraps(fn)
     def wrapped(*args):
         assert _CURRENT_MAKE_FX_TRACER is not None, (
             "Cannot reenter make_fx when we're not under a make_fx tracing session"
         )
-        return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+        gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args
         )
+        if (fake_mode := detect_fake_mode()) and fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(gm, fake_mode.shape_env, "reenter_make_fx")
+            gm.recompile()
+        return gm
 
     return wrapped
 
@@ -867,6 +873,9 @@ def check_input_alias_and_mutation_return_outputs(
             no_inference_mode_ctx = torch.inference_mode(False)
             ctx_stack.enter_context(new_fake_mode)
             ctx_stack.enter_context(no_inference_mode_ctx)
+            ctx_stack.enter_context(torch._C._DisableFuncTorch())
+            ctx_stack.enter_context(disable_functional_mode())
+            ctx_stack.enter_context(suspend_functionalization())
             if new_fake_mode.shape_env is not None:
                 ctx_stack.enter_context(
                     new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()
