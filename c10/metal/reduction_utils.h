@@ -16,6 +16,43 @@ inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_prod(T val) {
   return ::metal::simd_product(val);
 }
 
+// Floating simd_min/max with nan propagation
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline T simd_max(T val) {
+  if (::metal::simd_any(::metal::isnan(val))) {
+    return ::metal::numeric_limits<T>::quiet_NaN();
+  }
+  return ::metal::simd_max(val);
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline T simd_min(T val) {
+  if (::metal::simd_any(::metal::isnan(val))) {
+    return ::metal::numeric_limits<T>::quiet_NaN();
+  }
+  return ::metal::simd_min(val);
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T> && sizeof(T) != 8, bool> =
+        true>
+inline T simd_max(T val) {
+  return ::metal::simd_max(val);
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T> && sizeof(T) != 8, bool> =
+        true>
+inline T simd_min(T val) {
+  return ::metal::simd_min(val);
+}
+
 // Metal does not support SIMD reductions over 64-bit types, but it could be
 // implement using simd_shuffle_down, that yields result in log2(simdgroup_size)
 // iterations Use fill variant, as shuffle down returns garbage if inactive
@@ -36,6 +73,28 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_prod(T val) {
   for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
     val *= as_type<T>(
         ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
+  }
+  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
+}
+
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_max(T val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val = ::metal::max(
+        val,
+        as_type<T>(::metal::simd_shuffle_and_fill_down(
+            as_type<int2>(val), int2(0), i)));
+  }
+  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
+}
+
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_min(T val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val = ::metal::min(
+        val,
+        as_type<T>(::metal::simd_shuffle_and_fill_down(
+            as_type<int2>(val), int2(0), i)));
   }
   return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
 }
