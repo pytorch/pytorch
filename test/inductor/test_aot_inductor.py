@@ -1469,6 +1469,13 @@ class AOTInductorTestsTemplate:
 
     @skipIfNoFBGEMM
     def test_quantized_linear_bias_none(self):
+        if (config.freezing is None or config.freezing) and self.device != GPU_TYPE:
+            raise unittest.SkipTest(
+                "Freezing causes a failure within ATen/cpp_custom_type_hack.h::cast(), "
+                "which contains assertions about typical tensor deleters. This "
+                "function is deprecated, so no effort will be made to fix it."
+            )
+
         class Model(torch.nn.Module):
             def __init__(self, device):
                 super().__init__()
@@ -6829,17 +6836,14 @@ MPS_TEST_FAILURES = {
     "test_fp8_view_of_param": fail_mps(),
     # unsupported operator: aten._scaled_dot_product_attention_math_for_mps.default
     "test_issue_140766": fail_mps(),
-    # Compilation Error
+    # cannot initialize a parameter of type 'double' with an rvalue of type 'std::nullptr_t'
     "test_fallback_kernel_with_symexpr_output": fail_mps(),
-    "test_while_loop_with_mixed_device": fail_mps(),
+    # while-loop subgraph calls same kernel as outside. need to figure out how to
+    # either (1) tell outside to initialize a new kernel or (2) generate
+    # subgraph as a separate function, which would(?) cause (1) to happen automatically.
     "test_while_loop_nested": fail_mps(),
+    # correctness issue
     "test_index_put_with_none_index": fail_mps(),
-    "test_size_from_multi_ouptut": fail_mps(),
-    "test_simple_embed_kernel_binary_False": fail_mps(),
-    "test_simple_embed_cubin_False": fail_mps(is_skip=True),
-    "test_simple_embed_cubin_True": fail_mps(is_skip=True),
-    "test_simple_embed_kernel_binary_True": fail_mps(),
-    "test_missing_cubin": fail_mps(),
     # Dynamism
     "test_shifted_constraint_ranges": fail_mps(),
     "test_while_loop_with_sym_expr_cond_dynamic_True": fail_mps(),
