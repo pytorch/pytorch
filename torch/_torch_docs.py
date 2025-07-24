@@ -5019,6 +5019,60 @@ Alias for :func:`torch.gt`.
 )
 
 add_docstr(
+    torch.hash_tensor,
+    r"""
+hash_tensor(input, *, mode=0) -> Tensor
+
+Returns a hash of all elements in the :attr:`input` tensor.
+
+Currently only mode=0 (reduction via xor) is supported. The output will always
+be of type ``torch.uint64``. The elements of ``input`` are upcasted to their
+64 bit float / integer equivalent and bitcasted to ``torch.uint64`` before
+reduction via xor.
+
+Args:
+    {input}
+
+Keyword Args:
+    mode (int) : The hash to use. Default: 0 (xor_reduction)
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[ 1.1918, -1.1813,  0.3373]])
+    >>> torch.hash_tensor(a)
+    tensor(13822780554648485888, dtype=torch.uint64)
+
+.. function:: hash_tensor(input, dim, *, keepdim=False, mode=0) -> Tensor
+   :noindex:
+
+Returns the hash of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim` given by mode. If :attr:`dim` is a list of dimensions,
+reduce over all of them.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
+
+Keyword Args:
+    mode (int) : The hash to use. Default: 0 (xor_reduction)
+
+Example::
+
+    >>> a = torch.randn(2, 4)
+    >>> a
+    tensor([[ 0.1317, -0.5554, -1.4724, -1.1391],
+            [ 0.0778, -0.6070,  0.6375,  0.1798]])
+    >>> torch.hash_tensor(a, 1)
+    tensor([9233691267014066176, 9255993250844508160], dtype=torch.uint64)
+""".format(**multi_dim_common),
+)
+
+add_docstr(
     torch.histc,
     r"""
 histc(input, bins=100, min=0, max=0, *, out=None) -> Tensor
@@ -5128,7 +5182,7 @@ For each N-dimensional point in input:
 If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the N sequences
 of bin edges. Each 1D tensor should contain a strictly increasing sequence with at
 least one element. A sequence of K bin edges defines K-1 bins, explicitly specifying
-the left and right edges of all bins. Every bin is exclusive of its left edge. Only
+the left and right edges of all bins. Every bin is inclusive of its left edge. Only
 the rightmost bin is inclusive of its right edge.
 
 If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width bins
@@ -7605,7 +7659,7 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 
 Args:
     {input}
-    other (Tensor or Number) - the tensor or number to multiply input by.
+    other (Tensor or Number): the tensor or number to multiply input by.
 
 Keyword args:
     {out}
@@ -8948,7 +9002,7 @@ Args:
 Keyword args:
     {generator}
     {out}
-    dtype (`torch.dtype`, optional) - the desired data type of returned tensor. Default: if ``None``,
+    dtype (torch.dtype, optional): the desired data type of returned tensor. Default: if ``None``,
         this function returns a tensor with dtype ``torch.int64``.
     {layout}
     {device}
@@ -12137,6 +12191,12 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
     nondeterministic behavior from using the data as an input to an operation.
     Floating point and complex tensors are filled with NaN, and integer tensors
     are filled with the maximum value.
+
+    When ``torch.preserve_format`` is used:
+    If the input tensor is dense (i.e., non-overlapping strided),
+    its memory format (including strides) is retained.
+    Otherwise (e.g., a non-dense view like a stepped slice),
+    the output is converted to the dense format.
 
 Args:
     {input}
