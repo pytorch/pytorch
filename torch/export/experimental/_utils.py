@@ -184,9 +184,14 @@ def _get_make_file(package_name: str, model_names: list[str], cuda: bool) -> str
             "",
             "set(CMAKE_CXX_STANDARD 17)",
             "",
-            "find_package(Torch REQUIRED)",
         ]
     )
+
+    from torch._inductor.config import test_configs
+
+    if test_configs.use_libtorch:
+        ib.writeline("find_package(Torch REQUIRED)")
+
     if cuda:
         ib.writeline("find_package(CUDA REQUIRED)")
 
