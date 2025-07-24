@@ -480,6 +480,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         if config.functionalize_rng_ops:
             # Update example inputs for the fw_compiler
             fake_mode = detect_fake_mode()
+            assert fake_mode is not None
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             flat_args.extend([seed, offset])
             # We are not clearing flat_args here because
@@ -2156,7 +2157,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 )
 
                 if num_rng:
-                    nonlocal backward_state_position
+                    nonlocal backward_state_position, bwd_rng_states
                     curr_backward_iter = ctx._curr_iter
                     retain_graph = (
                         torch._C._autograd._get_current_graph_task_keep_graph()

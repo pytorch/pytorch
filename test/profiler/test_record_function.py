@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: profiler"]
 # ruff: noqa: F841
 
-
 from typing import Any
 
 import torch

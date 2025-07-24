@@ -376,6 +376,7 @@ def _inject_property(module: Module, tensor_name: str) -> None:
 
     @torch.jit.unused
     def get_cached_parametrization(parametrization) -> Tensor:
+        global _cache
         key = (id(module), tensor_name)
         tensor = _cache.get(key)
         if tensor is None:

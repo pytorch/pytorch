@@ -243,7 +243,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         counter = CompileCounter()
 
         def capturing_fn(gm, inputs):
-            nonlocal gms  # noqa: F824
+            nonlocal gms
             gms.append(gm)
             return counter(gm, inputs)
 
@@ -1480,7 +1480,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         guard_failure = []
 
         def guard_fail_fn(failure):
-            nonlocal guard_failure  # noqa: F824
+            nonlocal guard_failure
             guard_failure.append(failure[0])
 
         input = torch.ones(20)

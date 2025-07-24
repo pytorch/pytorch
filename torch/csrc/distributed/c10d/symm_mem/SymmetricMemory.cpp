@@ -343,6 +343,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name) -> Tensor(a!)");
   m.def(
       "all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name, int? major_align=None) -> Tensor(a!)");
+  m.def(
+      "all_to_all_vdev_2d_offset(Tensor input, Tensor(a!) out, Tensor in_splits_offsets, Tensor(a!) out_splits_offsets, str group_name) -> Tensor(a!)");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

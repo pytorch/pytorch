@@ -46,4 +46,11 @@ at::Tensor all_to_all_vdev_2d(
     std::string group_name,
     std::optional<int64_t> major_align = std::nullopt);
 
+at::Tensor all_to_all_vdev_2d_offset(
+    at::Tensor& input,
+    at::Tensor& out,
+    at::Tensor& in_splits_offsets,
+    at::Tensor& out_splits_offsets,
+    std::string group_name);
+
 } // namespace c10d::nvshmem_extension

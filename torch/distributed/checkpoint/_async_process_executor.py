@@ -263,6 +263,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
     ) -> Metadata:
+        global _CHECKPOINT_PROCESS
         if _CHECKPOINT_PROCESS is None:
             assert pg_init_info is not None
             ckpt_kwargs = {}
@@ -313,6 +314,8 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         - Process initialization can have significant overhead, dominated by latency for all ranks to spawn
         a background process + process group initialization in the background process.
         """
+
+        global _CHECKPOINT_PROCESS
         pg_init_info: Optional[_ProcessGroupInitInfo] = None
         if _CHECKPOINT_PROCESS is None:
             # Find a free port on coordinator rank and broadcast

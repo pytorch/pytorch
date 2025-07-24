@@ -229,6 +229,8 @@ def _large_cumprod_input(shape, dim, dtype, device):
 
 
 def define_custom_op_for_test(id_, fn, fn_meta, tags=()):
+    global libtest
+    global ids
     if id_ not in ids:
         libtest.define(f"{id_}(Tensor self) -> Tensor", tags=tags)
         libtest.impl(id_, fn, "CPU")
@@ -240,6 +242,8 @@ def define_custom_op_for_test(id_, fn, fn_meta, tags=()):
 
 
 def define_custom_op_2_for_test(id_, fn, fn_meta, tags=()):
+    global libtest
+    global ids
     if id_ not in ids:
         libtest.define(
             f"{id_}(Tensor self, float scale) -> (Tensor, Tensor)", tags=tags
@@ -253,6 +257,8 @@ def define_custom_op_2_for_test(id_, fn, fn_meta, tags=()):
 
 
 def define_custom_op_3_for_test(id_, fn, fn_meta, tags=()):
+    global libtest
+    global ids
     if id_ not in ids:
         libtest.define(f"{id_}(Tensor[] x) -> Tensor", tags=tags)
         libtest.impl(id_, fn, "CPU")
@@ -530,8 +536,19 @@ def check_model(
         correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
+    # Allow assert_equal to be a custom function, instead of True or False, for
+    # cases where differences may not indicate incorrectness.
     if assert_equal:
-        self.assertEqual(
+        if callable(assert_equal):
+
+            def custom_assert_with_self(*args, **kwargs):
+                assert_equal(self, *args, **kwargs)
+
+            assert_equal_fn = custom_assert_with_self
+        else:
+            assert_equal_fn = self.assertEqual
+
+        assert_equal_fn(
             actual,
             correct,
             atol=atol,
@@ -540,6 +557,7 @@ def check_model(
             exact_dtype=exact_dtype,
         )
         # In case of input mutations, check that inputs are the same
+        # (This never uses a custom assert_equal fn.)
         self.assertEqual(
             ref_inputs,
             example_inputs,
@@ -10343,6 +10361,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                         kwargs = kwargs if kwargs else {}
 
+                        nonlocal inps
+                        nonlocal inp_refs
+                        nonlocal test_self
                         nonlocal matmul_seen
 
                         # by matmul, inputs should be deallocated
@@ -11774,6 +11795,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         failed_guards = []
 
         def fail(guard):
+            nonlocal failed_guards
             failed_guards.append(guard)
 
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -13398,6 +13420,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                         kwargs = kwargs if kwargs else {}
 
+                        nonlocal inps
+                        nonlocal inp_refs
                         nonlocal matmul_seen
 
                         gc.collect()
@@ -13907,6 +13931,7 @@ if RUN_GPU:
 
             class LiveTensors(TorchDispatchMode):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                    nonlocal live_tensors
                     nonlocal max_live_tensors
 
                     kwargs = kwargs if kwargs else {}
