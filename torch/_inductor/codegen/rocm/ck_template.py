@@ -21,8 +21,10 @@ class CKTemplate(ROCmTemplate):
         torch.bfloat16: "BF16",
         torch.int32: "I32",
         torch.int8: "I8",
-        torch.float8_e4m3fnuz: "F8",
-        torch.float8_e5m2fnuz: "BF8",
+        torch.float8_e4m3fnuz: "F8",  # gfx94
+        torch.float8_e4m3fn: "F8",  # gfx95
+        torch.float8_e5m2fnuz: "BF8",  # gfx94
+        torch.float8_e5m2: "BF8",  # gfx95
     }
 
     def header(self) -> IndentedBuffer:
@@ -48,6 +50,11 @@ class CKTemplate(ROCmTemplate):
                 #include "ck/library/utility/host_tensor.hpp"
                 #include "ck/library/utility/host_tensor_generator.hpp"
                 #include "ck/library/utility/literals.hpp"
+
+                namespace at
+                {
+                  using Float8_e4m3fn = void;
+                }
             """
         )
         return res
