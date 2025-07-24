@@ -945,6 +945,7 @@ def register_autocast(
 def register_fake(
     op: _op_identifier,
     func: Optional[Callable] = None,
+    /,
     *,
     lib: Optional[Library] = None,
     _stacklevel: int = 1,
