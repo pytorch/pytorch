@@ -628,7 +628,33 @@ def _get_optimization_cflags(
             # `-march=native` is unrecognized option on M1
             if not config.is_fbcode():
                 if platform.machine() == "ppc64le":
-                    cflags.append("mcpu=native")
+                    try:
+                        with open("/proc/cpuinfo") as f:
+                            cpuinfo = f.read()
+                    except FileNotFoundError:
+                        # fallback to prtconf (useful for some AIX/Linux distros)
+                        try:
+                            cpuinfo = subprocess.check_output(
+                                [
+                                    "bash",
+                                    "-c",
+                                    "prtconf | grep 'Implementation' | head -n 1",
+                                ],
+                                text=True,
+                            )
+                        except subprocess.CalledProcessError:
+                            pass
+                    cpuinfo = cpuinfo.upper()
+                    match = re.search(r"POWER\s*([0-9]+)", cpuinfo)
+                    power_gen = 0
+                    if match:
+                        power_gen = int(match.group(1))
+                    if power_gen >= 10:
+                        cflags.append("mcpu=power10")
+                    elif power_gen == 9:
+                        cflags.append("mcpu=power9")
+                    else:
+                        cflags.append("mcpu=native")
                 else:
                     cflags.append("march=native")
 
