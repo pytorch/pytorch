@@ -36,6 +36,7 @@ from torch._export.utils import (
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.scan import scan
+from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
 from torch.export import (
@@ -931,7 +932,6 @@ graph():
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
-    @testing.expectedFailureCppSerDes  # Cpp Ser/Der seems to fail parsing complicated guards
     def test_export_statically_known_true(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -1587,9 +1587,6 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(m(*args), ep.module()(*args))
 
-    @testing.expectedFailureCppSerDes  #  AssertionError: 0 not in VR[2, int_oo]
-    @testing.expectedFailureSerDer  #  AssertionError: 0 not in VR[2, int_oo]
-    @testing.expectedFailureSerDerNonStrict  #  AssertionError: 0 not in VR[2, int_oo]
     def test_cond_access_identical_symint_closure(self):
         class Example2(torch.nn.Module):
             def forward(self, x, trigger, target):
@@ -1813,6 +1810,36 @@ class GraphModule(torch.nn.Module):
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_while_loop_tensor_constant_idx(self):
+        def while_loop_decomp(x, y0):
+            out = torch.zeros_like(x)
+
+            def cond_fn(idx, out, y0):
+                return idx < out.size(0)
+
+            def body_fn(idx, out, y0):
+                i = idx.item()
+                torch._check_is_size(i, max=x.size(0) - 1)
+                y0 = x[i] + y0
+                out = out.clone()
+                out[i] = y0
+                return idx + 1, out, y0
+
+            cnt = torch.tensor(0)
+            _, out, _ = while_loop(cond_fn, body_fn, [cnt, out, y0])
+            return out
+
+        class TestModel(torch.nn.Module):
+            def forward(self, x, y0):
+                return while_loop_decomp(x, y0)
+
+        x, y0 = torch.randn(16, 8), torch.randn(8)
+        exp_out = TestModel()(x, y0)
+        ep = export(TestModel(), (x, y0))
+        out = ep.module()(x, y0)
+        self.assertEqual(exp_out, out)
+
     def test_malformed_fqn_from_source_name(self):
         # See https://github.com/pytorch/pytorch/issues/141939
         from types import MethodType
@@ -1871,7 +1898,7 @@ class GraphModule(torch.nn.Module):
         for problem in [Problem1, Problem2]:
             m = problem()
             m(torch.rand(64, 64))
-            # simpified torch.distributed.pipeline code
+            # simplified torch.distributed.pipeline code
             annotate_split_points(m, {"blocks.1": 1, "blocks.3": 1})
             gm = export(m, (torch.rand(64, 64),))
             torch.export.unflatten(gm)
@@ -5051,7 +5078,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    @testing.expectedFailureCppSerDes  # cpp Ser/Der not handling complicated symbols
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 
@@ -7600,6 +7626,69 @@ def forward(self, x):
             ]:
                 self.assertFalse(hasattr(tensor, attr))
 
+    @testing.expectedFailureCppRuntime
+    def test_while_loop_index_assertions(self):
+        from torch._higher_order_ops import while_loop
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                def cond_fn(idx, acc):
+                    i = idx.item()
+                    return i < x.size(0)
+
+                def body_fn(idx, acc):
+                    # this check_is_size call needs to be traced by this subgraph for the select call,
+                    # it can't be in the cond graph, as that fires & fails right before loop termination.
+                    i = idx.item()
+                    torch._check_is_size(i, max=x.size(0) - 1)
+                    return idx + 1, acc + x[i]
+
+                acc = torch.zeros(x.size(1))
+                n = torch.full((), 0, dtype=torch.int64)
+                _, out = while_loop(cond_fn, body_fn, [n, acc])
+                return out
+
+        x = torch.randn(8, 4)
+        ep = export(Foo(), (x,), strict=False)
+        self.assertTrue(torch.allclose(x.sum(dim=0), ep.module()(x)))
+
+    @testing.expectedFailureCppRuntime
+    def test_while_loop_assert_separation(self):
+        from torch._higher_order_ops import while_loop
+
+        class Bar(torch.nn.Module):
+            def forward(self, idx, x):
+                i = idx.item()
+
+                def cond_fn(idx, x):
+                    i = idx.item()
+                    torch._check(i != 5)
+                    return i <= 9
+
+                def body_fn(idx, x):
+                    i = idx.item()
+                    torch._check(i % 2 == 0)
+                    return idx + 2, x + i
+
+                return while_loop(cond_fn, body_fn, [idx, x + i])
+
+        inps = (torch.tensor([0]), torch.zeros(1))
+        ep = export(Bar(), inps, strict=False)
+        i, out = ep.module()(*inps)
+        self.assertEqual(i, 10)
+        self.assertEqual(out.item(), 20)
+
+        # check assertions are separate for each subgraph
+        with self.assertRaisesRegex(
+            RuntimeError, r"Runtime assertion failed for expression Ne\(u[\d]+, 5\).*"
+        ):
+            ep.graph_module.while_loop_cond_graph_0(torch.tensor([5]), torch.zeros(1))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Eq\(PythonMod\(u[\d]+, 2\), 0\).*",
+        ):
+            ep.graph_module.while_loop_body_graph_0(torch.tensor([5]), torch.zeros(1))
+
     def test_constrain_decomp(self) -> None:
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -8096,7 +8185,7 @@ def forward(self, x):
             str(schema),
             """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1]""",
         )
-        # serdes deserailizes tuple as list
+        # serdes deserializes tuple as list
         if need_serdes_test(self._testMethodName):
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
@@ -8782,10 +8871,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
-    # TODO(pianpwk) blocker: https://github.com/pytorch/pytorch/issues/151809
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureCppSerDes
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -9232,7 +9317,7 @@ graph():
             x = torch.rand(5, 2, 2)
             model = Model()
 
-        # Manualy set the fake_device of fake tensors.
+        # Manually set the fake_device of fake tensors.
         x.fake_device = torch.device("cuda:0")
         for n, p in model.named_parameters():
             p.fake_device = torch.device("cuda:0")
@@ -13535,9 +13620,6 @@ graph():
         ):
             ep.module()(torch.randn(10), torch.tensor(2))
 
-    @testing.expectedFailureCppSerDes  # TODO: When we deserialize we somehow hardcode sympy.lower to 2
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureSerDer
     @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_baddbmm(self):
         class M(torch.nn.Module):
@@ -13562,7 +13644,7 @@ graph():
         self.assertTrue(torch.allclose(m(x2), ep.module()(x2)))
         self.assertTrue(torch.allclose(m(x1), ep.module()(x1)))
 
-    @testing.expectedFailureSerDerNonStrict  # construtor is not serialized today
+    @testing.expectedFailureSerDerNonStrict  # constructor is not serialized today
     @testing.expectedFailureSerDer  # constructor is not serialized today
     @testing.expectedFailureRetraceability  # dynamo doesn't work with FlatApply op
     def test_capture_subclass_constructor(self):
