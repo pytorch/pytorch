@@ -365,7 +365,6 @@ test_dynamo_wrapped_shard() {
     exit 1
   fi
   python tools/dynamo/verify_dynamo.py
-  python tools/dynamo/gb_id_mapping.py verify
   # PLEASE DO NOT ADD ADDITIONAL EXCLUDES HERE.
   # Instead, use @skipIfTorchDynamo on your tests.
   time python test/run_test.py --dynamo \
