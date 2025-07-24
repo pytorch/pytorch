@@ -87,10 +87,10 @@ EOF
     if [[ $(ver $ROCM_VERSION) -ge $(ver 6.4) ]] && [[ $(ver $ROCM_VERSION) -lt $(ver 7.0) ]]; then
         if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.2) ]]; then
             HIP_TAG=rocm-6.4.2
-            CLR_HASH=5fa01f2547f2f022692576867780e10b4511bdac  # branch release/rocm-rel-6.4.2-statco-hotfix
+            CLR_HASH=74d78ba3ac4bac235d02bcb48511c30b5cfdd457  # branch release/rocm-rel-6.4.2-statco-hotfix
         elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
             HIP_TAG=rocm-6.4.1
-            CLR_HASH=606bc820b4b1f315d135da02a1f0b176ca50a92c  # branch release/rocm-rel-6.4.1-statco-hotfix
+            CLR_HASH=efe6c35790b9206923bfeed1209902feff37f386  # branch release/rocm-rel-6.4.1-statco-hotfix
         elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
             HIP_TAG=rocm-6.4.0
             CLR_HASH=600f5b0d2baed94d5121e2174a9de0851b040b0c  # branch release/rocm-rel-6.4-statco-hotfix
