@@ -863,7 +863,6 @@ if torch.backends.mps.is_available():
             "round": [torch.float16],
             # topk fails with duplicate indices
             "topk": [torch.float16],
-            "nn.functional.avg_pool3d": [torch.float32],
         }
 
         MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
