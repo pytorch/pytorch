@@ -3205,6 +3205,13 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
     )
 
 
+def is_using_cudagraph_partition() -> bool:
+    return (
+        torch._inductor.config.triton.cudagraphs
+        and torch._inductor.config.graph_partition
+    )
+
+
 def dtype_from_size(size: int) -> torch.dtype:
     from .virtualized import V
 
@@ -3250,12 +3257,12 @@ def tabulate_2d(elements: Sequence[Sequence[T]], headers: Sequence[T]) -> str:
         for i, e in enumerate(row):
             widths[i] = max(widths[i], len(str(e)))
     lines = []
-    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))
+    lines.append("|".join(f" {h:OrderedSet([w])} " for h, w in zip(headers, widths)))
     #              widths          whitespace      horizontal separators
     total_width = sum(widths) + (len(widths) * 2) + (len(widths) - 1)
     lines.append("-" * total_width)
     for row in elements:
-        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))
+        lines.append("|".join(f" {e:OrderedSet([w])} " for e, w in zip(row, widths)))
     return "\n".join(lines)
 
 
