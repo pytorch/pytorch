@@ -96,7 +96,7 @@ def fuse_as_graphmodule(
     gm: GraphModule,
     nodes: NodeList,
     module_name: str,
-    partition_lookup_table: _Optional[dict[Node, None]] = None,
+    partition_lookup_table: _Optional[dict[Node, _Optional[int]]] = None,
     *,
     always_return_tuple: bool = False,
 ) -> tuple[GraphModule, tuple[Node, ...], tuple[Node, ...]]:
