@@ -8088,6 +8088,7 @@ FORWARD_SKIPS_AND_XFAILS = [
             "std.unbiased",
             "var",
             "var.unbiased",
+            "hash_tensor",
         },
         name="not_implemented",
     ),
