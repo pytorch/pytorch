@@ -2958,8 +2958,7 @@ class GuardManager {
         if (!register_weakref_callback(value)) {
           // something bad happened, disable the dict tag optimization
           throw std::runtime_error(
-              "Could not register a callback for recursive dict tag
-              optimization");
+              "Could not register a callback for recursive dict tag optimization");
         }
       }
     }
