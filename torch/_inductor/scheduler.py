@@ -2151,6 +2151,23 @@ class Scheduler:
                 OrderedSet(V.graph.get_output_names()),
             )
         if config.reorder_for_compute_comm_overlap:
+            from torch._logging import trace_structured
+
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "scheduler_nodes_before_comm_overlap",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: "\n\n".join(
+                    [
+                        f"snode[{i}]"
+                        + n.debug_str()
+                        + f" buffer_names:{n.get_buffer_names()}"
+                        for i, n in enumerate(self.nodes)
+                    ]
+                ),
+            )
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
 
@@ -3503,15 +3520,12 @@ class Scheduler:
         return False
 
     def fusion_accumulate_large_reads(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, threshold: int
     ) -> bool:
         all_reads = (node1.read_writes.reads | node2.read_writes.reads) - (
             node1.read_writes.writes | node2.read_writes.writes
         )
-        return (
-            sum(self.dep_size_hint(dep) for dep in all_reads)
-            > config.realize_acc_reads_size_threshold
-        )
+        return sum(self.dep_size_hint(dep) for dep in all_reads) > threshold
 
     def are_long_distant_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
