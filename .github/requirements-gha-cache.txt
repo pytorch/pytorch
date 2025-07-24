@@ -10,6 +10,6 @@ jinja2==3.1.6
 lintrunner==0.10.7
 ninja==1.10.0.post1
 nvidia-ml-py==11.525.84
-pyyaml==6.0.2
+pyyaml==6.0
 requests==2.32.4
-rich==14.0.0
+rich==10.9.0
