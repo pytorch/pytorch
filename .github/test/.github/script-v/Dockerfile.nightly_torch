@@ -126,7 +126,6 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     uv pip install --system torchvision torchaudio --no-deps --index-url https://download.pytorch.org/whl/nightly/cu128
 
 
-
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system numba==0.61.2
 
