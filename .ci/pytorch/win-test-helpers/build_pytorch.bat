@@ -42,6 +42,14 @@ SET CMAKE_INCLUDE_PATH=%PYTHON_PATH%\Library\include
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
+:: Install libuv
+curl -k https://s3.amazonaws.com/ossci-windows/libuv-1.40.0-h8ffe710_0.tar.bz2 -o libuv-1.40.0-h8ffe710_0.tar.bz2
+7z x -aoa libuv-1.40.0-h8ffe710_0.tar.bz2
+tar -xvf libuv-1.40.0-h8ffe710_0.tar -C %PYTHON_PATH%
+set libuv_ROOT=%PYTHON_PATH%\Library
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
+
 :: Override VS env here
 pushd .
 if "%VC_VERSION%" == "" (
