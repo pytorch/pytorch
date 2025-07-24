@@ -58,6 +58,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Reference: https://github.com/astral-sh/uv/pull/1694
 ENV UV_HTTP_TIMEOUT=500
 
+RUN apt-get update && \
+    apt-get install -y libopenblas-base libopenmpi-dev libcudnn9-cuda-12
+
+RUN apt-get -y install libcusparselt0 libcusparselt-dev
+
+RUN apt-get install -y libnvshmem3-cuda-12 libnvshmem3-dev-cuda-12
+
 RUN uv pip install --system \
   nvidia-cublas-cu12 \
   nvidia-cudnn-cu12 \
@@ -72,6 +79,11 @@ RUN uv pip install --system \
   nvidia-cuda-nvrtc-cu12 \
   nvidia-cuda-cupti-cu12 \
   nvidia-cufile-cu12
+
+RUN find /usr/local -name "libnccl.so*"
+
+ENV LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/nvshmem/12:$LD_LIBRARY_PATH"
+
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
@@ -94,6 +106,8 @@ RUN python3 use_existing_torch.py
 ARG TORCH_WHEELS_PATH="./requirements"
 ARG PINNED_TORCH_VERSION
 
+
+
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     --mount=type=cache,target=/root/.cache/uv \
     echo "[INFO] Listing /tmp/torch_wheels content:" && \
@@ -101,7 +115,9 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     echo "[INFO] Done listing" && \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/torch*.whl >/dev/null 2>&1; then \
         echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
-        uv pip install --system "/tmp/torch_wheels/torch*.whl[opt-einsum]"; \
+        torch_whl=$(find /tmp/torch_wheels -name 'torch*.whl' | head -n1 | xargs); \
+        echo "Found: '${torch_whl}'"; \
+        uv pip install --system "${torch_whl}[opt-einsum]"; \
     elif [ -n "$PINNED_TORCH_VERSION" ]; then \
         echo "[INFO] Installing pinned torch nightly version: $PINNED_TORCH_VERSION"; \
         uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
@@ -249,6 +265,7 @@ ARG TARGETPLATFORM
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 COPY --from=build /workspace/dist ./tmp/vllm-dist
 
+RUN cat torch_build_versions.txt
 
 RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
     echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment

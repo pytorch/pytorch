@@ -61,7 +61,7 @@ jobs:
     secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build-nighlty:
-    name: build-vllm
+    name: build-vllm-nightly
     uses: ./.github/workflows/_linux-vllm-build-nightly.yml
     needs: [
       get-label-type,
