@@ -6,7 +6,6 @@ file(GLOB_RECURSE SOURCE_FILES
 
 add_library(${LIBRARY_NAME} SHARED ${SOURCE_FILES})
 
-target_link_libraries(${LIBRARY_NAME} PRIVATE torch_python torch_openreg)
-target_link_directories(${LIBRARY_NAME} PRIVATE ${PYTORCH_INSTALL_DIR}/lib)
+target_link_libraries(${LIBRARY_NAME} PRIVATE torch torch_openreg)
 
 install(TARGETS ${LIBRARY_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})

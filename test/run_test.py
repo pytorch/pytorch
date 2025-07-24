@@ -28,7 +28,6 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
-    IS_LINUX,
     IS_MACOS,
     retry_shell,
     set_cwd,
