@@ -5,7 +5,21 @@ import torch.distributed._symmetric_memory as symm_mem
 
 
 class AllToAllVDev2d(torch.autograd.Function):
-    """Autograd function for `all_to_all_vdev_2d`"""
+    """
+    Autograd function for `all_to_all_vdev_2d`
+    Usage:
+        >>> # xdoctest: +SKIP("undefined vars")
+        >>> # Initialize
+        >>> AllToAllVDev2d.init(max_output_len)
+        >>> # Forward
+        >>> output, out_splits_offsets = AllToAllVDev2d.apply(
+        ...     input, input_splits, group_name, major_align
+        ... )
+        >>> # Backward
+        >>> s = output.sum()
+        >>> s.backward()
+        >>> print(input.grad)
+    """
 
     # Maximum output length (need to be set before use of AllToAllVDev2d)
     max_output_len: Optional[int] = None
