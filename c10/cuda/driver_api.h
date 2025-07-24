@@ -52,7 +52,10 @@
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)
 #define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
   _(cuCtxFromGreenCtx)                     \
-  _(cuCtxSetCurrent)                       \
+  _(cuCtxPopCurrent)                       \
+  _(cuCtxPushCurrent)                      \
+  _(cuGreenCtxCreate)                      \
+  _(cuGreenCtxDestroy)                     \
   _(cuDevSmResourceSplitByCount)           \
   _(cuDeviceGet)                           \
   _(cuDeviceGetDevResource)                \

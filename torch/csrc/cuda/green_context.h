@@ -56,9 +56,11 @@ public:
     // Implement move operations
     GreenContext(GreenContext&& other) noexcept 
         : green_ctx_(other.green_ctx_)
-        , context_(other.context_) {
+        , context_(other.context_)
+        , parent_stream_(other.parent_stream_) {
         other.green_ctx_ = nullptr;
         other.context_ = nullptr;
+        other.parent_stream_ = NULL;
     }
 
     GreenContext& operator=(GreenContext&& other) noexcept {
@@ -74,16 +76,18 @@ public:
             // Take ownership of other's resources
             green_ctx_ = other.green_ctx_;
             context_ = other.context_;
+            parent_stream_ = other.parent_stream_;
             
             // Null out other's pointers
             other.green_ctx_ = nullptr;
             other.context_ = nullptr;
+            other.parent_stream_ = NULL;
         }
         return *this;
     }
 
     ~GreenContext() noexcept {
-	C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuGreenCtxDestroy_(green_ctx_));
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuGreenCtxDestroy_(green_ctx_));
     }
 
     // Get the underlying CUDA context
@@ -94,16 +98,35 @@ public:
 
     // Make this context current
     void makeCurrent() {
-	auto current_stream = c10::cuda::getCurrentCUDAStream();
-	cudaEvent_t ev;
-	C10_CUDA_CHECK(cudaEventCreate(&ev));
-	C10_CUDA_CHECK(cudaEventRecord(ev, current_stream));
-        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxSetCurrent_(context_));
-	C10_CUDA_CHECK(cudaEventDestroy(ev));
-	// C10_CUDA_CHECK(cudaStreamWaitEvent(
+        auto current_stream = c10::cuda::getCurrentCUDAStream();
+        parent_stream_ = current_stream.stream();
+        cudaEvent_t ev;
+        C10_CUDA_CHECK(cudaEventCreate(&ev));
+        C10_CUDA_CHECK(cudaEventRecord(ev, current_stream));
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxPushCurrent_(context_));
+        // currently hardcoes the new green context to use the default stream
+        // TODO(eqy): consider creating a new stream if e.g., it allows interop
+        // with CUDA Graph captures etc.
+        C10_CUDA_CHECK(cudaStreamWaitEvent(NULL, ev, 0));
+        c10::cuda::setCurrentCUDAStream(c10::cuda::getDefaultCUDAStream());
+        C10_CUDA_CHECK(cudaEventDestroy(ev));
+        // C10_CUDA_CHECK(cudaStreamWaitEvent(
+    }
+
+    void popCurrent() {
+        // see above note about stream being hardcoded to the default stream
+        cudaEvent_t ev;
+        C10_CUDA_CHECK(cudaEventCreate(&ev));
+        C10_CUDA_CHECK(cudaEventRecord(ev, NULL));
+        CUcontext popped;
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxPopCurrent_(&popped));
+        TORCH_INTERNAL_ASSERT(popped == context_, "expected popped context to be the current ctx");
+        C10_CUDA_CHECK(cudaStreamWaitEvent(parent_stream_, ev, 0));
+        C10_CUDA_CHECK(cudaEventDestroy(ev));
     }
 
 private:
     CUgreenCtx green_ctx_ = nullptr;
     CUcontext context_ = nullptr;
+    cudaStream_t parent_stream_ = nullptr;
 };
