@@ -249,7 +249,7 @@ def erase_nodes(gm: GraphModule, nodes: NodeList) -> None:
 @compatibility(is_backward_compatible=False)
 def fuse_by_partitions(
     gm: GraphModule,
-    partitions: list[dict[Node, _Optional[None]]],
+    partitions: list[dict[Node, _Optional[int]]],
     prefix: str = "fused_",
     always_return_tuple: bool = False,
 ) -> GraphModule:
