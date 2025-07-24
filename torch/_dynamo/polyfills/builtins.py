@@ -70,7 +70,6 @@ def iter(iterable):  # type: ignore[no-untyped-def]
             i = 0
             while True:
                 try:
-                    # Can this execute user code?
                     yield iterable.__getitem__(i)
                     i += 1
                 except IndexError:
