@@ -10,21 +10,12 @@
 namespace at {
 
  /*
-  * ZeroTensor, use O(1) memory (tensors with a storage pointing to nullptr),
-  * are primarily used to represent undefined gradients in forward AD.
-  *
-  * ZeroTensors do not propagate nans or other extreme values. This is rooted in
-  * how the kernels are implemented for ZeroTensors. For example, ZT * (non-ZT) = ZT, i.e.,
-  * we don't check whether the non-ZT has nans for example.
-  *
   * Design:
-  *
   * 1. ZeroTensors are regular tensors with TensorOptions, a storage
   *    pointing to nullptr and a ZeroTensor dispatch key set.
   *
-  * 2. ZeroTensors are immutable.
-  *     - This is done to prevent data race in the case of multithreading
-  *       (when two threads try to read the same zero tensor and materialize it in-place).
+  * 2. ZeroTensors are immutable. This is done to prevent data race in the case of multithreading
+  *    (when two threads try to read the same zero tensor and materialize it in-place).
   *
   * 3. ZeroTensor has a boxed fallback that will be dispatched to any ops that don't
   *    have special ZeroTensor handling. This fallback materializes each ZeroTensor to
@@ -43,6 +34,10 @@ namespace at {
   *     - will never be required for ForwardMode AD.
   *       - This is because if all the tangents were undefined (efficient ZeroTensors),
   *         no computation will be performed (this is ensured via an existing pre-check).
+  *
+  * Today ZeroTensors are primarily used to represent undefined gradients in forward AD,
+  * it does not perfectly handle NaNs and Infs as we don't check the actual values
+  * and assume that they are non-zero, non-inf, non-NaN etc.
   */
   // ZeroTensors are designed to be immutable. Thus, we error out when an in-place operation is performed on ZeroTensors
   static void zeroTensorFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
