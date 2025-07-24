@@ -383,7 +383,7 @@ RUN pip freeze
 #################### UNITTEST IMAGE #############################
 
 #################### EXPORT STAGE ####################
-FROM test as export-wheels
+FROM scratch as export-wheels
 
 # Just copy the wheels we prepared in previous stages
 COPY --from=base /workspace/xformers-dist /wheels/xformers-dist

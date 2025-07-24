@@ -208,6 +208,17 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         ),
         branches="main",
     ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.LINUX,
+        package_type="manywheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+            OperatingSystem.LINUX,
+            arches=["12.8"],
+            python_versions=["3.12"],
+        ),
+        build_variant="vllm",
+        branches="main",
+    ),
 ]
 
 WINDOWS_BINARY_BUILD_WORKFLOWS = [
