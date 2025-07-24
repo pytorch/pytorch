@@ -532,7 +532,7 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
 
     for k, v in registry.items():
         if v and v[0].get("Gb_type") == gb_type:
-            return f"{GRAPH_BREAK_SITE_URL}gb{k}.html"
+            return f"{GRAPH_BREAK_SITE_URL}gb{k.lstrip('GB')}.html"
 
     return None
 
