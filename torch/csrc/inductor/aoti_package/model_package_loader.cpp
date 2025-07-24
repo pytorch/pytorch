@@ -53,13 +53,11 @@ std::string normalize_path_separator(const std::string& orig_path) {
   On Windows, when we input: "C:\Users\Test\file.txt", the output should be:
   "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
   */
-#ifdef _WIN32
   std::string normalized_path = orig_path;
+#ifdef _WIN32
   std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
-  return normalized_path;
-#else
-  return orig_path;
 #endif
+  return normalized_path;
 }
 
 bool file_exists(const std::string& path) {
@@ -548,32 +546,36 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         << found_filenames[1];
   }
 
-  temp_dir_ = create_temp_dir();
+  temp_dir_ = normalize_path_separator(create_temp_dir());
 
   std::string so_filename;
   std::string cpp_filename;
   std::vector<std::string> obj_filenames;
-  std::string model_directory = file_prefix + "data" + k_separator +
-      "aotinductor" + k_separator + model_name;
-  std::string const_directory =
-      file_prefix + "data" + k_separator + "constants";
+  std::string model_directory = normalize_path_separator(
+      file_prefix + "data" + k_separator + "aotinductor" + k_separator +
+      model_name);
+  std::string const_directory = normalize_path_separator(
+      file_prefix + "data" + k_separator + "constants");
 
-  for (const std::string& filename_str : found_filenames) {
+  // zip_filename_str can't be normalize_path_separator, because it should be
+  // as index for mz_zip_reader_extract_file_to_file.
+  for (auto const& zip_filename_str : found_filenames) {
+    auto cur_filename = normalize_path_separator(zip_filename_str);
     // Only compile files in the specified model directory
-    if (c10::starts_with(filename_str, model_directory) ||
-        c10::starts_with(filename_str, const_directory)) {
+    if (c10::starts_with(cur_filename, model_directory) ||
+        c10::starts_with(cur_filename, const_directory)) {
       std::string output_path_str = temp_dir_;
 
-      if (c10::starts_with(filename_str, model_directory)) {
+      if (c10::starts_with(cur_filename, model_directory)) {
         output_path_str += k_separator;
-        output_path_str += filename_str;
-      } else { // startsWith(filename_str, const_directory)
+        output_path_str += cur_filename;
+      } else { // startsWith(zip_filename_str, const_directory)
         // Extract constants to the same directory as the rest of the files
         // to be consistent with internal implementation
-        size_t lastSlash = filename_str.find_last_of(k_separator);
-        std::string filename = filename_str;
+        size_t lastSlash = cur_filename.find_last_of(k_separator);
+        std::string filename = cur_filename;
         if (lastSlash != std::string::npos) {
-          filename = filename_str.substr(lastSlash + 1);
+          filename = cur_filename.substr(lastSlash + 1);
         }
         output_path_str.append(k_separator)
             .append(model_directory)
@@ -581,16 +583,17 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             .append(filename);
       }
 
-      LOG(INFO) << "Extract file: " << filename_str << " to "
-                << output_path_str;
+      std::string output_file_path = normalize_path_separator(output_path_str);
+      LOG(INFO) << "Extract file: " << zip_filename_str << " to "
+                << output_file_path;
 
       // Create the parent directory if it doesn't exist
-      size_t parent_path_idx = output_path_str.find_last_of(k_separator);
+      size_t parent_path_idx = output_file_path.find_last_of(k_separator);
       if (parent_path_idx == std::string::npos) {
         throw std::runtime_error(
-            "Failed to find parent path in " + output_path_str);
+            "Failed to find parent path in " + output_file_path);
       }
-      std::string parent_path = output_path_str.substr(0, parent_path_idx);
+      std::string parent_path = output_file_path.substr(0, parent_path_idx);
       if (!recursive_mkdir(parent_path)) {
         throw std::runtime_error(fmt::format(
             "Failed to create directory {}: {}",
@@ -599,18 +602,18 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       }
 
       // Extracts file to the temp directory
-      zip_archive.extract_file(filename_str, output_path_str);
+      zip_archive.extract_file(zip_filename_str, output_path_str);
 
       // Save the file for bookkeeping
-      size_t extension_idx = output_path_str.find_last_of('.');
+      size_t extension_idx = output_file_path.find_last_of('.');
       if (extension_idx != std::string::npos) {
-        std::string filename_extension = output_path_str.substr(extension_idx);
+        std::string filename_extension = output_file_path.substr(extension_idx);
         if (filename_extension == ".cpp") {
-          cpp_filename = output_path_str;
+          cpp_filename = output_file_path;
         } else if (filename_extension == object_file_ext()) {
-          obj_filenames.push_back(output_path_str);
+          obj_filenames.push_back(output_file_path);
         } else if (filename_extension == extension_file_ext()) {
-          so_filename = output_path_str;
+          so_filename = output_file_path;
         }
       }
     }

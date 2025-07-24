@@ -94,6 +94,7 @@ from .exc import (
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
+from .polyfills import impl_CONTAINS_OP_fallback
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
@@ -2713,7 +2714,17 @@ class InstructionTranslatorBase(
         assert inst.argval == 0 or inst.argval == 1
         left, right = self.popn(2)
         op = inst.argval
-        self.push(right.call_method(self, "__contains__", [left], {}))
+        try:
+            self.push(right.call_method(self, "__contains__", [left], {}))
+        except Unsupported:  # object doesn't support __contains__
+            # Use __iter__ as fallback
+            self.push(
+                self.inline_user_function_return(
+                    VariableTracker.build(self, impl_CONTAINS_OP_fallback),
+                    [left, right],
+                    {},
+                )
+            )
         if op == 1:
             self.UNARY_NOT(inst)
 
