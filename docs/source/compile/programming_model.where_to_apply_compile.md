@@ -12,11 +12,11 @@ so consider applying `torch.compile` to the inner module passed to the wrapper.
 ```python
 # inference
 model = ...
-opt_model = torch.compile(model)
+model.compile()
 
 for _ in range(N_ITERS):
     inp = ...
-    out = opt_model(inp)
+    out = model(inp)
 ```
 
 ```python
@@ -40,8 +40,8 @@ for _ in range(N_ITERS):
 ```python
 # DistributedDataParallel
 model = ...
-opt_model = torch.compile(model)
-model_ddp = DistributedDataParallel(opt_model, ...)
+model.compile()
+model_ddp = DistributedDataParallel(model, ...)
 
 for _ in range(N_ITERS):
     inp = ...

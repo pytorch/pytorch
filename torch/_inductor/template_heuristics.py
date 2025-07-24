@@ -7,11 +7,16 @@ from functools import partial
 from threading import Lock
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
+import sympy
+
 import torch
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._triton import has_triton_stable_tma_api
 
-from . import config
-from .utils import get_backend_num_stages
+from . import config, config as inductor_config
+from .kernel_inputs import KernelInputs, MMKernelInputs
+from .template_registry import register_template_heuristic
+from .utils import get_backend_num_stages, get_num_sms, TMA_DESCRIPTOR_SIZE
 from .virtualized import V
 
 
@@ -467,7 +472,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         configs: list[BaseConfig],
         scale: float,
         has_int8_tensor: bool,
-        exclude: Callable[[int, int, int], bool],
+        exclude: Callable[[sympy.Integer, sympy.Integer, sympy.Integer], bool],
         hint_override: Optional[int] = None,
     ) -> list[BaseConfig]:
         """
@@ -568,9 +573,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         k: int,
         configs: list[BaseConfig],
         has_int8_tensor: bool = False,
-        scale: int = 1,
-        exclude: Callable[[int, int, int], bool] = lambda m, n, k: False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
         dtype_size: int = 0,
+        op_name: str = "mm",  # For preprocessing overrides e.g. on CPU
     ) -> Generator[TritonConfig, None, None]:
         scaled_configs = self._scale_mm_configs(
             m, n, k, configs, scale, has_int8_tensor, exclude
@@ -594,21 +602,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     def get_exhaustive_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.exhaustive_configs)
 
-    def get_extra_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        return partial(self.preprocess_mm_configs, configs=self.extra_mm_configs)
-
-    def get_int8_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        return partial(self.preprocess_mm_configs, configs=self.int8_mm_configs)
-
-    def get_mixed_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        mm_configs = (
-            self.mm_configs + self.mixed_mm_configs
-            if config.max_autotune_gemm_search_space == "EXHAUSTIVE"
-            else self.mm_configs
-        )
-        return partial(self.preprocess_mm_configs, configs=mm_configs)
-
     def get_persistent_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
+        # TODO(coconutruben): fold this into the normal get_mm_configs and get_exhaustive_mm_configs
+        # to just take in a filter callable
         persistent_mm_configs = (
             self.exhaustive_configs
             if config.max_autotune_gemm_search_space == "EXHAUSTIVE"
@@ -621,21 +617,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
         return partial(self.preprocess_mm_configs, configs=persistent_mm_configs)
 
-    def get_scaled_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        return partial(self.preprocess_mm_configs, configs=self.scaled_mm_configs)
-
-    def get_scaled_persistent_mm_configs(
-        self,
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        return partial(
-            self.preprocess_mm_configs, configs=self.scaled_persistent_mm_configs
-        )
-
-    def get_mm_plus_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        return partial(self._finalize_mm_configs, configs=self.mm_plus_mm_configs)
-
     def get_conv_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        return partial(self.preprocess_mm_configs, configs=self.conv_configs)
+        return partial(
+            self.preprocess_mm_configs, configs=self.conv_configs, op_name="conv"
+        )
 
     # Flex attn helpers
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
@@ -696,7 +681,80 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
 
 class CPUConfigHeuristic(BaseConfigHeuristic):
-    pass
+    """
+    CPU-specific config heuristic with CPU-specific optimizations.
+    """
+
+    def _get_cpu_exclude_function(
+        self, method: str = "bmm"
+    ) -> Callable[[sympy.Integer, sympy.Integer, sympy.Integer], bool]:
+        """
+        Get CPU-specific exclude function based on method type.
+        Returns a function that can be used as exclude condition.
+        Moved from mm_common._is_large_block_for_cpu and refactored to return a function.
+        """
+        if method in ("conv"):
+
+            def exclude_conv(
+                m: sympy.Integer, n: sympy.Integer, k: sympy.Integer
+            ) -> bool:
+                # Thresholds are experimentally determined to reduce Triton CPU compile times
+                if m > 256 or n > 256 or k > 256:
+                    return True
+                return m * n * k > 2**17
+
+            return exclude_conv
+        elif method in ("mm", "addmm", "int_mm"):
+
+            def exclude_mm(
+                m: sympy.Integer, n: sympy.Integer, k: sympy.Integer
+            ) -> bool:
+                return m * n > 2**13
+
+            return exclude_mm
+        else:  # Default to bmm implementation for unknown methods
+
+            def exclude_bmm(
+                m: sympy.Integer, n: sympy.Integer, k: sympy.Integer
+            ) -> bool:
+                if m > 128 or n > 128 or k > 128:
+                    return True
+                return m * n > 2**12
+
+            return exclude_bmm
+
+    def preprocess_mm_configs(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        configs: list[BaseConfig],
+        has_int8_tensor: bool = False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
+        dtype_size: int = 0,
+        op_name: str = "mm",
+    ) -> Generator[TritonConfig, None, None]:
+        """
+        CPU-specific preprocessing that applies CPU-specific scaling (0.5) and exclusion logic.
+        """
+        # Get CPU-specific exclude function based on operation type
+        cpu_exclude_fn = self._get_cpu_exclude_function(op_name)
+
+        # Apply CPU-specific scaling (0.5) and exclusion logic
+        return super().preprocess_mm_configs(
+            m,
+            n,
+            k,
+            configs,
+            has_int8_tensor,
+            scale=0.5,
+            exclude=cpu_exclude_fn,
+            dtype_size=dtype_size,
+            op_name=op_name,
+        )
 
 
 class CUDAConfigHeuristic(BaseConfigHeuristic):
@@ -1076,57 +1134,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     kwargs["GROUP_M"] = group_m
                 yield self.triton_config(**kwargs)
 
-    def get_extra_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        filtered_configs = self._filter_configs(
-            self.extra_mm_configs, self.default_num_stages
-        )
-        return partial(self.preprocess_mm_configs, configs=filtered_configs)
-
-    def get_int8_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        filtered_configs = self._filter_configs(
-            self.int8_mm_configs, self.default_num_stages
-        )
-        return partial(self.preprocess_mm_configs, configs=filtered_configs)
-
-    def get_mixed_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        mm_configs = (
-            self.mm_configs + self.mixed_mm_configs
-            if config.max_autotune_gemm_search_space == "EXHAUSTIVE"
-            else self.mm_configs
-        )
-        filtered_configs = self._filter_configs(mm_configs, self.default_num_stages)
-        return partial(self.preprocess_mm_configs, configs=filtered_configs)
-
-    def get_persistent_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        filtered_configs = self._filter_configs(
-            self.persistent_mm_configs, self.default_num_stages
-        )
-        return partial(self.preprocess_mm_configs, configs=filtered_configs)
-
-    def get_scaled_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        filtered_configs = self._filter_configs(
-            self.scaled_mm_configs, self.default_num_stages
-        )
-        return partial(self.preprocess_mm_configs, configs=filtered_configs)
-
-    def get_scaled_persistent_mm_configs(
-        self,
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        filtered_configs = self._filter_configs(
-            self.scaled_persistent_mm_configs, self.default_num_stages
-        )
-        return partial(self.preprocess_mm_configs, configs=filtered_configs)
-
-    def get_mm_plus_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        filtered_configs = self._filter_configs(self.mm_plus_mm_configs, 1)
-        return partial(self._finalize_mm_configs, configs=filtered_configs)
-
-    def get_conv_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        filtered_configs = self._filter_configs(
-            self.conv_configs, self.default_num_stages
-        )
-        return partial(self.preprocess_mm_configs, configs=filtered_configs)
-
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -1201,3 +1208,570 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
     """
     Placeholder child class for XPU specific overrides.
     """
+
+
+# Template-specific mixin classes
+
+
+class TemplateConfigHeuristics:
+    def get_template_configs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Any,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Get template configs for the given inputs.
+        This is the main entry point for template-specific logic.
+        """
+        # NOTE: not an abstract class, because that clashed below for the mixin
+        # functionality. Can be adjusted, but not a high priority
+        yield from {}
+
+
+class MMTemplateConfigMixin(TemplateConfigHeuristics):
+    """
+    Mixin class that converts config lists to template kwargs.
+    This handles the logic that was previously in choices.get_mm_configs.
+
+    This mixin expects to be used with BaseConfigHeuristic or its subclasses.
+    """
+
+    # Type annotations to ensure the mixin works with BaseConfigHeuristic
+    get_mm_configs: Callable[[], partial[Generator[TritonConfig, None, None]]]
+    get_exhaustive_mm_configs: Callable[
+        [], partial[Generator[TritonConfig, None, None]]
+    ]
+
+    def _get_config_generator(
+        self,
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        """
+        Get the appropriate config generator based on search space.
+        Can be overridden by subclasses for template-specific behavior.
+        """
+        # Handle exhaustive search case
+        if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
+            return self.get_exhaustive_mm_configs()
+        else:
+            return self.get_mm_configs()
+
+    def get_template_configs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Any,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Convert config lists to template kwargs.
+        This replaces the logic from choices.get_mm_configs and inlines mm_options.
+        """
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            f"{self.__class__.__name__} requires MMKernelInputs"
+        )
+        input_nodes = kernel_inputs.nodes()
+        if len(input_nodes) < 2:
+            raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
+
+        # Extract M, N, K from kernel_inputs
+        m, n, k = kernel_inputs.mnk_symbolic()
+
+        # Extract dtype and device_type from kernel_inputs
+        dtype = kernel_inputs.dtype()
+
+        # Get the appropriate config generator
+        configs = self._get_config_generator()
+
+        # Generate and process configs
+        for c in configs(m, n, k, dtype_size=dtype.itemsize, op_name=op_name):
+            template_kwargs = self._convert_config_to_template_kwargs(
+                c, m, n, k, layout
+            )
+            yield template_kwargs
+
+    def _convert_config_to_template_kwargs(
+        self,
+        triton_config: TritonConfig,
+        m: sympy.Integer,
+        n: sympy.Integer,
+        k: sympy.Integer,
+        layout: Any,
+    ) -> dict[str, Any]:
+        """
+        Convert triton config to template kwargs.
+        Moved from mm_common.mm_options.
+        """
+        # Calculate EVEN_K symbolic
+        even_k_symbolic = (
+            # it isn't worth guarding on this
+            sympy.gcd(k, triton_config.kwargs["BLOCK_K"])
+            == triton_config.kwargs["BLOCK_K"]
+        )
+
+        # Calculate allow_tf32
+        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+            not inductor_config.force_same_precision
+            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
+        )
+
+        # Build options dict
+        options_dict = dict(
+            EVEN_K=even_k_symbolic,
+            ALLOW_TF32=allow_tf32,
+            USE_FAST_ACCUM=False,  # Option for _scaled_mm
+            ACC_TYPE=self._get_acc_type(layout.dtype),
+            num_stages=triton_config.num_stages,
+            num_warps=triton_config.num_warps,
+            **triton_config.kwargs,
+        )
+
+        # If GROUP_M not specified then default to 8
+        if "GROUP_M" not in triton_config.kwargs:
+            group_m = triton_config.kwargs.get("GROUP_M", 8)
+            options_dict["GROUP_M"] = group_m
+
+        return options_dict
+
+    def _get_acc_type(self, dtype: torch.dtype) -> str:
+        """
+        Get accumulator type for the given dtype.
+        Moved from mm_common.acc_type.
+        """
+        if dtype in (torch.float16, torch.bfloat16):
+            return "tl.float32"
+        return f"tl.{dtype}".replace("torch.", "")
+
+
+# TMA-specific mixin for TMA templates
+class TMAConfigMixin(MMTemplateConfigMixin):
+    """
+    TMA-specific mixin that uses persistent configs and adds TMA options.
+    This inherits from MMTemplateConfigMixin and overrides config generation.
+    """
+
+    # Type annotations to ensure the mixin works with BaseConfigHeuristic
+    get_persistent_mm_configs: Callable[
+        [], partial[Generator[TritonConfig, None, None]]
+    ]
+
+    def _get_config_generator(
+        self,
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        """
+        Override to use persistent MM configs for TMA templates.
+        TODO(coconutruben): Fix this once we break out the preprocessing better.
+        """
+        # Always use persistent configs for TMA, regardless of search space
+        return self.get_persistent_mm_configs()
+
+    def get_template_configs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Any,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Generate TMA template configs by calling super and adding TMA-specific options.
+        """
+        # Get base template configs from superclass
+        for template_kwargs in super().get_template_configs(
+            kernel_inputs, layout, op_name
+        ):
+            # Add TMA-specific options (moved from mm_common.persistent_mm_options)
+            input_nodes = kernel_inputs.nodes()
+            self._add_tma_options(template_kwargs, input_nodes)
+            yield template_kwargs
+
+    def _add_tma_options(
+        self, template_kwargs: dict[str, Any], input_nodes: list[Any]
+    ) -> None:
+        """
+        Add TMA-specific options to template kwargs.
+        Moved from mm_common.persistent_mm_options and mm_common.tma_options.
+        """
+        # For TMA templates, we need the actual matrix tensors
+        mat1 = input_nodes[-2]
+        mat2 = input_nodes[-1]
+
+        tma_opts = {
+            "A_ROW_MAJOR": not mat1.layout.is_transposed(),
+            "B_ROW_MAJOR": not mat2.layout.is_transposed(),
+            "NUM_SMS": get_num_sms(),
+            "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
+            "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
+        }
+        template_kwargs.update(tma_opts)
+
+
+# Scaled MM-specific mixin for scaled MM templates (non-TMA)
+class ScaledMMConfigMixin(MMTemplateConfigMixin):
+    """
+    Scaled MM-specific mixin that uses scaled configs and adds scaled MM options.
+    This is for non-TMA scaled MM templates only.
+    This inherits from MMTemplateConfigMixin and overrides config generation.
+    """
+
+    def get_template_configs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Any,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Generate scaled MM template configs with scaled MM-specific options.
+        Handles the remaining logic from mm_common including assertions and SCALING_ROWWISE.
+        """
+        input_nodes = kernel_inputs.nodes()
+
+        # Initial assertion from mm_common.scaled_mm_options
+        assert len(input_nodes) >= 4, (
+            f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
+        )
+
+        # Extract scale tensors (typically scale_a and scale_b are input_nodes[2] and input_nodes[3])
+        scale_a = input_nodes[2]
+        scale_b = input_nodes[3]
+
+        # Scale compatibility assertion from mm_common.scaled_mm_options
+        def are_compatible_scales(size_a: Any, size_b: Any) -> bool:
+            # Same sized scales are compatible
+            if len(size_a) == len(size_b):
+                return True
+
+            # Both need to be scalars or len(1) tensors
+            if len(size_a) <= 1 and len(size_b) <= 1:
+                return True
+
+            return False
+
+        size_a, size_b = scale_a.get_size(), scale_b.get_size()
+        assert are_compatible_scales(size_a, size_b), (
+            "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
+            f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
+        )
+
+        # Get base template configs from superclass
+        for template_kwargs in super().get_template_configs(
+            kernel_inputs, layout, op_name
+        ):
+            # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
+            # Override accumulator type for scaled MM
+            template_kwargs["ACC_TYPE"] = "tl.float32"
+            # Add SCALING_ROWWISE attribute based on scale_a tensor shape
+            template_kwargs["SCALING_ROWWISE"] = len(size_a) == 2
+
+            yield template_kwargs
+
+
+# Scaled TMA-specific mixin for scaled MM templates with TMA
+class ScaledTMAConfigMixin(ScaledMMConfigMixin):
+    """
+    Scaled TMA-specific mixin that extends ScaledMMConfigMixin with TMA functionality.
+    This is for scaled MM templates that use device TMA.
+    This inherits from ScaledMMConfigMixin and adds TMA-specific options.
+    """
+
+    def get_template_configs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Any,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Generate scaled TMA template configs with both scaled MM and TMA-specific options.
+        """
+        # Get base scaled MM template configs from superclass
+        for template_kwargs in super().get_template_configs(
+            kernel_inputs, layout, op_name
+        ):
+            # Add TMA-specific options for device TMA scaled MM
+            if template_kwargs.get("device_tma", False):
+                template_kwargs["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE
+                template_kwargs["NUM_SMS"] = get_num_sms()
+                template_kwargs[
+                    "TMA_EXPERIMENTAL_API"
+                ] = not has_triton_stable_tma_api()
+
+            yield template_kwargs
+
+
+# Template-specific heuristic classes using multiple inheritance
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic("mm", "cuda", register=torch.version.hip is None)
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic("bmm", "cuda", register=torch.version.hip is None)
+class CUDAMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
+    """Standard MM template heuristic for CUDA"""
+
+
+# TODO(coconutruben): deprecate once autoheuristic is deprecated
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic("mm-ah", "cuda", register=torch.version.hip is None)
+class CUDAMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
+    """Standard MM template heuristic for CUDA using the extra mm configs only (for autoheuristic)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use scaled_mm_configs
+        self.mm_configs = self.extra_mm_configs
+        self.exhaustive_configs = self.mm_configs
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic(
+    "mm_persistent_tma", "cuda", register=torch.version.hip is None
+)
+class CUDAPersistentTMATemplateConfigHeuristic(TMAConfigMixin, CUDAConfigHeuristic):
+    """Persistent TMA template heuristic for CUDA"""
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic("scaled_mm", "cuda", register=torch.version.hip is None)
+class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeuristic):
+    """Scaled MM template heuristic for CUDA"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use scaled_mm_configs
+        self.mm_configs = self.scaled_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic(
+    "scaled_mm_device_tma", "cuda", register=torch.version.hip is None
+)
+class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuristic):
+    """Scaled TMA template heuristic for CUDA"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use scaled_persistent_mm_configs for TMA
+        self.mm_configs = self.scaled_persistent_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic("mm_plus_mm", "cuda", register=torch.version.hip is None)
+class CUDAMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
+    """MM Plus MM template heuristic for CUDA"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use mm_plus_mm_configs
+        self.mm_configs = self.mm_plus_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic("int_mm", "cuda", register=torch.version.hip is None)
+class CUDAInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
+    """Int8 MM template heuristic for CUDA"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use int8_mm_configs
+        self.mm_configs = self.int8_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+# ROCm template-specific classes
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic("mm", "cuda", register=torch.version.hip is not None)
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic("bmm", "cuda", register=torch.version.hip is not None)
+class ROCmMMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
+    """Standard MM template heuristic for ROCm"""
+
+
+# TODO(coconutruben): deprecate once autoheuristic is deprecated
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic("mm-ah", "cuda", register=torch.version.hip is not None)
+class ROCmMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
+    """Standard MM template heuristic for ROCm using the extra mm configs only (for autoheuristic)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use scaled_mm_configs
+        self.mm_configs = self.extra_mm_configs
+        self.exhaustive_configs = self.extra_mm_configs
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic(
+    "scaled_mm", "cuda", register=torch.version.hip is not None
+)
+class ROCmScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, ROCmConfigHeuristic):
+    """Scaled MM template heuristic for ROCm (non-TMA)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use scaled_mm_configs
+        self.mm_configs = self.scaled_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic("int_mm", "cuda", register=torch.version.hip is not None)
+class ROCmInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
+    """Int8 MM template heuristic for ROCm"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use int8_mm_configs
+        self.mm_configs = self.int8_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic(
+    "mm_plus_mm", "cuda", register=torch.version.hip is not None
+)
+class ROCmMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
+    """MM Plus MM template heuristic for ROCm"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use mm_plus_mm_configs
+        self.mm_configs = self.mm_plus_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+# CPU template-specific classes
+
+
+@register_template_heuristic("mm", "cpu")
+@register_template_heuristic("bmm", "cpu")
+class CPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeuristic):
+    """Standard MM template heuristic for CPU"""
+
+
+@register_template_heuristic("scaled_mm", "cpu")
+class CPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CPUConfigHeuristic):
+    """Scaled MM template heuristic for CPU (non-TMA)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use scaled_mm_configs
+        self.mm_configs = self.scaled_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+@register_template_heuristic("int_mm", "cpu")
+class CPUInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeuristic):
+    """Int8 MM template heuristic for CPU"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use int8_mm_configs
+        self.mm_configs = self.int8_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+@register_template_heuristic("mm_plus_mm", "cpu")
+class CPUMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeuristic):
+    """MM Plus MM template heuristic for CPU"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use mm_plus_mm_configs
+        self.mm_configs = self.mm_plus_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+# XPU template-specific classes
+
+
+@register_template_heuristic("mm", "xpu")
+@register_template_heuristic("bmm", "xpu")
+class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
+    """Standard MM template heuristic for XPU"""
+
+
+@register_template_heuristic("scaled_mm", "xpu")
+class XPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, XPUConfigHeuristic):
+    """Scaled MM template heuristic for XPU (non-TMA)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use scaled_mm_configs
+        self.mm_configs = self.scaled_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+@register_template_heuristic("int_mm", "xpu")
+class XPUInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
+    """Int8 MM template heuristic for XPU"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use int8_mm_configs
+        self.mm_configs = self.int8_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
+
+
+@register_template_heuristic("mm_plus_mm", "xpu")
+class XPUMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
+    """MM Plus MM template heuristic for XPU"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use mm_plus_mm_configs
+        self.mm_configs = self.mm_plus_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_configs
