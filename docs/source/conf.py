@@ -62,7 +62,7 @@ extensions = [
     "sphinxcontrib.katex",
     "sphinx_copybutton",
     "sphinx_design",
-    "myst_parser",
+    "myst_nb",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
@@ -81,6 +81,10 @@ sitemap_excludes = [
     "genindex.html",
 ]
 sitemap_url_scheme = "{link}"
+
+html_additional_pages = {
+    "404": "404.html",
+}
 
 # build the templated autosummary files
 autosummary_generate = True
@@ -1080,7 +1084,6 @@ coverage_ignore_functions = [
     "z3op",
     "z3str",
     # torch.fx.graph_module
-    "reduce_deploy_graph_module",
     "reduce_graph_module",
     "reduce_package_graph_module",
     # torch.fx.node
@@ -1809,31 +1812,9 @@ coverage_ignore_functions = [
     "check_export_model_diff",
     "verify",
     "verify_aten_graph",
-    # torch.optim.adadelta
-    "adadelta",
-    # torch.optim.adagrad
-    "adagrad",
-    # torch.optim.adam
-    "adam",
-    # torch.optim.adamax
-    "adamax",
-    # torch.optim.adamw
-    "adamw",
-    # torch.optim.asgd
-    "asgd",
-    # torch.optim.nadam
-    "nadam",
     # torch.optim.optimizer
     "register_optimizer_step_post_hook",
     "register_optimizer_step_pre_hook",
-    # torch.optim.radam
-    "radam",
-    # torch.optim.rmsprop
-    "rmsprop",
-    # torch.optim.rprop
-    "rprop",
-    # torch.optim.sgd
-    "sgd",
     # torch.optim.swa_utils
     "get_ema_avg_fn",
     "get_ema_multi_avg_fn",
@@ -2946,12 +2927,6 @@ coverage_ignore_classes = [
     # torch.onnx.verification
     "OnnxBackend",
     "OnnxTestCaseRepro",
-    # torch.optim.adadelta
-    "Adadelta",
-    # torch.optim.adagrad
-    "Adagrad",
-    # torch.optim.adam
-    "Adam",
     # torch.optim.adamax
     "Adamax",
     # torch.optim.adamw
@@ -2977,23 +2952,8 @@ coverage_ignore_classes = [
     "ReduceLROnPlateau",
     "SequentialLR",
     "StepLR",
-    # torch.optim.nadam
-    "NAdam",
     # torch.optim.optimizer
     "Optimizer",
-    # torch.optim.radam
-    "RAdam",
-    # torch.optim.rmsprop
-    "RMSprop",
-    # torch.optim.rprop
-    "Rprop",
-    # torch.optim.sgd
-    "SGD",
-    # torch.optim.sparse_adam
-    "SparseAdam",
-    # torch.optim.swa_utils
-    "AveragedModel",
-    "SWALR",
     # torch.overrides
     "BaseTorchFunctionMode",
     "TorchFunctionMode",
