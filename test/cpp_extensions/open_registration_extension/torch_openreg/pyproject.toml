@@ -18,6 +18,15 @@ authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 dependencies = [
     "torch",
 ]
+# Add classifiers info for making lint happy
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3 :: Only",
+]
 
 [project.urls]
 Homepage = "https://pytorch.org"
