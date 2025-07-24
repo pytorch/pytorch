@@ -91,6 +91,7 @@ def build_pytorch(
         not check_negative_env_flag("USE_CUDA")
         and not check_negative_env_flag("USE_NCCL")
         and not check_env_flag("USE_SYSTEM_NCCL")
+        and not check_env_flag("USE_SYSTEM_LIBS")
     ):
         checkout_nccl()
     build_test = not check_negative_env_flag("BUILD_TEST")
