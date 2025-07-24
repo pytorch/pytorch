@@ -514,5 +514,83 @@ class NVSHMEMAll2AllTest(MultiProcContinousTest):
         torch.testing.assert_close(combine_out_splits_offsets[1], inp_offsets)
 
 
+@instantiate_parametrized_tests
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class NVSHMEMAutogradTest(MultiProcContinousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        # NOTE: required for nvshmem allocation
+        torch.empty(1, device=self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    @skipIfRocm
+    def test_autograd_AllToAllVDev2d(self) -> None:
+        from torch.distributed._symmetric_memory._autograd import AllToAllVDev2d
+
+        # Mimics Group GEMM alignment
+        align = 8
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        # Number of experts per rank
+        ne = 8
+        nsplits = ne * self.world_size
+
+        # Number of elements for an expert is random between [0, k)
+        k = 10
+        inp_splits = torch.randint(k, (nsplits,), dtype=torch.int64, device=self.device)
+
+        # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
+        max_inp_numel = k * nsplits
+        # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = self.world_size  # worst case: one rank receives all data
+        max_out_numel = max_inp_numel * overflow_factor
+
+        # Init autograd function
+        AllToAllVDev2d.init(max_out_numel)
+
+        inp = (
+            symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device)
+            .copy_(torch.randn(max_inp_numel, dtype=dtype, device=self.device))
+            .requires_grad_(True)
+        )
+
+        in_splits = symm_mem.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        ).copy_(inp_splits)
+
+        def fwd_bwd():
+            out, out_splits_offsets = AllToAllVDev2d.apply(
+                inp, in_splits, group_name, align
+            )
+            s = out.sum()
+            s.backward()
+
+        # Run a few iterations
+        iters = 2
+        for i in range(iters):
+            inp.grad = None
+            fwd_bwd()
+
+        # Actual number of input elements
+        inp_numel = inp_splits.sum().item()
+        # Check gradients -- grad of sum is 1
+        torch.testing.assert_close(
+            inp.grad[:inp_numel],
+            torch.ones(inp_numel, device=self.device),
+        )
+
+
 if __name__ == "__main__":
     run_tests()
