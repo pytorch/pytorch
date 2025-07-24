@@ -301,7 +301,11 @@ else:
             If valid, return dim indexes of the slice mesh in the device mesh.
             """
             if device_mesh != self.get_root_mesh(device_mesh):
-                raise RuntimeError("Cannot create a submesh from a submesh.")
+                warnings.warn(
+                    "You are attempting to slice a submesh from another submesh. While we support this operation, "
+                    "it is users' responsibility to ensure that the submesh is consistently sliced across all ranks. "
+                    "If not, this may result in some ranks receiving the submesh while others encounter errors."
+                )
 
             # The slice mesh_dim_names should consist either the device_mesh's mesh_dim_names
             # or its flattened mesh's mesh_dim_names.
@@ -644,11 +648,15 @@ else:
 
         def __repr__(self) -> str:
             device_mesh_repr = (
-                f"DeviceMesh('{self.device_type}', {self.mesh.tolist()})"
-                if not self.mesh_dim_names
-                else f"DeviceMesh('{self.device_type}', {self.mesh.tolist()}, mesh_dim_names={self.mesh_dim_names})"
+                f"({', '.join(f'{k}={v}' for k, v in zip(self.mesh_dim_names, self.mesh.shape))})"
+                if self.mesh_dim_names
+                else f"{tuple(self.mesh.shape)}"
             )
-            return device_mesh_repr
+            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, device: '{self.device_type}', stride: {self.mesh.stride()}"
+            # We only print the mesh tensor if the debug mode is turned on.
+            if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "") == "DETAIL":
+                device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
+            return f"{device_mesh_repr})"
 
         def __hash__(self):
             # lazily compute hash
@@ -1007,7 +1015,7 @@ else:
             required for distributed communications behind the scene.
 
         Args:
-            device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
+            device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like", "xpu".
                 Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.

@@ -311,12 +311,13 @@ def all_gather_merge_fn_to_trace(
     return outs_reshaped
 
 
-def all_gather_merge_fn_to_trace_fsdp_ag_copy_in(
+def all_gather_merge_fn_to_trace_functional(
     ag_ins: list[torch.Tensor],
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
     local_rank: int,
+    use_fsdp_ag_copy_in: bool = False,
 ) -> list[torch.Tensor]:
     # Implementation that is functional in graph,
     # but uses custom op torch.ops.fsdp.all_gather_copy_in.
@@ -326,45 +327,12 @@ def all_gather_merge_fn_to_trace_fsdp_ag_copy_in(
     device = ag_ins[0].device
     new_ag_out = torch.empty(ag_input_numel * group_size, dtype=dtype, device=device)
     ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
-    new_ag_in, new_ag_out = torch.ops.fsdp.all_gather_copy_in(
-        ag_ins_flattened, new_ag_out, ins_split_sizes, ag_input_numel, local_rank
-    )
-    wait_tensor = torch.ops.c10d_functional.wait_tensor(
-        torch.ops._c10d_functional.all_gather_into_tensor_out.default(
-            new_ag_in, group_size, group_name, out=new_ag_out
+    if use_fsdp_ag_copy_in:
+        new_ag_in, new_ag_out = torch.ops.fsdp.all_gather_copy_in(
+            ag_ins_flattened, new_ag_out, ins_split_sizes, ag_input_numel, local_rank
         )
-    )
-    new_ag_out_reshaped = wait_tensor.reshape(group_size, -1)
-    outs = torch.split_with_sizes(
-        new_ag_out_reshaped,
-        ins_split_sizes,
-        dim=1,
-    )
-    outs_reshaped = [
-        o.reshape((shape[0] * group_size,) + shape[1:])
-        for o, shape in zip(outs, ins_sizes)
-    ]
-    return outs_reshaped
-
-
-def all_gather_merge_fn_to_trace_functional(
-    ag_ins: list[torch.Tensor],
-    group_size: int,
-    group_name: str,
-    dtype: torch.dtype,  # type: ignore[name-defined]
-    local_rank: int,
-) -> list[torch.Tensor]:
-    # Suboptimal functional implementation without mutations.
-    ins_sizes = [ag_in.shape for ag_in in ag_ins]
-    ins_split_sizes = [ag_in.numel() for ag_in in ag_ins]
-    ag_input_numel = sum(ins_split_sizes)
-    device = ag_ins[0].device
-    new_ag_out = torch.empty(ag_input_numel * group_size, dtype=dtype, device=device)
-    ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
-    new_ag_in = torch.cat(ag_ins_flattened, dim=0)
-    new_ag_in = new_ag_out.narrow(0, ag_input_numel * local_rank, ag_input_numel)
-    foreach_copy_dsts = torch.split(new_ag_in, ins_split_sizes)
-    torch._foreach_copy_(foreach_copy_dsts, ag_ins_flattened)
+    else:
+        new_ag_in = torch.cat(ag_ins_flattened, dim=0)
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.all_gather_into_tensor_out.default(
             new_ag_in, group_size, group_name, out=new_ag_out
@@ -394,10 +362,17 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
     g: torch.fx.Graph,
     fn_to_trace,
     inps,
-    insert_before_node,
-    g_fn_inps,
-    g_fn_outs,
+    insert_before_node: torch.fx.Node,
+    g_fn_inps: list[torch.fx.Node],
+    g_fn_outs: list[torch.fx.Node],
 ) -> dict[torch.fx.Node, torch.fx.Node]:  # type: ignore[no-untyped-def]
+    """
+    Helper function that traces :attr:`fn_to_trace` with inputs
+    :attr:`inps`.
+    The result function graph will be inserted before :attr:`insert_before_node`,
+    using :attr:`g_fn_inps` nodes of original graphas inputs of function graph,
+    function graph outputs will replace :attr:`g_fn_outs` in original graph.
+    """
     fn_gm = _trace(
         fn_to_trace,
         inps,
@@ -438,13 +413,22 @@ def merge_reduce_scatter(
     g = gm.graph
     rs_ins: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
     rs_waits: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
-    rs_to_bucket_idx: dict[torch.fx.Node, int] = {}
-    for bucket_idx, rs_nodes in enumerate(rs_buckets):
-        for rs_node in rs_nodes:
-            rs_to_bucket_idx[rs_node] = bucket_idx
 
-    for bucket_idx, rs_bucket in enumerate(rs_buckets):
-        for n in rs_bucket:
+    for bucket_idx, rs_nodes in enumerate(rs_buckets):
+        rs0 = rs_nodes[0]
+        rs0_val = rs0.meta["val"]
+        _, reduce_op, group_size, group_name = rs0.args
+        reduce_dtype = rs0_val.dtype
+        device = rs0_val.device
+        for n in rs_nodes:
+            rs_val = n.meta["val"]
+            assert (
+                n.args[1] == reduce_op
+                and n.args[2] == group_size
+                and n.args[3] == group_name
+                and rs_val.device == device
+                and rs_val.dtype == reduce_dtype
+            )
             assert len(n.users) == 1
             wait_n = next(iter(n.users))
             rs_ins[bucket_idx].append(n.args[0])  # type: ignore[arg-type]
@@ -476,14 +460,18 @@ def merge_reduce_scatter(
             _rs_ins,
             _rs_waits,
         )
+        # [Note: Replacement in bucketing passes]
+        # After bucketing _rs_waits will be replaced with output nodes of
+        # fn_to_trace graph that will be inserted in the graph g.
+        # By this time we already prepared rs_ins, rs_waits.
+        # rs_ins for following buckets can be replaced _rs_waits with new nodes.
+        # We apply replacements to rs_ins.
 
         def _replace(x: torch.fx.Node) -> torch.fx.Node:
             return replacements.get(x, x)
 
         for j in range(bucket_idx + 1, n_buckets):
             rs_ins[j] = pytree.tree_map(_replace, rs_ins[j])
-            rs_waits[j] = pytree.tree_map(_replace, rs_waits[j])
-            rs_buckets[j] = pytree.tree_map(_replace, rs_buckets[j])
 
         for rs_n, wait_n in zip(_rs_ns, _rs_waits):
             g.erase_node(wait_n)
@@ -573,13 +561,13 @@ def merge_all_gather(
             _ag_waits,
         )
 
+        # See Note: [Replacement in bucketing passes]
         def _replace(x: torch.fx.Node) -> torch.fx.Node:
             return replacements.get(x, x)
 
         for j in range(bucket_idx + 1, n_buckets):
             ag_ins[j] = pytree.tree_map(_replace, ag_ins[j])
-            ag_waits[j] = pytree.tree_map(_replace, ag_waits[j])
-            ag_buckets[j] = pytree.tree_map(_replace, ag_buckets[j])
+
         # Erasing old nodes in reverse order
         for ag_n, wait_n in zip(ag_buckets[bucket_idx], _ag_waits):
             g.erase_node(wait_n)
