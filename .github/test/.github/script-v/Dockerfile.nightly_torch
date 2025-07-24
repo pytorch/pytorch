@@ -81,10 +81,7 @@ RUN uv pip install --system \
   nvidia-cufile-cu12
 
 RUN find /usr/local -name "libnccl.so*"
-
-ENV LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/nvshmem/12:$LD_LIBRARY_PATH"
-
-
+ENV LD_LIBRARY_PATH="/usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib:/usr/lib/x86_64-linux-gnu/nvshmem/12:$LD_LIBRARY_PATH"
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
 # this won't be needed for future versions of this docker image
@@ -127,6 +124,8 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     fi && \
     echo "[INFO] Installing torchvision and torchaudio from nightly" && \
     uv pip install --system torchvision torchaudio --no-deps --index-url https://download.pytorch.org/whl/nightly/cu128
+
+
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system numba==0.61.2
