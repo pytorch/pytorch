@@ -1214,6 +1214,28 @@ Tensor randint_like(
 
 Tensor randint_like(
     const Tensor& self,
+    const Tensor& high,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      high.numel() == 1 && high.ndimension() == 0 && high.device().is_cpu(),
+      "high must be a scalar tensor and on CPU");
+  int64_t high_scalar = high.item<int64_t>();
+  return at::native::randint_like(
+      self,
+      high_scalar,
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      optional_memory_format);
+}
+
+Tensor randint_like(
+    const Tensor& self,
     int64_t low,
     int64_t high,
     std::optional<ScalarType> dtype,
@@ -1345,9 +1367,9 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
     for (int64_t i = 0; i < n - 1; i++) {
       // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
       int64_t z = generator->random() % (n - i);
-      scalar_t sav = r__data[i * r__stride_0];
+      scalar_t save = r__data[i * r__stride_0];
       r__data[i * r__stride_0] = r__data[(z + i) * r__stride_0];
-      r__data[(z + i) * r__stride_0] = sav;
+      r__data[(z + i) * r__stride_0] = save;
     }
     return;
   }

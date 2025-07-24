@@ -3028,8 +3028,8 @@ class TestAutograd(TestCase):
         check_index(x, y, ([1, 2, 3], [0]))
         check_index(x, y, ([1, 2], [2, 1]))
         check_index(x, y, ([[1, 2], [3, 0]], [[0, 1], [2, 3]]))
-        check_index(x, y, ([slice(None), [2, 3]]))
-        check_index(x, y, ([[2, 3], slice(None)]))
+        check_index(x, y, ((slice(None), [2, 3])))
+        check_index(x, y, (([2, 3], slice(None))))
 
         # advanced indexing, with less dim, or ellipsis
         check_index(x, y, ([0]))
@@ -3061,8 +3061,8 @@ class TestAutograd(TestCase):
         # advanced indexing, with a tensor wrapped in a variable
         z = torch.LongTensor([0, 1])
         zv = Variable(z, requires_grad=False)
-        seq = [z, Ellipsis]
-        seqv = [zv, Ellipsis]
+        seq = (z, Ellipsis)
+        seqv = (zv, Ellipsis)
 
         if y.grad is not None:
             with torch.no_grad():
@@ -3086,7 +3086,7 @@ class TestAutograd(TestCase):
         x = torch.arange(1.0, 17).view(4, 4)
         y = Variable(x, requires_grad=True)
 
-        idx = [[1, 1, 3, 2, 1, 2], [0]]
+        idx = ([1, 1, 3, 2, 1, 2], [0])
         y[idx].sum().backward()
         expected_grad = torch.zeros(4, 4)
         for i in idx[0]:
@@ -3097,7 +3097,7 @@ class TestAutograd(TestCase):
 
         x = torch.arange(1.0, 17).view(4, 4)
         y = Variable(x, requires_grad=True)
-        idx = [[[1, 2], [0, 0]], [[0, 1], [1, 1]]]
+        idx = ([[1, 2], [0, 0]], [[0, 1], [1, 1]])
         y[idx].sum().backward()
         expected_grad = torch.tensor(
             [
@@ -3112,7 +3112,7 @@ class TestAutograd(TestCase):
         x = torch.arange(1.0, 65).view(4, 4, 4)
         y = Variable(x, requires_grad=True)
 
-        idx = [[1, 1, 1], slice(None), slice(None)]
+        idx = ([1, 1, 1], slice(None), slice(None))
         y[idx].sum().backward()
         expected_grad = torch.empty(4, 4, 4).zero_()
         expected_grad[1].fill_(3)
@@ -3541,32 +3541,32 @@ class TestAutograd(TestCase):
         self._test_setitem((5, 5), 1)
         self._test_setitem((5,), 1)
         self._test_setitem((1,), 0)
-        self._test_setitem((10,), [[0, 4, 2]])
-        self._test_setitem((5, 5), [[0, 4], [2, 2]])
-        self._test_setitem((5, 5, 5), [slice(None), slice(None), [1, 3]])
-        self._test_setitem((5, 5, 5), [slice(None), [1, 3], slice(None)])
-        self._test_setitem((5, 5, 5), [[1, 3], slice(None), slice(None)])
-        self._test_setitem((5, 5, 5), [slice(None), [2, 4], [1, 3]])
-        self._test_setitem((5, 5, 5), [[1, 3], [2, 4], slice(None)])
+        self._test_setitem((10,), ([0, 4, 2]))
+        self._test_setitem((5, 5), ([0, 4], [2, 2]))
+        self._test_setitem((5, 5, 5), (slice(None), slice(None), [1, 3]))
+        self._test_setitem((5, 5, 5), (slice(None), [1, 3], slice(None)))
+        self._test_setitem((5, 5, 5), ([1, 3], slice(None), slice(None)))
+        self._test_setitem((5, 5, 5), (slice(None), [2, 4], [1, 3]))
+        self._test_setitem((5, 5, 5), ([1, 3], [2, 4], slice(None)))
         self._test_setitem_tensor((5, 5), 3)
-        self._test_setitem_tensor((5, 5), [[0, 1], [1, 0]])
+        self._test_setitem_tensor((5, 5), ([0, 1], [1, 0]))
         self._test_setitem_tensor((5,), 3)
         self._test_setitem_tensor(
             (5,), Variable(torch.LongTensor([3]), requires_grad=False).sum()
         )
         self._test_setitem_tensor((5,), [[0, 1, 2, 3]])
-        self._test_setitem_tensor((5, 5, 5), [slice(None), slice(None), [1, 3]])
-        self._test_setitem_tensor((5, 5, 5), [slice(None), [1, 3], slice(None)])
-        self._test_setitem_tensor((5, 5, 5), [[1, 3], slice(None), slice(None)])
-        self._test_setitem_tensor((5, 5, 5), [slice(None), [2, 4], [1, 3]])
-        self._test_setitem_tensor((5, 5, 5), [[1, 3], [2, 4], slice(None)])
+        self._test_setitem_tensor((5, 5, 5), (slice(None), slice(None), [1, 3]))
+        self._test_setitem_tensor((5, 5, 5), (slice(None), [1, 3], slice(None)))
+        self._test_setitem_tensor((5, 5, 5), ([1, 3], slice(None), slice(None)))
+        self._test_setitem_tensor((5, 5, 5), (slice(None), [2, 4], [1, 3]))
+        self._test_setitem_tensor((5, 5, 5), ([1, 3], [2, 4], slice(None)))
         self._test_setitem_tensor(
             (5, 5, 5),
-            [
+            (
                 Variable(torch.LongTensor([1, 3]), requires_grad=False),
                 [2, 4],
                 slice(None),
-            ],
+            ),
         )
 
     def test_setitem_mask(self):
@@ -3725,6 +3725,18 @@ class TestAutograd(TestCase):
             f.next_functions
         with self.assertRaisesRegex(RuntimeError, "Attribute 'name' is invalid"):
             f.name()
+        with self.assertRaisesRegex(
+            RuntimeError, "Attribute '_sequence_nr' is invalid"
+        ):
+            f._sequence_nr()
+        with self.assertRaisesRegex(
+            RuntimeError, "Attribute '_set_sequence_nr' is invalid"
+        ):
+            f._set_sequence_nr(2)
+        with self.assertRaisesRegex(
+            RuntimeError, "Attribute '_input_metadata' is invalid"
+        ):
+            f._input_metadata
         with self.assertRaisesRegex(
             RuntimeError, "underlying PyNode has already been deallocated"
         ):
@@ -4117,7 +4129,7 @@ class TestAutograd(TestCase):
         self.assertIsNone(y.grad_fn)
 
     def test_backward_copy(self):
-        # This tests checks backward engine for a very subtle bug that appreared
+        # This tests checks backward engine for a very subtle bug that appeared
         # in one of the initial versions of autograd. Gradients tensors were
         # simply stored in lists while the function waited for all its gradients
         # to be computed. However, sometimes an output was used multiple times,
@@ -4300,7 +4312,7 @@ class TestAutograd(TestCase):
                     ctx.output_var.sum().backward()
                 return ctx.x.grad * grad_output
 
-        # Reentrant starts on CPU thread, finishs on GPU thread
+        # Reentrant starts on CPU thread, finishes on GPU thread
         x = torch.randn(2, 2, requires_grad=True)
         out = Reenter.apply(x)
         out.sum().backward()
@@ -10716,7 +10728,7 @@ class TestAutogradForwardMode(TestCase):
             dual = fwAD.make_dual(foo, tangent)
             self.assertFalse(tangent_ref.expired())
 
-            # Make sure that the tangent we provided has been re-used as is
+            # Make sure that the tangent we provided has been reused as is
             self.assertTrue(fwAD.unpack_dual(dual)[1] is tangent)
 
             # Make sure that dual is keeping the tangent alive
@@ -11075,7 +11087,7 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(
                 dual_tangent.storage().data_ptr(), bar.storage().data_ptr()
             )
-            # And the tangent is actually re-used as-is so it is still the same Tensor
+            # And the tangent is actually reused as-is so it is still the same Tensor
             self.assertIs(dual_tangent, bar)
 
             # Ensure we properly share the version counter
@@ -11957,19 +11969,19 @@ class TestAutogradDeviceType(TestCase):
                         (new_param**2).sum().backward()
                 return grad_output
 
-        # Reentrant starts on GPU thread, finishs on GPU thread
+        # Reentrant starts on GPU thread, finishes on GPU thread
         x = torch.randn(2, 2, device=device, requires_grad=True)
         out = ReentrantFunc.apply(x)
         out.sum().backward()
 
-        # Reentrant starts on CPU thread, finishs on GPU thread
+        # Reentrant starts on CPU thread, finishes on GPU thread
         x = torch.randn(2, 2, requires_grad=True)
         # set ReentrantFunc node to GPU to emit tasks to GPU queue
         ReentrantFunc._cpu_mode = False
         out = ReentrantFunc.apply(x)
         out.sum().backward()
 
-        # Reentrant starts on GPU thread, finishs on CPU thread
+        # Reentrant starts on GPU thread, finishes on CPU thread
         x = torch.randn(2, 2, device=device, requires_grad=True)
         # set ReentrantFunc node to CPU to emit tasks to CPU queue
         ReentrantFunc._cpu_mode = True
@@ -13653,7 +13665,7 @@ class TestMultithreadAutograd(TestCase):
                     y = x * x
                     if torch.cuda.device_count() >= 2:
                         # DataParallel is calling the forward in different threads
-                        # without progating TLS, so hooks should not be called here
+                        # without propagating TLS, so hooks should not be called here
                         _self.assertEqual(len(w), 0)
                     else:
                         # DataParallel only uses one thread

@@ -8,6 +8,7 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - 'ciflow/triton_binaries/*'
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
@@ -139,6 +140,15 @@ jobs:
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==78.1.0 pybind11==2.13.1 auditwheel wheel
+          set +e
+          docker exec -t "${container_name}" command -v pip
+          has_pip=$?
+          set -e
+          if [ $has_pip -eq 0 ] ; then
+              docker exec -t "${container_name}" pip install -U cmake --force-reinstall
+          else
+              docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U cmake --force-reinstall
+          fi
 
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "rocm" || "${{ matrix.device }}" == "aarch64" ) ]]; then
             # With this install, it gets clang 16.0.6.
