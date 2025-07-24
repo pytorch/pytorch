@@ -489,7 +489,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       const void* mat2_scale_ptr = GetBScalePointerFromParams<CT>(params);
       const void* result_scale_ptr = GetDScalePointerFromParams<CT>(params);
       if (mat1_scale_ptr && mat2_scale_ptr) {
-#ifdef HIPBLASLT_VEC_EXT
+#if defined(HIPBLASLT_VEC_EXT) && !(defined(USE_ROCM) && ROCM_VERSION >= 70000)
         if (GetUseRowwiseFromParams<CT>(params)) {
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
