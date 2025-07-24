@@ -2876,7 +2876,7 @@ class ExpandView(BaseView):
                 assert old_size[i] is not None
                 new_size[i] = old_size[i]
             elif old_size[i] is None or V.graph.sizevars.shape_env.evaluate_expr(
-                sympy.Eq(old_size[i], 1), size_oblivious=True
+                sympy.Eq(old_size[i], 1), fallback_value=False
             ):
                 pass
             else:
@@ -2903,7 +2903,7 @@ class ExpandView(BaseView):
                 new_stride.append(
                     stride
                     if not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(size, 1), size_oblivious=True
+                        sympy.Eq(size, 1), fallback_value=False
                     )
                     else sympy.S.Zero
                 )
@@ -7877,6 +7877,10 @@ class TensorBox(MutableBox):
 
 
 class StorageBox(MutableBox):
+    """
+    StorageBox allow in-place mutation of Tensors
+    """
+
     def is_input_buffer(self) -> bool:
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
             return self.data.get_name() in V.graph.graph_inputs
@@ -7926,10 +7930,21 @@ class StorageBox(MutableBox):
         ):
             self.realize()
 
+    def has_accumulated_enough_reads_by_size(self, threshold: int) -> bool:
+        return (
+            sum(V.graph.get_dep_size_hint(dep) for dep in self.get_reads()) > threshold
+        )
+
     def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
             or self.has_large_inner_fn()
+            or (
+                config.realize_acc_reads_size_threshold is not None
+                and self.has_accumulated_enough_reads_by_size(
+                    config.realize_acc_reads_size_threshold
+                )
+            )
         )
 
     def should_realize_on_reuse(self, users: int) -> bool:
