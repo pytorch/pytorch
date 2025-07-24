@@ -467,7 +467,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
                     )
                     * gqa_shared_heads
                 ),
-                8 if torch.xpu.is_available() else 16,
+                float('-inf') if torch.xpu.is_available() else 16,
             )
         ),
     )
