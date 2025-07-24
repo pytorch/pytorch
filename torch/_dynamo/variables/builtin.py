@@ -577,7 +577,14 @@ class BuiltinVariable(VariableTracker):
 
         def create_cmp_op_handlers(op):
             def compare_by_value(tx: "InstructionTranslator", a, b):
-                return ConstantVariable(op(a.value, b.value))
+                try:
+                    return ConstantVariable(op(a.value, b.value))
+                except TypeError as exc:
+                    raise_observed_exception(
+                        type(exc),
+                        tx,
+                        args=list(map(ConstantVariable.create, exc.args)),
+                    )
 
             result: list[
                 tuple[
@@ -1270,6 +1277,19 @@ class BuiltinVariable(VariableTracker):
                     args[0],
                     args[1:],
                 )
+
+        if self.fn is float and len(args) == 1 and name in ("fromhex", "hex"):
+            if isinstance(args[0], ConstantVariable):
+                try:
+                    fn = getattr(float, name)
+                    res = fn(args[0].as_python_constant())
+                    return variables.ConstantVariable.create(res)
+                except (OverflowError, ValueError) as e:
+                    raise_observed_exception(
+                        type(e),
+                        tx,
+                        args=list(map(ConstantVariable.create, e.args)),
+                    )
 
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
