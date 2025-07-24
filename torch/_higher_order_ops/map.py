@@ -183,7 +183,7 @@ class MapAutogradOp(torch.autograd.Function):
                 args_single_step_bw = construct_args_single_step_bw()
 
             # TODO: we need to materialize the bw graphs because dynamo is unable to
-            # trace through the joint funcion when torch.compile torch.autograd.grad.
+            # trace through the joint function when torch.compile torch.autograd.grad.
             fn_bw_gm = materialize_as_graph(
                 bw_f_wrapper,
                 args_single_step_bw,
