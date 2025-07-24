@@ -69,16 +69,11 @@ The ONNX exporter is a community project and we welcome contributions. We follow
 also be interested in reading our [development wiki](https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter).
 
 
-## torch.onnx API
+### API Reference
 
-.. automodule:: torch.onnx
-
-### Functions
-
-.. autofunction:: export
-    :noindex:
-.. autofunction:: is_in_onnx_export
-    :noindex:
+```{eval-rst}
+.. autofunction:: torch.onnx.export
+```
 
 ### Deprecated API
 
