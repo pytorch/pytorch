@@ -7,7 +7,12 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import _maybe_run_with_interpreter, reenter_make_fx
+from torch._higher_order_ops.utils import (
+    _maybe_run_with_interpreter,
+    check_input_alias_and_mutation_return_outputs,
+    first_slice_copy,
+    reenter_make_fx,
+)
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -35,6 +40,52 @@ class MapImpl(HigherOrderOperator):
 
     def __call__(self, *args, **kwargs):
         return super().__call__(*args, **kwargs)
+
+    def gen_schema(self, f, xs, pos_args):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import materialize_as_graph
+
+        all_inputs = tuple([first_slice_copy(x) for x in xs] + list(pos_args))
+
+        f_gm: torch.fx.GraphModule = (
+            f
+            if isinstance(f, torch.fx.GraphModule)
+            else materialize_as_graph(f, all_inputs)
+        )
+
+        example_inputs = [
+            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
+            for n in f_gm.graph.find_nodes(op="placeholder")
+        ]
+
+        (
+            _,
+            _,
+            _,
+            mutated_inputs,
+            outputs,
+        ) = check_input_alias_and_mutation_return_outputs(f_gm, example_inputs)
+        if len(mutated_inputs) > 0:
+            raise RuntimeError(
+                "For map, combine_fn cannot have in-place mutations but found "
+                f"{mutated_inputs}-th inputs are mutated."
+            )
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("f", f_gm)
+
+        for idx, x in enumerate(xs):
+            # Check if this input is mutated in the mapped function
+            schema_gen.add_arg(f"xs{idx}", x)
+
+        for idx, arg in enumerate(pos_args):
+            schema_gen.add_arg(f"pos_args{idx}", arg)
+
+        for out in outputs:
+            schema_gen.add_output(out)
+
+        schema_gen.add_schema_tree_spec(f, xs, pos_args)
+        return schema_gen.gen_schema()
 
 
 map_impl = MapImpl()
