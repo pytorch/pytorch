@@ -69,12 +69,30 @@ The ONNX exporter is a community project and we welcome contributions. We follow
 also be interested in reading our [development wiki](https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter).
 
 
-### API Reference
+### torch.onnx API
 
 ```{eval-rst}
 .. automodule:: torch.onnx
-.. autofunction:: torch.onnx.export
-  :noindex:
+```
+
+### Functions
+
+```{eval-rst}
+.. autofunction:: export
+    :noindex:
+.. autofunction:: is_in_onnx_export
+    :noindex:
+.. autofunction:: enable_fake_mode
+    :noindex:
+```
+
+### Classes
+
+```{eval-rst}
+.. autoclass:: ONNXProgram
+    :noindex:
+.. autoclass:: OnnxExporterError
+    :noindex:
 ```
 
 ### Deprecated API
@@ -83,16 +101,16 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
 .. deprecated:: 2.6
     These functions are deprecated and will be removed in a future version.
 
-.. autofunction:: torch.onnx.register_custom_op_symbolic
-.. autofunction:: torch.onnx.unregister_custom_op_symbolic
-.. autofunction:: torch.onnx.select_model_mode_for_export
+.. autofunction:: register_custom_op_symbolic
+.. autofunction:: unregister_custom_op_symbolic
+.. autofunction:: select_model_mode_for_export
 
 .. autosummary::
     :toctree: generated
     :nosignatures:
     :template: classtemplate.rst
 
-    torch.onnx.JitScalarType
+    JitScalarType
 ```
 
 ```{eval-rst}
