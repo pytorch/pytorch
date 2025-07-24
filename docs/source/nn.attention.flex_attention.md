@@ -36,6 +36,14 @@
 .. autofunction:: noop_mask
 ```
 
+## FlexKernelOptions
+
+```{eval-rst}
+.. autoclass:: FlexKernelOptions
+    :members:
+    :undoc-members:
+```
+
 ## BlockMask
 
 ```{eval-rst}
