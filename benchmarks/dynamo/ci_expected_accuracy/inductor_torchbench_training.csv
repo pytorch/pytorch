@@ -2,11 +2,11 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,6
+torchrec_dlrm,pass,4
 
 
 
-BERT_pytorch,pass,6
+BERT_pytorch,pass,4
 
 
 
@@ -14,43 +14,43 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-LearningToPaint,pass,6
+LearningToPaint,pass,4
 
 
 
-Super_SloMo,pass,7
+Super_SloMo,pass,5
 
 
 
-alexnet,pass,6
+alexnet,pass,4
 
 
 
-basic_gnn_edgecnn,pass,20
+basic_gnn_edgecnn,pass,18
 
 
 
-basic_gnn_gcn,pass,13
+basic_gnn_gcn,pass,11
 
 
 
-basic_gnn_gin,pass,7
+basic_gnn_gin,pass,5
 
 
 
-basic_gnn_sage,pass,7
+basic_gnn_sage,pass,5
 
 
 
-dcgan,pass,6
+dcgan,pass,4
 
 
 
-demucs,pass,9
+demucs,pass,7
 
 
 
-densenet121,pass,6
+densenet121,pass,4
 
 
 
@@ -58,51 +58,51 @@ detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0
 
 
 
-dlrm,pass,6
+dlrm,pass,4
 
 
 
-drq,pass,7
+drq,pass,6
 
 
 
-fastNLP_Bert,pass,10
+fastNLP_Bert,pass,8
 
 
 
-functorch_dp_cifar10,pass,7
+functorch_dp_cifar10,pass,5
 
 
 
-functorch_maml_omniglot,pass,7
+functorch_maml_omniglot,pass,5
 
 
 
-hf_Albert,pass,6
+hf_Albert,pass,5
 
 
 
-hf_Bart,pass,6
+hf_Bart,pass,5
 
 
 
-hf_Bert,pass,6
+hf_Bert,pass,5
 
 
 
-hf_Bert_large,pass,6
+hf_Bert_large,pass,5
 
 
 
-hf_BigBird,pass,6
+hf_BigBird,pass,5
 
 
 
-hf_DistilBert,pass,6
+hf_DistilBert,pass,5
 
 
 
-hf_GPT2,pass,6
+hf_GPT2,pass,5
 
 
 
@@ -110,15 +110,15 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,23
+hf_Reformer,pass,22
 
 
 
-hf_Roberta_base,pass,6
+hf_Roberta_base,pass,5
 
 
 
-hf_T5_base,eager_2nd_run_OOM,0
+hf_T5_base,pass,4
 
 
 
@@ -126,7 +126,7 @@ hf_T5_large,pass_due_to_skip,0
 
 
 
-hf_Whisper,pass,6
+hf_Whisper,pass,5
 
 
 
@@ -134,7 +134,7 @@ hf_distil_whisper,model_fail_to_load,0
 
 
 
-lennard_jones,pass,7
+lennard_jones,pass,5
 
 
 
@@ -142,19 +142,19 @@ llava,model_fail_to_load,0
 
 
 
-maml_omniglot,pass,7
+maml_omniglot,pass,5
 
 
 
-microbench_unbacked_tolist_sum,pass,8
+microbench_unbacked_tolist_sum,pass,6
 
 
 
-mnasnet1_0,pass,7
+mnasnet1_0,pass,5
 
 
 
-mobilenet_v2,pass,6
+mobilenet_v2,pass,4
 
 
 
@@ -162,19 +162,19 @@ mobilenet_v2_quantized_qat,eager_fail_to_run,0
 
 
 
-mobilenet_v3_large,pass,7
+mobilenet_v3_large,pass,5
 
 
 
-moco,pass,13
+moco,pass,11
 
 
 
-nanogpt,pass,7
+nanogpt,pass,5
 
 
 
-nvidia_deeprecommender,pass,7
+nvidia_deeprecommender,fail_accuracy,5
 
 
 
@@ -182,35 +182,35 @@ opacus_cifar10,eager_fail_to_run,0
 
 
 
-phlippe_densenet,pass,6
+phlippe_densenet,pass,4
 
 
 
-phlippe_resnet,pass,6
+phlippe_resnet,pass,4
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,6
+pytorch_CycleGAN_and_pix2pix,pass,4
 
 
 
-pytorch_stargan,pass,6
+pytorch_stargan,pass,4
 
 
 
-pytorch_unet,pass_due_to_skip,7
+pytorch_unet,pass_due_to_skip,5
 
 
 
-resnet152,pass,7
+resnet152,pass,5
 
 
 
-resnet18,pass,6
+resnet18,pass,4
 
 
 
-resnet50,pass,6
+resnet50,pass,4
 
 
 
@@ -218,7 +218,7 @@ resnet50_quantized_qat,eager_fail_to_run,0
 
 
 
-resnext50_32x4d,pass,7
+resnext50_32x4d,pass,5
 
 
 
@@ -226,23 +226,23 @@ sam,eager_fail_to_run,0
 
 
 
-shufflenet_v2_x1_0,pass,6
+shufflenet_v2_x1_0,pass,4
 
 
 
-soft_actor_critic,pass,6
+soft_actor_critic,pass,5
 
 
 
-speech_transformer,pass,16
+speech_transformer,pass,14
 
 
 
-squeezenet1_1,pass,6
+squeezenet1_1,pass,4
 
 
 
-stable_diffusion_text_encoder,pass,5
+stable_diffusion_text_encoder,pass,4
 
 
 
@@ -250,19 +250,19 @@ stable_diffusion_unet,pass_due_to_skip,0
 
 
 
-timm_efficientnet,fail_accuracy,7
+timm_efficientnet,fail_accuracy,5
 
 
 
-timm_regnet,pass,7
+timm_regnet,pass,5
 
 
 
-timm_resnest,pass,6
+timm_resnest,pass,4
 
 
 
-timm_vision_transformer,pass,6
+timm_vision_transformer,pass,4
 
 
 
@@ -270,24 +270,24 @@ timm_vision_transformer_large,pass_due_to_skip,0
 
 
 
-timm_vovnet,pass,6
+timm_vovnet,pass,4
 
 
 
-torch_multimodal_clip,pass,7
+torch_multimodal_clip,pass,5
 
 
 
-tts_angular,pass,9
+tts_angular,pass,7
 
 
 
-vgg16,pass,6
+vgg16,pass,4
 
 
 
-vision_maskrcnn,pass,39
+vision_maskrcnn,pass,37
 
 
 
-yolov3,pass,8
+yolov3,pass,6

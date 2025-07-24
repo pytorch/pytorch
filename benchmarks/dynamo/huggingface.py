@@ -16,6 +16,7 @@ try:
         download_retry_decorator,
         load_yaml_file,
         main,
+        maybe_detach,
         reset_rng_state,
     )
 except ImportError:
@@ -24,6 +25,7 @@ except ImportError:
         download_retry_decorator,
         load_yaml_file,
         main,
+        maybe_detach,
         reset_rng_state,
     )
 
@@ -441,6 +443,13 @@ class HuggingfaceRunner(BenchmarkRunner):
             if "drop" in attr and isinstance(getattr(config, attr), float):
                 setattr(config, attr, 1e-30)
 
+        if is_training:
+            # Detach all the outputs other than loss, for joint export.
+            def detach_non_loss(module, args, output):
+                return output[0], maybe_detach(output[1:])
+
+            model.register_forward_hook(detach_non_loss)
+
         if (
             is_training
             and not use_eval_mode
@@ -511,19 +520,17 @@ class HuggingfaceRunner(BenchmarkRunner):
                 return 4e-3, cosine
         return 1e-3, cosine
 
-    def compute_loss(self, pred):
-        return pred[0]
-
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast(**self.autocast_arg):
             return mod(**inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
+        assert isinstance(cloned_inputs, dict)
         self.optimizer_zero_grad(mod)
         with self.autocast(**self.autocast_arg):
             pred = mod(**cloned_inputs)
-            loss = self.compute_loss(pred)
+            loss = pred[0]
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:
