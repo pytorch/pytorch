@@ -71,8 +71,12 @@ def _do_instantiate_remote_module_template(
     if generated_module_name in sys.modules:
         return sys.modules[generated_module_name]
 
-    loader = _StringLoader(get_remote_module_template(enable_moving_cpu_tensors_to_cuda).format(**str_dict))
-    spec = importlib.util.spec_from_loader(generated_module_name, loader, origin='torch-git')
+    loader = _StringLoader(
+        get_remote_module_template(enable_moving_cpu_tensors_to_cuda).format(**str_dict)
+    )
+    spec = importlib.util.spec_from_loader(
+        generated_module_name, loader, origin="torch-git"
+    )
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[generated_module_name] = module
