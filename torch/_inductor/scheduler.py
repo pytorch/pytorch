@@ -2151,6 +2151,23 @@ class Scheduler:
                 OrderedSet(V.graph.get_output_names()),
             )
         if config.reorder_for_compute_comm_overlap:
+            from torch._logging import trace_structured
+
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "scheduler_nodes_before_comm_overlap",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: "\n\n".join(
+                    [
+                        f"snode[{i}]"
+                        + n.debug_str()
+                        + f" buffer_names:{n.get_buffer_names()}"
+                        for i, n in enumerate(self.nodes)
+                    ]
+                ),
+            )
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
 

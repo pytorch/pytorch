@@ -50,7 +50,7 @@ def inner2(x):
     torch._dynamo.graph_break()  # traced
     return x + 1  # traced
 
-@torch.compiler.disable(recursive=True)
+@torch.compiler.disable(recursive=False)
 def outer2(x):
     x = x + 2  # not traced
     torch._dynamo.graph_break()  # not traced
