@@ -58,6 +58,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Reference: https://github.com/astral-sh/uv/pull/1694
 ENV UV_HTTP_TIMEOUT=500
 
+RUN uv pip install --system \
+  nvidia-cublas-cu12 \
+  nvidia-cudnn-cu12 \
+  nvidia-cusolver-cu12 \
+  nvidia-curand-cu12 \
+  nvidia-cufft-cu12 \
+  nvidia-cusparse-cu12 \
+  nvidia-cusparselt-cu12 \
+  nvidia-nccl-cu12 \
+  nvidia-nvjitlink-cu12 \
+  nvidia-nvshmem-cu12 \
+  nvidia-cuda-nvrtc-cu12 \
+  nvidia-cuda-cupti-cu12 \
+  nvidia-cufile-cu12
+
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
 # this won't be needed for future versions of this docker image
@@ -103,6 +118,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
 uv pip install --system -r requirements/common.txt
 
+RUN python3 -c "import torch; print('Torch:', torch.__version__);"
+
 # must put before installing xformers, so it can install the correct version of xfomrers.
 ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
@@ -138,7 +155,7 @@ RUN ls
 # build can take a long time, and the torch nightly version fetched from url can be different in next docker stage.
 # track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
-RUN cat torch_build_versions.txt
+RUN cat  torch_build_versions.txt
 
 RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
 
@@ -230,7 +247,7 @@ ARG TARGETPLATFORM
 
 # get the nightly torch version used in the build to make sure the version is the same
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
-COPY --from=build /workspace/dist /tmp/vllm-dist
+COPY --from=build /workspace/dist ./tmp/vllm-dist
 
 
 RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
@@ -267,7 +284,6 @@ ENV UV_HTTP_TIMEOUT=500
 # or future versions of triton.
 RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 
-
 RUN echo "[DEBUG] Listing current directory before torch install step:" && \
     ls -al && \
     echo "[DEBUG] Showing torch_build_versions.txt content:" && \
@@ -284,12 +300,11 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
         echo "[INFO] Reinstalling torch from host wheel"; \
         uv pip install --system /tmp/torch_wheels/torch*.whl; \
         echo "[INFO] Installing torchvision/torchaudio from torch_build_versions.txt"; \
-        uv pip install --system --no-deps $(grep -i '^torchvision\|^torchaudio' /torch_build_versions.txt) --index-url https://download.pytorch.org/whl/nightly/cu128;\
+        uv pip install --system --no-deps $(grep -i '^torchvision\|^torchaudio' torch_build_versions.txt) --index-url https://download.pytorch.org/whl/nightly/cu128;\
     else \
         echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
-        uv pip install --system $(cat /torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
     fi
-
 # install the vllm wheel
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/vllm-workspace/vllm-dist \
     --mount=type=cache,target=/root/.cache/uv \

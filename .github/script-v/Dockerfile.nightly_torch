@@ -136,7 +136,7 @@ RUN mkdir -p /export/xformers-dist && cp /workspace/xformers-dist/*.whl /export/
 # build can take a long time, and the torch nightly version fetched from url can be different in next docker stage.
 # track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
-RUN cat torch_build_versions.txt
+RUN cat  torch_build_versions.txt
 
 RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
 RUN ls
@@ -229,8 +229,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 ARG TARGETPLATFORM
 
 # get the nightly torch version used in the build to make sure the version is the same
-COPY --from=base /workspace/torch_build_versions.txt /torch_build_versions.txt
-COPY --from=build /workspace/dist /tmp/vllm-dist
+COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
+COPY --from=build /workspace/dist ./tmp/vllm-dist
 
 RUN ls
 
@@ -272,7 +272,7 @@ RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 RUN echo "[DEBUG] Listing current directory before torch install step:" && \
     ls -al && \
     echo "[DEBUG] Showing torch_build_versions.txt content:" && \
-    cat /torch_build_versions.txt
+    cat torch_build_versions.txt
 
 
 # default mount file as placeholder, this just avoid the mount error
@@ -285,10 +285,10 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
         echo "[INFO] Reinstalling torch from host wheel"; \
         uv pip install --system /tmp/torch_wheels/torch*.whl; \
         echo "[INFO] Installing torchvision/torchaudio from torch_build_versions.txt"; \
-        uv pip install --system --no-deps $(grep -i '^torchvision\|^torchaudio' /torch_build_versions.txt) --index-url https://download.pytorch.org/whl/nightly/cu128;\
+        uv pip install --system --no-deps $(grep -i '^torchvision\|^torchaudio' torch_build_versions.txt) --index-url https://download.pytorch.org/whl/nightly/cu128;\
     else \
         echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
-        uv pip install --system $(cat /torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
     fi
 
 # install the vllm wheel
