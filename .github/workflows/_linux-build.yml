@@ -288,7 +288,13 @@ jobs:
           TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
 
           if [[ ${BUILD_ENVIRONMENT} == *"riscv64"* ]]; then
-            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+            for i in {1..3}; do
+              docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+              sleep 2
+            done
+
+            sleep 5
+            ls -la /proc/sys/fs/binfmt_misc/
             cat /proc/sys/fs/binfmt_misc/qemu-riscv64 2>/dev/null || echo "qemu-riscv64 registration failed"
             RISCV_DOCKER_ARGS="--privileged"
           else
