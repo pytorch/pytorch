@@ -1405,25 +1405,12 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 + additional_lifted_inputs
             ),
         )
-
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
-        unspecialized_flat_example_value = pytree.tree_map_only(
-            (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(
-                tx.output.fake_mode, ignore_fresh_unbacked_symbols=False
-            ),
-            flat_example_value,
-        )
         return _call_function_and_unflatten_output(
             tx,
             torch.ops.higher_order.while_loop,
             p_args,
             {},
-            unspecialized_flat_example_value,
+            None,
             body_treespec,
         )
 
