@@ -2426,6 +2426,9 @@ void stop_recording_dict_pointers(
     bool result);
 bool is_recording_dict_pointers(RootGuardManager* root);
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer);
+void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer);
+std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
+    RootGuardManager* _root);
 
 GuardManager* clone_guard_manager(
     GuardManager* from,
@@ -2624,6 +2627,24 @@ class GuardManager {
   }
 
  public:
+  // relational guard helpers
+  void set_has_object_aliasing_guard() {
+    _has_object_aliasing_guard = true;
+  }
+
+  void set_has_no_tensor_aliasing_guard() {
+    _has_no_tensor_aliasing_guard = true;
+  }
+
+  bool has_object_aliasing_guard() {
+    return _has_object_aliasing_guard;
+  }
+
+  bool has_no_tensor_aliasing_guard() {
+    return _has_no_tensor_aliasing_guard;
+  }
+
+ public:
   // type related helpers
   bool is_guarded_value_immutable() {
     return _is_immutable;
@@ -2682,6 +2703,12 @@ class GuardManager {
       PyObject* value,
       std::unordered_map<PyObject*, uint64_t> dict_pointers) {
     _dict_pointers[value] = dict_pointers;
+  }
+
+  void stash_tensor_pointers(
+      PyObject* value,
+      std::vector<PyObject*> tensor_pointers) {
+    _tensor_pointers[value] = tensor_pointers;
   }
 
  public:
@@ -2814,6 +2841,17 @@ class GuardManager {
     return true;
   }
 
+  bool check_no_tensor_aliasing_guards_fast(PyObject* value) {
+    std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard =
+        get_no_tensor_aliasing_guard(_root);
+    for (auto* tensor_pointer : _tensor_pointers[value]) {
+      if (!no_tensor_aliasing_guard->check_nopybind(tensor_pointer)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   virtual bool check_nopybind(PyObject* value) {
     // -----------------------------------------------------------------------------
     // Recursive Dict‑Tag Matching
@@ -2880,7 +2918,12 @@ class GuardManager {
           // Check for fast path
           // if (is_weakref_valid(value) && check_dict_pointer_tags(value)) {
           if (check_dict_pointer_tags(value)) {
-            return true;
+            if (check_no_tensor_aliasing_guards_fast(value)) {
+              return true;
+            } else {
+              _disable_dict_tag_matching = true;
+              return false;
+            }
           }
           // Something changed, very likely the dict tag checking will fail in
           // future. So disable the recursive tag matching.
@@ -2895,15 +2938,15 @@ class GuardManager {
         } else {
           // Start the recording
           start_recording_dict_pointers(_root, this);
-          if (_is_dict) {
-            record_dict_pointer(_root, value);
-          }
           is_recording = true;
         }
-      } else if (
-          _is_tag_safe && _is_dict && is_recording_dict_pointers(_root)) {
+      } else if (_is_tag_safe && is_recording_dict_pointers(_root)) {
         // This is a tag safe node, record the dict pointer
-        record_dict_pointer(_root, value);
+        if (_is_dict) {
+          record_dict_pointer(_root, value);
+        } else if (_is_tensor && _has_no_tensor_aliasing_guard) {
+          record_tensor_pointer(_root, value);
+        }
       }
     }
 
@@ -3198,6 +3241,10 @@ class GuardManager {
   // to enable fail fast for the next check.
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
+  // relational guard helpers
+  bool _has_object_aliasing_guard = false;
+  bool _has_no_tensor_aliasing_guard = false;
+
   bool _is_dict = false;
   bool _is_empty_dict = false;
   bool _is_immutable = false;
@@ -3213,6 +3260,7 @@ class GuardManager {
   bool _disable_dict_tag_matching = false;
   std::unordered_map<PyObject*, std::unordered_map<PyObject*, uint64_t>>
       _dict_pointers;
+  std::unordered_map<PyObject*, std::vector<PyObject*>> _tensor_pointers;
   std::vector<PyObject*> _tag_safe_keys_weakrefs;
 };
 
@@ -3259,6 +3307,17 @@ class RootGuardManager : public GuardManager {
  public:
   // This is the root node, set its _root member to nullptr
   RootGuardManager() : GuardManager(this, "L") {}
+
+  void add_no_tensor_aliasing_guard(
+      std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard) {
+    // stash a pointer to the _no_tensor_alising_guard
+    _no_tensor_aliasing_guard = no_tensor_aliasing_guard;
+    this->add_relational_guard_resetter(std::move(no_tensor_aliasing_guard));
+  }
+
+  std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard() {
+    return _no_tensor_aliasing_guard;
+  }
 
   // Adds the relational guard resetter
   void add_relational_guard_resetter(
@@ -3450,6 +3509,7 @@ class RootGuardManager : public GuardManager {
     _is_recording_dict_pointers = false;
     _current_tag_safe_root = nullptr;
     _recorded_dict_pointers.clear();
+    _recorded_tensor_pointers.clear();
   }
 
   void stop_recording_dict_pointers(PyObject* value, bool result) {
@@ -3457,6 +3517,8 @@ class RootGuardManager : public GuardManager {
       // Stash the pointers only if the guard eval passed
       _current_tag_safe_root->stash_dict_pointers(
           value, _recorded_dict_pointers);
+      _current_tag_safe_root->stash_tensor_pointers(
+          value, _recorded_tensor_pointers);
     }
     reset_dict_tag_recording_variables();
   }
@@ -3468,6 +3530,10 @@ class RootGuardManager : public GuardManager {
   void record_dict_pointer(PyObject* dict_pointer) {
     _recorded_dict_pointers[dict_pointer] =
         get_dict_version_unchecked(dict_pointer);
+  }
+
+  void record_tensor_pointer(PyObject* tensor_pointer) {
+    _recorded_tensor_pointers.push_back(tensor_pointer);
   }
 
  public:
@@ -3515,10 +3581,14 @@ class RootGuardManager : public GuardManager {
   // TENSOR_MATCH guard init.
   bool _init_local_state = false;
 
+  // Pointer to the no tensor relational guard
+  std::shared_ptr<RelationalGuard> _no_tensor_aliasing_guard;
+
   // tag safe optimization related members
   bool _is_recording_dict_pointers{false};
   GuardManager* _current_tag_safe_root{nullptr};
   std::unordered_map<PyObject*, uint64_t> _recorded_dict_pointers;
+  std::vector<PyObject*> _recorded_tensor_pointers;
 };
 
 /*
@@ -3934,6 +4004,13 @@ bool is_recording_dict_pointers(RootGuardManager* root) {
 
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer) {
   root->record_dict_pointer(dict_pointer);
+}
+std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
+    RootGuardManager* _root) {
+  return _root->get_no_tensor_aliasing_guard();
+}
+void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer) {
+  root->record_tensor_pointer(tensor_pointer);
 }
 
 class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
@@ -4554,6 +4631,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) override {
     if (matches_dict_tag && _is_immutable_object &&
+        !is_recording_dict_pointers(get_guard_manager()->get_root()) &&
         _guard_manager->has_no_accessors()) {
       // immutable object and dict tag matches, we can skip the guard subtree.
       // NB: We only skip the subtree if there are no accessors in the subtree.
@@ -5821,6 +5899,9 @@ void install_object_aliasing_guard(
   // the newly added relational guard when the guard eval fails.
   x->get_root()->add_relational_guard_resetter(guard);
 
+  x->set_has_object_aliasing_guard();
+  y->set_has_object_aliasing_guard();
+
   // In case the guard is a DictGuardManager, OBJECT_ALIASING guard is a
   // permitted guard.
   x->add_permitted_leaf_guard(guard);
@@ -5843,9 +5924,11 @@ void install_no_tensor_aliasing_guard(
   // the newly added relational guard when the guard eval fails.
   py::cast<GuardManager*>(guard_managers[0])
       ->get_root()
-      ->add_relational_guard_resetter(guard);
+      ->add_no_tensor_aliasing_guard(guard);
+
   for (const auto& guard_manager : guard_managers) {
     py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
+    py::cast<GuardManager*>(guard_manager)->set_has_no_tensor_aliasing_guard();
   }
 }
 
@@ -6324,6 +6407,8 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
       .def("fail_count", &GuardManager::fail_count)
+      .def(
+          "has_object_aliasing_guard", &GuardManager::has_object_aliasing_guard)
       .def(
           "is_guarded_value_immutable",
           &GuardManager::is_guarded_value_immutable)
