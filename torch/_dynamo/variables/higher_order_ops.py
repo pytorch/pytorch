@@ -1638,7 +1638,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from torch._higher_order_ops.scan import _extract_carry_and_out, stack_y
+        from torch._higher_order_ops.scan import _extract_carry_and_out
         from torch._higher_order_ops.utils import first_slice_copy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -1801,7 +1801,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_proxy = list(additional_inputs.as_proxy()) + list(
             combine_freevars_proxy
         )
-        y_proxies = [out_var.as_proxy() for out_var in out_vars]
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)
@@ -1813,19 +1812,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             additional_inputs_proxy,
         )
 
-        with tx.fake_mode:
-            example_carry = [
-                init_p.node.meta["example_value"].clone() for init_p in init_proxy
-            ]
-            # For the fake mode, we need to duplicate the init tensor along the dim
-            # to have the same size as the xs arguments
-            example_stacked_out = [
-                stack_y(y.node.meta["example_value"], scan_length) for y in y_proxies
-            ]
-            out_meta = [*example_carry, *example_stacked_out]
-
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.scan, p_args, {}, out_meta, _combine_treespec
+            tx, torch.ops.higher_order.scan, p_args, {}, None, _combine_treespec
         )
 
 
