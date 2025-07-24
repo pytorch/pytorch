@@ -92,7 +92,7 @@ def _create_graph(
 
             # Unfortunately, flat_args_descs is not guaranteed to match the
             # number of actual arguments that show up on the FX graph.
-            # Speciifcally, allow_token_discovery=True means that we will
+            # Specifically, allow_token_discovery=True means that we will
             # silently add extra token arguments to the backwards graph.
             #
             # Although there are a few ways to detect what these tokens are,
@@ -112,10 +112,12 @@ def _create_graph(
             # didn't we just introduce a new type.
 
             i = 0
+            j = 0
             for n in fx_g.graph.nodes:
                 if n.op == "placeholder":
                     if n.name.startswith("tangents_token"):
-                        n.meta["desc"] = BackwardTokenAOTInput()
+                        n.meta["desc"] = BackwardTokenAOTInput(j)
+                        j += 1
                     else:
                         assert i < len(flat_args_descs), (
                             (fn_wrappers(inner_f)),

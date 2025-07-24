@@ -324,6 +324,48 @@ class CodeGen:
         self._body_transformer: Optional[TransformCodeFunc] = None
         self._func_name: str = "forward"
 
+    def _format_multiline_args(self, args: list[str]) -> str:
+        """Helper to format function arguments in expanded multiline format."""
+        return "".join(self._format_single_arg(arg) for arg in args)
+
+    def _format_single_arg(self, arg: str) -> str:
+        """Helper to format a single argument with optional comment."""
+        if "#" in arg:
+            arg_part, comment_part = arg.split("#", 1)
+            return f"    {arg_part.rstrip()},  # {comment_part.lstrip()}\n"
+        else:
+            return f"    {arg},\n"
+
+    def _get_delimiters(self, container) -> tuple[str, str]:
+        """Helper to get opening and closing delimiters for containers."""
+        return ("(", ")") if isinstance(container, tuple) else ("[", "]")
+
+    def _format_multiline_container(self, items, descs=None, prefix="") -> str:
+        """Helper to format containers (lists/tuples) in multiline format."""
+        ldelim, rdelim = self._get_delimiters(items)
+        desc_trailers = self._get_desc_trailers(items, descs)
+
+        return (
+            f"{prefix}{ldelim}\n"
+            + "".join(
+                f"    {item},{trailer}\n" for item, trailer in zip(items, desc_trailers)
+            )
+            + f"{rdelim}"
+        )
+
+    def _get_desc_trailers(self, items, descs):
+        """Helper to generate description trailers for items."""
+        if descs is None:
+            return [""] * len(items)
+        return [f"  # {desc}" for desc in descs]
+
+    def _call_method_with_signature_check(self, method, *args, **kwargs):
+        """Helper to call a method with optional parameters based on signature."""
+        sig = inspect.signature(method)
+        # Filter kwargs to only include parameters that exist in the method signature
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+        return method(*args, **filtered_kwargs)
+
     def gen_fn_def(
         self,
         free_vars: list[str],
@@ -341,15 +383,9 @@ class CodeGen:
             free_vars.insert(0, "self")
 
         if expanded_def:
+            args_formatted = self._format_multiline_args(free_vars)
             return (
-                f"def {self._func_name}(\n"
-                + "".join(
-                    f"    {fv.split('#')[0].rstrip()},  # {fv.split('#')[1].lstrip()}\n"
-                    if "#" in fv
-                    else f"    {fv},\n"
-                    for fv in free_vars
-                )
-                + f"){maybe_return_annotation}:"
+                f"def {self._func_name}(\n{args_formatted}){maybe_return_annotation}:"
             )
         else:
             return f"def {self._func_name}({', '.join(free_vars)}){maybe_return_annotation}:"
@@ -362,20 +398,7 @@ class CodeGen:
         Note: The returned statement should not be indented.
         """
         if descs is not None and isinstance(output_args, (list, tuple)):
-            ldelim = "(" if isinstance(output_args, tuple) else "["
-            rdelim = ")" if isinstance(output_args, tuple) else "]"
-            if descs is None:
-                maybe_desc_trailers = [""] * len(output_args)
-            else:
-                maybe_desc_trailers = [f"  # {d}" for d in descs]
-            return (
-                f"return {ldelim}\n"
-                + "".join(
-                    f"    {o},{mbd}\n"
-                    for o, mbd in zip(output_args, maybe_desc_trailers)
-                )
-                + f"{rdelim}"
-            )
+            return self._format_multiline_container(output_args, descs, "return ")
         else:
             return f"return {repr(output_args)}"
 
@@ -744,13 +767,12 @@ class CodeGen:
             elif node.op == "output":
                 if node.type is not None:
                     maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
-                sig = inspect.signature(self.generate_output)
                 body.append(
-                    self.generate_output(
-                        node.args[0], descs=desc if expanded_def else None
+                    self._call_method_with_signature_check(
+                        self.generate_output,
+                        node.args[0],
+                        descs=desc if expanded_def else None,
                     )
-                    if "descs" in sig.parameters
-                    else self.generate_output(node.args[0])
                 )
                 return
             raise NotImplementedError(f"node: {node.op} {node.target}")
@@ -785,13 +807,12 @@ class CodeGen:
         for name, value in self.additional_globals():
             add_global(name, value)
 
-        sig = inspect.signature(self.gen_fn_def)
-        if "expanded_def" in sig.parameters:
-            prologue = self.gen_fn_def(
-                free_vars, maybe_return_annotation[0], expanded_def=expanded_def
-            )
-        else:
-            prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
+        prologue = self._call_method_with_signature_check(
+            self.gen_fn_def,
+            free_vars,
+            maybe_return_annotation[0],
+            expanded_def=expanded_def,
+        )
 
         # remove counter and generate lineno to node index mapping
         lineno_map: dict[int, Optional[int]] = {}
@@ -839,6 +860,20 @@ class _PyTreeCodeGen(CodeGen):
             out = [out]
         assert self.pytree_info.out_spec is not None
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
+
+    def _format_annotations(self, free_vars: list[str], expanded_def: bool) -> str:
+        """Helper to format annotations for variables in pytree codegen."""
+        if not free_vars:
+            return ""
+
+        has_annotation = [x for x in free_vars if ":" in x]
+        if not has_annotation:
+            return ""
+
+        if expanded_def:
+            return "\n    " + "\n    ".join(has_annotation)
+        else:
+            return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
 
     def gen_fn_def(
         self, free_vars, maybe_return_annotation, *, expanded_def: bool = False
@@ -902,13 +937,7 @@ class _PyTreeCodeGen(CodeGen):
             # one for annotation: `var1: annotation1; var2: annotation2;` (note the semicolon)
             # one for code: `var1, var2, = function_call()`
             without_annotation = [x.split(":")[0].split("#")[0] for x in free_vars]
-            if expanded_def:
-                has_annotation = [x for x in free_vars if ":" in x]
-                fn_definition += "\n    " + "\n    ".join(has_annotation)
-            else:
-                has_annotation = [x + "; " for x in free_vars if ":" in x]
-                if len(has_annotation) > 0:
-                    fn_definition += "\n    " + "".join(has_annotation) + "\n"
+            fn_definition += self._format_annotations(free_vars, expanded_def)
             fn_definition += f"""
     {", ".join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
         return fn_definition
@@ -916,26 +945,18 @@ class _PyTreeCodeGen(CodeGen):
     def generate_output(self, output_args, *, descs: Optional[Any] = None):
         if self.pytree_info and self.pytree_info.out_spec:
             if descs is not None and isinstance(output_args, (list, tuple)):
-                ldelim = "(" if isinstance(output_args, tuple) else "["
-                rdelim = ")" if isinstance(output_args, tuple) else "]"
-                if descs is None:
-                    maybe_desc_trailers = [""] * len(output_args)
-                else:
-                    maybe_desc_trailers = [f"  # {d}" for d in descs]
                 return (
-                    f"return pytree.tree_unflatten({ldelim}\n"
-                    + "".join(
-                        f"    {o},{mbd}\n"
-                        for o, mbd in zip(output_args, maybe_desc_trailers)
+                    self._format_multiline_container(
+                        output_args, descs, "return pytree.tree_unflatten("
                     )
-                    + f"{rdelim}, self._out_spec)"
+                    + ", self._out_spec)"
                 )
             else:
                 return (
                     f"return pytree.tree_unflatten({repr(output_args)}, self._out_spec)"
                 )
         else:
-            return super().generate_output(output_args)
+            return super().generate_output(output_args, descs=descs)
 
 
 class _FindNodesLookupTable:
