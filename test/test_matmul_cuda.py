@@ -28,6 +28,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
+    IS_SM90,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -1360,7 +1361,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM90OrLater, "cuBLAS blockwise scaling requires sm90+")
+    @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
     @unittest.skipIf(
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",

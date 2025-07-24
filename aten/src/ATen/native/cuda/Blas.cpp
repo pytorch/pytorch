@@ -1125,7 +1125,7 @@ bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
   // TODO: We might want to enforce some structure on the shapes of the scale
   // tensors
   return (t.scalar_type() == ScalarType::Float4_e2m1fn_x2 && scale.scalar_type() == at::kFloat8_e4m3fn
-      && scale.numel() == round_up(t.size(0), 128) * round_up(ceil_div(t.size(1) * 2, 16), 4)
+      && scale.numel() == round_up<int64_t>(t.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(t.size(1) * 2, 16), 4)
       && scale.is_contiguous());
 }
 
@@ -1134,20 +1134,20 @@ bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
   // TODO: We might want to enforce some structure on the shapes of the scale
   // tensors
   return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat8_e8m0fnu
-      && scale.numel() == round_up(t.size(0), 128) * round_up(ceil_div(t.size(1), 32), 4)
+      && scale.numel() == round_up<int64_t>(t.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(t.size(1), 32), 4)
       && scale.is_contiguous());
 }
 
 bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
   return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.dim() == 2
-      && scale.size(0) == t.size(0) && scale.size(1) == ceil_div(t.size(1), 128)
+      && scale.size(0) == t.size(0) && scale.size(1) == ceil_div<int64_t>(t.size(1), 128)
       && scale.stride(0) == 1 && scale.stride(1) == t.size(0));
 }
 
 bool is_blockwise_128x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
   return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.dim() == 2
-      && scale.size(0) == ceil_div(t.size(0), 128) && scale.size(1) == ceil_div(t.size(1), 128)
-      && scale.stride(0) == round_up(ceil_div(t.size(1), 128), 4) && scale.stride(1) == 1);
+      && scale.size(0) == ceil_div<int64_t>(t.size(0), 128) && scale.size(1) == ceil_div<int64_t>(t.size(1), 128)
+      && scale.stride(0) == round_up<int64_t>(ceil_div<int64_t>(t.size(1), 128), 4) && scale.stride(1) == 1);
 }
 
 bool is_desired_scaling(const at::Tensor& t, const at::Tensor& scale, ScalingType desired_scaling) {
@@ -1184,10 +1184,10 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
     "Invalid scaling configuration.\n"
     "- For TensorWise scaling, a and b should be float8, scales should be float and singletons.\n"
     "- For RowWise scaling, a and b should be float8, scales should be float, scale_a should be (", a.size(0), ", 1) and scale_b should be (1, ", b.size(1), "), and both should be contiguous.\n"
-    "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (", a.size(0), ", ", ceil_div(a.size(1), 128), ") and scale_b should be (", ceil_div(b.size(0), 128), ", ", b.size(1), "), and both should be outer-dim-major.\n"
-    "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (", ceil_div(a.size(0), 128), ", ", ceil_div(a.size(1), 128), ") and scale_b should be (", ceil_div(b.size(0), 128), ", ", ceil_div(b.size(1), 128), "), and both should be near-inner-dim-major (with 16-byte aligned strides).\n"
-    "- For Blockwise 1x32 scaling, a and b should be float8, scales should be float8_e8m0fnu, scale_a should have ", round_up(a.size(0), 128) * round_up(ceil_div(a.size(1), 32), 4), " elements and scale_b should have ", round_up(b.size(1), 128) * round_up(ceil_div(b.size(0), 32), 4), " elements, and both should be contiguous.\n"
-    "- For Blockwise 1x16 scaling, a and b should be float4 (packed 2x), scales should be float8_e4m3fn, scale_a should have ", round_up(a.size(0), 128) * round_up(ceil_div(a.size(1) * 2, 16), 4), " elements and scale_b should have ", round_up(b.size(1), 128) * round_up(ceil_div(b.size(0) * 2, 16), 4), " elements, and both should be contiguous.\n"
+    "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (", a.size(0), ", ", ceil_div<int64_t>(a.size(1), 128), ") and scale_b should be (", ceil_div<int64_t>(b.size(0), 128), ", ", b.size(1), "), and both should be outer-dim-major.\n"
+    "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (", ceil_div<int64_t>(a.size(0), 128), ", ", ceil_div<int64_t>(a.size(1), 128), ") and scale_b should be (", ceil_div<int64_t>(b.size(0), 128), ", ", ceil_div<int64_t>(b.size(1), 128), "), and both should be near-inner-dim-major (with 16-byte aligned strides).\n"
+    "- For Blockwise 1x32 scaling, a and b should be float8, scales should be float8_e8m0fnu, scale_a should have ", round_up<int64_t>(a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(a.size(1), 32), 4), " elements and scale_b should have ", round_up<int64_t>(b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(b.size(0), 32), 4), " elements, and both should be contiguous.\n"
+    "- For Blockwise 1x16 scaling, a and b should be float4 (packed 2x), scales should be float8_e4m3fn, scale_a should have ", round_up<int64_t>(a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(a.size(1) * 2, 16), 4), " elements and scale_b should have ", round_up<int64_t>(b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(b.size(0) * 2, 16), 4), " elements, and both should be contiguous.\n"
     "Got a.dtype()=", a.scalar_type(), ", scale_a.dtype()=", scale_a.scalar_type(), ", scale_a.size()=", scale_a.sizes(), ", scale_a.stride()=", scale_a.strides(), ", ",
     "b.dtype()=", b.scalar_type(), ", scale_b.dtype()=", scale_b.scalar_type(), ", scale_b.size()=", scale_b.sizes(), " and scale_b.stride()=", scale_b.strides()
   );
