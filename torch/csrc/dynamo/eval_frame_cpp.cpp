@@ -7,6 +7,10 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 
+#include <cstring>
+#include <unordered_map>
+#include <vector>
+
 extern "C" {
 extern PyObject* guard_complete_hook;
 }
@@ -334,4 +338,15 @@ PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
 
   extra_state_set_exec_strategy(extra, strategy);
   Py_RETURN_NONE;
+}
+
+void skip_code_recursive(PyCodeObject* code) {
+  ExtraState* extra = get_extra_state(code);
+  if (extra == nullptr) {
+    extra = init_and_set_extra_state(code);
+  }
+
+  FrameExecStrategy strategy =
+      FrameExecStrategy{FrameAction::SKIP, FrameAction::SKIP};
+  extra_state_set_exec_strategy(extra, strategy);
 }

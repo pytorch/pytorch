@@ -8,6 +8,7 @@ from typing import Callable, cast, Optional, Union
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -101,7 +102,49 @@ class ShardingPropagator:
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
-        Register a sharding strategy generator for an operator.
+        Register a :class:`OpStrategy` generator for an operator.
+
+        During the sharding propagation, DTensor wants to enumerate all
+        acceptable sharding specs (:class:`OpSpec`) for an operator,
+        and by "acceptable" we mean that the operator can be executed on
+        the ``_local_tensor`` of DTensor args/kwargs (with ``OpSpec.input_specs``)
+        and the output(s) constitute valid DTensor(s) (with ``OpSpec.output_specs``).
+
+        ``strategy_func`` is the function that enumerates such acceptable specs
+        for the operator ``op_overload``. One general approach to write ``strategy_func``
+        is, if the operator has simple arguments structure (e.g. mm, bmm), first enumerating
+        all sharding specs for the operands, and then filtering out the ones that
+        are not valid. For example, for ``mm``, the operands are two 2D tensors, and
+        if both ``input`` and ``mat2`` have sharding placements ``[Shard(0)]``, then this
+        is not an acceptable ``input_specs``.
+
+        Once we have a way to enumerate all acceptable sharding specs, we can use each
+        of them to construct a :class:`OpSpec`. The ``OpSpec.input_specs`` directly comes
+        from the sharding spec, and the ``OpSpec.output_specs`` is therefore determined
+        (e.g. ``[Shard(1)]`` @ ``[Shard(0)]`` yields ``[Partial()]``). In addition,
+        :class:`OpSpec` also contains ``redistribute_cost`` which records the redistribution
+        cost from each :class:`OpSpec` in the source :class:`OpStrategy.strategies` to
+        the target sharding spec, for each operand.
+
+        The ``strategy_func`` should return a :class:`OpStrategy` which contains a list of
+        all the :class:`OpSpec`s generated in the above.
+
+        The optional ``schema_info`` tells which non-DTensor args/kwargs could affect the
+        cache and whether ``pytree`` is needed to flatten the nested args. ``static_argnum``
+        marks the starting index of the non-DTensor args that should be hashed into the
+        sharding propagation hash key, and ``static_kwargkey`` marks the keys of the
+        non-DTensor kwargs that should be hashed. ``needs_pytree`` should be used when
+        the input arg has :class:`list` or :class:`dict` structure.
+
+        For example, ``aten.cat.default`` op has a ``List[Tensor]`` argument ``tensors``
+        and an ``int`` argument ``dim``. Because ``dim`` affects the sharding propagation
+        result, we want to pass ``RuntimeSchemaInfo(static_argnum=1)`` because the argument
+        index of ``dim`` is 1. Besides, we also want to set ``needs_pytree=True`` because
+        ``tensors`` needs be flattened in sharding propagation. Another example is
+        ``aten.histc.default``. ``histc`` has 4 arguments (self, bins, min, max) and the
+        last two would affect sharding propagation along with the :class:`DTensor` argument
+        ``self``. Since the argument index of ``min`` is 2, the `schema_info` should be
+        `RuntimeSchemaInfo(static_argnum=2)`.
         """
         self.op_strategy_funcs[op_overload] = strategy_func
         if schema_info is not None:
@@ -252,14 +295,16 @@ class ShardingPropagator:
             op=op_schema.op,
             args_schema=tuple(args_op_strategy),
             kwargs_schema=kwargs_op_strategy,
+            schema_info=op_schema.schema_info,
         )
 
     def propagate(self, op_info: OpInfo) -> None:
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
-        # and tracing does not need to be as fast as eagermode DTensor usages.
-        if op_info.schema.has_symints:
+        # and compile autograd initial tracing, which do not need to be as fast as
+        # eagermode DTensor usages.
+        if _are_we_tracing():
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
             output_sharding = cast(
@@ -353,7 +398,10 @@ class ShardingPropagator:
                                 for _ in range(len(op_schema.op._schema.returns))
                             ]
                         )
-                elif op_schema.return_type_tensor():
+                elif (
+                    op_schema.return_type_tensor()
+                    or op_schema.return_type_list_tensor_like()
+                ):
                     output_specs = output_strategy.output_specs
                 else:
                     output_specs = None
@@ -368,7 +416,7 @@ class ShardingPropagator:
                 # runtime select OpSpec for each TupleStrategy input arg
                 selected_strategies: list[OpSpec] = []
                 out_spec_list: list[DTensorSpec] = []
-                for strategy in op_strategy.childs:
+                for strategy in op_strategy.children:
                     assert isinstance(strategy, OpStrategy)
                     selected_strategy = self._select_strategy(strategy)
                     selected_strategies.append(selected_strategy)

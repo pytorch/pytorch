@@ -1212,6 +1212,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.serialTest()
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(
             _rel_bias, dtype, B, Hq, S, head_dim, B, Hkv, S, head_dim, device=device
@@ -1875,7 +1876,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # init 4 requests with different prefill length
         prefill_length = [5, 98, 47, 194]
-        querys, keys, values = [], [], []
+        queries, keys, values = [], [], []
         for seq_len in prefill_length:
             q = torch.randn(
                 1,
@@ -1904,13 +1905,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 dtype=dtype,
                 requires_grad=False,
             )
-            querys.append(q)
+            queries.append(q)
             keys.append(k)
             values.append(v)
 
         # get ground truth output
         ref_outs, golden_outs = [], []
-        for q, k, v in zip(querys, keys, values):
+        for q, k, v in zip(queries, keys, values):
             q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
             q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
@@ -1978,7 +1979,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
         )
         paged_out = compiled_sdpa(
-            torch.cat(querys, 0), k_cache, v_cache, block_mask=new_block_mask
+            torch.cat(queries, 0), k_cache, v_cache, block_mask=new_block_mask
         )
 
         with torch.no_grad():

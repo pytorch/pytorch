@@ -40,6 +40,7 @@ from torch._C import (
 )
 from torch._prims_common import DeviceLikeType
 from torch.autograd.graph import Node as _Node
+from torch.cuda import _POOL_HANDLE
 from torch.fx.node import Node as FxNode
 from torch.package import PackageExporter
 from torch.storage import TypedStorage, UntypedStorage
@@ -1300,9 +1301,20 @@ def _initCrashHandler() -> None: ...
 
 # NB: There is no Capsule type in typing, see
 # https://github.com/python/cpython/issues/109562
-def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
-def _to_dlpack_versioned(data: Tensor) -> Any: ...  # THPModule_toDLPackVersioned
+def _to_dlpack(
+    data: Tensor,
+    dl_device: tuple[IntEnum, _int] | None = None,
+    copy: _bool | None = None,
+) -> Any: ...  # THPModule_toDLPack
+def _to_dlpack_versioned(
+    data: Tensor,
+    dl_device: tuple[IntEnum, _int] | None = None,
+    copy: _bool | None = None,
+) -> Any: ...  # THPModule_toDLPackVersioned
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
+def _torchDeviceToDLDevice(
+    device: torch.device,
+) -> tuple[_int, _int]: ...  # THPModule_torchDeviceToDLDevice
 def _get_cpp_backtrace(
     frames_to_skip: _int,
     maximum_number_of_frames: _int,
@@ -2042,6 +2054,7 @@ def _cuda_record_memory_history_legacy(
     alloc_trace_record_context: _bool,
     clear_history: _bool,
     compile_context: _bool,
+    global_record_annotations: _bool,
 ) -> None: ...
 def _cuda_record_memory_history(
     enabled: str | None,
@@ -2050,6 +2063,7 @@ def _cuda_record_memory_history(
     max_entries: _int,
     clear_history: _bool,
     compile_context: _bool,
+    global_record_annotations: _bool,
 ) -> None: ...
 def _cuda_isHistoryEnabled() -> _bool: ...
 def _cuda_getAllocatorBackend() -> str: ...
@@ -2197,6 +2211,7 @@ class _SDPBackend(Enum):
     FLASH_ATTENTION = 1
     EFFICIENT_ATTENTION = 2
     CUDNN_ATTENTION = 3
+    OVERRIDEABLE = 4
 
 def _is_flash_attention_available() -> _bool: ...
 def _can_use_cudnn_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
@@ -2286,7 +2301,7 @@ class _CUDAGraph:
     def __new__(cls, keep_graph: _bool = ...) -> Self: ...
     def capture_begin(
         self,
-        pool: tuple[_int, _int] | None = ...,
+        pool: _POOL_HANDLE | None = ...,
         capture_error_mode: str = "global",
     ) -> None: ...
     def capture_end(self) -> None: ...
@@ -2294,7 +2309,7 @@ class _CUDAGraph:
     def register_generator_state(self, Generator) -> None: ...
     def replay(self) -> None: ...
     def reset(self) -> None: ...
-    def pool(self) -> tuple[_int, _int]: ...
+    def pool(self) -> _POOL_HANDLE: ...
     def enable_debug_mode(self) -> None: ...
     def debug_dump(self, debug_path: str) -> None: ...
     def raw_cuda_graph(self) -> _int: ...
@@ -2342,6 +2357,7 @@ class _XpuDeviceProperties:
     name: str
     platform_name: str
     vendor: str
+    device_id: _int
     driver_version: str
     version: str
     max_compute_units: _int

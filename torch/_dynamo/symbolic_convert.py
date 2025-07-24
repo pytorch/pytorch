@@ -94,6 +94,7 @@ from .exc import (
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
+from .polyfills import impl_CONTAINS_OP_fallback
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
@@ -943,6 +944,7 @@ def break_graph_if_unsupported(*, push):
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
+                assert inst.arg is not None
                 call_insts = create_call_function(inst.arg, False)
                 call_insts[-1].copy_positions(inst)
                 self.output.add_output_instructions(call_insts)
@@ -1156,22 +1158,10 @@ class InstructionTranslatorBase(
         return False
 
     def cellvars(self):
-        if not hasattr(self, "_cellvars"):
-            self._cellvars = tuple(self.code_options["co_cellvars"] or [])
-            # An inlined function might depend on the cellvar of the parent
-            # function. So, recursively obtain parent cellvars.
-            if isinstance(self, InliningInstructionTranslator):
-                self._cellvars += self.parent.cellvars()
-        return self._cellvars
+        return self.code_options["co_cellvars"]
 
     def freevars(self):
-        if not hasattr(self, "_freevars"):
-            self._freevars = tuple(self.code_options["co_freevars"] or [])
-            # An inlined function might depend on the freevar of the parent
-            # function. So, recursively obtain parent freevars.
-            if isinstance(self, InliningInstructionTranslator):
-                self._freevars += self.parent.freevars()
-        return self._freevars
+        return self.code_options["co_freevars"]
 
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
@@ -2724,7 +2714,17 @@ class InstructionTranslatorBase(
         assert inst.argval == 0 or inst.argval == 1
         left, right = self.popn(2)
         op = inst.argval
-        self.push(right.call_method(self, "__contains__", [left], {}))
+        try:
+            self.push(right.call_method(self, "__contains__", [left], {}))
+        except Unsupported:  # object doesn't support __contains__
+            # Use __iter__ as fallback
+            self.push(
+                self.inline_user_function_return(
+                    VariableTracker.build(self, impl_CONTAINS_OP_fallback),
+                    [left, right],
+                    {},
+                )
+            )
         if op == 1:
             self.UNARY_NOT(inst)
 
@@ -3047,7 +3047,7 @@ class InstructionTranslatorBase(
             self.popn(2)
 
     def LOAD_FAST_CHECK(self, inst):
-        if isinstance(self.symbolic_locals.get(inst.argval, None), NullVariable):
+        if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
             unimplemented_v2(
                 gb_type="LOAD_FAST_CHECK on uninitialized variable",
                 context=inst.argval,
@@ -3455,7 +3455,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     side_effects.store_cell(cell_var, contents_var)
                 else:
                     cell_var = side_effects.track_cell_new()
-                cell_var.local_name = name
+                cell_var.local_name = name  # type: ignore[attr-defined]
                 self.symbolic_locals[name] = cell_var
 
             # Populate `symbolic_locals` with cells captured by this frame,
@@ -3473,7 +3473,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 cell_var = side_effects.track_cell_existing(
                     cell_source, cell, contents_var
                 )
-                cell_var.local_name = name
+                cell_var.local_name = name  # type: ignore[attr-defined]
                 self.symbolic_locals[name] = cell_var
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(

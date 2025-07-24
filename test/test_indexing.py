@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
+    dtypesIfMPS,
     instantiate_device_type_tests,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -140,7 +141,10 @@ class TestIndexing(TestCase):
         )
 
         lst = [list(range(i, i + 10)) for i in range(0, 100, 10)]
-        tensor = torch.DoubleTensor(lst).to(device)
+        _make_tensor = (
+            torch.DoubleTensor if not device.startswith("mps") else torch.FloatTensor
+        )
+        tensor = _make_tensor(lst).to(device)
         for _i in range(100):
             idx1_start = random.randrange(10)
             idx1_end = idx1_start + random.randrange(1, 10 - idx1_start + 1)
@@ -156,7 +160,7 @@ class TestIndexing(TestCase):
             else:
                 lst_indexed = lst[idx1]
                 tensor_indexed = tensor[idx1]
-            self.assertEqual(torch.DoubleTensor(lst_indexed), tensor_indexed)
+            self.assertEqual(_make_tensor(lst_indexed), tensor_indexed)
 
         self.assertRaises(ValueError, lambda: reference[1:9:0])
         self.assertRaises(ValueError, lambda: reference[1:9:-1])
@@ -231,7 +235,7 @@ class TestIndexing(TestCase):
                 x[ri([0, 2, 4]),], torch.tensor([5, 4, 3], dtype=dtype, device=device)
             )
 
-        # Only validates indexing and setting for halfs
+        # Only validates indexing and setting for Halfs
         if dtype == torch.half:
             reference = consec((10,))
             validate_indexing(reference)
@@ -908,6 +912,66 @@ class TestIndexing(TestCase):
         mask2 = torch.tensor([1, 1, 1], dtype=torch.bool, device=device)
         self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
 
+    def test_multi_dimensional_bool_mask(self, device):
+        x = torch.randn(2, 2, 3, device=device)
+        b = ((True, False), (False, False))
+        m = torch.tensor(b, dtype=torch.bool, device=device)
+        z = torch.tensor(0)
+        t = torch.tensor(True)
+        f = torch.tensor(False)
+
+        # Using boolean sequence
+        self.assertEqual(x[b,].shape, (1, 3))
+        self.assertEqual(x[b, ::2].shape, (1, 2))
+        self.assertEqual(x[b, None].shape, (1, 1, 3))
+        self.assertEqual(x[b, 0].shape, (1,))
+        self.assertEqual(x[b, z].shape, (1,))
+        self.assertEqual(x[b, True].shape, (1, 3))
+        self.assertEqual(x[b, True, True, True, True].shape, (1, 3))
+        self.assertEqual(x[b, False].shape, (0, 3))
+        self.assertEqual(x[b, True, True, False, True].shape, (0, 3))
+        self.assertEqual(x[b, t].shape, (1, 3))
+        self.assertEqual(x[b, f].shape, (0, 3))
+
+        # Using boolean tensor
+        self.assertEqual(x[m].shape, (1, 3))
+        self.assertEqual(x[m, ::2].shape, (1, 2))
+        self.assertEqual(x[m, None].shape, (1, 1, 3))
+        self.assertEqual(x[m, 0].shape, (1,))
+        self.assertEqual(x[m, z].shape, (1,))
+        self.assertEqual(x[m, True].shape, (1, 3))
+        self.assertEqual(x[m, True, True, True, True].shape, (1, 3))
+        self.assertEqual(x[m, False].shape, (0, 3))
+        self.assertEqual(x[m, True, True, False, True].shape, (0, 3))
+        self.assertEqual(x[m, t].shape, (1, 3))
+        self.assertEqual(x[m, f].shape, (0, 3))
+
+        # Boolean mask in the middle of indices array
+        x = torch.randn(3, 2, 2, 5, device=device)
+        self.assertEqual(x[:, m, :].shape, (3, 1, 5))
+        self.assertEqual(x[0, m, ::2].shape, (1, 3))
+        self.assertEqual(x[..., m, ::2].shape, (3, 1, 3))
+        self.assertEqual(x[None, ..., m, ::2].shape, (1, 3, 1, 3))
+
+    def test_bool_mask_assignment(self, device):
+        v = torch.tensor([[1, 2], [3, 4]], device=device)
+        mask = torch.tensor([1, 0], dtype=torch.bool, device=device)
+        v[mask, :] = 0
+        self.assertEqual(v, torch.tensor([[0, 0], [3, 4]], device=device))
+
+        v = torch.tensor([[1, 2], [3, 4]], device=device)
+        v[:, mask] = 0
+        self.assertEqual(v, torch.tensor([[0, 2], [0, 4]], device=device))
+
+    def test_multi_dimensional_bool_mask_assignment(self, device):
+        v = torch.tensor([[[[1], [2]], [[3], [4]]]], device=device)
+        mask = torch.tensor([[1, 0], [0, 1]], dtype=torch.bool, device=device)
+        v[:, mask, :] = 0
+        self.assertEqual(v, torch.tensor([[[[0], [2]], [[3], [0]]]], device=device))
+        v = torch.tensor([[[[1], [2]], [[3], [4]]]], device=device)
+        torch.ops.aten.index_put_(v, [None, mask, None], torch.tensor(0))
+        self.assertEqual(v, torch.tensor([[[[0], [2]], [[3], [0]]]], device=device))
+
     def test_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
         mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
@@ -1243,6 +1307,7 @@ class TestIndexing(TestCase):
         torch.float8_e5m2,
         torch.float8_e4m3fn,
     )
+    @dtypesIfMPS(torch.float, torch.float16, torch.long, torch.bool)
     def test_index_put_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
         vals = torch.ones(3, 2, 4, device=device, dtype=dtype)
@@ -1989,7 +2054,9 @@ class NumpyTests(TestCase):
         self.assertEqual(kernel, kernel2)
 
 
-instantiate_device_type_tests(TestIndexing, globals(), except_for="meta")
+instantiate_device_type_tests(
+    TestIndexing, globals(), except_for="meta", allow_mps=True
+)
 instantiate_device_type_tests(NumpyTests, globals(), except_for="meta")
 
 if __name__ == "__main__":

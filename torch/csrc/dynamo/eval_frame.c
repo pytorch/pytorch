@@ -34,6 +34,14 @@ void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
+#if IS_PYTHON_3_12_PLUS
+const size_t sys_monitoring_num_callables =
+    sizeof((PyInterpreterState){0}.monitoring_callables) / sizeof(PyObject*);
+PyObject** get_monitoring_callables(PyInterpreterState* interp) {
+  return (PyObject**)interp->monitoring_callables;
+}
+#endif
+
 // 3.14 Not supported at all. See cpython_defs.c for hints
 #if !(IS_PYTHON_3_14_PLUS)
 
@@ -222,17 +230,6 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   // Returns the C string name of the current frame.
   DEBUG_CHECK(PyUnicode_Check(F_CODE(frame)->co_name));
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
-}
-
-void clear_old_frame_if_python_312_plus(
-    PyThreadState* tstate,
-    THP_EVAL_API_FRAME_OBJECT* frame) {
-#if IS_PYTHON_3_12_PLUS
-
-  THP_PyFrame_Clear(frame);
-  THP_PyThreadState_PopFrame(tstate, frame);
-
-#endif
 }
 
 static PyObject* dynamo_eval_custom_code_impl(
@@ -485,6 +482,18 @@ static PyObject* dynamo__custom_eval_frame_shim(
 
 static void enable_eval_frame_shim(PyThreadState* tstate) {}
 static void enable_eval_frame_default(PyThreadState* tstate) {}
+PyObject* dynamo_eval_custom_code(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    PyCodeObject* code,
+    const char* trace_annotation,
+    int throw_flag) {}
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(
+    THP_EVAL_API_FRAME_OBJECT* frame) {}
+PyObject* dynamo_eval_frame_default(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    int throw_flag) {}
 
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {NULL};
 
@@ -497,6 +506,17 @@ static PyTypeObject THPPyInterpreterFrameType = {
 };
 
 #endif // !(IS_PYTHON_3_14_PLUS)
+
+void clear_old_frame_if_python_312_plus(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame) {
+#if IS_PYTHON_3_12_PLUS
+
+  THP_PyFrame_Clear(frame);
+  THP_PyThreadState_PopFrame(tstate, frame);
+
+#endif
+}
 
 static PyObject* increment_working_threads(
     PyThreadState* tstate,
@@ -570,6 +590,23 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
       "python enabled=%d and is run_only=%d",
       callback != Py_None,
       callback == Py_False);
+#if IS_PYTHON_3_12_PLUS
+  // skip tracing sys.monitoring callables
+  if (callback != Py_None && callback != Py_False) {
+    PyInterpreterState* interp = PyThreadState_GET()->interp;
+    PyObject** monitoring_callables_flat =
+        (PyObject**)interp->monitoring_callables;
+    for (size_t i = 0; i < sys_monitoring_num_callables; ++i) {
+      PyObject* callable = monitoring_callables_flat[i];
+      if (callable != NULL && PyFunction_Check(callable)) {
+        PyFunctionObject* func = (PyFunctionObject*)callable;
+        if (func->func_code != NULL) {
+          skip_code_recursive((PyCodeObject*)func->func_code);
+        }
+      }
+    }
+  }
+#endif
   return set_eval_frame(callback, PyThreadState_GET(), module);
 }
 
