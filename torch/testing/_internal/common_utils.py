@@ -5764,3 +5764,16 @@ def recover_orig_fp32_precision(fn):
             torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
 
     return recover()(fn)
+
+def skipIfPythonVersionMismatch(predicate):
+    vi = sys.version_info
+
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if predicate(vi.major, vi.minor, vi.micro):
+                return fn(self, *args, **kwargs)
+            else:
+                raise unittest.SkipTest("Python version mismatch")
+        return wrap_fn
+    return dec_fn

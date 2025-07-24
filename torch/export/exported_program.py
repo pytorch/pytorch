@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import (
+    _build_cache,
     _collect_all_valid_cia_ops,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
@@ -572,8 +573,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
         delattr(ep.graph_module, name)
 
     # TODO(zhxhchen17) Return the new graph_signature directly.
-    fake_mode = detect_fake_mode(fake_args)
-    fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode  # type: ignore[assignment]
+    fake_mode_det = detect_fake_mode(fake_args)
+    fake_mode_ctx = contextlib.nullcontext() if fake_mode_det is None else fake_mode_det  # type: ignore[assignment]
     custom_triton_ops_decomposition_ctx = (
         contextlib.nullcontext
         if decompose_custom_triton_ops
@@ -581,7 +582,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     )
     with (
         _ignore_backend_decomps(),
-        fake_mode,
+        fake_mode_ctx,
         _override_composite_implicit_decomp(cia_to_decomp),
         custom_triton_ops_decomposition_ctx(),
     ):
@@ -620,11 +621,18 @@ def _decompose_and_get_gm_with_new_signature_constants(
         new_ph.name = new_ph.target = old_ph.name
 
     # handle name collisions with newly decomposed graph nodes
-    name_map = {ph.name: ph.name for ph in new_placeholders}
+    name_map = {}
+    find_available: dict[str, int] = defaultdict(int)
+    used_names: set[str] = set()
+    for ph in new_placeholders:
+        name_map[ph.name] = ph.name
+        _build_cache(ph.name, find_available, used_names)
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             continue
-        node.name = _rename_without_collisions(name_map, node.name, node.name)
+        node.name = _rename_without_collisions(
+            name_map, find_available, used_names, node.name, node.name
+        )
 
     # propagate names to higher order op subgraphs
     _name_hoo_subgraph_placeholders(gm)
