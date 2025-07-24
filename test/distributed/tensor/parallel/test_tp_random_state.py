@@ -1,4 +1,6 @@
 # Owner(s): ["oncall: distributed"]
+from typing import Callable
+
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
@@ -16,7 +18,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class TensorParallelRandomStateTests(DTensorTestBase):
-    def get_tensor_slice(self, idx, n, large_tensor):
+    def get_tensor_slice(
+        self, idx: int, n: int, large_tensor: torch.Tensor
+    ) -> torch.Tensor:
         shape = large_tensor.shape
         assert shape[0] % n == 0
         local_shape = [shape[0] // n, shape[1]]
@@ -27,7 +31,13 @@ class TensorParallelRandomStateTests(DTensorTestBase):
         )
         return large_tensor[slice_idx]
 
-    def check_gathered_tensors(self, self_rank, size, gathered_tensors, assertFunc):
+    def check_gathered_tensors(
+        self,
+        self_rank: int,
+        size: int,
+        gathered_tensors: torch.Tensor,
+        assertFunc: Callable[[torch.Tensor, torch.Tensor], None],
+    ) -> None:
         for other_rank in range(size):
             if self_rank != other_rank:
                 assertFunc(
@@ -37,7 +47,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_model_init(self):
+    def test_model_init(self) -> None:
         dp_size = 2
         tp_size = self.world_size // dp_size
         mesh_2d = init_device_mesh(
@@ -66,7 +76,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
             # in the following way:
             #   - within a tensor parallel group, the RNG is set with the same seed
             #   - across data parallel groups, the RNG is set with different seeds
-            torch.cuda.manual_seed(dp_rank)
+            torch.get_device_module(self.device_type).manual_seed(dp_rank)
 
             # disable/enable parallel RNG feature
             if random._rng_tracker:
@@ -95,7 +105,9 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                 self.assertEqual(_1d_mesh.get_coordinate()[0], tp_rank)
 
                 # compare local shards within the TP group
-                def tp_weights_assert(tensor1, tensor2):
+                def tp_weights_assert(
+                    tensor1: torch.Tensor, tensor2: torch.Tensor
+                ) -> None:
                     if enable_distribute_flag:
                         # each rank within a TP group shall initialize local weights differently
                         self.assertNotEqual(tensor1, tensor2)
@@ -117,7 +129,9 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                 )
 
                 # compare local shards across TP groups
-                def dp_weights_assert(tensor1, tensor2):
+                def dp_weights_assert(
+                    tensor1: torch.Tensor, tensor2: torch.Tensor
+                ) -> None:
                     if enable_distribute_flag:
                         # local weights shall be initialized the same across TP groups
                         self.assertEqual(tensor1, tensor2)

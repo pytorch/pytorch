@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+from typing import Any
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -34,7 +35,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DistTensorRandomInitTest(DTensorTestBase):
-    def _run_init_op(self, init_op, *args, **kwargs):
+    def _run_init_op(self, init_op: Any, *args: Any, **kwargs: Any) -> None:
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         input_size = (8, 4)
@@ -72,7 +73,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
                     self.assertNotEqual(dtensor.full_tensor()[slice_idx], local_tensor)
 
     @with_comms
-    def test_init_ops(self):
+    def test_init_ops(self) -> None:
         self._run_init_op(
             torch.nn.init.kaiming_uniform_,
             a=0,
@@ -89,14 +90,14 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_meta_tensor_init(self):
+    def test_meta_tensor_init(self) -> None:
         # test suite sets each rank's seed to the same value but in actual
         # execution the default random seed will be different (a random value).
         # The DTensor random ops will use the same random seed even though the
         # torch random generator keeps different seeds on ranks. This ensures
         # that Replicate DTensor will have the same initialized results
         # across ranks.
-        torch.cuda.manual_seed(self.rank)
+        torch.get_device_module(self.device_type).manual_seed(self.rank)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
@@ -130,6 +131,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
                 )
 
         # Test 2: disable the distribute region for RNG
+        torch.get_device_module(self.device_type).manual_seed(self.rank)
         self.assertTrue(meta_dtensor.is_meta)
         # Tensor meta init
         dtensor = torch.empty_like(meta_dtensor, device=self.device_type)
@@ -155,7 +157,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
-    def test_tp_model_meta_init(self):
+    def test_tp_model_meta_init(self) -> None:
         # initialize the 1-d device mesh for TP
         tp_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
 
@@ -202,7 +204,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_fsdp_tp_model_meta_init(self):
+    def test_fsdp_tp_model_meta_init(self) -> None:
         # initialize the 2-d device mesh
         global_mesh = init_device_mesh(
             self.device_type,
@@ -257,7 +259,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
 class DistTensorRandomOpTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
-    def test_rng_tracker_init(self):
+    def test_rng_tracker_init(self) -> None:
         torch.manual_seed(self.rank)
         object_list = [torch.initial_seed()]
         broadcast_object_list(object_list)
@@ -279,7 +281,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
-    def test_manual_seed(self):
+    def test_manual_seed(self) -> None:
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         # in the case of calling ``torch.distributed.tensor._random.manual_seed``,
@@ -304,7 +306,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
-    def test_manual_seed_submesh(self):
+    def test_manual_seed_submesh(self) -> None:
         # the current rank is not a part of the mesh
         single_rank_device_mesh = DeviceMesh(
             self.device_type, [(self.rank + 1) % self.world_size]
@@ -317,7 +319,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
-    def test_pipeline_parallel_manual_seed(self):
+    def test_pipeline_parallel_manual_seed(self) -> None:
         # This test is to verify the `manual_seed` API works as expected in the
         # pipeline parallel setting.
         world_mesh = init_device_mesh(
@@ -358,7 +360,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
-    def test_deterministic_dropout_1d(self):
+    def test_deterministic_dropout_1d(self) -> None:
         # test suite sets each rank's seed to the same value but in actual
         # execution the default random seed will be different (a random value).
         # The DTensor random ops will use the same random seed even though the
@@ -399,7 +401,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
-    def test_deterministic_rand_1d(self):
+    def test_deterministic_rand_1d(self) -> None:
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [4, 4 * self.world_size]
 
@@ -442,7 +444,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_deterministic_uniform_2d(self):
+    def test_deterministic_uniform_2d(self) -> None:
         mesh = torch.arange(self.world_size).reshape(2, 2)
         device_mesh = DeviceMesh(self.device_type, mesh)
         dtensor = distribute_tensor(
@@ -547,12 +549,12 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):
     @property
-    def world_size(self):
+    def world_size(self) -> int:
         return 8
 
     @with_comms
     @skip_if_lt_x_gpu(8)
-    def test_hsdp_tp_model_meta_init(self):
+    def test_hsdp_tp_model_meta_init(self) -> None:
         # initialize the 3-d device mesh
         global_mesh = init_device_mesh(
             self.device_type,
