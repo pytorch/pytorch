@@ -51,6 +51,12 @@
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)
 #define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
+  _(cuCtxFromGreenCtx)                     \
+  _(cuCtxSetCurrent)                       \
+  _(cuDevSmResourceSplitByCount)           \
+  _(cuDeviceGet)                           \
+  _(cuDeviceGetDevResource)                \
+  _(cuDevResourceGenerateDesc)             \
   _(cuMulticastAddDevice, 12030)           \
   _(cuMulticastBindMem, 12030)             \
   _(cuMulticastCreate, 12030)              \
