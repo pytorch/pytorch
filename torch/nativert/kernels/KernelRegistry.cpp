@@ -245,7 +245,7 @@ C10_DEFINE_REGISTRY(
     StaticallyDispatchedCPUKernelRegistry,
     OpKernel,
     const Node*,
-    c10::Device);
+    c10::Device)
 
 namespace {
 
@@ -294,7 +294,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.remainder.Tensor", aten_remainder_Tensor, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::cpu::remainder_out(out, self, KernelInput(1).toTensor());
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.remainder.Scalar", aten_remainder_Scalar, {
   const auto& self = KernelInput(0).toTensor();
@@ -305,7 +305,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.remainder.Scalar", aten_remainder_Scalar, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::native::remainder_out(self, KernelInput(1).toScalar(), out);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.matmul.default", aten_matmul, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -318,7 +318,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.matmul.default", aten_matmul, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::native::matmul_out(in0_t, in1_t, out_t);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.bmm.default", aten_bmm, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -329,7 +329,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.bmm.default", aten_bmm, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::cpu::bmm_out(out_t, in0_t, in1_t);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.abs.default", aten_abs, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -340,7 +340,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.abs.default", aten_abs, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::native::abs_out(in0_t, out_t);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.mul.Tensor", aten_mul, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -352,7 +352,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.mul.Tensor", aten_mul, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::cpu::mul_out(out_t, in0_t, in1_t);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.mul.Scalar", aten_mul_Scalar, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -364,7 +364,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.mul.Scalar", aten_mul_Scalar, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   KernelOutput(0) = at::native::mul_out(out_t, in0_t, in1_t);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.nan_to_num.default", aten_nan_to_num, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -378,7 +378,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.nan_to_num.default", aten_nan_to_num, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::native::nan_to_num_out(in0_t, in1_d, in2_d, in3_d, out_t);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.leaky_relu.default", aten_leaky_relu, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -389,7 +389,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.leaky_relu.default", aten_leaky_relu, {
   }
   auto& out_t = KernelOutput(0).toTensor();
   at::cpu::leaky_relu_out(out_t, in0_t, in1_s);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.relu.default", aten_relu, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -399,7 +399,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.relu.default", aten_relu, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::cpu::threshold_out(out_t, in0_t, 0, 0);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.clone.default", aten_clone, {
   const auto& src = KernelInput(0).toTensor();
@@ -433,7 +433,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.clone.default", aten_clone, {
   at::native::resize_impl_cpu_(
       out_t.unsafeGetTensorImpl(), src.sizes(), src.strides());
   at::native::copy_(out_t, src, false);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.index.Tensor", aten_index, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -446,7 +446,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.index.Tensor", aten_index, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::cpu::index_out(out_t, in0_t, in1_l);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.index_select.default", aten_index_select, {
   const auto& self = KernelInput(0).toTensor();
@@ -459,7 +459,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.index_select.default", aten_index_select, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::native::index_select_out_cpu_(self, dim, index, out);
-});
+})
 
 REGISTER_CPU_KERNEL(
     "torch.ops.aten.pow.Tensor_Tensor",
@@ -474,7 +474,7 @@ REGISTER_CPU_KERNEL(
       fastResizeToZero(out_t);
       at::cpu::pow_out(
           out_t, KernelInput(0).toTensor(), KernelInput(1).toTensor());
-    });
+    })
 
 REGISTER_CPU_KERNEL("torch.ops.aten.pow.Scalar", aten_pow_Scalar, {
   if (KernelOutput(0).isNone()) {
@@ -491,7 +491,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.pow.Scalar", aten_pow_Scalar, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::cpu::pow_out(out_t, KernelInput(0).toScalar(), KernelInput(1).toTensor());
-});
+})
 
 REGISTER_CPU_KERNEL(
     "torch.ops.aten.pow.Tensor_Scalar",
@@ -512,7 +512,7 @@ REGISTER_CPU_KERNEL(
       fastResizeToZero(out_t);
       at::cpu::pow_out(
           out_t, KernelInput(0).toTensor(), KernelInput(1).toScalar());
-    });
+    })
 
 REGISTER_CPU_KERNEL("torch.ops.aten.sum.default", aten_sum_default, {
   // if (n->inputs().size() != 2 && n->inputs().size() != 4) {
@@ -529,7 +529,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.sum.default", aten_sum_default, {
     fastResizeToZero(out);
     at::cpu::sum_out(out, self, dim, keepdim, dtype);
   }
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.sum.dim_IntList", aten_sum_dim_IntList, {
   // if (n->inputs().size() != 2 && n->inputs().size() != 4) {
@@ -546,7 +546,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.sum.dim_IntList", aten_sum_dim_IntList, {
     fastResizeToZero(out);
     at::cpu::sum_out(out, self, dim, keepdim, dtype);
   }
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.mean.dim", aten_mean_dim, {
   const auto& self = KernelInput(0).toTensor();
@@ -560,7 +560,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.mean.dim", aten_mean_dim, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::cpu::mean_out(out, self, dim, keepdim, dtype);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.mean.default", aten_mean_default, {
   const auto& self = KernelInput(0).toTensor();
@@ -572,7 +572,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.mean.default", aten_mean_default, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::cpu::mean_out(out, self, /*dim=*/{}, /*keepdim=*/false, dtype);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.max.other", aten_max_other, {
   const auto& self = KernelInput(0).toTensor();
@@ -584,7 +584,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.max.other", aten_max_other, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::native::max_out(self, other, out);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.max.default", aten_max_default, {
   const auto& self = KernelInput(0).toTensor();
@@ -594,7 +594,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.max.default", aten_max_default, {
   auto& value = KernelOutput(0).toTensor();
   fastResizeToZero(value);
   at::cpu::amax_out(value, self);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.sign.Tensor", aten_sign_Tensor, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -605,7 +605,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.sign.Tensor", aten_sign_Tensor, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::cpu::sign_out(out_t, in0_t);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.log.default", aten_log, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -616,7 +616,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.log.default", aten_log, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::cpu::log_out(out_t, in0_t);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.sub.Tensor", aten_sub_Tensor, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -629,7 +629,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.sub.Tensor", aten_sub_Tensor, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::cpu::sub_out(out_t, in0_t, in1_t, alpha);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.sub.Scalar", aten_sub, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -643,7 +643,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.sub.Scalar", aten_sub, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::cpu::sub_out(out_t, in0_t, in1_t, alpha);
-});
+})
 
 // TODO: support clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
 // Missing Test Coverage
@@ -660,7 +660,7 @@ REGISTER_CPU_KERNEL(
       auto& out_t = KernelOutput(0).toTensor();
       fastResizeToZero(out_t);
       at::cpu::clamp_min_out(out_t, in0_t, in1_s);
-    });
+    })
 
 REGISTER_CPU_KERNEL("torch.ops.aten.argmin.default", aten_argmin, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -677,7 +677,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.argmin.default", aten_argmin, {
     return;
   }
   at::cpu::argmin_out(out_t, in0_t, dim, keepdim);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.softmax.int", aten_softmax_int, {
   const auto& in_t = KernelInput(0).toTensor();
@@ -692,7 +692,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.softmax.int", aten_softmax_int, {
   auto half_to_float = in_t.scalar_type() == at::ScalarType::Half &&
       dtype == at::ScalarType::Float;
   at::cpu::_softmax_out(out_t, in_t, dim, half_to_float);
-});
+})
 
 REGISTER_CPU_KERNEL(
     "torch.ops.aten.norm.ScalarOpt_dtype",
@@ -712,7 +712,7 @@ REGISTER_CPU_KERNEL(
           false,
           KernelInput(2).toScalarType(),
           out_t);
-    });
+    })
 
 REGISTER_CPU_KERNEL("torch.ops.aten.full.default", aten_full, {
   const auto& size = KernelInput(0).toDimVector();
@@ -728,7 +728,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.full.default", aten_full, {
   }
   KernelOutput(0) =
       at::native::full_out(size, fill_value, KernelOutput(0).toTensor());
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.ones.default", aten_ones, {
   const auto size = KernelInput(0).toDimVector();
@@ -743,7 +743,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.ones.default", aten_ones, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::native::ones_out(size, out_t);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.ones_like.default", aten_ones_like, {
   const auto& self = KernelInput(0).toTensor();
@@ -760,7 +760,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.ones_like.default", aten_ones_like, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::native::ones_out(self.sizes(), out_t);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.zeros.default", aten_zeros, {
   const auto size = KernelInput(0).toDimVector();
@@ -774,7 +774,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.zeros.default", aten_zeros, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::compositeexplicitautograd::zeros_out(out_t, size);
-});
+})
 
 REGISTER_CPU_KERNEL(
     "torch.ops.aten.linalg_norm.default",
@@ -798,7 +798,7 @@ REGISTER_CPU_KERNEL(
           keepdim,
           dtype,
           out);
-    });
+    })
 
 REGISTER_CPU_KERNEL("torch.ops.aten.linalg_norm.ord_str", aten_linalg_norm, {
   const auto& self = KernelInput(0).toTensor();
@@ -814,7 +814,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.linalg_norm.ord_str", aten_linalg_norm, {
   fastResizeToZero(out);
   at::native::linalg_norm_out(
       self, KernelInput(1).toStringRef(), dim, keepdim, dtype, out);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.cat.default", aten_cat, {
   const auto inputs = KernelInput(0).toTensorVector();
@@ -827,7 +827,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.cat.default", aten_cat, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::cpu::cat_outf(inputs, dim, out);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.cumsum.default", aten_cumsum, {
   const auto& self = KernelInput(0).toTensor();
@@ -840,7 +840,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.cumsum.default", aten_cumsum, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::cpu::cumsum_out(out, self, dim, dtype);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.nonzero.default", aten_nonzero, {
   const auto& self = KernelInput(0).toTensor();
@@ -851,7 +851,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.nonzero.default", aten_nonzero, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::native::nonzero_out_cpu(self, out);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.addmm.default", aten_addmm, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -866,7 +866,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.addmm.default", aten_addmm, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::cpu::addmm_out(out_t, in0_t, in1_t, in2_t, in3_s, in4_s);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.narrow_copy.default", aten_narrow_copy, {
   const auto& self = KernelInput(0).toTensor(); // self
@@ -888,7 +888,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.narrow_copy.default", aten_narrow_copy, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::native::narrow_copy_dense_cpu_out(self, dim, start, length, out);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.repeat.default", aten_repeat, {
   const auto& self = KernelInput(0).toTensor();
@@ -900,7 +900,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.repeat.default", aten_repeat, {
   }
   at::Tensor& out = KernelOutput(0).toTensor();
   at::native::repeat_out(out, self, repeats);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.max.dim", aten_max_dim, {
   const auto& self = KernelInput(0).toTensor();
@@ -920,7 +920,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.max.dim", aten_max_dim, {
   fastResizeToZero(values);
   fastResizeToZero(indices);
   at::cpu::max_out(values, indices, self, dim, keepdim);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.layer_norm.default", aten_layer_norm, {
   // ignore KernelInput(5): `bool cudnn_enable=True`
@@ -956,7 +956,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.layer_norm.default", aten_layer_norm, {
   }
   at::Tensor& out = KernelOutput(0).toTensor();
   at::native::layer_norm_cpu_out(out, *X, *gamma, *beta, eps, M, N);
-});
+})
 
 REGISTER_CPU_KERNEL(
     "torch.ops.aten.norm.ScalarOpt_dim_dtype",
@@ -978,7 +978,7 @@ REGISTER_CPU_KERNEL(
           KernelInput(3).toBool(), // keepdim
           KernelInput(4).toScalarType(), // dtype
           out_t);
-    });
+    })
 
 REGISTER_CPU_KERNEL(
     "torch.ops.aten.norm.ScalarOpt_dim",
@@ -999,7 +999,7 @@ REGISTER_CPU_KERNEL(
           KernelInput(2).toDimVector(), // dim
           KernelInput(3).toBool(), // keepdim
           out_t);
-    });
+    })
 
 REGISTER_CPU_KERNEL("torch.ops.aten.full_like.default", aten_full_like, {
   const auto in1_s = KernelInput(1).toScalar();
@@ -1017,7 +1017,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.full_like.default", aten_full_like, {
   auto& out_t = KernelOutput(0).toTensor();
   at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
   at::native::fill_out(out_t, in1_s);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.linear.default", aten_linear, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -1031,7 +1031,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.linear.default", aten_linear, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::native::linear_out(out_t, in0_t, in1_t, in2_t);
-});
+})
 
 REGISTER_CPU_KERNEL("torch.ops.aten.where.self", aten_where, {
   const auto& cond = KernelInput(0).toTensor();
@@ -1044,7 +1044,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.where.self", aten_where, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::native::where_self_out(cond, self, other, out);
-});
+})
 
 REGISTER_CPU_KERNEL(
     "torch.ops.quantized.embedding_bag_byte_rowwise_offsets.default",
@@ -1074,7 +1074,7 @@ REGISTER_CPU_KERNEL(
           per_sample_weights,
           compressed_indices_mapping,
           include_last_offset);
-    });
+    })
 
 REGISTER_CPU_KERNEL(
     "torch.ops.quantized.embedding_bag_4bit_rowwise_offsets.default",
@@ -1104,7 +1104,7 @@ REGISTER_CPU_KERNEL(
           per_sample_weights,
           compressed_indices_mapping,
           include_last_offset);
-    });
+    })
 
 REGISTER_CPU_KERNEL(
     "torch.ops.quantized.linear_dynamic_fp16.default",
@@ -1121,7 +1121,7 @@ REGISTER_CPU_KERNEL(
 
       KernelInput(1).toCustomClass<LinearPackedParamsBase>()->apply_dynamic_out(
           in_0, out_0, /* reduce_range= */ false);
-    });
+    })
 
 REGISTER_CPU_KERNEL(
     "torch.ops.quantized.linear_relu_dynamic_fp16.default",
@@ -1140,7 +1140,7 @@ REGISTER_CPU_KERNEL(
           .toCustomClass<LinearPackedParamsBase>()
           ->apply_dynamic_out(in_0, out_0, /* reduce_range= */ false)
           .relu_();
-    });
+    })
 
 REGISTER_CPU_KERNEL(
     "torch.ops.quantized.linear.default",
@@ -1165,7 +1165,7 @@ REGISTER_CPU_KERNEL(
       auto& out_tensor = KernelOutput(0).toTensor();
       fastResizeToZero(out_tensor);
       w_prepack->apply_out(in_0, output_scale, output_zero_point, out_tensor);
-    });
+    })
 
 REGISTER_CPU_KERNEL("torch.ops.aten.logit.default", aten_logit, {
   const auto& in0_t = KernelInput(0).toTensor();
@@ -1176,7 +1176,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.logit.default", aten_logit, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::native::logit_out(in0_t, in1_d, out_t);
-});
+})
 
 REGISTER_CPU_KERNEL(
     "torch.ops.aten.slice_scatter.default",
@@ -1194,7 +1194,7 @@ REGISTER_CPU_KERNEL(
       auto& out = KernelOutput(0).toTensor();
       fastResizeToZero(out);
       at::slice_scatter_out(out, self, src, dim, start, end, step);
-    });
+    })
 
 REGISTER_CPU_KERNEL(
     "torch.ops.quantized.embedding_bag_byte_unpack.default",
@@ -1210,7 +1210,7 @@ REGISTER_CPU_KERNEL(
       auto& out_tensor = KernelOutput(0).toTensor();
       fastResizeToZero(out_tensor);
       at::native::qembeddingbag_byte_unpack_out(out_tensor, weight);
-    });
+    })
 
 REGISTER_CPU_KERNEL(
     "torch.ops.quantized.embedding_bag_byte_prepack.default",
@@ -1224,7 +1224,7 @@ REGISTER_CPU_KERNEL(
       auto& out_tensor = KernelOutput(0).toTensor();
       fastResizeToZero(out_tensor);
       at::native::qembeddingbag_byte_prepack_out(out_tensor, weight);
-    });
+    })
 
 REGISTER_CPU_KERNEL("torch.ops.aten.stack.default", aten_stack, {
   const auto& inputs = KernelInput(0).toTensorVector();
@@ -1236,7 +1236,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.stack.default", aten_stack, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::native::_stack_out_cpu(inputs, dim, out_t);
-});
+})
 
 class OpKernel_aten__to_copy : public C10Kernel {
  public:
