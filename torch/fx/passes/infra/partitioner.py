@@ -20,7 +20,7 @@ class Partition:
     def __init__(
         self,
         id: Optional[int] = None,
-        nodes: Optional[Iterable[tuple[Node, int]]] = None,
+        nodes: Optional[Iterable[tuple[Node, Optional[int]]]] = None,
     ):
         self.id = id
         self.nodes = dict(nodes) if nodes is not None else {}
