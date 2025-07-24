@@ -458,7 +458,7 @@ if(LAPACK_FOUND)
     # would not need this at all), some of our libraries (magma in particular)
     # backend to CPU BLAS/LAPACK implementations, and so it is very important
     # we get the *right* implementation, because even if the symbols are the
-    # same, LAPACK implementions may have different calling conventions.
+    # same, LAPACK implementations may have different calling conventions.
     # This caused https://github.com/pytorch/pytorch/issues/7353
     #
     # We do NOT do this on Linux, since we just rely on torch_cpu to
@@ -586,17 +586,10 @@ if(USE_CUDA AND NOT USE_ROCM)
       CUDA::cufft_static_nocallback
     )
    if(NOT BUILD_LAZY_CUDA_LINALG)
-     if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
-       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-         CUDA::cusolver_static
-         ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-       )
-     elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
-       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-         CUDA::cusolver_static
-         ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
-       )
-     endif()
+     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+       CUDA::cusolver_static
+       ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+     )
    endif()
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS

@@ -26,8 +26,6 @@
 #else
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/empty_strided.h>
-#include <ATen/ops/_cudnn_attention_backward.h>
-#include <ATen/ops/_cudnn_attention_backward_native.h>
 #include <ATen/ops/_flash_attention_backward.h>
 #include <ATen/ops/_flash_attention_backward_native.h>
 #include <ATen/ops/_efficient_attention_backward.h>
@@ -98,14 +96,14 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   std::optional<at::Tensor> dk{std::nullopt};
   std::optional<at::Tensor> dv{std::nullopt};
 
-  //  The kernel computes irregardless we will drop for this functions return
+  //  The kernel computes regardless we will drop for this functions return
   Tensor grad_softmax;
 
   // Currently unused args:
   std::optional<at::Tensor> alibi_slopes{std::nullopt};
   const float softcap = 0.0;
 
-  bool determinisitic{false};
+  bool deterministic{false};
   auto& ctx = at::globalContext();
   if (ctx.deterministicAlgorithms()) {
     if (ctx.deterministicAlgorithmsWarnOnly()) {
@@ -113,7 +111,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
           "Flash Attention defaults to a non-deterministic algorithm. ",
           "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
     } else {
-      determinisitic = true;
+      deterministic = true;
     }
   }
 
@@ -148,7 +146,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         non_null_window_right,
 #endif
         softcap,
-        determinisitic,
+        deterministic,
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
@@ -176,7 +174,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         non_null_window_right,
 #endif
         softcap,
-        determinisitic,
+        deterministic,
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
@@ -186,7 +184,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   return std::make_tuple(Tensor(), Tensor(), Tensor());
 }
 
-std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
+std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_cuda(
     const Tensor& grad_out,
     const Tensor& query,
     const Tensor& key,
@@ -213,117 +211,57 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
       }
     }
 
-    const bool is_nested = cum_seq_q.defined();
+    const int64_t batch_size = query.size(0);
+    const int64_t num_heads = query.size(1);
+    const int64_t head_dim_qk = query.size(3);
+    const int64_t head_dim_v = value.size(3);
     const int64_t max_seqlen_batch_q = query.size(2);
     const int64_t max_seqlen_batch_k = key.size(2);
 
-    if (!is_nested) {
-      const int64_t batch_size = query.size(0);
-      const int64_t num_heads = query.size(1);
-      const int64_t head_dim_qk = query.size(3);
-      const int64_t head_dim_v = value.size(3);
-
-      // This is needed because SaveVariable automatically converts
-      // std::optional to undefined tensor
-      std::optional<Tensor> attn_bias_;
-      if (attn_bias.defined()) {
-        attn_bias_ = attn_bias;
-      }
-      if (attn_bias_.has_value()) {
-        const auto bias_dim = attn_bias_.value().dim();
-        if (bias_dim == 2) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
-        } else if (bias_dim == 3) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
-        } else {
-          TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
-          attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
-        }
-      }
-
-      const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
-      auto dq = at::empty_like(query);
-      auto dk = at::empty_like(key);
-      auto dv = at::empty_like(value);
-      run_cudnn_SDP_bprop(batch_size /*int64_t b*/,
-                          num_heads /*int64_t h*/,
-                          max_q/*int64_t s_q*/,
-                          max_k/*int64_t s_kv*/,
-                          head_dim_qk /*int64_t d_qk*/,
-                          head_dim_v /*int64_t d_v*/,
-                          softmax_scale /*float scaling_factor*/,
-                          is_causal /*bool is_causal*/,
-                          dropout_p /*float dropout_probability*/,
-                          query /*const Tensor& q*/,
-                          key /*const Tensor& k*/,
-                          value /*const Tensor& v*/,
-                          attn_bias_ /*const std::optional<Tensor>& attn_bias*/,
-                          out /*const Tensor& o*/,
-                          grad_out/*const Tensor& dO*/,
-                          logsumexp.unsqueeze(-1)/*const Tensor& softmaxstats*/,
-                          dq/*Tensor& dQ*/,
-                          dk/*Tensor& dK*/,
-                          dv/*Tensor& dV*/,
-                          philox_seed/*Tensor& dropoutseed*/,
-                          philox_offset/*Tensor& dropoutoffset*/);
-      return std::make_tuple(std::move(dq), std::move(dk), std::move(dv));
-    } else {
-      // BHSD ...
-      const int64_t batch_size = cum_seq_q.size(0) - 1;
-      const int64_t num_heads_q = query.size(-2);
-      const int64_t num_heads_k = key.size(-2);
-      const int64_t num_heads_v = value.size(-2);
-      const int64_t head_dim_qk = query.size(-1);
-      const int64_t head_dim_v = value.size(-1);
-      std::optional<Tensor> attn_bias_;
-      if (attn_bias.defined()) {
-        attn_bias_ = attn_bias;
-      }
-      if (attn_bias_.has_value()) {
-        const auto bias_dim = attn_bias_.value().dim();
-        if (bias_dim == 2) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
-        } else if (bias_dim == 3) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
-        } else {
-          attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
-          TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
-        }
-      }
-
-      auto dq = at::empty_like(query);
-      auto dk = at::empty_like(key);
-      auto dv = at::empty_like(value);
-
-      const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
-      run_cudnn_SDP_bprop_nestedtensor(
-        batch_size,
-        num_heads_q,
-        num_heads_k,
-        num_heads_v,
-        max_seqlen_batch_q,
-        max_seqlen_batch_k,
-        head_dim_qk,
-        head_dim_v,
-        softmax_scale,
-        is_causal,
-        dropout_p,
-        cum_seq_q,
-        cum_seq_k,
-        query,
-        key,
-        value,
-        attn_bias_,
-        out,
-        grad_out,
-        logsumexp,
-        dq,
-        dk,
-        dv,
-        philox_seed,
-        philox_offset);
-      return std::make_tuple(std::move(dq), std::move(dk), std::move(dv));
+    // This is needed because SaveVariable automatically converts
+    // std::optional to undefined tensor
+    std::optional<Tensor> attn_bias_;
+    if (attn_bias.defined()) {
+      attn_bias_ = attn_bias;
     }
+    if (attn_bias_.has_value()) {
+      const auto bias_dim = attn_bias_.value().dim();
+      if (bias_dim == 2) {
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+      } else if (bias_dim == 3) {
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+      } else {
+        TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
+        attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
+      }
+    }
+
+    const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
+    auto dq = at::empty_like(query);
+    auto dk = at::empty_like(key);
+    auto dv = at::empty_like(value);
+    run_cudnn_SDP_bprop(batch_size /*int64_t b*/,
+                        num_heads /*int64_t h*/,
+                        max_q/*int64_t s_q*/,
+                        max_k/*int64_t s_kv*/,
+                        head_dim_qk /*int64_t d_qk*/,
+                        head_dim_v /*int64_t d_v*/,
+                        softmax_scale /*float scaling_factor*/,
+                        is_causal /*bool is_causal*/,
+                        dropout_p /*float dropout_probability*/,
+                        query /*const Tensor& q*/,
+                        key /*const Tensor& k*/,
+                        value /*const Tensor& v*/,
+                        attn_bias_ /*const std::optional<Tensor>& attn_bias*/,
+                        out /*const Tensor& o*/,
+                        grad_out/*const Tensor& dO*/,
+                        logsumexp.unsqueeze(-1)/*const Tensor& softmaxstats*/,
+                        dq/*Tensor& dQ*/,
+                        dk/*Tensor& dK*/,
+                        dv/*Tensor& dV*/,
+                        philox_seed/*Tensor& dropoutseed*/,
+                        philox_offset/*Tensor& dropoutoffset*/);
+    return std::make_tuple(std::move(dq), std::move(dk), std::move(dv));
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -1123,42 +1061,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
     }
     return process_chunk(grad_out_t, query_t, key_t, value_t, attn_bias_opt, out_t, logsumexp);
   }
-}
-
-std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_cuda(
-    const Tensor& grad_out,
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    const Tensor& out,
-    const Tensor& logsumexp,
-    const Tensor& philox_seed,
-    const Tensor& philox_offset,
-    const Tensor& attn_bias,
-    const Tensor& cum_seq_q,
-    const Tensor& cum_seq_k,
-    const int64_t max_q,
-    const int64_t max_k,
-    double dropout_p,
-    bool is_causal,
-    std::optional<double> scale) {
-        return at::_cudnn_attention_backward(
-            grad_out,
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            philox_seed,
-            philox_offset,
-            attn_bias,
-            cum_seq_q,
-            cum_seq_k,
-            max_q,
-            max_k,
-            dropout_p,
-            is_causal,
-            scale);
 }
 
 } // namespace at::native

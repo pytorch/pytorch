@@ -52,6 +52,7 @@ from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.common import (
+    custom_backend_codegen_configs,
     custom_backend_passes,
     init_backend_registration,
 )
@@ -265,6 +266,7 @@ class PersistentCache(CacheBase):
         op: str,
         inputs: str,
         benchmark: Optional[Callable[[Any], dict[ChoiceCaller, float]]],
+        hint_override: Optional[int] = None,
     ) -> dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -277,6 +279,7 @@ class PersistentCache(CacheBase):
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
         precision = torch.get_float32_matmul_precision()
+        cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}
 
@@ -285,9 +288,11 @@ class PersistentCache(CacheBase):
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}):
+                if choice_hash in cache.get(op, {}).get(cache_key, {}).get(
+                    precision, {}
+                ):
                     # cache hit
-                    timings[choice] = cache[op][inputs][precision][choice_hash]
+                    timings[choice] = cache[op][cache_key][precision][choice_hash]
                 else:
                     # cache miss
                     hit = False
@@ -300,9 +305,9 @@ class PersistentCache(CacheBase):
             timings = benchmark(choices)
             assert all(choice in timings for choice in choices)
             local_cache.setdefault(op, {})
-            local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
+            local_cache[op].setdefault(cache_key, {}).setdefault(precision, {})
             for choice, timing in timings.items():
-                local_cache[op][inputs][precision][choice.hash_key()] = timing
+                local_cache[op][cache_key][precision][choice.hash_key()] = timing
 
             self.update_local_cache(local_cache)
 
@@ -850,6 +855,13 @@ class FxGraphHashDetails:
             map(self._get_custom_pass_detail, custom_backend_passes.values())
         )
 
+        # Save custom inductor codegen configs
+        self.custom_backend_codegen_configs = {
+            device: custom_config.save_config_portable(ignore_private_configs=False)
+            for device, custom_config in custom_backend_codegen_configs.items()
+            if custom_config is not None
+        }
+
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
@@ -1053,7 +1065,7 @@ class GuardedCache(Generic[T]):
         Helper to get the shape env from the tracing context.
         """
         ctx = torch._guards.TracingContext.try_get()
-        if not ctx:
+        if not ctx or not ctx.fake_mode:
             return None
         return ctx.fake_mode.shape_env
 
@@ -1631,9 +1643,6 @@ class AotCodeCompiler:
         """
         generated_files: list[Union[str, Weights]] = additional_files  # type: ignore[assignment]
 
-        if sys.platform == "win32":
-            raise RuntimeError("AotCodeCompiler not yet supported for inductor")
-
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
         picked_vec_isa = pick_vec_isa()
@@ -1800,8 +1809,17 @@ class AotCodeCompiler:
             elif platform == "darwin":
                 section_attr = "__DATA,__data"
                 symbol_prefix = "_"
+            elif platform == "win32":
+                symbol_prefix = ""
+                # ASM build is not supported on Windows, force use CPP build.
+                use_asm_build = False
             else:
                 raise RuntimeError(f"Unsupported platform: {platform}")
+
+            # Intel compiler failed to compile this manually constructed assembly file.
+            # Switch XPU to use consts cpp build.
+            if device_type == "xpu":
+                use_asm_build = False
 
             is_large_consts = len(consts) > 1024
 
@@ -1829,12 +1847,21 @@ class AotCodeCompiler:
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
                 return consts_asm, "S"
 
-            # Use c++ to comvert consts to object file can support more compilers, such as msvc and icx.
+            # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
                 consts: bytes, align_bytes: int, symbol_prefix: str
             ) -> tuple[str, str]:
-                const_cpp = f"alignas({align_bytes}) extern "
-                const_cpp += f"const unsigned char {symbol_prefix}_binary_constants_bin_start[] = {{\t\n"
+                consts_size = len(consts)
+                asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))\t\n\
+#else\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n\
+#endif\t\n\
+\t\n\
+ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
+                const_cpp = asan_attr
+                const_cpp += f"alignas({align_bytes}) extern "
+                const_cpp += f"unsigned char {symbol_prefix}_binary_constants_bin_start[{consts_size}] = {{\t\n"
                 count_bytes = 0
                 for c in consts:
                     const_cpp += f"{c}, "
@@ -1842,7 +1869,7 @@ class AotCodeCompiler:
                     if count_bytes % 16 == 0:
                         const_cpp += "\t\n"
                 const_cpp += "};\t\n"
-                const_cpp += f"alignas({align_bytes}) extern const unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
+                const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
                 return const_cpp, "cpp"
 
             if use_asm_build:
@@ -1861,9 +1888,7 @@ class AotCodeCompiler:
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
-                # Intel compiler failed to compile this manually constructed assembly file.
-                # it is ok to use gcc to compile the .S to a .o and linked with Intel compiler .
-                device_type=device_type if device_type != "xpu" else "cpu",
+                device_type=device_type,
                 aot_mode=graph.aot_mode,
                 compile_only=True,
                 use_relative_path=use_relative_path,
@@ -2151,40 +2176,44 @@ class AotCodeCompiler:
 
             cubins_o = []
             asm_files = []
-            ld, objcopy = get_ld_and_objcopy(use_relative_path)
-            for kernel_name, value in CudaKernelParamCache.cache.items():
-                if asm_file := value["asm"]:
-                    asm_files.append(asm_file)
+            if not _IS_WINDOWS:
+                ld, objcopy = get_ld_and_objcopy(use_relative_path)
+                for kernel_name, value in CudaKernelParamCache.cache.items():
+                    if asm_file := value["asm"]:
+                        asm_files.append(asm_file)
 
-                cubin_file = value[get_cpp_wrapper_cubin_path_name()]
-                if config.aot_inductor.emit_multi_arch_kernel and device_type == "cuda":
-                    current_arch = _nvcc_arch_as_compile_option()
-                    cmd = (
-                        f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
-                        # Triton only allows generating PTX version as same as the current arch
-                        f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
-                        # Include SASS for the current specific arch
-                        f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
-                    )
-                    try:
-                        subprocess.run(
-                            cmd.split(),
-                            capture_output=True,
-                            text=True,
-                            check=True,
+                    cubin_file = value[get_cpp_wrapper_cubin_path_name()]
+                    if (
+                        config.aot_inductor.emit_multi_arch_kernel
+                        and device_type == "cuda"
+                    ):
+                        current_arch = _nvcc_arch_as_compile_option()
+                        cmd = (
+                            f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
+                            # Triton only allows generating PTX version as same as the current arch
+                            f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
+                            # Include SASS for the current specific arch
+                            f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                         )
-                    except subprocess.CalledProcessError as e:
-                        print(
-                            f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
-                            file=sys.stderr,
-                        )
-                        raise
+                        try:
+                            subprocess.run(
+                                cmd.split(),
+                                capture_output=True,
+                                text=True,
+                                check=True,
+                            )
+                        except subprocess.CalledProcessError as e:
+                            print(
+                                f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                                file=sys.stderr,
+                            )
+                            raise
 
-                if config.aot_inductor.embed_kernel_binary:
-                    # Embed cubin files into model.so using objcopy
-                    cubins_o.append(
-                        convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
-                    )
+                    if config.aot_inductor.embed_kernel_binary:
+                        # Embed cubin files into model.so using objcopy
+                        cubins_o.append(
+                            convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
+                        )
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(
@@ -3745,6 +3774,7 @@ class CUDACodeCache:
             return None
 
     @classmethod
+    @lru_cache(None)
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
         """
         Writes source code into a file with dst_file_ext as the file extension.

@@ -1,5 +1,3 @@
-# mypy: allow-untyped-decorators
-
 """
 This module implements TorchDynamo's core frame conversion functionality, transforming Python
 frames into FX graphs. It handles:
@@ -225,6 +223,31 @@ def fx_forward_from_src_skip_result(
     result = original_forward_from_src(src, globals, co_fields)
     skip_code(result.__code__)
     return result
+
+
+def log_dynamo_start(code: CodeType, skip: int = 0) -> None:
+    convert_frame_intern = structured.intern_string(__file__)
+    # Initialize the ChromiumEventLogger on start
+    torch._logging.trace_structured(
+        "dynamo_start",
+        lambda: {
+            "stack": list(
+                itertools.takewhile(
+                    lambda f: f["filename"] != convert_frame_intern,
+                    structured.from_traceback(
+                        CapturedTraceback.extract(skip=4 + skip).summary()
+                    ),
+                )
+            )
+            + [
+                {
+                    "line": code.co_firstlineno,
+                    "name": code.co_name,
+                    "filename": structured.intern_string(code.co_filename),
+                }
+            ]
+        },
+    )
 
 
 def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -495,6 +518,29 @@ def _is_error_on_graph_break(tx: Optional[InstructionTranslator]) -> bool:
     return tx.error_on_graph_break
 
 
+def get_compile_id(
+    frame_state: dict[str, Union[int, FrameStateSizeEntry]],
+) -> CompileId:
+    global FRAME_COUNTER
+    if "_id" not in frame_state:
+        frame_state["_id"] = FRAME_COUNTER
+        FRAME_COUNTER += 1
+    frame_id = frame_state["_id"]
+    assert isinstance(frame_id, int)
+
+    frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
+    FRAME_COMPILE_COUNTER[frame_id] += 1
+
+    compiled_autograd_id = None
+    if prior := CompileContext.current_compile_id():
+        compiled_autograd_id = prior.compiled_autograd_id
+    return CompileId(
+        compiled_autograd_id=compiled_autograd_id,
+        frame_id=frame_id,
+        frame_compile_id=frame_compile_id,
+    )
+
+
 class ConvertFrameAssert:
     def __init__(
         self,
@@ -610,24 +656,8 @@ class ConvertFrameAssert:
         global initial_global_state
         initial_global_state = GlobalStateGuard()
 
-        global FRAME_COUNTER
-        if "_id" not in frame_state:
-            frame_state["_id"] = FRAME_COUNTER
-            FRAME_COUNTER += 1
-        frame_id = frame_state["_id"]
-        assert isinstance(frame_id, int)
-
-        frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
-        FRAME_COMPILE_COUNTER[frame_id] += 1
-
-        compiled_autograd_id = None
-        if prior := CompileContext.current_compile_id():
-            compiled_autograd_id = prior.compiled_autograd_id
-        compile_id = CompileId(
-            compiled_autograd_id=compiled_autograd_id,
-            frame_id=frame_id,
-            frame_compile_id=frame_compile_id,
-        )
+        compile_id = get_compile_id(frame_state)
+        frame_id = compile_id.frame_id
 
         signpost_event(
             "dynamo",
@@ -1063,7 +1093,7 @@ def _compile(
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
 
             # NS: Don't add period at the end of string, as it'll be added to URL
-            # renderring it incorrect
+            # rendering it incorrect
             log.warning(
                 "torch._dynamo hit config.%s (%s)\n"
                 "   function: %s\n"
@@ -1130,28 +1160,7 @@ def _compile(
         # # 2 extra here
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
-        convert_frame_intern = structured.intern_string(__file__)
-        # Initialize the ChromiumEventLogger on start
-        torch._logging.trace_structured(
-            "dynamo_start",
-            lambda: {
-                "stack": list(
-                    itertools.takewhile(
-                        lambda f: f["filename"] != convert_frame_intern,
-                        structured.from_traceback(
-                            CapturedTraceback.extract(skip=4 + skip).summary()
-                        ),
-                    )
-                )
-                + [
-                    {
-                        "line": code.co_firstlineno,
-                        "name": code.co_name,
-                        "filename": structured.intern_string(code.co_filename),
-                    }
-                ]
-            },
-        )
+        log_dynamo_start(code, skip)
         start_time_ns = time.time_ns()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
@@ -1583,9 +1592,10 @@ class CatchErrorsWrapper:
 
         with compile_lock, _disable_current_modes():
             # skip=1: skip this frame
-            return self._torchdynamo_orig_backend(
+            result = self._torchdynamo_orig_backend(
                 frame, cache_entry, self.hooks, frame_state, skip=1
             )
+            return result
 
 
 def catch_errors_wrapper(
