@@ -128,8 +128,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
     const torch::nativert::ExecutorConfig& executorConfig,
     const Placement& placement,
     const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
-        pytorchStreamReader,
-    const MakeProxyExecutorFn& makeProxyExecutorFunc) {
+        pytorchStreamReader) {
   std::vector<std::unique_ptr<OpKernel>> nodeKernels;
   std::vector<std::unique_ptr<DelegateExecutor>> delegateExecutors;
   std::vector<ConstFoldingExecution> constFoldingExecutions;
@@ -243,7 +242,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       nodeKernels.push_back(std::make_unique<HigherOrderKernel>(
           &node, std::move(graphExecutors)));
     } else if (c10::starts_with(node.target(), "torch.ops")) {
-      nodeKernels.push_back(std::make_unique<C10Kernel>(&node, targetDevice));
+      nodeKernels.push_back(std::make_unique<C10Kernel>(&node));
 
       std::string opName = std::string(node.target());
       if (opsWithoutStaticDispatchCount.find(opName) ==

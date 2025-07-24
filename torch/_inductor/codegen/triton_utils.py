@@ -71,6 +71,8 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
             return "fp32"
+        elif isinstance(arg.expr, bool):
+            return "i1"
 
         # if this is a integer
         if size_dtype == "tl.int32":

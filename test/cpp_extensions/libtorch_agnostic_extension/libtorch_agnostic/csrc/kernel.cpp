@@ -2,6 +2,7 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <optional>
 
@@ -33,6 +34,8 @@ Tensor sgd_out_of_place(
     const float weight_decay,
     const double lr,
     const bool maximize) {
+  STD_TORCH_CHECK(param.dim() == 1, "param must be 1D");
+
   int64_t *param_sizes;
   int64_t *param_strides;
   aoti_torch_get_sizes(param.get(), &param_sizes);
@@ -45,7 +48,7 @@ Tensor sgd_out_of_place(
   aoti_torch_get_device_type(param.get(), &param_device_type);
 
   AtenTensorHandle out_ath;
-  aoti_torch_empty_strided(param.dim(), param_sizes, param_strides, param_dtype, param_device_type, param.get_device(), /*is_pinned=*/false, &out_ath);
+  aoti_torch_empty_strided(param.dim(), param_sizes, param_strides, param_dtype, param_device_type, param.get_device(), &out_ath);
   auto out = Tensor(out_ath);
 
   sgd_math(
@@ -266,10 +269,39 @@ void boxed_my_transpose(StableIValue* stack, uint64_t num_args, uint64_t num_out
   stack[0] = from(res);
 }
 
+Tensor my_empty_like(Tensor t) {
+  return empty_like(t);
+}
+
+void boxed_empty_like(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_empty_like(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
+  m.def("my_empty_like(Tensor t) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_transpose", &boxed_my_transpose);
+  m.impl("my_empty_like", &boxed_empty_like);
+}
+
+
+Tensor my_zero_(Tensor t) {
+  return zero_(t);
+}
+
+void boxed_my_zero_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_zero_(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("my_zero_(Tensor(a!) t) -> Tensor(a!)");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
+  m.impl("my_zero_", &boxed_my_zero_);
 }
