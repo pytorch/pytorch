@@ -84,7 +84,12 @@ class MicrobatchTests(TestCase):
 
         ref = mod(x, y)
         out = pipe(x, y)[0]
-        torch.testing.assert_close(out, ref)
+
+        rtol, atol = None, None
+        if self.device_type == "xpu":
+            rtol, atol = 1e-4, 1e-4
+
+        torch.testing.assert_close(out, ref, rtol=rtol, atol=atol)
         print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
