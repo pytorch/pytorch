@@ -1,4 +1,4 @@
-name: rocm-mi325
+name: rocm-mi300
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - main
       - release/*
     tags:
-      - ciflow/rocm-mi325/*
+      - ciflow/rocm-mi300/*
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT
@@ -38,12 +38,12 @@ jobs:
 
   linux-noble-rocm-py3_12-build:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-    name: linux-noble-rocm-py3.12-mi325
+    name: linux-noble-rocm-py3.12-mi300
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-noble-rocm-py3.12-mi325
+      build-environment: linux-noble-rocm-py3.12-mi300
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
@@ -61,13 +61,13 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    name: linux-noble-rocm-py3.12-mi325
+    name: linux-noble-rocm-py3.12-mi300
     uses: ./.github/workflows/_rocm-test.yml
     needs:
       - linux-noble-rocm-py3_12-build
       - target-determination
     with:
-      build-environment: linux-noble-rocm-py3.12-mi325
+      build-environment: linux-noble-rocm-py3.12-mi300
       docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
     secrets: inherit
