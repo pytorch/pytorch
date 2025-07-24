@@ -4565,6 +4565,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         test_pixel_shuffle_unshuffle_3D()
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
+    
+    def test_pixel_shuffle_raises_if_channel_dimension_is_zero(self):
+        input = torch.randn((1, 0, 4, 4))
+        ps = torch.nn.PixelShuffle(3)
+        with self.assertRaises(RuntimeError):
+            output = torch.onnx.export(ps, input, "dummy_pixel_shuffle.onnx", opset_version=9)
 
     @set_default_dtype(torch.double)
     def test_pixel_shuffle_nhwc_cpu(self):
