@@ -7,9 +7,14 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
-// Two warninngs in Cutlass included header files
+// Warnings in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
+
+// Direct pragma to suppress unused-but-set-variable warnings
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
@@ -44,6 +49,10 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
+// Restore GCC diagnostic state
+#pragma GCC diagnostic pop
+
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
