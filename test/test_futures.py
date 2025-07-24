@@ -261,6 +261,7 @@ class TestFuture(TestCase):
             callback_result = 2
 
         def callback_then(fut):
+            nonlocal callback_result
             return fut.wait() + callback_result
 
         fut = Future[torch.Tensor]()

@@ -308,6 +308,7 @@ def _is_skip_guard_eval_unsafe_stance() -> bool:
 
 
 def _reset_guarded_backend_cache() -> None:
+    global cached_backends
     for backend in cached_backends.values():
         if hasattr(backend, "reset"):
             backend.reset()
@@ -678,8 +679,7 @@ class _TorchDynamoContext:
 
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
-            assert self._package is not None
-            if not self._package.is_initialized():
+            if self._package is not None and not self._package.is_initialized():
                 result = DynamoCache.load(fn)
                 if result is None:
                     # Create a fresh CompilePackage
@@ -1263,6 +1263,7 @@ def explain(f: Callable[..., Any], *extra_args: Any, **extra_kwargs: Any) -> Any
             return gm.forward
 
         def guard_export_print(guards: Iterable[_guards.Guard]) -> None:
+            nonlocal out_guards
             out_guards.extend(guards)
 
         opt_f = optimize(
@@ -1845,7 +1846,7 @@ def export(
                 ignore_fresh_unbacked = null_context()
                 assert ambient_fake_mode is not None
                 if shape_env := ambient_fake_mode.shape_env:
-                    ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
+                    ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()  # type: ignore[assignment]
 
                 with (
                     ambient_fake_mode,
@@ -1897,7 +1898,9 @@ def export(
                         fakify_with_ambient, graph_inputs
                     )
                     graph_captured_result = torch.func.functional_call(
-                        graph, fake_params_buffers, fake_graph_inputs
+                        graph,
+                        fake_params_buffers,  # type: ignore[arg-type]
+                        fake_graph_inputs,  # type: ignore[arg-type]
                     )
 
                 return graph_captured_result

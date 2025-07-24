@@ -296,6 +296,7 @@ def onnx_symbolic(
             for decorate_func in decorate:
                 decorated = decorate_func(decorated)
 
+        global registry
         nonlocal opset
         if isinstance(opset, OpsetVersion):
             opset = (opset,)
