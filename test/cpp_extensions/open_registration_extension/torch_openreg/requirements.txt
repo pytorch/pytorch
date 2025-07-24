@@ -1,2 +1,1 @@
 torch
-pybind11

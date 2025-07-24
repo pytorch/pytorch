@@ -15,7 +15,6 @@ import torch_openreg  # noqa: F401
 import torch
 from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import (
-    IS_LINUX,
     run_tests,
     skipIfTorchDynamo,
     skipIfXpu,
@@ -583,5 +582,4 @@ class TestOpenReg(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX:
-        run_tests()
+    run_tests()
