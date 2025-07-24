@@ -19,6 +19,7 @@ TORCH_PYTHON_API PyObject* THPStorage_Wrap(c10::Storage storage);
 TORCH_PYTHON_API PyObject* THPStorage_NewWithStorage(
     PyTypeObject* type,
     c10::Storage _storage,
+    c10::impl::PyInterpreterStatus status,
     bool allow_preexisting_pyobj = false);
 TORCH_PYTHON_API extern PyTypeObject* THPStorageClass;
 
