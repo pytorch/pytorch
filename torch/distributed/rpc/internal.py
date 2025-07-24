@@ -54,11 +54,9 @@ class _InternalRPCPickler:
 
     @classmethod
     def _tensor_receiver(cls, tensor_index):
-        global _thread_local_tensor_tables
         return _thread_local_tensor_tables.recv_tables[tensor_index]
 
     def _tensor_reducer(self, tensor):
-        global _thread_local_tensor_tables
         _thread_local_tensor_tables.send_tables.append(tensor)
         tensor_index = len(_thread_local_tensor_tables.send_tables) - 1
         return (_InternalRPCPickler._tensor_receiver, (tensor_index,))
@@ -126,7 +124,6 @@ class _InternalRPCPickler:
             p.dispatch_table[class_name] = self._class_reducer_dict[class_name]  # type: ignore[index]
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
-        global _thread_local_tensor_tables
         if hasattr(_thread_local_tensor_tables, "send_tables"):
             old_send_tables = _thread_local_tensor_tables.send_tables
         else:
@@ -150,7 +147,6 @@ class _InternalRPCPickler:
         Deserialize binary string + tensor table to original obj
         """
         # save _thread_local_tensor_tables.recv_tables if it is in nested call
-        global _thread_local_tensor_tables
         if hasattr(_thread_local_tensor_tables, "recv_tables"):
             old_recv_tables = _thread_local_tensor_tables.recv_tables
         else:
@@ -226,7 +222,7 @@ def _handle_exception(result):
         exc = None
         try:
             exc = result.exception_type(exception_msg)
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             raise RuntimeError(  # noqa: B904
                 f"Failed to create original exception type. Error msg was {str(e)}"
                 f" Original exception on remote side was {exception_msg}"

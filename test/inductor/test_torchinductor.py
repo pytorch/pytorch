@@ -229,8 +229,6 @@ def _large_cumprod_input(shape, dim, dtype, device):
 
 
 def define_custom_op_for_test(id_, fn, fn_meta, tags=()):
-    global libtest
-    global ids
     if id_ not in ids:
         libtest.define(f"{id_}(Tensor self) -> Tensor", tags=tags)
         libtest.impl(id_, fn, "CPU")
@@ -242,8 +240,6 @@ def define_custom_op_for_test(id_, fn, fn_meta, tags=()):
 
 
 def define_custom_op_2_for_test(id_, fn, fn_meta, tags=()):
-    global libtest
-    global ids
     if id_ not in ids:
         libtest.define(
             f"{id_}(Tensor self, float scale) -> (Tensor, Tensor)", tags=tags
@@ -257,8 +253,6 @@ def define_custom_op_2_for_test(id_, fn, fn_meta, tags=()):
 
 
 def define_custom_op_3_for_test(id_, fn, fn_meta, tags=()):
-    global libtest
-    global ids
     if id_ not in ids:
         libtest.define(f"{id_}(Tensor[] x) -> Tensor", tags=tags)
         libtest.impl(id_, fn, "CPU")
@@ -8851,7 +8845,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                (a.add_(b[0] * c * e),)
+                a.add_(b[0] * c * e)
                 if d is not None:
                     d.add_(b[1])
 
@@ -8924,7 +8918,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                (a.add_(b[0] * c * e),)
+                a.add_(b[0] * c * e)
                 if d is not None:
                     d.add_(b[1])
                 return b[0] + b[1]
@@ -10349,9 +10343,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                         kwargs = kwargs if kwargs else {}
 
-                        nonlocal inps
-                        nonlocal inp_refs
-                        nonlocal test_self
                         nonlocal matmul_seen
 
                         # by matmul, inputs should be deallocated
@@ -11783,7 +11774,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         failed_guards = []
 
         def fail(guard):
-            nonlocal failed_guards
             failed_guards.append(guard)
 
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -13408,8 +13398,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                         kwargs = kwargs if kwargs else {}
 
-                        nonlocal inps
-                        nonlocal inp_refs
                         nonlocal matmul_seen
 
                         gc.collect()
@@ -13625,6 +13613,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             else:
                 FileCheck().check("cpp_fused_add_0").run(code)
             self.assertEqual(refe_out, test_out)
+
+    def test_triton_kernel_bool_param(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        from torch.testing._internal.triton_utils import add_kernel_with_boolean_param
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                out = torch.zeros_like(x)
+                add_kernel_with_boolean_param[1,](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    out_ptr=out,
+                    n_elements=x.numel(),
+                    add_xy=True,
+                    BLOCK_SIZE=1,
+                )
+                return out
+
+        inputs = (torch.randn(4, device=self.device),)
+        self.common(Model(), inputs)
 
 
 @dataclasses.dataclass
@@ -13897,7 +13907,6 @@ if RUN_GPU:
 
             class LiveTensors(TorchDispatchMode):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                    nonlocal live_tensors
                     nonlocal max_live_tensors
 
                     kwargs = kwargs if kwargs else {}
