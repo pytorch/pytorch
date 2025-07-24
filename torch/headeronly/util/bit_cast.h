@@ -46,5 +46,5 @@ bit_cast(const From& src) noexcept {
 } // namespace torch::headeronly
 
 namespace c10 {
-  using torch::headeronly::bit_cast;
+using torch::headeronly::bit_cast;
 } // namespace c10

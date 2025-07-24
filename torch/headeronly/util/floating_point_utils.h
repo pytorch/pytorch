@@ -33,6 +33,6 @@ C10_HOST_DEVICE inline uint32_t fp32_to_bits(float f) {
 } // namespace torch::headeronly::detail
 
 namespace c10::detail {
-  using torch::headeronly::detail::fp32_from_bits;
-  using torch::headeronly::detail::fp32_to_bits;
+using torch::headeronly::detail::fp32_from_bits;
+using torch::headeronly::detail::fp32_to_bits;
 } // namespace c10::detail

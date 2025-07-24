@@ -64,7 +64,7 @@
 #endif // __GNUC__ || __clang__
 
 namespace c10 {
-  
+
 namespace detail {
 
 /*
