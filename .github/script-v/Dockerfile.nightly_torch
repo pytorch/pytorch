@@ -39,15 +39,16 @@
     # Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
     # as it was causing spam when compiling the CUTLASS kernels
     # Ensure gcc >= 10 to avoid CUTLASS issues (bug 92519)
-    RUN if ! gcc --version | grep -E 'gcc.+(1[0-9]|[2-9][0-9])' >/dev/null; then \
-          echo "Installing GCC 10..."; \
-          apt-get update && apt-get install -y gcc-10 g++-10 && \
-          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 && \
-          update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100; \
+    RUN RUN if ! gcc --version | grep -E 'gcc.+(11|1[2-9]|[2-9][0-9])' >/dev/null; then \
+            echo "Installing GCC 11..."; \
+            apt-get update && apt-get install -y gcc-11 g++-11 && \
+            update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 && \
+            update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100; \
         else \
-          echo "✅ GCC already >= 10, using system default."; \
+            echo "✅ GCC already >= 11, using system default."; \
         fi \
-     && gcc --version
+        && gcc --version
+
 
     # install uv for faster pip installs
     RUN --mount=type=cache,target=/root/.cache/uv \
