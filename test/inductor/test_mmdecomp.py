@@ -6,15 +6,19 @@ from typing import Union
 
 import torch
 from torch._inductor import config
+from torch._inductor.decomposition import mm
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    ShapeEnv,
+    StatelessSymbolicContext,
+)
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, run_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv, StatelessSymbolicContext
 
-from torch._inductor.decomposition import mm
 
 default_atol = {
     torch.float16: 1e-3,
@@ -79,6 +83,7 @@ def torch_bmm(a, b):
 
 def torch_baddbmm(add, b, c, alpha, beta):
     return torch.baddbmm(add, b, c, alpha=alpha, beta=beta)
+
 
 def create_fake_tensor_with_dynamic_size(x, fake_mode):
     with fake_mode:
@@ -229,22 +234,44 @@ class TestDecomp(NNTestCase):
             )
 
             # Save the expression types to check if any symints are evaluated
-            og_t1_expr_types = [type(d.node.expr) if type(d) is torch.SymInt else int for d in t1.size()]
-            og_t2_expr_types = [type(d.node.expr) if type(d) is torch.SymInt else int for d in t2.size()]
-
+            og_t1_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t1.size()
+            ]
+            og_t2_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t2.size()
+            ]
 
             r = mm(t1, t2)
 
             if r is not NotImplemented:
                 # Make sure all symints are not evaluated
-                new_t1_expr_types = [type(d.node.expr) if type(d) is torch.SymInt else int for d in t1.size()]
-                new_t2_expr_types = [type(d.node.expr) if type(d) is torch.SymInt else int for d in t2.size()]
-                self.assertTrue(all([og_t1_expr_types[i] == new_t1_expr_types[i] for i in range(len(og_t1_expr_types))]))
-                self.assertTrue(all([og_t2_expr_types[i] == new_t2_expr_types[i] for i in range(len(og_t2_expr_types))]))
+                new_t1_expr_types = [
+                    type(d.node.expr) if type(d) is torch.SymInt else int
+                    for d in t1.size()
+                ]
+                new_t2_expr_types = [
+                    type(d.node.expr) if type(d) is torch.SymInt else int
+                    for d in t2.size()
+                ]
+                self.assertTrue(
+                    all(
+                        og_t1_expr_types[i] == new_t1_expr_types[i]
+                        for i in range(len(og_t1_expr_types))
+                    )
+                )
+                self.assertTrue(
+                    all(
+                        og_t2_expr_types[i] == new_t2_expr_types[i]
+                        for i in range(len(og_t2_expr_types))
+                    )
+                )
                 # Check that the output is well formed
                 self.assertEqual(t1.size(0), r.size(0))
                 self.assertEqual(t2.size(1), r.size(1))
-                r_expr_types = [type(d.node.expr) if type(d) is torch.SymInt else int for d in r.size()]
+                r_expr_types = [
+                    type(d.node.expr) if type(d) is torch.SymInt else int
+                    for d in r.size()
+                ]
                 self.assertTrue(r_expr_types[0] == og_t1_expr_types[0])
                 self.assertTrue(r_expr_types[1] == og_t2_expr_types[1])
 
