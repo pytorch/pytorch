@@ -73,6 +73,7 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
 
 ```{eval-rst}
 .. autofunction:: torch.onnx.export
+  :noindex:
 ```
 
 ### Deprecated API
