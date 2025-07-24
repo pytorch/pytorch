@@ -110,7 +110,7 @@ class TestLookupTableRecorder(TestCase):
         default_config = {"max_autotune_gemm": True}
         if config_patches:
             default_config.update(config_patches)
-
+        torch._dynamo.reset()
         with inductor_config.patch(default_config):
             model = SimpleMMModel().to(self.device)
             tensors = self.create_simple_mm_tensors()
@@ -361,6 +361,93 @@ class TestLookupTableRecorder(TestCase):
             tma_entries_found,
             "Expected to find at least one entry with TMA-related values",
         )
+
+    @fresh_cache()
+    def test_limited_choices_feedback(self):
+        """Test that feeding back a limited subset of choices works correctly"""
+        # Step 1: Record initial lookup table
+        test_record_backend = TestRecordBackend()
+        recorder = get_lookup_table_recorder()
+        recorder.add_backend(test_record_backend)
+
+        # First compilation - record all choices
+        self.compile_and_run_mm()
+        recorder.dump()
+
+        # Get the recorded table
+        recorded_table = test_record_backend.dumped_data
+        self.assertGreater(len(recorded_table), 0, "Should have recorded some entries")
+
+        # Step 2: Modify the table to keep only the first 2 entries for each key
+        limited_table = {}
+        for key, configs in recorded_table.items():
+            limited_table[key] = configs[:2]  # Keep only first 2 entries
+
+        # Step 3: Create a custom backend to capture what gets considered in the second run
+        class ChoiceCapturingBackend(RecordBackend):
+            def __init__(self):
+                self.captured_choices = []
+
+            def dump(self, data):
+                self.captured_choices = []
+                for configs in data.values():
+                    self.captured_choices.extend(configs)
+
+        # Clear recorder and set up for second run
+        clear()
+        force_recorder_reset()
+        choice_capturing_backend = ChoiceCapturingBackend()
+        recorder = get_lookup_table_recorder()
+        recorder.add_backend(choice_capturing_backend)
+
+        # Step 4: Configure inductor to use the limited table
+        inductor_config.template_lookup_table = limited_table
+
+        # Step 5: Run compilation again
+        self.compile_and_run_mm()
+        recorder.dump()
+
+        # Step 6: Verify that only 2 choices were considered
+        self.assertEqual(
+            len(choice_capturing_backend.captured_choices),
+            2,
+            f"Expected exactly 2 choices, got {len(choice_capturing_backend.captured_choices)}",
+        )
+
+        # Step 7: Verify the choices match what we fed in
+        original_choices = []
+        for configs in limited_table.values():
+            original_choices.extend(configs)
+
+        # Sort both lists by key parameters to ensure consistent comparison
+        def sort_key(config):
+            return (
+                config["BLOCK_M"],
+                config["BLOCK_N"],
+                config["BLOCK_K"],
+                config["num_stages"],
+                config["num_warps"],
+            )
+
+        original_sorted = sorted(original_choices, key=sort_key)
+        captured_sorted = sorted(
+            choice_capturing_backend.captured_choices, key=sort_key
+        )
+
+        # Compare the choices
+        for i in range(2):
+            self.assertEqual(
+                captured_sorted[i].get("template_id"),
+                original_sorted[i].get("template_id"),
+                f"Choice {i} template_id mismatch",
+            )
+            # Compare key parameters that should match
+            for param in ["BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"]:
+                self.assertEqual(
+                    captured_sorted[i].get(param),
+                    original_sorted[i].get(param),
+                    f"Choice {i} parameter {param} mismatch",
+                )
 
 
 if __name__ == "__main__":

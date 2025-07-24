@@ -10,7 +10,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from . import config as inductor_config
@@ -124,7 +124,7 @@ class DirectoryRecordBackend(RecordBackend):
         os.makedirs(self.directory, exist_ok=True)
 
         # Generate timestamped filename with 3-digit millisecond precision
-        now = datetime.now(UTC)
+        now = datetime.now(tz=timezone.utc)
         timestamp = now.strftime("%Y%m%d_%H%M%S") + f"_{now.microsecond // 1000:03d}"
         filename = f"inductor_lut_{timestamp}.json"
         filepath = os.path.join(self.directory, filename)
