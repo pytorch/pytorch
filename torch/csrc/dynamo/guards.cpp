@@ -2609,7 +2609,7 @@ class GuardManager {
 
   virtual ~GuardManager() {
     for (auto weakref : _tag_safe_keys_weakrefs) {
-      Py_CLEAR(weakref);
+      Py_DECREF(weakref);
     }
     _tag_safe_keys_weakrefs.clear();
   }
@@ -2956,8 +2956,10 @@ class GuardManager {
       stop_recording_dict_pointers(_root, value, result);
       if (result) {
         if (!register_weakref_callback(value)) {
+          // something bad happened, disable the dict tag optimization
           throw std::runtime_error(
-              "Could not register a callback for recursive dict tag optimization");
+              "Could not register a callback for recursive dict tag
+              optimization");
         }
       }
     }
@@ -2998,6 +3000,7 @@ class GuardManager {
     PyObject* capsule =
         PyCapsule_New(this, "GuardManager*", nullptr); // new reference
     if (!capsule) {
+      PyErr_Clear();
       return false;
     }
 
@@ -3010,14 +3013,20 @@ class GuardManager {
     PyObject* py_cb = PyCFunction_New(&cb_def, capsule);
     Py_DECREF(capsule); // py_cb holds the capsule object
     if (!py_cb) {
+      PyErr_Clear();
       return false;
     }
 
     PyObject* wr = PyWeakref_NewRef(target, py_cb); // new ref
     Py_DECREF(py_cb); // weakref holds py_cb ref
+
+    if (wr == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
     // These will be decrefed in destructor
     _tag_safe_keys_weakrefs.push_back(wr);
-    return wr != nullptr;
+    return true;
   }
 
   virtual bool check_nopybind(FrameLocalsMapping* value) {
