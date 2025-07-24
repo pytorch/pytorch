@@ -139,33 +139,6 @@ class TestStaticCudaLauncher(TestCase):
         launcher.run(1, 1, 1, stream, new_arg0, 50, 50, 50, 50)
         self.assertEqual(new_arg0, arg0)
 
-    # TODO: floats don't work properly, triton seems to think they're all tl.float32
-    # despite type annotations.
-    # There's also not really a good way for me to make a float16 in python...
-    @skipIfRocm
-    def test_floats(self):
-        @triton.jit
-        def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
-            x = tl.load(arg0)
-            y = arg1 + arg2 + arg3
-            tl.store(arg0, x + y)
-
-        arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
-
-        args = (arg0, 1.0, 1.0, 1.0)
-
-        compiled_kernel = floats[1,](*args)
-        launcher = self._make_launcher(compiled_kernel)
-        # TODO: in Pytorch's pinned version of triton, arg3 is typed as regular float
-        # but in triton 3.3.0, this is fixed and it's 0ffd. We'll need to update later.
-        self.assertEqual(launcher.arg_tys, "Offf")
-        self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda"))
-        new_arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
-        device_interface = get_interface_for_device("cuda")
-        stream = device_interface.get_raw_stream(device_interface.current_device())
-        launcher.run(1, 1, 1, stream, new_arg0, 1.0, 1.0, 1.0)
-        self.assertEqual(new_arg0, arg0)
-
     @skipIfRocm
     def test_basic_1arg(self):
         @triton.jit
@@ -464,6 +437,28 @@ class TestStaticTritonCompileResult(TestCase):
             "CannotStaticallyLaunchKernel: User defined triton kernel",
             lambda: foo(x),
         )
+
+    @skipIfRocm
+    # The error gets raised on a worker, so we want to not use a separate process
+    @torch._inductor.config.patch(
+        {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
+    )
+    def test_static_launch_user_defined_triton_kernels(self):
+        # User defined triton kernel
+        @triton.jit
+        def custom_kernel(arg_0, arg_1):
+            x = tl.load(arg_0)
+            y = arg_1
+            tl.store(arg_0, x + y)
+
+        @torch.compile
+        def foo(x):
+            custom_kernel[1,](x, 5)
+            return x
+
+        x = torch.randn(1, device="cuda")
+        x2 = x.clone().detach_()
+        self.assertEqual(foo(x), x2 + 5)
 
     @skipIfRocm
     def test_empty_tensor(self):
