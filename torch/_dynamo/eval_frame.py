@@ -679,8 +679,7 @@ class _TorchDynamoContext:
 
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
-            assert self._package is not None
-            if not self._package.is_initialized():
+            if self._package is not None and not self._package.is_initialized():
                 result = DynamoCache.load(fn)
                 if result is None:
                     # Create a fresh CompilePackage
