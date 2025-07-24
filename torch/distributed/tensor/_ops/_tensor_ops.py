@@ -568,7 +568,7 @@ def replica_only_strategy(op_schema: OpSchema) -> StrategyType:
 @register_op_strategy(
     [aten.sort.stable, aten.sort.default], schema_info=RuntimeSchemaInfo(1)
 )
-def replicate_op_strategy_out_tensor(op_schema: OpSchema):
+def sort_strategy(op_schema: OpSchema):
     return cast(TupleStrategy, replicate_op_strategy(op_schema))
 
 
