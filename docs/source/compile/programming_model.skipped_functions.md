@@ -169,8 +169,8 @@ def fn(x):
 fn(torch.randn(3))
 ```
 
-<!-- ## Hitting a Recompilation Limit
-See Changing the Cache Size Limit. (TODO: link) -->
+## Hitting a Recompilation Limit
+See [Changing the Cache Size Limit.](programming_model.recompilation.changing_cache_size_limit)
 
 ## Compiler Errors
 Some compiler errors will result in skipped functions.
