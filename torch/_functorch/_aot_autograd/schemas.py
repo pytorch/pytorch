@@ -28,6 +28,7 @@ import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
+from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
@@ -1058,7 +1059,7 @@ class AOTState:
     stack: contextlib.ExitStack
 
 
-FxValue = Union[Tensor, int, SymInt]
+FxValue = Union[Tensor, int, SymInt, BackwardState]
 
 
 class CompilerWrapper:
