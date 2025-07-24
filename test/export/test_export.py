@@ -6832,6 +6832,19 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 ops.append(node.target)
         self.assertEqual(len(ops), 1)
 
+    def test_device_to_agnostic(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                z = x + 1
+                y = z.to("cpu")
+                z.add_(1)
+                return y
+
+        ep = export(Module(), (torch.tensor(1, device="cpu"),))
+        for node in ep.graph.nodes:
+            if node.target == torch.ops.aten.add_.Tensor:
+                self.assertEqual(node.args[0].name, "add")
+
     def test_device_to_mutation(self):
         class Module(torch.nn.Module):
             def forward(self, x):

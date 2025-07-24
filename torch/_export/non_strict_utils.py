@@ -1060,7 +1060,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                     frame.f_lineno,
                     frame.f_code.co_name,
                 )
-
+        # could also intercept here, but writing a lot more code needed
         func, args, kwargs = self._override(func, args, kwargs)
         try:
             return func(*args, **kwargs)

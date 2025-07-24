@@ -1673,11 +1673,13 @@ def _export_to_aten_ir_make_fx(
                         k.__getattribute__ = old_getattr  # type: ignore[method-assign, attr-defined]
 
             with ctx, override_getattribute_for_subclasses(flat_args):
+                torch.fx.experimental.proxy_tensor.in_export = True
                 gm = make_fx(
                     wrapped_fn,
                     record_module_stack=True,
                     pre_dispatch=True,
                 )(*flat_args)
+                torch.fx.experimental.proxy_tensor.in_export = False
 
             if non_strict_root is not None:
                 input_names = _graph_input_names(gm)
