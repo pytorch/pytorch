@@ -302,13 +302,10 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
             # - The traced code would use the wrong constant value for all iterations
             # Solution: We clone the constant tensors and mark the cloned tensor as non-constant so they won't
             # be specialized to fixed values during tracing body_fn or cond_fn.
-            elif (
-                isinstance(x, torch.Tensor)
-                and hasattr(x, "constant")
-                and x.constant is not None
-            ):
+            elif isinstance(x, torch.Tensor):
                 x = x.clone()
-                x.constant = None
+                if hasattr(x, "constant") and x.constant is not None:
+                    x.constant = None
             return x
 
         with disable_proxy_modes_tracing():
@@ -319,12 +316,14 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
                 carried_inputs,
             )
 
-        cond_graph = reenter_make_fx(cond_fn)(
-            *unspecialized_carried_inputs, *additional_inputs
-        )
-        body_graph = reenter_make_fx(body_fn)(
-            *unspecialized_carried_inputs, *additional_inputs
-        )
+            def produce_graph(fn):
+                cloned_carried_inputs = pytree.tree_map_only(
+                    torch.Tensor, lambda x: x.clone(), unspecialized_carried_inputs
+                )
+                return reenter_make_fx(fn)(*cloned_carried_inputs, *additional_inputs)
+
+            cond_graph = produce_graph(cond_fn)
+            body_graph = produce_graph(body_fn)
 
         next_name = None
         i = 0
