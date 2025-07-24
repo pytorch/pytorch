@@ -32,6 +32,7 @@ ciflow_push_tags:
 - ciflow/h100
 - ciflow/h100-distributed
 - ciflow/h100-symm-mem
+- ciflow/h100-cutlass-backend
 retryable_workflows:
 - pull
 - trunk
