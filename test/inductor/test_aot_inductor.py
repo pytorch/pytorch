@@ -85,6 +85,7 @@ if HAS_GPU:
         add_kernel_autotuned_weird_param_order,
         add_kernel_on_device_tma_new_api,
         add_kernel_on_device_tma_old_api,
+        add_kernel_with_boolean_param,
         add_kernel_with_none_param_and_equal_to_1_arg,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
@@ -188,6 +189,26 @@ class AOTInductorTestsTemplate:
             self.code_check_count(
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
+
+    def test_triton_kernel_bool_param(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                out = torch.zeros_like(x)
+                add_kernel_with_boolean_param[1,](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    out_ptr=out,
+                    n_elements=x.numel(),
+                    add_xy=True,
+                    BLOCK_SIZE=1,
+                )
+                return out
+
+        inputs = (torch.randn(4, device=self.device),)
+        self.check_model(Model(), inputs)
 
     @unittest.skipIf(
         IS_FBCODE,
@@ -6794,17 +6815,14 @@ MPS_TEST_FAILURES = {
     "test_fp8_view_of_param": fail_mps(),
     # unsupported operator: aten._scaled_dot_product_attention_math_for_mps.default
     "test_issue_140766": fail_mps(),
-    # Compilation Error
+    # cannot initialize a parameter of type 'double' with an rvalue of type 'std::nullptr_t'
     "test_fallback_kernel_with_symexpr_output": fail_mps(),
-    "test_while_loop_with_mixed_device": fail_mps(),
+    # while-loop subgraph calls same kernel as outside. need to figure out how to
+    # either (1) tell outside to initialize a new kernel or (2) generate
+    # subgraph as a separate function, which would(?) cause (1) to happen automatically.
     "test_while_loop_nested": fail_mps(),
+    # correctness issue
     "test_index_put_with_none_index": fail_mps(),
-    "test_size_from_multi_ouptut": fail_mps(),
-    "test_simple_embed_kernel_binary_False": fail_mps(),
-    "test_simple_embed_cubin_False": fail_mps(is_skip=True),
-    "test_simple_embed_cubin_True": fail_mps(is_skip=True),
-    "test_simple_embed_kernel_binary_True": fail_mps(),
-    "test_missing_cubin": fail_mps(),
     # Dynamism
     "test_shifted_constraint_ranges": fail_mps(),
     "test_while_loop_with_sym_expr_cond_dynamic_True": fail_mps(),
