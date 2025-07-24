@@ -10,10 +10,6 @@
 #include <torch/nativert/kernels/C10Kernel.h>
 #include <torch/nativert/kernels/KernelFactory.h>
 
-// Maximum number of retries when trying to get a frame from
-// clearedExecutionFrames_
-constexpr uint32_t kClearExecutionFrameRetries = 10;
-
 namespace torch::nativert {
 
 Executor::Executor(
@@ -31,7 +27,7 @@ Executor::Executor(
               ? std::optional<ConstantFolder>(*graph_)
               : std::nullopt),
       executionFrames_(executorConfig_.maxNumConcurrentThreads),
-      clearedExecutionFrames_(executorConfig_.maxNumConcurrentThreads),
+      inactiveExecutionFrames_(executorConfig_.maxNumConcurrentThreads),
       numExecutionFrames_(0),
       lastClearedTimestamp_(getCurrentTimestampSeconds()) {
   if (weights) {
@@ -195,34 +191,12 @@ Executor::ExecutorFramePtr Executor::getExecutorFrameFromPool() {
   std::shared_ptr<Weights> weights;
   weights_.withLock([&](auto& w) { weights = w; });
 
-  // First try to get a frame from clearedExecutionFrames_ if clearing is in
-  // progress
-  if (C10_UNLIKELY(clearingInProgress_)) {
-    ExecutionFrameEntry frameEntry;
-    uint32_t retry = 0;
-    while (
-        retry <
-        kClearExecutionFrameRetries) { // Limit retries to avoid infinite loop
-      if (clearedExecutionFrames_.readIfNotEmpty(frameEntry)) {
-        if (retry > 0) {
-          VLOG(1) << "Took " << retry
-                  << " retries to pop from clearedExecutionFrames_";
-        }
-        ExecutorFramePtr ptr{std::move(frameEntry.frame), *this};
-        if (ptr->weightVersion() != weights->version()) {
-          ptr->setWeights(*weights);
-        }
-        return ptr;
-      }
-      retry++;
-    }
-    // If we couldn't get a frame from cleared pool after retries, move onto
-    // main pool
-  }
-
   // Try to get a frame from the main pool or create a new one
   std::unique_ptr<ExecutionFrame> frame;
-  while (!executionFrames_.readIfNotEmpty(frame)) {
+
+  // Try to get a frame from executionFrames_ or inactiveExecutionFrames_
+  while (!executionFrames_.readIfNotEmpty(frame) &&
+         !inactiveExecutionFrames_.readIfNotEmpty(frame)) {
     int64_t numFrames = numExecutionFrames_.load();
     if (numFrames < executorConfig_.maxNumConcurrentThreads) {
       if (numExecutionFrames_.compare_exchange_strong(
@@ -245,6 +219,7 @@ Executor::ExecutorFramePtr Executor::getExecutorFrameFromPool() {
 }
 
 void Executor::clearStaleExecutionFrames() {
+  VLOG(1) << "Clearing stale execution frames";
   if (!cleanupLock_.try_lock()) {
     // Another thread is already doing cleanup
     return;
@@ -252,40 +227,42 @@ void Executor::clearStaleExecutionFrames() {
   // Update timestamp first to minimize contention
   lastClearedTimestamp_ = getCurrentTimestampSeconds();
 
-  int numPopped = 0;
+  int total = 0;
+  int numCleared = 0;
   std::unique_ptr<ExecutionFrame> frame;
+  torch::nativert::detail::MPMCQueue<std::unique_ptr<ExecutionFrame>> tmpQueue(
+      executorConfig_.maxNumConcurrentThreads);
 
-  // Move frames from executionFrames_ to clearedExecutionFrames_
+  // Loop through active execution frames queue to get total number in the
+  // active pool
   while (executionFrames_.readIfNotEmpty(frame)) {
-    ++numPopped;
-    // Keep the first popped entries up to minimum size
-    if (numPopped > executorConfig_.minNumExecutionFrames) {
-      // Discard stale frames
-      frame.reset();
-      numExecutionFrames_ -= 1;
-      continue;
-    }
-
-    ExecutionFrameEntry entry;
-    entry.used = false;
-    entry.frame = std::move(frame);
-    clearedExecutionFrames_.writeIfNotFull(std::move(entry));
-    // Enable clients to pop from clearedExecutionFrames_ while clearing is in
-    // progress
-    clearingInProgress_ = true;
+    ++total;
+    tmpQueue.writeIfNotFull(std::move(frame));
   }
 
-  uint32_t numPushed = 0;
-  ExecutionFrameEntry frameEntry;
-  // Move frames back from clearedExecutionFrames_ to executionFrames_
-  while (clearedExecutionFrames_.readIfNotEmpty(frameEntry)) {
-    ++numPushed;
-    executionFrames_.writeIfNotFull(std::move(frameEntry.frame));
-    clearingInProgress_ = false;
+  // If number of active frames is less than the configured min, then transfer
+  // the difference from inactive frames
+  while (total < executorConfig_.minNumExecutionFrames &&
+         inactiveExecutionFrames_.readIfNotEmpty(frame)) {
+    ++total;
+    tmpQueue.writeIfNotFull(std::move(frame));
   }
 
-  clearingInProgress_ = false;
-  VLOG(1) << "Cleared " << (numPopped - numPushed) << " out of " << numPopped
+  // Clear remaining inactive frames (i.e. those that were not used in the last
+  // time interval)
+  while (inactiveExecutionFrames_.readIfNotEmpty(frame)) {
+    ++total;
+    ++numCleared;
+    frame.reset();
+    numExecutionFrames_ -= 1;
+  }
+
+  // Move active frames to inactive so they are cleared next time if not used
+  while (tmpQueue.readIfNotEmpty(frame)) {
+    inactiveExecutionFrames_.writeIfNotFull(std::move(frame));
+  }
+
+  VLOG(1) << "Cleared " << numCleared << " out of " << total
           << " ExecutionFrame instances in the pool";
 
   cleanupLock_.unlock();
@@ -303,21 +280,11 @@ void Executor::returnExecutorFrameToPool(
 
   try {
     frame->destroyBorrowedIValues();
-
-    // Create an entry with used=true
-    if (C10_UNLIKELY(!clearingInProgress_)) {
-      TORCH_CHECK(
-          executionFrames_.writeIfNotFull(std::move(frame)),
-          "ExecutionFrame pool full");
-    } else {
-      ExecutionFrameEntry frameEntry;
-      frameEntry.used = true;
-      frameEntry.frame = std::move(frame);
-
-      TORCH_CHECK(
-          clearedExecutionFrames_.writeIfNotFull(std::move(frameEntry)),
-          "Cleared ExecutionFrame pool full");
-    }
+    // Always return to active execution frame pool, indicating that frame was
+    // used in the previous time interval
+    TORCH_CHECK(
+        executionFrames_.writeIfNotFull(std::move(frame)),
+        "ExecutionFrame pool full");
   } catch (...) {
     sem_.release();
     throw;
