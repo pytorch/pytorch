@@ -492,6 +492,19 @@
   - srossross
   - chillee
   - zou3519
+  - guilhermeleobas
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Dynamo
+  patterns:
+  - torch/_dynamo/**
+  - torch/csrc/dynamo/**
+  - test/dynamo/**
+  approved_by:
+  - guilhermeleobas
   mandatory_checks_name:
   - EasyCLA
   - Lint
