@@ -243,6 +243,30 @@ def foreach_all_gather(
     all_gather_comm: AllGather,
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
+    # Fast path for world_size=1: no need for actual all-gather
+    if world_size == 1:
+        # Store the original parameters directly in all_gather_output for direct access in copy_out
+
+        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
+        param_all_gather_input_dtypes, param_all_gather_input_numels, dtype = (
+            _get_all_gather_input_metadatas(param_all_gather_inputs)
+        )
+        all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
+        inp_split_sizes = [t.numel() for t in all_gather_inputs]
+
+        # Store the original tensors directly
+        # This will be used in foreach_all_gather_copy_out
+        all_gather_output = torch.cat([t.view(-1) for t in all_gather_inputs])
+
+        return AllGatherResult(
+            all_gather_output,
+            None,
+            None,
+            param_all_gather_input_dtypes,
+            param_all_gather_input_numels,
+            inp_split_sizes,
+        )
+
     device_handle = _get_device_handle(device.type)
     with device_handle.stream(all_gather_copy_in_stream):
         param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
@@ -356,6 +380,38 @@ def foreach_all_gather_copy_out(
         all_gather_input_split_sizes,
     ) = all_gather_result
     _dtype, device = all_gather_output.dtype, all_gather_output.device
+
+    if group.size() == 1:
+        # For world_size=1, we can directly set the original tensors as outputs
+        # without any copying since there's no actual gathering happening
+        device = all_gather_output.device
+
+        # Initialize outputs for each parameter
+        for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
+            param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
+        ):
+            fsdp_param.init_all_gather_outputs(
+                all_gather_input_numels,
+                all_gather_input_dtypes,
+                group.size(),
+                device,
+                force_recreate=compiled_autograd_enabled(),
+            )
+            if not compiled_autograd_enabled():
+                fsdp_param.alloc_all_gather_outputs()
+
+        # Use the original tensors directly - minimal copying required
+        offset = 0
+        for fsdp_param in fsdp_params:
+            for output_tensor in fsdp_param.all_gather_outputs:
+                numel = output_tensor.numel()
+                # Just copy the view - this is more efficient than reshaping and copying data
+                output_tensor.copy_(
+                    all_gather_output[offset : offset + numel].view_as(output_tensor)
+                )
+                offset += numel
+        return
+
     device_handle = _get_device_handle(device.type)
     if all_gather_event is not None:  # sync op
         device_handle.current_stream().wait_event(all_gather_event)
@@ -472,6 +528,68 @@ def foreach_reduce(
     ``unsharded_grads`` owns the references to the gradients computed by
     autograd, so clearing the list frees the gradients.
     """
+
+    if reduce_scatter_group.size() == 1:
+        # For world_size=1, we can directly use the unsharded gradients as sharded gradients
+        # with minimal processing - no actual collective communication needed
+        device_handle = _get_device_handle(device.type)
+        current_stream = device_handle.current_stream()
+        # Apply any gradient hooks if provided
+        if all_reduce_hook is not None:
+            for grad in unsharded_grads:
+                all_reduce_hook(grad)
+
+        # Set gradients directly without collective communication
+        for fsdp_param, unsharded_grad in zip(fsdp_params, unsharded_grads):
+            # Handle any dtype conversion if needed
+            if orig_dtype is not None and unsharded_grad.dtype != orig_dtype:
+                unsharded_grad = _to_dtype_if_needed(unsharded_grad, orig_dtype)
+
+            # Handle CPU offloading if needed
+            if fsdp_param.offload_to_cpu:
+                non_blocking = (
+                    fsdp_param.pin_memory and fsdp_param.sharded_param.grad is None
+                )
+                unsharded_grad = unsharded_grad.to(
+                    torch.device("cpu"), non_blocking=non_blocking
+                )
+                if non_blocking:
+                    fsdp_param.grad_offload_event = current_stream.record_event()
+
+            # Set or accumulate gradient - direct assignment without sharding logic
+            if fsdp_param.sharded_param.grad is not None:
+                assert isinstance(fsdp_param.sharded_param.grad, DTensor)
+                fsdp_param.sharded_param.grad._local_tensor += unsharded_grad
+            else:
+                # Create DTensor directly without unnecessary operations
+                sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(unsharded_grad)
+                fsdp_param.sharded_param.grad = sharded_dtensor_grad
+
+            # Apply post-accumulate hooks if any
+            if not compiled_autograd_enabled():
+                for hook in (
+                    getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
+                    or {}
+                ).values():
+                    hook(fsdp_param.sharded_param)
+
+        # Clear unsharded_grads to free memory
+        unsharded_grads.clear()
+
+        # Create single dummy event for API compatibility - reuse for both events
+        dummy_event = current_stream.record_event()
+        dummy_tensor = torch.empty(0, device=device)  # Empty tensor on the same device
+
+        # Return minimal dummy values for API compatibility
+        return (
+            dummy_tensor,  # reduce_scatter_input (not used in this path)
+            dummy_event,  # reduce_scatter_event
+            dummy_event,  # post_reduce_event
+            None,  # all_reduce_input
+            None,  # all_reduce_event
+            None,  # partial_reduce_output
+        )
+
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
     if len(grad_dtypes) != 1:
         # Check this at runtime since it could be a real runtime error if e.g.
@@ -625,6 +743,7 @@ def foreach_reduce(
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
     # hold refs through the end of backward.
+
     return (
         reduce_scatter_input,
         reduce_scatter_event,
