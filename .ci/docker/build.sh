@@ -156,7 +156,6 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm)
     CUDA_VERSION=12.8.1
-    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     VISION=yes
