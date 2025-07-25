@@ -166,7 +166,7 @@ from .utils import (
 )
 
 
-guard_manager_testing_hook_fn: Optional[Callable[[Any, Any], Any]] = None
+guard_manager_testing_hook_fn: Optional[Callable[[Any, Any, Any], Any]] = None
 
 try:
     import numpy as np
@@ -311,6 +311,7 @@ class GuardManagerWrapper:
         s = t + ": source=" + source
         if accessor_str:
             s += ", " + accessor_str
+        s += f", type={guard_manager.type_of_guarded_value()}"
         return s
 
     def construct_dict_manager_string(self, mgr, body):
@@ -1969,6 +1970,8 @@ class GuardBuilder(GuardBuilderBase):
         if self.serialization_mode == "save":
             if name := get_local_source_name(source_b):
                 self.check_fn_manager.additional_used_local_vars.add(name)
+            if name := get_global_source_name(source_b):
+                self.check_fn_manager.additional_used_global_vars.add(name)
 
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
@@ -2848,6 +2851,7 @@ class CheckFunctionManager:
         self.guards_serialization_mode = guards_serialization_mode
         self.used_builtin_vars: OrderedSet[str] = OrderedSet()
         self.additional_used_local_vars: OrderedSet[str] = OrderedSet()
+        self.additional_used_global_vars: OrderedSet[str] = OrderedSet()
         if runtime_global_scope:
             assert self.guards_serialization_mode == "load"
         self.runtime_global_scope = runtime_global_scope
@@ -2966,7 +2970,7 @@ class CheckFunctionManager:
 
             if guard_manager_testing_hook_fn is not None:
                 guard_manager_testing_hook_fn(
-                    self.guard_manager, output_graph.local_scope
+                    self.guard_manager, output_graph.local_scope, builder
                 )
 
             # NB for developers: n_iters is chosen to be 1 to prevent excessive
@@ -3038,7 +3042,7 @@ class CheckFunctionManager:
             global_scope_state = {
                 k: v
                 for k, v in output_graph_guards_state.global_scope.items()
-                if k in used_global_vars
+                if k in used_global_vars or k in self.additional_used_global_vars
             }
             global_scope_state[builtins_dict_name] = {
                 k: v

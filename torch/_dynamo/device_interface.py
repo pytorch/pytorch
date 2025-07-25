@@ -301,7 +301,7 @@ class MtiaInterface(DeviceInterface):
 
     class Worker:
         @staticmethod
-        def set_device(device: int):
+        def set_device(device: int) -> None:
             caching_worker_current_devices["mtia"] = device
 
         @staticmethod
@@ -311,7 +311,7 @@ class MtiaInterface(DeviceInterface):
             return torch.mtia.current_device()
 
         @staticmethod
-        def get_device_properties(device: torch.types.Device = None):
+        def get_device_properties(device: torch.types.Device = None) -> Any:
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
@@ -352,7 +352,7 @@ class MtiaInterface(DeviceInterface):
         return ret
 
     @staticmethod
-    def get_compute_capability(device: torch.types.Device = None):
+    def get_compute_capability(device: torch.types.Device = None) -> Any:
         cc = torch.mtia.get_device_capability(device)
         return cc
 

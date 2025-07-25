@@ -380,7 +380,7 @@ class CompilePackage:
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
-        from torch._dynamo.convert_frame import get_compile_id
+        from torch._dynamo.convert_frame import get_compile_id, log_dynamo_start
         from torch._guards import compile_context, CompileContext
 
         from .output_graph import get_builtins_dict
@@ -394,6 +394,7 @@ class CompilePackage:
             # collapsed into 0/0, 1/0 on warm.
             increment_frame()
             compile_id = get_compile_id(frame_state={})
+            log_dynamo_start(code)
             with (
                 compile_context(CompileContext(compile_id)),
                 dynamo_timed(
