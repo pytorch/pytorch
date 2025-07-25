@@ -3778,6 +3778,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @skip_if_cpp_wrapper("AOTI does not support aoti_torch_cuda__mm_dtype_out_cuda")
     def test_mm_out_dtype(self):
         if self.device != "cuda":
             self.skipTest("out_dtype is only supported on CUDA")
