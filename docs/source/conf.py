@@ -181,7 +181,6 @@ html_theme_options = {
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
 html_context = {
-    "theme_variables": theme_variables,
     "github_url": "https://github.com",
     "github_user": "pytorch",
     "github_repo": "pytorch",
@@ -189,7 +188,7 @@ html_context = {
     "github_version": "main",
     "pytorch_project": "docs",
     "doc_path": "docs/source",
-    "theme_variables": theme_variables,  # noqa: F601
+    "theme_variables": theme_variables,
     # library links are defined in
     # pytorch_sphinx_theme2/pytorch_sphinx_theme2/links.json
     "library_links": theme_variables.get("library_links", []),
@@ -1086,6 +1085,7 @@ coverage_ignore_functions = [
     "z3op",
     "z3str",
     # torch.fx.graph_module
+    "reduce_deploy_graph_module",
     "reduce_graph_module",
     "reduce_package_graph_module",
     # torch.fx.node
