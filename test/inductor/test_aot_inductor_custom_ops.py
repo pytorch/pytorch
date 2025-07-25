@@ -512,6 +512,7 @@ CUDA_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(),
     "test_quanatized_int8_linear": fail_cuda(),
+    "test_quantized_linear_bias_none": fail_cuda(),
 }
 
 

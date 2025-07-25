@@ -202,24 +202,25 @@ struct ShareableHandle {
   std::string handle;
 };
 
-class CUDAAllocator : public DeviceAllocator {
+class CUDAAllocator : public Allocator {
  public:
   virtual void* raw_alloc(size_t nbytes) = 0;
   virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) = 0;
   virtual void raw_delete(void* ptr) = 0;
   virtual void init(int device_count) = 0;
+  virtual bool initialized() = 0;
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
+  virtual void emptyCache(MempoolId_t mempool_id = {0, 0}) = 0;
   virtual void enable(bool value) = 0;
   virtual bool isEnabled() const = 0;
   virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
-  // Keep for BC only
-  virtual void recordStream(const DataPtr& ptr, CUDAStream stream) = 0;
-  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
-    CUDAStream cuda_stream = CUDAStream(stream);
-    recordStream(ptr, cuda_stream);
-  }
+  virtual void recordStream(const DataPtr&, CUDAStream stream) = 0;
+  virtual c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) = 0;
+  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
+  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
   virtual SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) = 0;
   virtual void beginAllocateToPool(
       c10::DeviceIndex device,
@@ -523,10 +524,6 @@ inline void enablePeerAccess(
 } // namespace c10::cuda::CUDACachingAllocator
 
 namespace c10::cuda {
-
-// Keep BC only
-using c10::CaptureId_t;
-using c10::MempoolId_t;
 
 // MemPool represents a pool of memory in a caching allocator. Currently,
 // it's just the ID of the pool object maintained in the CUDACachingAllocator.
