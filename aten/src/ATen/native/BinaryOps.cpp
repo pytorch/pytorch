@@ -144,6 +144,7 @@
 #include <ATen/ops/xlogy.h>
 #include <ATen/ops/xlogy_native.h>
 #include <ATen/ops/xor_native.h>
+#include <ATen/ops/mm_native.h>
 #endif
 
 namespace at::meta {
@@ -1067,6 +1068,11 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   }
 }
 
+static inline Tensor get_out_like(const Tensor& tensor, const Device& out_device, const Tensor& meta_out) {
+    auto sizes = meta_out.sizes();
+    return at::_to_copy(tensor.expand(sizes), meta_out.options().device(out_device));
+}
+
 static Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto [out_device, meta_out] = get_zero_tensor_meta(
     self, other,
@@ -1074,22 +1080,17 @@ static Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const
       return at::_ops::add_Tensor::redispatch(meta_dks, self, other, alpha);
     });
 
-  auto get_out_like = [&] (const Tensor& tensor)
-  {
-      auto sizes = meta_out.sizes();
-      return at::_to_copy(tensor.expand(sizes), meta_out.options().device(out_device));
-  };
-
   if (self._is_zerotensor()) {
     if (other._is_zerotensor()) {
       return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
     }
-    auto res = get_out_like(other);
+    auto res = get_out_like(other, out_device, meta_out);
     return alpha.equal(1) ? std::move(res) : res.mul(alpha);
   } else {
-    return get_out_like(self);
+    return get_out_like(self, out_device, meta_out);
   }
 }
+
 Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return maybe_add_maybe_sub(self, other, alpha);
 }
