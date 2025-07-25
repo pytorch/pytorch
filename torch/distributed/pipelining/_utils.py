@@ -18,7 +18,6 @@ def flatten_args_detach(args):
     flat_detached_args = []
 
     def extract_tensor_args(a):
-        nonlocal flat_detached_args
         if isinstance(a, torch.Tensor):
             val = a.detach().requires_grad_(a.requires_grad)
             flat_detached_args.append(val)
@@ -42,7 +41,6 @@ def flatten_args(args):
     flat_args = []
 
     def extract_tensor_args(a):
-        nonlocal flat_args
         flat_args.append(a)
         return a
 

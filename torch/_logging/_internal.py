@@ -1215,7 +1215,6 @@ structured_logging_overhead: dict[str, float] = defaultdict(float)
 
 
 def add_structured_logging_overhead(time_spent: float) -> None:
-    global structured_logging_overhead
     key = None
     if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
         frame_id = trace_id.compile_id.frame_id

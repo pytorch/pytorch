@@ -676,7 +676,7 @@ class PGOCacheArtifact(CacheArtifact):
 
 
 def get_code_state() -> defaultdict[CodeId, CodeState]:
-    global _CODE_STATE, _INIT_CODE_STATE
+    global _CODE_STATE
     if _CODE_STATE is not None:
         return _CODE_STATE
 

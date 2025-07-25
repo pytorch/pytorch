@@ -2157,7 +2157,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 )
 
                 if num_rng:
-                    nonlocal backward_state_position, bwd_rng_states
+                    nonlocal backward_state_position
                     curr_backward_iter = ctx._curr_iter
                     retain_graph = (
                         torch._C._autograd._get_current_graph_task_keep_graph()

@@ -92,7 +92,6 @@ def _add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]])
 
 
 def _get_safe_globals() -> list[Union[Callable, tuple[Callable, str]]]:
-    global _marked_safe_globals_set
     return list(_marked_safe_globals_set)
 
 

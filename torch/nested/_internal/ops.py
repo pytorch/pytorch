@@ -1650,7 +1650,6 @@ def view_default(func, *args, **kwargs):
     #    inner_size[3] = outer_size[4]
     #    inner_size[4] = outer_size[5]
     def get_inner_size(inner_idx):
-        nonlocal inp, size
         if inner_idx == inp._ragged_idx - 1:
             return inp._values.size(inner_idx)
         else:

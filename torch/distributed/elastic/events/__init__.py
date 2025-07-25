@@ -55,8 +55,6 @@ def _get_or_create_logger(destination: str = "null") -> logging.Logger:
         destination: The string representation of the event handler.
             Available handlers found in ``handlers`` module
     """
-    global _events_loggers
-
     if destination not in _events_loggers:
         _events_logger = logging.getLogger(f"torchelastic-events-{destination}")
         _events_logger.setLevel(os.environ.get("LOGLEVEL", "INFO"))

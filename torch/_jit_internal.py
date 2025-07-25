@@ -1027,7 +1027,6 @@ def _check_overload_body(func):
 def _overload(func):
     _check_overload_body(func)
     qual_name = _qualified_name(func)
-    global _overloaded_fns
     fn_overload_list = _overloaded_fns.get(qual_name)
     if fn_overload_list is None:
         fn_overload_list = []
@@ -1080,7 +1079,6 @@ _overloaded_method_class_fileno: dict[tuple[str, str], int] = {}
 def _overload_method(func):
     _check_overload_body(func)
     qual_name = _qualified_name(func)
-    global _overloaded_methods
     class_name_map = _overloaded_methods.get(qual_name, None)
     if class_name_map is None:
         class_name_map = {}

@@ -851,9 +851,6 @@ def create_node_mapping_kernel_to_post_grad(
 def dump_inductor_provenance_info(
     filename: str = "inductor_generated_kernel_to_post_grad_nodes.json",
 ) -> dict[str, Any]:
-    global _pre_grad_graph_id
-    global _inductor_post_to_pre_grad_nodes
-    global _inductor_triton_kernel_to_post_grad_node_info
     if config.trace.enabled:
         with V.debug.fopen(filename, "w") as fd:
             log.info("Writing provenance tracing debugging info to %s", fd.name)
@@ -882,7 +879,6 @@ def set_kernel_post_grad_provenance_tracing(
 ) -> None:
     from .codegen.simd_kernel_features import DisableReduction, EnableReduction
 
-    global _inductor_triton_kernel_to_post_grad_node_info
     if is_extern:
         assert isinstance(node_schedule, ExternKernelOut)
         curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(

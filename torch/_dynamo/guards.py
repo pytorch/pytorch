@@ -400,7 +400,6 @@ class GuardManagerWrapper:
             return code_parts
 
         def visit(mgr):
-            nonlocal relational_guards_seen
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, torch._C._dynamo.guards.RelationalGuard):  # type: ignore[attr-defined]
                     if guard not in relational_guards_seen:

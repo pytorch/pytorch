@@ -336,8 +336,6 @@ def quantized_args(
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(g, *args, **kwargs):
-            nonlocal scale
-            nonlocal zero_point
             if scale is not None:
                 _scale = g.op("Constant", value_t=torch.tensor(scale))
             else:

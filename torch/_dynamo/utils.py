@@ -1662,7 +1662,6 @@ def set_compilation_metrics_limit(new_size: int) -> None:
 
 
 def clear_compilation_metrics() -> None:
-    global _compilation_metrics
     _compilation_metrics.clear()
 
 
@@ -1991,7 +1990,6 @@ def get_chromium_event_logger() -> ChromiumEventLogger:
 
 
 def chromium_event_log_active() -> bool:
-    global CHROMIUM_EVENT_LOG
     return CHROMIUM_EVENT_LOG is not None
 
 

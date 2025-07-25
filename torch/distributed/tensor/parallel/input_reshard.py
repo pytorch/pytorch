@@ -56,7 +56,6 @@ def input_reshard(
     def input_reshard_backward_hook(
         _: torch.nn.Module, _i: tuple[Any, ...], _o: Any
     ) -> Any:
-        nonlocal cx
         cx.__exit__()  # type: ignore[name-defined, union-attr]
 
     module.register_forward_pre_hook(input_reshard_forward_pre_hook)

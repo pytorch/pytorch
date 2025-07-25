@@ -47,7 +47,6 @@ def register_rendezvous_handler(scheme, handler):
             the corresponding scheme. It must be a generator function
             that yields the triplet.
     """
-    global _rendezvous_handlers
     if scheme in _rendezvous_handlers:
         raise RuntimeError(f"Rendezvous handler for {scheme}:// already registered")
     _rendezvous_handlers[scheme] = handler
