@@ -207,6 +207,27 @@ bool CUDAHooks::hasCuBLASLt() const {
 #endif
 }
 
+
+bool CUDAHooks::hasCKSDPA() const {
+#if !defined(USE_ROCM)
+    return false;
+#elif defined(USE_ROCM) && (defined(USE_ROCM_CK_SDPA) || defined(USE_CK_FLASH_ATTENTION))
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool CUDAHooks::hasCKGEMM() const {
+#if !defined(USE_ROCM)
+    return false;
+#elif defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool CUDAHooks::hasROCM() const {
   // Currently, this is same as `compiledWithMIOpen`.
   // But in future if there are ROCm builds without MIOpen,

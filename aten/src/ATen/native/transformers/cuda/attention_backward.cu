@@ -431,7 +431,7 @@ _efficient_attention_backward(
   // ROCM Implementation
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
-#if defined(USE_CK_FLASH_ATTENTION)
+#if defined(USE_ROCM_CK_SDPA)
     const auto my_softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     // Store grad_bias in optional
     std::optional<at::Tensor> opt_grad_bias = grad_bias;
