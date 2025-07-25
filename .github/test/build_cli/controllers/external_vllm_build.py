@@ -86,6 +86,8 @@ def build_vllm(
         )
         docker_torch_arg = ""
         if torch_whl_dir:
+            print("cwd:", os.getcwd())
+            print("ls:", os.listdir())
             print("pwd")
             run("pwd")
 
