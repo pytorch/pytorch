@@ -13,17 +13,20 @@ import sys
 import time
 
 
-def run_command(args: list[str]) -> subprocess.CompletedProcess[bytes]:
+def run_command(
+    args: list[str],
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
-        return subprocess.run(args, check=True)
+        return subprocess.run(args, env=env, text=True, encoding="utf-8", check=True)
     finally:
         end_time = time.monotonic()
         logging.debug("took %dms", (end_time - start_time) * 1000)
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(description="pip initializer")
     parser.add_argument(
         "packages",
@@ -52,17 +55,16 @@ if __name__ == "__main__":
         stream=sys.stderr,
     )
 
-    uv_available = (
-        any(prefix in sys.base_prefix for prefix in ["uv/python", "uv\\python"])
-        and shutil.which("uv") is not None
-    )
-
-    if uv_available:
-        pip_args = ["uv", "pip", "install"]
-    elif sys.executable:
-        pip_args = [sys.executable, "-mpip", "install"]
-    else:
-        pip_args = ["pip3", "install"]
+    env: dict[str, str] = {
+        **os.environ,
+        "UV_PYTHON": sys.executable,
+        "UV_PYTHON_DOWNLOADS": "never",
+        "FORCE_COLOR": "1",
+        "CLICOLOR_FORCE": "1",
+    }
+    uv_index = env.get("UV_INDEX", env.get("PIP_EXTRA_INDEX_URL"))
+    if uv_index:
+        env["UV_INDEX"] = uv_index
 
     # If we are in a global install, use `--user` to install so that you do not
     # need root access in order to initialize linters.
@@ -70,9 +72,20 @@ if __name__ == "__main__":
     # However, `pip install --user` interacts poorly with virtualenvs (see:
     # https://bit.ly/3vD4kvl) and conda (see: https://bit.ly/3KG7ZfU). So in
     # these cases perform a regular installation.
-    in_conda = os.environ.get("CONDA_PREFIX") is not None
-    in_virtualenv = os.environ.get("VIRTUAL_ENV") is not None
-    if not in_conda and not in_virtualenv:
+    in_conda = env.get("CONDA_PREFIX") is not None
+    in_virtualenv = env.get("VIRTUAL_ENV") is not None
+    need_user_flag = not in_conda and not in_virtualenv
+
+    uv: str | None = shutil.which("uv")
+    is_uv_managed_python = "uv/python" in sys.base_prefix.replace("\\", "/")
+    if uv and (is_uv_managed_python or not need_user_flag):
+        pip_args = [uv, "pip", "install"]
+    elif sys.executable:
+        pip_args = [sys.executable, "-mpip", "install"]
+    else:
+        pip_args = ["pip3", "install"]
+
+    if need_user_flag:
         pip_args.append("--user")
 
     pip_args.extend(args.packages)
@@ -92,4 +105,8 @@ if __name__ == "__main__":
         print(f"Would have run: {pip_args}")
         sys.exit(0)
 
-    run_command(pip_args)
+    run_command(pip_args, env=env)
+
+
+if __name__ == "__main__":
+    main()

@@ -66,7 +66,16 @@ from torch.utils._pytree import tree_flatten, tree_map_only
 
 OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
+    "inductor_autotune_lookup_table",
 ]
+
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    free_unbacked_symbols,
+    IterateExprs,
+    ShapeEnv,
+)
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
@@ -74,21 +83,12 @@ if TYPE_CHECKING:
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.fx.node import Node
 
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .ir import (
-        Buffer,
-        ExternKernel,
-        ExternKernelOut,
-        IRNode,
-        Layout,
-        Operation,
-        ReinterpretView,
-    )
+    from .ir import Buffer, ExternKernel, IRNode, Layout, Operation, ReinterpretView
     from .output_code import CompiledFxGraph
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
@@ -1098,13 +1098,17 @@ def fresh_cache(
     """
     clear_caches()
 
-    inductor_cache_dir = tempfile.mkdtemp(dir=dir)
+    from torch._inductor.cpp_builder import normalize_path_separator
+
+    inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
-            triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
+            triton_cache_dir = normalize_path_separator(
+                os.path.join(inductor_cache_dir, "triton")
+            )
             with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
                 yield
                 if isinstance(cache_entries, dict):
@@ -1652,8 +1656,9 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
         if not try_import_cutlass():
             log.warning(
                 "Failed to import CUTLASS lib. Please check whether "
-                "_inductor.config.cuda.cutlass_dir is set correctly. "
-                "Skipping CUTLASS backend for now."
+                "_inductor.config.cuda.cutlass_dir %s is set correctly. "
+                "Skipping CUTLASS backend for now.",
+                config.cuda.cutlass_dir,
             )
             return False
     return res
@@ -1667,19 +1672,14 @@ def _use_cutlass_for_op(op_name: str) -> bool:
     return op_name.upper() in [x.strip() for x in enabled_ops.split(",")]
 
 
-decompose_k_threshold = 32
-
-# To limit compile time
-k_splits_limit = 5
-
-# Hand-tuned
-default_k_splits = [16, 32, 64, 128, 256]
-
 _IntLike: TypeAlias = Union[int, sympy.Expr]
 
 
+@functools.cache
 def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
+
+    decompose_k_threshold = config.triton.decompose_k_threshold
 
     return (
         not torch.version.hip
@@ -1691,15 +1691,21 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
         )
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         and not V.graph.cpp_wrapper
-        and not config.disable_decompose_k
     )
 
 
 @functools.cache
 def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
+    # To limit compile time
+    k_splits_limit = config.triton.num_decompose_k_splits
+
+    # Hand-tuned
+    default_k_splits = [16, 32, 64, 128, 256]
     # If k is a sympy expression, we can't do any splitting
     if isinstance(k, sympy.Expr) and not k.is_number:
         return default_k_splits
+    elif k_splits_limit == 0:
+        return []
 
     if (isinstance(m, sympy.Expr) and not m.is_number) or (
         isinstance(n, sympy.Expr) and not n.is_number
@@ -1739,15 +1745,10 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
 
     if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
         return pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
-    # If the # of power of 2 divisors are greater than k_splits_limit, return all
-    # This should be ok for compile time, all perfect squares between 128 and min(k / m, k / n)
-    # should never be a massive amount
-    if len(pow_of_2_divisors) >= k_splits_limit:
-        return pow_of_2_divisors
-    else:
-        best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
-        # Otherwise, conform results to k_splits_limit
-        return best_splits[:k_splits_limit]
+
+    best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
+    # Otherwise, conform results to k_splits_limit
+    return best_splits[:k_splits_limit]
 
 
 @functools.cache
@@ -2022,7 +2023,6 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
         # Skip all the actual compiling.
-        nonlocal save_output_code
         save_output_code(wrapper_code.value)
         if kernel_code:
             save_output_code(kernel_code.value)
@@ -2229,7 +2229,10 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
-    from torch.testing._internal.common_cuda import SM80OrLater
+    SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
+        8,
+        0,
+    )
 
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
 
@@ -2723,10 +2726,9 @@ def maybe_get_suppress_shape_guards_ctx() -> contextlib.AbstractContextManager[N
         return contextlib.nullcontext()
 
     # In standalone inductor compile mode, we might not have a shape_env attached to the fake mode
-    shape_env = tracing_context.fake_mode.shape_env
-    if not shape_env:
+    if not tracing_context.fake_mode or not tracing_context.fake_mode.shape_env:
         return contextlib.nullcontext()
-
+    shape_env = tracing_context.fake_mode.shape_env
     return shape_env.suppress_guards()
 
 
@@ -3123,42 +3125,6 @@ def get_donated_idxs() -> Optional[list[int]]:
     return None
 
 
-def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
-    kernel_name: str,
-    is_extern: bool = False,
-) -> None:
-    from .codegen.simd_kernel_features import DisableReduction, EnableReduction
-    from .ir import ExternKernelOut
-    from .virtualized import V
-
-    if is_extern:
-        assert isinstance(node_schedule, ExternKernelOut)
-        curr_node_info = (
-            V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
-                kernel_name, []
-            )
-        )
-        curr_node_info.extend(
-            origin.name
-            for origin in node_schedule.origins
-            if origin.name not in curr_node_info
-        )
-    else:
-        assert isinstance(node_schedule, list)
-        for snode in node_schedule:
-            if snode not in (EnableReduction, DisableReduction):
-                if snode.node is not None:
-                    curr_node_info = V.debug._inductor_triton_kernel_to_post_grad_node_info.setdefault(
-                        kernel_name, []
-                    )
-                    curr_node_info.extend(
-                        origin.name
-                        for origin in snode.node.origins
-                        if origin.name not in curr_node_info
-                    )
-
-
 class TritonAttrsDescriptorVersion(enum.Enum):
     V0_NO_TRITON = 0
     V1_COMPILER = 1  # triton.compiler.compiler.AttrsDescriptor
@@ -3285,12 +3251,13 @@ def tabulate_2d(elements: Sequence[Sequence[T]], headers: Sequence[T]) -> str:
         for i, e in enumerate(row):
             widths[i] = max(widths[i], len(str(e)))
     lines = []
-    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))
+    # Need nested {} for string formatting; ignore SET_LINTER here
+    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))  # noqa: set_linter
     #              widths          whitespace      horizontal separators
     total_width = sum(widths) + (len(widths) * 2) + (len(widths) - 1)
     lines.append("-" * total_width)
     for row in elements:
-        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))
+        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))  # noqa: set_linter
     return "\n".join(lines)
 
 
@@ -3360,3 +3327,45 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
                 "Please set aot_inductor.package_cpp_only=True in your inductor config."
             )
     return config_patches
+
+
+def is_valid_aoti_model_name() -> bool:
+    """
+    Validates if a model name is suitable for use in code generation.
+
+    """
+    from torch._inductor import config
+
+    model_name = config.aot_inductor.model_name_for_generated_files
+
+    if model_name is None:
+        return True
+
+    if not isinstance(model_name, str):
+        raise ValueError("Invalid AOTI model name: Model name must be a string")
+
+    if model_name == "":
+        return True
+
+    # Can only contain alphanumeric characters and underscores
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", model_name):
+        raise ValueError(
+            "Invalid AOTI model name: Model name can only contain letters, numbers, and underscores"
+        )
+
+    return True
+
+
+def aoti_model_name_from_config() -> str:
+    from torch._inductor import config
+
+    model_name = config.aot_inductor.model_name_for_generated_files
+    model_name = "aoti_model" if model_name is None else model_name
+    return model_name
+
+
+def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.Symbol]:
+    if unbacked_only:
+        return free_unbacked_symbols(x)
+    else:
+        return free_symbols(x)

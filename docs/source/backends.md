@@ -54,7 +54,7 @@ These backends include:
 .. attribute::  allow_tf32
 
     A :class:`bool` that controls whether TensorFloat-32 tensor cores may be used in matrix
-    multiplications on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
+    multiplications on Ampere or newer GPUs. allow_tf32 is going to be deprecated. See :ref:`tf32_on_ampere`.
 ```
 
 ```{eval-rst}
@@ -193,7 +193,7 @@ These backends include:
 .. attribute::  allow_tf32
 
     A :class:`bool` that controls where TensorFloat-32 tensor cores may be used in cuDNN
-    convolutions on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
+    convolutions on Ampere or newer GPUs. allow_tf32 is going to be deprecated. See :ref:`tf32_on_ampere`.
 ```
 
 ```{eval-rst}

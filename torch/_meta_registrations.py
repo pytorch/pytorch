@@ -2720,10 +2720,24 @@ if torch._C._has_mkldnn:
             groups,
             None,
         )
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
+        if output_dtype is None:
+            output_dtype = x.dtype
+        assert output_dtype in [
+            torch.float32,
+            torch.bfloat16,
+            torch.uint8,
+            torch.int8,
+            torch.float8_e4m3fn,
+        ]
         out = x.new_empty(shape_out, dtype=output_dtype)
-        assert len(shape_out) in [3, 4], "only conv1d/2d are supported"
-        format = torch.channels_last if len(shape_out) == 4 else torch.contiguous_format
+        assert len(shape_out) in [3, 4, 5], (
+            "Expect output to be 3d/4d/5d for conv1d/2d/3d"
+        )
+        format = {
+            3: torch.contiguous_format,
+            4: torch.channels_last,
+            5: torch.channels_last_3d,
+        }[len(shape_out)]
         out = out.to(memory_format=format)
         return out
 
@@ -2775,7 +2789,13 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.int8, torch.uint8]
+        assert output_dtype in [
+            torch.float32,
+            torch.bfloat16,
+            torch.int8,
+            torch.uint8,
+            torch.float8_e4m3fn,
+        ]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -2806,7 +2826,13 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
+        assert output_dtype in [
+            torch.float32,
+            torch.bfloat16,
+            torch.uint8,
+            torch.int8,
+            torch.float8_e4m3fn,
+        ]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -5527,39 +5553,6 @@ def meta_zeros(
     )
 
 
-@register_meta(aten.select.int)
-def meta_select(self, dim, index):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-    ndim = self.dim()
-    torch._check_index(
-        ndim != 0,
-        lambda: "select() cannot be applied to a 0-dim tensor.",
-    )
-
-    dim = dim if dim >= 0 else dim + ndim
-    size = self.size(dim)
-
-    torch._check_index(
-        not (
-            guard_size_oblivious(-index > size) or guard_size_oblivious(index >= size)
-        ),
-        lambda: f"select(): index {index} out of range for tensor of size "
-        f"{self.size()} at dimension {dim}",
-    )
-
-    index = index if index >= 0 else index + size
-
-    new_size = list(self.size())
-    new_stride = list(self.stride())
-
-    new_storage_offset = self.storage_offset() + index * new_stride[dim]
-    del new_size[dim]
-    del new_stride[dim]
-
-    return self.as_strided(new_size, new_stride, new_storage_offset)
-
-
 @register_meta(aten.select_scatter.default)
 def meta_select_scatter(self, src, dim, index):
     return utils.clone_preserve_strides(self)
@@ -6019,27 +6012,21 @@ def meta__scaled_dot_product_flash_attention_for_cpu_backward(
     scale: Optional[float] = None,
 ):
     # cpus's grad layout is different from cuda's,
-    # i.e. (batch_size, seq_len,num_heads, head_dim)
-    batch_size = query.size(0)
-    num_heads = query.size(1)
-    head_dim = query.size(3)
-    len_q = query.size(2)
-    len_k = key.size(2)
-
+    # i.e. (batch_size, seq_len, num_heads, head_dim)
     grad_q = torch.empty_permuted(
-        (batch_size, num_heads, len_q, head_dim),
+        query.size(),
         (0, 2, 1, 3),
         dtype=query.dtype,
         device=query.device,
     )
     grad_k = torch.empty_permuted(
-        (batch_size, num_heads, len_k, head_dim),
+        key.size(),
         (0, 2, 1, 3),
         dtype=key.dtype,
         device=key.device,
     )
     grad_v = torch.empty_permuted(
-        (batch_size, num_heads, len_k, head_dim),
+        value.size(),
         (0, 2, 1, 3),
         dtype=value.dtype,
         device=value.device,
@@ -7482,18 +7469,20 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
             out_size = [offs.size(0), mat1.size(0), mat2.size(1)]
         else:
             torch._check(
-                offs.size(0) == mat2.size(0), "matrix batch sizes have to match"
+                offs.size(0) == mat2.size(0), lambda: "matrix batch sizes have to match"
             )
             out_size = [mat1.size(0), mat2.size(-1)]
     else:
         if mat2_is_2d:
             torch._check(
-                offs.size(0) == mat1.size(0), "matrix batch sizes have to match"
+                offs.size(0) == mat1.size(0), lambda: "matrix batch sizes have to match"
             )
             out_size = [mat1.size(1), mat2.size(1)]
         else:
             # regular bmm
-            torch._check(mat1.size(0) == mat2.size(0), "batched dimension has to match")
+            torch._check(
+                mat1.size(0) == mat2.size(0), lambda: "batched dimension has to match"
+            )
             out_size = [mat1.size(0), mat1.size(1), mat2.size(-1)]
 
     out_dtype = out_dtype or mat1.dtype
@@ -7678,7 +7667,7 @@ def _meta_grouped_mm_common(
 
 @register_meta(aten._grouped_mm)
 @out_wrapper()
-def grouped_mm(
+def meta_grouped_mm(
     mat_a: Tensor,
     mat_b: Tensor,
     offs: Optional[Tensor] = None,
@@ -7697,7 +7686,7 @@ def grouped_mm(
     )
 
 
-@register_meta([aten._scaled_grouped_mm.default])
+@register_meta([aten._scaled_grouped_mm])
 def meta_scaled_grouped_mm(
     mat_a: torch.Tensor,
     mat_b: torch.Tensor,
