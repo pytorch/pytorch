@@ -1,22 +1,25 @@
+```{eval-rst}
 .. role:: hidden
     :class: hidden-section
+```
 
-torch.nn
-===================================
+# torch.nn
+
+```{eval-rst}
 .. automodule:: torch.nn
 .. automodule:: torch.nn.modules
+```
 
 These are the basic building blocks for graphs:
 
-.. contents:: torch.nn
-    :depth: 2
-    :local:
-    :backlinks: top
+```{contents} torch.nn
+:local:
+:depth: 2
+:backlinks: top
+```
 
-
+```{eval-rst}
 .. currentmodule:: torch.nn
-
-
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -26,10 +29,10 @@ These are the basic building blocks for graphs:
     ~parameter.Parameter
     ~parameter.UninitializedParameter
     ~parameter.UninitializedBuffer
+```
 
-Containers
-----------------------------------
-
+## Containers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -41,9 +44,10 @@ Containers
     ModuleDict
     ParameterList
     ParameterDict
+```
 
-Global Hooks For Module
-
+## Global Hooks For Module
+```{eval-rst}
 .. currentmodule:: torch.nn.modules.module
 .. autosummary::
     :toctree: generated
@@ -57,12 +61,14 @@ Global Hooks For Module
     register_module_buffer_registration_hook
     register_module_module_registration_hook
     register_module_parameter_registration_hook
+```
 
+```{eval-rst}
 .. currentmodule:: torch
+```
 
-Convolution Layers
-----------------------------------
-
+## Convolution Layers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -82,10 +88,10 @@ Convolution Layers
     nn.LazyConvTranspose3d
     nn.Unfold
     nn.Fold
+```
 
-Pooling layers
-----------------------------------
-
+## Pooling layers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -111,10 +117,10 @@ Pooling layers
     nn.AdaptiveAvgPool1d
     nn.AdaptiveAvgPool2d
     nn.AdaptiveAvgPool3d
+```
 
-Padding Layers
---------------
-
+## Padding Layers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -135,10 +141,10 @@ Padding Layers
     nn.CircularPad1d
     nn.CircularPad2d
     nn.CircularPad3d
+```
 
-Non-linear Activations (weighted sum, nonlinearity)
----------------------------------------------------
-
+## Non-linear Activations (weighted sum, nonlinearity)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -169,10 +175,10 @@ Non-linear Activations (weighted sum, nonlinearity)
     nn.Tanhshrink
     nn.Threshold
     nn.GLU
+```
 
-Non-linear Activations (other)
-------------------------------
-
+## Non-linear Activations (other)
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -183,10 +189,10 @@ Non-linear Activations (other)
     nn.Softmax2d
     nn.LogSoftmax
     nn.AdaptiveLogSoftmaxWithLoss
+```
 
-Normalization Layers
-----------------------------------
-
+## Normalization Layers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -209,10 +215,10 @@ Normalization Layers
     nn.LayerNorm
     nn.LocalResponseNorm
     nn.RMSNorm
+```
 
-Recurrent Layers
-----------------
-
+## Recurrent Layers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -225,10 +231,10 @@ Recurrent Layers
     nn.RNNCell
     nn.LSTMCell
     nn.GRUCell
+```
 
-Transformer Layers
-----------------------------------
-
+## Transformer Layers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -239,10 +245,10 @@ Transformer Layers
     nn.TransformerDecoder
     nn.TransformerEncoderLayer
     nn.TransformerDecoderLayer
+```
 
-Linear Layers
-----------------------------------
-
+## Linear Layers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -252,10 +258,10 @@ Linear Layers
     nn.Linear
     nn.Bilinear
     nn.LazyLinear
+```
 
-Dropout Layers
---------------
-
+## Dropout Layers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -267,10 +273,10 @@ Dropout Layers
     nn.Dropout3d
     nn.AlphaDropout
     nn.FeatureAlphaDropout
+```
 
-Sparse Layers
--------------
-
+## Sparse Layers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -278,10 +284,10 @@ Sparse Layers
 
     nn.Embedding
     nn.EmbeddingBag
+```
 
-Distance Functions
-------------------
-
+## Distance Functions
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -289,10 +295,10 @@ Distance Functions
 
     nn.CosineSimilarity
     nn.PairwiseDistance
+```
 
-Loss Functions
---------------
-
+## Loss Functions
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -319,10 +325,10 @@ Loss Functions
     nn.MultiMarginLoss
     nn.TripletMarginLoss
     nn.TripletMarginWithDistanceLoss
+```
 
-Vision Layers
-----------------
-
+## Vision Layers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -333,22 +339,22 @@ Vision Layers
     nn.Upsample
     nn.UpsamplingNearest2d
     nn.UpsamplingBilinear2d
+```
 
-Shuffle Layers
-----------------
-
+## Shuffle Layers
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
     :template: classtemplate.rst
 
     nn.ChannelShuffle
+```
 
-DataParallel Layers (multi-GPU, distributed)
---------------------------------------------
+## DataParallel Layers (multi-GPU, distributed)
+```{eval-rst}
 .. automodule:: torch.nn.parallel
 .. currentmodule:: torch
-
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -356,15 +362,18 @@ DataParallel Layers (multi-GPU, distributed)
 
     nn.DataParallel
     nn.parallel.DistributedDataParallel
+```
 
-Utilities
----------
+## Utilities
+```{eval-rst}
 .. automodule:: torch.nn.utils
+```
 
 From the ``torch.nn.utils`` module:
 
 Utility functions to clip parameter gradients.
 
+```{eval-rst}
 .. currentmodule:: torch.nn.utils
 .. autosummary::
     :toctree: generated
@@ -375,18 +384,22 @@ Utility functions to clip parameter gradients.
     clip_grad_value_
     get_total_norm
     clip_grads_with_norm_
+```
 
 Utility functions to flatten and unflatten Module parameters to and from a single vector.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     parameters_to_vector
     vector_to_parameters
+```
 
 Utility functions to fuse Modules with BatchNorm modules.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -395,18 +408,22 @@ Utility functions to fuse Modules with BatchNorm modules.
     fuse_conv_bn_weights
     fuse_linear_bn_eval
     fuse_linear_bn_weights
+```
 
 Utility functions to convert Module parameter memory formats.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     convert_conv2d_weight_memory_format
     convert_conv3d_weight_memory_format
+```
 
 Utility functions to apply and remove weight normalization from Module parameters.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -415,17 +432,21 @@ Utility functions to apply and remove weight normalization from Module parameter
     remove_weight_norm
     spectral_norm
     remove_spectral_norm
+```
 
 Utility functions for initializing Module parameters.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     skip_init
+```
 
 Utility classes and functions for pruning Module parameters.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -447,10 +468,11 @@ Utility classes and functions for pruning Module parameters.
     prune.custom_from_mask
     prune.remove
     prune.is_pruned
+```
 
-Parametrizations implemented using the new parametrization functionality
-in :func:`torch.nn.utils.parameterize.register_parametrization`.
+Parametrizations implemented using the new parametrization functionality in {func}`torch.nn.utils.parameterize.register_parametrization`.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -458,15 +480,11 @@ in :func:`torch.nn.utils.parameterize.register_parametrization`.
     parametrizations.orthogonal
     parametrizations.weight_norm
     parametrizations.spectral_norm
+```
 
-Utility functions to parametrize Tensors on existing Modules.
-Note that these functions can be used to parametrize a given Parameter
-or Buffer given a specific function that maps from an input space to the
-parametrized space. They are not parameterizations that would transform
-an object into a parameter. See the
-`Parametrizations tutorial <https://pytorch.org/tutorials/intermediate/parametrizations.html>`_
-for more information on how to implement your own parametrizations.
+Utility functions to parametrize Tensors on existing Modules. Note that these functions can be used to parametrize a given Parameter or Buffer given a specific function that maps from an input space to the parametrized space. They are not parameterizations that would transform an object into a parameter. See the [Parametrizations tutorial](https://pytorch.org/tutorials/intermediate/parametrizations.html) for more information on how to implement your own parametrizations.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -475,24 +493,30 @@ for more information on how to implement your own parametrizations.
     parametrize.remove_parametrizations
     parametrize.cached
     parametrize.is_parametrized
+```
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
     :template: classtemplate.rst
 
     parametrize.ParametrizationList
+```
 
 Utility functions to call a given Module in a stateless manner.
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     stateless.functional_call
+```
 
 Utility functions in other modules
 
+```{eval-rst}
 .. currentmodule:: torch
 .. autosummary::
     :toctree: generated
@@ -505,7 +529,9 @@ Utility functions in other modules
     nn.utils.rnn.pack_sequence
     nn.utils.rnn.unpack_sequence
     nn.utils.rnn.unpad_sequence
+```
 
+```{eval-rst}
 .. autosummary::
     :toctree: generated
     :nosignatures:
@@ -513,16 +539,13 @@ Utility functions in other modules
 
     nn.Flatten
     nn.Unflatten
+```
 
-Quantized Functions
---------------------
+## Quantized Functions
+Quantization refers to techniques for performing computations and storing tensors at lower bitwidths than floating point precision. PyTorch supports both per tensor and per channel asymmetric linear quantization. To learn more how to use quantized functions in PyTorch, please refer to the {ref}`quantization-doc` documentation.
 
-Quantization refers to techniques for performing computations and storing tensors at lower bitwidths than
-floating point precision. PyTorch supports both per tensor and per channel asymmetric linear quantization. To learn more how to use quantized functions in PyTorch, please refer to the :ref:`quantization-doc` documentation.
-
-Lazy Modules Initialization
----------------------------
-
+## Lazy Modules Initialization
+```{eval-rst}
 .. currentmodule:: torch
 .. autosummary::
     :toctree: generated
@@ -530,12 +553,11 @@ Lazy Modules Initialization
     :template: classtemplate.rst
 
     nn.modules.lazy.LazyModuleMixin
+```
 
-Aliases
-_______
-
+## Aliases
 The following are aliases to their counterparts in ``torch.nn``:
-
+```{eval-rst}
 .. currentmodule:: torch
 .. autosummary::
     :toctree: generated
@@ -543,9 +565,12 @@ The following are aliases to their counterparts in ``torch.nn``:
     :template: classtemplate.rst
 
     nn.modules.normalization.RMSNorm
+```
 
-.. This module needs to be documented. Adding here in the meantime
-.. for tracking purposes
+<!--
+This module needs to be documented. Adding here in the meantime for tracking purposes
+
+```{eval-rst}
 .. py:module:: torch.nn.backends
 .. py:module:: torch.nn.utils.stateless
 .. py:module:: torch.nn.backends.thnn
@@ -593,3 +618,5 @@ The following are aliases to their counterparts in ``torch.nn``:
 .. py:module:: torch.nn.utils.parametrize
 .. py:module:: torch.nn.utils.prune
 .. py:module:: torch.nn.utils.rnn
+```
+-->

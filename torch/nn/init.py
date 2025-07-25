@@ -156,7 +156,8 @@ def calculate_gain(
     ================= ====================================================
 
     .. warning::
-        In order to implement `Self-Normalizing Neural Networks`_ ,
+        In order to implement `Self-Normalizing Neural Networks
+        <https://papers.nips.cc/paper/2017/hash/5d44ee6f2c3f71b73125876103c8f6c4-Abstract.html>`_,
         you should use ``nonlinearity='linear'`` instead of ``nonlinearity='selu'``.
         This gives the initial weights a variance of ``1 / N``,
         which is necessary to induce a stable fixed point in the forward pass.
@@ -172,7 +173,6 @@ def calculate_gain(
         ...     "leaky_relu", 0.2
         ... )  # leaky_relu with negative_slope=0.2
 
-    .. _Self-Normalizing Neural Networks: https://papers.nips.cc/paper/2017/hash/5d44ee6f2c3f71b73125876103c8f6c4-Abstract.html
     """
     linear_fns = [
         "linear",

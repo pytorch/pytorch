@@ -2148,7 +2148,8 @@ def gumbel_softmax(
     dim: int = -1,
 ) -> Tensor:
     r"""
-    Sample from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretize.
+    Sample from the Gumbel-Softmax distribution (`Link 1 <https://arxiv.org/abs/1611.00712>`_
+    `Link 2 <https://arxiv.org/abs/1611.01144>`_) and optionally discretize.
 
     Args:
       logits: `[..., num_features]` unnormalized log probabilities
@@ -2180,11 +2181,6 @@ def gumbel_softmax(
         >>> F.gumbel_softmax(logits, tau=1, hard=False)
         >>> # Sample hard categorical using "Straight-through" trick:
         >>> F.gumbel_softmax(logits, tau=1, hard=True)
-
-    .. _Link 1:
-        https://arxiv.org/abs/1611.00712
-    .. _Link 2:
-        https://arxiv.org/abs/1611.01144
     """
     if has_torch_function_unary(logits):
         return handle_torch_function(
