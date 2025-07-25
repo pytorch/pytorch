@@ -850,11 +850,11 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
     Returns boolean indicating if fusion was successful or not.
     """
-    backend = torch.distributed.get_default_backend_for_device(torch.accelerator.current_accelerator()) \
-        if torch.accelerator.is_available() else "None"
-    assert torch.distributed.is_available() and torch.distributed.is_backend_available(backend), (
-        f"torch.distributed and {backend} must be available to use async tensor parallelism"
-    )
+    if (
+        not torch.distributed.is_available()
+        or not torch.distributed.is_nccl_available()
+    ):
+        return
 
     from torch.distributed._symmetric_memory import (
         is_symm_mem_enabled_for_group,
@@ -877,9 +877,8 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         reduce_scatter.group_name,
     )
 
-    assert is_symm_mem_enabled_for_group(group_name), (
-        f"symmetric memory is not enabled for process group {group_name}, this is required for async TP"
-    )
+    if not is_symm_mem_enabled_for_group(group_name):
+        return
 
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
     # so we can't apply the fusion if the matmul result is used by multiple

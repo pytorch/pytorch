@@ -82,6 +82,10 @@ sitemap_excludes = [
 ]
 sitemap_url_scheme = "{link}"
 
+html_additional_pages = {
+    "404": "404.html",
+}
+
 # build the templated autosummary files
 autosummary_generate = True
 numpydoc_show_class_members = False
@@ -177,7 +181,6 @@ html_theme_options = {
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
 html_context = {
-    "theme_variables": theme_variables,
     "github_url": "https://github.com",
     "github_user": "pytorch",
     "github_repo": "pytorch",
@@ -185,7 +188,7 @@ html_context = {
     "github_version": "main",
     "pytorch_project": "docs",
     "doc_path": "docs/source",
-    "theme_variables": theme_variables,  # noqa: F601
+    "theme_variables": theme_variables,
     # library links are defined in
     # pytorch_sphinx_theme2/pytorch_sphinx_theme2/links.json
     "library_links": theme_variables.get("library_links", []),
@@ -1836,31 +1839,9 @@ coverage_ignore_functions = [
     "check_export_model_diff",
     "verify",
     "verify_aten_graph",
-    # torch.optim.adadelta
-    "adadelta",
-    # torch.optim.adagrad
-    "adagrad",
-    # torch.optim.adam
-    "adam",
-    # torch.optim.adamax
-    "adamax",
-    # torch.optim.adamw
-    "adamw",
-    # torch.optim.asgd
-    "asgd",
-    # torch.optim.nadam
-    "nadam",
     # torch.optim.optimizer
     "register_optimizer_step_post_hook",
     "register_optimizer_step_pre_hook",
-    # torch.optim.radam
-    "radam",
-    # torch.optim.rmsprop
-    "rmsprop",
-    # torch.optim.rprop
-    "rprop",
-    # torch.optim.sgd
-    "sgd",
     # torch.optim.swa_utils
     "get_ema_avg_fn",
     "get_ema_multi_avg_fn",
@@ -3108,12 +3089,6 @@ coverage_ignore_classes = [
     # torch.onnx.verification
     "OnnxBackend",
     "OnnxTestCaseRepro",
-    # torch.optim.adadelta
-    "Adadelta",
-    # torch.optim.adagrad
-    "Adagrad",
-    # torch.optim.adam
-    "Adam",
     # torch.optim.adamax
     "Adamax",
     # torch.optim.adamw
@@ -3139,23 +3114,8 @@ coverage_ignore_classes = [
     "ReduceLROnPlateau",
     "SequentialLR",
     "StepLR",
-    # torch.optim.nadam
-    "NAdam",
     # torch.optim.optimizer
     "Optimizer",
-    # torch.optim.radam
-    "RAdam",
-    # torch.optim.rmsprop
-    "RMSprop",
-    # torch.optim.rprop
-    "Rprop",
-    # torch.optim.sgd
-    "SGD",
-    # torch.optim.sparse_adam
-    "SparseAdam",
-    # torch.optim.swa_utils
-    "AveragedModel",
-    "SWALR",
     # torch.overrides
     "BaseTorchFunctionMode",
     "TorchFunctionMode",
