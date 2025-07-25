@@ -3528,7 +3528,7 @@ class Scheduler:
         size_of_reads = [self.dep_size_hint(dep) for dep in all_reads]
         total_size = sum(size_of_reads)
         # TODO(xuanzh): check for primals size
-        return total_size > threshold and total_size / max(size_of_reads) > 2
+        return total_size > threshold and total_size / max(size_of_reads) >= 2
 
     def are_long_distant_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
