@@ -58,9 +58,12 @@ class GreenContext {
   }
 
   static std::unique_ptr<GreenContext> create(
-      int device_id,
-      unsigned int num_sms) {
-    return std::make_unique<GreenContext>(device_id, num_sms);
+      unsigned int num_sms,
+      std::optional<unsigned int> device_id) {
+    if (!device_id.has_value()) {
+      device_id = at::cuda::current_device();
+    }
+    return std::make_unique<GreenContext>(device_id.value(), num_sms);
   }
 
   // Delete copy constructor and assignment
@@ -131,7 +134,6 @@ class GreenContext {
     C10_CUDA_CHECK(cudaEventCreate(&ev));
     C10_CUDA_CHECK(cudaEventRecord(ev, current_stream));
     CUcontext current = nullptr;
-    uint32_t version;
     C10_CUDA_DRIVER_CHECK(
         c10::cuda::DriverAPI::get()->cuCtxGetCurrent_(&current));
     if (!current) {

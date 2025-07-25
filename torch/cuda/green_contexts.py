@@ -1,3 +1,4 @@
 import torch
 
-from torch._C import GreenContext
+if hasattr(torch._C, "GreenContext"):
+    from torch._C import GreenContext
