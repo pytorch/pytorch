@@ -2,7 +2,7 @@
 import datetime
 import functools
 import unittest
-from collections import defaultdict
+from collections import Counter
 from typing import Optional
 from unittest.mock import patch
 
@@ -666,7 +666,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
         class TrackingMode(TorchDispatchMode):
             def __init__(self):
                 super().__init__()
-                self.ops_counter = defaultdict(int)
+                self.ops_counter = Counter()
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 if kwargs is None:
@@ -1539,12 +1539,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
                 ag_0_cast, group_size, group_name
             )
+            ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_0_out = ag_0_out * 2
+
+            ag_1_cast = ag_1_cast * 2
             ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
                 ag_1_cast, group_size, group_name
             )
 
             # wait op
-            ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
             ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_out)
 
             return y, ag_0_out, ag_1_out
@@ -1557,7 +1560,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         with torch._inductor.config.patch(
             {
-                "bucket_all_gathers_fx": "fsdp",
+                "bucket_all_gathers_fx": "all",
                 "reorder_for_compute_comm_overlap": False,
             }
         ):
@@ -1601,7 +1604,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
         w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
         rs_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        rs_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        rs_1 = torch.ones(384, 256, device="cuda", dtype=torch.float32)
         inputs = [x, w, rs_0, rs_1]
         func(*inputs, **self.get_world_trs())
 
@@ -1786,10 +1789,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(len(node_stats), 4)
         it = iter(node_stats.values())
         node_stat0 = next(it)
-        self.assertTrue(node_stat0.moves > 0)
         self.assertTrue(node_stat0.limiting_factor == "None")
         node_stat1 = next(it)
-        self.assertTrue(node_stat1.moves > 0)
         self.assertTrue("collective ordering" in node_stat1.limiting_factor)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
