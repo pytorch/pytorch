@@ -334,6 +334,14 @@ void Context::setBenchmarkLimitCuDNN(int b) {
   benchmark_limit_cudnn = b;
 }
 
+bool Context::immediateMiopen() const {
+  return immediate_miopen;
+}
+
+void Context::setImmediateMiopen(bool b) {
+  immediate_miopen = b;
+}
+
 bool Context::allowTF32CuBLAS() const {
 #ifdef USE_ROCM
     const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
@@ -504,7 +512,7 @@ at::BlasBackend Context::blasPreferredBackend() {
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101", "gfx1200", "gfx1201",
+          "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
 #endif
 #if ROCM_VERSION >= 60500
           "gfx950"

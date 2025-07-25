@@ -461,7 +461,7 @@ def _transform_batch_norm(gm: torch.fx.GraphModule, node: torch.fx.Node):
 def fx_transform_quantized_op_to_standard_op(
     gm: torch.fx.GraphModule, node: torch.fx.Node
 ) -> torch.fx.Node:
-    global _SCALE, _ZERO_POINT
+    global _SCALE, _ZERO_POINT, _INPUT_Q_DTYPE
 
     assert isinstance(node.target, torch._ops.OpOverload)
     opname, overload = node.target._opname, node.target._overloadname

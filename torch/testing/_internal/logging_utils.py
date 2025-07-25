@@ -160,6 +160,7 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         exit_stack = contextlib.ExitStack()
 
         def emit_post_hook(record):
+            nonlocal record_list
             record_list.append(record)
 
         # registered logs are the only ones with handlers, so patch those
