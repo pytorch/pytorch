@@ -6268,7 +6268,9 @@ def div_prim(a, b):
     if is_integral:
         return truncdiv(a, b)
 
-    if (divisor := get_constant_value(b)) is not None:
+    # Disable CPU optimization to avoid precision issues.
+    # see https://github.com/pytorch/pytorch/issues/157959
+    if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
         # Replace divide by constant with multiply by reciprocal
         if divisor.value == 0:
             reciprocal = math.copysign(float("inf"), divisor.value)
