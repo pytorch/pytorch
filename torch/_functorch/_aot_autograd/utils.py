@@ -532,7 +532,6 @@ def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
     return inner
 
 
-_P = ParamSpec("_P")
 _P2 = ParamSpec("_P2")
 _R = TypeVar("_R")
 _R2 = TypeVar("_R2")
