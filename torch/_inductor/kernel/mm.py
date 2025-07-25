@@ -1091,25 +1091,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             beta=beta,
         )
 
-    if use_cutlass_template(layout, m, n, k) and _use_cutlass_for_op(name):
-        from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate
-
-        CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
-            choices,
-            layout,
-            # reorder here because CUTLASS expects (x, w, bias) but torch
-            # is bias, x, w
-            kernel_inputs.nodes(reorder=[1, 2, 0]),
-            input_reorder=[2, 0, 1],
-        )
-
-    if use_ck_gemm_template(layout, m, n, k):
+    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(
             choices,
             layout,
             # reorder here because CK expects (x, w, bias) but torch
             # is bias, x, w
             kernel_inputs.nodes(reorder=[1, 2, 0]),
+            alpha=alpha,
+            beta=beta,
             input_reorder=[2, 0, 1],
         )
 
