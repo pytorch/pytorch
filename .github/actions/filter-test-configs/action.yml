@@ -57,20 +57,12 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: nick-fields/retry@v3.0.0
-      name: Setup dependencies
-      env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
-      with:
-        shell: bash
-        timeout_minutes: 10
-        max_attempts: 5
-        retry_wait_seconds: 30
-        command: |
+    - name: Install Dependencies
+      id: install-dependencies
+      shell: bash
+      run: |
           set -eux
-          # PyYAML 6.0 doesn't work with MacOS x86 anymore
-          # This must run on Python-3.7 (AmazonLinux2) so can't use request=3.32.2
-          python3 -m pip install requests==2.27.1 pyyaml==6.0.1
+          python3 -m pip install requests==2.32.4 pyyaml==6.0.2
 
     - name: Parse ref
       id: parse-ref

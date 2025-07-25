@@ -15,7 +15,9 @@ curl --retry 3 -kL "%PYTHON_INSTALLER_URL%" --output python-amd64.exe
 if errorlevel 1 exit /b 1
 
 start /wait "" python-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_test=0 %ADDITIONAL_OPTIONS% TargetDir=%CD%\Python
+
 if errorlevel 1 exit /b 1
+
 
 set "PATH=%CD%\Python\Scripts;%CD%\Python;%PATH%"
 %PYTHON_EXEC% -m pip install --upgrade pip setuptools packaging wheel
