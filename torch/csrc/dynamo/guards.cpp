@@ -2427,8 +2427,6 @@ void stop_recording_dict_pointers(
 bool is_recording_dict_pointers(RootGuardManager* root);
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer);
 void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer);
-std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
-    RootGuardManager* _root);
 
 GuardManager* clone_guard_manager(
     GuardManager* from,
@@ -2437,6 +2435,9 @@ GuardManager* clone_guard_manager(
 void add_relational_guard_resetter_to_cloned_root(
     RootGuardManager* root,
     std::shared_ptr<RelationalGuard> guard);
+std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
+    RootGuardManager* _root);
+std::string get_compile_id(RootGuardManager* root);
 
 struct WeakEntry {
   PyObject* wr; // weakref
@@ -2714,7 +2715,7 @@ class GuardManager {
   // tag safe optimizations
   void stash_dict_pointers(
       PyObject* value,
-      std::unordered_map<PyObject*, uint64_t> dict_pointers) {
+      std::vector<std::pair<PyObject*, uint64_t>> dict_pointers) {
     _dict_pointers[value] = dict_pointers;
   }
 
@@ -3279,7 +3280,7 @@ class GuardManager {
   bool _is_tag_safe = false;
   bool _is_tag_safe_root = false;
   bool _disable_dict_tag_matching = false;
-  std::unordered_map<PyObject*, std::unordered_map<PyObject*, uint64_t>>
+  std::unordered_map<PyObject*, std::vector<std::pair<PyObject*, uint64_t>>>
       _dict_pointers;
   std::unordered_map<PyObject*, std::vector<PyObject*>> _tensor_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
@@ -3511,6 +3512,14 @@ class RootGuardManager : public GuardManager {
     return ret;
   }
 
+  void attach_compile_id(std::string compile_id) {
+    _compile_id = compile_id;
+  }
+
+  std::string get_compile_id() {
+    return _compile_id;
+  }
+
  private:
   // Reset the state of all the relational guards on failure.
   void _reset_relational_guard_state() {
@@ -3549,8 +3558,8 @@ class RootGuardManager : public GuardManager {
   }
 
   void record_dict_pointer(PyObject* dict_pointer) {
-    _recorded_dict_pointers[dict_pointer] =
-        get_dict_version_unchecked(dict_pointer);
+    _recorded_dict_pointers.push_back(
+        std::make_pair(dict_pointer, get_dict_version_unchecked(dict_pointer)));
   }
 
   void record_tensor_pointer(PyObject* tensor_pointer) {
@@ -3602,13 +3611,16 @@ class RootGuardManager : public GuardManager {
   // TENSOR_MATCH guard init.
   bool _init_local_state = false;
 
+  // debug info
+  std::string _compile_id;
+
   // Pointer to the no tensor relational guard
   std::shared_ptr<RelationalGuard> _no_tensor_aliasing_guard;
 
   // tag safe optimization related members
   bool _is_recording_dict_pointers{false};
   GuardManager* _current_tag_safe_root{nullptr};
-  std::unordered_map<PyObject*, uint64_t> _recorded_dict_pointers;
+  std::vector<std::pair<PyObject*, uint64_t>> _recorded_dict_pointers;
   std::vector<PyObject*> _recorded_tensor_pointers;
 };
 
@@ -4026,12 +4038,18 @@ bool is_recording_dict_pointers(RootGuardManager* root) {
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer) {
   root->record_dict_pointer(dict_pointer);
 }
+
+void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer) {
+  root->record_tensor_pointer(tensor_pointer);
+}
+
 std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
     RootGuardManager* _root) {
   return _root->get_no_tensor_aliasing_guard();
 }
-void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer) {
-  root->record_tensor_pointer(tensor_pointer);
+
+std::string get_compile_id(RootGuardManager* root) {
+  return root->get_compile_id();
 }
 
 class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
@@ -7021,6 +7039,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(py::init<>())
       .def("check", &RootGuardManager::check)
       .def("check_verbose", &RootGuardManager::check_verbose)
+      .def("attach_compile_id", &RootGuardManager::attach_compile_id)
       .def(
           "clone_manager",
           &RootGuardManager::clone_manager,
