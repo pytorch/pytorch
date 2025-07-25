@@ -544,3 +544,12 @@ def call_and_expect_output_descs(fn, args):
         outs_descs,
     )
     return outs_pair
+
+
+def fn_wrappers(fn):
+    fns = [fn]
+    f = fn
+    while hasattr(f, "__wrapped__"):
+        f = f.__wrapped__
+        fns.append(f)
+    return fns
