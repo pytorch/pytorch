@@ -3937,7 +3937,7 @@ class Scheduler:
             if remaining:
                 for rd in remaining:
                     if self.fusable_read_and_write(rd, cd):
-                        remaining.remove(rd)
+                        remaining.remove(rd)  # noqa: B909
 
         remaining_deps = OrderedSet(
             dep.name
