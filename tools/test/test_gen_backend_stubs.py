@@ -15,6 +15,7 @@ from torchgen.gen_backend_stubs import run
 # The tests here are to confirm that badly formed inputs result in reasonable error messages.
 class TestGenBackendStubs(expecttest.TestCase):
     def setUp(self) -> None:
+        global _GLOBAL_PARSE_NATIVE_YAML_CACHE
         _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
 
     def assert_success_from_gen_backend_stubs(self, yaml_str: str) -> None:

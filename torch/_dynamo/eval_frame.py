@@ -310,6 +310,7 @@ def _is_skip_guard_eval_unsafe_stance() -> bool:
 
 
 def _reset_guarded_backend_cache() -> None:
+    global cached_backends
     for backend in cached_backends.values():
         if hasattr(backend, "reset"):
             backend.reset()
@@ -1264,6 +1265,7 @@ def explain(f: Callable[..., Any], *extra_args: Any, **extra_kwargs: Any) -> Any
             return gm.forward
 
         def guard_export_print(guards: Iterable[_guards.Guard]) -> None:
+            nonlocal out_guards
             out_guards.extend(guards)
 
         opt_f = optimize(

@@ -320,6 +320,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             module: nn.Module,
             mp_policy: MixedPrecisionPolicy,
         ) -> tuple[tuple[torch.Tensor, ...], Any]:
+            nonlocal tls
             tls.ran_pre_all_gather = True
             return (self.to(torch.bfloat16),), None
 
@@ -423,6 +424,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             module: nn.Module,
             mp_policy: MixedPrecisionPolicy,
         ) -> tuple[tuple[torch.Tensor, ...], Any]:
+            nonlocal tls
             tls.mesh = mesh
             return (self,), None
 
