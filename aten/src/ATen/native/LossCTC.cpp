@@ -385,7 +385,9 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
         for (const auto c : c10::irange(num_labels)) {
           scalar_t& res = grad_a[t][c];
           scalar_t lp = log_probs_a[t][c];
-          res = (std::exp(lp)-std::exp(res + nll - lp)) * gr;
+          //res = (std::exp(lp)-std::exp(res + nll - lp)) * gr;
+          // updates res: upstream and dowstream gradients differ by exp(log_probs).
+          res = (-std::exp(res + nll -lp)) * gr;
         }
       }
 
