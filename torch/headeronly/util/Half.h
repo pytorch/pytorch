@@ -621,56 +621,72 @@ inline C10_HOST_DEVICE double operator/(double a, Half b)
 /// Arithmetic with ints
 
 inline C10_HOST_DEVICE Half operator+(Half a, int b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return a + static_cast<Half>(b);
 }
 inline C10_HOST_DEVICE Half operator-(Half a, int b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return a - static_cast<Half>(b);
 }
 inline C10_HOST_DEVICE Half operator*(Half a, int b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return a * static_cast<Half>(b);
 }
 inline C10_HOST_DEVICE Half operator/(Half a, int b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return a / static_cast<Half>(b);
 }
 
 inline C10_HOST_DEVICE Half operator+(int a, Half b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return static_cast<Half>(a) + b;
 }
 inline C10_HOST_DEVICE Half operator-(int a, Half b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return static_cast<Half>(a) - b;
 }
 inline C10_HOST_DEVICE Half operator*(int a, Half b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return static_cast<Half>(a) * b;
 }
 inline C10_HOST_DEVICE Half operator/(int a, Half b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return static_cast<Half>(a) / b;
 }
 
 //// Arithmetic with int64_t
 
 inline C10_HOST_DEVICE Half operator+(Half a, int64_t b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return a + static_cast<Half>(b);
 }
 inline C10_HOST_DEVICE Half operator-(Half a, int64_t b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return a - static_cast<Half>(b);
 }
 inline C10_HOST_DEVICE Half operator*(Half a, int64_t b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return a * static_cast<Half>(b);
 }
 inline C10_HOST_DEVICE Half operator/(Half a, int64_t b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return a / static_cast<Half>(b);
 }
 
 inline C10_HOST_DEVICE Half operator+(int64_t a, Half b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return static_cast<Half>(a) + b;
 }
 inline C10_HOST_DEVICE Half operator-(int64_t a, Half b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return static_cast<Half>(a) - b;
 }
 inline C10_HOST_DEVICE Half operator*(int64_t a, Half b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return static_cast<Half>(a) * b;
 }
 inline C10_HOST_DEVICE Half operator/(int64_t a, Half b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return static_cast<Half>(a) / b;
 }
 
@@ -695,6 +711,13 @@ using torch::headeronly::operator/=;
 using torch::headeronly::operator<<;
 
 namespace detail {
+#if defined(__aarch64__) && !defined(__CUDACC__)
+using torch::headeronly::detail::fp16_from_bits;
+using torch::headeronly::detail::fp16_to_bits;
+using torch::headeronly::detail::native_fp16_from_fp32_value;
+using torch::headeronly::detail::native_fp16_to_fp32_value;
+#endif
+
 using torch::headeronly::detail::fp16_ieee_from_fp32_value;
 using torch::headeronly::detail::fp16_ieee_to_fp32_value;
 } // namespace detail

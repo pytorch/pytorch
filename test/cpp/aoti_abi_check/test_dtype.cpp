@@ -95,6 +95,13 @@ TEST(TestDtype, TestHalf) {
   EXPECT_EQ(a -= b, add - b);
   EXPECT_EQ(a *= b, b);
   EXPECT_EQ(a /= b, mul * div);
+
+#if defined(__aarch64__) && !defined(__CUDACC__)
+  EXPECT_EQ(
+      torch::headeronly::detail::fp16_to_bits(
+          torch::headeronly::detail::fp16_from_bits(32)),
+      32);
+#endif
 }
 
 TEST(TestDtype, TestComplexFloat) {
