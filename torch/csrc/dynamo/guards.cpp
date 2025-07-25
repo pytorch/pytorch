@@ -2438,6 +2438,10 @@ void add_relational_guard_resetter_to_cloned_root(
     RootGuardManager* root,
     std::shared_ptr<RelationalGuard> guard);
 
+struct WeakEntry {
+  PyObject* wr; // weakref
+  PyObject* cap; // capsule whose m_self is used by the callback
+};
 /**
  * Base class representing a pair of accessor and the associated guard
  * manager. The accessor defines how to access the child value from the
@@ -2608,10 +2612,19 @@ class GuardManager {
   GuardManager& operator=(const GuardManager&) = delete;
 
   virtual ~GuardManager() {
-    for (auto weakref : _tag_safe_keys_weakrefs) {
-      Py_DECREF(weakref);
+    cleanup_tag_safe_entries();
+  }
+
+  void cleanup_tag_safe_entries() {
+    for (auto& e : _tag_safe_entries) {
+      // unset the pycapsule to make it invalid. This ensures that the weakref
+      // callback does not look into a dangling pointer.
+      if (PyCapsule_IsValid(e.cap, "GuardManager*")) {
+        PyCapsule_SetPointer(e.cap, nullptr);
+      }
+      Py_CLEAR(e.wr); // kills weakref (may remove callback)
     }
-    _tag_safe_keys_weakrefs.clear();
+    _tag_safe_entries.clear();
   }
 
   RootGuardManager* get_root() {
@@ -3024,7 +3037,7 @@ class GuardManager {
       return false;
     }
     // These will be decrefed in destructor
-    _tag_safe_keys_weakrefs.push_back(wr);
+    _tag_safe_entries.push_back({wr, capsule});
     return true;
   }
 
@@ -3269,7 +3282,7 @@ class GuardManager {
   std::unordered_map<PyObject*, std::unordered_map<PyObject*, uint64_t>>
       _dict_pointers;
   std::unordered_map<PyObject*, std::vector<PyObject*>> _tensor_pointers;
-  std::vector<PyObject*> _tag_safe_keys_weakrefs;
+  std::vector<WeakEntry> _tag_safe_entries;
 };
 
 GuardAccessor::GuardAccessor(
