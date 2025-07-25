@@ -20,6 +20,10 @@ from collections import defaultdict
 from contextlib import nullcontext
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 import torch
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
@@ -51,6 +55,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
+from .descriptors import AOTOutput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -73,6 +78,8 @@ from .schemas import (
     AOTConfig,
     AOTGraphCapture,
     AOTState,
+    FlatFn,
+    FxValue,
     MutationType,
     ViewAndMutationMeta,
 )
@@ -86,9 +93,6 @@ from .utils import (
     unlift_tokens,
 )
 
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 zip = strict_zip
 
@@ -113,18 +117,37 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
 
 def aot_stage1_graph_capture(
     aot_state: AOTState,
-    flat_fn: Callable,
+    orig_flat_fn: FlatFn,
 ) -> AOTGraphCapture:
+    # NB: flat_fn at this point coincides with the initial info from forward
+    # metadata collection returning a list[Tensor].  We are now going to
+    # augment the output to return a tuple[list[Tensor], list[AOTOutput]] and
+    # then preserve this convention through the rest of the passes.
+
+    from functools import wraps
+
+    # TODO: We could test for consistency with fw_metadata, but this is not a
+    # big deal
+    @wraps(orig_flat_fn)
+    def orig_flat_fn2(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
+        out = orig_flat_fn(*args)
+        out_descs: list[AOTOutput] = [PlainAOTOutput(i) for i in range(len(out))]
+        return out, out_descs
+
     aot_config = aot_state.aot_config
 
     wrappers = _create_wrappers_for_dispatch(aot_state.needs_autograd)
-    flat_fn, aot_state.flat_args, aot_state.fw_metadata = pre_compile(
-        wrappers,
-        flat_fn,
-        aot_state.flat_args,
-        aot_config,
-        fw_metadata=aot_state.fw_metadata,
+    flat_fn, aot_state.flat_args, aot_state.flat_args_descs, aot_state.fw_metadata = (
+        pre_compile(
+            wrappers,
+            orig_flat_fn2,
+            aot_state.flat_args,
+            aot_state.flat_args_descs,
+            aot_config,
+            fw_metadata=aot_state.fw_metadata,
+        )
     )
+
     # NB: This is currently only used for backwards, where fwd/bwd
     # deterministic TLS can be different
     aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
@@ -132,21 +155,31 @@ def aot_stage1_graph_capture(
     if aot_state.needs_autograd and not aot_config.pre_dispatch:
         # FYI: this being moved to trigger in export is new, seems fine!
         with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
-            graph, updated_flat_args, maybe_subclass_meta = aot_dispatch_autograd_graph(
+            graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
+                aot_dispatch_autograd_graph(
+                    flat_fn,
+                    aot_state.flat_args,
+                    aot_state.flat_args_descs,
+                    aot_config,
+                    fw_metadata=aot_state.fw_metadata,
+                )
+            )
+    else:
+        graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
+            aot_dispatch_base_graph(  # type: ignore[assignment]
                 flat_fn,
                 aot_state.flat_args,
+                aot_state.flat_args_descs,
                 aot_config,
                 fw_metadata=aot_state.fw_metadata,
             )
-    else:
-        graph, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(
-            flat_fn, aot_state.flat_args, aot_config, fw_metadata=aot_state.fw_metadata
         )
 
     return AOTGraphCapture(
         wrappers=wrappers,
         graph=graph,
         updated_flat_args=updated_flat_args,
+        updated_flat_args_descs=updated_flat_args_descs,
         maybe_subclass_meta=maybe_subclass_meta,
     )
 
@@ -899,8 +932,8 @@ def prepare_hook_gm(aot_config, fn, args):
 # All tensors to save for backward will be grouped together at front.
 # Sym scalars grouped on another end. Constants are inlined in the graph.
 def maybe_inline_graph_saved_tensors_hooks(
-    fw_module,
-    bw_module,
+    fw_module,  # torch.fx.GraphModule
+    bw_module,  # torch.fx.GraphModule
     num_inner_fwd_outputs,
     inner_meta,
     aot_config,
