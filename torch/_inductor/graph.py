@@ -341,6 +341,7 @@ class GraphLowering(torch.fx.Interpreter):
             shape_env.deferred_runtime_asserts.copy()
         )
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
+
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
@@ -1821,7 +1822,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         shape_env = V.graph.sizevars.shape_env
 
-        # An input can an unbacked symint i.e.: when mark_unabcked is used.
+        # An input can be unbacked symint i.e.: when mark_unabcked is used.
         # in that case add it to new_unbacked_defs.
         if (
             n.op == "placeholder"
@@ -1888,6 +1889,7 @@ class GraphLowering(torch.fx.Interpreter):
             V.fake_mode.shape_env.unbacked_renamings.get(s, s)
             for s in unbacked_bindings.keys()
         )
+
         assert new_unbacked_defs >= renamed_unbacked_bindings, (
             f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
             f"fx node is: {n.format_node()}\n"
