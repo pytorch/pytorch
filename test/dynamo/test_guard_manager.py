@@ -957,6 +957,354 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
             opt_fn(torch.randn(4, 4))
 
 
+class TagSafetyChecks(torch._dynamo.test_case.TestCase):
+    def test_immutable_tag_safe(self):
+        class Bar:
+            pass
+
+        class Foo:
+            def __init__(self):
+                self.a = Bar()
+                self.b = torch.randn(4)
+                self.c = 3
+                self.d = (3, 4)
+                self.e = (3, Bar())
+
+        foo = Foo()
+
+        def fn(x):
+            if foo.a:
+                x = torch.sin(x)
+            x = x * foo.b + foo.c + foo.d[0] + foo.d[1] + foo.e[0]
+            if foo.e[1]:
+                x = torch.sin(x)
+            return x
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import AttrSource, LocalSource
+
+            foo_source = LocalSource("foo")
+
+            # Check types of foo.a
+            foo_a_source = AttrSource(foo_source, "a")
+            foo_a_mgr = builder.get_guard_manager_from_source(foo_a_source)
+            self.assertFalse(foo_a_mgr.is_tag_safe())
+            self.assertFalse(foo_a_mgr.is_tag_safe_root())
+
+            # Check types of foo.b
+            foo_b_source = AttrSource(foo_source, "b")
+            foo_b_mgr = builder.get_guard_manager_from_source(foo_b_source)
+            if torch._dynamo.config.skip_tensor_guards_with_matching_dict_tags:
+                self.assertTrue(foo_b_mgr.is_tag_safe())
+            else:
+                self.assertFalse(foo_b_mgr.is_tag_safe())
+
+            self.assertFalse(foo_b_mgr.is_tag_safe_root())
+
+            # Check types of foo.c
+            foo_c_source = AttrSource(foo_source, "c")
+            foo_c_mgr = builder.get_guard_manager_from_source(foo_c_source)
+            self.assertTrue(foo_c_mgr.is_tag_safe())
+            self.assertFalse(foo_c_mgr.is_tag_safe_root())
+
+            # Check types of foo.d
+            foo_d_source = AttrSource(foo_source, "d")
+            foo_d_mgr = builder.get_guard_manager_from_source(foo_d_source)
+            self.assertTrue(foo_d_mgr.is_tag_safe())
+            self.assertFalse(foo_d_mgr.is_tag_safe_root())
+
+            # Check types of foo.e
+            foo_e_source = AttrSource(foo_source, "e")
+            foo_e_mgr = builder.get_guard_manager_from_source(foo_e_source)
+            self.assertFalse(foo_e_mgr.is_tag_safe())
+            self.assertFalse(foo_e_mgr.is_tag_safe_root())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(torch.randn(4, 4))
+
+    def test_dict_tag_safe(self):
+        class Foo:
+            def __init__(self):
+                self.a = 4
+
+        foo = Foo()
+        terminal_dict = {
+            "a": 1,
+        }
+
+        tag_safe_dict = {
+            "const": 1,
+            "tup": (2, 3),
+            "nested_dict": terminal_dict,
+        }
+
+        tag_unsafe_dict = {
+            "const": 1,
+            "foo": foo,
+        }
+
+        outer_dict = {
+            "safe": tag_safe_dict,
+            "unsafe": tag_unsafe_dict,
+            "terminal_dict": {"a": 1},
+        }
+
+        def fn(x):
+            x = x + outer_dict["safe"]["const"]
+
+            x = x + outer_dict["safe"]["tup"][0]
+            x = x + outer_dict["safe"]["tup"][1]
+
+            x = x + outer_dict["safe"]["nested_dict"]["a"]
+
+            x = x + outer_dict["unsafe"]["const"]
+
+            x = x + outer_dict["unsafe"]["foo"].a
+
+            if outer_dict["terminal_dict"]:
+                x = torch.sin(x)
+            return x
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import DictGetItemSource, LocalSource
+
+            outer_source = LocalSource("outer_dict")
+
+            # Check tagness of outer dict
+            outer_mgr = builder.get_guard_manager_from_source(outer_source)
+            self.assertFalse(outer_mgr.is_tag_safe())
+            self.assertFalse(outer_mgr.is_tag_safe_root())
+
+            # Check tagness of outer["safe"]
+            outer_safe_source = DictGetItemSource(outer_source, "safe")
+            outer_safe_mgr = builder.get_guard_manager_from_source(outer_safe_source)
+            self.assertTrue(outer_safe_mgr.is_tag_safe())
+            self.assertFalse(outer_safe_mgr.is_tag_safe_root())
+
+            # Check tagness of outer["unsafe"]
+            outer_unsafe_source = DictGetItemSource(outer_source, "unsafe")
+            outer_unsafe_mgr = builder.get_guard_manager_from_source(
+                outer_unsafe_source
+            )
+            self.assertFalse(outer_unsafe_mgr.is_tag_safe())
+            self.assertFalse(outer_unsafe_mgr.is_tag_safe_root())
+
+            # Check tagness of outer["terminal_dict"]
+            outer_terminal_source = DictGetItemSource(outer_source, "terminal_dict")
+            outer_terminal_mgr = builder.get_guard_manager_from_source(
+                outer_terminal_source
+            )
+            self.assertTrue(outer_terminal_mgr.is_tag_safe())
+            self.assertFalse(outer_terminal_mgr.is_tag_safe_root())
+
+            # Check tagness of outer["safe"]["nested_dict"]
+            outer_safe_nested_source = DictGetItemSource(
+                outer_safe_source, "nested_dict"
+            )
+            outer_safe_nested_mgr = builder.get_guard_manager_from_source(
+                outer_safe_nested_source
+            )
+            self.assertTrue(outer_safe_nested_mgr.is_tag_safe())
+            # This should not be marked as a root
+            self.assertFalse(outer_safe_nested_mgr.is_tag_safe_root())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(torch.randn(4, 4))
+
+    def test_nn_module_tag_safe(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 4
+
+            def forward(self, x):
+                return x + self.a
+
+        foo = Foo()
+
+        class Baz(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = foo
+
+            def forward(self, x):
+                return self.foo(x)
+
+        baz = Baz()
+
+        def fn(x):
+            x = x + baz(x)
+            return x
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            from torch._C._dynamo.guards import GetGenericDictGuardAccessor
+            from torch._dynamo.source import LocalSource
+
+            baz_source = LocalSource("baz")
+
+            # Check tagness of baz
+            baz_mgr = builder.get_guard_manager_from_source(baz_source)
+            self.assertTrue(baz_mgr.is_tag_safe())
+            self.assertTrue(baz_mgr.is_tag_safe_root())
+
+            # Check tagness of baz.__dict__
+            self.assertTrue(len(baz_mgr.get_accessors()) == 1)
+            dunder_dict_accessor = baz_mgr.get_accessors()[0]
+            self.assertTrue(
+                isinstance(dunder_dict_accessor, GetGenericDictGuardAccessor)
+            )
+
+            dunder_dict_mgr = baz_mgr.get_child_managers()[0]
+            self.assertTrue(dunder_dict_mgr.is_tag_safe())
+            self.assertFalse(dunder_dict_mgr.is_tag_safe_root())
+
+            # Check tagness of baz.__dict__["_modules"]
+            modules_mgr = dunder_dict_mgr.get_child_managers()[0]
+            self.assertTrue(modules_mgr.is_tag_safe())
+            self.assertFalse(modules_mgr.is_tag_safe_root())
+
+            # Check tagness of baz.__dict__["_modules"]["foo"]
+            modules_foo_mgr = modules_mgr.get_child_managers()[0]
+            self.assertTrue(modules_foo_mgr.is_tag_safe())
+            self.assertFalse(modules_foo_mgr.is_tag_safe_root())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(torch.randn(4, 4))
+
+
+class RecursiveDictGuardTests(torch._dynamo.test_case.TestCase):
+    def test_disabling(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 4
+
+            def forward(self, x):
+                return x + self.a
+
+        mod = Mod()
+        mod_to_fail = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        x = torch.randn(4, 4)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def basic_hook_test(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_source = LocalSource("mod")
+
+            # Check tagness of mod
+            mod_mgr = builder.get_guard_manager_from_source(mod_source)
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            for _ in range(10):
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            # Let the guard pass but dict matching fail, this should add new cached entry
+            self.assertTrue(guard_wrapper.check({"mod": mod_to_fail, "x": x}))
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            # Let the guard fail, this should disable dict tag optimization as well
+            mod_to_fail.a = 5
+            self.assertFalse(guard_wrapper.check({"mod": mod_to_fail, "x": x}))
+            self.assertTrue(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(basic_hook_test):
+            opt_fn(x)
+
+        # Test that dict tag matching failure leads to disable of dict tag optimization
+        torch.compiler.reset()
+        mod = Mod()
+        mod_to_fail = Mod()
+
+        def disable_on_dict_tag_match_failure(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_source = LocalSource("mod")
+
+            # Check tagness of mod
+            mod_mgr = builder.get_guard_manager_from_source(mod_source)
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            for _ in range(10):
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            # Change the mod attr to cause dict tag matching to fail, this still
+            # get the guard pass. This should disable the dict tag optimization.
+            mod.a = 5
+            mod.a = 4
+            self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            self.assertTrue(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(disable_on_dict_tag_match_failure):
+            opt_fn(x)
+
+        # Test that max size limit breach disables the dict tag optimization
+        torch.compiler.reset()
+        mod = Mod()
+        mod_to_fail = Mod()
+
+        def max_size_test(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_source = LocalSource("mod")
+
+            # Check tagness of mod
+            mod_mgr = builder.get_guard_manager_from_source(mod_source)
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            for _ in range(10):
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+            # Let the guard pass but dict matching fail, since cache size is set
+            # to 1, this would cause dict tag optimization to be disabled.
+            self.assertTrue(guard_wrapper.check({"mod": mod_to_fail, "x": x}))
+            self.assertTrue(mod_mgr.is_recursive_dict_tag_matching_disabled())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with torch._dynamo.config.patch(
+            max_saved_pointers_for_recursive_dict_tags_check=1
+        ):
+            with install_guard_manager_testing_hook(max_size_test):
+                opt_fn(x)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
