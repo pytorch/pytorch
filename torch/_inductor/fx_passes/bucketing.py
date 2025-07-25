@@ -9,6 +9,7 @@ from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._ordered_set import OrderedSet
+from torch._dynamo.utils import detect_fake_mode
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -354,7 +355,7 @@ def all_gather_merge_fn_to_trace_functional(
 
 
 def _trace(fn, inps) -> torch.fx.GraphModule:  # type: ignore[no-untyped-def]
-    fake_mode = maybe_get_fake_mode(inps[0][0])
+    fake_mode = detect_fake_mode(inps)
     assert fake_mode is not None
     with fake_mode, enable_python_dispatcher():
         return make_fx(fn)(*inps)
