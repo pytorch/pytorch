@@ -1560,8 +1560,10 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             if (
                 n.op == "call_function"
+                # this path only for built-in operators
                 and n.target
-                not in (operator.getitem, torch._higher_order_ops.invoke_subgraph)
+                and isinstance(n.target, torch._ops.OpOverload)
+                and torch._library.utils.is_builtin(n.target)
                 and (
                     fallback_node_due_to_unsupported_type(n)
                     or CompilerBisector.disable_subsystem(
