@@ -10236,7 +10236,6 @@ TORCH_LIBRARY(test_multigrad_all_hooks, m) {
 
         def hook(hook_id: int, *unused):
             nonlocal hook_count
-            nonlocal hook_order
             hook_count += 1
             hook_order.append(hook_id)
 

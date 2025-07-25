@@ -521,7 +521,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         class FuncEquivMode(BaseTorchFunctionMode):
             def __torch_function__(self, func, types, args=(), kwargs=None):
-                nonlocal expected_func
+                nonlocal expected_func  # noqa: F824
                 nonlocal valid
                 if not kwargs:
                     kwargs = {}

@@ -56,7 +56,6 @@ class FxirTestCase(InductorTestCase):
         orig_generate = FxConverter.generate
 
         def generate(self) -> torch.fx.GraphModule:
-            nonlocal gms
             gm = orig_generate(self)
             gms.append(gm)
             return gm

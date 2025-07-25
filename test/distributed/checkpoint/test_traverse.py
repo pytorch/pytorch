@@ -28,7 +28,6 @@ class TestTraverse(TestCase):
         data = {}
 
         def collect_data(path, value):
-            nonlocal data
             data[path] = value
 
         _traverse.traverse_state_dict(state_dict, collect_data)
@@ -59,7 +58,6 @@ class TestTraverse(TestCase):
         data = {}
 
         def collect_data(path, value):
-            nonlocal data
             data[path] = value
 
         _traverse.traverse_state_dict(state_dict, collect_data)
@@ -90,7 +88,6 @@ class TestTraverse(TestCase):
         data = {}
 
         def collect_data(path, value):
-            nonlocal data
             data[path] = value
 
         _traverse.traverse_state_dict(state_dict, collect_data)
@@ -109,7 +106,6 @@ class TestTraverse(TestCase):
         data = {}
 
         def collect_data(path, value):
-            nonlocal data
             data[path] = value
 
         _traverse.traverse_state_dict(state_dict, collect_data)
@@ -133,7 +129,6 @@ class TestTraverse(TestCase):
         data = {}
 
         def collect_data(path, value):
-            nonlocal data
             data[path] = value
 
         _traverse.traverse_state_dict(state_dict, collect_data)

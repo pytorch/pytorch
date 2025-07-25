@@ -93,7 +93,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
     def test_store_global_list(self):
         def fn(x):
-            global g_list
+            global g_list  # noqa: F824
             val = x + g_list[1]
             """
             Strictly speaking, we are not testing STORE_GLOBAL
@@ -125,7 +125,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
     def test_store_global_dict(self):
         def fn(x):
-            global g_dict
+            global g_dict  # noqa: F824
             val = x + g_dict["b"]
             """
             Strictly speaking, we are not testing STORE_GLOBAL
@@ -157,7 +157,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
     def test_store_global_object(self):
         def fn(x):
-            global g_object
+            global g_object  # noqa: F824
             val = x + g_object.y
             g_object.y += 1
             return val
