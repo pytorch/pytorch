@@ -614,6 +614,7 @@ def gen_aoti_c_shim(
     else:
         return (
             warning
+            + aten_warning
             + textwrap.dedent(
                 f"""
 

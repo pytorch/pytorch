@@ -2841,6 +2841,8 @@ def main() -> None:
     aoti_backends = {
         DispatchKey.CPU,
         DispatchKey.CUDA,
+        # None will generate the aten shim based on aten_shimified_ops
+        # which does not bypass the dispatcher
         None,
     }
 
