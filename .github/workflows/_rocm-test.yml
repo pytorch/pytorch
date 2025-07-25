@@ -132,7 +132,7 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
-          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
+          python3 -m pip install psutil==5.9.8 dataclasses_json==0.6.7
           python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
