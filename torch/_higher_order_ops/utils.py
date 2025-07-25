@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from contextlib import contextmanager, ExitStack, nullcontext
+from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, overload, TypeVar, Union
 
@@ -111,16 +111,22 @@ def _maybe_compile_and_run_fn(fn, *args):
 
 
 def reenter_make_fx(fn):
+    from torch._guards import detect_fake_mode
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+    from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
     @functools.wraps(fn)
     def wrapped(*args):
         assert _CURRENT_MAKE_FX_TRACER is not None, (
             "Cannot reenter make_fx when we're not under a make_fx tracing session"
         )
-        return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+        gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args
         )
+        if (fake_mode := detect_fake_mode()) and fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(gm, fake_mode.shape_env, "reenter_make_fx")
+            gm.recompile()
+        return gm
 
     return wrapped
 
@@ -260,11 +266,12 @@ def _set_compilation_env():
 
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
-    fake_mode = detect_fake_mode(inputs)
-    tracing_mode = "real"
-    if fake_mode is None:
-        fake_mode = nullcontext()
-        tracing_mode = "fake"
+    fake_mode_det = detect_fake_mode(inputs)
+    fake_mode: AbstractContextManager = nullcontext()
+    tracing_mode = "fake"
+    if fake_mode_det is not None:
+        fake_mode = fake_mode_det
+        tracing_mode = "real"
 
     # Note: we need to turn off proxy tensor mode to avoid tracing infra
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
@@ -276,9 +283,12 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
-        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:
+        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:  # type: ignore[attr-defined]
             insert_deferred_runtime_asserts(
-                gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
+                gm,
+                fake_mode.shape_env,  # type: ignore[attr-defined]
+                "hoo_maybe_fake_tracing",
+                export=True,  # type: ignore[attr-defined]
             )
         return gm
 

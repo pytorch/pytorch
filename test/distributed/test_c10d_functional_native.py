@@ -492,7 +492,7 @@ class TestWithNCCL(MultiProcessTestCase):
                 try:
                     func(arg)
                     compiled(arg)
-                except BaseException as exc:
+                except BaseException as exc:  # noqa: B036
                     self.exc = exc
 
             def join(self):
