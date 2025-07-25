@@ -345,27 +345,13 @@ class TestCKBackend(TestCase):
             )
             return y
 
-        if quantize_type == "tensorwise":
-            y_eager = linear(
-                x_fp8,
-                x_inverse_scale,
-                w_t_fp8,
-                w_inverse_scale_t,
-                bias,
-            )
-        else:
-            # FIXME when rowwise quantize is supported by pt eager on ROCm
-            w_fp8_tw, w_inverse_scale_tw = _quantize_tensorwise(w, dtype_float8)
-            w_fp8_tw_t = w_fp8_tw.t()
-            w_inverse_scale_tw_t = w_inverse_scale_tw.t()
-            x_fp8_tw, x_inverse_scale_tw = _quantize_tensorwise(x, dtype_float8)
-            y_eager = linear(
-                x_fp8_tw,
-                x_inverse_scale_tw,
-                w_fp8_tw_t,
-                w_inverse_scale_tw_t,
-                bias,
-            )
+        y_eager = linear(
+            x_fp8,
+            x_inverse_scale,
+            w_t_fp8,
+            w_inverse_scale_t,
+            bias,
+        )
 
         with config.patch(
             {
