@@ -264,8 +264,10 @@ def _private_register_pytree_node(
         )
 
 
-def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
-    return isinstance(obj, TreeSpec)
+def _is_pytreespec_instance(
+    obj: Any, /
+) -> TypeIs[Union[TreeSpec, python_pytree.TreeSpec]]:
+    return isinstance(obj, (TreeSpec, python_pytree.TreeSpec))
 
 
 def tree_is_leaf(
@@ -282,9 +284,9 @@ def tree_is_leaf(
     False
     >>> tree_is_leaf((1, 2, 3), is_leaf=lambda x: isinstance(x, tuple))
     True
-    >>> tree_is_leaf({'a': 1, 'b': 2, 'c': 3})
+    >>> tree_is_leaf({"a": 1, "b": 2, "c": 3})
     False
-    >>> tree_is_leaf({'a': 1, 'b': 2, 'c': None})
+    >>> tree_is_leaf({"a": 1, "b": 2, "c": None})
     False
 
     Args:
@@ -370,10 +372,10 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     """
     if not _is_pytreespec_instance(treespec):
         raise TypeError(
-            f"tree_unflatten(leaves, treespec): Expected `treespec` to be instance of "
+            f"Expected `treespec` to be an instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
-    return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
+    return treespec.unflatten(leaves)
 
 
 def tree_iter(
@@ -972,7 +974,7 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     """Serialize a treespec to a JSON string."""
     if not _is_pytreespec_instance(treespec):
         raise TypeError(
-            f"treespec_dumps(treespec): Expected `treespec` to be instance of "
+            f"Expected `treespec` to be instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
 
