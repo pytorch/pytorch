@@ -21,6 +21,7 @@ configure_file(
 file(GLOB HEADERONLY_HEADERS
     *.h
     macros/*.h
+    util/*.h
 )
 
 add_library(headeronly INTERFACE ${HEADERONLY_HEADERS})

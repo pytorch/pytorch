@@ -40,6 +40,13 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
 
   ProfileMetrics results;
   const auto numNodes = static_cast<uint32_t>(nodeKernels_.size());
+
+  results.percentPerNode.resize(numNodes, 0.0f);
+  results.nodeTypes.reserve(numNodes);
+  for (const auto& nodeKernel : nodeKernels_) {
+    results.nodeTypes.emplace_back(nodeKernel->node()->target());
+  }
+
   results.timePerNode.resize(numNodes, 0);
   if (inputsList.empty()) {
     auto i = 0;
@@ -113,6 +120,10 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
   for (const auto& r : results.timePerNodeType) {
     const std::string& target = r.first;
     results.percentPerNodeType[target] = r.second * 100.0f / results.totalTime;
+  }
+  for (const auto i : c10::irange(numNodes)) {
+    results.percentPerNode[i] =
+        results.timePerNode[i] * 100.0f / results.totalTime;
   }
   return results;
 }
