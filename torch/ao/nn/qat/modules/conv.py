@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import ClassVar, Union, Literal
+from typing import ClassVar, Literal, Union
 
 import torch
 import torch.nn as nn
