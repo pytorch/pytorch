@@ -124,7 +124,7 @@ class InductorChoices:
         device_type = kernel_inputs.device_type
         assert device_type is not None, "get_mm_configs requires a valid device type"
         # Get the appropriate template-specific heuristic
-        heuristic = get_template_heuristic(template_name, device_type)
+        heuristic = get_template_heuristic(template_name, device_type, op_name)
 
         yield from heuristic.get_template_configs(kernel_inputs, layout, op_name)
 
