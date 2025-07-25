@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <optional>
 
-#include <torch/csrc/inductor/aoti_torch/generated/c_shim_generic.h>
+#include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 
 using torch::stable::Tensor;
 
@@ -33,7 +33,7 @@ inline Tensor empty_like(const Tensor& self) {
 // header-only.
 inline Tensor fill_(const Tensor& self, double value) {
   auto self_ = self.get();
-  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_generic_fill__Scalar(self_, value));
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_fill__Scalar(self_, value));
   return self;
 }
 
