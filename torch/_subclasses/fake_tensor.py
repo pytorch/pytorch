@@ -2598,7 +2598,11 @@ class FakeTensorMode(TorchDispatchMode):
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
 
-        if func not in meta_table and not self.cpp_meta_supports_symint(func):
+        if (
+            func not in meta_table
+            and not self.cpp_meta_supports_symint(func)
+            and not (has_symbolic_sizes and func in self._view_fake_tensor_impl_ops)
+        ):
             from torch._decomp import decomposition_table
 
             # Prefer Python decompositions over C++ ones
@@ -2904,6 +2908,10 @@ class FakeTensorMode(TorchDispatchMode):
         aten.view_as_complex.default,
         aten.set_.source_Storage_storage_offset,
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
+    )
+
+    _view_fake_tensor_impl_ops = ordered_set(
+        aten.view.default, aten._unsafe_view.default
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:

@@ -69,13 +69,20 @@ OPTIMUS_EXCLUDE_POST_GRAD = [
     "inductor_autotune_lookup_table",
 ]
 
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    free_unbacked_symbols,
+    IterateExprs,
+    ShapeEnv,
+)
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
 
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.fx.node import Node
 
     from .codegen.common import WorkspaceArg
@@ -1124,6 +1131,7 @@ def fresh_cache(
                 # Let's not fail if we can't clean up the temp dir. Also note that for
                 # Windows, we can't delete the loaded modules because the module binaries
                 # are open.
+                ignore_errors=is_windows(),
                 onerror=lambda func, path, exc_info: log.warning(
                     "Failed to remove temporary cache dir at %s",
                     inductor_cache_dir,
@@ -2719,10 +2727,9 @@ def maybe_get_suppress_shape_guards_ctx() -> contextlib.AbstractContextManager[N
         return contextlib.nullcontext()
 
     # In standalone inductor compile mode, we might not have a shape_env attached to the fake mode
-    shape_env = tracing_context.fake_mode.shape_env
-    if not shape_env:
+    if not tracing_context.fake_mode or not tracing_context.fake_mode.shape_env:
         return contextlib.nullcontext()
-
+    shape_env = tracing_context.fake_mode.shape_env
     return shape_env.suppress_guards()
 
 
@@ -3245,12 +3252,13 @@ def tabulate_2d(elements: Sequence[Sequence[T]], headers: Sequence[T]) -> str:
         for i, e in enumerate(row):
             widths[i] = max(widths[i], len(str(e)))
     lines = []
-    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))
+    # Need nested {} for string formatting; ignore SET_LINTER here
+    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))  # noqa: set_linter
     #              widths          whitespace      horizontal separators
     total_width = sum(widths) + (len(widths) * 2) + (len(widths) - 1)
     lines.append("-" * total_width)
     for row in elements:
-        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))
+        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))  # noqa: set_linter
     return "\n".join(lines)
 
 
@@ -3355,3 +3363,10 @@ def aoti_model_name_from_config() -> str:
     model_name = config.aot_inductor.model_name_for_generated_files
     model_name = "aoti_model" if model_name is None else model_name
     return model_name
+
+
+def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.Symbol]:
+    if unbacked_only:
+        return free_unbacked_symbols(x)
+    else:
+        return free_symbols(x)
