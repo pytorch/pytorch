@@ -294,3 +294,68 @@ Shuffle Layers (Aliases)
     :template: classtemplate.rst
 
     channelshuffle.ChannelShuffle
+
+torch.nn.utils
+---------------------------------
+
+The following are aliases to their counterparts in ``torch.nn.utils`` in nested namespaces.
+
+Utility functions to clip parameter gradients.
+
+.. currentmodule:: torch.nn.utils
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    clip_grad.clip_grad_norm_
+    clip_grad.clip_grad_norm
+    clip_grad.clip_grad_value_
+
+
+Utility functions to flatten and unflatten Module parameters to and from a single vector.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    convert_parameters.parameters_to_vector
+    convert_parameters.vector_to_parameters
+
+Utility functions to fuse Modules with BatchNorm modules.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    fusion.fuse_conv_bn_eval
+    fusion.fuse_conv_bn_weights
+    fusion.fuse_linear_bn_eval
+    fusion.fuse_linear_bn_weights
+
+Utility functions to convert Module parameter memory formats.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    memory_format.convert_conv2d_weight_memory_format
+    memory_format.convert_conv3d_weight_memory_format
+
+Utility functions to apply and remove weight normalization from Module parameters.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    weight_norm.weight_norm
+    weight_norm.remove_weight_norm
+    spectral_norm.spectral_norm
+    spectral_norm.remove_spectral_norm
+
+Utility functions for initializing Module parameters.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    init.skip_init

@@ -263,8 +263,6 @@ coverage_ignore_functions = [
     "flags_frozen",
     # torch.distributed.algorithms.ddp_comm_hooks
     "register_ddp_comm_hook",
-    # torch.nn
-    "factory_kwargs",
     # torch.nn.parallel
     "DistributedDataParallelCPU",
     # torch.utils
@@ -1226,37 +1224,37 @@ coverage_ignore_functions = [
     # torch.multiprocessing.spawn
     "start_processes",
     # torch.nn.functional
-    "adaptive_max_pool1d_with_indices",
-    "adaptive_max_pool2d_with_indices",
-    "adaptive_max_pool3d_with_indices",
-    "assert_int_or_pair",
-    "fractional_max_pool2d_with_indices",
-    "fractional_max_pool3d_with_indices",
-    "max_pool1d_with_indices",
-    "max_pool2d_with_indices",
-    "max_pool3d_with_indices",
+    "adaptive_max_pool1d_with_indices",  # documented as adaptive_max_pool1d
+    "adaptive_max_pool2d_with_indices",  # documented as adaptive_max_pool2d
+    "adaptive_max_pool3d_with_indices",  # documented as adaptive_max_pool3d
+    "assert_int_or_pair",  # looks unintentionally public
+    "fractional_max_pool2d_with_indices",  # documented as fractional_max_pool2d
+    "fractional_max_pool3d_with_indices",  # documented as fractional_max_pool3d
+    "max_pool1d_with_indices",  # documented as max_pool1d
+    "max_pool2d_with_indices",  # documented as max_pool2d
+    "max_pool3d_with_indices",  # documented as max_pool3d
     "multi_head_attention_forward",
     # torch.nn.grad
-    "conv1d_input",
-    "conv1d_weight",
-    "conv2d_input",
-    "conv2d_weight",
-    "conv3d_input",
-    "conv3d_weight",
+    "conv1d_input",  # legacy helper for gradient computation
+    "conv1d_weight",  # legacy helper for gradient computation
+    "conv2d_input",  # legacy helper for gradient computation
+    "conv2d_weight",  # legacy helper for gradient computation
+    "conv3d_input",  # legacy helper for gradient computation
+    "conv3d_weight",  # legacy helper for gradient computation
     # torch.nn.init
-    "constant",
-    "dirac",
-    "eye",
-    "kaiming_normal",
-    "kaiming_uniform",
-    "normal",
-    "orthogonal",
-    "sparse",
-    "uniform",
-    "xavier_normal",
-    "xavier_uniform",
+    "constant",  # deprecated
+    "dirac",  # deprecated
+    "eye",  # deprecated
+    "kaiming_normal",  # deprecated
+    "kaiming_uniform",  # deprecated
+    "normal",  # deprecated
+    "orthogonal",  # deprecated
+    "sparse",  # deprecated
+    "uniform",  # deprecated
+    "xavier_normal",  # deprecated
+    "xavier_uniform",  # deprecated
     # torch.nn.modules.rnn
-    "apply_permutation",
+    "apply_permutation",  # deprecated
     # torch.nn.modules.utils
     "consume_prefix_in_state_dict_if_present",
     # torch.nn.parallel.comm
@@ -1278,34 +1276,8 @@ coverage_ignore_functions = [
     "is_namedtuple",
     "scatter",
     "scatter_kwargs",
-    # torch.nn.parameter
-    "is_lazy",
-    # torch.nn.utils.convert_parameters
-    "parameters_to_vector",
-    "vector_to_parameters",
-    # torch.nn.utils.fusion
-    "fuse_conv_bn_eval",
-    "fuse_conv_bn_weights",
-    "fuse_linear_bn_eval",
-    "fuse_linear_bn_weights",
-    # torch.nn.utils.init
-    "skip_init",
-    # torch.nn.utils.memory_format
-    "convert_conv2d_weight_memory_format",
-    # torch.nn.utils.parametrizations
-    "weight_norm",
-    # torch.nn.utils.parametrize
-    "transfer_parametrizations_and_params",
-    "type_before_parametrizations",
     # torch.nn.utils.rnn
-    "bind",
-    "invert_permutation",
-    # torch.nn.utils.spectral_norm
-    "remove_spectral_norm",
-    "spectral_norm",
-    # torch.nn.utils.weight_norm
-    "remove_weight_norm",
-    "weight_norm",
+    "bind",  # looks unintentionally public
     # torch.onnx.operators
     "reshape_from_tensor_shape",
     "shape_as_tensor",
@@ -2897,7 +2869,7 @@ coverage_ignore_classes = [
     "ModuleWrapper",
     "OrderedDictWrapper",
     # torch.nn.modules.container
-    "Container",
+    "Container",  # deprecated
     # torch.nn.modules.linear
     "NonDynamicallyQuantizableLinear",
     # torch.nn.modules.module
@@ -2905,7 +2877,7 @@ coverage_ignore_classes = [
     # WARNING: more than one target found for cross-reference 'Module'
     "Module",
     # torch.nn.modules.loss
-    "NLLLoss2d",
+    "NLLLoss2d",  # deprecated
     # torch.nn.modules.normalization
     "CrossMapLRN2d",
     # torch.nn.parallel.data_parallel

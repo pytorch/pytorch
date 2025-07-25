@@ -480,6 +480,8 @@ for more information on how to implement your own parametrizations.
     parametrize.remove_parametrizations
     parametrize.cached
     parametrize.is_parametrized
+    parametrize.transfer_parametrizations_and_params
+    parametrize.type_before_parametrizations
 
 .. autosummary::
     :toctree: generated
@@ -510,6 +512,9 @@ Utility functions in other modules
     nn.utils.rnn.pack_sequence
     nn.utils.rnn.unpack_sequence
     nn.utils.rnn.unpad_sequence
+    nn.utils.rnn.invert_permutation
+    nn.parameter.is_lazy
+    nn.factory_kwargs
 
 .. autosummary::
     :toctree: generated
