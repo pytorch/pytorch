@@ -1,9 +1,10 @@
 # Owner(s): ["module: inductor"]
+import functools
 import logging
 import os
 import unittest
 
-
+from torch.testing._internal.common_cuda import tf32_off
 try:
     from .test_aot_inductor_utils import AOTIRunnerUtil
 except ImportError:
@@ -25,13 +26,13 @@ except ImportError:
     from test_fp8 import _quantize_rowwise, _quantize_tensorwise
 
 
-torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 log = logging.getLogger(__name__)
 
 
+@functools.lru_cache(None)
 def _get_path_without_sccache() -> str:
     """
     Get the PATH environment variable without sccache.
@@ -82,8 +83,6 @@ class TestCKBackend(TestCase):
         Make sure autotuning mm doesn't crash.
         """
 
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
         def mm(a, b):
             return a @ b
 
@@ -104,7 +103,7 @@ class TestCKBackend(TestCase):
                 "rocm.ck_tile_max_profiling_configs": 8,
                 "rocm.ck_dir": self.ck_dir,
             }
-        ):
+        ), tf32_off():
             if use_aoti:
                 Y_compiled = AOTIRunnerUtil.run(
                     model=mm,
@@ -132,8 +131,6 @@ class TestCKBackend(TestCase):
         Test matmul with dynamic shapes
         """
 
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
         tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
 
         a = torch.randn(2240, 256, **tensor_options)
@@ -153,7 +150,7 @@ class TestCKBackend(TestCase):
                 "rocm.ck_tile_max_profiling_configs": 8,
                 "rocm.ck_dir": self.ck_dir,
             }
-        ):
+        ), tf32_off():
 
             @torch.compile(dynamic=True)
             def compiled_mm(a, b):
@@ -176,8 +173,6 @@ class TestCKBackend(TestCase):
         End to end test for picking preselected ck instances
         """
 
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
         def mm(a, b):
             return a @ b
 
@@ -197,7 +192,7 @@ class TestCKBackend(TestCase):
                 "rocm.ck_dir": self.ck_dir,
                 "rocm.use_preselected_instances": True,
             }
-        ):
+        ), tf32_off():
             Y_compiled = torch.compile(mm, dynamic=False)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
@@ -209,8 +204,6 @@ class TestCKBackend(TestCase):
         """
         Make sure the ck template can work with non-contiguous inputs
         """
-
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         tensor_options = {"device": "cuda", "dtype": torch.float16}
 
@@ -229,7 +222,7 @@ class TestCKBackend(TestCase):
                 "rocm.ck_max_profiling_configs": 8,
                 "rocm.ck_tile_max_profiling_configs": 8,
             }
-        ):
+        ), tf32_off():
 
             @torch.compile(dynamic=False)
             def mm(a, b):
@@ -244,7 +237,6 @@ class TestCKBackend(TestCase):
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("x_shape", ([4096, 2048], [2048], [4096, 1]))
     def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape):
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         m, k, n = 4096, 224, 2048
         alpha, beta = 1.0, 1.0
@@ -265,7 +257,7 @@ class TestCKBackend(TestCase):
                 "rocm.ck_dir": self.ck_dir,
                 "rocm.ck_max_profiling_configs": 2,
             }
-        ):
+        ), tf32_off():
 
             @torch.compile(dynamic=False)
             def addmm(x, a, b, alpha, beta):
@@ -386,7 +378,6 @@ class TestCKBackend(TestCase):
     )
     @parametrize("max_autotune_conv_backends", ("CK", "ATEN,CK,TRITON"))
     def test_max_autotune_conv2d(self, max_autotune_conv_backends):
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         tensor_options = {"device": "cuda", "dtype": torch.float32}
 
@@ -406,7 +397,7 @@ class TestCKBackend(TestCase):
                 "rocm.ck_dir": self.ck_dir,
                 "rocm.ck_max_profiling_configs": 4,
             }
-        ):
+        ), tf32_off():
 
             @torch.compile(dynamic=False)
             def conv2d(x, w):
@@ -428,8 +419,6 @@ class TestCKBackend(TestCase):
         Test gemm-max-autotune torch.bmm with CK backend
         """
 
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-
         def bmm(a, b):
             return torch.bmm(a, b)
 
@@ -448,7 +437,7 @@ class TestCKBackend(TestCase):
                 "rocm.ck_max_profiling_configs": 2,
                 "rocm.ck_dir": self.ck_dir,
             }
-        ):
+        ), tf32_off():
 
             @torch.compile(dynamic=False)
             def compiled_bmm(x, w):
