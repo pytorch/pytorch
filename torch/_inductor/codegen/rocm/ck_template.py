@@ -50,11 +50,6 @@ class CKTemplate(ROCmTemplate):
                 #include "ck/library/utility/host_tensor.hpp"
                 #include "ck/library/utility/host_tensor_generator.hpp"
                 #include "ck/library/utility/literals.hpp"
-
-                namespace at
-                {
-                  using Float8_e4m3fn = void;
-                }
             """
         )
         return res
