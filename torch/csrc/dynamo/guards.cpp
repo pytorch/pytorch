@@ -2620,7 +2620,7 @@ class GuardManager {
       // unset the pycapsule to make it invalid. This ensures that the weakref
       // callback does not look into a dangling pointer.
       if (PyCapsule_IsValid(e.cap, "GuardManager*")) {
-        PyCapsule_SetPointer(e.cap, nullptr);
+        PyCapsule_SetName(e.cap, "DeadGuardManager");
       }
       Py_CLEAR(e.wr); // kills weakref (may remove callback)
     }
