@@ -5,11 +5,13 @@ that are produced by AOTAutograd.  They will NOT work on generic FX graphs.  See
 recommend reading :mod:torch._functorch._aot_autograd.descriptors`.
 """
 
-from typing import NoReturn, Optional
+from typing import NoReturn, Optional, Union
 
 import torch.fx as fx
 
 from .descriptors import (
+    AOTInput,
+    AOTOutput,
     BufferAOTInput,
     DifferentiableAOTInput,
     DifferentiableAOTOutput,
@@ -23,9 +25,12 @@ from .descriptors import (
 )
 
 
-def _raise_autograd_subclass_not_implemented() -> NoReturn:
+def _raise_autograd_subclass_not_implemented(
+    n: fx.Node, desc: Union[AOTInput, AOTOutput]
+) -> NoReturn:
     raise RuntimeError(
-        "Subclasses currently not supported by this function.  The problem is "
+        "Subclasses are currently not supported by this function, but a desugared subclass input "
+        f"was found at {n} ({desc}).  The problem is "
         "that there may not necessarily be a 1-1 correspondence between primals/tangents/outputs/grads "
         "when subclasses are involved: for example, the primal might be a plain tensor "
         "but the tangent a tensor subclass that desugared into multiple plain tensors. "
@@ -72,14 +77,14 @@ def get_all_input_and_grad_nodes(
             if not isinstance(desc, DifferentiableAOTInput):
                 continue
             if isinstance(desc, SubclassGetAttrAOTInput):
-                _raise_autograd_subclass_not_implemented()
+                _raise_autograd_subclass_not_implemented(n, desc)
             input_index[desc] = (n, None)
         elif n.op == "output":
             assert "desc" in n.meta, (n, n.meta)
             desc = n.meta["desc"]
             for sub_n, sub_desc in zip(n.args[0], desc):
                 if isinstance(sub_desc, SubclassGetAttrAOTOutput):
-                    _raise_autograd_subclass_not_implemented()
+                    _raise_autograd_subclass_not_implemented(sub_n, sub_desc)
                 if isinstance(sub_desc, GradAOTOutput):
                     inp, grad = input_index[sub_desc.grad_of]
                     assert grad is None, (sub_n, sub_desc, input_index)
@@ -123,13 +128,13 @@ def get_all_output_and_tangent_nodes(
                 if not isinstance(sub_d, DifferentiableAOTOutput):
                     continue
                 if isinstance(sub_d, SubclassGetAttrAOTOutput):
-                    _raise_autograd_subclass_not_implemented()
+                    _raise_autograd_subclass_not_implemented(sub_n, sub_d)
                 output_index[sub_d] = (sub_n, None)
     for n in g.nodes:
         if n.op == "placeholder":
             desc = n.meta["desc"]
             if isinstance(desc, SubclassGetAttrAOTInput):
-                _raise_autograd_subclass_not_implemented()
+                _raise_autograd_subclass_not_implemented(n, desc)
             if isinstance(desc, TangentAOTInput):
                 out, tangent = output_index[desc.output]
                 assert tangent is None, (n, desc, output_index)
@@ -197,9 +202,12 @@ def get_plain_output_and_tangent_nodes(
     }
 
 
-def _raise_fqn_subclass_not_implemented() -> NoReturn:
+def _raise_fqn_subclass_not_implemented(
+    n: fx.Node, desc: Union[AOTInput, AOTOutput]
+) -> NoReturn:
     raise RuntimeError(
-        "Subclasses currently not supported by this function.  The problem is "
+        "Subclasses are currently not supported by this function, but a desugared subclass input "
+        f"was found at {n} ({desc}).  The problem is "
         "that there may not necessarily be a 1-1 correspondence between a FQN and a plain tensor "
         "when subclasses are involved: for example, a parameter that is a subclass "
         "would desugar into multiple plain tensors, which we can't uniquely assign the "
@@ -232,7 +240,7 @@ def get_named_param_nodes(graph: fx.Graph) -> dict[str, fx.Node]:
         if n.op == "placeholder":
             desc = n.meta["desc"]
             if isinstance(desc, SubclassGetAttrAOTInput):
-                _raise_fqn_subclass_not_implemented()
+                _raise_fqn_subclass_not_implemented(n, desc)
             elif isinstance(desc, ParamAOTInput):
                 r[desc.target] = n
     return r
@@ -260,7 +268,7 @@ def get_named_buffer_nodes(graph: fx.Graph) -> dict[str, fx.Node]:
         if n.op == "placeholder":
             desc = n.meta["desc"]
             if isinstance(desc, SubclassGetAttrAOTInput):
-                _raise_fqn_subclass_not_implemented()
+                _raise_fqn_subclass_not_implemented(n, desc)
             elif isinstance(desc, BufferAOTInput):
                 r[desc.target] = n
     return r

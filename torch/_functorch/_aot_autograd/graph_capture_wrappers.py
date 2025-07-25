@@ -1319,7 +1319,9 @@ def aot_dispatch_subclass(
     )
 
 
-def create_functional_call(mod, params_spec, params_len, store_orig_mod=False, strict_out_tuple=True):
+def create_functional_call(
+    mod, params_spec, params_len, store_orig_mod=False, strict_out_tuple=True
+):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
 

@@ -179,7 +179,7 @@ def aot_stage1_graph_capture(
 
     return AOTGraphCapture(
         wrappers=wrappers,
-        graph=graph,
+        graph_module=graph,
         updated_flat_args=updated_flat_args,
         updated_flat_args_descs=updated_flat_args_descs,
         maybe_subclass_meta=maybe_subclass_meta,
@@ -189,7 +189,7 @@ def aot_stage1_graph_capture(
 def aot_stage2_export(
     aot_state: AOTState, aot_graph_capture: AOTGraphCapture
 ) -> DispatchReturn:
-    graph = aot_graph_capture.graph
+    graph = aot_graph_capture.graph_module
     aot_config = aot_state.aot_config
     wrappers = aot_graph_capture.wrappers
 
@@ -252,7 +252,7 @@ def aot_stage2_inference(
 
     aot_config = aot_state.aot_config
     fw_metadata = aot_state.fw_metadata
-    fw_module = aot_graph_capture.graph
+    fw_module = aot_graph_capture.graph_module
     wrappers = aot_graph_capture.wrappers
     updated_flat_args = aot_graph_capture.updated_flat_args
     maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
@@ -1326,7 +1326,7 @@ def aot_stage2_autograd(
     """
 
     wrappers = aot_graph_capture.wrappers
-    fx_g = aot_graph_capture.graph
+    fx_g = aot_graph_capture.graph_module
     flat_args = aot_state.flat_args
     joint_inputs = aot_graph_capture.updated_flat_args
     maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
