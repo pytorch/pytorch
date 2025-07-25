@@ -2653,7 +2653,9 @@ def set_example_value(node, example_value):
     # this to accurately reflect what the state of the value was at the time
     # the program was traced).
     node.meta["example_value"] = example_value
-    shape_env = TracingContext.get().fake_mode.shape_env
+    fake_mode = TracingContext.get().fake_mode
+    assert fake_mode is not None
+    shape_env = fake_mode.shape_env
     if (
         symbol_to_path
         := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
@@ -4774,7 +4776,7 @@ def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
 
 # Returns a set of code objects present traced in the current TracingContext, or None
 # if there is no current TracingContext.
-def get_traced_code() -> list[CodeType]:
+def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()
