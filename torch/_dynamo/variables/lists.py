@@ -1045,10 +1045,10 @@ class NamedTupleVariable(TupleVariable):
         *TupleVariable._nonvar_fields,
     }
 
-    def __init__(self, items, tuple_cls, **kwargs) -> None:
+    def __init__(self, items, tuple_cls, dynamic_attributes=None, **kwargs) -> None:
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
-        self.dynamic_attributes = {}
+        self.dynamic_attributes = {} if not dynamic_attributes else dynamic_attributes
 
     def is_namedtuple(self):
         return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(
@@ -1279,8 +1279,13 @@ class ListIteratorVariable(IteratorVariable):
             raise NotImplementedError
         return iter([x.as_python_constant() for x in self.items])
 
+    def has_unpack_var_sequence(self, tx):
+        return True
+
     def unpack_var_sequence(self, tx):
-        return list(self.items[self.index :])
+        r = list(self.items[self.index :])
+        self.index = len(self.items)
+        return r
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)

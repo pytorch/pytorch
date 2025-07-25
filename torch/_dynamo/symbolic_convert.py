@@ -632,13 +632,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         self.pop()
 
         if_next = self.create_call_resume_at(
-            self.next_instruction, 0, all_stack_locals_metadata
+            self.next_instruction, int(push), all_stack_locals_metadata
         )
         if push:
             self.push(value)
-        if_jump = self.create_call_resume_at(
-            inst.target, int(push), all_stack_locals_metadata
-        )
+        if_jump = self.create_call_resume_at(inst.target, 0, all_stack_locals_metadata)
 
         if sys.version_info >= (3, 13):
             # 3.13 requires stack[-1] to be bool type
@@ -947,6 +945,7 @@ def break_graph_if_unsupported(*, push):
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
+                assert inst.arg is not None
                 call_insts = create_call_function(inst.arg, False)
                 call_insts[-1].copy_positions(inst)
                 self.output.add_output_instructions(call_insts)
@@ -1173,11 +1172,8 @@ class InstructionTranslatorBase(
     def prune_dead_locals(self):
         # Only keep the locals that must remain on the stack.
         reads = livevars_analysis(self.instructions, self.current_instruction)
-        # also keep cell/free vars alive
         self.symbolic_locals = {
-            k: v
-            for k, v in self.symbolic_locals.items()
-            if k in reads or k in self.cell_and_freevars()
+            k: v for k, v in self.symbolic_locals.items() if k in reads
         }
         # "Garbage collect the heap".
         self.output.side_effects.prune_dead_object_new(self)
@@ -2467,10 +2463,11 @@ class InstructionTranslatorBase(
                 # Replace the stack var with the context class
                 ctx = cast(ContextWrappingVariable, txes[i].stack[j_orig])
                 # frames[i][0][j] = reconstructed_ctx
+                cg.append_output(create_dup_top())
                 ctx.reconstruct_type(cg)
                 cg.extend_output(
                     [
-                        create_dup_top(),
+                        *create_swap(2),
                         cg.create_load_const(i),
                         cg.create_binary_subscr(),
                         cg.create_load_const(0),
@@ -2484,10 +2481,11 @@ class InstructionTranslatorBase(
                 # Replace the local with the context class
                 ctx = cast(ContextWrappingVariable, txes[i].symbolic_locals[name])
                 # frames[i][1][meta.locals_names[name]] = reconstructed_ctx
+                cg.append_output(create_dup_top())
                 ctx.reconstruct_type(cg)
                 cg.extend_output(
                     [
-                        create_dup_top(),
+                        *create_swap(2),
                         cg.create_load_const(i),
                         cg.create_binary_subscr(),
                         cg.create_load_const(1),
@@ -3314,7 +3312,7 @@ class InstructionTranslatorBase(
             self.popn(2)
 
     def LOAD_FAST_CHECK(self, inst):
-        if isinstance(self.symbolic_locals.get(inst.argval, None), NullVariable):
+        if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
             unimplemented_v2(
                 gb_type="LOAD_FAST_CHECK on uninitialized variable",
                 context=inst.argval,
@@ -3722,7 +3720,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     side_effects.store_cell(cell_var, contents_var)
                 else:
                     cell_var = side_effects.track_cell_new()
-                cell_var.local_name = name
+                cell_var.local_name = name  # type: ignore[attr-defined]
                 self.symbolic_locals[name] = cell_var
 
             # Populate `symbolic_locals` with cells captured by this frame,
@@ -3740,7 +3738,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 cell_var = side_effects.track_cell_existing(
                     cell_source, cell, contents_var
                 )
-                cell_var.local_name = name
+                cell_var.local_name = name  # type: ignore[attr-defined]
                 self.symbolic_locals[name] = cell_var
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(

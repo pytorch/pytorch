@@ -61,7 +61,7 @@ static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_input
 # We assume tangents memory format to be similar to corresponding output's memory_format.
 # The idea is that we are technically making a guess about the strides of our tangents,
 # while we trace out the joint.
-# If runtime specfied tangents will not have the same memory format as predicted traced tangents,
+# If runtime specified tangents will not have the same memory format as predicted traced tangents,
 # we coerce them at runtime to traced tangents memory format.
 
 
@@ -83,7 +83,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
         out = out.contiguous(memory_format=memory_format.memory_format)
         updated = was is not out
 
-    # For subclass we keep memory format of outer strides at the beggining of the list
+    # For subclass we keep memory format of outer strides at the beginning of the list
     out_memory_format = [memory_format] if is_subclass else memory_format
 
     # Note [Tangents memory format, Part 2]
@@ -583,7 +583,7 @@ from a multi-output view call"
                 and not o.requires_grad
             ):
                 # In theory we could use any of these tensors to regenerate the aliased outputs from,
-                # since they all alias each other and have identical metatadata
+                # since they all alias each other and have identical metadata
                 out_alias = outs_with_identical_metadata_that_require_grad[0]
                 existing_out_idx = out_tensor_ids[id(out_alias)]
                 output_type = OutputType.alias_of_intermediate_base_is_user_output
@@ -702,7 +702,7 @@ from a multi-output view call"
             # (a * b).sum().backward()
             #
             # We can not deduce it easily now, so introducing a debug config to be able to turn off this for specific cases.
-            # NJT gurantees to have its tangent as NJT, because it has dedicated integration in Autograd
+            # NJT guarantees to have its tangent as NJT, because it has dedicated integration in Autograd
             # See torch/csrc/autograd/python_function.cpp, use_zeros_like.
             (
                 _plain_fake_tensor_like_subclass(inp)

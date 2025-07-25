@@ -356,7 +356,7 @@ class StackLocalsMetadata:
 
 def get_builtins_dict(global_scope):
     # f_globals["__builtins__"] can be a dict or a module. This is an
-    # implemenation detail -
+    # implementation detail -
     # https://docs.python.org/3/library/builtins.html.
 
     # This makes guarding on any builtin messy because the guard check_fn
@@ -1217,6 +1217,18 @@ class OutputGraph(OutputGraphGuardsState):
         # so checks for NULLs and context managers in the case of codegen'ing resume
         # functions will not be performed on them. This is expected behavior.
         for k, v in tx.symbolic_locals.items():
+            # Note! this explicitly uses .local_name for matching
+            # Failure to do so will cause spurious registrations in val_to_names.
+            # This will in turn result in spurious variables showing up in the graph.
+            # This was very tricky to debug. For an example, dump the graph at call_user_compiler
+            # while running test_subgraphs.py
+            # Do not load unmodified locals (load them at a later time) from the top frame
+            if (
+                isinstance(v.source, LocalSource)
+                and v.source.local_name == k
+                and tx is self.root_tx
+            ):
+                continue
             # Do not load cell/free vars
             if k in meta.cell_and_freevars:
                 continue
@@ -1504,7 +1516,7 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.add_output_instructions([create_dup_top()])
             # values, values
-            for cnt in counts:
+            for j, cnt in enumerate(counts):
                 end_idx += cnt
                 if start_idx == end_idx:
                     self.add_output_instructions(
@@ -1523,7 +1535,32 @@ class OutputGraph(OutputGraphGuardsState):
                         ]
                     )
                     # values[x:y], values
+                # add root frame's unmodified locals here
+                if i == len(all_stack_locals_metas) - 1 and j == 1:
+                    root_cg = PyCodegen(self.root_tx)
+                    unmodified_locals_names: dict[str, int] = {}
+                    for k, v in self.root_tx.symbolic_locals.items():
+                        if (
+                            isinstance(v.source, LocalSource)
+                            and v.source.local_name == k
+                        ):
+                            root_cg.append_output(root_cg.create_load(k))
+                            unmodified_locals_names[k] = len(meta.locals_names) + len(
+                                unmodified_locals_names
+                            )
+                    self.add_output_instructions(
+                        root_cg.get_instructions()
+                        + [
+                            create_instruction(
+                                "BUILD_LIST", arg=len(unmodified_locals_names)
+                            ),
+                            # arg=2 because we already swapped the locals list back
+                            create_instruction("LIST_EXTEND", arg=2),
+                        ]
+                    )
+                    meta.locals_names.update(unmodified_locals_names)
                 start_idx += cnt
+
             # pack stack, locals, cells together
             # values, stack, locals, cells, values
             self.add_output_instructions(
