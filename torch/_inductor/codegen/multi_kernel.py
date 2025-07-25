@@ -4,6 +4,7 @@ import logging
 import os
 import pathlib
 
+from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
 
@@ -45,6 +46,9 @@ class MultiKernelState:
 
         We should name the multi-kernel differently in these 2 cases.
         """
+        # Prevent circular import
+        from ..select_algorithm import TritonTemplateKernel
+
         kernel_names = tuple(k.kernel_name for k in kernels)
         if kernel_names in self.subkernel_to_kernel_name:
             return self.subkernel_to_kernel_name[kernel_names]
@@ -58,15 +62,44 @@ class MultiKernelState:
             # the second pass of cpp-wrapper.
             return multi_kernel_name
 
+        arg_index: dict[int, list[slice]] = {}
+        _, call_args, _, arg_types = kernels[0].args.python_argdefs()
+        if isinstance(kernels[0], TritonTemplateKernel) and isinstance(
+            kernels[0].output_node, MultiTemplateBuffer
+        ):
+            for i, kernel in enumerate(kernels):
+                additional_call_args, additional_arg_types = (
+                    kernel.additional_call_args_and_types()
+                )
+                if i not in arg_index:
+                    arg_index[i] = []
+                arg_index[i].append(slice(0, len(call_args)))
+                arg_index[i].append(
+                    slice(
+                        len(call_args) + i * len(additional_call_args),
+                        len(call_args) + (i + 1) * len(additional_call_args),
+                    )
+                )
+        else:
+            kernels[0].add_numel_to_call_args(multi_kernel_name, call_args, arg_types)
+            for i in range(len(kernels)):
+                arg_index[i] = [slice(0, len(call_args))]
+
+        shape_specialize = isinstance(kernels[0], TritonTemplateKernel)
         buf = self.kernel_defs
         buf.writeline("")
+        buf.writeline("arg_index = {")
+        for key, slice_list in arg_index.items():
+            slice_reprs = ", ".join(repr(s) for s in slice_list)
+            buf.writeline(f"    {key}: [{slice_reprs}],")
+        buf.writeline("}")
         buf.writeline(
             f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
         )
         with buf.indent():
             for name in kernel_names:
                 buf.writeline(f"{name},")
-        buf.writeline("])")
+        buf.writeline(f"], arg_index=arg_index, shape_specialize={shape_specialize})")
 
         if config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
@@ -135,6 +168,9 @@ class MultiKernel:
         Collect the union of arguments from all subkernels as the arguments
         for the multi-kernel.
         """
+        # Prevent circular import
+        from ..select_algorithm import TritonTemplateKernel
+
         assert kernel_name == self.kernel_name
         V.graph.wrapper_code.write_triton_header_once()
         _, call_args, _, arg_types = self.kernels[0].args.python_argdefs()
@@ -148,17 +184,42 @@ class MultiKernel:
             # the fast kernel directly
             kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
-        # numels for all subkernels should be the same. Use kernels[0] here
-        self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
+        if isinstance(self.kernels[0], TritonTemplateKernel) and isinstance(
+            self.kernels[0].output_node, MultiTemplateBuffer
+        ):
+            # For matmuls the grid arguments are passed in as additional arguments
+            # to the kernel run method. These grids change based on the various
+            # parameters of the matmul. So we need to pass each kernel's grid into
+            # the multi call kernel.
+            multi_call_args = call_args
+            multi_call_arg_types = arg_types
+            for i, kernel in enumerate(self.kernels):
+                additional_call_args, additional_arg_types = (
+                    kernel.additional_call_args_and_types()
+                )
+                multi_call_args.extend(list(additional_call_args))
+                multi_call_arg_types.extend(list(additional_arg_types))
+        else:
+            # numels for all subkernels should be the same. Use kernels[0] here
+            self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
+            multi_call_args = call_args
+            multi_call_arg_types = arg_types
 
         for ws in self.kernels[0].args.workspace_args:
             V.graph.wrapper_code.generate_workspace_allocation(ws)
 
-        V.graph.wrapper_code.generate_kernel_call(
-            kernel_name,
-            call_args,
-            arg_types=arg_types,
-        )
+        if V.graph.cpp_wrapper:
+            # We have already selected the best kernel at compile time
+            # so we only have one set of call args. NB: this currently
+            # doesn't work with MultiTemplateBuffer kernels. @bobrenjc93
+            # will add it in a subsequent PR.
+            V.graph.wrapper_code.generate_kernel_call(
+                kernel_name, call_args, arg_types=arg_types
+            )
+        else:
+            V.graph.wrapper_code.generate_kernel_call(
+                kernel_name, multi_call_args, arg_types=multi_call_arg_types
+            )
 
         for ws in reversed(self.kernels[0].args.workspace_args):
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
@@ -205,7 +266,7 @@ class MultiKernelCall:
     This class is called at run time to actually run the kernel
     """
 
-    def __init__(self, multi_kernel_name, kernels):
+    def __init__(self, multi_kernel_name, kernels, arg_index, shape_specialize=False):
         assert len(kernels) >= 2
         self._kernels = kernels
         self.multi_kernel_name = multi_kernel_name
@@ -215,6 +276,7 @@ class MultiKernelCall:
         ) == "1" or is_metric_table_enabled("persistent_red_perf")
 
         self.picked_kernel = None
+        self.arg_index = arg_index
         if config.triton.multi_kernel > 1:
             # manually force a subkernel to ease perf testing
             picked_by_config = config.triton.multi_kernel - 2
@@ -224,6 +286,13 @@ class MultiKernelCall:
             self.load_cache()
 
         self._recorded = False
+
+        # This means for each unique shape we will do a separate assessment
+        # for which kernel is the best. This is particularly useful for matmul
+        # kernels where the best kernel can vary based on very small differences
+        # in shape.
+        self._shape_specialize = shape_specialize
+        self._shape_cache = {}
 
     def cache_file_path(self):
         key = code_hash(
@@ -282,17 +351,33 @@ class MultiKernelCall:
         be picked.
         """
 
-        def wrap_fn(kernel):
+        def wrap_fn(kernel, index):
             def inner():
-                args_clone, kwargs_clone = kernel.clone_args(*args, **kwargs)
+                filtered_args = self._get_filtered_args(args, index)
+                args_clone, kwargs_clone = kernel.clone_args(*filtered_args, **kwargs)
                 return kernel.run(*args_clone, **kwargs_clone)
 
             return inner
 
         return [
-            benchmarker.benchmark_gpu(wrap_fn(kernel), rep=40)
-            for kernel in self.kernels
+            benchmarker.benchmark_gpu(wrap_fn(kernel, index), rep=40)
+            for index, kernel in enumerate(self.kernels)
         ]
+
+    def _get_filtered_args(self, args, index):
+        """
+        We pass in all arguments to all kernels into the MultiKernelCall
+        so when invoking a particular kernel we need to filter to only the
+        arguments for that specific kernel.
+        """
+
+        # This is sometimes invoked at runtime where V.graph is
+        # a NullHandler
+        if hasattr(V.graph, "cpp_wrapper") and V.graph.cpp_wrapper:
+            # for cpp-wrapper, we should not filter the args since
+            # we already have chosen a single kernel and arg set.
+            return args
+        return [item for s in self.arg_index[index] for item in args[s]]
 
     # record_choice and lookup_choice are helper functions for cpp-wrapper
     # codegen. The first pass use record_choice to keep the choice and
@@ -330,6 +415,20 @@ class MultiKernelCall:
         return V.graph.multi_kernel_to_choice[multi_kernel_name]
 
     def run(self, *args, **kwargs):
+        if self._shape_specialize:
+            cache_key = self._get_shape_cache_key(*args, **kwargs)
+            cached_choice = self._get_cached_shape_choice(cache_key)
+            if cached_choice is not None:
+                self.picked_kernel = cached_choice
+                log.debug(
+                    "using cached shape-specialized choice %dth sub-kernel in %s. Cache key: %s",
+                    self.picked_kernel,
+                    [k.inductor_meta.get("kernel_name") for k in self.kernels],
+                    cache_key,
+                )
+            else:
+                self._select_kernel_by_shape(*args, **kwargs)
+
         if self.picked_kernel is None:
             timings = self.benchmark_sub_kernels(*args, **kwargs)
             self.picked_kernel = timings.index(min(timings))
@@ -345,6 +444,7 @@ class MultiKernelCall:
             get_metric_table("persistent_red_perf").add_row(
                 functools.partial(self._metrics_table_row, timings)
             )
+
             if not self.disable_cache:
                 self.store_cache()
 
@@ -355,8 +455,42 @@ class MultiKernelCall:
             )
             assert picked_kernel_name is not None
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
-        self.run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
-        self.run(*args, **kwargs)
+
+        run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
+        filtered_args = self._get_filtered_args(args, self.picked_kernel)
+        run(*filtered_args, **kwargs)
+
+    def _get_shape_cache_key(self, *args, **kwargs):
+        """
+        Generate a cache key based on tensor shapes for shape-specialized dispatch.
+        """
+        shapes = []
+        for arg in args:
+            if hasattr(arg, "shape"):
+                shapes.append(tuple(arg.shape))
+        return tuple(shapes)
+
+    def _get_cached_shape_choice(self, cache_key):
+        """
+        Get cached kernel choice for a specific shape.
+        """
+        return self._shape_cache.get(cache_key)
+
+    def _cache_shape_choice(self, cache_key, kernel_idx):
+        """
+        Cache kernel choice for a specific shape
+        """
+        self._shape_cache[cache_key] = kernel_idx
+
+    def _select_kernel_by_shape(self, *args, **kwargs):
+        """
+        Benchmark kernels for a particular shape and return the
+        best kernel for this shape.
+        """
+        shape_key = self._get_shape_cache_key(*args, **kwargs)
+        timings = self.benchmark_sub_kernels(*args, **kwargs)
+        self.picked_kernel = timings.index(min(timings))
+        self._cache_shape_choice(shape_key, self.picked_kernel)
 
     def _metrics_table_row(self, timings):
         def get_kernel_path(k):
