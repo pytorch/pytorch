@@ -13,7 +13,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 // Direct pragma to suppress unused-but-set-variable warnings
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#pragma GCC diagnostic ignored "-Werror=unused-but-set-variable"
 
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
