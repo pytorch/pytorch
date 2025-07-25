@@ -26,11 +26,8 @@ logging.basicConfig(level=logging.INFO)
 
 
 def is_rocm_job(job_name: Optional[str]) -> bool:
-    if not job_name:
-        return False
-
     # ROCm jobs are expected to have "rocm" in their name
-    return "rocm" in job_name.lower()
+    return job_name is not None and "rocm" in job_name.lower()
 
 
 def is_cuda_or_rocm_job(job_name: Optional[str]) -> bool:
