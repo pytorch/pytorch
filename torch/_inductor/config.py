@@ -1795,6 +1795,7 @@ class trace:
     log = os.environ.get("INDUCTOR_TRACE_LOG", "1" if enabled else "0") == "1"
     dump_collective_schedule = True
 
+
 _save_config_ignore: list[str] = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",

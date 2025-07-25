@@ -1005,7 +1005,7 @@ def _compile_fx_inner(
             mb_compiled_graph._fx_graph_cache_debug_lines = debug_lines
 
         assert mb_compiled_graph is not None
-        compiled_graph = mb_compiled_graph # DEBUG: Spot 2 - Analysis
+        compiled_graph = mb_compiled_graph  # DEBUG: Spot 2 - Analysis
 
         # Logging and observability: we log a single chromium event
         # and a tlparse log for every cache action.

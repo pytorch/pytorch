@@ -38,8 +38,8 @@ from .scheduler import (
     FusedSchedulerNode,
     NopKernelSchedulerNode,
     OutputNode,
-    SchedulerNode,
     Scheduler,
+    SchedulerNode,
 )
 from .virtualized import V
 
@@ -691,7 +691,10 @@ class DebugFormatter:
                 payload_fn=lambda: json.dumps(schedule, separators=(",", ":")),
             )
         except Exception:
-            log.debug("Failed to log inductor_collective_schedule via structured logging", exc_info=True)
+            log.debug(
+                "Failed to log inductor_collective_schedule via structured logging",
+                exc_info=True,
+            )
 
 
 def log_ir_pre_fusion(nodes: SchedulerNodeList) -> None:
@@ -710,12 +713,9 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
 
 def log_collective_schedule(scheduler: "Scheduler") -> None:
     schedule = [
-        {
-            "op_name": getattr(node.node, "python_kernel_name", None)
-                      or node.node.kernel
-        }
+        {"op_name": getattr(op, "python_kernel_name", None)}
         for node in scheduler.nodes
-        if isinstance(getattr(node, "node", None), ir._CollectiveKernel)
+        if isinstance(op := getattr(node, "node", None), ir._CollectiveKernel)
     ]
 
     V.debug.dump_collective_schedule(schedule)
@@ -874,6 +874,7 @@ def create_node_mapping_kernel_to_post_grad(
         )
         log.error(traceback.format_exc())
         return empty_return
+
 
 def dump_inductor_provenance_info(
     filename: str = "inductor_generated_kernel_to_post_grad_nodes.json",
