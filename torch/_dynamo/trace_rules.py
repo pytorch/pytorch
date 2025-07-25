@@ -659,6 +659,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_cublas_allow_tf32",
         "torch._C._get_cudnn_allow_tf32",
         "torch._C._get_cudnn_benchmark",
+        "torch._C._get_miopen_immediate",
         "torch._C._get_cudnn_deterministic",
         "torch._C._get_cudnn_enabled",
         "torch._C._get_custom_class_python_wrapper",
