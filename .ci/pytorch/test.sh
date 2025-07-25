@@ -928,12 +928,6 @@ test_torchbench_gcp_smoketest(){
   popd
 }
 
-test_python_gloo_with_tls() {
-  source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
-  assert_git_not_dirty
-}
-
-
 test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:

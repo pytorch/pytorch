@@ -132,6 +132,7 @@ Distributed
 -  Chien-Chin Huang (`fegin <https://github.com/fegin>`__)
 -  Tristan Rice (`d4l3k <https://github.com/d4l3k>`__)
 -  Junjie Wang (`fduwjj <https://github.com/fduwjj>`__)
+-  Wei Feng (`weifengpy <https://github.com/weifengpy>`__)
 -  (emeritus) Shen Li (`mrshenli <https://github.com/mrshenli>`__)
 -  (emeritus) Pritam Damania (`pritamdamania87 <https://github.com/pritamdamania87>`__)
 -  (emeritus) Yanli Zhao (`zhaojuanmao <https://github.com/zhaojuanmao>`__)
