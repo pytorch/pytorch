@@ -4461,7 +4461,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 
     t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
@@ -4469,7 +4469,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
         return True
     if tensor1.ndim == 2:
         return False
-    if guard_size_oblivious(t1.numel() == 0):
+    if guard_or_false(t1.numel() == 0):
         return True
 
     t1_shape = t1.shape
@@ -4481,7 +4481,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
     for size in reversed(t1_shape[1:]):
         expected_stride.append(size * expected_stride[-1])
     return all(
-        guard_size_oblivious(size == 1) or left == right
+        guard_or_false(size == 1) or guard_or_false(left == right)
         for left, right, size in zip(
             t1_stride, list(reversed(expected_stride)), t1_shape
         )

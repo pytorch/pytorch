@@ -4354,6 +4354,20 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(ref[0], actual[0]))
         self.assertTrue(torch.allclose(ref[1], actual[1]))
 
+    def test_unbacked_3d_matmul(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, repeat):
+                u0 = repeat.item()
+                t1 = x.unsqueeze(1).expand(x.size(0), u0 // 2, x.size(-1))
+                t2 = torch.ones(3)
+                return torch.matmul(t1, t2)
+
+        model = Model()
+        inputs = (torch.randn(4, 3), torch.scalar_tensor(2, dtype=torch.int))
+
+        exported = export(model, inputs).module()
+        self.assertEqual(model(*inputs), exported(*inputs))
+
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
