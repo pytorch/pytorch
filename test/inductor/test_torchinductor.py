@@ -13660,6 +13660,27 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
 
+    @parametrize("dtype", [torch.int32, torch.int64])
+    def test_repeat_interleave_Tensor_decomp(self, dtype):
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            device = "cuda"
+
+        # https://github.com/pytorch/pytorch/issues/147160
+        def f(input, repeats):
+            return torch.repeat_interleave(input, repeats, dim=0, output_size=3) + 1
+
+        input = torch.tensor([[1, 2], [3, 4]], dtype=dtype, device=device)
+        repeat = torch.tensor([1, 2], device=device)
+        f_compiled = torch.compile(f)
+        test, (code,) = run_and_get_code(f_compiled, input, repeat)
+        self.assertEqual(test, f(input, repeat))
+        # we don't lower when the cpp_wrapper is used because it cannot generate
+        # proper examples during autotune
+        can_lower = (not config.cpp_wrapper) and (self.device != "mps")
+        has_lowered = not re.search(r"repeat_interleave.Tensor", code)
+        self.assertEqual(has_lowered, can_lower)
+
 
 @dataclasses.dataclass
 class TestFailure:
