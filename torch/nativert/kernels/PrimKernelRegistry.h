@@ -11,17 +11,17 @@ namespace torch::nativert {
 
 TORCH_DECLARE_REGISTRY(PrimKernelRegistry, OpKernel, const Node*);
 
-#define REGISTER_PRIM_KERNEL(name, id, ...)                          \
-  class OpKernel_##id : public OpKernel {                            \
-   public:                                                           \
-    OpKernel_##id(const Node* node)                                  \
-        : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {} \
-    void computeInternal(                                            \
-        ExecutionFrame& executionFrame) const override final {       \
-      __VA_ARGS__;                                                   \
-    }                                                                \
-  };                                                                 \
-  C10_REGISTER_TYPED_CLASS(PrimKernelRegistry, name, OpKernel_##id);
+#define REGISTER_PRIM_KERNEL(name, id, ...)                    \
+  class OpKernel_##id : public OpKernel {                      \
+   public:                                                     \
+    OpKernel_##id(const Node* node)                            \
+        : OpKernel(node, OpKernelKind::kPrimKernel) {}         \
+    void computeInternal(                                      \
+        ExecutionFrame& executionFrame) const override final { \
+      __VA_ARGS__;                                             \
+    }                                                          \
+  };                                                           \
+  C10_REGISTER_TYPED_CLASS(PrimKernelRegistry, name, OpKernel_##id)
 
 inline bool checkResizedDataPtr(at::Tensor& t) {
   auto const prev_data_ptr = t.data_ptr();
