@@ -288,14 +288,27 @@ jobs:
           TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
 
           if [[ ${BUILD_ENVIRONMENT} == *"riscv64"* ]]; then
-            for i in {1..3}; do
-              docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-              sleep 2
-            done
+            # EC2 specific setup for RISC-V emulation
+            # Ensure binfmt_misc is available
+            echo "Mounting binfmt_misc filesystem"
+            sudo mount binfmt_misc -t binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
 
-            sleep 5
-            ls -la /proc/sys/fs/binfmt_misc/
-            cat /proc/sys/fs/binfmt_misc/qemu-riscv64 2>/dev/null || echo "qemu-riscv64 registration failed"
+            echo "QEMU registration: multiarch/qemu-user-static"
+            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes || true
+            sleep 3
+
+            # Final verification
+            echo "Checking binfmt_misc status:"
+            ls -la /proc/sys/fs/binfmt_misc/ 2>/dev/null || echo "Cannot access binfmt_misc directory"
+
+            if [ -f /proc/sys/fs/binfmt_misc/qemu-riscv64 ]; then
+              echo "qemu-riscv64 registration successful"
+              cat /proc/sys/fs/binfmt_misc/qemu-riscv64 | head -3
+            else
+              echo "qemu-riscv64 registration failed - proceeding without emulation"
+              echo "This may cause RISC-V builds to fail"
+            fi
+
             RISCV_DOCKER_ARGS="--privileged"
           else
             RISCV_DOCKER_ARGS=
