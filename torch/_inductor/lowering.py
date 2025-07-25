@@ -489,11 +489,11 @@ def broadcast_symbolic_shapes(a, b):
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
         if V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(y, 1), size_oblivious=True
+            sympy.Eq(y, 1), fallback_value=False
         ):
             output.append(x)
         elif V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(x, 1), size_oblivious=True
+            sympy.Eq(x, 1), fallback_value=False
         ):
             output.append(y)
         else:
@@ -939,26 +939,14 @@ def broadcast_tensors(*inputs):
     outputs = []
     for x in inputs:
         sizes = x.get_size()
-        if len(sizes) != len(target) or any(
-            (
-                (
-                    V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(a, 1), size_oblivious=True
-                    )
-                    and not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(b, 1), size_oblivious=True
-                    )
-                )
-                or (
-                    not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(a, 1), size_oblivious=True
-                    )
-                    and V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(b, 1), size_oblivious=True
-                    )
-                )
+
+        def is_length_one(size: sympy.Expr):
+            return V.graph.sizevars.shape_env.evaluate_expr(
+                sympy.Eq(size, 1), fallback_value=False
             )
-            for a, b in zip(sizes, target)
+
+        if len(sizes) != len(target) or any(
+            is_length_one(a) != is_length_one(b) for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -2538,7 +2526,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
+        is_aligned_tensor = ir.is_aligned_realized_tensor_hint(arg, ALIGNMENT)
+        if is_aligned_tensor:
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
@@ -2546,7 +2535,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if (
             isinstance(arg, IRNode)
             and arg.maybe_get_stride() is not None
-            and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
+            and is_aligned_tensor
         ):
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
@@ -2590,7 +2579,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
             return ir.ExternKernel.require_exact_strides(arg, out_strides)
 
-        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
+        if is_aligned_tensor:
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
@@ -2598,7 +2587,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if (
             isinstance(arg, IRNode)
             and arg.maybe_get_stride() is not None
-            and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
+            and is_aligned_tensor
         ):
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
