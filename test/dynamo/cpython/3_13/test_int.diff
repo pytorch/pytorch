@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_int.py b/test/dynamo/cpython/3_13/test_int.py
-index 48825f46911..4ab200372ea 100644
+index 48825f46911..ce115cd784c 100644
 --- a/test/dynamo/cpython/3_13/test_int.py
 +++ b/test/dynamo/cpython/3_13/test_int.py
-@@ -1,13 +1,137 @@
+@@ -1,13 +1,140 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_int.py
 +
 +import sys
 +import torch
@@ -144,7 +147,7 @@ index 48825f46911..4ab200372ea 100644
  
  try:
      import _pylong
-@@ -38,7 +162,7 @@ L = [
+@@ -38,7 +165,7 @@ L = [
  class IntSubclass(int):
      pass
  
@@ -153,7 +156,7 @@ index 48825f46911..4ab200372ea 100644
  
      def test_basic(self):
          self.assertEqual(int(314), 314)
-@@ -566,6 +690,7 @@ class IntTestCases(unittest.TestCase):
+@@ -566,6 +693,7 @@ class IntTestCases(unittest.TestCase):
          self.assertEqual(n, 1)
          self.assertIs(type(n), IntSubclass)
  
@@ -161,7 +164,7 @@ index 48825f46911..4ab200372ea 100644
      def test_error_message(self):
          def check(s, base=None):
              with self.assertRaises(ValueError,
-@@ -607,7 +732,7 @@ class IntTestCases(unittest.TestCase):
+@@ -607,7 +735,7 @@ class IntTestCases(unittest.TestCase):
          self.assertEqual(int('1_2_3_4_5_6_7', 32), 1144132807)
  
  
@@ -170,7 +173,7 @@ index 48825f46911..4ab200372ea 100644
  
      int_class = int  # Override this in subclasses to reuse the suite.
  
-@@ -818,7 +943,7 @@ class IntSubclassStrDigitLimitsTests(IntStrDigitLimitsTests):
+@@ -818,7 +946,7 @@ class IntSubclassStrDigitLimitsTests(IntStrDigitLimitsTests):
      int_class = IntSubclass
  
  
@@ -179,7 +182,7 @@ index 48825f46911..4ab200372ea 100644
      # Tests of the functions in _pylong.py.  Those get used when the
      # number of digits in the input values are large enough.
  
-@@ -922,4 +1047,4 @@ class PyLongModuleTests(unittest.TestCase):
+@@ -922,4 +1050,4 @@ class PyLongModuleTests(unittest.TestCase):
              bits <<= 1
  
  if __name__ == "__main__":
