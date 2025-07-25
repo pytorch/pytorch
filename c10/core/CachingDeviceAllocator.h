@@ -449,60 +449,49 @@ struct PrivatePool {
 
 // Represents a contiguous virtual memory segment mapped for allocation.
 struct SegmentRange {
-  SegmentRange(void* p, size_t s, bool is_small)
-      : ptr_(static_cast<char*>(p)),
-        size_(s),
-        // Use 2 MiB pages for small segments, 20 MiB pages for large segments.
-        segment_size_(is_small ? kSmallBuffer : kLargeBuffer) {}
+  SegmentRange(void* p, size_t s) : ptr_(static_cast<char*>(p)), size_(s) {}
 
-  template <bool is_open_interval = true>
-  size_t begin() const {
-    if constexpr (is_open_interval) {
-      return segmentLeft(ptr_);
-    } else {
-      return segmentRight(ptr_);
-    }
-  }
-
-  template <bool is_open_interval = true>
-  size_t end() const {
-    if constexpr (is_open_interval) {
-      return segmentRight(ptr_ + size_);
-    } else {
-      return segmentLeft(ptr_ + size_);
-    }
-  }
-
-private:
-  char* ptr_;          // Starting address of the mapped range.
-  size_t size_;        // Size in bytes of the mapped range.
-  size_t segment_size_; // Page size used for the segment (2 MiB or 20 MiB).
+  char* ptr_; // Starting address of the mapped range.
+  size_t size_; // Size in bytes of the mapped range.
 };
 
+template <typename Handle>
 struct ExpandableSegment {
   virtual ExpandableSegment(
       c10::DeviceIndex device,
       std::optional<c10::Stream> stream,
-      size_t address_space_size,
       size_t segment_size,
-      std::vector<c10::DeviceIndex> peers) = 0;
+      std::vector<c10::DeviceIndex> peers)
+      : device_(device),
+        stream_(stream),
+        // 2MB for small pool, 20MB for large pool
+        segment_size_(segment_size),
+        peers_(std::move(peers)) {
+    size_t total = getReservedVirtualMemorySize();
+    max_handles_ = numSegments(total);
+    createVirtualMemoryAddress(&ptr_);
+  }
   C10_DISABLE_COPY_AND_ASSIGN(ExpandableSegment);
   ExpandableSegment(ExpandableSegment&&) = delete;
   ExpandableSegment operator=(ExpandableSegment&&) = delete;
 
   // Maps a virtual memory range to physical memory.
-  //
-  // `range.start` must be aligned to `segment_size_`.
-  // The returned range may be larger than requested if `range.size` is not
-  // aligned to `segment_size_`.
-  //
-  // Return:
-  // - A valid `SegmentRange` representing the actual mapped memory.
-  // - If the return range has `.size() == 0`, it indicates out-of-memory (OOM).
-  //
-  // Must be implemented by subclasses.
-  virtual SegmentRange map(SegmentRange range) = 0;
+  virtual SegmentRange map(SegmentRange range) {
+    auto begin = segmentLeft(range.ptr);
+    auto end = segmentRight(range.ptr + range.size);
+    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
+    if (begin == end) {
+      return rangeFromHandles(begin, end);
+    }
+    mapHandles(begin, end);
+    setAccess(device_, begin, end);
+    for (auto p : peers_) {
+      setAccess(p, begin, end);
+    }
+    return rangeFromHandles(begin, end);
+  }
 
+  // Unmap a virtual memory range from physical memory.
   virtual SegmentRange unmap(SegmentRange range) {
     auto begin = segmentRight(range.ptr);
     auto end = segmentLeft(range.ptr + range.size);
@@ -513,7 +502,6 @@ struct ExpandableSegment {
     return rangeFromHandles(begin, end);
   }
 
- private:
   char* ptr() const {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     return reinterpret_cast<char*>(ptr_);
@@ -523,78 +511,93 @@ struct ExpandableSegment {
     return max_handles_ * segment_size_;
   }
 
-  void addPeer(c10::DeviceIndex device) {
+  // Registers a new peer device and updates access permissions.
+  virtual void addPeer(c10::DeviceIndex device) {
     peers_.push_back(device);
     forEachAllocatedRange(
         [&](size_t begin, size_t end) { setAccess(device, begin, end); });
   }
 
-  ~ExpandableSegment() {
+  virtual ~ExpandableSegment() {
     forEachAllocatedRange(
         [&](size_t begin, size_t end) { unmapHandles(begin, end); });
-    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
-        ptr_, segment_size_ * max_handles_));
+    releaseVirtualMemoryAddress(ptr_);
   }
 
  private:
-  void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
-    CUmemAccessDesc desc;
-    desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-    desc.location.id = static_cast<int>(device);
-    desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
-        ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
+  // Runtime-related methods
+
+  // Returns the reserved virtual memory size for this segment, which may be
+  // larger than the total size if the segment is expandable.
+  virtual size_t getReservedVirtualMemorySize() const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "Not implemented for getReservedVirtualMemorySize.");
+  };
+
+  // Create virtual memory address for this segment for the reserved size.
+  virtual void createVirtualMemoryAddress(void** ptr) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "Not implemented for createVirtualMemoryAddress.");
   }
 
-  void mapAndSetAccess(size_t begin, size_t end) {
-    for (auto i : c10::irange(begin, end)) {
-      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemMap_(
-          ptr_ + i * segment_size_,
-          segment_size_,
-          0,
-          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-          handles_.at(i).value().handle,
-          0ULL));
-    }
-    setAccess(device_, begin, end);
-    for (auto p : peers_) {
-      setAccess(p, begin, end);
-    }
+  // Release the virtual memory address associated with the segment.
+  virtual void releaseVirtualMemoryAddress(void* ptr) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "Not implemented for releaseVirtualMemoryAddress.");
   }
 
-  void unmapHandles(size_t begin, size_t end) {
-    // note: unlike cudaFree, MemUnmap and MemRelease do
-    // not appear to synchronize in all cases, so we have to wait for the
-    // stream to finish before this memory is truly free.
+  // Maps the physical memory handles in the range [begin, end) to the segment.
+  virtual void mapHandles(size_t begin, size_t end) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for mapHandles.");
+  }
 
-    // cannot call c10::cuda::stream_synchronize because
-    // it might grab the GIL which can lead to a deadlock
-    // Locking order must be GIL -> Allocator Lock
-    if (stream_) {
-      C10_CUDA_CHECK(cudaStreamSynchronize(*stream_));
-    } else {
-      cuda::CUDAGuard device_guard(device_);
-      C10_CUDA_CHECK(cudaDeviceSynchronize());
-    }
-    for (auto i : c10::irange(begin, end)) {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      Handle h = handles_.at(i).value();
-      handles_.at(i) = std::nullopt;
-      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
-          ptr_ + segment_size_ * i, segment_size_));
-      if (h.shareable_handle) {
-        close(std::get<int>(*h.shareable_handle));
-      }
-      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
-    }
-    trimHandles();
+  // Unmaps the physical memory handles in the range [begin, end) from the
+  // segment.
+  virtual void unmapHandles(size_t begin, size_t end) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for unmapHandles.");
   }
-  void trimHandles() {
-    while (!handles_.empty() && !handles_.back()) {
-      handles_.pop_back();
-    }
+
+  // Internal methods
+
+  // Returns the number of full segments required to cover `size` bytes.
+  // Rounds up to ensure partial segments are counted.
+  size_t numSegments(size_t size) const {
+    return (size + segment_size_ - 1) / segment_size_;
   }
+
+  // Returns the index of the segment that contains the pointer `p`,
+  // relative to the base pointer `ptr_`. This is the *inclusive* lower bound
+  // of the segment that includes `p`.
+  size_t segmentLeft(char* p) const {
+    size_t offset = p - ptr();
+    return offset / segment_size_;
+  }
+
+  // Returns the index of the segment just *past* the one containing pointer
+  // `p`, relative to the base pointer `ptr_`. This is the *exclusive* upper
+  // bound, useful for [begin, end) style ranges.
+  // If `p` lies exactly on a segment boundary, this is equal to segmentLeft(p).
+  // Otherwise, it rounds up and returns segmentLeft(p) + 1.
+  size_t segmentRight(char* p) const {
+    size_t offset = p - ptr();
+    return numSegments(offset);
+  }
+
+  // Constructs a SegmentRange starting at [start, end) indices.
+  SegmentRange rangeFromHandles(size_t begin, size_t end) {
+    return SegmentRange(
+        ptr() + segment_size_ * begin, segment_size_ * (end - begin));
+  }
+
+  // Sets access permissions for the specified device on the segment range
+  // [begin, end).
+  virtual void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for setAccess.");
+  }
+
+  // Iterates over all contiguous ranges of allocated segments in `handles_`,
+  // and invokes the provided function `fn(start, end)` for each range.
+  // Each range is defined as a half-open interval [start, end).
   void forEachAllocatedRange(const std::function<void(size_t, size_t)>& fn) {
     size_t start = 0;
     for (auto i : c10::irange(handles_.size())) {
@@ -606,30 +609,13 @@ struct ExpandableSegment {
       }
     }
   }
-  size_t numSegments(size_t size) {
-    return (size + segment_size_ - 1) / segment_size_;
-  }
-  size_t segmentLeft(char* p) {
-    auto size = p - ptr();
-    return size / segment_size_;
-  }
-  size_t segmentRight(char* p) {
-    auto size = p - ptr();
-    return numSegments(size);
-  }
-  SegmentRange rangeFromHandles(size_t begin, size_t end) {
-    return SegmentRange(
-        ptr() + segment_size_ * begin, segment_size_ * (end - begin));
-  }
+
   c10::DeviceIndex device_;
-  std::optional<cudaStream_t> stream_;
-  CUdeviceptr ptr_{};
+  std::optional<c10::Stream> stream_;
+  // This is the virtual memory address used in reserveVirtualMemory.
+  void* ptr_;
   size_t segment_size_;
   size_t max_handles_;
-  struct Handle {
-    CUmemGenericAllocationHandle handle;
-    std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
-  };
   std::vector<std::optional<Handle>> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
@@ -646,3 +632,4 @@ struct CachingDeviceAllocatorImpl {
 };
 
 } // namespace c10
+  
