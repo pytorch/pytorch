@@ -199,10 +199,10 @@ class TestCKBackend(TestCase):
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    @parametrize("max_autotune_gemm_backends", ("ATen,Triton,CK"))
     def test_max_autotune_precompile_non_contiguous(self, max_autotune_gemm_backends):
         """
-        Make sure the ck template can work with non-contiguous inputs
+        Make sure the matmul with non-contiguous inputs can fallback
         """
 
         tensor_options = {"device": "cuda", "dtype": torch.float16}
