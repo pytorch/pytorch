@@ -1192,15 +1192,11 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # graph, among other things!
     wrappers: list[CompilerWrapper]
 
-    # The actual captured graph.  In some circumstances (export) this graph
-    # has a specific calling convention that can be relied upon by external
-    # callers.  In other situations, the calling convention is unspecified and
-    # only aot_stage2_compile knows how to deal with them.
-    #
-    # TODO: don't call this graph, it's a GraphModule
-    # TODO: should we return a GraphModule here??  More convenient for
-    # printing, I guess?
-    graph: torch.fx.GraphModule
+    # The actual captured graph module.  In some circumstances (export) this
+    # graph has a specific calling convention that can be relied upon by
+    # external callers.  In other situations, the calling convention is
+    # unspecified and only aot_stage2_compile knows how to deal with them.
+    graph_module: torch.fx.GraphModule
 
     # When compiling with autograd support, this is the joint_inputs, which is
     # larger than the original flat_args as all tangents get inputs.  The
@@ -1300,8 +1296,8 @@ class JointWithDescriptors:
 
     @property
     def graph_module(self):
-        return self._aot_graph_capture.graph
+        return self._aot_graph_capture.graph_module
 
     @graph_module.setter
     def graph_module(self, value):
-        self._aot_graph_capture.graph = value
+        self._aot_graph_capture.graph_module = value
