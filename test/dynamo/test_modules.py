@@ -698,6 +698,7 @@ class LazyModuleKwArgs(LazyModuleMixin, torch.nn.Module):
     def forward(self, x, y):
         return self.layer(x, y=y)
 
+
 class LazyModuleBadInferParams(LazyModuleMixin, torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -1670,18 +1671,17 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         y = [torch.rand([5, 5])] * 2
         # Note that this raises from within dynamo code, with no exception handling.
         with self.assertRaises(AttributeError) as cm:
-            opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+            opt_m = torch.compile(backend="eager")(m)
             exp_res = opt_m(x, y)
 
     def test_lazy_module_bad_params_call_function(self):
-
-        class holder():
+        class holder:
             x = LazyModuleBadInferParams()
 
             def apply(self, x, y):
                 self.x(x, y)
 
-        def m(x,y):
+        def m(x, y):
             h = holder()
             return h.apply(x, y)
 

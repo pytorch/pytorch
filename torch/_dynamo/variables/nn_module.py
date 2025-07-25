@@ -70,7 +70,6 @@ from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
-import logging
 
 
 if TYPE_CHECKING:
@@ -104,7 +103,7 @@ def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
         fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
         try:
             mod._infer_parameters(mod, fake_args, fake_kwargs)
-        except AttributeError as e:
+        except AttributeError:
             raise_observed_exception(
                 AttributeError,
                 tx,
