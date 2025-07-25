@@ -21,7 +21,7 @@ from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, Sy
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import config, ir
+from .. import config, cpp_builder, ir
 from ..utils import (
     _align,
     aoti_model_name_from_config,
@@ -119,7 +119,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # e.g. const double** is possible, but not const double* const*.  This means
         # that an array containing pointers must _already_ be properly const-qualified
         # by the c_type, and not add additional const-ness.
-        ptr_call = "data()" if force_mutable or c_type.endswith("*") else "cbegin()"
+        # MSVC does not support implicitly converting a const iterator to a const pointer.
+        ptr_call = (
+            "data()"
+            if force_mutable or c_type.endswith("*") or cpp_builder.is_msvc_cl()
+            else "cbegin()"
+        )
         return (
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )

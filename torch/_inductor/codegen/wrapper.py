@@ -2541,7 +2541,9 @@ class PythonWrapperCodegen(CodeGen):
         original_fxnode_name=None,
     ):
         device = device or V.graph.get_current_device_or_throw()
-        if not (triton or device.type != "cpu"):
+        if not (
+            triton or device.type not in ("cpu", "mps")
+        ):  # TODO: Fix me, MPS does not expose streams now
             self.writeline(self.wrap_kernel_call(kernel_name, call_args))
             return
 

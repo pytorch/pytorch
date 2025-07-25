@@ -3698,6 +3698,27 @@ exit(2)
         self.assertEqual(len(x), 2)
         self.assertEqual(x[0], x[1])
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_cuda_graph_tensor_item_not_allowed(self):
+        # Tesnor.item() calls a synchronize which is not allowed in a cudagraph
+        # Valid for CUDA and ROCm
+        def my_func(a: torch.Tensor, b: torch.Tensor, perm: torch.Tensor):
+            idx = perm[0]
+            a[0] *= b[idx]  # should raise an error during capture
+            return a
+
+        a = torch.rand(500, 500, device="cuda")
+        b = torch.rand(500, 500, device="cuda")
+        perm = torch.randint(0, 500, (500,), device="cuda")
+
+        g = torch.cuda.CUDAGraph()
+
+        with self.assertRaises(RuntimeError):
+            with torch.cuda.graph(g):
+                output = my_func(a, b, perm)
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device="cuda")
         mean, invstd = torch.batch_norm_gather_stats(
