@@ -41,6 +41,8 @@ For example, for the function `f` in the above diagram, Dynamo produces:
 - **guards** that specify the conditions under which the graph and bytecode are valid. Unless otherwise specified,
   the graph produced by Dynamo specializes on the shapes of input Tensors.
 
+(programming_model.dynamo_core_concepts.graph_breaks)=
+
 ## Graph Breaks
 Dynamo traces your code and attempts to capture your PyTorch code into a single computation graph of PyTorch
 operators (FX graph). However, this is not always possible. When encountering code that can't be traced, a "**graph break**" occurs.
