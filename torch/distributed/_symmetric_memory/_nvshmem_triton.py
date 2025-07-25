@@ -54,12 +54,14 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
 if has_triton():
     from triton.language import core
 
+    # RMA Operations (mem-based APIs - sizes in bytes)
     @core.extern
-    def putmem_block(dst, src, nelems, pe, _builder=None):  # type: ignore[no-untyped-def]
+    def putmem_block(dst, src, size_bytes, pe, _builder=None):  # type: ignore[no-untyped-def]
+        """Put data to remote PE. size_bytes specifies the size in bytes."""
         return core.extern_elementwise(
             "",
             "",
-            [dst, src, nelems, pe],
+            [dst, src, size_bytes, pe],
             {
                 (
                     core.dtype("int64"),
@@ -73,11 +75,12 @@ if has_triton():
         )
 
     @core.extern
-    def getmem_block(dst, src, nelems, pe, _builder=None):  # type: ignore[no-untyped-def]
+    def getmem_block(dst, src, size_bytes, pe, _builder=None):  # type: ignore[no-untyped-def]
+        """Get data from remote PE. size_bytes specifies the size in bytes."""
         return core.extern_elementwise(
             "",
             "",
-            [dst, src, nelems, pe],
+            [dst, src, size_bytes, pe],
             {
                 (
                     core.dtype("int64"),
@@ -94,17 +97,18 @@ if has_triton():
     def putmem_signal_block(  # type: ignore[no-untyped-def]
         dst,
         src,
-        nelems,
+        size_bytes,
         sig_addr,
         signal,
         sig_op,
         pe,
         _builder=None,
     ):  # type: ignore[no-untyped-def]
+        """Put data to remote PE with signal. size_bytes specifies the size in bytes."""
         return core.extern_elementwise(
             "",
             "",
-            [dst, src, nelems, sig_addr, signal, sig_op, pe],
+            [dst, src, size_bytes, sig_addr, signal, sig_op, pe],
             {
                 (
                     core.dtype("int64"),
@@ -120,8 +124,10 @@ if has_triton():
             _builder=_builder,
         )
 
+    # Wait and Signal Operations
     @core.extern
     def wait_until(ivar, cmp, cmp_val, _builder=None):  # type: ignore[no-untyped-def]
+        """Wait until a condition is met on a symmetric variable."""
         return core.extern_elementwise(
             "",
             "",
@@ -139,6 +145,7 @@ if has_triton():
 
     @core.extern
     def signal_wait_until(sig_addr, cmp, cmp_val, _builder=None):  # type: ignore[no-untyped-def]
+        """Wait until a signal variable meets a condition."""
         return core.extern_elementwise(
             "",
             "",
@@ -156,6 +163,7 @@ if has_triton():
 
     @core.extern
     def signal_op(sig_addr, signal, sig_op, pe, _builder=None):  # type: ignore[no-untyped-def]
+        """Perform a signal operation on a remote PE."""
         return core.extern_elementwise(
             "",
             "",
@@ -172,8 +180,10 @@ if has_triton():
             _builder=_builder,
         )
 
+    # Memory Ordering Operations
     @core.extern
     def fence(_builder=None):  # type: ignore[no-untyped-def]
+        """Ensure ordering of put operations."""
         return core.extern_elementwise(
             "",
             "",
@@ -187,6 +197,7 @@ if has_triton():
 
     @core.extern
     def quiet(_builder=None):  # type: ignore[no-untyped-def]
+        """Wait for completion of all outstanding put operations."""
         return core.extern_elementwise(
             "",
             "",
@@ -198,8 +209,10 @@ if has_triton():
             _builder=_builder,
         )
 
+    # PE Information Operations
     @core.extern
     def my_pe(_builder=None):  # type: ignore[no-untyped-def]
+        """Get the PE number of the calling PE."""
         return core.extern_elementwise(
             "",
             "",
@@ -211,6 +224,7 @@ if has_triton():
 
     @core.extern
     def n_pes(_builder=None):  # type: ignore[no-untyped-def]
+        """Get the total number of PEs."""
         return core.extern_elementwise(
             "",
             "",
@@ -220,8 +234,10 @@ if has_triton():
             _builder=_builder,
         )
 
+    # Synchronization Operations
     @core.extern
     def barrier_all(_builder=None):  # type: ignore[no-untyped-def]
+        """Synchronize all PEs."""
         return core.extern_elementwise(
             "",
             "",
@@ -233,6 +249,7 @@ if has_triton():
 
     @core.extern
     def sync_all(_builder=None):  # type: ignore[no-untyped-def]
+        """Synchronize all PEs (lightweight version, does not ensure completion of remote memory updates)."""
         return core.extern_elementwise(
             "",
             "",
@@ -242,48 +259,50 @@ if has_triton():
             _builder=_builder,
         )
 
+    # Collective Operations (mem-based APIs - sizes in bytes)
     @core.extern
-    def alltoall(team, dest, source, nelems, _builder=None):  # type: ignore[no-untyped-def]
-        """Perform alltoall operation on NVSHMEM symmetric memory"""
+    def alltoallmem_block(team, dest, source, size_bytes, _builder=None):  # type: ignore[no-untyped-def]
+        """Perform alltoall operation on symmetric memory. size_bytes specifies the number of bytes to exchange per PE."""
         return core.extern_elementwise(
             "",
             "",
-            [team, dest, source, nelems],
+            [team, dest, source, size_bytes],
             {
                 (
                     core.dtype("int64"),  # team handle
                     core.dtype("int64"),  # dest ptr
                     core.dtype("int64"),  # source ptr
-                    core.dtype("int64"),  # nelems
-                ): ("nvshmem_longlong_alltoall", core.dtype("int32"))
+                    core.dtype("int64"),  # size in bytes
+                ): ("nvshmemx_alltoallmem_block", core.dtype("int32"))
             },
             is_pure=False,
             _builder=_builder,
         )
 
     @core.extern
-    def broadcast(team, dest, source, nelems, pe_root, _builder=None):  # type: ignore[no-untyped-def]
-        """Broadcasts data from a root PE to all other PEs in a team"""
+    def broadcastmem_block(team, dest, source, size_bytes, pe_root, _builder=None):  # type: ignore[no-untyped-def]
+        """Broadcast data from a root PE to all other PEs in a team. size_bytes specifies the size in bytes."""
         return core.extern_elementwise(
             "",
             "",
-            [team, dest, source, nelems, pe_root],
+            [team, dest, source, size_bytes, pe_root],
             {
                 (
                     core.dtype("int64"),  # team handle
                     core.dtype("int64"),  # dest ptr
                     core.dtype("int64"),  # source ptr
-                    core.dtype("int64"),  # nelems
+                    core.dtype("int64"),  # size in bytes
                     core.dtype("int64"),  # pe_root
-                ): ("nvshmem_longlong_broadcast", core.dtype("int32"))
+                ): ("nvshmemx_broadcastmem_block", core.dtype("int32"))
             },
             is_pure=False,
             _builder=_builder,
         )
 
+    # Reduction Operations
     @core.extern
     def sum_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
-        """Sum reduction for int64"""
+        """Sum reduction for int64. nreduce is number of elements in the dest and source arrays."""
         return core.extern_elementwise(
             "",
             "",
@@ -302,7 +321,7 @@ if has_triton():
 
     @core.extern
     def max_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
-        """Max reduction for int64"""
+        """Max reduction for int64. nreduce is number of elements in the dest and source arrays."""
         return core.extern_elementwise(
             "",
             "",
@@ -321,7 +340,7 @@ if has_triton():
 
     @core.extern
     def min_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
-        """Min reduction for int64"""
+        """Min reduction for int64. nreduce is number of elements in the dest and source arrays."""
         return core.extern_elementwise(
             "",
             "",

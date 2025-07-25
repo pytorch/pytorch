@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: distributed"]
-
 # To run:
 # python test/distributed/test_nvshmem_triton.py
-
 
 import triton.language as tl
 
@@ -36,37 +34,37 @@ device_module = torch.get_device_module(device_type)
 
 # Shared Triton JIT kernels
 @triton.jit
-def put_kernel(
+def putmem_block_kernel(
     dst_ptr,
     src_ptr,
-    numel,
+    size_bytes,
     peer,
 ):
-    nvshmem.putmem_block(dst_ptr, src_ptr, numel, peer)
+    nvshmem.putmem_block(dst_ptr, src_ptr, size_bytes, peer)
 
 
 @triton.jit
-def get_kernel(
+def getmem_block_kernel(
     dst_ptr,
     src_ptr,
-    numel,
+    size_bytes,
     peer,
 ):
-    nvshmem.getmem_block(dst_ptr, src_ptr, numel, peer)
+    nvshmem.getmem_block(dst_ptr, src_ptr, size_bytes, peer)
 
 
 @triton.jit
-def put_signal_kernel(
+def putmem_signal_block_kernel(
     dst_ptr,
     src_ptr,
-    numel,
+    size_bytes,
     sig_ptr,
     signal_val,
     sig_op,
     peer,
 ):
     nvshmem.putmem_signal_block(
-        dst_ptr, src_ptr, numel, sig_ptr, signal_val, sig_op, peer
+        dst_ptr, src_ptr, size_bytes, sig_ptr, signal_val, sig_op, peer
     )
 
 
@@ -95,21 +93,6 @@ def wait_until_kernel(
 
 
 @triton.jit
-def put_and_signal_kernel(
-    dst_ptr,
-    src_ptr,
-    numel,
-    sig_ptr,
-    signal_val,
-    sig_op,
-    peer,
-):
-    nvshmem.putmem_signal_block(
-        dst_ptr, src_ptr, numel, sig_ptr, signal_val, sig_op, peer
-    )
-
-
-@triton.jit
 def fence_kernel():
     nvshmem.fence()
 
@@ -122,19 +105,19 @@ def put_with_fence_kernel(
     src_ptr2,
     flag_ptr,
     flag_src_ptr,
-    numel,
+    size_bytes,
     peer,
 ):
     # First put
-    nvshmem.putmem_block(dst_ptr1, src_ptr1, numel, peer)
+    nvshmem.putmem_block(dst_ptr1, src_ptr1, size_bytes, peer)
     # Ensure the first put is ordered before the next.
     nvshmem.fence()
     # Second put
-    nvshmem.putmem_block(dst_ptr2, src_ptr2, numel, peer)
+    nvshmem.putmem_block(dst_ptr2, src_ptr2, size_bytes, peer)
     # Order the second put before flag update.
     nvshmem.fence()
     # Write the flag (single int64) to signal completion.
-    nvshmem.putmem_block(flag_ptr, flag_src_ptr, 1, peer)
+    nvshmem.putmem_block(flag_ptr, flag_src_ptr, 8, peer)  # 8 bytes for int64
 
 
 @triton.jit
@@ -143,23 +126,23 @@ def put_with_quiet_kernel(
     src_ptr,
     flag_dst_ptr,
     flag_src_ptr,
-    numel,
+    size_bytes,
     peer,
 ):
     # Put data
-    nvshmem.putmem_block(dst_ptr, src_ptr, numel, peer)
+    nvshmem.putmem_block(dst_ptr, src_ptr, size_bytes, peer)
     # Call quiet to ensure put is complete
     nvshmem.quiet()
     # Only after quiet, set the completion flag
     # This ensures the data put is complete before flag is set
-    nvshmem.putmem_block(flag_dst_ptr, flag_src_ptr, 1, peer)
+    nvshmem.putmem_block(flag_dst_ptr, flag_src_ptr, 8, peer)  # 8 bytes for int64
 
 
 @triton.jit
 def barrier_test_kernel(
     dst_ptr,
     src_ptr,
-    numel,
+    size_bytes,
 ):
     # Testing barrier_all() requires coordinated operations across PEs within
     # the same kernel execution. Unlike other kernels that just wrap NVSHMEM
@@ -167,6 +150,7 @@ def barrier_test_kernel(
     # device-side barrier synchronization.
     my_pe = nvshmem.my_pe()
     n_pes = nvshmem.n_pes()
+
     # Rank 0 broadcasts its value to all other ranks
     if my_pe == 0:
         # Write initial value
@@ -175,10 +159,12 @@ def barrier_test_kernel(
         # Put to all other ranks
         i = 1
         while i < n_pes:
-            nvshmem.putmem_block(dst_ptr, src_ptr, numel, i)
+            nvshmem.putmem_block(dst_ptr, src_ptr, size_bytes, i)
             i += 1
+
     # Synchronize all PEs
     nvshmem.barrier_all()
+
     # Non-zero ranks increment the received value
     if my_pe != 0:
         p_dst = dst_ptr.to(tl.pointer_type(tl.int32))
@@ -190,7 +176,7 @@ def barrier_test_kernel(
 def sync_test_kernel(
     dst_ptr,
     src_ptr,
-    numel,
+    size_bytes,
 ):
     my_pe = nvshmem.my_pe()
     n_pes = nvshmem.n_pes()
@@ -203,11 +189,13 @@ def sync_test_kernel(
         # Put to all other ranks
         i = 1
         while i < n_pes:
-            nvshmem.putmem_block(dst_ptr, src_ptr, numel, i)
+            nvshmem.putmem_block(dst_ptr, src_ptr, size_bytes, i)
             i += 1
+
     # Synchronize all PEs (this is more lightweight than barrier_all() b/c it only ensures local store visibility
     # and doesn't wait for remote ops to complete)
     nvshmem.sync_all()
+
     # Non-zero ranks increment the received value
     if my_pe != 0:
         p_dst = dst_ptr.to(tl.pointer_type(tl.int32))
@@ -216,24 +204,24 @@ def sync_test_kernel(
 
 
 @triton.jit
-def alltoall_kernel(
+def alltoallmem_block_kernel(
     team_handle,
     dest_ptr,
     src_ptr,
-    nelems,
+    size_bytes_per_pe,
 ):
-    nvshmem.alltoall(team_handle, dest_ptr, src_ptr, nelems)
+    nvshmem.alltoallmem_block(team_handle, dest_ptr, src_ptr, size_bytes_per_pe)
 
 
 @triton.jit
-def broadcast_kernel(
+def broadcastmem_block_kernel(
     team_handle,
     dest_ptr,
     src_ptr,
-    nelems,
+    size_bytes,
     pe_root,
 ):
-    nvshmem.broadcast(team_handle, dest_ptr, src_ptr, nelems, pe_root)
+    nvshmem.broadcastmem_block(team_handle, dest_ptr, src_ptr, size_bytes, pe_root)
 
 
 @triton.jit
@@ -308,10 +296,10 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         if rank == 0:
             dst_ptr = out_hdl.buffer_ptrs[rank]
             src_ptr = inp_hdl.buffer_ptrs[rank]
-            put_kernel[(1, 1, 1)](
+            putmem_block_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
-                numel=numel,
+                size_bytes=msg_size_bytes,
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
@@ -348,10 +336,10 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             # Rank 1 gets data from rank 0
             dst_ptr = out_hdl.buffer_ptrs[rank]
             src_ptr = inp_hdl.buffer_ptrs[rank]
-            get_kernel[(1, 1, 1)](
+            getmem_block_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
-                numel=numel,
+                size_bytes=msg_size_bytes,
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
@@ -389,10 +377,10 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # All ranks execute the get operation
         dst_ptr = out_hdl.buffer_ptrs[rank]
         src_ptr = inp_hdl.buffer_ptrs[rank]
-        get_kernel[(1, 1, 1)](
+        getmem_block_kernel[(1, 1, 1)](
             dst_ptr,
             src_ptr,
-            numel=numel,
+            size_bytes=msg_size_bytes,
             peer=peer,
             extern_libs=nvshmem_lib,
         )
@@ -439,10 +427,10 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             dst_ptr = out_hdl.buffer_ptrs[peer]
             src_ptr = inp_hdl.buffer_ptrs[rank]
             sig_ptr = out_hdl.signal_pad_ptrs[peer]
-            put_signal_kernel[(1, 1, 1)](
+            putmem_signal_block_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
-                numel=numel,
+                size_bytes=msg_size_bytes,
                 sig_ptr=sig_ptr,
                 signal_val=SIGNAL_VAL,
                 sig_op=NVSHMEM_SIGNAL_SET,
@@ -504,10 +492,10 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             dst_ptr = out_hdl.buffer_ptrs[peer]
             src_ptr = inp_hdl.buffer_ptrs[rank]
             sig_ptr = out_hdl.signal_pad_ptrs[peer]
-            put_signal_kernel[(1, 1, 1)](
+            putmem_signal_block_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
-                numel=numel,
+                size_bytes=msg_size_bytes,
                 sig_ptr=sig_ptr,
                 signal_val=SIGNAL_VAL,
                 sig_op=NVSHMEM_SIGNAL_ADD,
@@ -578,10 +566,10 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             dst_ptr = out_hdl.buffer_ptrs[peer]
             src_ptr = inp_hdl.buffer_ptrs[rank]
 
-            put_kernel[(1, 1, 1)](
+            putmem_block_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
-                numel=numel,
+                size_bytes=msg_size_bytes,
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
@@ -597,10 +585,10 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             flag_src = torch.tensor([flag_val], dtype=torch.int64, device=self.device)
             flag_dst_ptr = out_hdl.signal_pad_ptrs[peer]
 
-            put_kernel[(1, 1, 1)](
+            putmem_block_kernel[(1, 1, 1)](
                 flag_dst_ptr,
                 flag_src.data_ptr(),
-                numel=1,
+                size_bytes=8,  # 8 bytes for int64
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
@@ -624,6 +612,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         msg_size_bytes = 8
         dtype = torch.int8
         numel = msg_size_bytes // dtype.itemsize
+
         val_to_put = 123  # arbitrary test value
         COMPLETION_FLAG_VAL = 1
 
@@ -642,11 +631,11 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             dst_ptr = out_hdl.buffer_ptrs[peer]
             src_ptr = inp_hdl.buffer_ptrs[rank]
             sig_ptr = out_hdl.signal_pad_ptrs[peer]
-            put_and_signal_kernel[(1, 1, 1)](
+            putmem_signal_block_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
-                numel,
-                sig_ptr,
+                size_bytes=msg_size_bytes,
+                sig_ptr=sig_ptr,
                 signal_val=COMPLETION_FLAG_VAL,
                 sig_op=NVSHMEM_SIGNAL_SET,
                 peer=peer,
@@ -701,7 +690,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             flag[0] = 1  # local store is fine for rank‑0
         else:
             data.fill_(0)
-        # ring algoirthm
+        # ring algorithm
         next_pe = (rank + 1) % world_size
         # 1) wait until our flag is non‑zero
         local_sig_ptr = flag_hdl.buffer_ptrs[rank]
@@ -715,11 +704,11 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         if rank != world_size - 1:
             dst_ptr = data_hdl.buffer_ptrs[next_pe]
             src_ptr = data_hdl.buffer_ptrs[rank]
-            put_kernel[(1,)](
+            putmem_block_kernel[(1,)](
                 dst_ptr,
                 src_ptr,
-                msg_size_bytes,
-                next_pe,
+                size_bytes=msg_size_bytes,
+                peer=next_pe,
                 extern_libs=nvshmem_lib,
             )
             # order before signaling
@@ -762,6 +751,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         msg_size_bytes = 8
         dtype = torch.int8
         numel = msg_size_bytes // dtype.itemsize
+
         val1 = 10
         val2 = 20
         flag_val = 1
@@ -797,7 +787,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 src_ptr2,
                 flag_ptr,
                 flag_src_ptr,
-                numel,
+                size_bytes=msg_size_bytes,
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
@@ -835,6 +825,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         msg_size_bytes = 8
         dtype = torch.int8
         numel = msg_size_bytes // dtype.itemsize
+
         # Data buffers
         val = 15
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val)
@@ -874,7 +865,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 src_ptr,
                 flag_dst_ptr,
                 flag_src_ptr,
-                numel=numel,
+                size_bytes=msg_size_bytes,
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
@@ -890,6 +881,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         rank = self.rank
         numel = 1
         dtype = torch.int32
+        size_bytes = numel * dtype.itemsize
         # Create symmetric buffers
         src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
         dst = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
@@ -899,7 +891,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         barrier_test_kernel[(1,)](
             dst_hdl.buffer_ptrs[rank],
             src_hdl.buffer_ptrs[rank],
-            numel=numel,
+            size_bytes=size_bytes,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
             num_ctas=1,
@@ -928,6 +920,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         rank = self.rank
         numel = 1
         dtype = torch.int32
+        size_bytes = numel * dtype.itemsize
         # Create symmetric buffers
         src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
         dst = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
@@ -937,7 +930,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         sync_test_kernel[(1,)](
             dst_hdl.buffer_ptrs[rank],
             src_hdl.buffer_ptrs[rank],
-            numel=numel,
+            size_bytes=size_bytes,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
             num_ctas=1,
@@ -967,6 +960,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # Each PE will send 2 int64 elements to every other PE
         nelems_per_pe = 2
         dtype = torch.int64
+        size_bytes_per_pe = nelems_per_pe * dtype.itemsize
         # Source buffer: contains data for all PEs
         # Layout: [data_for_pe0, data_for_pe1, ...]
         src_size = nelems_per_pe * world_size
@@ -984,11 +978,11 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         dist.barrier()
         team_handle = 0  # NVSHMEM_TEAM_WORLD handle is 0
         # Launch the kernel
-        alltoall_kernel[(1,)](
+        alltoallmem_block_kernel[(1,)](
             team_handle,
             dst_hdl.buffer_ptrs[rank],
             src_hdl.buffer_ptrs[rank],
-            nelems_per_pe,
+            size_bytes_per_pe=size_bytes_per_pe,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
@@ -1014,6 +1008,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # Configuration
         nelems = 4  # number of elements
         dtype = torch.int64
+        size_bytes = nelems * dtype.itemsize
         # Source buffer - only root will have meaningful data
         pe_root = 0  # PE 0 will be the root
         src = symm_mem.empty(nelems, dtype=dtype, device=self.device)
@@ -1032,12 +1027,12 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         dist.barrier()
         # Execute broadcast
         team_handle = 0  # NVSHMEM_TEAM_WORLD
-        broadcast_kernel[(1,)](
+        broadcastmem_block_kernel[(1,)](
             team_handle,
             dst_hdl.buffer_ptrs[rank],
             src_hdl.buffer_ptrs[rank],
-            nelems,
-            pe_root,
+            size_bytes=size_bytes,
+            pe_root=pe_root,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
