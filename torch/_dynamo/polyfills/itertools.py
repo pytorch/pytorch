@@ -43,7 +43,11 @@ def chain(*iterables: Iterable[_T]) -> Iterator[_T]:
 
 @substitute_in_graph(itertools.chain.from_iterable)  # type: ignore[arg-type]
 def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
-    return itertools.chain(*iterable)
+    # previous version of this code was:
+    #   return itertools.chain(*iterable)
+    # If iterable is an infinite generator, this will lead to infinite recursion
+    for it in iterable:
+        yield from it
 
 
 chain.from_iterable = chain_from_iterable  # type: ignore[attr-defined]
