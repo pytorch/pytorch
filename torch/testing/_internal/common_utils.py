@@ -3376,6 +3376,8 @@ class TestCase(expecttest.TestCase):
 
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()
+        elif torch._dynamo.config.compiled_autograd:
+            torch._dynamo.compiled_autograd.reset()
 
         # Early terminate test if necessary.  If using pytest, use the -x flag instead
         if using_unittest and self._should_stop_test_suite():

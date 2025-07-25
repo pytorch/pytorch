@@ -128,3 +128,27 @@ def my_transpose(t, dim0, dim1) -> Tensor:
     Returns: my_transpose(t, dim0, dim1)
     """
     return torch.ops.libtorch_agnostic.my_transpose.default(t, dim0, dim1)
+
+
+def my_empty_like(t) -> Tensor:
+    """
+    Returns t.empty_like()
+
+    Args:
+        t: Tensor
+
+    Returns: my_empty_like(t)
+    """
+    return torch.ops.libtorch_agnostic.my_empty_like.default(t)
+
+
+def my_zero_(t) -> Tensor:
+    """
+    Returns t.zero_()
+
+    Args:
+        t: Tensor
+
+    Returns: my_zero_(t)
+    """
+    return torch.ops.libtorch_agnostic.my_zero_.default(t)
