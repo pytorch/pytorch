@@ -8,7 +8,8 @@ import operator
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -18,6 +19,8 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
+
+from .descriptors import AOTOutput
 
 
 KNOWN_TYPES = [
@@ -513,3 +516,31 @@ def saved_tensors_hooks_are_inlineable(hooks) -> bool:
     return isinstance(pack, torch.fx.GraphModule) and isinstance(
         unpack, torch.fx.GraphModule
     )
+
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+_S = TypeVar("_S")
+
+
+def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
+    @wraps(f)
+    def inner(*args, **kwargs):
+        return f(*args, **kwargs)[0]
+
+    return inner
+
+
+def call_and_expect_output_descs(fn, args):
+    outs_pair = fn(*args)
+    assert isinstance(outs_pair, tuple) and len(outs_pair) == 2, (fn, outs_pair)
+    outs, outs_descs = outs_pair
+    # The Tensor tests protects against the test when there are no outputs
+    assert pytree.tree_any(
+        lambda x: isinstance(x, AOTOutput), outs_descs
+    ) or not pytree.tree_any(lambda x: isinstance(x, torch.Tensor), outs), (
+        fn,
+        outs,
+        outs_descs,
+    )
+    return outs_pair
