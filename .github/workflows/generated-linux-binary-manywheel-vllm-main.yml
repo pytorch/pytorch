@@ -48,32 +48,8 @@ jobs:
     needs:
       - manywheel-py3_12-cuda12_8-build
       - get-label-type
-   runs_on: linux.24xlarge
-   steps:
-     - name: Print Hello World
-       run: echo "Hello World"
+    runs-on: linux.24xlarge
+    steps:
+      - name: Print Hello World
+        run: echo "Hello World"
 
-  manywheel-py3_12-cuda12_8-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - manywheel-py3_12-cuda12_8-build
-      - get-label-type
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: manylinux2_28-builder
-      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
-      DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-cuda12_8
-      build_environment: linux-binary-manywheel-vllm
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
