@@ -383,6 +383,7 @@ reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
+memory_debug = os.environ.get("TORCHINDUCTOR_MEMORY_DEBUG") == "1"
 
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
@@ -571,9 +572,7 @@ realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8
-realize_acc_reads_size_threshold: Optional[int] = (
-    None  # TODO(xuanzh): harden this to make it non optional
-)
+realize_acc_reads_size_threshold: Optional[int] = 3 * 1024**3
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
