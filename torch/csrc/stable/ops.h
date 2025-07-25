@@ -32,8 +32,7 @@ inline Tensor empty_like(const Tensor& self) {
 // actually a Scalar. This is because Scalar.h is currently not
 // header-only.
 inline Tensor fill_(const Tensor& self, double value) {
-  auto self_ = self.get();
-  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_fill__Scalar(self_, value));
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_fill__Scalar(self.get(), value));
   return self;
 }
 
