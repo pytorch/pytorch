@@ -23,6 +23,7 @@ from torch import fx as fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
 from torch._logging import getArtifactLogger
+from torch._logging._internal import trace_structured_artifact
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -38,6 +39,7 @@ from .scheduler import (
     NopKernelSchedulerNode,
     OutputNode,
     SchedulerNode,
+    Scheduler,
 )
 from .virtualized import V
 
@@ -46,6 +48,7 @@ log = logging.getLogger(__name__)
 
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
+collective_schedule_log = getArtifactLogger(__name__, "collective_schedule")
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
@@ -678,6 +681,18 @@ class DebugFormatter:
                 json.dump(info_dict, fd)
                 fd.write("\n")
 
+    def dump_collective_schedule(self, schedule: list[dict[str, Any]]) -> None:
+        with self.fopen("collective_schedule.json", "w", encoding="utf-8") as fd:
+            json.dump(schedule, fd)
+        try:
+            trace_structured_artifact(
+                "inductor_collective_schedule",
+                "string",  # encoding
+                payload_fn=lambda: json.dumps(schedule, separators=(",", ":")),
+            )
+        except Exception:
+            log.debug("Failed to log inductor_collective_schedule via structured logging", exc_info=True)
+
 
 def log_ir_pre_fusion(nodes: SchedulerNodeList) -> None:
     if ir_pre_fusion_log.isEnabledFor(logging.INFO):
@@ -691,6 +706,19 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
         ir_post_fusion_log.info("AFTER FUSION\n%s", DebugFormatter._write_ir(nodes))
 
     V.debug.ir_post_fusion(nodes)
+
+
+def log_collective_schedule(scheduler: "Scheduler") -> None:
+    schedule = [
+        {
+            "op_name": getattr(node.node, "python_kernel_name", None)
+                      or node.node.kernel
+        }
+        for node in scheduler.nodes
+        if isinstance(getattr(node, "node", None), ir._CollectiveKernel)
+    ]
+
+    V.debug.dump_collective_schedule(schedule)
 
 
 @dataclasses.dataclass
@@ -846,7 +874,6 @@ def create_node_mapping_kernel_to_post_grad(
         )
         log.error(traceback.format_exc())
         return empty_return
-
 
 def dump_inductor_provenance_info(
     filename: str = "inductor_generated_kernel_to_post_grad_nodes.json",
