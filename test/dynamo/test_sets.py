@@ -76,7 +76,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            nonlocal n  # noqa: F824
+            nonlocal n
             s = {2, 4, 5}
             s.isdisjoint(gen())
             if n == 3:

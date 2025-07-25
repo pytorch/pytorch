@@ -1374,7 +1374,7 @@ def register_vmap(
         )
 
     def register(func):
-        nonlocal lib
+        nonlocal op, lib
 
         namespace, opname = torch._library.utils.parse_namespace(qualname)
         if lib is None:

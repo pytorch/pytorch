@@ -1039,6 +1039,7 @@ class TimeoutTest(TestCase):
         rank_res = [None, None]
 
         def run(rank, my_store):
+            nonlocal rank_res
             try:
                 if rank == 0:
                     time.sleep(4)

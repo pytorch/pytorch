@@ -159,6 +159,7 @@ class TestUtils(TestCase):
         def my_backend(gm, example_inputs):
             from torch._dynamo.utils import get_traced_code
 
+            nonlocal traced_code_lists
             traced_code_lists.append(get_traced_code())
             return gm.forward
 
