@@ -36,7 +36,6 @@ import re
 import sys
 import traceback
 import types
-import warnings
 import weakref
 from collections.abc import MutableMapping
 from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
@@ -304,8 +303,7 @@ DimList = list
 
 
 def safe_has_grad(t):
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+    with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return hasattr(t, "grad")
 
 

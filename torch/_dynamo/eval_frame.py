@@ -2273,10 +2273,10 @@ class TorchPatcher:
         fn: Callable[..., Any],
     ) -> Callable[..., Any]:
         def inner_fn(*args: Any, **kwargs: Any) -> Any:
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, module="torch.distributed"
-            )
-            return fn(*args, **kwargs)
+            with torch._logging.hide_warnings(
+                torch._logging._internal.user_warning_filter
+            ):
+                return fn(*args, **kwargs)
 
         return inner_fn
 
