@@ -11,7 +11,7 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
 from . import config as inductor_config
 from .kernel_inputs import KernelInputs
@@ -141,7 +141,7 @@ class LookupTableRecorder:
         self.emit_backends: list[EmitBackend] = []
         self.record_backends: list[RecordBackend] = []
 
-    def add_backend(self, backend: EmitBackend | RecordBackend) -> None:
+    def add_backend(self, backend: Union[EmitBackend, RecordBackend]) -> None:
         """Add a backend to the appropriate list based on its type"""
         if isinstance(backend, EmitBackend):
             self.emit_backends.append(backend)
@@ -190,7 +190,7 @@ def get_lookup_table_recorder() -> LookupTableRecorder:
     return _lookup_table_recorder
 
 
-def add_backend(backend: EmitBackend | RecordBackend) -> None:
+def add_backend(backend: Union[EmitBackend, RecordBackend]) -> None:
     """Add a backend to the global lookup table recorder"""
     recorder = get_lookup_table_recorder()
     if recorder is not None:
