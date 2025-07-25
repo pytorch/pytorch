@@ -6538,7 +6538,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(ref, res)
 
     @skipIfPy312  # listcomp bytecode is optimized
-    @skipIfWindows(mag="TODO: (xuhancn) fix, AssertionError: Scalars are not equal!")
+    @skipIfWindows(msg="TODO: (xuhancn) fix, AssertionError: Scalars are not equal!")
     def test_listcomp(self):
         class Module(torch.nn.Module):
             def __init__(self):
