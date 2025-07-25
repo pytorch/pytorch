@@ -19,18 +19,14 @@ set(PYTORCH_FOUND_XPU TRUE)
 # SYCL library interface
 add_library(torch::sycl INTERFACE IMPORTED)
 
-set_property(
-    TARGET torch::sycl PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${SYCL_INCLUDE_DIR})
-set_property(
-    TARGET torch::sycl PROPERTY INTERFACE_LINK_LIBRARIES
-    ${SYCL_LIBRARY})
+set_property(TARGET torch::sycl PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+                                         ${SYCL_INCLUDE_DIR})
+set_property(TARGET torch::sycl PROPERTY INTERFACE_LINK_LIBRARIES
+                                         ${SYCL_LIBRARY})
 
 # xpurt
 add_library(torch::xpurt INTERFACE IMPORTED)
-set_property(
-    TARGET torch::xpurt PROPERTY INTERFACE_LINK_LIBRARIES
-    torch::sycl)
+set_property(TARGET torch::xpurt PROPERTY INTERFACE_LINK_LIBRARIES torch::sycl)
 
 # setting xpu arch flags
 torch_xpu_get_arch_list(XPU_ARCH_FLAGS)
@@ -39,7 +35,8 @@ set(TORCH_XPU_ARCH_LIST ${XPU_ARCH_FLAGS})
 
 # Ensure USE_XPU is enabled.
 string(APPEND XPU_HOST_CXX_FLAGS " -DUSE_XPU")
-string(APPEND XPU_HOST_CXX_FLAGS " -DSYCL_COMPILER_VERSION=${SYCL_COMPILER_VERSION}")
+string(APPEND XPU_HOST_CXX_FLAGS
+       " -DSYCL_COMPILER_VERSION=${SYCL_COMPILER_VERSION}")
 
 if(DEFINED ENV{XPU_ENABLE_KINETO})
   set(XPU_ENABLE_KINETO TRUE)

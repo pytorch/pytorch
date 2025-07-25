@@ -8,12 +8,12 @@ if(INTERN_BUILD_MOBILE)
 endif()
 
 caffe2_binary_target("parallel_info.cc")
-target_include_directories(parallel_info PUBLIC
-  ${CMAKE_BINARY_DIR}/aten/src) # provides "ATen/TypeExtendedInterface.h" to ATen.h
+target_include_directories(parallel_info PUBLIC ${CMAKE_BINARY_DIR}/aten/src
+)# provides "ATen/TypeExtendedInterface.h" to ATen.h
 
 caffe2_binary_target("record_function_benchmark.cc")
-target_include_directories(record_function_benchmark PUBLIC
-  ${CMAKE_BINARY_DIR}/aten/src)
+target_include_directories(record_function_benchmark
+                           PUBLIC ${CMAKE_BINARY_DIR}/aten/src)
 
 caffe2_binary_target("speed_benchmark_torch.cc")
 caffe2_binary_target("compare_models_torch.cc")

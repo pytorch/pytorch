@@ -2,7 +2,8 @@ if(NOT __NCCL_INCLUDED)
   set(__NCCL_INCLUDED TRUE)
 
   if(USE_SYSTEM_NCCL)
-    # NCCL_ROOT, NCCL_LIB_DIR, NCCL_INCLUDE_DIR will be accounted in the following line.
+    # NCCL_ROOT, NCCL_LIB_DIR, NCCL_INCLUDE_DIR will be accounted in the
+    # following line.
     find_package(NCCL REQUIRED)
     if(NCCL_FOUND)
       add_library(__caffe2_nccl INTERFACE)
@@ -30,7 +31,8 @@ if(NOT __NCCL_INCLUDED)
 
     if("${CMAKE_GENERATOR}" MATCHES "Make")
       # Recursive make with jobserver for parallelism, and also put a load limit
-      # here to avoid flaky OOM, https://www.gnu.org/software/make/manual/html_node/Parallel.html
+      # here to avoid flaky OOM,
+      # https://www.gnu.org/software/make/manual/html_node/Parallel.html
       set(MAKE_COMMAND "$(MAKE)" "-l${MAX_JOBS}")
     else()
       # Parallel build with CPU load limit to avoid oversubscription
@@ -38,35 +40,32 @@ if(NOT __NCCL_INCLUDED)
     endif()
 
     set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
-    ExternalProject_Add(nccl_external
+    ExternalProject_Add(
+      nccl_external
       SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl
       BUILD_IN_SOURCE 1
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
-        ${MAKE_COMMAND}
-        "CXX=${CMAKE_CXX_COMPILER}"
-        "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
-        "NVCC=${CUDA_NVCC_EXECUTABLE}"
-        "NVCC_GENCODE=${NVCC_GENCODE}"
-        "BUILDDIR=${__NCCL_BUILD_DIR}"
-        "VERBOSE=0"
-        "DEBUG=0"
+        ${MAKE_COMMAND} "CXX=${CMAKE_CXX_COMPILER}"
+        "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}" "NVCC=${CUDA_NVCC_EXECUTABLE}"
+        "NVCC_GENCODE=${NVCC_GENCODE}" "BUILDDIR=${__NCCL_BUILD_DIR}"
+        "VERBOSE=0" "DEBUG=0"
       BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
-      INSTALL_COMMAND ""
-      )
+      INSTALL_COMMAND "")
 
     set(__NCCL_LIBRARY_DEP nccl_external)
     set(NCCL_LIBRARIES ${__NCCL_BUILD_DIR}/lib/libnccl_static.a)
 
     set(NCCL_FOUND TRUE)
     add_library(__caffe2_nccl INTERFACE)
-    # The following old-style variables are set so that other libs, such as Gloo,
-    # can still use it.
+    # The following old-style variables are set so that other libs, such as
+    # Gloo, can still use it.
     set(NCCL_INCLUDE_DIRS ${__NCCL_BUILD_DIR}/include)
     add_dependencies(__caffe2_nccl ${__NCCL_LIBRARY_DEP})
     target_link_libraries(__caffe2_nccl INTERFACE ${NCCL_LIBRARIES})
     target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})
-    # nccl includes calls to shm_open/shm_close and therefore must depend on librt on Linux
+    # nccl includes calls to shm_open/shm_close and therefore must depend on
+    # librt on Linux
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
       target_link_libraries(__caffe2_nccl INTERFACE rt)
     endif()

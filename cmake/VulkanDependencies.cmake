@@ -8,18 +8,18 @@ if(ANDROID)
   endif()
 
   # Vulkan from ANDROID_NDK
-  set(VULKAN_INCLUDE_DIR "${ANDROID_NDK}/sources/third_party/vulkan/src/include")
+  set(VULKAN_INCLUDE_DIR
+      "${ANDROID_NDK}/sources/third_party/vulkan/src/include")
   message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
 
-  set(VULKAN_ANDROID_NDK_WRAPPER_DIR "${ANDROID_NDK}/sources/third_party/vulkan/src/common")
-  message(STATUS "Vulkan_ANDROID_NDK_WRAPPER_DIR:${VULKAN_ANDROID_NDK_WRAPPER_DIR}")
+  set(VULKAN_ANDROID_NDK_WRAPPER_DIR
+      "${ANDROID_NDK}/sources/third_party/vulkan/src/common")
+  message(
+    STATUS "Vulkan_ANDROID_NDK_WRAPPER_DIR:${VULKAN_ANDROID_NDK_WRAPPER_DIR}")
   set(VULKAN_WRAPPER_DIR "${VULKAN_ANDROID_NDK_WRAPPER_DIR}")
 
-  add_library(
-    VulkanWrapper
-    STATIC
-    ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
-    ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
+  add_library(VulkanWrapper STATIC ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
+                                   ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
 
   target_include_directories(VulkanWrapper PUBLIC .)
   target_include_directories(VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
@@ -33,7 +33,10 @@ else()
   find_package(Vulkan)
 
   if(NOT Vulkan_FOUND)
-    message(FATAL_ERROR "USE_VULKAN requires either Vulkan installed on system path or environment var VULKAN_SDK set.")
+    message(
+      FATAL_ERROR
+        "USE_VULKAN requires either Vulkan installed on system path or environment var VULKAN_SDK set."
+    )
   endif()
 
   list(APPEND Vulkan_INCLUDES ${Vulkan_INCLUDE_DIRS})

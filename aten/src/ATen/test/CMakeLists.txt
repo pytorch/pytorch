@@ -4,7 +4,9 @@ if(MSVC)
   endif()
 endif(MSVC)
 
-list(APPEND ATen_CPU_TEST_SRCS
+list(
+  APPEND
+  ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/Dict_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/Dimname_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/MaybeOwned_test.cpp
@@ -49,11 +51,12 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/weakref_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wrapdim_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xla_tensor_test.cpp
-  # Fix this.
-  # ${CMAKE_CURRENT_SOURCE_DIR}/xnnpack_test.cpp
-  )
+  # Fix this. ${CMAKE_CURRENT_SOURCE_DIR}/xnnpack_test.cpp
+)
 
-list(APPEND ATen_CUDA_TEST_SRCS
+list(
+  APPEND
+  ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_apply_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_atomic_ops_test.cu
@@ -76,10 +79,12 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu)
 if(CAFFE2_USE_CUDNN)
   list(APPEND ATen_CUDA_TEST_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cudnn_test.cpp)
+       ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cudnn_test.cpp)
 endif()
 
-list(APPEND ATen_HIP_TEST_SRCS
+list(
+  APPEND
+  ATen_HIP_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_apply_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_math_test.hip
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_test.hip
@@ -92,45 +97,62 @@ list(APPEND ATen_HIP_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_packedtensoraccessor_test.hip
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_vectorized_test.hip)
 # TODO: fix and enable these
-#  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_tensor_interop_test.cpp
-#  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_stream_test.cpp
+# ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_tensor_interop_test.cpp
+# ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_stream_test.cpp
 
 list(APPEND ATen_VULKAN_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp)
+     ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp)
 
-list(APPEND ATen_MOBILE_TEST_SRCS
+list(
+  APPEND
+  ATen_MOBILE_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_caching_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/quantized_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/vec_test_all_types.cpp)
 
 list(APPEND ATen_VEC_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vec_test_all_types.cpp
-  )
+     ${CMAKE_CURRENT_SOURCE_DIR}/vec_test_all_types.cpp)
 
-list(APPEND ATen_MPS_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_print.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_allocator.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_metal_library.cpp)
+list(APPEND ATen_MPS_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_print.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_allocator.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_metal_library.cpp)
 if(APPLE AND USE_MPS)
   list(APPEND ATen_MPS_TEST_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_objc_interface.mm)
+       ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_objc_interface.mm)
 endif()
 
-list(APPEND ATen_XPU_TEST_SRCS
+list(
+  APPEND
+  ATen_XPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/xpu_caching_host_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xpu_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xpu_event_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xpu_generator_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_reportMemoryUsage_test.cpp
-  )
+  ${CMAKE_CURRENT_SOURCE_DIR}/xpu_reportMemoryUsage_test.cpp)
 
 # ---[ Send the lists to the parent scope.
-set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
-set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
-set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
-set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
-set(ATen_MOBILE_TEST_SRCS ${ATen_MOBILE_TEST_SRCS} PARENT_SCOPE)
-set(ATen_VEC_TEST_SRCS ${ATen_VEC_TEST_SRCS} PARENT_SCOPE)
-set(ATen_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS} PARENT_SCOPE)
-set(ATen_XPU_TEST_SRCS ${ATen_XPU_TEST_SRCS} PARENT_SCOPE)
+set(ATen_CPU_TEST_SRCS
+    ${ATen_CPU_TEST_SRCS}
+    PARENT_SCOPE)
+set(ATen_CUDA_TEST_SRCS
+    ${ATen_CUDA_TEST_SRCS}
+    PARENT_SCOPE)
+set(ATen_HIP_TEST_SRCS
+    ${ATen_HIP_TEST_SRCS}
+    PARENT_SCOPE)
+set(ATen_VULKAN_TEST_SRCS
+    ${ATen_VULKAN_TEST_SRCS}
+    PARENT_SCOPE)
+set(ATen_MOBILE_TEST_SRCS
+    ${ATen_MOBILE_TEST_SRCS}
+    PARENT_SCOPE)
+set(ATen_VEC_TEST_SRCS
+    ${ATen_VEC_TEST_SRCS}
+    PARENT_SCOPE)
+set(ATen_MPS_TEST_SRCS
+    ${ATen_MPS_TEST_SRCS}
+    PARENT_SCOPE)
+set(ATen_XPU_TEST_SRCS
+    ${ATen_XPU_TEST_SRCS}
+    PARENT_SCOPE)
