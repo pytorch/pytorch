@@ -176,12 +176,32 @@ class ModelWrapper:
 
     MODEL_BASE_NAME = "triton_mm"
 
-    def _get_device_model_path(self, device_name: str) -> str:
+    def _device_name_projection(self, device_name: str) -> Optional[str]:
+        """
+        Project device name to a common format.
+
+        Args:
+            device_name: Device name to project
+
+        Returns:
+            Projected device name
+        """
+        if "H100" in device_name or "h100" in device_name:
+            return "NVIDIA H100"
+        if "mi300x" in device_name or "MI300X" in device_name:
+            return "AMD INSTINCT MI300X"
+        return None
+
+    def _get_device_model_path(self, device_name: str) -> Optional[str]:
         if config.fast_autotune_model_directory is None:
             base_directory = os.path.dirname(__file__)
         else:
             base_directory = config.fast_autotune_model_directory
-        file_name = _sanitize_path(device_name)
+        new_device_name = self._device_name_projection(device_name)
+        if new_device_name is None:
+            return None
+
+        file_name = _sanitize_path(new_device_name)
         return os.path.join(
             base_directory, "artifacts", f"{file_name}_{self.MODEL_BASE_NAME}.pt2"
         )
@@ -193,15 +213,20 @@ class ModelWrapper:
         if device_name is None:
             device_name = torch.cuda.get_device_name()
         model_path = self._get_device_model_path(device_name)
+        if model_path is None:
+            raise RuntimeError(
+                f"Model path not found for device {device_name}. "
+                "Please check that the device is supported."
+            )
         # check to see if model_path exists
-        # TODO remove
+        # TODO remove logging
         print("Loading NN Kernel Prediction Model from ", model_path)
         print("Model path exists: ", os.path.exists(model_path))
         if not os.path.exists(model_path):
             print("Model path does not exist: %s", model_path)
-            # Fall back to h100 model
-            # eventually we should check is_big_gpu() and use another default model for non big gpus
-            model_path = self._get_device_model_path("NVIDIA H100")
+            raise RuntimeError(
+                f"Model path not found for device {device_name}. "
+            )
 
         start_time = time.time()
         self.model = torch._inductor.aoti_load_package(model_path)
