@@ -736,6 +736,7 @@ def _make_module_call_graph(
     return [*original, *additional]
 
 
+@torch.fx.experimental._config.patch(backed_size_oblivious=True)
 def _export_to_torch_ir(
     f: Callable,
     args: tuple[Any, ...],
@@ -829,6 +830,7 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
+@torch.fx.experimental._config.patch(backed_size_oblivious=True)
 def _export_to_aten_ir(
     mod: torch.nn.Module,
     fake_args,
@@ -1539,6 +1541,7 @@ def _strict_export(
     )
 
 
+@torch.fx.experimental._config.patch(backed_size_oblivious=True)
 def _export_to_aten_ir_make_fx(
     mod: torch.nn.Module,
     fake_args,
@@ -1998,6 +2001,7 @@ def _non_strict_export(
 
 @_log_export_wrapper
 @_disable_prexisiting_fake_mode
+@torch.fx.experimental._config.patch(backed_size_oblivious=True)
 def _export_for_training(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
@@ -2083,6 +2087,7 @@ def _export_for_training(
 
 @_log_export_wrapper
 @_disable_prexisiting_fake_mode
+@torch.fx.experimental._config.patch(backed_size_oblivious=True)
 def _export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
