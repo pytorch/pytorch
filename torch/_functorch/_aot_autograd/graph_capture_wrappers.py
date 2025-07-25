@@ -14,7 +14,6 @@ It does so by:
 import warnings
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from functools import wraps
 from typing import Any, Callable, cast, Optional, TypeVar, Union
 from unittest.mock import patch
 
@@ -92,6 +91,7 @@ from .subclass_utils import (
 from .utils import (
     call_and_expect_output_descs,
     maybe_to_fresh_input,
+    simple_wraps,
     without_output_descs,
 )
 
@@ -105,7 +105,7 @@ def fn_input_mutations_to_outputs(
     meta: ViewAndMutationMeta,
     keep_data_input_mutations: bool,
 ) -> Any:
-    @wraps(fn)
+    @simple_wraps(fn)
     def inner_fn(*args):
         outs, outs_descs = call_and_expect_output_descs(fn, args)
         assert len(meta.output_info) == len(outs)
@@ -160,7 +160,7 @@ def fn_prepped_for_autograd(
     args_descs: list[AOTInput],
     meta: ViewAndMutationMeta,
 ) -> PreppedForAutogradTraceFn:
-    @wraps(fn)
+    @simple_wraps(fn)
     def inner_fn(*args):
         args_maybe_cloned = [
             maybe_to_fresh_input(i, t, meta) for i, t in enumerate(args)
@@ -244,7 +244,10 @@ def fn_prepped_for_autograd(
                 continue
             sync_functional_tensor(arg)
 
-        return (fw_outs_to_return, out_grad_mask), fw_outs_to_return_descs
+        return (fw_outs_to_return, out_grad_mask), (
+            fw_outs_to_return_descs,
+            out_grad_mask,
+        )
 
     return inner_fn
 
@@ -274,6 +277,7 @@ def create_joint(
 
     # post_forward
     # NB: this type is inaccurate when primals_descs is None
+    @simple_wraps(fn)
     def inner_fn(
         primals: list[FxValue], tangents: list[FxValue]
     ) -> tuple[
@@ -285,7 +289,9 @@ def create_joint(
             outs, tangent_mask = fn(*primals)
             assert not pytree.tree_any(lambda x: isinstance(x, AOTOutput), tangent_mask)
         else:
-            (outs, tangent_mask), outs_descs = call_and_expect_output_descs(fn, primals)
+            (outs, tangent_mask), (outs_descs, _) = call_and_expect_output_descs(
+                fn, primals
+            )
 
         # TODO: I think this hook can also be eliminated now
         if joint_fn_handle and joint_fn_handle.post_forward:
@@ -411,6 +417,7 @@ def create_joint(
             ],
         )
 
+    @simple_wraps(inner_fn)
     def inner_fn_with_anomaly(
         primals: list[FxValue], tangents: list[FxValue]
     ) -> tuple[
@@ -755,7 +762,7 @@ def create_functionalized_fn(
     ]
     has_input_mutated_in_graph = any(inputs_mutated_in_graph)
 
-    @wraps(fn)
+    @simple_wraps(fn)
     def _functionalized_f_helper(
         *args: list[FxValue],
     ) -> tuple[tuple[list[FxValue], list[Tensor]], list[Optional[AOTOutput]]]:
@@ -1055,7 +1062,7 @@ def handle_effect_tokens_fn(
 ) -> Any:
     num_tokens = len(meta.tokens)
 
-    @wraps(fn)
+    @simple_wraps(fn)
     def inner_fn(*args):
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(
@@ -1236,7 +1243,7 @@ def aot_dispatch_subclass(
             return inner_fn(flat_fn_maybe_joint, primals, use_trace_joint=False)
 
     def metadata_fn(*primals: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
-        @wraps(fw_only)
+        @simple_wraps(fw_only)
         def inner_fw_only(*args):
             return call_and_expect_output_descs(fw_only, args)
 
@@ -1317,6 +1324,7 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
 
+    @simple_wraps(mod)
     def functional_call(*args, **kwargs):
         flat_params = args[:params_len]
         if isinstance(params_spec, TreeSpec):

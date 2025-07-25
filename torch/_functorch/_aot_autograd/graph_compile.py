@@ -89,6 +89,7 @@ from .utils import (
     contain_metadata_mutation_ops,
     get_cuda_generator_meta_val,
     make_boxed_func,
+    simple_wraps,
     strict_zip,
     unlift_tokens,
 )
@@ -124,14 +125,15 @@ def aot_stage1_graph_capture(
     # augment the output to return a tuple[list[Tensor], list[AOTOutput]] and
     # then preserve this convention through the rest of the passes.
 
-    from functools import wraps
-
     # TODO: We could test for consistency with fw_metadata, but this is not a
     # big deal
-    @wraps(orig_flat_fn)
+    @simple_wraps(orig_flat_fn)
     def orig_flat_fn2(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
         out = orig_flat_fn(*args)
-        out_descs: list[AOTOutput] = [PlainAOTOutput(i) for i in range(len(out))]
+        out_descs: list[AOTOutput] = type(out)(  # type: ignore[assignment]
+            PlainAOTOutput(i)  # type: ignore[misc]
+            for i in range(len(out))  # type: ignore[misc]
+        )
         return out, out_descs
 
     aot_config = aot_state.aot_config
@@ -894,8 +896,6 @@ def maybe_log_graph(
 
 
 def create_wrap_fn(fn, args):
-    from functools import wraps
-
     from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
 
     from .functional_utils import from_fun, has_data_mutation, to_fun
@@ -905,7 +905,7 @@ def create_wrap_fn(fn, args):
             "Saved tensors hooks with inputs mutations are not allowed"
         )
 
-    @wraps(fn)
+    @simple_wraps(fn)
     def _wrapper(*args):
         with maybe_enable_thunkify():
             disable_above = torch._C._ExcludeDispatchKeyGuard(
