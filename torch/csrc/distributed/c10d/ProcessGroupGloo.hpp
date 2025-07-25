@@ -69,6 +69,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
         std::vector<std::vector<at::Tensor>> outputTensors,
         OpType opType,
         uint64_t seq,
+        std::chrono::milliseconds timeout,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputTensors =
             std::nullopt);
@@ -99,6 +100,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     // work has completed
     std::optional<uint64_t> trace_id_;
     std::shared_ptr<gloo::Context> context_;
+    const std::chrono::milliseconds timeout_;
 
    private:
     void finishWorkGloo();
@@ -186,6 +188,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
 #endif
 
+    const c10::intrusive_ptr<::c10d::Store>& _getStore() const {
+      return store_;
+    }
+
    protected:
     c10::intrusive_ptr<::c10d::Store> store_;
   };
@@ -250,7 +256,6 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
 
     std::vector<uint64_t> global_ranks_in_group;
-    std::string group_name;
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads;
   };
@@ -291,6 +296,27 @@ class TORCH_API ProcessGroupGloo : public Backend {
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
   }
+
+  void setTimeout(std::chrono::milliseconds timeout) override {
+    options_->timeout = timeout;
+    for (auto& context : contexts_) {
+      context->setTimeout(timeout);
+    }
+  }
+
+  c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
+    return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+  }
+
+  c10::intrusive_ptr<Backend> split(
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Backend::Options>& opts) override;
+
+  c10::intrusive_ptr<Backend> merge(
+      const c10::intrusive_ptr<Store>& store,
+      const c10::intrusive_ptr<Backend::Options>& opts,
+      const int& rank,
+      const int& size) override;
 
   const std::vector<uint64_t>& groupRanks() const;
 

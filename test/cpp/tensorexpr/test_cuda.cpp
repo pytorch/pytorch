@@ -1681,7 +1681,7 @@ TEST(Cuda, MaskMultiDim_CUDA) {
 
 // Tests the case where loop extents are symbolic and not known at compile time.
 // In this case both stores must be masked against the extent of the other loop,
-// incase it is larger.
+// in case it is larger.
 TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   VarHandle OUTER_SIZE("OUTER_SIZE", kLong);
   VarHandle A_SIZE("A_SIZE", kLong);

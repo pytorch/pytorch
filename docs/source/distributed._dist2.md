@@ -8,11 +8,5 @@
     :members:
     :undoc-members:
     :show-inheritance:
-```
-
-```{eval-rst}
-.. autoclass:: torch.distributed.ProcessGroup
-    :members:
-    :undoc-members:
-    :show-inheritance:
+    :exclude-members: ReduceOp
 ```
