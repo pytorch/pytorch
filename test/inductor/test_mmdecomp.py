@@ -243,12 +243,10 @@ class TestDecomp(NNTestCase):
 
             # Make sure all symints are not evaluated
             new_t1_expr_types = [
-                type(d.node.expr) if type(d) is torch.SymInt else int
-                for d in t1.size()
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t1.size()
             ]
             new_t2_expr_types = [
-                type(d.node.expr) if type(d) is torch.SymInt else int
-                for d in t2.size()
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t2.size()
             ]
             self.assertTrue(
                 all(
