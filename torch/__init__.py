@@ -34,19 +34,9 @@ from typing import (
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
-from . import version
-
 
 if TYPE_CHECKING:
     from .types import Device, IntLikeType
-
-
-# multipy/deploy is setting this import before importing torch, this is the most  # codespell:ignore multipy
-# reliable way we have to detect if we're running within deploy.
-# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137  # codespell:ignore multipy # noqa: B950
-def _running_with_deploy() -> builtins.bool:
-    return sys.modules.get("torch._meta_registrations", None) is object
-
 
 from torch._utils import (
     _functionalize_sync as _sync,
@@ -60,13 +50,8 @@ from torch._utils_internal import (
     USE_GLOBAL_DEPS,
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
+from torch.torch_version import __version__ as __version__
 
-
-# TODO(torch_deploy) figure out how to freeze version.py in fbcode build
-if _running_with_deploy():
-    __version__ = "torch-deploy-1.8"
-else:
-    from torch.torch_version import __version__ as __version__
 
 __all__ = [
     "BoolStorage",
@@ -317,7 +302,7 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
 
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
-    if _running_with_deploy() or platform.system() == "Windows":
+    if platform.system() == "Windows":
         return
 
     # Determine the file extension based on the platform
@@ -381,7 +366,7 @@ def _load_global_deps() -> None:
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
-    _running_with_deploy() or platform.system() != "Windows"
+    platform.system() != "Windows"
 ):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
@@ -2082,7 +2067,7 @@ from torch.serialization import load, save
 
 # Shared memory manager needs to know the exact location of manager executable
 def _manager_path():
-    if _running_with_deploy() or platform.system() == "Windows":
+    if platform.system() == "Windows":
         return b""
     path = get_file_path("torch", "bin", "torch_shm_manager")
     prepare_multiprocessing_environment(get_file_path("torch"))
@@ -2687,21 +2672,21 @@ from torch import fx as fx
 # Register MPS specific decomps
 torch.backends.mps._init()
 
-if not _running_with_deploy():
-    from torch import compiler as compiler
+from torch import compiler as compiler
 
-    class _TritonLibrary:
-        lib = torch.library.Library("triton", "DEF")
-        ops_table: dict[tuple[str, str], _Callable] = {}
 
-        @classmethod
-        def registerOp(cls, op_key, full_schema, op_impl, dispatch_key):
-            if (op_key, dispatch_key) not in cls.ops_table:
-                cls.lib.define(full_schema)
-                cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
-                cls.ops_table[(op_key, dispatch_key)] = op_impl
+class _TritonLibrary:
+    lib = torch.library.Library("triton", "DEF")
+    ops_table: dict[tuple[str, str], _Callable] = {}
 
-            return cls.ops_table[(op_key, dispatch_key)]
+    @classmethod
+    def registerOp(cls, op_key, full_schema, op_impl, dispatch_key):
+        if (op_key, dispatch_key) not in cls.ops_table:
+            cls.lib.define(full_schema)
+            cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
+            cls.ops_table[(op_key, dispatch_key)] = op_impl
+
+        return cls.ops_table[(op_key, dispatch_key)]
 
 
 # Deprecated attributes
