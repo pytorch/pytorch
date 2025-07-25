@@ -27,7 +27,6 @@ The following are aliases to their counterparts in ``torch.nn`` in the ``torch.n
     :nosignatures:
     :template: classtemplate.rst
 
-    module.Module
     container.Sequential
     container.ModuleList
     container.ModuleDict
