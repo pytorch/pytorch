@@ -12,7 +12,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
-#include <ATen/native/hip/ck_gemm.h>
+#include <ATen/native/hip/ck_gemm/ck_gemm.h>
 #include <ATen/native/hip/ck_types.h>
 
 #include <ck/ck.hpp>
@@ -41,6 +41,49 @@ using Col = ck::tensor_layout::gemm::ColumnMajor;
 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 
 namespace at::native {
+
+
+enum class KernelSize { Small, Medium, Large };
+inline std::ostream& operator<<(std::ostream& os, KernelSize size) {
+    switch (size) {
+        case KernelSize::Small:
+            os << "Small";
+            break;
+        case KernelSize::Medium:
+            os << "Medium";
+            break;
+        case KernelSize::Large:
+            os << "Large";
+            break;
+        default:
+            os << "Unknown";
+    }
+    return os;
+}
+
+// Returns whether to use Small, Medium, or Large kernel template and
+// whether padding is required
+inline std::tuple<KernelSize, bool> get_kernel_size(
+                                int64_t M,
+                                int64_t N,
+                                int64_t K )
+{
+  bool use_small_kernel = ( M <= 128 );
+  bool use_large_kernel = ((M >= 8192 && N >= 4096) || (N >= 8192 && M >= 4096));
+  bool use_pad;
+  if(use_small_kernel) {
+    use_pad = (M % 32 != 0) || (N % 128 != 0) || (K % 128 != 0);
+    return {KernelSize::Small, use_pad};
+
+  } else if (use_large_kernel) {
+    use_pad = (M % 256 != 0) || (N % 128 != 0) || (K % 64 != 0);
+    return {KernelSize::Large, use_pad};
+  } else { // Medium gemm
+    use_pad = (M % 128 != 0) || (N % 128 != 0) || (K % 64 != 0);
+    return {KernelSize::Medium, use_pad};
+  }
+}
+
 
 // Elementwise Operators
 struct AlphaBetaAdd
@@ -142,6 +185,8 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   using BElementOp = PassThrough;
   using CElementOp = AlphaBetaAdd;
 
+  static constexpr int CBLOCK_N = NBLOCK / 16;
+  static constexpr int CBLOCK_M = BLOCK_SIZE / CBLOCK_N;
 
   static constexpr auto GemmDefault =
       ck::tensor_operation::device::GemmSpecialization::Default;
@@ -191,7 +236,7 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
                                                                    BBLOCK_LDS_EXTRAN,
                                                                    CMPER_WAVE,
                                                                    CNPER_WAVE,
-                                                                   BLOCK_CLUSTER_LENS,
+                                                                   S<1, CBLOCK_M, 1, CBLOCK_N>,
                                                                    CDE_SCALAR_VEC>;
 
 
@@ -231,7 +276,6 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
             "wrong! device_gemm with the specified compilation parameters does "
             "not support this GEMM problem");
  }
-
 
  auto stream = at::cuda::getCurrentHIPStream().stream();
  invoker.Run(argument, StreamConfig{stream, false});
@@ -309,7 +353,6 @@ void gemm_impl_wmma(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   static constexpr auto GemmMNKPadding =
       ck::tensor_operation::device::GemmSpecialization::MNKPadding;
   static constexpr auto GemmSpec = PADDING ? GemmMNKPadding : GemmDefault;
-
 
   using DeviceGemmInstance =
             ck::tensor_operation::device::DeviceGemmWmma_CShuffle<ALayout,
