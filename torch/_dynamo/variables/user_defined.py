@@ -31,6 +31,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import itertools
 import random
 import sys
 import threading
@@ -58,6 +59,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
+    DataclassFieldsSource,
     GetItemSource,
     RandomValueSource,
     TypeSource,
@@ -624,11 +626,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return SizeVariable(tup.items)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)
+            fields_source = DataclassFieldsSource(self.source)
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
 
             default_kwargs = {}
-            for field, var_tracker in zip(fields, items):
+            for ind, field, var_tracker in zip(itertools.count(), fields, items):
                 if var_tracker is None:
                     if field.name in kwargs:
                         var_tracker = kwargs[field.name]
@@ -637,7 +640,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             continue
 
                         if field.default is not dataclasses.MISSING:
-                            var_tracker = VariableTracker.build(tx, field.default)
+                            var_tracker = VariableTracker.build(
+                                tx,
+                                field.default,
+                                source=AttrSource(
+                                    GetItemSource(fields_source, ind), "default"
+                                ),
+                            )
                         elif field.default_factory is not dataclasses.MISSING:
                             factory_fn = VariableTracker.build(
                                 tx, field.default_factory

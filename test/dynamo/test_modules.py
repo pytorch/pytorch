@@ -703,16 +703,7 @@ class LazyModuleBadInferParams(LazyModuleMixin, torch.nn.Module):
         super().__init__()
 
     def initialize_parameters(self, *args, **kwargs):
-        with torch.no_grad():
-            self.layer = LazyLayerWithInputs()
-
-        print('DEBUG SHOULD THROW')
-        try:
-            self.foo += 1
-        except AttributeError as e:
-            print(type(e), e)
-            raise
-        print('Debug didnt throw?')
+        self.foo += 1
 
     def forward(self, x, y):
         return self.layer(x, y=y)
@@ -1673,12 +1664,30 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         exp_res = m(x, y)
         self.assertTrue(torch.allclose(exp_res, opt_m(x, y)))
 
-    #@torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_lazy_module_bad_params(self):
         m = LazyModuleBadInferParams()
         x = [torch.rand([5, 5])] * 3
         y = [torch.rand([5, 5])] * 2
-        opt_m = torch.compile(fullgraph=True)(m)
+        # Note that this raises from within dynamo code, with no exception handling.
+        with self.assertRaises(AttributeError) as cm:
+            opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+            exp_res = opt_m(x, y)
+
+    def test_lazy_module_bad_params_call_function(self):
+
+        class holder():
+            x = LazyModuleBadInferParams()
+
+            def apply(self, x, y):
+                self.x(x, y)
+
+        def m(x,y):
+            h = holder()
+            return h.apply(x, y)
+
+        x = [torch.rand([5, 5])] * 3
+        y = [torch.rand([5, 5])] * 2
+        opt_m = torch.compile(backend="eager")(m)
         with self.assertRaises(AttributeError):
             exp_res = opt_m(x, y)
 
