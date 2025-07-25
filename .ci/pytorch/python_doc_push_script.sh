@@ -46,7 +46,7 @@ echo "error: python_doc_push_script.sh: branch (arg3) not specified"
 fi
 
 echo "install_path: $install_path  version: $version"
-
+pip install -e git+https://github.com/pytorch/pytorch_sphinx_theme.git@pytorch_sphinx_theme2#egg=pytorch_sphinx_theme2
 
 build_docs () {
   set +e
