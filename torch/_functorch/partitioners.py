@@ -2398,7 +2398,7 @@ def choose_saved_values_set(
             # if idx in all_recomputable_banned_nodes:
             try:
                 dont_ban.add(all_recomputable_banned_nodes[idx])
-            except BaseException:
+            except BaseException:  # noqa: B036
                 pass
 
         assert dont_ban.issubset(all_recomputable_banned_nodes)

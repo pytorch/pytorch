@@ -295,6 +295,7 @@ class ShardingPropagator:
             op=op_schema.op,
             args_schema=tuple(args_op_strategy),
             kwargs_schema=kwargs_op_strategy,
+            schema_info=op_schema.schema_info,
         )
 
     def propagate(self, op_info: OpInfo) -> None:
