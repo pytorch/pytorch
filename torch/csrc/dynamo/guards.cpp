@@ -2437,7 +2437,7 @@ void add_relational_guard_resetter_to_cloned_root(
     std::shared_ptr<RelationalGuard> guard);
 std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
     RootGuardManager* _root);
-std::string get_compile_id(RootGuardManager* root);
+// std::string get_compile_id(RootGuardManager* root);
 
 struct WeakEntry {
   PyObject* wr; // weakref
@@ -3516,9 +3516,9 @@ class RootGuardManager : public GuardManager {
     _compile_id = compile_id;
   }
 
-  std::string get_compile_id() {
-    return _compile_id;
-  }
+  // std::string get_compile_id() {
+  //   return _compile_id;
+  // }
 
  private:
   // Reset the state of all the relational guards on failure.
@@ -4048,9 +4048,9 @@ std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
   return _root->get_no_tensor_aliasing_guard();
 }
 
-std::string get_compile_id(RootGuardManager* root) {
-  return root->get_compile_id();
-}
+// std::string get_compile_id(RootGuardManager* root) {
+//   return root->get_compile_id();
+// }
 
 class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
  public:
