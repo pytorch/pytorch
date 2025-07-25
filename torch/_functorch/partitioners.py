@@ -307,7 +307,9 @@ def _extract_fwd_bwd_outputs(
         *(node.args for node in joint_module.graph.find_nodes(op="output"))
     )
     outputs_descs = pytree.arg_tree_leaves(
-        next(iter(joint_module.graph.find_nodes(op="output"))).meta["desc"]
+        next(iter(joint_module.graph.find_nodes(op="output"))).meta.get(
+            "desc", [None] * len(outputs)
+        )
     )
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
