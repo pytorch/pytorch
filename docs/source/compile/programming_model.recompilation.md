@@ -111,6 +111,7 @@ Note that in the case of a recompilation limit hit, **all nested function calls 
 Dynamo will also issue a warning containing the affected function and which limit was hit.
 In the example below, each function call results in a recompile attempt.
 When we hit the cache size limit (by default, 8), we stop attempting to recompile.
+(Note that we set `dynamic=False` for demonstration purposes to force recompilation every time).
 
 ```{code-cell}
 @torch.compile(dynamic=False)
@@ -141,20 +142,20 @@ a graph break in order to reduce recompilation costs, at the expense of introduc
 def very_large_function(x):
     return x + 1
 
-@torch.compile
+@torch.compile(dynamic=False)
 def fn(x, c):
     y = very_large_function(x)  # recompiled every time
     return y + c
 
-for i in range(1, 3):
-    fn(torch.ones(i), i)
+for i in range(1, 5):
+    fn(torch.ones(3), i)
 
-@torch.compile
+@torch.compile(dynamic=False)
 def gn(x, c):
     y = very_large_function(x)  # compiled only once
     torch._dynamo.graph_break()
     return y + c  # recompiled every time
 
-for i in range(1, 3):
-    gn(torch.ones(i), i)
+for i in range(1, 5):
+    gn(torch.ones(3), i)
 ```
