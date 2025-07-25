@@ -181,6 +181,11 @@ register_artifact(
     "Inductor scheduler information. Useful if working on Inductor fusion algo",
     off_by_default=True,
 )
+register_artifact(
+    "collective_schedule",
+    "Collective communication schedule logged to dedicated artifact logger.",
+)
+
 register_artifact("perf_hints", "", off_by_default=True)
 register_artifact("onnx_diagnostics", "", off_by_default=True)
 register_artifact("compute_dependencies", "", off_by_default=True)
