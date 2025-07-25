@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -15,7 +15,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def bucket_size_determinator(bucket_id: int) -> float:
+def bucket_cap_mb_by_bucket_idx_default(bucket_id: int) -> float:
     """
     Determine the size of a bucket based on its ID.
 
@@ -29,9 +29,16 @@ def bucket_size_determinator(bucket_id: int) -> float:
 
 
 def bucket_all_gather(
-    gm: torch.fx.GraphModule, all_gather_bucket_cap_mb_callback: Callable[[int], float]
+    gm: torch.fx.GraphModule,
+    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
 ) -> None:
-    ag_buckets = bucket_all_gather_by_mb(gm, all_gather_bucket_cap_mb_callback)
+    if bucket_cap_mb_by_bucket_idx is None:
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,
+        )
+
+        bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
+    ag_buckets = bucket_all_gather_by_mb(gm, bucket_cap_mb_by_bucket_idx)
     if len(ag_buckets) == 0:
         return
     merge_all_gather(gm, ag_buckets)
@@ -39,9 +46,15 @@ def bucket_all_gather(
 
 def bucket_reduce_scatter(
     gm: torch.fx.GraphModule,
-    reduce_scatter_bucket_cap_mb_callback: Callable[[int], float],
+    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
 ) -> None:
-    rs_buckets = bucket_reduce_scatter_by_mb(gm, reduce_scatter_bucket_cap_mb_callback)
+    if bucket_cap_mb_by_bucket_idx is None:
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,
+        )
+
+        bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
+    rs_buckets = bucket_reduce_scatter_by_mb(gm, bucket_cap_mb_by_bucket_idx)
     if len(rs_buckets) == 0:
         return
     merge_reduce_scatter(gm, rs_buckets)
@@ -72,145 +85,145 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
     return is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0])  # type: ignore[arg-type]
 
 
-def bucket_all_gather_by_mb(
+def greedy_bucket_collective_by_mb(
     gm: torch.fx.GraphModule,
-    all_gather_bucket_cap_mb_callback: Callable[[int], float],
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float],
+    filter_node: Callable[[torch.fx.Node], bool],
+    node_group_key: Callable[[torch.fx.Node], Any],
     filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> list[list[torch.fx.Node]]:
-    """
-    Identifies all all_gather nodes and groups them into buckets based on size limit `all_gather_bucket_cap_mb_callback`.
-    Returns a list of buckets, where each bucket is a list of all_gather nodes.
-    """
-    node_list = gm.graph.nodes
-    # Prerequisite: Check if there is any all_gather node
-    found_all_gather = False
-    for node in node_list:
-        if is_all_gather_into_tensor(node):
-            found_all_gather = True
+    g = gm.graph
+    found_candidates = False
+    for node in g.nodes:
+        if filter_node(node):
+            found_candidates = True
             break
-    if not found_all_gather:
+    if not found_candidates:
         return []
-    group_name_ag_nodes: dict[tuple[str, torch.dtype], list[torch.fx.Node]] = (  # type: ignore[name-defined]
-        defaultdict(list)
+
+    nodes_groups: dict[Any, list[torch.fx.Node]] = defaultdict(list)
+    nodes_successors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = defaultdict(
+        OrderedSet
     )
-    # Step 1: Find all all_gather nodes
-    for node in node_list:
-        if is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0]):
+
+    for node in g.nodes:
+        for n, successors in nodes_successors.items():
+            if any(arg in successors for arg in node.args):
+                successors.add(n)
+        if is_wait_tensor(node) and filter_node(node.args[0]):
             if (filter_wait_node is None) or filter_wait_node(node):
-                ag_node = node.args[0]
-                _, group_size, group_name = ag_node.args
-                dtype = ag_node.meta["val"].dtype
-                assert isinstance(group_name, str)
-                group_name_ag_nodes[(group_name, dtype)].append(ag_node)
-    # Step 2: Put all_gather nodes into buckets
-    ag_buckets: list[list[torch.fx.Node]] = []
-    for (group_name, dtype), ag_nodes in group_name_ag_nodes.items():
+                coll_node = node.args[0]
+                group_key = node_group_key(coll_node)
+                nodes_groups[group_key].append(coll_node)
+
+    buckets: list[list[torch.fx.Node]] = []
+    for nodes in nodes_groups.values():
         cur_bucket: list[torch.fx.Node] = []
-        cur_bucket_recursive_users: OrderedSet[torch.fx.Node] = OrderedSet()
+        cur_bucket_successors: OrderedSet[torch.fx.Node] = OrderedSet()
         cur_bucket_size_bytes: int = 0
         cur_bucket_id: int = 0
-        all_gather_bucket_size_bytes = int(
-            all_gather_bucket_cap_mb_callback(cur_bucket_id) * 1024 * 1024
+        bucket_size_bytes = int(
+            bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024
         )
-        for ag_node in ag_nodes:
-            assert is_all_gather_into_tensor(ag_node)
-            if ag_node in cur_bucket_recursive_users:
+        for node in nodes:
+            if node in cur_bucket_successors:
                 # We can not bucket successors with the node
                 continue
-            assert "val" in ag_node.meta
-            ag_n_val = ag_node.meta["val"]
-            ag_output_size_bytes = ag_n_val.numel() * ag_n_val.element_size()
+            assert "val" in node.meta
+            n_val = node.meta["val"]
+            out_size_bytes = n_val.numel() * n_val.element_size()
             if (
-                cur_bucket_size_bytes + ag_output_size_bytes
-                > all_gather_bucket_size_bytes
+                cur_bucket_size_bytes + out_size_bytes > bucket_size_bytes
                 and cur_bucket
             ):
                 # Current bucket is full, create new bucket
                 if len(cur_bucket) > 1:
-                    ag_buckets.append(cur_bucket)
+                    buckets.append(cur_bucket)
                 cur_bucket = []
                 cur_bucket_size_bytes = 0
                 cur_bucket_id += 1
-            cur_bucket_size_bytes += ag_output_size_bytes
-            cur_bucket.append(ag_node)
-            find_recursive_users_of_fx_node(ag_node, cur_bucket_recursive_users)
+                cur_bucket_successors = OrderedSet()
+            cur_bucket_size_bytes += out_size_bytes
+            cur_bucket.append(node)
+            cur_bucket_successors |= nodes_successors[node]
         if len(cur_bucket) > 1:
-            ag_buckets.append(cur_bucket)
-    return ag_buckets
+            buckets.append(cur_bucket)
+    return buckets
+
+
+def bucket_all_gather_by_mb(
+    gm: torch.fx.GraphModule,
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float],
+    filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
+) -> list[list[torch.fx.Node]]:
+    """
+    Identifies all all_gather nodes and groups them into buckets,
+    based on size limit `bucket_cap_mb_by_bucket_idx`.
+
+    Args:
+        gm (torch.fx.GraphModule): GraphModule where to bucket all_gathers.
+        bucket_cap_mb_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
+            in megabytes by bucket idx.  The idea of `bucket_cap_mb_by_bucket_idx` is to allow
+            to specify different sizes of the buckets at the start,
+            as first all_gather is usually exposed.  Interface of bucket_cap_mb_by_bucket_idx
+            is `bucket_cap_mb_by_bucket_idx_default` function that is default value for `bucket_cap_mb_by_bucket_idx`.
+        filter_wait_node (Optional[Callable[[torch.fx.Node], bool]]): If specified,
+            only all_gather nodes with wait_node that satisfy `filter_wait_node` will be bucketed.
+
+    Returns:
+        list[list[torch.fx.Node]]: List of buckets, where each bucket is a list of all_gather nodes.
+    """
+
+    def _ag_group_key(node: torch.fx.Node) -> tuple[str, torch.dtype]:
+        _, group_size, group_name = node.args
+        dtype = node.meta["val"].dtype
+        assert isinstance(group_name, str)
+        return (group_name, dtype)
+
+    return greedy_bucket_collective_by_mb(
+        gm,
+        bucket_cap_mb_by_bucket_idx,
+        is_all_gather_into_tensor,
+        _ag_group_key,
+        filter_wait_node,
+    )
 
 
 def bucket_reduce_scatter_by_mb(
     gm: torch.fx.GraphModule,
-    reduce_scatter_bucket_cap_mb_callback: Callable[[int], float],
+    bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> list[list[torch.fx.Node]]:
     """
-    Identifies all reduce_scatter nodes and groups them into buckets based on size limit `reduce_scatter_bucket_cap_mb_callback`.
-    Returns a list of buckets, where each bucket is a list of reduce_scatter nodes.
+    Identifies all reduce_scatter nodes and groups them into buckets,
+        based on size limit `bucket_cap_mb_by_bucket_idx`.
+
+    Args:
+        gm (torch.fx.GraphModule): GraphModule where to bucket reduce_scatters.
+        bucket_cap_mb_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
+            in megabytes by bucket idx.  The idea of `bucket_cap_mb_by_bucket_idx` is to allow
+            to specify different sizes of the buckets.
+        filter_wait_node (Optional[Callable[[torch.fx.Node], bool]]): If specified,
+            only reduce_scatter nodes with wait_node that satisfy `filter_wait_node` will be bucketed.
+
+    Returns:
+        list[list[torch.fx.Node]]: List of buckets, where each bucket is a list of all_gather nodes.
     """
-    node_list = list(gm.graph.nodes)
-    # Prerequisite: Check if there is any reduce_scatter node
-    found_reduce_scatter = False
-    for node in node_list:
-        if is_reduce_scatter_tensor(node):
-            found_reduce_scatter = True
-            break
-    if not found_reduce_scatter:
-        return []
-    group_name_rs_nodes: dict[tuple[str, str, torch.dtype], list[torch.fx.Node]] = (  # type: ignore[name-defined]
-        defaultdict(list)
+
+    def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
+        _, reduce_op, group_size, group_name = node.args
+        dtype = node.meta["val"].dtype
+        assert isinstance(group_name, str)
+        assert isinstance(reduce_op, str)
+        return (group_name, reduce_op, dtype)
+
+    return greedy_bucket_collective_by_mb(
+        gm,
+        bucket_cap_mb_by_bucket_idx,
+        is_reduce_scatter_tensor,
+        _rs_group_key,
+        filter_wait_node,
     )
-    # Step 1: Find all reduce_scatter nodes
-    for node in node_list:
-        if is_wait_tensor(node) and is_reduce_scatter_tensor(node.args[0]):
-            if (filter_wait_node is None) or filter_wait_node(node):
-                rs_node = node.args[0]
-                _, reduce_op, group_size, group_name = rs_node.args
-                dtype = rs_node.meta["val"].dtype
-                assert isinstance(group_name, str)
-                assert isinstance(reduce_op, str)
-                group_name_rs_nodes[(group_name, reduce_op, dtype)].append(rs_node)
-    # Step 2: Put reduce_scatter nodes into buckets
-    rs_buckets: list[list[torch.fx.Node]] = []
-    for (group_name, reduce_op, dtype), rs_nodes in group_name_rs_nodes.items():
-        cur_bucket: list[torch.fx.Node] = []
-        cur_bucket_recursive_users: OrderedSet[torch.fx.Node] = OrderedSet()
-        cur_bucket_size_bytes: int = 0
-        cur_bucket_id: int = 0
-        # Convert MiB to bytes
-        reduce_scatter_bucket_size_bytes = int(
-            reduce_scatter_bucket_cap_mb_callback(cur_bucket_id) * 1024 * 1024
-        )
-        for rs_node in rs_nodes:
-            assert is_reduce_scatter_tensor(rs_node)
-            if rs_node in cur_bucket_recursive_users:
-                # We can not bucket successors with the node
-                continue
-            rs_input = rs_node.args[0]
-            assert "val" in rs_input.meta  # type: ignore[union-attr]
-            rs_in_val = rs_input.meta["val"]  # type: ignore[union-attr]
-            rs_input_size_bytes = rs_in_val.numel() * rs_in_val.element_size()
-            if (
-                cur_bucket_size_bytes + rs_input_size_bytes
-                > reduce_scatter_bucket_size_bytes
-                and cur_bucket
-            ):
-                # Current bucket is full, create new bucket
-                if len(cur_bucket) > 1:
-                    rs_buckets.append(cur_bucket)
-                cur_bucket = []
-                cur_bucket_size_bytes = 0
-                cur_bucket_id += 1
-                reduce_scatter_bucket_size_bytes = int(
-                    reduce_scatter_bucket_cap_mb_callback(cur_bucket_id) * 1024 * 1024
-                )
-            cur_bucket_size_bytes += rs_input_size_bytes
-            cur_bucket.append(rs_node)
-            find_recursive_users_of_fx_node(rs_node, cur_bucket_recursive_users)
-        if cur_bucket:
-            if len(cur_bucket) > 1:
-                rs_buckets.append(cur_bucket)
-    return rs_buckets
 
 
 def _rank_idx_dict(group_name: str) -> dict[int, int]:
@@ -223,17 +236,6 @@ def _rank_idx_dict(group_name: str) -> dict[int, int]:
     ranks = get_process_group_ranks(pg)
     rank_idx_dict: dict[int, int] = {rank: idx for idx, rank in enumerate(ranks)}
     return rank_idx_dict
-
-
-def find_recursive_users_of_fx_node(node, collected_node_set) -> None:  # type: ignore[no-untyped-def]
-    for user_node in node.users:
-        if user_node in collected_node_set:
-            continue
-        collected_node_set.add(user_node)
-        find_recursive_users_of_fx_node(
-            user_node,
-            collected_node_set,
-        )
 
 
 def reduce_scatter_merge_fn_to_trace(
