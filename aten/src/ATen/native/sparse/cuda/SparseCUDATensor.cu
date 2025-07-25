@@ -106,7 +106,14 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     values = values.contiguous();
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
     int warp_size = at::cuda::warp_size();
+#ifdef USE_ROCM
+    const int64_t BATCHING_SEGMENT = 4096;
+    int64_t nsegments = ceil_div(newNnz, (int64_t) SZ);
+    int64_t s_batch = ceil_div(nsegments, BATCHING_SEGMENT);
+    dim3 grid(s_batch, (s_batch == 1) ? nsegments : BATCHING_SEGMENT, ceil_div(stride, (int64_t) warp_size*SZ));
+#else
     dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) warp_size*SZ));
+#endif
     dim3 block(warp_size, SZ);
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::ComplexHalf, at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
@@ -119,6 +126,9 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
           newValues.data_ptr<scalar_t>(),
           nnz,
           newNnz,
+#if USE_ROCM
+          nsegments,
+#endif
           stride
         );
         C10_CUDA_KERNEL_LAUNCH_CHECK();
