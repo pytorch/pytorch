@@ -1158,6 +1158,10 @@ def lp_pool1d(
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
+    if kernel_size <= 0 or kernel_size >= 1e9:
+        raise ValueError(f"lp_pool1d: kernel_size must be > 0 and reasonably small, got {kernel_size}")
+    if not math.isfinite(norm_type) or abs(norm_type) > 1e10:
+        raise ValueError(f"lp_pool1d: norm_type must be a finite number, got {norm_type}")
     if has_torch_function_unary(input):
         return handle_torch_function(
             lp_pool1d,

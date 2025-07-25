@@ -23,6 +23,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.rnn as rnn_utils
+import pytest 
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_, clip_grads_with_norm_, get_total_norm
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn.utils.fusion import fuse_conv_bn_weights
@@ -85,6 +86,22 @@ class TestNN(NNTestCase):
                 return module(*input)
             else:
                 return module(input)
+    def test_lp_pool1d_invalid_params(self):
+        t = torch.randn(2, 10)
+        with pytest.raises(ValueError, match="kernel_size"):
+            F.lp_pool1d(t, norm_type=2.0, kernel_size=int(1e18))
+
+        with pytest.raises(ValueError, match="norm_type"):
+            F.lp_pool1d(t, norm_type=float('inf'), kernel_size=2)
+    def test_lp_pool1d_invalid_params_gpu(self):
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+
+        t = torch.randn(2, 10, device="cuda")
+
+        with self.assertRaisesRegex(RuntimeError, r"(integer out of range|too large|invalid)"):
+            torch._C._nn.lp_pool1d(t, -1.3e150, 7879455037536781369, None, True)
+
 
     def _backward(self, module, input: _TensorOrTensors, output, grad_output, create_graph=False):
         output.backward(grad_output, retain_graph=True, create_graph=create_graph)
