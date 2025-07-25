@@ -10,7 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import IncorrectUsage, Unsupported
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import run_tests, skipIfWindows
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 def my_custom_function(x):
