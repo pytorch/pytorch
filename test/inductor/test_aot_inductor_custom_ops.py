@@ -416,6 +416,7 @@ class AOTInductorTestsTemplate:
 
     @skipIfXpu
     @skipIfRocm
+    @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
     def test_custom_op_square(self) -> None:
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -511,6 +512,7 @@ CUDA_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(),
     "test_quanatized_int8_linear": fail_cuda(),
+    "test_quantized_linear_bias_none": fail_cuda(),
 }
 
 

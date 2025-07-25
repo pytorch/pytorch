@@ -5,7 +5,7 @@ import itertools
 import math
 from functools import partial
 from threading import Lock
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -33,6 +33,7 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
+    hint_override: Optional[int] = None
 
 
 @dataclasses.dataclass
@@ -421,7 +422,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used: OrderedSet[tuple[int, ...]] = OrderedSet()
+        used: OrderedSet[tuple[Optional[int], ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -430,11 +431,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Construct key for finding duplicate configs
-            key: tuple[int, ...] = (
+            key: tuple[Optional[int], ...] = (
                 conf.block_m,
                 conf.block_n,
                 conf.block_k,
                 conf.num_stages,
+                conf.hint_override,
                 num_warps,
             )
 
@@ -451,12 +453,11 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     "BLOCK_M": conf.block_m,
                     "BLOCK_N": conf.block_n,
                     "BLOCK_K": conf.block_k,
-                    "num_stages": conf.num_stages,
-                    "num_warps": num_warps,
+                    "hint_override": conf.hint_override,
                 }
                 if group_m is not None:
                     kwargs["GROUP_M"] = group_m
-                yield self.triton_config(**kwargs)
+                yield self.triton_config(conf.num_stages, num_warps, **kwargs)
 
     def _scale_mm_configs(
         self,
@@ -467,6 +468,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scale: float,
         has_int8_tensor: bool,
         exclude: Callable[[int, int, int], bool],
+        hint_override: Optional[int] = None,
     ) -> list[BaseConfig]:
         """
         Scales and filters matrix multiplication configs based on input size.
@@ -476,47 +478,52 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         min_block_size = 16
         min_block_size_k = 32 if has_int8_tensor else 16
 
-        m = max(
-            next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    m,
-                    fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                )
-            ),
-            min_block_size,
-        )
-        n = max(
-            next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    n,
-                    fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                )
-            ),
-            min_block_size,
-        )
-        k = max(
-            next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    k,
-                    fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                )
-            ),
-            min_block_size_k,
-        )
-
         scaled_configs = []
-        for c in configs:
-            scaled_config = dataclasses.replace(
-                c,
-                block_m=max(min(int(c.block_m * scale), m), min_block_size),
-                block_n=max(min(int(c.block_n * scale), n), min_block_size),
-                block_k=max(min(int(c.block_k * scale), k), min_block_size_k),
+        for hint_override in [None] + config.multi_kernel_hints:
+            m_hint = max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        m,
+                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
+                        hint_override=hint_override,
+                    )
+                ),
+                min_block_size,
+            )
+            n_hint = max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        n,
+                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
+                        hint_override=hint_override,
+                    )
+                ),
+                min_block_size,
+            )
+            k_hint = max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        k,
+                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
+                        hint_override=hint_override,
+                    )
+                ),
+                min_block_size_k,
             )
 
-            if not exclude(
-                scaled_config.block_m, scaled_config.block_n, scaled_config.block_k
-            ):
-                scaled_configs.append(scaled_config)
+            for c in configs:
+                scaled_config = dataclasses.replace(
+                    c,
+                    block_m=max(min(int(c.block_m * scale), m_hint), min_block_size),
+                    block_n=max(min(int(c.block_n * scale), n_hint), min_block_size),
+                    block_k=max(min(int(c.block_k * scale), k_hint), min_block_size_k),
+                    hint_override=hint_override,
+                )
+
+                if not exclude(
+                    scaled_config.block_m, scaled_config.block_n, scaled_config.block_k
+                ):
+                    scaled_configs.append(scaled_config)
 
         return scaled_configs
 
@@ -700,6 +707,18 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
     def __init__(self) -> None:
         super().__init__()
 
+        self.b200_default_flex_config = {
+            (torch.float32, 64): FlexConfig(128, 32, 3, 4),
+            (torch.float32, 128): FlexConfig(32, 64, 3, 4),
+            (torch.float32, 256): FlexConfig(32, 32, 3, 4),
+            (torch.bfloat16, 64): FlexConfig(128, 128, 3, 4),
+            (torch.bfloat16, 128): FlexConfig(128, 64, 2, 8),
+            (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
+            (torch.float16, 64): FlexConfig(128, 128, 3, 4),
+            (torch.float16, 128): FlexConfig(128, 128, 3, 8),
+            (torch.float16, 256): FlexConfig(64, 32, 3, 4),
+        }
+
         self.h100_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 3, 4),
             (torch.float32, 128): FlexConfig(32, 64, 3, 4),
@@ -738,7 +757,11 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
                 default_config = FlexConfig(128, 64, 3, 4)
-            if capability >= (9, 0):
+            if capability >= (10, 0):
+                default_config = self.b200_default_flex_config.get(
+                    (dtype, head_dim), default_config
+                )
+            elif capability >= (9, 0):
                 default_config = self.h100_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )

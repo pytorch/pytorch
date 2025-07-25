@@ -62,7 +62,7 @@ c10::Device inferTargetDevice(
 
 } // namespace
 
-inline constexpr std::string_view kSymIntOps[] = {
+inline constexpr std::array<std::string_view, 7> kSymIntOps = {
     "_operator.floordiv",
     "_operator.mod",
     "torch.sym_int",
@@ -72,7 +72,7 @@ inline constexpr std::string_view kSymIntOps[] = {
     "torch.sym_min",
 };
 
-inline constexpr std::string_view kSymBoolOps[] = {
+inline constexpr std::array<std::string_view, 8> kSymBoolOps = {
     "_operator.eq",
     "_operator.ne",
     "_operator.le",
@@ -83,14 +83,14 @@ inline constexpr std::string_view kSymBoolOps[] = {
     "torch.sym_not",
 };
 
-inline constexpr std::string_view kSymFloatOps[] = {
+inline constexpr std::array<std::string_view, 4> kSymFloatOps = {
     "torch._sym_sqrt",
     "math.trunc",
     "_operator.neg",
     "_operator.truediv",
 };
 
-inline constexpr std::string_view kScalarBinaryOps[] = {
+inline constexpr std::array<std::string_view, 4> kScalarBinaryOps = {
     "_operator.mul",
     "_operator.add",
     "_operator.sub",
@@ -124,11 +124,11 @@ void KernelFactory::registerHandler(
 
 ExecutionKernels KernelFactory::initializeNodeKernels(
     const Graph& graph,
-    std::shared_ptr<Weights> weights,
+    const std::shared_ptr<Weights>& weights,
     const torch::nativert::ExecutorConfig& executorConfig,
     const Placement& placement,
-    std::shared_ptr<caffe2::serialize::PyTorchStreamReader> pytorchStreamReader,
-    const MakeProxyExecutorFn& makeProxyExecutorFunc) {
+    const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
+        pytorchStreamReader) {
   std::vector<std::unique_ptr<OpKernel>> nodeKernels;
   std::vector<std::unique_ptr<DelegateExecutor>> delegateExecutors;
   std::vector<ConstFoldingExecution> constFoldingExecutions;
@@ -214,10 +214,12 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
           const auto& subgraph = std::get<std::unique_ptr<Graph>>(attr.value);
           auto executionKernels = initializeNodeKernels(
               *subgraph, weights, executorConfig, placement);
-          CHECK(executionKernels.delegateExecutors.empty())
-              << "HigherOrderKernel does not support delegates";
-          CHECK(executionKernels.constFoldingExecutions.size() == 0)
-              << "HigherOrderKernel does not support const folding";
+          TORCH_CHECK(
+              executionKernels.delegateExecutors.empty(),
+              "HigherOrderKernel does not support delegates");
+          TORCH_CHECK(
+              executionKernels.constFoldingExecutions.empty(),
+              "HigherOrderKernel does not support const folding");
           if (executorConfig.maxParallelOps > 1) {
             graphExecutors.emplace_back(
                 std::unique_ptr<GraphExecutorBase>(new ParallelGraphExecutor(
@@ -240,7 +242,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       nodeKernels.push_back(std::make_unique<HigherOrderKernel>(
           &node, std::move(graphExecutors)));
     } else if (c10::starts_with(node.target(), "torch.ops")) {
-      nodeKernels.push_back(std::make_unique<C10Kernel>(&node, targetDevice));
+      nodeKernels.push_back(std::make_unique<C10Kernel>(&node));
 
       std::string opName = std::string(node.target());
       if (opsWithoutStaticDispatchCount.find(opName) ==
