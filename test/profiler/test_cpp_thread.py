@@ -43,7 +43,6 @@ def blueprint(text):
 # onIterationStart() will be called by C++ training engine in cpp_thread_test_lib.cpp
 class PythonProfilerEventHandler(cpp.ProfilerEventHandler):
     def onIterationStart(self, iteration: int) -> None:
-        global KinetoProfiler, IterationCount
         # it is important to start the profiler on the same thread that step() is called
         # and yes, onIterationStart() will always be called on the same thread
         if iteration == 0:
@@ -58,7 +57,6 @@ class PythonProfilerEventHandler(cpp.ProfilerEventHandler):
             KinetoProfiler.step()
 
     def emulateTraining(self, iteration: int, thread_id: int) -> None:
-        global device
         # blueprint(f"training iteration {iteration} in thread {thread_id}")
         torch_device = getattr(torch, device)
         assert hasattr(torch_device, "synchronize")

@@ -1163,7 +1163,6 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
                 self.lin = nn.Linear(5, 5)
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
-                nonlocal param_shapes
                 # Allow for FSDP prefixes
                 param_names = [
                     clean_tensor_name(tup[0]) for tup in self.named_parameters()
