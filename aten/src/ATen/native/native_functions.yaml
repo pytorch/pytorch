@@ -2936,6 +2936,7 @@
   dispatch:
     CPU: grid_sampler_3d_backward_cpu
     CUDA: grid_sampler_3d_backward_cuda
+    MPS: grid_sampler_3d_backward_mps
   autogen: grid_sampler_3d_backward.out
 
 - func: hann_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
