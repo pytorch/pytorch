@@ -49,6 +49,7 @@ from torch._inductor.output_code import (
     CompiledFxGraphConstants,
     OutputCode,
 )
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
@@ -1023,8 +1024,9 @@ class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
         # which is set by compile_fx. But in precompile, we never actually call compile_fx
         # so we don't have a place to track cudagraphs here.
         cudagraphs = torch._inductor.config.triton.cudagraphs
+        boxed_forward_device_index = BoxedDeviceIndex(None)
         compiled_fn = entry.wrap_post_compile(
-            [], entry.sanitized_aot_config, {"cudagraphs": cudagraphs}
+            [], entry.sanitized_aot_config, {"cudagraphs": cudagraphs, "boxed_forward_device_index": boxed_forward_device_index}
         )
 
         # TODO: this ignores flat_params, which can exist
