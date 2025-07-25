@@ -9,6 +9,7 @@ import unittest
 
 import torch._dynamo.test_case
 from torch._dynamo.repro.after_aot import InputReader, InputWriter, save_graph_repro
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import IS_FBCODE
 from torch.utils._traceback import report_compile_source_on_error
@@ -32,7 +33,7 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
         gm = make_fx(f)(*args)
         with tempfile.TemporaryDirectory() as d:
             save_graph_repro(buf, gm, args, "inductor_accuracy", save_dir=d)
-            r = buf.getvalue()
+            r = normalize_path_separator(buf.getvalue())
             with report_compile_source_on_error():
                 exec(r, {"__compile_source__": r})
 
