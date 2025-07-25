@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -159,6 +160,10 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
     if not isinstance(fn, torch._ops.OpOverload):
         # Only OpOverloads have layout constraints.
         return None
+
+    if maybe_layout_tag := get_layout_constraint_tag(fn, with_default=False):
+        return tag_to_layout_constraint(maybe_layout_tag)
+
     if fn in _maybe_layout_constraints:
         return _maybe_layout_constraints[fn]
     return None
@@ -2629,7 +2634,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
-make_fallback(aten._scaled_grouped_mm, constrain_to_fx_strides)
 
 
 # 1) Easy
