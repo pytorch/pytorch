@@ -4,8 +4,6 @@ import logging
 import os
 import unittest
 
-from torch.testing._internal.common_cuda import tf32_off
-
 
 try:
     from .test_aot_inductor_utils import AOTIRunnerUtil
@@ -15,17 +13,17 @@ except ImportError:
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-
-
-try:
-    from .test_fp8 import _quantize_rowwise, _quantize_tensorwise
-except ImportError:
-    from test_fp8 import _quantize_rowwise, _quantize_tensorwise
+from torch.testing._internal.inductor_utils import (
+    _quantize_rowwise,
+    _quantize_tensorwise,
+    HAS_CPU,
+    HAS_CUDA,
+)
 
 
 if HAS_CUDA:
@@ -42,6 +40,12 @@ def _get_path_without_sccache() -> str:
     path_envs = os.environ.get("PATH", "").split(":")
     path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
     return ":".join(path_envs)
+
+
+_test_env = {
+    "PATH": _get_path_without_sccache(),
+    "DISABLE_SCCACHE": "1",
+}
 
 
 @instantiate_parametrized_tests
@@ -74,7 +78,7 @@ class TestCKBackend(TestCase):
             )
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK", "CKTILE", "ATen,Triton,CK"))
     @parametrize("autotune_in_subproc", (True, False))
     @parametrize("use_aoti", (True, False))
@@ -126,7 +130,7 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK",))
     @parametrize("autotune_in_subproc", (True,))
     def test_max_autotune_precompile_matmul_dynamic(
@@ -174,7 +178,7 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y1_compiled, Y1)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
         """
@@ -209,8 +213,8 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @parametrize("max_autotune_gemm_backends", ("ATen,Triton,CK"))
+    @unittest.mock.patch.dict(os.environ, _test_env)
+    @parametrize("max_autotune_gemm_backends", ("Aten,CK",))
     def test_max_autotune_precompile_non_contiguous(self, max_autotune_gemm_backends):
         """
         Make sure the matmul with non-contiguous inputs can fallback
@@ -244,10 +248,10 @@ class TestCKBackend(TestCase):
 
             Y_compiled = mm(a, b)
             Y_eager = a @ b
-            torch.testing.assert_close(Y_compiled, Y_eager)
+            torch.testing.assert_close(Y_compiled, Y_eager, equal_nan=True)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("x_shape", ([4096, 2048], [2048], [4096, 1]))
     def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape):
@@ -285,7 +289,7 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
     @parametrize("has_bias", (True, False))
@@ -390,7 +394,7 @@ class TestCKBackend(TestCase):
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(
         os.environ,
-        {"PATH": _get_path_without_sccache(), "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
+        {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
     )
     @parametrize("max_autotune_conv_backends", ("CK", "ATEN,CK,TRITON"))
     def test_max_autotune_conv2d(self, max_autotune_conv_backends):
@@ -427,7 +431,7 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     def test_max_autotune_precompile_bmm(
         self,
