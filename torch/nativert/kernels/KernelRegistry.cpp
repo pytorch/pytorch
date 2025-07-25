@@ -244,8 +244,7 @@ namespace torch::nativert {
 C10_DEFINE_REGISTRY(
     StaticallyDispatchedCPUKernelRegistry,
     OpKernel,
-    const Node*,
-    c10::Device)
+    const Node*)
 
 namespace {
 
@@ -1240,10 +1239,9 @@ REGISTER_CPU_KERNEL("torch.ops.aten.stack.default", aten_stack, {
 
 class OpKernel_aten__to_copy : public C10Kernel {
  public:
-  explicit OpKernel_aten__to_copy(const Node* node, c10::Device device)
+  explicit OpKernel_aten__to_copy(const Node* node)
       : C10Kernel(
             node,
-            device,
             torch::nativert::OpKernelKind::kStaticDispatchKernel,
             torch::nativert::AliasingSpec{
                 {/* input_idx = */ 0, /* output_idx = */ 0}}) {

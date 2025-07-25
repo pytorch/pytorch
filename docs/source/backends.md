@@ -253,6 +253,19 @@ These backends include:
 
 ```
 
+## torch.backends.miopen
+
+```{eval-rst}
+.. automodule:: torch.backends.miopen
+```
+
+```{eval-rst}
+.. attribute::  immediate
+
+    A :class:`bool` that, if True, causes MIOpen to use Immediate Mode
+    (https://rocm.docs.amd.com/projects/MIOpen/en/latest/how-to/find-and-immediate.html).
+```
+
 ## torch.backends.mps
 
 ```{eval-rst}

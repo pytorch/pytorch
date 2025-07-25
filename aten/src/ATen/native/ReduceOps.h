@@ -27,6 +27,7 @@ DECLARE_DISPATCH(reduce_fn, min_values_stub)
 DECLARE_DISPATCH(reduce_fn, max_values_stub)
 DECLARE_DISPATCH(reduce_fn, argmax_stub)
 DECLARE_DISPATCH(reduce_fn, argmin_stub)
+DECLARE_DISPATCH(reduce_fn, xor_sum_stub)
 
 using reduce_std_var_function =
     void (*)(TensorIterator&, double correction, bool take_sqrt);

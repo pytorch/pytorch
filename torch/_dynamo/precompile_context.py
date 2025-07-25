@@ -141,6 +141,9 @@ class PrecompileContext(CacheArtifactManager):
     @classmethod
     def serialize(cls) -> Optional[tuple[bytes, CacheInfo]]:
         cls._save_artifacts_by_type()
+        # No need to serialize if there are no new dynamo compiles
+        if "precompile_dynamo" not in cls._new_cache_artifacts:
+            return None
         return super().serialize()
 
     @staticmethod

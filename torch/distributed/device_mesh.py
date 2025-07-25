@@ -171,17 +171,12 @@ else:
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
 
             flatten_dims_in_root = [
-                not_none(root_mesh.mesh_dim_names).index(flattened_mesh_dim_name)
-                for flattened_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
+                not_none(root_mesh.mesh_dim_names).index(flatten_mesh_dim_name)
+                for flatten_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
             ]
 
             if not mesh_dim_name:
-                mesh_dim_name = "_".join(
-                    [
-                        not_none(root_mesh.mesh_dim_names)[dim]
-                        for dim in flatten_dims_in_root
-                    ]
-                )
+                mesh_dim_name = "_".join(not_none(device_mesh.mesh_dim_names))
 
             # Check whether the mesh_dim_name for flattened mesh is valid.
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})
@@ -301,7 +296,11 @@ else:
             If valid, return dim indexes of the slice mesh in the device mesh.
             """
             if device_mesh != self.get_root_mesh(device_mesh):
-                raise RuntimeError("Cannot create a submesh from a submesh.")
+                warnings.warn(
+                    "You are attempting to slice a submesh from another submesh. While we support this operation, "
+                    "it is users' responsibility to ensure that the submesh is consistently sliced across all ranks. "
+                    "If not, this may result in some ranks receiving the submesh while others encounter errors."
+                )
 
             # The slice mesh_dim_names should consist either the device_mesh's mesh_dim_names
             # or its flattened mesh's mesh_dim_names.

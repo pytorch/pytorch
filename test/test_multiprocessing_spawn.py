@@ -201,7 +201,7 @@ class _TestMultiProcessing:
                 try:
                     os.kill(pid, 0)
                 except ProcessLookupError:
-                    pids.remove(pid)
+                    pids.remove(pid)  # noqa: B909
                     break
 
             # This assert fails if any nested child process is still

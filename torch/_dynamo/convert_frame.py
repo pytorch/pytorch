@@ -225,6 +225,31 @@ def fx_forward_from_src_skip_result(
     return result
 
 
+def log_dynamo_start(code: CodeType, skip: int = 0) -> None:
+    convert_frame_intern = structured.intern_string(__file__)
+    # Initialize the ChromiumEventLogger on start
+    torch._logging.trace_structured(
+        "dynamo_start",
+        lambda: {
+            "stack": list(
+                itertools.takewhile(
+                    lambda f: f["filename"] != convert_frame_intern,
+                    structured.from_traceback(
+                        CapturedTraceback.extract(skip=4 + skip).summary()
+                    ),
+                )
+            )
+            + [
+                {
+                    "line": code.co_firstlineno,
+                    "name": code.co_name,
+                    "filename": structured.intern_string(code.co_filename),
+                }
+            ]
+        },
+    )
+
+
 def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     Context manager to:
@@ -1135,28 +1160,7 @@ def _compile(
         # # 2 extra here
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
-        convert_frame_intern = structured.intern_string(__file__)
-        # Initialize the ChromiumEventLogger on start
-        torch._logging.trace_structured(
-            "dynamo_start",
-            lambda: {
-                "stack": list(
-                    itertools.takewhile(
-                        lambda f: f["filename"] != convert_frame_intern,
-                        structured.from_traceback(
-                            CapturedTraceback.extract(skip=4 + skip).summary()
-                        ),
-                    )
-                )
-                + [
-                    {
-                        "line": code.co_firstlineno,
-                        "name": code.co_name,
-                        "filename": structured.intern_string(code.co_filename),
-                    }
-                ]
-            },
-        )
+        log_dynamo_start(code, skip)
         start_time_ns = time.time_ns()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
@@ -1588,9 +1592,10 @@ class CatchErrorsWrapper:
 
         with compile_lock, _disable_current_modes():
             # skip=1: skip this frame
-            return self._torchdynamo_orig_backend(
+            result = self._torchdynamo_orig_backend(
                 frame, cache_entry, self.hooks, frame_state, skip=1
             )
+            return result
 
 
 def catch_errors_wrapper(

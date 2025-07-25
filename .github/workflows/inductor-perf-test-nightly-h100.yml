@@ -2,7 +2,7 @@ name: inductor-perf-nightly-h100
 
 on:
   schedule:
-    - cron: 15 0,4,8,12,16,20 * * 1-6
+    - cron: 15 0,12 * * 1-6
     - cron: 0 7 * * 0
   # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
   # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
@@ -126,7 +126,7 @@ jobs:
     name: cuda12.8-py3.10-gcc9-sm90
     uses: ./.github/workflows/_linux-test.yml
     needs: build
-    if: github.event.schedule == '15 0,4,8,12,16,20 * * 1-6'
+    if: github.event.schedule == '15 0,12 * * 1-6'
     with:
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm90
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true

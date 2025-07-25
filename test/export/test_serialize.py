@@ -795,7 +795,7 @@ class TestDeserialize(TestCase):
             )
 
             @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo")
+            @torch.library.register_fake("mylib::foo")
             def foo_impl(a, b, c):
                 res2 = None
                 if c is not None:
@@ -884,21 +884,21 @@ class TestDeserialize(TestCase):
             )
 
             @torch.library.impl("mylib::foo1", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo1")
+            @torch.library.register_fake("mylib::foo1")
             def foo1_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)
                 return n + n
 
             @torch.library.impl("mylib::foo2", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo2")
+            @torch.library.register_fake("mylib::foo2")
             def foo2_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)
                 return (n + n, n * n)
 
             @torch.library.impl("mylib::foo3", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo3")
+            @torch.library.register_fake("mylib::foo3")
             def foo3_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)

@@ -217,7 +217,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 z.add_(y[1] + n)
                 return y[0] + w, y[1] + n
 
-            @torch.library.impl_abstract("mylib::foo", lib=lib)
+            @torch.library.register_fake("mylib::foo", lib=lib)
             def foo_abstract(x, y, z, w, n):
                 return y[0] + w, y[1] + n
 
@@ -495,7 +495,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 z.add_(y[1] + n)
                 return y[0] + w, y[1] + n
 
-            @torch.library.impl_abstract("mylib::foo", lib=lib)
+            @torch.library.register_fake("mylib::foo", lib=lib)
             def foo_abstract(x, y, z, w, n):
                 return y[0] + w, y[1] + n
 

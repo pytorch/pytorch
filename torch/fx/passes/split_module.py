@@ -394,7 +394,7 @@ def split_module(
         root_partition = root_partitions.pop()
         sorted_partitions.append(root_partition)
         for dependent in partitions[root_partition].dependents:
-            partitions[dependent].dependencies.pop(root_partition)
+            partitions[dependent].dependencies.pop(root_partition)  # noqa: B909
             if not partitions[dependent].dependencies:
                 root_partitions.append(dependent)
     if len(sorted_partitions) != len(partitions):

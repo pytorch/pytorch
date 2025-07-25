@@ -216,13 +216,21 @@ void LayoutPlanner::run_periodic(const std::function<void()>& f) {
 void LayoutPlanner::create_plan() {
   // update spec sizes to use historical maximums set
   // by execution frames before creating the new plan
+  bool updated = false;
   for (const auto i : c10::irange(planned_allocation_specs_.size())) {
     auto& spec = planned_allocation_specs_[i];
-    spec.size = planned_values_historical_max_nbytes_[i].load(
-        std::memory_order_relaxed);
+    if (const auto new_size = planned_values_historical_max_nbytes_[i].load(
+            std::memory_order_relaxed);
+        new_size > spec.size) {
+      spec.size = new_size;
+      updated = true;
+    }
   }
-  plan_.write([p_new = (*algorithm_)(planned_allocation_specs_)](
-                  LayoutPlan& plan) { plan = p_new; });
+
+  if (updated) {
+    plan_.write([p_new = (*algorithm_)(planned_allocation_specs_)](
+                    LayoutPlan& plan) { plan = p_new; });
+  }
 }
 
 } // namespace torch::nativert

@@ -504,11 +504,13 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     # Needs larger cache size since we recompile for each op
     @patch.object(torch._dynamo.config, "recompile_limit", 48)
     def test_builtin_equivalent_funcs(self):
+        from torch._dynamo.variables.builtin import (
+            BUILTIN_TO_TENSOR_FN_MAP,
+            BUILTIN_TO_TENSOR_RFN_MAP,
+        )
         from torch._dynamo.variables.torch_function import (
             bin_int_ops,
             bin_ops,
-            BUILTIN_TO_TENSOR_FN_MAP,
-            BUILTIN_TO_TENSOR_RFN_MAP,
             tensor_and_int_ops,
             un_int_ops,
             un_ops,

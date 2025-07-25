@@ -221,8 +221,13 @@ its type to `common_constant_types`.
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
-            result = search in self.value
-            return ConstantVariable.create(result)
+            try:
+                result = search in self.value
+                return ConstantVariable.create(result)
+            except TypeError as e:
+                raise_observed_exception(
+                    type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                )
         return super().call_method(tx, name, args, kwargs)
 
     def call_obj_hasattr(

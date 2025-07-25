@@ -94,6 +94,7 @@ from .exc import (
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
+from .polyfills import impl_CONTAINS_OP_fallback
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
@@ -1913,6 +1914,21 @@ class InstructionTranslatorBase(
         self.call_function(fn, [typ, val, tb], {})
 
     def exception_handler(self, raised_exception):
+        def bubble_exception_to_interpreter():
+            # Bubble the exception to the interpreter
+            curr_exc = self.exn_vt_stack.get_current_exception()
+            dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
+            assert isinstance(raised_exception, dynamo_exc)  # sanity check
+            unimplemented_v2(
+                gb_type="Observed exception",
+                context=f"raised exception {curr_exc.python_type_name()}({curr_exc.args})",
+                explanation=observed_exn_gb_explanation,
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         observed_exn_gb_explanation = (
             "Dynamo found no exception handler at the top-level compiled function "
             "when encountering an exception. Exception will propagate outside the compiled region."
@@ -1944,15 +1960,7 @@ class InstructionTranslatorBase(
                 # instruction translator. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    unimplemented_v2(
-                        gb_type="Observed exception",
-                        context=str(raised_exception),
-                        explanation=observed_exn_gb_explanation,
-                        hints=[
-                            *graph_break_hints.USER_ERROR,
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
+                    bubble_exception_to_interpreter()
                 raise raised_exception
         else:
             if len(self.block_stack):
@@ -2024,15 +2032,7 @@ class InstructionTranslatorBase(
                 # instruction translator. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    unimplemented_v2(
-                        gb_type="Observed exception",
-                        context=str(raised_exception),
-                        explanation=observed_exn_gb_explanation,
-                        hints=[
-                            *graph_break_hints.USER_ERROR,
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
+                    bubble_exception_to_interpreter()
                 raise raised_exception
 
     def PUSH_EXC_INFO(self, inst):
@@ -2713,7 +2713,17 @@ class InstructionTranslatorBase(
         assert inst.argval == 0 or inst.argval == 1
         left, right = self.popn(2)
         op = inst.argval
-        self.push(right.call_method(self, "__contains__", [left], {}))
+        try:
+            self.push(right.call_method(self, "__contains__", [left], {}))
+        except Unsupported:  # object doesn't support __contains__
+            # Use __iter__ as fallback
+            self.push(
+                self.inline_user_function_return(
+                    VariableTracker.build(self, impl_CONTAINS_OP_fallback),
+                    [left, right],
+                    {},
+                )
+            )
         if op == 1:
             self.UNARY_NOT(inst)
 
@@ -3622,7 +3632,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         if self.package is not None:
             self.package.add_resume_function(
-                new_code, self.f_globals["__name__"], package_name
+                new_code, self.f_globals["__name__"], function_name=package_name
             )
 
         cg.extend_output([cg.create_load(k) for k in argnames])

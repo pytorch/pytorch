@@ -1149,7 +1149,7 @@ def spawn_threads_and_init_comms(
             )
             try:
                 callback()
-            except BaseException as ex:
+            except BaseException as ex:  # noqa: B036
                 # Exceptions are handled in MultiThreadedTestCase
                 MultiThreadedTestCase.exception_queue.put((rank, sys.exc_info()))
                 ProcessLocalGroup.exception_handle(
@@ -1310,7 +1310,7 @@ class MultiThreadedTestCase(TestCase):
 
         try:
             getattr(self, test_name)()
-        except BaseException as ex:
+        except BaseException as ex:  # noqa: B036
             self.exception_queue.put((rank, sys.exc_info()))
             ProcessLocalGroup.exception_handle(
                 ex
@@ -1641,7 +1641,7 @@ class MultiProcContinousTest(TestCase):
             try:
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
-            except BaseException as ex:
+            except BaseException as ex:  # noqa: B036
                 raised_exception = True
                 # Send the exception and stack trace back to the dispatcher
                 exc_info = sys.exc_info()

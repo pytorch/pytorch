@@ -1,4 +1,5 @@
 import torch
+
 import torch_openreg._C  # type: ignore[misc]
 
 

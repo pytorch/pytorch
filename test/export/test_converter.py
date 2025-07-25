@@ -911,7 +911,7 @@ class TestConverter(TestCase):
                 return x + x
 
             # Meta function of the custom op.
-            @torch.library.impl_abstract(
+            @torch.library.register_fake(
                 "mylib::foo",
                 lib=lib,
             )

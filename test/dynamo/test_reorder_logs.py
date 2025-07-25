@@ -210,7 +210,8 @@ Unsupported Tensor.item() call with capture_scalar_outputs=False
   Hint: Set `torch._dynamo.config.capture_scalar_outputs = True` or `export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1` to include these operations in the captured graph.
 
   Developer debug context: call_method TensorVariable() item () {}
-""",  # noqa: B950
+
+ For more details about this graph break, please visit: https://pytorch-labs.github.io/compile-graph-break-site/gb/gb0124.html""",  # noqa: B950
         )
 
 

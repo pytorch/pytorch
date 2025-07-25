@@ -1794,3 +1794,12 @@ include_patterns = [
     'torch/header_only_apis.txt',
 ]
 is_formatter = false
+
+
+[[linter]]
+code = "GB_REGISTRY"
+include_patterns = ["torch/_dynamo/**/*.py"]
+command = [
+  "python3",
+  "tools/linter/adapters/gb_registry_linter.py",
+]

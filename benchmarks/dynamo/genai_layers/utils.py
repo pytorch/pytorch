@@ -134,7 +134,7 @@ class BenchmarkKernel:
                 print(
                     f"Failed to run {backend} backend on {self.name} kernel for {setting} due to {e}"
                 )
-                self.available_backends.remove(backend)
+                self.available_backends.remove(backend)  # noqa: B909
                 continue
             mem_bytes = self.get_memory_bytes(args_ref, kwargs_ref)
             perf = Performance(setting, avg_time, mem_bytes)

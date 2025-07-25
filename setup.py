@@ -1325,6 +1325,7 @@ def main() -> None:
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
         "_dynamo/graph_break_registry.json",
+        "tools/dynamo/gb_id_mapping.py",
     ]
 
     if not BUILD_LIBTORCH_WHL:

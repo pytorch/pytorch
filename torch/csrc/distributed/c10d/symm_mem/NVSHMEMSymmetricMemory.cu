@@ -10,7 +10,13 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
 
-#include <nvshmem_host.h>
+// Starting from NVSHMEM 3.3.9, nvshmem_host.h exists so that we can cleanly
+// include only the nvshmem host library headers:
+// #include <nvshmem_host.h>
+// It translates into the following two lines:
+#include <host/nvshmem_api.h>
+#include <host/nvshmemx_api.h>
+// For maximum compatibility, we use the "host/" style for now.
 
 namespace c10d {
 namespace symmetric_memory {

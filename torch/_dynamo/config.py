@@ -549,7 +549,7 @@ fake_tensor_disable_inference_mode = True
 
 # Experimental feature for running automatic caching precompile.
 # Enables automatic DynamoCache save/load
-caching_precompile = False
+caching_precompile = os.environ.get("TORCH_CACHING_PRECOMPILE", "0") == "1"
 
 # Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
 # Note: AOTAutograd will still trace and partition an AOT backward graph local to that

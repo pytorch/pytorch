@@ -3324,7 +3324,7 @@ class TestCase(expecttest.TestCase):
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
-                        except BaseException as e:
+                        except BaseException as e:  # noqa: B036
                             self.skipTest(e)
                         raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
                     return wrapper
@@ -3346,7 +3346,7 @@ class TestCase(expecttest.TestCase):
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
-                        except BaseException as e:
+                        except BaseException as e:  # noqa: B036
                             self.skipTest(e)
                         method = getattr(self, self._testMethodName)
                         if getattr(method, "__unittest_expecting_failure__", False):
@@ -5764,16 +5764,3 @@ def recover_orig_fp32_precision(fn):
             torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
 
     return recover()(fn)
-
-def skipIfPythonVersionMismatch(predicate):
-    vi = sys.version_info
-
-    def dec_fn(fn):
-        @wraps(fn)
-        def wrap_fn(self, *args, **kwargs):
-            if predicate(vi.major, vi.minor, vi.micro):
-                return fn(self, *args, **kwargs)
-            else:
-                raise unittest.SkipTest("Python version mismatch")
-        return wrap_fn
-    return dec_fn

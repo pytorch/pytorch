@@ -13,9 +13,15 @@ from torch.distributed.tensor.placement_types import Placement
 
 
 try:
-    from torch.utils._cxx_pytree import tree_leaves, tree_map_only, TreeSpec
+    from torch.utils._cxx_pytree import (
+        register_pytree_node,
+        tree_leaves,
+        tree_map_only,
+        TreeSpec,
+    )
 except ImportError:
     from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
+        register_pytree_node,
         tree_leaves,
         tree_map_only,
         TreeSpec,
@@ -240,6 +246,17 @@ class TupleStrategy(StrategyType):
             [f"{str(strat)}" for idx, strat in enumerate(self.children)]
         )
         return f"TupleStrategy({child_strategies_str})"
+
+
+try:
+    register_pytree_node(
+        TupleStrategy,
+        lambda node: (node.children, None),
+        lambda children, _: TupleStrategy(tuple(children)),
+    )
+except ValueError:
+    # already registered TupleStrategy, skip
+    pass
 
 
 @dataclass

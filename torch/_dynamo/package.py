@@ -9,6 +9,7 @@ from a different process or host.
 """
 
 import abc
+import ast
 import contextlib
 import dataclasses
 import functools
@@ -22,11 +23,13 @@ import platform
 import shutil
 import sys
 import types
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from typing import Any, Callable, NewType, Optional
+from typing_extensions import Never
 
 import torch
 import torch._inductor.package
+from torch._dynamo.exc import PackageError
 from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch.compiler._cache import CacheArtifactFactory
@@ -123,6 +126,10 @@ class _DynamoCodeCacheEntry:
       4. A list of guarded code that eval frame dispatches to.
       5. A list of imported module objects unioned from all compiled branches.
       6. A list of "backends" (compiled fx graph) unioned from all compield branches.
+      7. A string path used to access the original code object users defined.
+         A code object can be accessed by "{python_module}.{function_name}.{code_source}" .
+      8. A boolean flag indicating whether the function is installed to global scope.
+      9. A boolean flag indicating whether the function has a compile id.
     """
 
     python_code: SerializedCode
@@ -131,6 +138,120 @@ class _DynamoCodeCacheEntry:
     guarded_codes: list[_GuardedCodeCacheEntry]
     import_sources: dict[str, str]
     backend_ids: list[_BackendId]
+    code_source: Optional[str]
+    install_to_global: bool
+    has_compile_id: bool = False
+
+
+def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
+    assert len(entry.function_names) == 1
+    fn: Any = sys.modules[entry.python_module]
+    parts = entry.function_names[0].split(".")
+    for part in parts:
+        fn = getattr(fn, part)
+    if entry.code_source:
+        parts = entry.code_source.split(".")
+        for part in parts:
+            if part.endswith("]"):
+                index_begin = part.rfind("[")
+                assert isinstance(index_begin, int) and index_begin >= 0
+                attr = getattr(fn, part[:index_begin], None)
+                if attr is None:
+                    raise PackageError(f"Cannot find source for code entry {entry}")
+                fn = attr[ast.literal_eval(part[index_begin + 1 : -1])]
+            else:
+                fn = getattr(fn, part)
+    else:
+        raise PackageError(f"Cannot find source for code entry {entry}")
+    assert isinstance(fn, types.CodeType)
+    return fn
+
+
+def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
+    raise PackageError(
+        f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}"
+    )
+
+
+def _get_code_source(code: types.CodeType) -> tuple[str, str]:
+    """
+    Given a code object, return a fully qualified name which will be used as
+    a serialized handle to access the code object from the new process.
+    This is normally a straightforward process, but there are some corner cases:
+    1. When a function is defined with decorator, then this function will be captured
+       inside a closure with the wrapper object.
+    2. When a function is defined as a nested function, then the code object will be
+       stored on the co_consts field of the parent code object by Python compiler.
+    This function handles all of the corner cases above.
+    """
+
+    module = inspect.getmodule(code)
+    if module is None:
+        raise PackageError(f"Cannot find module for code {code}")
+
+    toplevel: Any = module
+    if sys.version_info >= (3, 11):
+        parts = code.co_qualname.split(".")
+
+        for part in parts:
+            if not hasattr(toplevel, part):
+                _raise_resolution_error(code, toplevel)
+            toplevel = getattr(toplevel, part)
+            if inspect.isfunction(toplevel):
+                break
+
+    def _find_code_source(obj: Any) -> Optional[str]:
+        nonlocal toplevel
+        if inspect.iscode(obj):
+            if obj is code:
+                return ""
+
+            for i, const in enumerate(obj.co_consts):
+                if (res := _find_code_source(const)) is not None:
+                    return f".co_consts[{i}]{res}"
+
+        if inspect.isfunction(obj):
+            if (res := _find_code_source(obj.__code__)) is not None:
+                toplevel = obj
+                return f".__code__{res}"
+            if obj.__closure__ is not None:
+                for i, cell in enumerate(obj.__closure__):
+                    try:
+                        cell_contents = cell.cell_contents
+                    except ValueError:
+                        continue
+                    if not (
+                        inspect.isfunction(cell_contents)
+                        or inspect.iscode(cell_contents)
+                    ):
+                        continue
+                    if (res := _find_code_source(cell_contents)) is not None:
+                        toplevel = obj
+                        return f".__closure__[{i}].cell_contents{res}"
+
+        if sys.version_info < (3, 11):
+            if inspect.ismodule(obj):
+                for value in obj.__dict__.values():
+                    if not (inspect.isfunction(value) or inspect.isclass(value)):
+                        continue
+                    if (res := _find_code_source(value)) is not None:
+                        return res
+
+            if inspect.isclass(obj):
+                for name, value in obj.__dict__.items():
+                    if not (inspect.isfunction(value) or inspect.isclass(value)):
+                        continue
+                    if (res := _find_code_source(value)) is not None:
+                        if not value.__name__ != name:
+                            _raise_resolution_error(code, toplevel)
+                        return res
+
+        return None
+
+    code_source = _find_code_source(toplevel)
+    if code_source is None:
+        _raise_resolution_error(code, toplevel)
+    return toplevel.__qualname__, code_source.strip(".")
 
 
 @dataclasses.dataclass
@@ -169,6 +290,42 @@ def _get_sourcelines(
 
 def _hash_sourcelines(m: types.ModuleType, firstlineno: int, lastlineno: int) -> str:
     return _hash_source("".join(_get_sourcelines(m, firstlineno, lastlineno)))
+
+
+def _compile_frame_context(
+    code: types.CodeType,
+) -> contextlib.AbstractContextManager[None]:
+    from torch._dynamo.convert_frame import get_compile_id, log_dynamo_start
+    from torch._guards import compile_context, CompileContext
+
+    # Each code represents a new compile frame
+    # recompiles on the same frame are all saved
+    # under the same cache entry, so we don't have recompile ids
+    # i.e. If cold start had 0/0, 0/1, 1/0, 1/1, these would be
+    # collapsed into 0/0, 1/0 on warm.
+    @contextlib.contextmanager
+    def _ctx() -> Iterator[None]:
+        increment_frame()
+        compile_id = get_compile_id(frame_state={})
+        log_dynamo_start(code)
+        with (
+            compile_context(CompileContext(compile_id)),
+            dynamo_timed(
+                "_compile.compile_inner",
+                phase_name="entire_frame_compile",
+                dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
+                # TODO: save all relevant compilation metrics
+                metadata={
+                    "frame_key": str(torch._dynamo.utils.curr_frame),
+                    "co_name": code.co_name,
+                    "co_filename": code.co_filename,
+                    "co_firstlineno": code.co_firstlineno,
+                },
+            ),
+        ):
+            yield
+
+    return _ctx()
 
 
 class CompilePackage:
@@ -256,7 +413,9 @@ class CompilePackage:
         self,
         python_code: types.CodeType,
         python_module: str,
-        name: Optional[_FunctionId] = None,
+        function_name: Optional[_FunctionId] = None,
+        code_source: Optional[str] = None,
+        install_to_global: bool = False,
     ) -> None:
         if python_code not in self._codes:
             code = _DynamoCodeCacheEntry(
@@ -266,14 +425,18 @@ class CompilePackage:
                 guarded_codes=[],
                 import_sources={},
                 backend_ids=[],
+                code_source=code_source,
+                install_to_global=install_to_global,
             )
             self._codes[python_code] = code
         else:
             code = self._codes[python_code]
             assert code.python_module == python_module
+            assert code.install_to_global == install_to_global
+            assert code.code_source == code_source
 
-        if name is not None:
-            code.function_names.append(name)
+        if function_name is not None:
+            code.function_names.append(function_name)
 
     @property
     def cached_backends(self) -> dict[_BackendId, Any]:
@@ -284,15 +447,33 @@ class CompilePackage:
         assert self._innermost_fn is not None
         return CompilePackage.source_id_from_fn(self._innermost_fn)
 
+    def _add_user_function(self, code: types.CodeType) -> None:
+        function_name, code_source = _get_code_source(code)
+        module = inspect.getmodule(code)
+        if module is None:
+            raise PackageError(f"Cannot find module for code {code}")
+        self._add_function(
+            code,
+            module.__name__,
+            function_name=_FunctionId(function_name),
+            code_source=code_source,
+        )
+
     @contextlib.contextmanager
     def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
         assert self._current_entry is None
+
+        # Sometimes user code cannot be inlined in dynamo resulting in extra user code
+        # being compiled. We should record these as when they are actually invoked.
+        if code not in self._codes:
+            self._add_user_function(code)
 
         entry = self._codes[code]
         self._current_entry = entry
         try:
             yield
         finally:
+            entry.has_compile_id = True
             self._current_entry = None
 
     def add_guarded_code(
@@ -332,10 +513,13 @@ class CompilePackage:
         self,
         python_code: types.CodeType,
         python_module: str,
-        name: Optional[str],
+        function_name: Optional[str],
     ) -> None:
         self._add_function(
-            python_code, python_module, _FunctionId(name) if name else None
+            python_code,
+            python_module,
+            function_name=_FunctionId(function_name) if function_name else None,
+            install_to_global=True,
         )
         self._resume_codes.add(python_code)
 
@@ -354,6 +538,7 @@ class CompilePackage:
     def validate(self) -> None:
         assert self._current_entry is None
         assert self._innermost_fn is not None
+        assert self._initialized
         assert next(iter(self._codes)) is self._innermost_fn.__code__
 
     def _install_global(self, module: types.ModuleType, name: str, value: Any) -> None:
@@ -380,43 +565,30 @@ class CompilePackage:
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
-        from torch._dynamo.convert_frame import get_compile_id
-        from torch._guards import compile_context, CompileContext
 
         from .output_graph import get_builtins_dict
 
         self.uninstall()
         for code, entry in self._codes.items():
-            # Each code represents a new compile frame
-            # recompiles on the same frame are all saved
-            # under the same cache entry, so we don't have recompile ids
-            # i.e. If cold start had 0/0, 0/1, 1/0, 1/1, these would be
-            # collapsed into 0/0, 1/0 on warm.
-            increment_frame()
-            compile_id = get_compile_id(frame_state={})
-            with (
-                compile_context(CompileContext(compile_id)),
-                dynamo_timed(
-                    "_compile.compile_inner",
-                    phase_name="entire_frame_compile",
-                    dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
-                    # TODO: save all relevant compilation metrics
-                    metadata={
-                        "frame_key": str(torch._dynamo.utils.curr_frame),
-                        "co_name": code.co_name,
-                        "co_filename": code.co_filename,
-                        "co_firstlineno": code.co_firstlineno,
-                    },
-                ),
-            ):
+            context = (
+                _compile_frame_context(code)
+                if entry.has_compile_id
+                else contextlib.nullcontext()
+            )
+            with context:
                 module = sys.modules[entry.python_module]
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
                         module, alias, importlib.import_module(module_name)
                     )
-                for function_name in entry.function_names:
-                    fn = types.FunctionType(code, module.__dict__, function_name)
-                    self._install_global(module, function_name, fn)
+                target_code = code
+                if entry.install_to_global:
+                    for function_name in entry.function_names:
+                        fn = types.FunctionType(code, module.__dict__, function_name)
+                        self._install_global(module, function_name, fn)
+                if entry.code_source:
+                    target_code = _lookup_code(entry)
+
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
@@ -431,6 +603,11 @@ class CompilePackage:
                             backend_id,
                             torch._dynamo.disable(backend),
                         )
+
+                if len(entry.guarded_codes) == 0:
+                    # Dynamo generates empty graph for trivial functions, should just skip them
+                    # in these cases.
+                    torch._dynamo.eval_frame.skip_code(target_code)
 
                 for guarded_code in entry.guarded_codes:
                     guards_state = pickle.loads(guarded_code.guards_state)
@@ -450,14 +627,14 @@ class CompilePackage:
                             runtime_global_scope[builtin_dict_name] = builtins_dict
                     assert isinstance(guards_state, torch._dynamo.guards.GuardsState)
                     check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
-                        code,
+                        target_code,
                         guards_state.output_graph,
                         guards_serialization_mode="load",
                         shape_code_parts=guards_state.shape_code_parts,
                         runtime_global_scope=runtime_global_scope,
                     )
                     _load_precompile_entry(
-                        code,
+                        target_code,
                         check_fn_manager.guard_manager,
                         SerializedCode.to_code_object(guarded_code.dynamo_code),
                     )

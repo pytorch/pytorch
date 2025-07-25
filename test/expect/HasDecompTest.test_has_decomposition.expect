@@ -852,6 +852,8 @@ aten::hann_window.periodic
 aten::hann_window.periodic_out
 aten::hardshrink_backward
 aten::hardshrink_backward.grad_input
+aten::hash_tensor
+aten::hash_tensor.out
 aten::histc
 aten::histc.out
 aten::histogram.bin_ct

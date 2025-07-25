@@ -47,6 +47,7 @@ torch_openreg/
 │       ├── OpenRegHostAllocator.cpp
 │       ├── OpenRegHostAllocator.h
 │       └── ...
+├── pyproject.toml
 ├── README.md
 ├── setup.py
 ├── third_party
@@ -75,10 +76,20 @@ graph LR
     A --> B --> C --> D --> E
 ```
 
-- `_C.so`: torch\_openreg/csrc/stub.c
-- `libtorch_bindings.so`: torch\_openreg/csrc/\*.cpp
-- `libtorch_openreg.so`: csrc
-- `libopenreg.so`: third\_party/openreg
+There are 4 DSOs in torch_openreg, and the dependencies between them are as follows:
+
+- `_C.so`:
+  - **sources**: torch_openreg/csrc/stub.c
+  - **description**: Python C module entry point.
+- `libtorch_bindings.so`: The bridging code between Python and C++ should go here.
+  - **sources**: torch_openreg/csrc
+  - **description**: A thin glue layer between Python and C++.
+- `libtorch_openreg.so`: All core implementations should go here.
+  - **sources**: csrc
+  - **description**: All core functionality, such as device runtime, operators, etc.
+- `libopenreg.so`: A DSO that uses the CPU to emulate a CUDA-like device, you can ignore it.
+  - **sources**: third_party/openreg
+  - **description**: Provides low-level device functionality similar to libcudart.so.
 
 **Key Directories**:
 
@@ -134,9 +145,8 @@ graph LR
 ### Installation
 
 ```python
-pip3 install -r requirements.txt
-
-python setup.py develop/install
+pip3 install --no-build-isolation -e . # for develop
+pip3 install --no-build-isolation . # for install
 ```
 
 ### Usage Example
@@ -155,18 +165,14 @@ print("OpenReg backend is available!")
 
 device = torch.device("openreg")
 
-try:
-    x = torch.tensor([[1., 2.], [3., 4.]], device=device)
-    y = x + 2
-    print("Result y:\n", y)
-    print(f"Device of y: {y.device}")
+x = torch.tensor([[1., 2.], [3., 4.]], device=device)
+y = x + 2
+print("Result y:\n", y)
+print(f"Device of y: {y.device}")
 
-    z = y.cpu()
-    print("Result z:\n", z)
-    print(f"Device of z: {z.device}")
-
-except Exception as e:
-    print(f"\nAn error occurred: {e}")
+z = y.cpu()
+print("Result z:\n", z)
+print(f"Device of z: {z.device}")
 ```
 
 ## Future Plans

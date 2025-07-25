@@ -69,8 +69,6 @@ if HAS_CUDA:
 
 log = logging.getLogger(__name__)
 
-DEFAULT_INST_LEVEL_MM_CONFIG: int = 78
-
 
 def _get_path_without_sccache() -> str:
     """
@@ -1595,6 +1593,7 @@ class TestCutlassBackend(TestCase):
                     "fx_graph_cache": False,
                     "fx_graph_remote_cache": False,
                     "cuda.enable_caching_codegen": True,
+                    "cuda.cutlass_max_profiling_configs": 2,
                 }
             ):
                 compiled_model = torch.compile(model, fullgraph=True)
@@ -1604,9 +1603,7 @@ class TestCutlassBackend(TestCase):
 
         # Check render call count: render is called uniquely for each codegen
         # and for each finalized codegen.
-        self.assertEqual(
-            render_call_count, NUM_ITERATIONS + DEFAULT_INST_LEVEL_MM_CONFIG
-        )
+        self.assertEqual(render_call_count, NUM_ITERATIONS + 2)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -2189,42 +2186,54 @@ class TestCutlassBackend(TestCase):
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @parametrize("layout", ("rr", "rc"))
-    @parametrize("dtype", (torch.float16, torch.bfloat16))
-    def test_config_number_post_filtering(
-        self, layout: str, dtype: torch.dtype
-    ) -> None:
+    def test_config_number_post_filtering(self) -> None:
         """
-        Test if cutlass backend produces the same number of configs after filtering.
+        Test if cutlass backend produces the same number of configs after filtering
+        regardless of layout and dtype.
         """
-        a = torch.randn(128, 128, dtype=dtype).cuda()
-        b = torch.randn(128, 128, dtype=dtype).cuda()
-        if layout[0] == "c":
-            a = a.t()
-        if layout[1] == "c":
-            b = b.t()
+        layouts = ["rr", "rc", "cr", "cc"]
+        dtypes = [torch.float16, torch.bfloat16]
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                # needed for log searching
-                "force_disable_caches": True,
-                "cuda.cutlass_max_profiling_swizzle_options": [2],
-            }
-        ):
-            with mock.patch(
-                "torch._inductor.kernel.mm.autotune_select_algorithm",
-                wraps=select_no_algorithm,
-            ) as sa:
-                with self.assertRaisesRegex(
-                    BackendCompilerFailed, r".*NoValidChoicesError.*"
+        config_counts = {}
+
+        for layout in layouts:
+            for dtype in dtypes:
+                a = torch.randn(128, 128, dtype=dtype).cuda()
+                b = torch.randn(128, 128, dtype=dtype).cuda()
+                if layout[0] == "c":
+                    a = a.t()
+                if layout[1] == "c":
+                    b = b.t()
+
+                with config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_gemm_backends": "CUTLASS",
+                        # needed for log searching
+                        "force_disable_caches": True,
+                        "cuda.cutlass_max_profiling_swizzle_options": [2],
+                    }
                 ):
-                    _ = torch.compile(torch.mm, dynamic=False)(a, b)
-                args, _ = sa.call_args
-                _, choices, _, __ = args
+                    with mock.patch(
+                        "torch._inductor.kernel.mm.autotune_select_algorithm",
+                        wraps=select_no_algorithm,
+                    ) as sa:
+                        with self.assertRaisesRegex(
+                            BackendCompilerFailed, r".*NoValidChoicesError.*"
+                        ):
+                            _ = torch.compile(torch.mm, dynamic=False)(a, b)
+                        args, _ = sa.call_args
+                        _, choices, _, __ = args
 
-                self.assertEqual(len(choices), DEFAULT_INST_LEVEL_MM_CONFIG)
+                        config_counts[(layout, dtype)] = len(choices)
+
+        # Check that all config counts are equal
+        all_counts = list(config_counts.values())
+        self.assertTrue(
+            len(set(all_counts)) == 1,
+            f"Config counts should be equal across all layout/dtype combinations. "
+            f"Got counts: {config_counts}",
+        )
 
 
 if __name__ == "__main__":

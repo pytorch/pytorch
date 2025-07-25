@@ -889,6 +889,11 @@ class FakeTensor(Tensor):
             aten._foreach_copy.default,
         )
 
+        # list of ops not using zero dim cpu tensor logic to align with the eager mode.
+        bypass_zero_dim_cpu_tensor_check_ops = ordered_set(
+            aten.nextafter.default,
+        )
+
         def check_cpu_device(device: torch.device) -> bool:
             return device.type == "cpu"
 
@@ -912,13 +917,17 @@ class FakeTensor(Tensor):
                     is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
 
+            is_bypass_zero_dim_cpu_tensor_check_op = (
+                func in bypass_zero_dim_cpu_tensor_check_ops
+            )
+
             # mismatching devices !
             # if current tensor is cpu 0 dim, defer to existing device
-            if t_is_cpu_zero_dim:
+            if t_is_cpu_zero_dim and not is_bypass_zero_dim_cpu_tensor_check_op:
                 return
 
             # current device is from cpu 0 dim tensor, overwrite
-            if is_cpu_zero_dim:
+            if is_cpu_zero_dim and not is_bypass_zero_dim_cpu_tensor_check_op:
                 common_device = t.device
                 is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
@@ -2589,7 +2598,11 @@ class FakeTensorMode(TorchDispatchMode):
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
 
-        if func not in meta_table and not self.cpp_meta_supports_symint(func):
+        if (
+            func not in meta_table
+            and not self.cpp_meta_supports_symint(func)
+            and not (has_symbolic_sizes and func in self._view_fake_tensor_impl_ops)
+        ):
             from torch._decomp import decomposition_table
 
             # Prefer Python decompositions over C++ ones
@@ -2895,6 +2908,10 @@ class FakeTensorMode(TorchDispatchMode):
         aten.view_as_complex.default,
         aten.set_.source_Storage_storage_offset,
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
+    )
+
+    _view_fake_tensor_impl_ops = ordered_set(
+        aten.view.default, aten._unsafe_view.default
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:

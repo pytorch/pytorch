@@ -269,8 +269,8 @@ jobs:
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
-      - name: Change permissions (only needed for MI300 runners for now)
-        if: ${{ always() && steps.test.conclusion && contains(matrix.runner, 'mi300') }}
+      - name: Change permissions (only needed for MI300 and MI355 kubernetes runners for now)
+        if: ${{ always() && steps.test.conclusion && (contains(matrix.runner, 'mi300') || contains(matrix.runner, 'mi355')) }}
         run: |
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1001:1001 test"
 

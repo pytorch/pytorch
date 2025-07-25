@@ -49,46 +49,47 @@ Tensor = torch.Tensor
 __all__ = ["trace_wrapped"]
 
 
-@torch.library.custom_op("flex_lib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
-def zeros_and_scatter(
-    shape: list[int],
-    indices: list[Tensor],
-    vals: Tensor,
-) -> Tensor:
-    """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
-    grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
-    return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
+if not torch._running_with_deploy():
+    # torch.library.custom_op does not work with torch.deploy/multipy  # codespell:ignore
 
+    @torch.library.custom_op("flex_lib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
+    def zeros_and_scatter(
+        shape: list[int],
+        indices: list[Tensor],
+        vals: Tensor,
+    ) -> Tensor:
+        """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
+        grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
+        return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
-@zeros_and_scatter.register_fake  # type: ignore[misc]
-def _(
-    shape: list[int],
-    indices: list[Tensor],
-    vals: Tensor,
-) -> Tensor:
-    return vals.new_empty(shape)
+    @zeros_and_scatter.register_fake  # type: ignore[misc]
+    def _(
+        shape: list[int],
+        indices: list[Tensor],
+        vals: Tensor,
+    ) -> Tensor:
+        return vals.new_empty(shape)
 
+    @zeros_and_scatter.register_vmap  # type: ignore[misc]
+    def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
+        """The batching rule is special in that it returns a tensor that is not batched"""
+        indices_indims = indims[1]
+        expanded_indices = []
+        for idx, idx_indim in zip(indices, indices_indims):
+            # The index is not a being batched, we should unsqueeze and expand to val
+            if idx_indim is None:
+                expanded_indices.append(idx.expand(value.shape))
+            else:
+                # the index is being part of the vmap batch, it should be the same size as val
+                assert idx.shape == value.shape
+                expanded_indices.append(idx)
 
-@zeros_and_scatter.register_vmap  # type: ignore[misc]
-def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
-    """The batching rule is special in that it returns a tensor that is not batched"""
-    indices_indims = indims[1]
-    expanded_indices = []
-    for idx, idx_indim in zip(indices, indices_indims):
-        # The index is not a being batched, we should unsqueeze and expand to val
-        if idx_indim is None:
-            expanded_indices.append(idx.expand(value.shape))
-        else:
-            # the index is being part of the vmap batch, it should be the same size as val
-            assert idx.shape == value.shape
-            expanded_indices.append(idx)
-
-    out = torch.ops.flex_lib.zeros_and_scatter(
-        shape,
-        expanded_indices,
-        value,
-    )
-    return out, None
+        out = torch.ops.flex_lib.zeros_and_scatter(
+            shape,
+            expanded_indices,
+            value,
+        )
+        return out, None
 
 
 class ModIndex(torch.autograd.Function):

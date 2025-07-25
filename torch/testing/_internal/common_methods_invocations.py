@@ -11595,6 +11595,26 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
         return np.stack(split_ret).reshape(orig_shape)
 
+def reference_hash_tensor(tensor, dim=(), keepdim=False, mode=0):
+    assert mode == 0, "Only mode=0 (xor_sum) is supported right now"
+
+    dtype = tensor.dtype
+    if dtype.kind == 'f':
+        tensor = tensor.astype(np.float64).view(np.uint64)
+    else:
+        tensor = tensor.astype(np.uint64)
+
+
+    if dim == ():
+        result = np.bitwise_xor.reduce(tensor.flatten(), keepdims=keepdim)
+    else:
+        if isinstance(dim, list):
+            dim = tuple(dim)
+        result = np.bitwise_xor.reduce(tensor, axis=dim, keepdims=keepdim)
+
+    return result
+
+
 def loss_reference_reduction_wrapper(fn):
     def wrapper(input, target, *, size_average=None, reduce=None, reduction="mean", **other_kwargs):
         if size_average is not None or reduce is not None:
@@ -11827,8 +11847,11 @@ op_db: list[OpInfo] = [
                        safe_val=2)),
     BinaryUfuncInfo('add',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
-                    ref=lambda input, other, *, alpha=1: np.add(input, other) if alpha == 1 \
-                    else np.add(input, np.multiply(alpha, other)),
+                    ref=lambda input, other, *, alpha=1: (
+                        np.add(input, other)
+                        if alpha == 1
+                        else np.add(input, np.multiply(alpha, other))
+                    ),
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
                                                      torch.float16, torch.chalf),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
@@ -20478,8 +20501,11 @@ op_db: list[OpInfo] = [
         'jiterator_binary',
         op=torch.cuda.jiterator._create_jit_fn(
             "template <typename T> T binary(T x, T y, T alpha) { return x + alpha * y; }", alpha=1),
-        ref=lambda input, other, *, alpha=1: np.add(input, other) if alpha == 1 \
-            else np.add(input, np.multiply(alpha, other)),
+        ref=lambda input, other, *, alpha=1: (
+            np.add(input, other)
+            if alpha == 1
+            else np.add(input, np.multiply(alpha, other))
+        ),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=2, alpha=-3.14),
         supports_out=False,
@@ -21361,6 +21387,26 @@ op_db: list[OpInfo] = [
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-3, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
         ),
+    ),
+    ReductionOpInfo(
+        'hash_tensor',
+        result_dtype=torch.uint64,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        ref=reference_hash_tensor,
+        skips=(
+            # hash_tensor reduces all dimensions when dim=[] (as do sum, prod etc.)
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # aten::hash_tensor hit the vmap fallback which is currently disabled
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            # NYI
+            DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
+            # Sharding strategy NYI
+            DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+        )
     ),
     OpInfo(
         "nn.functional.ctc_loss",
