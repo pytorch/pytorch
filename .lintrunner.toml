@@ -885,6 +885,39 @@ init_command = [
 ]
 
 [[linter]]
+code = 'CMAKEFORMAT'
+is_formatter=true
+include_patterns = [
+    "**/*.cmake",
+    "**/*.cmake.in",
+    "**/CMakeLists.txt",
+]
+exclude_patterns = [
+    'cmake/Modules/**',
+    'cmake/Modules_CUDA_fix/**',
+    'cmake/Caffe2Config.cmake.in',
+    'aten/src/ATen/ATenConfig.cmake.in',
+    'cmake/TorchConfig.cmake.in',
+    'cmake/TorchConfigVersion.cmake.in',
+    'cmake/cmake_uninstall.cmake.i',
+    'fb/**',
+    '**/fb/**',
+    'third_party/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/cmake_format_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'cmakelang==0.6.13',
+]
+
+[[linter]]
 code = 'SHELLCHECK'
 include_patterns = [
     '.ci/pytorch/**/*.sh'
