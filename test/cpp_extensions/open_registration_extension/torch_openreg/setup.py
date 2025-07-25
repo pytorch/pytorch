@@ -5,8 +5,8 @@ import shutil
 import subprocess
 import sys
 import sysconfig
-
 from distutils.command.clean import clean
+
 from setuptools import Extension, find_packages, setup
 
 
@@ -105,7 +105,7 @@ def main():
         version="0.0.1",
         author="PyTorch Core Team",
         description="Example for PyTorch out of tree registration",
-        packages=find_packages(exclude=("test",)),
+        packages=find_packages(),
         package_data=package_data,
         install_requires=[
             "torch",
