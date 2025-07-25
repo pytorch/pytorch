@@ -1130,8 +1130,6 @@ _GLOBAL_DEVICE_CONTEXT = threading.local()
 
 def get_default_device() -> "torch.device":
     r"""Gets the default ``torch.Tensor`` to be allocated on ``device``"""
-    global _GLOBAL_DEVICE_CONTEXT
-
     from torch.overrides import _get_current_function_mode_stack
     from torch.utils._device import DeviceContext
 
@@ -1208,7 +1206,6 @@ def set_default_device(device: "Device") -> None:
         device(type='cuda', index=1)
 
     """
-    global _GLOBAL_DEVICE_CONTEXT
     if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
         device_context = _GLOBAL_DEVICE_CONTEXT.device_context
         if device_context is not None:

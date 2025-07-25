@@ -2787,7 +2787,6 @@ class FakeTensorMode(TorchDispatchMode):
             if not isinstance(x, Tensor):
                 return x
 
-            nonlocal flat_arg_fake_tensors
             if not self.is_our_fake(x):
                 if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags:
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)

@@ -35,7 +35,7 @@ def xla_backend_helper(model, fake_tensor_inputs, boxed=False):
         nonlocal compiled_graph
         if compiled_graph is None:
             compiled_graph = bridge.extract_compiled_graph(model, args)
-            del model
+            model = None
         return compiled_graph(*args)
 
     return make_boxed_func(fwd) if boxed else fwd

@@ -96,8 +96,6 @@ def report_exportability(
     report: dict[str, Optional[Exception]] = {}
 
     def try_export(module, module_name, args, kwargs):
-        nonlocal submod_inputs, report, strict, pre_dispatch, tried_module_types
-
         if type(module) in tried_module_types:
             return
         tried_module_types.add(type(module))

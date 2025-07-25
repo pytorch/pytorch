@@ -786,13 +786,11 @@ def register_onednn_fusion_ops():
                         x_scale_loader = x_scale.make_loader()
                         w_scale_loader = w_scale.make_loader()
                         x_zp_loader = x_zp.make_loader()
-                        nonlocal bias
                         bias_loader = None
                         if bias is not None:
                             bias_loader = bias.make_loader()
 
                         def inner_fn(index):
-                            nonlocal bias
                             input = input_loader(index)
                             # MicroKernel Output is with int32
                             # cvt to FP32 before doing compensation
@@ -824,7 +822,6 @@ def register_onednn_fusion_ops():
                             # Step 2: add Bias if applicable
                             if bias is not None:
                                 _bias = bias_loader(weight_compens_index)
-                                nonlocal bias_dtype
                                 assert bias_dtype in [torch.float32, torch.bfloat16]
                                 if bias_dtype == torch.bfloat16:
                                     _bias = ops.to_dtype(_bias, torch.float32)
@@ -1111,13 +1108,11 @@ def register_onednn_fusion_ops():
                         x_scale_loader = x_scale.make_loader()
                         w_scale_loader = w_scale.make_loader()
                         x_zp_loader = x_zp.make_loader()
-                        nonlocal bias
                         bias_loader = None
                         if bias is not None:
                             bias_loader = bias.make_loader()
 
                         def inner_fn(index):
-                            nonlocal bias
                             input = input_loader(index)
                             _x2 = x2_loader(index)
                             _x_scale = None
@@ -1148,14 +1143,12 @@ def register_onednn_fusion_ops():
                             # Step 2: add Bias if applicable
                             if bias is not None:
                                 _bias = bias_loader(weight_compens_index)
-                                nonlocal bias_dtype
                                 assert bias_dtype in [torch.float32, torch.bfloat16]
                                 if bias_dtype == torch.bfloat16:
                                     _bias = ops.to_dtype(_bias, torch.float32)
                                 temp = ops.add(temp, _bias)
 
                             # Step 3: Binary add
-                            nonlocal x2_dtype
                             assert x2_dtype in [torch.float32, torch.bfloat16]
                             if x2_dtype == torch.bfloat16:
                                 _x2 = ops.to_dtype(_x2, torch.float32)
