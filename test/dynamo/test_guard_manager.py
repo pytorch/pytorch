@@ -957,7 +957,23 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
             opt_fn(torch.randn(4, 4))
 
 
-class TagSafetyChecks(torch._dynamo.test_case.TestCase):
+class RecursiveDictTagTests(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
+        torch._dynamo.config.use_recursive_dict_tags_for_guards = True
+
+    def tearDown(self):
+        torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
+
+
+class TagSafetyChecks(RecursiveDictTagTests):
+    def setUp(self):
+        self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
+        torch._dynamo.config.use_recursive_dict_tags_for_guards = True
+
+    def tearDown(self):
+        torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
+
     def test_immutable_tag_safe(self):
         class Bar:
             pass
@@ -1190,7 +1206,7 @@ class TagSafetyChecks(torch._dynamo.test_case.TestCase):
             opt_fn(torch.randn(4, 4))
 
 
-class RecursiveDictGuardTests(torch._dynamo.test_case.TestCase):
+class RecursiveDictGuardTests(RecursiveDictTagTests):
     def test_disabling(self):
         class Mod(torch.nn.Module):
             def __init__(self):

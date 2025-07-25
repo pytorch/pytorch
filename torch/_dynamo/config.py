@@ -356,7 +356,7 @@ skip_tensor_guards_with_matching_dict_tags = True
 
 # Speedup guard execution of nested nn modules by recursively checking for dict
 # tags to avoid full guard execution.
-use_recursive_dict_tags_for_guards = True
+use_recursive_dict_tags_for_guards = False
 
 max_saved_pointers_for_recursive_dict_tags_check = 256
 

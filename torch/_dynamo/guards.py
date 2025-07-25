@@ -279,7 +279,9 @@ class GuardManagerWrapper:
         return self.diff_guard_sources
 
     def finalize(self):
-        if config.use_recursive_dict_tags_for_guards:
+        if config.use_recursive_dict_tags_for_guards and justknobs_check(
+            "pytorch/compiler:use_recursive_dict_tags_for_guards"
+        ):
             self.find_tag_safe_roots()
         self.prepare_diff_guard_manager()
 
