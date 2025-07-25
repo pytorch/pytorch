@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from contextlib import contextmanager, ExitStack, nullcontext
+from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, overload, TypeVar, Union
 
@@ -266,11 +266,12 @@ def _set_compilation_env():
 
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
-    fake_mode = detect_fake_mode(inputs)
-    tracing_mode = "real"
-    if fake_mode is None:
-        fake_mode = nullcontext()
-        tracing_mode = "fake"
+    fake_mode_det = detect_fake_mode(inputs)
+    fake_mode: AbstractContextManager = nullcontext()
+    tracing_mode = "fake"
+    if fake_mode_det is not None:
+        fake_mode = fake_mode_det
+        tracing_mode = "real"
 
     # Note: we need to turn off proxy tensor mode to avoid tracing infra
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
@@ -282,9 +283,12 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
-        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:
+        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:  # type: ignore[attr-defined]
             insert_deferred_runtime_asserts(
-                gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
+                gm,
+                fake_mode.shape_env,  # type: ignore[attr-defined]
+                "hoo_maybe_fake_tracing",
+                export=True,  # type: ignore[attr-defined]
             )
         return gm
 
