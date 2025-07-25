@@ -349,8 +349,9 @@ Args:
       tuple `(kW,)`
     stride: the stride of the window. Can be a single number or a tuple
       `(sW,)`. Default: :attr:`kernel_size`
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padW,)`. Default: 0
+    padding: implicit zero paddings on both sides of the input. Can be a single
+      number or a tuple `(padW,)`. Should be at most half of effective kernel
+      size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` to compute the
         output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -388,7 +389,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number, a single-element tuple or a tuple `(padH, padW)`. Default: 0
+      single number, a single-element tuple or a tuple `(padH, padW)`.
+      Should be at most half of effective kernel size, that
+      is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -419,7 +422,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`, Default: 0
+      single number or a tuple `(padT, padH, padW)`. Should be at most half
+      of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
+      Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
     count_include_pad: when True, will include the zero-padding in the
