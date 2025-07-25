@@ -166,7 +166,7 @@ init_command = [
     'types-colorama==0.4.6',
     'filelock==3.18.0',
     'junitparser==2.1.1',
-    'rich==14.0.0',
+    'rich==14.1.0',
     'pyyaml==6.0.2',
     'optree==0.13.0',
     'dataclasses-json==0.6.7',
