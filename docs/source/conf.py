@@ -99,8 +99,6 @@ autosectionlabel_prefix_document = True
 parallel_write_safe = True
 parallel_read_safe = True
 numfig = True
-# Disable parallel builds
-parallel_workers = 1
 
 # katex options
 #
