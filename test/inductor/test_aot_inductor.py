@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfMPS,
     skipIfRocm,
+    skipIfWindows,
     skipIfXpu,
     TEST_MPS,
     TEST_WITH_ROCM,
@@ -2390,6 +2391,9 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, device=self.device),)
         self.check_model(Model(self.device), example_inputs)
 
+    @skipIfWindows(
+        msg="OpenMP crashed application on windows"
+    )  # TODO: (xuhancn) need to root cause and fix.
     def test_buffer_mutation_3(self):
         class KVCache(torch.nn.Module):
             def __init__(
@@ -5434,6 +5438,9 @@ class AOTInductorTestsTemplate:
         self.check_model(sin_triton, none_inputs)
         self.check_model(sin_triton, not_none_inputs)
 
+    @skipIfWindows(
+        msg="OpenMP crashed application on windows"
+    )  # TODO: (xuhancn) need to root cause and fix.
     def test_issue_140766(self):
         class Model(torch.nn.Module):
             def __init__(self):
