@@ -1252,7 +1252,6 @@ int PythonTracer::pyProfileFn(
       local_results.active_tracer_->recordCCall(local_results, frame, arg);
       break;
 
-    case PyTrace_EXCEPTION:
     case PyTrace_RETURN:
       local_results.exit_times_.emplace_back(c10::getApproximateTime());
       break;
