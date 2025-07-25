@@ -83,9 +83,11 @@ def build_vllm(
         )
         docker_torch_arg = ""
         if torch_whl_dir:
+            run('pwd')
             # copy the torch wheel in tmp folder into the vllm's build context directory
-            tmp_file = get_abs_path(f"./vllm/{_VLLM_TEMP_FOLDER}")
+            tmp_file = f"./vllm/{_VLLM_TEMP_FOLDER}"
             force_create_dir(tmp_file)
+
             run(f"cp -a {torch_whl_dir}/. {tmp_file}", logging=True)
             print(f"constructing TORCH_WHEELS_PATH {_VLLM_TEMP_FOLDER}")
             docker_torch_arg = f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"
