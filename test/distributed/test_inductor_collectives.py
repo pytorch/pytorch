@@ -413,6 +413,21 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    def test_allgather_scalar_tensor_input(self):
+        def func(tensor, world_size):
+            tensor_list = [torch.empty_like(tensor) for _ in range(world_size)]
+            torch.distributed.all_gather(tensor_list, tensor)
+            return tensor_list
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            func_compiled = torch.compile(func)
+            inp = torch.tensor(self.rank, dtype=torch.long, device="cuda")
+            out = func_compiled(inp, self.world_size)
+            correct = func(inp, self.world_size)
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     def test_allgather_contiguous_input(self):
         class Model(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
