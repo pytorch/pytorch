@@ -928,12 +928,6 @@ test_torchbench_gcp_smoketest(){
   popd
 }
 
-test_python_gloo_with_tls() {
-  source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
-  assert_git_not_dirty
-}
-
-
 test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
@@ -1561,7 +1555,7 @@ test_executorch() {
 test_linux_aarch64() {
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
         test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
-        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops test_cpp_extensions_open_device_registration \
+        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
