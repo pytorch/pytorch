@@ -108,8 +108,8 @@ class BaseLookupTableTest(TestCase):
 
         # Create expected config without template_id for comparison
         expected_without_template_id = expected_config.copy()
-        if "template_id" in expected_without_template_id:
-            expected_without_template_id.pop("template_id")
+        expected_without_template_id.pop("template_id", None)
+        expected_without_template_id.pop("template_hash", None)
 
         # Compare the configs without template_id
         self.assertEqual(result_config, expected_without_template_id)
@@ -200,6 +200,7 @@ class BaseLookupTableTest(TestCase):
         lookup_table_data,
         expected_result,
         template_id="triton",
+        template_hash=None,
         should_call_lookup_key=True,
         input_nodes=None,
         enable_max_autotune=True,
@@ -219,7 +220,9 @@ class BaseLookupTableTest(TestCase):
             ) as mock_lookup_key,
             patch.object(inductor_config, "template_lookup_table", lookup_table_data),
         ):
-            result = lookup_template_configs(input_nodes, method, template_id)
+            result = lookup_template_configs(
+                input_nodes, method, template_id, template_hash=template_hash
+            )
 
             if expected_result is None:
                 # If we expect None, the result should be None
@@ -719,6 +722,42 @@ class TestLookupConfigsForTemplateId(BaseLookupTableTest):
             second_result_tma = lookup_template_configs(input_nodes, "mm", "tma")
             self.assertIsNotNone(second_result_tma)
             self.assertEqual(len(second_result_tma), 1)
+
+    @parametrize(
+        "config_hash,provided_hash,expected_kept",
+        [
+            # hash provided, hash not defined
+            (None, "hash123", True),
+            # hash provided, hash defined
+            ("hash123", "hash123", True),
+            # hash provided, hash defined, mismatch
+            ("hash123", "hash456", False),
+            # hash not provided, hash defined
+            ("hash123", None, True),
+        ],
+    )
+    def test_lookup_configs_hash_filtering(
+        self, config_hash, provided_hash, expected_kept
+    ):
+        """Test hash filtering behavior of lookup_template_configs"""
+        config = self.create_triton_config(BLOCK_M=128, BLOCK_N=64)
+        if config_hash is not None:
+            config["template_hash"] = config_hash
+
+        lookup_table_data = self.create_lookup_table_config(
+            "NVIDIA H100", "mm", "test_key", [config]
+        )
+
+        expected_result = [config] if expected_kept else []
+        self._run_lookup_test(
+            "NVIDIA H100",
+            "test_key",
+            "mm",
+            lookup_table_data,
+            expected_result,
+            template_id="triton",
+            template_hash=provided_hash,
+        )
 
 
 if __name__ == "__main__":

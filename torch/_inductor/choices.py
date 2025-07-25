@@ -99,17 +99,24 @@ class InductorChoices:
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
 
     def _get_configs_from_lookup_table(
-        self, input_nodes: list[Any], template_name: str, op_name: str
+        self,
+        input_nodes: list[Any],
+        op_name: str,
+        template_name: str,
+        template_hash: Optional[str] = None,
     ) -> Optional[list[dict[str, Any]]]:
         """Get configs from lookup table if available."""
-        return lookup_template_configs(input_nodes, op_name, template_name)
+        return lookup_template_configs(
+            input_nodes, op_name, template_name, template_hash
+        )
 
     def get_mm_configs(
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
-        template_name: str,
         op_name: str,
+        template_name: str,
+        template_hash: Optional[str] = None,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Get generator of template parameters for MM templates using template-specific heuristics.
@@ -117,8 +124,9 @@ class InductorChoices:
         Args:
             kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
             layout: Output layout
-            template_name: Template name (e.g., "bmm", "mm", "mm_persistent_tma")
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm", "mm_plus_mm")
+            template_name: Template name (e.g., "bmm", "mm", "mm_persistent_tma")
+            template_hash: Template hash (generated from the template source)
 
         Yields:
             Template parameter dictionaries ready for maybe_append_choice
@@ -129,7 +137,10 @@ class InductorChoices:
 
         # Try lookup table first
         lookup_configs = self._get_configs_from_lookup_table(
-            input_nodes, template_name, op_name
+            input_nodes,
+            op_name=op_name,
+            template_name=template_name,
+            template_hash=template_hash,
         )
         if lookup_configs is not None:
             yield from lookup_configs

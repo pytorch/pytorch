@@ -128,6 +128,11 @@ def make_lookup_key(input_nodes: list[Any], op_name: str) -> Optional[str]:
     """
     Create a flattened lookup key from input nodes and operation name.
 
+    If template_hash is provided, we will look for 'template_hash' in the config
+    and compare it
+    If there is no match, or no template_hash in the config, we will filter
+    out the config
+
     Args:
         input_nodes: List of input nodes for the operation
         op_name: Operation name (e.g., "mm", "addmm")
@@ -149,7 +154,10 @@ def make_lookup_key(input_nodes: list[Any], op_name: str) -> Optional[str]:
 
 
 def lookup_template_configs(
-    input_nodes: list[Any], op_name: str, template_id: str
+    input_nodes: list[Any],
+    op_name: str,
+    template_id: str,
+    template_hash: Optional[str] = None,
 ) -> Optional[list[dict[str, Any]]]:
     """
     Unified function to look up template configurations for a specific operation and template.
@@ -158,6 +166,7 @@ def lookup_template_configs(
         input_nodes: List of input nodes for the operation
         op_name: Operation name (e.g., "mm", "addmm")
         template_id: Template identifier (e.g., "mm", "tma", "decompose_k")
+        template_hash: Unique hash for the template, or None
 
     Returns:
         None: No lookup table is in use
@@ -191,6 +200,7 @@ def lookup_template_configs(
         if config["template_id"] == template_id:
             matching_configs.append(config)
 
+    log.debug("configs for %s (%s): %r", template_id, template_hash, config_list)
     # Filter out configs with ALLOW_TF32=True when torch.backends.cuda.matmul.allow_tf32 is False
     filtered_configs = []
     for config in matching_configs:
@@ -205,11 +215,32 @@ def lookup_template_configs(
                 config,
             )
             continue
+        if template_hash is not None:
+            chash = config.get("template_hash")
+            if chash is None:
+                log.debug(
+                    "Config %r for template_id %s has no template_hash, so we will "
+                    "keep it and not compare it against provided hash %s",
+                    config,
+                    template_id,
+                    template_hash,
+                )
+            elif chash != template_hash:
+                log.warning(
+                    "Filtering out config %r for template_id %s because template_hash %s does not match %s",
+                    config,
+                    template_id,
+                    chash,
+                    template_hash,
+                )
+                continue
         # Return a copy of the config, as we don't want to modify the original
         cconfig = copy.deepcopy(config)
         # Lastly, we have to throw out the template_id, as it's not a valid kwarg
         # and just used to identify which template the entry belongs to
         del cconfig["template_id"]
+        # Similarly, the template_hash is not a valid kwarg
+        cconfig.pop("template_hash", None)
         filtered_configs.append(cconfig)
 
     return filtered_configs
