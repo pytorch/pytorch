@@ -3,6 +3,7 @@ from collections import defaultdict
 from typing import Any, Callable, Optional
 
 import torch
+import torch.distributed as dist
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import detect_fake_mode
@@ -226,18 +227,6 @@ def bucket_reduce_scatter_by_mb(
     )
 
 
-def _rank_idx_dict(group_name: str) -> dict[int, int]:
-    from torch.distributed.distributed_c10d import (
-        _resolve_process_group,
-        get_process_group_ranks,
-    )
-
-    pg = _resolve_process_group(group_name)
-    ranks = get_process_group_ranks(pg)
-    rank_idx_dict: dict[int, int] = {rank: idx for idx, rank in enumerate(ranks)}
-    return rank_idx_dict
-
-
 def reduce_scatter_merge_fn_to_trace(
     rs_ins: list[torch.Tensor],
     group_size: int,
@@ -284,14 +273,14 @@ def all_gather_merge_fn_to_trace(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
-    local_rank: int,
+    rank: int,
 ) -> list[torch.Tensor]:
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
     ins_split_sizes = [ag_in.numel() for ag_in in ag_ins]
     ag_input_numel = sum(ins_split_sizes)
     device = ag_ins[0].device
     new_ag_out = torch.empty(ag_input_numel * group_size, dtype=dtype, device=device)
-    new_ag_in = new_ag_out.narrow(0, ag_input_numel * local_rank, ag_input_numel)
+    new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
     foreach_copy_dsts = torch.split(new_ag_in, ins_split_sizes)
     ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
     torch._foreach_copy_(foreach_copy_dsts, ag_ins_flattened)
@@ -318,7 +307,7 @@ def all_gather_merge_fn_to_trace_functional(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
-    local_rank: int,
+    rank: int,
     use_fsdp_ag_copy_in: bool = False,
 ) -> list[torch.Tensor]:
     # Implementation that is functional in graph,
@@ -331,7 +320,7 @@ def all_gather_merge_fn_to_trace_functional(
     ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
     if use_fsdp_ag_copy_in:
         new_ag_in, new_ag_out = torch.ops.fsdp.all_gather_copy_in(
-            ag_ins_flattened, new_ag_out, ins_split_sizes, ag_input_numel, local_rank
+            ag_ins_flattened, new_ag_out, ins_split_sizes, ag_input_numel, rank
         )
     else:
         new_ag_in = torch.cat(ag_ins_flattened, dim=0)
@@ -486,6 +475,8 @@ def merge_all_gather(
     """
     Merges specified buckets of all_gather to joint all_gather.
     """
+    from torch.distributed.distributed_c10d import _resolve_process_group
+
     trace_structured(
         "artifact",
         metadata_fn=lambda: {
@@ -498,15 +489,12 @@ def merge_all_gather(
 
     ag_node_to_pre_nodes = defaultdict(list)
 
-    group_name_to_rank_idx_dict: dict[str, dict[int, int]] = {}
     ag_ins: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
     ag_waits: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
     for bucket_idx, ag_bucket in enumerate(ag_buckets):
         _, group_size, group_name = ag_bucket[0].args
         assert isinstance(group_name, str)
         dtype = ag_bucket[0].meta["val"].dtype
-        if group_name not in group_name_to_rank_idx_dict:
-            group_name_to_rank_idx_dict[group_name] = _rank_idx_dict(group_name)  # type: ignore[index]
 
         for ag_node in ag_bucket:
             assert len(ag_node.users) == 1, (
@@ -541,12 +529,9 @@ def merge_all_gather(
         ag0_val = ag0.meta["val"]
         _, group_size, group_name = ag0.args
         dtype = ag0_val.dtype
-        device = ag0_val.device
         assert isinstance(group_name, str)
 
-        rank_idx_dict = group_name_to_rank_idx_dict[group_name]
-        rank = device.index
-        local_rank = rank_idx_dict[rank]
+        rank: int = dist.get_rank(_resolve_process_group(group_name))
 
         replacements = _insert_fn_trace_before_node(
             g,
@@ -556,7 +541,7 @@ def merge_all_gather(
                 group_size,
                 group_name,
                 dtype,
-                local_rank,
+                rank,
             ),
             ag0.next,
             _ag_ins,
