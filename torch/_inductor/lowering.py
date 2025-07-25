@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -163,6 +164,10 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
     if not isinstance(fn, torch._ops.OpOverload):
         # Only OpOverloads have layout constraints.
         return None
+
+    if maybe_layout_tag := get_layout_constraint_tag(fn, with_default=False):
+        return tag_to_layout_constraint(maybe_layout_tag)
+
     if fn in _maybe_layout_constraints:
         return _maybe_layout_constraints[fn]
     return None
