@@ -5,11 +5,10 @@ from typing import Any, Callable, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.utils import detect_fake_mode
 from torch._logging import trace_structured
-from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._ordered_set import OrderedSet
-from torch._dynamo.utils import detect_fake_mode
 
 
 logger: logging.Logger = logging.getLogger(__name__)
