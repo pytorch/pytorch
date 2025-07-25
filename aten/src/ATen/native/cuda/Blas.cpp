@@ -1175,18 +1175,13 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
     const at::Tensor& a, const at::Tensor& b,
     const at::Tensor& scale_a, const at::Tensor& scale_b) {
   for (auto [lhs, rhs] : options) {
-    // For blockwise scaling types (1x16, 1x32), the scale tensor is swizzled/blocked
-    // and should not be transposed as its structure is based on the original tensor dimensions
-    if ((rhs == ScalingType::BlockWise1x16 || rhs == ScalingType::BlockWise1x32)) {
-      // Don't transpose scale_b for blockwise 1xN scaling with swizzled scales
-      if (is_desired_scaling(a, scale_a, lhs) && is_desired_scaling(b.t(), scale_b, rhs)) {
-        return {lhs, rhs};
-      }
-    } else {
-      // For other scaling types, transpose both tensor and scale
-      if (is_desired_scaling(a, scale_a, lhs) && is_desired_scaling(b.t(), scale_b.t(), rhs)) {
-        return {lhs, rhs};
-      }
+    // For blockwise 1x16 and 1x32 scaling, the scale tensors are swizzled/blocked
+    // and should not be transposed as their structure is based on the original tensor dimensions
+    bool use_swizzled_scale = (rhs == ScalingType::BlockWise1x16 || rhs == ScalingType::BlockWise1x32);
+    const at::Tensor& scale_b_check = use_swizzled_scale ? scale_b : scale_b.t();
+
+    if (is_desired_scaling(a, scale_a, lhs) && is_desired_scaling(b.t(), scale_b_check, rhs)) {
+      return {lhs, rhs};
     }
   }
   TORCH_CHECK(
