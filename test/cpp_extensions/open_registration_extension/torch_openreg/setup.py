@@ -1,5 +1,6 @@
 import multiprocessing
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -9,8 +10,22 @@ from distutils.command.clean import clean
 from setuptools import Extension, find_packages, setup
 
 
+# Env Variables
+IS_LINUX = platform.system() == "Linux"
+IS_DARWIN = platform.system() == "Darwin"
+IS_WINDOWS = platform.system() == "Windows"
+
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 RUN_BUILD_DEPS = any(arg in {"clean", "dist_info"} for arg in sys.argv)
+
+
+def make_relative_rpath_args(path):
+    if IS_DARWIN:
+        return ["-Wl,-rpath,@loader_path/" + path]
+    elif IS_WINDOWS:
+        return []
+    else:
+        return ["-Wl,-rpath,$ORIGIN/" + path]
 
 
 def get_pytorch_dir():
@@ -72,11 +87,17 @@ def main():
             extra_compile_args=["-g", "-Wall", "-Werror"],
             libraries=["torch_bindings"],
             library_dirs=[os.path.join(BASE_DIR, "torch_openreg/lib")],
-            extra_link_args=["-Wl,-rpath,$ORIGIN/lib"],
+            extra_link_args=[*make_relative_rpath_args("lib")],
         )
     ]
 
-    package_data = {"torch_openreg": ["lib/*.so*"]}
+    package_data = {
+        "torch_openreg": [
+            "lib/*.so*",
+            "lib/*.dylib*",
+            "lib/*.dll",
+        ]
+    }
 
     setup(
         packages=find_packages(),
