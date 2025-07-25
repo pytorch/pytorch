@@ -259,6 +259,16 @@ def tensorify_python_scalars(
                     ):
                         transform = True
                         try:
+                            for arg in zf.node.expr.args:
+                                if (
+                                    isinstance(arg, Symbol)
+                                    and arg in expr_to_tensor_proxy
+                                ):
+                                    expr_to_tensor_proxy[arg] = (
+                                        torch.ops.prims.convert_element_type.default(
+                                            expr_to_tensor_proxy[arg], compute_dtype
+                                        )
+                                    )
                             proxy = _sympy_interp(zf.node.expr)
                         except NotImplementedError:
                             transform = False
