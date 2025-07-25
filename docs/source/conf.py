@@ -66,6 +66,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
+    "sphinx_remove_toctrees"
 ]
 
 myst_enable_extensions = [
@@ -73,6 +74,9 @@ myst_enable_extensions = [
     "deflist",
     "html_image",
 ]
+
+# Remove the "generated" tag from the toctree to allow for faster builds
+remove_from_toctrees = ["generated/*"]
 
 html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
 sitemap_locales = [None]
@@ -96,9 +100,6 @@ numpydoc_show_class_members = False
 
 autosectionlabel_prefix_document = True
 
-parallel_write_safe = True
-parallel_read_safe = True
-numfig = True
 
 # katex options
 #
