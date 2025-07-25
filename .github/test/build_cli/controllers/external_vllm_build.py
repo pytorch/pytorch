@@ -37,22 +37,6 @@ def prepare_artifact_dir(path: str):
     return abs_path
 
 
-def get_torch_whl_path(path: str):
-    torch_whl_abs_path = ""
-    if path:
-        torch_whl_abs_path = get_existing_abs_path(path)
-        print(f"torch wheel path is {torch_whl_abs_path}")
-    else:
-        print("no torch whl path detected, vllm will be built using torch nightly")
-    return torch_whl_abs_path
-
-def is_file(path: str) -> bool:
-    return subprocess.run(f"test -f {path}", shell=True).returncode == 0
-
-def is_dir(path: str) -> bool:
-    return subprocess.run(f"test -d {path}", shell=True).returncode == 0
-
-
 def build_vllm(
     artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_image=""
 ) -> None:
@@ -86,33 +70,13 @@ def build_vllm(
         )
         docker_torch_arg = ""
         if torch_whl_dir:
-            print("cwd:", os.getcwd())
-            print("ls:", os.listdir())
-            print("pwd")
             run("pwd")
-
-            print("ls")
-            run("ls")
-
-            print("check dst")
-            try:
-                subprocess.run(["ls", "dst"], check=True)
-                print("dst exists")
-            except subprocess.CalledProcessError:
-                print("dst does not exist")
-
-            if is_dir("dst"):
-                print("dst is a directory")
-            elif is_file("dst"):
-                print("dst is a file")
-            else:
-                print("dst does not exist")
-
+            abs_whl_dir = get_existing_abs_path(torch_whl_dir)
             # copy the torch wheel in tmp folder into the vllm's build context directory
             tmp_file = f"./vllm/{_VLLM_TEMP_FOLDER}"
             force_create_dir(tmp_file)
 
-            run(f"cp -a {torch_whl_dir}/. {tmp_file}", logging=True)
+            run(f"cp -a {abs_whl_dir}/. {tmp_file}", logging=True)
             print(f"constructing TORCH_WHEELS_PATH {_VLLM_TEMP_FOLDER}")
             docker_torch_arg = f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"
 
