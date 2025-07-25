@@ -274,7 +274,7 @@ ListTypePtr ListType::ofNumbers() {
   return value;
 }
 
-TypePtr OptionalType::get(TypePtr inner) {
+TypePtr OptionalType::get(const TypePtr& inner) {
   static ska::flat_hash_map<TypePtr, TypePtr> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
@@ -287,7 +287,7 @@ TypePtr OptionalType::get(TypePtr inner) {
   return containerTypePtrs[inner];
 }
 
-TypePtr ListType::get(const std::string& identifier, TypePtr inner) {
+TypePtr ListType::get(const std::string& identifier, const TypePtr& inner) {
   static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind

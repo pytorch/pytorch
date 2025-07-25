@@ -180,7 +180,7 @@ class TORCH_API PyTorchStreamReader final {
   size_t getRecordOffset(const std::string& name);
   size_t getRecordOffsetNoRead(
       size_t cursor,
-      std::string filename,
+      const std::string& filename,
       size_t size,
       uint64_t alignment);
   bool hasRecord(const std::string& name);
@@ -232,7 +232,7 @@ class TORCH_API PyTorchStreamWriter final {
       bool compute_crc32 = true,
       uint64_t alignment = 64);
   explicit PyTorchStreamWriter(
-      const std::function<size_t(const void*, size_t)> writer_func,
+      const std::function<size_t(const void*, size_t)>& writer_func,
       bool compute_crc32 = true,
       uint64_t alignment = 64);
 
