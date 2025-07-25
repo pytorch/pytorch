@@ -1,10 +1,13 @@
-import subprocess
+warning: Selection `PLW1507` has no effect because preview is not enabled.
+warning: Selection `RUF041` has no effect because preview is not enabled.
+warning: Selection `RUF048` has no effect because preview is not enabled.
 import os
+import shlex
 import shutil
+import subprocess
+import time
 from pathlib import Path
 from typing import Optional
-import shlex
-import time
 
 
 def run(
@@ -37,6 +40,7 @@ def force_create_dir(path: str):
     remove_dir(path)
     ensure_dir_exists(path)
 
+
 def ensure_dir_exists(path: str):
     """
     Ensure the directory exists. Create it if necessary.
@@ -46,6 +50,7 @@ def ensure_dir_exists(path: str):
         os.makedirs(path, exist_ok=True)
     else:
         print(f"[INFO] Directory already exists: {path}")
+
 
 def remove_dir(path: str):
     """
@@ -57,8 +62,10 @@ def remove_dir(path: str):
     else:
         print(f"[INFO] Directory not found (skipped): {path}")
 
-def get_abs_path(path:str):
+
+def get_abs_path(path: str):
     return os.path.abspath(path)
+
 
 class Timer:
     def __enter__(self):
@@ -68,6 +75,7 @@ class Timer:
     def __exit__(self, *args):
         self.end = time.perf_counter()
         print(f"Took {self.end - self.start:.3f} seconds")
+
 
 def get_existing_abs_path(path: str) -> str:
     path = os.path.abspath(path)

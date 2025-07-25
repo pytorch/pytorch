@@ -1,27 +1,36 @@
+warning: Selection `PLW1507` has no effect because preview is not enabled.
+warning: Selection `RUF041` has no effect because preview is not enabled.
+warning: Selection `RUF048` has no effect because preview is not enabled.
+import os
 import subprocess
+
 from utils import (
     ensure_dir_exists,
     force_create_dir,
+    get_abs_path,
+    get_env,
+    get_existing_abs_path,
+    get_post_build_pinned_commit,
     remove_dir,
     run,
-    get_post_build_pinned_commit,
-    get_env,
     Timer,
-    get_abs_path,
-    get_existing_abs_path,
 )
-import os
+
 
 _DEFAULT_RESULT_PATH = "./results"
 _VLLM_TEMP_FOLDER = "tmp"
 _BUILDER_NAME = "localbuilder"
 
-def local_image_exists(image:str):
+
+def local_image_exists(image: str):
     try:
-        subprocess.check_output(["docker", "image", "inspect", image], stderr=subprocess.DEVNULL)
+        subprocess.check_output(
+            ["docker", "image", "inspect", image], stderr=subprocess.DEVNULL
+        )
         return True
     except subprocess.CalledProcessError:
         return False
+
 
 def prepare_artifact_dir(path: str):
     if not path:
@@ -30,7 +39,8 @@ def prepare_artifact_dir(path: str):
     ensure_dir_exists(abs_path)
     return abs_path
 
-def get_torch_whl_path(path:str):
+
+def get_torch_whl_path(path: str):
     torch_whl_abs_path = ""
     if path:
         torch_whl_abs_path = get_existing_abs_path(path)
@@ -39,7 +49,10 @@ def get_torch_whl_path(path:str):
         print("no torch whl path detected, vllm will be built using torch nightly")
     return torch_whl_abs_path
 
-def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_image="") -> None:
+
+def build_vllm(
+    artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_image=""
+) -> None:
     result_path = prepare_artifact_dir(artifact_dir)
     print(f"Target artifact dir path is {result_path}")
 
@@ -73,10 +86,9 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_
             # copy the torch wheel in tmp folder into the vllm's build context directory
             tmp_file = get_abs_path(f"./vllm/{_VLLM_TEMP_FOLDER}")
             force_create_dir(tmp_file)
-            run(f"cp -a {torch_whl_dir}/. {tmp_file}",logging=True)
+            run(f"cp -a {torch_whl_dir}/. {tmp_file}", logging=True)
             print(f"constructing TORCH_WHEELS_PATH {_VLLM_TEMP_FOLDER}")
             docker_torch_arg = f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"
-
 
         base_image_arg = ""
         disable_pull = "--pull=true"
@@ -84,10 +96,12 @@ def build_vllm(artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_
             base_image_arg = f"--build-arg BASE_IMAGE={base_image}"
             if local_image_exists(base_image):
                 print(f"[INFO] Found local image: {base_image_arg}")
-                disable_pull="--pull=false"
+                disable_pull = "--pull=false"
 
             else:
-                print(f"[INFO] Local image {base_image_arg} not found, using default remote behavior")
+                print(
+                    f"[INFO] Local image {base_image_arg} not found, using default remote behavior"
+                )
 
             # Optional: you can still force remote buildx context if needed
         env = os.environ.copy()

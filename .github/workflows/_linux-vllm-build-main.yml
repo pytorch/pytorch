@@ -16,6 +16,10 @@ on:
         required: true
         type: string
         description: Docker image to run in.
+      target-stage:
+        required: false
+        type: string
+        description: Docker image to run in.
       sync-tag:
         required: false
         type: string
@@ -190,6 +194,7 @@ jobs:
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+          STAGE: ${{input.target-stage || ''}}
           MAX_JOBS: 32
           DOCKER_IMAGE: ${{ inputs.docker-image }}
         run: |
@@ -197,7 +202,7 @@ jobs:
           python3 -m pip install cement==3.0.14
           docker images
           ls
-          cd dst && pwd
+          pwd
           python3 .github/test/build_cli/cli.py external --target vllm --artifact-dir shared --torch-whl-dir "dst" --base-image "$DOCKER_IMAGE" run
       - name: Archive artifacts into zip
         run: |

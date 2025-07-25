@@ -75,8 +75,6 @@ jobs:
       runner: linux.24xlarge
       target-stage: test
     secrets: inherit
-    
-
 
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build-nighlty:
     name: build-vllm-nightly
