@@ -252,6 +252,7 @@ def set_logs(
     graph_region_expansion: bool = False,
     inductor_metrics: bool = False,
     hierarchical_compile: bool = False,
+    compute_dependencies: bool = False,
 ) -> None:
     """
     Sets the log level for individual components and toggles individual log
@@ -565,6 +566,7 @@ def set_logs(
         graph_region_expansion=graph_region_expansion,
         inductor_metrics=inductor_metrics,
         hierarchical_compile=hierarchical_compile,
+        compute_dependencies=compute_dependencies,
     )
 
 

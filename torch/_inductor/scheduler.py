@@ -74,6 +74,9 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
+compute_dependencies_log = torch._logging.getArtifactLogger(
+    __name__, "compute_dependencies"
+)
 
 PartitionType = list["BaseSchedulerNode"]
 
@@ -2278,6 +2281,15 @@ class Scheduler:
         for node in self.nodes:
             for buf1 in node.get_outputs():
                 buf1_name = buf1.get_name()
+                # This is for handling auto functionized ops which return None
+                # and mutate more than 1 inputs, we shouldn't let them all
+                # point to the same user list since buffers in the aliases
+                # list might not be alias to each other.
+                if (
+                    isinstance(buf1.node.layout, ir.NoneLayout)
+                    and len(buf1.get_aliases()) > 1
+                ):
+                    continue
                 for buf2_name in buf1.get_aliases():
                     if buf1_name in name_to_users and buf2_name in name_to_users:
                         # merge the two
@@ -2444,6 +2456,18 @@ class Scheduler:
 
         for name in self.name_to_donated_buffer:
             self.name_to_donated_buffer[name].set_users(name_to_users[name].items)
+
+        # For debug logging
+        logbuf = IndentedBuffer()
+        logbuf.splice("{")
+        for key, value in name_to_users.items():
+            with logbuf.indent():
+                users = [v.get_name() for v in value.items]
+                logbuf.splice(f"'{key}': {users},")
+        logbuf.splice("}")
+        str = logbuf.getrawvalue().rstrip()
+        compute_dependencies_log.debug("BUFFER USER LIST\n")
+        compute_dependencies_log.debug("===== AFTER SCHEDULING =====\n%s", str)
 
     def dead_node_elimination(self) -> None:
         """
