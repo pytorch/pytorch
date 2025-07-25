@@ -14,6 +14,7 @@ import itertools
 import json
 import logging
 import os
+import platform
 import random
 import shutil
 import signal
@@ -1764,6 +1765,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_cpu_aarch64(self):
+        return set()
+
+    @property
     def skip_models_for_freezing_cpu(self):
         return set()
 
@@ -3264,6 +3269,12 @@ def parse_args(args=None):
             instead of deleting it and creating a new one.",
     )
 
+    parser.add_argument(
+        "--caching-precompile",
+        action="store_true",
+        help="Enables caching precompile, serializing artifacts to DynamoCache between runs",
+    )
+
     group_latency = parser.add_mutually_exclusive_group()
     group_latency.add_argument(
         "--cold-start-latency",
@@ -3414,6 +3425,29 @@ def parse_args(args=None):
     return parser.parse_args(args)
 
 
+def process_caching_precompile():
+    """
+    After every process_entry, save precompile artifacts to DynamoCache
+    """
+    assert torch._dynamo.config.caching_precompile, (
+        "Caching precompile should be enabled with --caching-precompile"
+    )
+    from torch._dynamo.precompile_context import PrecompileContext
+
+    # Serialize all callables, clear PrecompileContext
+    # TODO: put this under torch.compiler API once ready
+    serialized = PrecompileContext.serialize()
+    PrecompileContext.clear()
+    if serialized is not None:
+        artifacts, info = serialized
+        print(
+            f"Saving {len(info.precompile_dynamo_artifacts)} Precompile Artifact(s)..."
+        )
+        results = PrecompileContext.deserialize(artifacts)
+        assert results is not None
+        PrecompileContext.populate_caches(results)
+
+
 def process_entry(rank, runner, original_dir, args):
     args.rank = rank
     with maybe_init_distributed(
@@ -3422,7 +3456,10 @@ def process_entry(rank, runner, original_dir, args):
         world_size=args.world_size,
         port=args.distributed_master_port,
     ):
-        return run(runner, args, original_dir)
+        result = run(runner, args, original_dir)
+        if args.caching_precompile:
+            process_caching_precompile()
+        return result
 
 
 def maybe_fresh_cache(args):
@@ -3458,6 +3495,10 @@ def main(runner, original_dir=None, args=None):
             )
 
     with maybe_fresh_cache(args):
+        if args.caching_precompile:
+            os.environ["TORCH_CACHING_PRECOMPILE"] = "1"
+            torch._dynamo.config.caching_precompile = True
+
         args.init_distributed = args.only and args.multiprocess
         if args.init_distributed:
             # NB: Do NOT query device count before CUDA initialization; we're
@@ -3715,7 +3756,10 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.slow_models)
 
     if args.devices == ["cpu"]:
+        arch = platform.machine()
         runner.skip_models.update(runner.skip_models_for_cpu)
+        if arch == "aarch64":
+            runner.skip_models.update(runner.skip_models_for_cpu_aarch64)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
 

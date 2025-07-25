@@ -1100,7 +1100,7 @@ def tuned_sparse_semi_structured_mm(
         and _use_cutlass_for_op("sparse_semi_structured_mm")
     ):
         CUTLASS2xGemmTemplate.add_cutlass_gemm_choices(
-            choices, layout, [mat1, mat1_meta, mat2], fuseable=True, non_fuseable=True
+            choices, layout, [mat1, mat2, mat1_meta], fuseable=True, non_fuseable=True
         )
 
     return autotune_select_algorithm(
