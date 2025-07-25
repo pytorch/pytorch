@@ -247,7 +247,7 @@ class inner_f(torch.nn.Module):
             None,  # None
             None,  # None
         ], self._out_spec)
-""",
+""",  # noqa: B950
             )
 
             # Compile the result
@@ -423,7 +423,7 @@ class inner_f(torch.nn.Module):
             as_strided,  # GradAOTOutput(grad_of=ParamAOTInput(target='linear2.bias'))
             None,  # None
         ], self._out_spec)
-""",
+""",  # noqa: B950
             )
 
             # Compile the result
