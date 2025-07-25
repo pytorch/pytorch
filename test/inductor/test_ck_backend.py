@@ -5,6 +5,8 @@ import os
 import unittest
 
 from torch.testing._internal.common_cuda import tf32_off
+
+
 try:
     from .test_aot_inductor_utils import AOTIRunnerUtil
 except ImportError:
@@ -93,17 +95,20 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": autotune_in_subproc,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 16,
-                "rocm.ck_max_profiling_configs": 8,
-                "rocm.ck_tile_max_profiling_configs": 8,
-                "rocm.ck_dir": self.ck_dir,
-            }
-        ), tf32_off():
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": autotune_in_subproc,
+                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                    "compile_threads": 16,
+                    "rocm.ck_max_profiling_configs": 8,
+                    "rocm.ck_tile_max_profiling_configs": 8,
+                    "rocm.ck_dir": self.ck_dir,
+                }
+            ),
+            tf32_off(),
+        ):
             if use_aoti:
                 Y_compiled = AOTIRunnerUtil.run(
                     model=mm,
@@ -140,17 +145,20 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": autotune_in_subproc,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 16,
-                "rocm.ck_max_profiling_configs": 8,
-                "rocm.ck_tile_max_profiling_configs": 8,
-                "rocm.ck_dir": self.ck_dir,
-            }
-        ), tf32_off():
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": autotune_in_subproc,
+                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                    "compile_threads": 16,
+                    "rocm.ck_max_profiling_configs": 8,
+                    "rocm.ck_tile_max_profiling_configs": 8,
+                    "rocm.ck_dir": self.ck_dir,
+                }
+            ),
+            tf32_off(),
+        ):
 
             @torch.compile(dynamic=True)
             def compiled_mm(a, b):
@@ -183,16 +191,19 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 12,
-                "rocm.ck_dir": self.ck_dir,
-                "rocm.use_preselected_instances": True,
-            }
-        ), tf32_off():
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": True,
+                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                    "compile_threads": 12,
+                    "rocm.ck_dir": self.ck_dir,
+                    "rocm.use_preselected_instances": True,
+                }
+            ),
+            tf32_off(),
+        ):
             Y_compiled = torch.compile(mm, dynamic=False)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
@@ -212,17 +223,20 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 16,
-                "rocm.ck_dir": self.ck_dir,
-                "rocm.ck_max_profiling_configs": 8,
-                "rocm.ck_tile_max_profiling_configs": 8,
-            }
-        ), tf32_off():
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": True,
+                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                    "compile_threads": 16,
+                    "rocm.ck_dir": self.ck_dir,
+                    "rocm.ck_max_profiling_configs": 8,
+                    "rocm.ck_tile_max_profiling_configs": 8,
+                }
+            ),
+            tf32_off(),
+        ):
 
             @torch.compile(dynamic=False)
             def mm(a, b):
@@ -237,7 +251,6 @@ class TestCKBackend(TestCase):
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("x_shape", ([4096, 2048], [2048], [4096, 1]))
     def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape):
-
         m, k, n = 4096, 224, 2048
         alpha, beta = 1.0, 1.0
 
@@ -248,16 +261,19 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 2,
-                "rocm.ck_dir": self.ck_dir,
-                "rocm.ck_max_profiling_configs": 2,
-            }
-        ), tf32_off():
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": True,
+                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                    "compile_threads": 2,
+                    "rocm.ck_dir": self.ck_dir,
+                    "rocm.ck_max_profiling_configs": 2,
+                }
+            ),
+            tf32_off(),
+        ):
 
             @torch.compile(dynamic=False)
             def addmm(x, a, b, alpha, beta):
@@ -378,7 +394,6 @@ class TestCKBackend(TestCase):
     )
     @parametrize("max_autotune_conv_backends", ("CK", "ATEN,CK,TRITON"))
     def test_max_autotune_conv2d(self, max_autotune_conv_backends):
-
         tensor_options = {"device": "cuda", "dtype": torch.float32}
 
         x = torch.randn(1, 8, 224, 224, **tensor_options)
@@ -388,16 +403,19 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": False,
-                "max_autotune_conv_backends": max_autotune_conv_backends,
-                "compile_threads": 4,
-                "rocm.ck_dir": self.ck_dir,
-                "rocm.ck_max_profiling_configs": 4,
-            }
-        ), tf32_off():
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "autotune_in_subproc": False,
+                    "max_autotune_conv_backends": max_autotune_conv_backends,
+                    "compile_threads": 4,
+                    "rocm.ck_dir": self.ck_dir,
+                    "rocm.ck_max_profiling_configs": 4,
+                }
+            ),
+            tf32_off(),
+        ):
 
             @torch.compile(dynamic=False)
             def conv2d(x, w):
@@ -429,15 +447,18 @@ class TestCKBackend(TestCase):
 
         assert "rocm" in dir(config)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "compile_threads": 2,
-                "rocm.ck_max_profiling_configs": 2,
-                "rocm.ck_dir": self.ck_dir,
-            }
-        ), tf32_off():
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                    "compile_threads": 2,
+                    "rocm.ck_max_profiling_configs": 2,
+                    "rocm.ck_dir": self.ck_dir,
+                }
+            ),
+            tf32_off(),
+        ):
 
             @torch.compile(dynamic=False)
             def compiled_bmm(x, w):
