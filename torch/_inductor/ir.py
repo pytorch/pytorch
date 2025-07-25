@@ -6467,9 +6467,16 @@ class SubgraphBuffer(ExternKernel):
         with V.set_graph_handler(self.subgraph):
             # Don't bother autotuning on Triton here
             with inductor_config.patch(  # type: ignore[no-untyped-def]
-                max_autotune=False,
-                max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
+                {
+                    "max_autotune": False,
+                    "max_autotune_gemm": False,
+                    "max_autotune_gemm_backends": "ATEN",
+                    # Also, remove the lookup table if it exists here, as it's only
+                    # valid with max_autotune right now
+                    # TODO(coconutruben): remove this when lookup table is valid without
+                    # max-autotune
+                    "template_lookup_table": None,
+                }
             ):
                 self.subgraph.run(*self.example_inputs)
 
