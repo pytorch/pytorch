@@ -147,7 +147,9 @@ class InductorChoices:
             return
 
         # Get the appropriate template-specific heuristic
-        heuristic = get_template_heuristic(template_name, kernel_inputs.device_type)
+        heuristic = get_template_heuristic(
+            template_name, kernel_inputs.device_type, op_name
+        )
 
         yield from heuristic.get_template_configs(kernel_inputs, layout, op_name)
 
