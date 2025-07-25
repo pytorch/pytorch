@@ -262,7 +262,9 @@ def _check_capability():
         "12.9": {"min": 70, "max": 120},
     }
 
-    if torch.version.cuda is not None:  # on ROCm we don't want this check
+    if (
+        torch.version.cuda is not None and torch.cuda.get_arch_list()
+    ):  # on ROCm we don't want this check
         for d in range(device_count()):
             capability = get_device_capability(d)
             major = capability[0]
@@ -405,8 +407,6 @@ def _lazy_init():
             )
         # This function throws if there's a driver initialization error, no GPUs
         # are found or any other error occurs
-        if "CUDA_MODULE_LOADING" not in os.environ:
-            os.environ["CUDA_MODULE_LOADING"] = "LAZY"
         torch._C._cuda_init()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
