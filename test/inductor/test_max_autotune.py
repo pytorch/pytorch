@@ -35,10 +35,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch._inductor.template_heuristics import (
-    CUDAMMTemplateConfigHeuristic,
-    GemmConfig,
-)
+from torch._inductor.template_heuristics import CUDAConfigHeuristic, GemmConfig
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1564,9 +1561,9 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.template_registry.get_template_heuristic"
+            "torch._inductor.kernel.mm.V.choices.get_config_heuristics"
         ) as config_mock:
-            config_heuristics = CUDAMMTemplateConfigHeuristic()
+            config_heuristics = CUDAConfigHeuristic()
 
             # Traditionally, this would be set of all possible configs
             # We mock out the code path for the sake of the unit test
