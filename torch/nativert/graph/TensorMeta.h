@@ -25,12 +25,12 @@ class TensorMeta {
   explicit TensorMeta(const torch::_export::TensorMeta& tensorMeta);
 
   c10::IntArrayRef sizes() const {
-    CHECK(!hasSymbolicShape_) << "TensorMeta has symbolic shape";
+    TORCH_CHECK(!hasSymbolicShape_, "TensorMeta has symbolic shape");
     return sizes_;
   }
 
   c10::IntArrayRef strides() const {
-    CHECK(!hasSymbolicShape_) << "TensorMeta has symbolic shape";
+    TORCH_CHECK(!hasSymbolicShape_, "TensorMeta has symbolic shape");
     return strides_;
   }
 
@@ -55,7 +55,7 @@ class TensorMeta {
   }
 
   int64_t numel() const {
-    CHECK(!hasSymbolicShape_) << "TensorMeta has symbolic shape";
+    TORCH_CHECK(!hasSymbolicShape_, "TensorMeta has symbolic shape");
     return numel_;
   }
 
