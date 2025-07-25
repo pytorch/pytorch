@@ -7931,9 +7931,10 @@ class StorageBox(MutableBox):
             self.realize()
 
     def has_accumulated_enough_reads_by_size(self, threshold: int) -> bool:
-        return (
-            sum(V.graph.get_dep_size_hint(dep) for dep in self.get_reads()) > threshold
-        )
+        size_of_reads = [V.graph.get_dep_size_hint(dep) for dep in self.get_reads()]
+        total_size = sum(size_of_reads)
+
+        return total_size > threshold and total_size / max(size_of_reads) >= 2
 
     def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (
