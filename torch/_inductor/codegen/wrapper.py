@@ -1196,8 +1196,9 @@ class PythonWrapperCodegen(CodeGen):
 
             # avoid duplicating asserts for both partition functions and
             # the call function when using cudagraph partition
-            if is_using_cudagraph_partition() and is_codegen_graph_partition_subgraph(
-                self
+            if not (
+                is_using_cudagraph_partition()
+                and (not is_codegen_graph_partition_subgraph(self))
             ):
                 self.codegen_input_size_and_nan_asserts()
 
