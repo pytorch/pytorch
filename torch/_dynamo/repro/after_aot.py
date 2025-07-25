@@ -304,7 +304,7 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
     model_str = textwrap.dedent(
         f"""
-{normalize_path_separator(generate_env_vars_string(stable_output=stable_output))}
+{generate_env_vars_string(stable_output=stable_output)}
 import torch
 from torch import tensor, device
 import torch.fx as fx
