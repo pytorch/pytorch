@@ -2116,7 +2116,7 @@ std::tuple<double, double, int, int> produce_inputs_for_binary_op(
     input2_cpu = produce_random_tensor(input2_shape);
 
     if (compute_quantization_params) {
-      // compute appropiate scale and zero point for inputs
+      // compute appropriate scale and zero point for inputs
       const auto in1_quant_params = compute_quant_params(input1_cpu);
       in1_scale = std::get<0>(in1_quant_params);
       in1_zero_point = std::get<1>(in1_quant_params);
@@ -2287,7 +2287,7 @@ void test_quantized_binary_op(
       apply_cpu_quantized_binary_op(op_name, input1_cpu_deq, input2_cpu_deq);
 
   if (compute_quantization_params || random_quantization_params) {
-    // compute appropiate scale and zero point for output
+    // compute appropriate scale and zero point for output
     const auto out_quant_params = compute_quant_params(output_cpu);
     out_scale = std::get<0>(out_quant_params);
     out_zero_point = std::get<1>(out_quant_params);
@@ -2540,7 +2540,7 @@ void test_quantized_conv2d(
     bias_cpu = produce_random_tensor(bias_shape, 1.26, 5.97, 0.59);
 
     if (compute_quantization_params) {
-      // compute appropiate scale and zero point for input, weight and bias
+      // compute appropriate scale and zero point for input, weight and bias
       const auto in_quant_params = compute_quant_params(input_cpu, in_dtype);
       in_scale = std::get<0>(in_quant_params);
       in_zero_point = std::get<1>(in_quant_params);
@@ -2624,7 +2624,7 @@ void test_quantized_conv2d(
       groups);
 
   if (compute_quantization_params || random_quantization_params) {
-    // compute appropiate scale and zero point for output
+    // compute appropriate scale and zero point for output
     const auto out_quant_params = compute_quant_params(output_cpu, out_dtype);
     out_scale = std::get<0>(out_quant_params);
     out_zero_point = std::get<1>(out_quant_params);
@@ -3524,7 +3524,7 @@ TEST_F(VulkanAPITest, linear_4d_large) {
   test_quantized_linear({9, 13, 11, 17}, {23, 17}, {23});
 }
 
-// The following code is not directly releated to quantization. We put it here
+// The following code is not directly related to quantization. We put it here
 // since we are not able to run this test on GH's CI: for some unknown reason,
 // we are not able to reference symbols in the vulkan directory, hence the build
 // on GH fails. Moving the test here so we are still able to run it on
@@ -3566,7 +3566,7 @@ TEST_F(VulkanAPITest, extract_texel_test) {
   // is the channel count.
   // We always start a new batch on a new z. Hence, when c cannot be divided by
   // 4, there are some undefined values in the padding area. We use -1 to
-  // indicate that we are not performing comparsion on those values.
+  // indicate that we are not performing comparison on those values.
   std::tuple<ivec3, ivec4> test_cases[]{
       {{0, 0, 0}, {0, hw, 2 * hw, 3 * hw}},
       {{1, 0, 0}, {1, hw + 1, 2 * hw + 1, 3 * hw + 1}},
@@ -3672,7 +3672,7 @@ TEST_F(VulkanAPITest, channel_to_width_packing_test) {
   at::Tensor output = at::native::vulkan::ops::convert(v_output);
 
   // This tensor will be width-packed. Meaning that each texel represent
-  // consecutive elements along the width dimension. The  differece between
+  // consecutive elements along the width dimension. The  difference between
   // consecutive texels is 1.
   std::tuple<ivec3, ivec4> test_cases[]{
       {{0, 0, 0}, {0, 1, 2, 3}},
