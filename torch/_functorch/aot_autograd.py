@@ -16,7 +16,6 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
-from torch.export._tree_utils import reorder_kwargs
 from torch._dynamo.utils import (
     CompileEventLogger,
     dynamo_timed,
@@ -27,6 +26,7 @@ from torch._guards import detect_fake_mode
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
+from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -148,8 +148,8 @@ from ._aot_autograd.utils import (  # noqa: F401
     normalize_as_list,
     partial_flatten_asdict,
     root_module_when_exporting_non_strict,
-    strict_zip,
     simple_wraps,
+    strict_zip,
 )
 from .partitioners import default_partition
 
@@ -925,7 +925,9 @@ def prepare_aot_module_simplified(
     full_args = [*params_flat, *buffers_flat, *args]
     in_spec, out_spec = None, None
     if flatten:
-        functional_call, out_spec = create_tree_flattened_fn(functional_call, full_args, kwargs)
+        functional_call, out_spec = create_tree_flattened_fn(
+            functional_call, full_args, kwargs
+        )
         full_args, in_spec = pytree.tree_flatten((full_args, kwargs))
 
     del kwargs
@@ -936,7 +938,9 @@ def prepare_aot_module_simplified(
     full_args_descs.extend(ParamAOTInput(fqn) for fqn in params_spec)
     full_args_descs.extend(BufferAOTInput(fqn) for fqn in buffers_spec)
     # TODO: it would be better to put pytree information in here
-    full_args_descs.extend(PlainAOTInput(i) for i in range(len(full_args) - len(full_args_descs)))
+    full_args_descs.extend(
+        PlainAOTInput(i) for i in range(len(full_args) - len(full_args_descs))
+    )
 
     # TODO: These tracing_context fields should become unnecessary once we
     # always maintain sources on all arguments
@@ -1128,7 +1132,7 @@ def aot_export_joint_with_descriptors(
     stack: contextlib.ExitStack,
     mod: nn.Module,
     args,
-    kwargs = None,
+    kwargs=None,
     *,
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
@@ -1172,9 +1176,9 @@ def aot_export_joint_with_descriptors(
 
     Note: When using this API, you must create and enter an ExitStack context
     manager, which will be passed into this function.  This context manager
-    must remain active if you .  (TODO: We may relax this requirement by
-    having AOTAutograd keep track of how to reconstruct all the context
-    managers at a later point in time.)
+    must remain active if you call the compile function to finish compilation.
+    (TODO: We may relax this requirement by having AOTAutograd keep track of
+    how to reconstruct all the context managers at a later point in time.)
 
     NB: You're not obligated to do a /full/ compile in stage2; instead you can
     leave the forward/backward compilers unspecified in which case the
@@ -1185,7 +1189,13 @@ def aot_export_joint_with_descriptors(
     NB: These APIs do NOT hit cache, as we only ever cache the final compile results,
     not the intermediate export result.
 
-    TODO: talk carefully about how parameters/buffers work here
+    NB: If the passed nn.Module has parameters and buffers on it, we will
+    generate extra implicit parameter/buffer arguments and assign ParamAOTInput
+    and BufferAOTInput descriptors to them.  However, if you generate the input
+    nn.Module from a mechanism like Dynamo, you will NOT get these descriptors
+    (because Dynamo will already have taken care of lifting the parameters/buffers
+    into arguments!)  In that case, it would be necessary to analyze the Sources
+    of the inputs to determine if inputs are parameters and their FQNs.
     """
 
     from torch._dynamo.backends.debugging import boxed_nop
@@ -1258,6 +1268,7 @@ def aot_compile_joint_with_descriptors(jd: JointWithDescriptors) -> callable:
     TODO: Consider if we should allow_in_graph the result by default.
     """
     compiled_fn, _ = aot_stage2_compile(jd._aot_state, jd._aot_graph_capture)
+
     # Cribbed from torch/export/pt2_archive/_package.py
     @simple_wraps(compiled_fn)
     def unflattened_compiled_fn(*args, **kwargs):
@@ -1265,6 +1276,7 @@ def aot_compile_joint_with_descriptors(jd: JointWithDescriptors) -> callable:
         # TODO: do I need to filter? I hope not!
         flat_outputs = compiled_fn(flat_inputs)
         return pytree.tree_unflatten(flat_outputs, jd.out_spec)
+
     return unflattened_compiled_fn
 
 
