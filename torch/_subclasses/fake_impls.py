@@ -231,7 +231,7 @@ def stride_incorrect_op(op):
 # These operators have meta implementations with incorrect strides
 @register_op_impl(stride_incorrect_op)
 def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
-    # This is a workaround for meta implmentations with incorrect strides
+    # This is a workaround for meta implementations with incorrect strides
 
     def is_symbolic(x):
         if isinstance(x, FakeTensor):

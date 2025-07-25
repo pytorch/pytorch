@@ -2456,7 +2456,7 @@ def error_inputs_cat(op_info, device, **kwargs):
 
     # error inputs for empty tensors
     yield ErrorInput(SampleInput([], kwargs={'dim': 1}),
-                     error_regex='non-empty list of Tensors')
+                     error_regex='non-empty list of Tensors', error_type=ValueError)
 
     # error inputs for different sizes
     yield ErrorInput(SampleInput([make_arg((S, S, L, L)), make_arg((S, 0, L - 1, L))], kwargs={'dim': 1}),

@@ -21,7 +21,7 @@ TORCH_DECLARE_REGISTRY(PrimKernelRegistry, OpKernel, const Node*);
       __VA_ARGS__;                                                   \
     }                                                                \
   };                                                                 \
-  C10_REGISTER_TYPED_CLASS(PrimKernelRegistry, name, OpKernel_##id);
+  C10_REGISTER_TYPED_CLASS(PrimKernelRegistry, name, OpKernel_##id)
 
 inline bool checkResizedDataPtr(at::Tensor& t) {
   auto const prev_data_ptr = t.data_ptr();

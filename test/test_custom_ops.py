@@ -167,6 +167,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
 
         x = torch.tensor(3.14159 / 3, requires_grad=True, device=device)
         with self.assertRaisesRegex(
@@ -271,6 +272,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
 
         x = torch.tensor([0, 1.0], requires_grad=True)
         with self.assertRaisesRegex(
@@ -312,6 +314,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
         lib.impl("foo", foo_meta, "Meta")
 
         x = torch.tensor([0, 1.0], requires_grad=True)
@@ -343,6 +346,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
         lib.impl("foo", foo_meta, "Meta")
 
         x = torch.tensor([0, 1.0])
@@ -369,6 +373,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         lib.impl("foo", Foo.apply, "CPU")
         lib.impl("foo", Foo.apply, "CUDA")
+        lib.impl("foo", Foo.apply, "XPU")
         lib.impl("foo", lambda x: x.clone(), "Meta")
 
         x = torch.randn([], requires_grad=True)
@@ -462,6 +467,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
 
         x = torch.randn(3, requires_grad=True, device=device)
         # Should not raise
@@ -511,6 +517,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         lib.impl("foo", Foo.apply, "CPU")
         lib.impl("foo", Foo.apply, "CUDA")
+        lib.impl("foo", Foo.apply, "XPU")
 
         x = torch.randn(3, requires_grad=True, device=device)
         with self.assertRaisesRegex(AssertionError, "incorrectly registered"):
@@ -536,62 +543,6 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
 class TestCustomOp(CustomOpTestCaseBase):
     test_ns = "_test_custom_op"
-
-    def test_deploy_interaction(self):
-        # run in a different process to avoid parallel issues when we monkeypatch torch._running_with_deploy
-        script = """
-import torch
-torch._running_with_deploy = lambda: True
-
-# creating the library is a no-op, so you can DEF multiple times
-m1 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
-m2 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
-
-m = torch.library.Library("aten", "FRAGMENT")  # noqa: TOR901
-
-# define is a no-op
-m.define("foobarbaz9996(Tensor x) -> Tensor")
-assert not hasattr(torch.ops.aten, "foobarbaz9996"), "m.define should have been a noop"
-
-def sin_override(x):
-    raise AssertionError("m.impl should have been a noop")
-
-# impl is a no-op
-m.impl("sin", sin_override, "CompositeImplicitAutograd")
-x = torch.randn(3)
-y = torch.sin(x)
-
-# should be a no-op
-@torch.library.custom_op("mylib::foobar", mutates_args={})
-def foobar(x: torch.Tensor) -> torch.Tensor:
-    return x.sin()
-
-# should be a no-op
-@foobar.register_fake
-def _(x):
-    return torch.empty_like(x)
-
-# should be a no-op
-m2.define("foobarbaz9996(Tensor x) -> Tensor")
-
-# should be a no-op
-@torch.library.register_fake("mylib4392::foobarbaz9996")
-def _(x):
-    return torch.empty_like(x)
-        """
-        script = script.strip()
-        env = os.environ.copy()
-        try:
-            subprocess.check_output(
-                [sys.executable, "-c", script],
-                stderr=subprocess.STDOUT,
-                # On Windows, opening the subprocess with the default CWD makes `import torch`
-                # fail, so just set CWD to this script's directory
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-                env=env,
-            )
-        except subprocess.CalledProcessError as e:
-            self.fail(msg=("Subprocess exception:\n" + e.output.decode("utf-8")))
 
     @requires_compile
     def test_functionalize_error(self):
@@ -630,7 +581,7 @@ def _(x):
                 g(x)
 
     def test_invalid_schemas(self):
-        # function schmea validation goes through torchgen, so this is just a
+        # function schema validation goes through torchgen, so this is just a
         # basic test.
         with self.assertRaisesRegex(AssertionError, "Invalid function schema: foo"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(")
@@ -2712,7 +2663,7 @@ class TestCustomOpAPI(TestCase):
                 self.assertEqual(ctx.needs_input_grad, expected)
                 return list(grad.unbind(0))
 
-        # call two applys, do a backward on the first
+        # call two applies, do a backward on the first
         def t():
             return torch.randn([], requires_grad=True)
 
@@ -4677,8 +4628,10 @@ class TestOpProfiles(TestCase):
             loaded = read_profiles_from_yaml(yaml_str)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestCustomOpTesting, globals(), only_for=only_for)
+only_for = ("cpu", "cuda", "xpu")
+instantiate_device_type_tests(
+    TestCustomOpTesting, globals(), only_for=only_for, allow_xpu=True
+)
 instantiate_parametrized_tests(TestCustomOp)
 instantiate_parametrized_tests(TestCustomOpAPI)
 

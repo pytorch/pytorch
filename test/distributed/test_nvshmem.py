@@ -232,7 +232,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         )
         out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
         # 3 rows: input splits, output splits, output offsets
-        # Initiallizing all values to -1 to check if they are updated
+        # Initializing all values to -1 to check if they are updated
         in_out_splits = symm_mem.empty(
             (3, nsplits), dtype=torch.int64, device=self.device
         ).fill_(-1)
