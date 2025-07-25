@@ -2420,6 +2420,9 @@ GuardManager* clone_guard_manager(
 void add_relational_guard_resetter_to_cloned_root(
     RootGuardManager* root,
     std::shared_ptr<RelationalGuard> guard);
+std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
+    RootGuardManager* _root);
+std::string get_compile_id(RootGuardManager* root);
 
 /**
  * Base class representing a pair of accessor and the associated guard
@@ -3206,6 +3209,14 @@ class RootGuardManager : public GuardManager {
     return ret;
   }
 
+  void attach_compile_id(std::string compile_id) {
+    _compile_id = compile_id;
+  }
+
+  std::string get_compile_id() {
+    return _compile_id;
+  }
+
  private:
   // Reset the state of all the relational guards on failure.
   void _reset_relational_guard_state() {
@@ -3258,6 +3269,9 @@ class RootGuardManager : public GuardManager {
   // We init LocalState only when this flag it set. This flag is set during
   // TENSOR_MATCH guard init.
   bool _init_local_state = false;
+
+  // debug info
+  std::string _compile_id;
 
   // Pointer to the no tensor relational guard
   std::shared_ptr<RelationalGuard> _no_tensor_aliasing_guard;
@@ -3649,6 +3663,15 @@ std::unique_ptr<GuardManager> make_guard_manager(
     }
   }
   return std::make_unique<GuardManager>(root, std::move(source), example_value);
+}
+
+std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
+    RootGuardManager* _root) {
+  return _root->get_no_tensor_aliasing_guard();
+}
+
+std::string get_compile_id(RootGuardManager* root) {
+  return root->get_compile_id();
 }
 
 class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
@@ -6627,6 +6650,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(py::init<>())
       .def("check", &RootGuardManager::check)
       .def("check_verbose", &RootGuardManager::check_verbose)
+      .def("attach_compile_id", &RootGuardManager::attach_compile_id)
       .def(
           "clone_manager",
           &RootGuardManager::clone_manager,
