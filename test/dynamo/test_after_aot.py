@@ -32,8 +32,8 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
 
         gm = make_fx(f)(*args)
         with tempfile.TemporaryDirectory() as d:
-            save_graph_repro(buf, gm, args, "inductor_accuracy", save_dir=d)
-            r = normalize_path_separator(buf.getvalue())
+            save_graph_repro(buf, gm, args, "inductor_accuracy", save_dir=normalize_path_separator(d))
+            r = buf.getvalue()
             with report_compile_source_on_error():
                 exec(r, {"__compile_source__": r})
 
