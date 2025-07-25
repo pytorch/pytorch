@@ -974,6 +974,8 @@ test_without_numpy() {
   if [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
     python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch;torch.compile(lambda x:print(x))('Hello World')"
   fi
+  # Regression test for https://github.com/pytorch/pytorch/pull/157734 (torch.onnx should be importable without numpy)
+  python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch; import torch.onnx"
   popd
 }
 
