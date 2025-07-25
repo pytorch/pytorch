@@ -1542,7 +1542,7 @@ def use_triton_template(
     )
 
 
-def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
+def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
     """
     Return True iff *all* supplied tensors satisfy the CUDA-12.9 TMA constraints
     that Triton relies on today.
@@ -1625,6 +1625,13 @@ def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool
         return True
 
     return has_triton_tma_device() and all(_is_tma_compatible(m) for m in matrices)
+
+
+def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
+    return (
+        can_use_tma(*matrices, add_guards=add_guards)
+        and config.triton.enable_persistent_tma_matmul
+    )
 
 
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
