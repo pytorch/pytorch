@@ -326,7 +326,7 @@ class Conv1d(_ConvNd):
         bias: bool = True,
         padding_mode: Literal[
             "zeros", "reflect", "replicate", "circular"
-        ] = "zeros",  # TODO: refine this type
+        ] = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -507,7 +507,7 @@ class Conv2d(_ConvNd):
         bias: bool = True,
         padding_mode: Literal[
             "zeros", "reflect", "replicate", "circular"
-        ] = "zeros",  # TODO: refine this type
+        ] = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1564,7 +1564,7 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
         bias: bool = True,
         padding_mode: Literal[
             "zeros", "reflect", "replicate", "circular"
-        ] = "zeros",  # TODO: refine this type
+        ] = "zeros",
         device=None,
         dtype=None,
     ) -> None:
