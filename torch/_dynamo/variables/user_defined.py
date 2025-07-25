@@ -1576,6 +1576,10 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     def __context__(self):
         return self.exc_vt.__context__
 
+    @property
+    def args(self):
+        return self.exc_vt.args
+
     def set_context(self, context: "variables.ExceptionVariable"):
         return self.exc_vt.set_context(context)
 
