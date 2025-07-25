@@ -50,6 +50,7 @@ jobs:
         runner: [linux.12xlarge]
         docker-image-name: [
           pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks,
           pytorch-linux-jammy-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks,
           pytorch-linux-jammy-cuda12.6-cudnn9-py3.13-gcc9-inductor-benchmarks,
