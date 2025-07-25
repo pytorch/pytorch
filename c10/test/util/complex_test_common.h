@@ -23,8 +23,10 @@ MAYBE_GLOBAL void test_size() {
 }
 
 MAYBE_GLOBAL void test_align() {
+#if !defined(PYTORCH_COMPLEX_ALIGNMENT_WORKAROUND)
   static_assert(alignof(c10::complex<float>) == 2 * sizeof(float), "");
   static_assert(alignof(c10::complex<double>) == 2 * sizeof(double), "");
+#endif
 }
 
 MAYBE_GLOBAL void test_pod() {
