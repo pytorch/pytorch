@@ -1106,14 +1106,16 @@ struct IValuePacker {
   // That's what the TypePtr is for: it contains the information to do the
   // parsing. See torch::jit::toIValue for more information.
   static at::TypePtr packed_type() {
-#ifdef _WIN32
+#if defined(_WIN32)
+#if defined(USE_CUDA) || defined(USE_ROCM)
     // NB: the if-constexpr usage triggers compilation errors on Windows
     // with certain compiler settings
     // (see https://github.com/pytorch/pytorch/pull/144707 for examples).
     // It's not clear what the problem is, so we're going to ignore it for now.
     TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "torch.compile not supported on Windows");
-#else
+        false, "torch.compile not supported on Windows GPU");
+#endif
+#endif
     if constexpr (::std::is_same_v<T, at::Tensor>) {
       return at::TensorType::get();
     } else if constexpr (::std::is_same_v<T, int64_t>) {
@@ -1153,7 +1155,6 @@ struct IValuePacker {
           false, "IValuePacker not implemented for type");
       return at::NoneType::get();
     }
-#endif
   }
 };
 

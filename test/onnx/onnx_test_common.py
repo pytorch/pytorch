@@ -65,36 +65,6 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     return verification.verify(*args, options=options, **kwargs)
 
 
-def assert_dynamic_shapes(onnx_program: torch.onnx.ONNXProgram, dynamic_shapes: bool):
-    """Assert whether the exported model has dynamic shapes or not.
-
-    Args:
-        onnx_program (torch.onnx.ONNXProgram): The output of torch.onnx.dynamo_export.
-        dynamic_shapes (bool): Whether the exported model has dynamic shapes or not.
-            When True, raises if graph inputs don't have at least one dynamic dimension
-            When False, raises if graph inputs have at least one dynamic dimension.
-
-    Raises:
-        AssertionError: If the exported model has dynamic shapes and dynamic_shapes is False and vice-versa.
-    """
-
-    if dynamic_shapes is None:
-        return
-
-    model_proto = onnx_program.model_proto
-    # Process graph inputs
-    dynamic_inputs = []
-    for inp in model_proto.graph.input:
-        dynamic_inputs += [
-            dim
-            for dim in inp.type.tensor_type.shape.dim
-            if dim.dim_value == 0 and dim.dim_param != ""
-        ]
-    assert dynamic_shapes == (len(dynamic_inputs) > 0), (
-        "Dynamic shape check failed for graph inputs"
-    )
-
-
 def parameterize_class_name(cls: type, idx: int, input_dicts: Mapping[Any, Any]):
     """Combine class name with the parameterized arguments.
 
