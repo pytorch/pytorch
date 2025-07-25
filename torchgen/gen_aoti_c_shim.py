@@ -290,8 +290,6 @@ def gen_declaration_and_definition(
     version_info: dict[str, list[str]],
 ) -> tuple[str, str]:
     base_name = schema.name.unambiguous_name()
-
-    global declaration_definition_cache
     if (base_name, device, backend_call) in declaration_definition_cache:
         return declaration_definition_cache[(base_name, device, backend_call)]
 

@@ -119,7 +119,6 @@ class TestBackwardPrefetch(FSDPTest):
                 training_state == HandleTrainingState.BACKWARD_POST
                 and state.backward_prefetch == BackwardPrefetch.BACKWARD_POST
             ):
-                nonlocal all_handle_fqns
                 # FQNs prefixed from the root module
                 # state._exec_order_data.param_to_fqn
                 fqns = _get_handle_fqns_from_root(state, handle)

@@ -573,7 +573,7 @@ num_guards_executed=0)
         self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
 
     def test_globals(self):
-        global global_pair, Pair
+        global global_pair, Pair  # noqa: F824
         guard_manager = RootGuardManager()
         gpair_mgr = guard_manager.globals_dict_manager(
             globals(), "", None, default_mgr_enum

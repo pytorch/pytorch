@@ -45,7 +45,6 @@ class TestNumericDebugger(TestCase):
         debug_handle_map: dict[str, int] = {}
 
         def _extract_debug_handles_from_node(node):
-            nonlocal debug_handle_map
             if (
                 CUSTOM_KEY in node.meta
                 and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]
@@ -62,7 +61,6 @@ class TestNumericDebugger(TestCase):
         prev_decomp_op_to_debug_handle_map: dict[str, int] = {}
 
         def _extract_debug_handles_with_prev_decomp_op_from_node(node):
-            nonlocal prev_decomp_op_to_debug_handle_map
             if (
                 CUSTOM_KEY in node.meta
                 and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]

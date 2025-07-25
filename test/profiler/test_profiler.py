@@ -2153,7 +2153,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     def test_forked_process(self):
         # Induce a pid cache by running the profiler with payload
         def validate_forked_json(profiler):
-            nonlocal cpu_op_found, parent_tid, child_pid
+            nonlocal cpu_op_found
             with TemporaryFileName(mode="w+") as fname:
                 profiler.export_chrome_trace(fname)
                 with open(fname) as f:
