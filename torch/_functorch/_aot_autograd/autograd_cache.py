@@ -44,12 +44,12 @@ from torch._inductor.codecache import (
     sha256_hash,
     write_atomic,
 )
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.output_code import (
     CompiledFxGraph,
     CompiledFxGraphConstants,
     OutputCode,
 )
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
@@ -78,7 +78,6 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
-    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
@@ -1026,7 +1025,12 @@ class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
         cudagraphs = torch._inductor.config.triton.cudagraphs
         boxed_forward_device_index = BoxedDeviceIndex(None)
         compiled_fn = entry.wrap_post_compile(
-            [], entry.sanitized_aot_config, {"cudagraphs": cudagraphs, "boxed_forward_device_index": boxed_forward_device_index}
+            [],
+            entry.sanitized_aot_config,
+            {
+                "cudagraphs": cudagraphs,
+                "boxed_forward_device_index": boxed_forward_device_index,
+            },
         )
 
         # TODO: this ignores flat_params, which can exist

@@ -184,85 +184,81 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
        stored on the co_consts field of the parent code object by Python compiler.
     This function handles all of the corner cases above.
     """
-    with dynamo_timed("_get_code_source"):
 
-        module = inspect.getmodule(code)
-        if module is None:
-            raise PackageError(f"Cannot find module for code {code}")
+    module = inspect.getmodule(code)
+    if module is None:
+        raise PackageError(f"Cannot find module for code {code}")
 
-        toplevel: Any = module
-        if sys.version_info >= (3, 11):
-            parts = code.co_qualname.split(".")
+    toplevel: Any = module
+    if sys.version_info >= (3, 11):
+        parts = code.co_qualname.split(".")
 
-            for part in parts:
-                if not hasattr(toplevel, part):
-                    _raise_resolution_error(code, toplevel)
-                toplevel = getattr(toplevel, part)
-                if inspect.isfunction(toplevel):
-                    break
-        seen = set()
-        def _find_code_source(obj: Any) -> Optional[str]:
-            nonlocal toplevel
-            nonlocal seen
-            if obj in seen:
-                return None
+        for part in parts:
+            if not hasattr(toplevel, part):
+                _raise_resolution_error(code, toplevel)
+            toplevel = getattr(toplevel, part)
+            if inspect.isfunction(toplevel):
+                break
+    seen = set()
 
-            seen.add(obj)
-
-            if inspect.iscode(obj):
-                if obj is code:
-                    return ""
-
-                for i, const in enumerate(obj.co_consts):
-                    if (res := _find_code_source(const)) is not None:
-                        return f".co_consts[{i}]{res}"
-
-            if inspect.isfunction(obj):
-                if (res := _find_code_source(obj.__code__)) is not None:
-                    toplevel = obj
-                    return f".__code__{res}"
-                if obj.__closure__ is not None:
-                    for i, cell in enumerate(obj.__closure__):
-                        try:
-                            cell_contents = cell.cell_contents
-                        except ValueError:
-                            continue
-                        if not (
-                            inspect.isfunction(cell_contents)
-                            or inspect.iscode(cell_contents)
-                        ):
-                            continue
-                        if (res := _find_code_source(cell_contents)) is not None:
-                            toplevel = obj
-                            return f".__closure__[{i}].cell_contents{res}"
-
-            if sys.version_info < (3, 11):
-                if inspect.ismodule(obj):
-                    for value in obj.__dict__.values():
-                        if not (inspect.isfunction(value) or inspect.isclass(value)):
-                            continue
-                        if (res := _find_code_source(value)) is not None:
-                            return res
-
-                if isinstance(obj, staticmethod):
-                    if (res := _find_code_source(obj.__func__)) is not None:
-                        toplevel = obj
-                        return res
-
-                if inspect.isclass(obj):
-                    for name, value in obj.__dict__.items():
-                        if not (inspect.isfunction(value) or inspect.isclass(value) or isinstance(value, staticmethod)):
-                            continue
-                        if (res := _find_code_source(value)) is not None:
-                            if value.__name__ != name:
-                                _raise_resolution_error(code, toplevel)
-                            return res
+    def _find_code_source(obj: Any) -> Optional[str]:
+        nonlocal toplevel
+        nonlocal seen
+        if obj in seen:
             return None
 
-        code_source = _find_code_source(toplevel)
-        if code_source is None:
-            _raise_resolution_error(code, toplevel)
-        return toplevel.__qualname__, code_source.strip(".")
+        seen.add(obj)
+
+        if inspect.iscode(obj):
+            if obj is code:
+                return ""
+
+            for i, const in enumerate(obj.co_consts):
+                if (res := _find_code_source(const)) is not None:
+                    return f".co_consts[{i}]{res}"
+
+        if inspect.isfunction(obj):
+            if (res := _find_code_source(obj.__code__)) is not None:
+                toplevel = obj
+                return f".__code__{res}"
+            if obj.__closure__ is not None:
+                for i, cell in enumerate(obj.__closure__):
+                    try:
+                        cell_contents = cell.cell_contents
+                    except ValueError:
+                        continue
+                    if not (
+                        inspect.isfunction(cell_contents)
+                        or inspect.iscode(cell_contents)
+                    ):
+                        continue
+                    if (res := _find_code_source(cell_contents)) is not None:
+                        toplevel = obj
+                        return f".__closure__[{i}].cell_contents{res}"
+
+        if sys.version_info < (3, 11):
+            if inspect.ismodule(obj):
+                for value in obj.__dict__.values():
+                    if not (inspect.isfunction(value) or inspect.isclass(value)):
+                        continue
+                    if (res := _find_code_source(value)) is not None:
+                        return res
+
+            if inspect.isclass(obj):
+                for name, value in obj.__dict__.items():
+                    value = getattr(obj, name)
+                    if not (inspect.isfunction(value) or inspect.isclass(value)):
+                        continue
+                    if (res := _find_code_source(value)) is not None:
+                        if value.__name__ != name:
+                            _raise_resolution_error(code, toplevel)
+                        return res
+        return None
+
+    code_source = _find_code_source(toplevel)
+    if code_source is None:
+        _raise_resolution_error(code, toplevel)
+    return toplevel.__qualname__, code_source.strip(".")
 
 
 @dataclasses.dataclass
