@@ -1085,8 +1085,6 @@ def _jvp_with_argnums(
     assert_non_empty_list_of_tensors(flat_primals, jvp_str, "primals")
     assert_non_empty_list_of_tensors(flat_tangents, jvp_str, "tangents")
 
-    global JVP_NESTING
-
     with jvp_increment_nesting() as level:
         with fwAD._set_fwd_grad_enabled(True):
             ctx = fwAD.dual_level if JVP_NESTING == 1 else contextlib.nullcontext

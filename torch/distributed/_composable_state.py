@@ -14,7 +14,6 @@ _module_state_mapping: weakref.WeakKeyDictionary[
 
 
 def _insert_module_state(module: nn.Module, state: _State) -> None:
-    global _module_state_mapping
     assert module not in _module_state_mapping, f"Inserting {module} more than once."
     _module_state_mapping[module] = weakref.ref(state)
 
@@ -29,7 +28,6 @@ def _get_module_state(module: nn.Module) -> Optional[_State]:
     If it is managed by a composable API, the corresponding ``_State`` will
     be returned.
     """
-    global _module_state_mapping
     if isinstance(module, _State):
         return cast(_State, module)
     else:

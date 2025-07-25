@@ -507,7 +507,7 @@ def register_multi_grad_hook(
 
         def get_inner_hook(idx: int) -> Callable[[torch.Tensor], None]:
             def inner_hook(grad: torch.Tensor) -> None:
-                nonlocal count, nb_calls, buffer, fn
+                nonlocal nb_calls, fn
                 id = torch._C._current_graph_task_id()
                 assert id != -1, (
                     "expected this hook to be called inside a backward call"
@@ -544,7 +544,6 @@ def register_multi_grad_hook(
 
         @functools.wraps(fn)
         def wrapped_fn(grad: torch.Tensor) -> None:
-            nonlocal ran_hook
             id = torch._C._current_graph_task_id()
             assert id != -1, "expected this hook to be called inside a backward call"
             with lock:

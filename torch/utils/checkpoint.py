@@ -131,7 +131,6 @@ def _infer_device_type(*args):
     device_types = []
 
     def add_device_types(arg):
-        nonlocal device_types
         if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu":
             device_types.append(arg.device.type)
     tree_map(add_device_types, args)
@@ -167,7 +166,6 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     fwd_device_ids = []
 
     def add_device_ids(arg):
-        nonlocal fwd_device_ids
         if isinstance(arg, torch.Tensor) and arg.device.type not in {"cpu", "meta"}:
             fwd_device_ids.append(arg.get_device())
     tree_map(add_device_ids, args)

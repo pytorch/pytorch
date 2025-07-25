@@ -23,7 +23,6 @@ def observe_garbage(observer):
     atexit.register(disable)
 
     def gc_callback(phase, info):
-        nonlocal enabled
         if not enabled:
             return
         if phase == "start":
