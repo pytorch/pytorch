@@ -1,4 +1,3 @@
-
 import os
 import subprocess
 
@@ -81,7 +80,7 @@ def build_vllm(
         )
         docker_torch_arg = ""
         if torch_whl_dir:
-            run('pwd')
+            run("pwd")
             # copy the torch wheel in tmp folder into the vllm's build context directory
             tmp_file = f"./vllm/{_VLLM_TEMP_FOLDER}"
             force_create_dir(tmp_file)

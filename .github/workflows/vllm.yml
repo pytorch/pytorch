@@ -60,7 +60,7 @@ jobs:
       runner: linux.24xlarge
     secrets: inherit
 
-    linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build-test-img:
+  linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build-test-img:
     name: build-vllm
     uses: ./.github/workflows/_linux-vllm-build-main.yml
     needs: [
