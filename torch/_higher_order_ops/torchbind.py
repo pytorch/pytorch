@@ -136,7 +136,7 @@ def inner(mode, *args, **kwargs):
 
 # When tracing with fake script object, the call_torchbind op will return a fake tensor
 # When tracing with real script object, the call_torchbind op may return a real tensor,
-# we need to convert it to fake tensor mannually. Dynamic shape is surpported.
+# we need to convert it to fake tensor manually. Dynamic shape is supported.
 @call_torchbind.py_impl(FakeTensorMode)
 def call_torchbind_fake(mode, *args, **kwargs):
     with mode:

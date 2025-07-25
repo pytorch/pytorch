@@ -368,8 +368,8 @@ def _fix_input_output_signature(
     if forward_arg_names is None:
         forward_arg_names = []
         assert signature.in_spec.num_children == 2
-        arg_spec = signature.in_spec.children_specs[0]
-        kwarg_spec = signature.in_spec.children_specs[1]
+        arg_spec = signature.in_spec.child(0)
+        kwarg_spec = signature.in_spec.child(1)
         assert arg_spec.type == tuple
         assert kwarg_spec.type == dict
         for i in range(arg_spec.num_children):

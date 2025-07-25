@@ -5,6 +5,7 @@
 #include <initializer_list>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
@@ -35,10 +36,6 @@
                                                                        name:(NSString*)name;
 @end
 
-// Fwd declarations
-namespace at {
-struct TensorIteratorBase;
-}
 using namespace at::mps;
 
 namespace at::native::mps {
@@ -148,8 +145,6 @@ MPSGraphTensorData* getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStre
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar);
 
 MPSGraph* make_mps_graph();
-void printTensorNDArray(const TensorBase& t);
-MPSNDArray* ndArrayFromTensor(const TensorBase& tensor, MPSShape* shape, MPSDataType mpsType);
 
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph* mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph* mpsGraph, MPSDataType dataType, MPSShape* mpsShape);
@@ -506,6 +501,30 @@ static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Cont
 
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const MPSScalar& s, unsigned idx) {
   [encoder setBytes:&s.value length:s.size atIndex:idx];
+}
+
+static size_t iter_tensor_offset(TensorIteratorBase& iter, unsigned idx) {
+  // At the moment, MPS storage data is not the real GPU pointer, but rather a pointer to id<MTLBuffer> object
+  // But TensorIterator constructs data_ptr as if base was just a raw pointer
+  // Workaround this problem by computing an offset from the start of the tensor, which works for both
+  // tensor views and sliced 64-bit iterators
+  return reinterpret_cast<size_t>(iter.data_ptr(idx)) -
+      reinterpret_cast<size_t>(iter.tensor_base(idx).storage().data());
+}
+
+static inline void bind_iter_tensors(id<MTLComputeCommandEncoder> encoder,
+                                     TensorIteratorBase& iter,
+                                     std::optional<size_t> ntensors = std::nullopt) {
+  for (auto idx : c10::irange(ntensors.value_or(iter.ntensors()))) {
+    auto& t = iter.tensor_base(idx);
+    // Handle CPU scalars
+    if (C10_UNLIKELY(t.device().type() == kCPU)) {
+      mtl_setBuffer(encoder, t, idx);
+      continue;
+    }
+    auto offs = iter_tensor_offset(iter, idx);
+    [encoder setBuffer:getMTLBufferStorage(t) offset:offs atIndex:idx];
+  }
 }
 
 namespace detail {

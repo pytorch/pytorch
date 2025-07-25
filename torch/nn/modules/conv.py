@@ -1374,7 +1374,7 @@ class _ConvTransposeMixin(_ConvTransposeNd):
         "Please consider using public APIs.",
         category=FutureWarning,
     )
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
 
