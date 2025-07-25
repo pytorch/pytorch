@@ -559,7 +559,12 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
             "details on the differences between the two variants."
         )
         use_reentrant = True
-
+        
+    if len(functions) < segments:
+        raise ValueError(
+            "len(functions) cannot be less than segments"
+        )
+        
     # Hack for keyword-only parameter in a python 2.7-compliant way
     preserve = kwargs.pop("preserve_rng_state", True)
     if kwargs:
