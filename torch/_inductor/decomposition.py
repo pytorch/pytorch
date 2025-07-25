@@ -1163,7 +1163,7 @@ def repeat_interleave_Tensor(
         return NotImplemented
     if output_size is None or type(output_size) is not int:
         return NotImplemented
-    if repeat.device == "mps":
+    if repeat.device.type == "mps":
         return NotImplemented
     assert repeat.dtype in [torch.int32, torch.int64]
     assert repeat.ndim == 1
