@@ -217,7 +217,6 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 
 
 def populate_builtin_to_tensor_fn_map():
-    global BUILTIN_TO_TENSOR_FN_MAP
     if len(BUILTIN_TO_TENSOR_FN_MAP) > 0:
         # Only populate once; after there are elements present no need to
         # repopulate
@@ -1166,7 +1165,6 @@ class BuiltinVariable(VariableTracker):
         from .builder import SourcelessBuilder
         from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
-        global BUILTIN_TO_TENSOR_RFN_MAP, BUILTIN_TO_TENSOR_FN_MAP
         if can_dispatch_torch_function(tx, args, kwargs):
             # Only remap the fn to tensor methods if we aren't exporting
             # export serde does not handle method descriptors today

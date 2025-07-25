@@ -3562,12 +3562,12 @@ G['bulbous_bouffant'], accessed at:
         macademia = torch.randn(3)
 
         def g(y):
-            global macademia
+            global macademia  # noqa: F824
             y = macademia + y
             return y
 
         def f(y):
-            global macademia
+            global macademia  # noqa: F824
             y = g(y)
             return macademia + y
 

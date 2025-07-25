@@ -106,7 +106,6 @@ def load_derivatives(
     derivatives_yaml_path: str, native_yaml_path: str, tags_yaml_path: str
 ) -> DerivativeRet:
     # Do some caching as this is a deterministic function
-    global _GLOBAL_LOAD_DERIVATIVE_CACHE
     key = (derivatives_yaml_path, native_yaml_path)
     if key not in _GLOBAL_LOAD_DERIVATIVE_CACHE:
         with open(derivatives_yaml_path) as f:

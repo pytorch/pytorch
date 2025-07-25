@@ -353,7 +353,6 @@ def write_outputs(filename, headers, row, upload_to_benchmark_db: bool = True):
     """
     Write both CSV and JSON outputs using the original CSV output interface
     """
-    global disable_output
     if disable_output:
         return
 
