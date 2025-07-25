@@ -442,6 +442,11 @@ def _verify_exported_program_signature(exported_program) -> None:
                 raise SpecViolationError(
                     f"Constant tensor {input_spec.name} is not a tensor argument. Found {input_spec.arg} instead."
                 )
+        elif input_spec.kind == InputKind.SYMBOLIC_ATTR:
+            if not isinstance(input_spec.arg, SymIntArgument):
+                raise SpecViolationError(
+                    f"Symbolic attribute {input_spec.name} is not a symint argument. Found {input_spec.arg} instead."
+                )
         else:
             raise SpecViolationError(f"Unknown InputKind {input_spec.kind}.")
 

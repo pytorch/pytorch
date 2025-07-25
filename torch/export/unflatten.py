@@ -101,8 +101,10 @@ def _assign_attr(
             assert isinstance(from_obj, torch.nn.Parameter)
             to_module.register_parameter(field, from_obj)
         elif attr_kind == _AttrKind.BUFFER:
-            assert isinstance(from_obj, torch.Tensor)
-            to_module.register_buffer(field, from_obj, persistent=persistent)
+            if isinstance(from_obj, torch.Tensor):
+                to_module.register_buffer(field, from_obj, persistent=persistent)
+            else:
+                setattr(to_module, field, from_obj)
         elif attr_kind == _AttrKind.CONSTANT:
             assert not isinstance(from_obj, FakeScriptObject), (
                 "FakeScriptObject should only exist during tracing."
@@ -112,6 +114,7 @@ def _assign_attr(
                 (
                     torch.Tensor,
                     torch.ScriptObject,
+                    int,
                 ),
             )
             setattr(to_module, field, from_obj)

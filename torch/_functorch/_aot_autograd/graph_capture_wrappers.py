@@ -1119,10 +1119,13 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # https://github.com/pytorch/pytorch/issues/103569
 
     def functional_call(*args, **kwargs):
+        params_and_buffers = {
+            k: v
+            for k, v in pytree.tree_unflatten(args[:params_len], params_spec).items()
+            if isinstance(v, torch.Tensor)
+        }
         with (
-            stateless._reparametrize_module(
-                mod, pytree.tree_unflatten(args[:params_len], params_spec)
-            ),
+            stateless._reparametrize_module(mod, params_and_buffers),
             maybe_disable_thunkify(),
         ):
             if isinstance(mod, torch.fx.GraphModule):

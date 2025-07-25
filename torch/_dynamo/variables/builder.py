@@ -1126,16 +1126,10 @@ class VariableBuilder:
                     # We need to create an unbacked symint to replace the unbacked symbool.
                     new_symint = self.tx.output.shape_env.create_unbacked_symint()
                 else:
-                    # TODO (yidi): we need to figure out a way to propagate the guards
-                    # we accumulated when tracing the subggraph to outer shape_env. For normal symints,
-                    # this is automatically done by evaluating the guards once but this
-                    # will cause data-dependent error when we evaluate the outer unbacked symints.
-                    # The test case that triggers this graph break is test_cond_unbacked_symint_closure
-                    unimplemented_v2(
-                        gb_type="Attempted to wrap unbacked SymInt",
-                        context="",
-                        explanation="Unbacked SymInt input is not supported yet.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
+                    assert isinstance(value, torch.SymInt)
+                    new_symint = self.tx.output.shape_env.create_unbacked_symint()
+                    self.tx.output.shape_env.var_to_range[new_symint.node.expr] = (
+                        value.node.shape_env.var_to_range[value.node.expr]
                     )
 
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(

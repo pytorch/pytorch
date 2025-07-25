@@ -1106,6 +1106,10 @@ def aot_export_module(
         **dict(named_parameters),
         **dict(named_buffers),
     }
+    params_and_buffers.update({
+        fqn: v for fqn, v in mod.__dict__.items() if isinstance(v, torch.SymInt)
+    })
+
     params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)

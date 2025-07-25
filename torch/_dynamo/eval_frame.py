@@ -1705,6 +1705,7 @@ def export(
     allow_complex_guards_as_runtime_asserts: bool = False,
     _log_export_usage: bool = True,
     constraints: Optional[list[Constraint]] = None,
+    preserve_module_attributes: tuple[str, ...] = (),
     **extra_kwargs: Any,
 ) -> Callable[..., ExportResult]:
     """
@@ -2088,6 +2089,30 @@ def export(
                 }
                 for x in flat_args
             ]
+
+            placeholders = graph.graph.find_nodes(op="placeholder")
+            symbolic_attr_placeholders = {}
+            new_example_fake_inputs = []
+            new_graph_captured_input = []
+            for i, node in enumerate(placeholders):
+                s = node.meta.get("example_value")
+                if isinstance(s, torch.SymInt) and isinstance(s.node.expr, sympy.Symbol):
+                    attr_name = s.node.shape_env.var_to_sources[s.node.expr][0].name().split(".")[-1]
+                    if attr_name in preserve_module_attributes:
+                        symbolic_attr_placeholders[attr_name] = node
+                        continue
+                new_example_fake_inputs.append(example_fake_inputs[i])
+                new_graph_captured_input.append(graph_captured_input[i])
+
+            for attr_name, node in symbolic_attr_placeholders.items():
+                with graph.graph.inserting_after(node):
+                    new_node = graph.graph.get_attr(attr_name)
+                    new_node.meta["example_value"] = node.meta["example_value"]
+                    torch._export.utils.node_replace_(node, new_node)
+                    setattr(graph, attr_name, getattr(f, attr_name))
+
+            example_fake_inputs = new_example_fake_inputs
+            graph_captured_input = tuple(new_graph_captured_input)
             graph = rewrite_signature(
                 original_signature,
                 graph,

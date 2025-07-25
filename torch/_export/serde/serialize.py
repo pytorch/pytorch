@@ -57,6 +57,7 @@ from .schema import (  # type: ignore[attr-defined]
     InputToCustomObjSpec,
     InputTokenSpec,
     InputToParameterSpec,
+    InputToSymbolicAttrSpec,
     InputToTensorConstantSpec,
     Layout,
     LossOutputSpec,
@@ -1218,6 +1219,15 @@ class GraphModuleSerializer(metaclass=Final):
                     arg=TokenArgument(name=spec.arg.name),
                 )
             )
+        elif spec.kind == ep.InputKind.SYMBOLIC_ATTR:
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.SymIntArgument)
+            return InputSpec.create(
+                symbolic_attr=InputToSymbolicAttrSpec(
+                    arg=SymIntArgument.create(as_name=spec.arg.name),
+                    symbolic_attr_name=spec.target,
+                )
+            )
         else:
             raise AssertionError(f"Unknown argument kind: {spec}")
 
@@ -2175,6 +2185,12 @@ class GraphModuleDeserializer(metaclass=Final):
                 ),
                 target=None,
             )
+        elif i.type == "symbolic_attr":
+            return ep.InputSpec(
+                kind=ep.InputKind.SYMBOLIC_ATTR,
+                arg=ep.SymIntArgument(i.symbolic_attr.arg.as_name),
+                target=i.symbolic_attr.symbolic_attr_name,
+            )
         else:
             raise AssertionError(f"Unknown input spec {i}")
 
@@ -2294,9 +2310,10 @@ class GraphModuleDeserializer(metaclass=Final):
             # shape env to accommodate unbacked symbols in the exported program
             self.unbacked_symbols = set()
             count_unbacked_symfloat, count_unbacked_symint = -1, -1
-            unbacked_symfloat_prefix, unbacked_symint_prefix = (
+            unbacked_prefixes = tuple(
                 prefix_str[t] for t in [SymT.UNBACKED_FLOAT, SymT.UNBACKED_INT]
             )
+            unbacked_symfloat_prefix, unbacked_symint_prefix = unbacked_prefixes
             if symbol_name_to_range:
                 for k, vr in symbol_name_to_range.items():
                     lower = vr.lower
@@ -3356,7 +3373,7 @@ def canonicalize(
         idx, (_arg, spec) = inp
         assert isinstance(spec, InputSpec)
         if spec.type == "user_input":
-            return 5, None, idx
+            return 6, None, idx
         elif spec.type == "parameter":
             return 1, spec.parameter.parameter_name, idx
         elif spec.type == "buffer":
@@ -3368,7 +3385,9 @@ def canonicalize(
         elif spec.type == "token":
             return 0, None, idx
         elif spec.type == "constant_input":
-            return 6, spec.constant_input.name, idx
+            return 7, spec.constant_input.name, idx
+        elif spec.type == "symbolic_attr":
+            return 5, spec.symbolic_attr.symbolic_attr_name, idx
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 
@@ -3462,6 +3481,10 @@ def canonicalize(
             tok = spec.token.arg
             tok.name = replace_table[tok.name]
         elif spec.type == "constant_input":
+            return
+        elif spec.type == "symbolic_attr":
+            symbolic_attr = spec.symbolic_attr.arg
+            symbolic_attr.as_name = replace_table[symbolic_attr.as_name]
             return
         else:
             raise AssertionError(f"Unknown input type: {spec}")

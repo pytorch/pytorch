@@ -57,6 +57,7 @@ placeholder_prefixes = {
     InputKind.CONSTANT_TENSOR: "c_",
     InputKind.CUSTOM_OBJ: "obj_",
     InputKind.TOKEN: "token",
+    InputKind.SYMBOLIC_ATTR: "s_",
 }
 
 _DISABLE_ATEN_TO_ASSERTION_PASS = False

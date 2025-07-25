@@ -84,6 +84,7 @@ class InputKind(Enum):
     CONSTANT_TENSOR = auto()
     CUSTOM_OBJ = auto()
     TOKEN = auto()
+    SYMBOLIC_ATTR = auto()
 
 
 @dataclasses.dataclass
@@ -320,6 +321,15 @@ class ExportGraphSignature:
             if isinstance(s.target, str)
         )
 
+    @property
+    def lifted_symbolic_attrs(self) -> Collection[str]:
+        return tuple(
+            s.target
+            for s in self.input_specs
+            if s.kind == InputKind.SYMBOLIC_ATTR
+            if isinstance(s.target, str)
+        )
+
     # Graph node names of pytree-flattened inputs of original program
     @property
     def user_inputs(self) -> Collection[Union[int, float, bool, None, str]]:
@@ -434,6 +444,16 @@ class ExportGraphSignature:
             for s in self.input_specs
             if s.kind == InputKind.CUSTOM_OBJ
             and isinstance(s.arg, CustomObjArgument)
+            and isinstance(s.target, str)
+        )
+
+    @property
+    def inputs_to_lifted_symbolic_attrs(self) -> Mapping[str, str]:
+        return _immutable_dict(
+            (s.arg.name, s.target)
+            for s in self.input_specs
+            if s.kind == InputKind.SYMBOLIC_ATTR
+            and isinstance(s.arg, SymIntArgument)  # TODO: other sym types
             and isinstance(s.target, str)
         )
 
@@ -590,6 +610,7 @@ def _convert_to_export_graph_signature(
     graph_signature: "GraphSignature",
     gm: "torch.fx.GraphModule",
     non_persistent_buffers: set[str],
+    preserve_module_attributes: tuple[str, ...] = (),
 ) -> "ExportGraphSignature":
     from torch.utils import _pytree as pytree
 
@@ -599,6 +620,12 @@ def _convert_to_export_graph_signature(
     user_inputs = set(graph_signature.user_inputs)
     inputs_to_parameters = graph_signature.inputs_to_parameters
     inputs_to_buffers = graph_signature.inputs_to_buffers
+    inputs_to_lifted_symbolic_attrs = {
+        name: buf for name, buf in inputs_to_buffers.items()
+        if buf in preserve_module_attributes
+    }
+    for name in inputs_to_lifted_symbolic_attrs:
+        inputs_to_buffers.pop(name)
     user_outputs = set(graph_signature.user_outputs)
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
@@ -634,7 +661,7 @@ def _convert_to_export_graph_signature(
         if isinstance(inp, TokenArgument):
             return InputSpec(kind=InputKind.TOKEN, arg=inp, target=None)
 
-        if not isinstance(inp, TensorArgument):
+        if not isinstance(inp, (TensorArgument, SymIntArgument)):
             return InputSpec(kind=InputKind.USER_INPUT, arg=inp, target=None)
         name = inp.name
         if name in user_inputs:
@@ -644,6 +671,12 @@ def _convert_to_export_graph_signature(
                 kind=InputKind.PARAMETER,
                 arg=inp,
                 target=inputs_to_parameters[name],  # type: ignore[index]
+            )
+        elif name in inputs_to_lifted_symbolic_attrs:
+            return InputSpec(
+                kind=InputKind.SYMBOLIC_ATTR,
+                arg=inp,
+                target=inputs_to_lifted_symbolic_attrs[name],  # type: ignore[index]
             )
         elif name in inputs_to_buffers:
             return InputSpec(

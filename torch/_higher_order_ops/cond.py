@@ -196,9 +196,15 @@ def cond(
                 backend = make_eager_backend_with_torch_function_mode(metadata_mode)
             else:
                 backend = "eager"
-            return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
-                pred, true_fn, false_fn, operands
-            )
+            dynamo_config_patch = contextlib.nullcontext()
+            if torch.compiler.is_exporting():
+                dynamo_config_patch = torch._dynamo.config.patch(
+                    prefer_deferred_runtime_asserts_over_guards=True
+                )
+            with dynamo_config_patch:
+                return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
+                    pred, true_fn, false_fn, operands
+                )
 
 
 def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:

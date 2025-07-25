@@ -406,4 +406,9 @@ def _materialize_and_lift_constants(
 ) -> dict[str, _ConstantAttributeType]:
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
+
+    placeholders = {node.name: node for node in gm.graph.find_nodes(op="placeholder")}
+    for name, fqn in export_graph_signature.inputs_to_lifted_symbolic_attrs.items():
+        constants[fqn] = placeholders[name].meta["val"].node.hint
+
     return constants
