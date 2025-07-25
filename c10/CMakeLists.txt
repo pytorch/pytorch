@@ -1,55 +1,65 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 project(c10 CXX)
 
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_CXX_STANDARD
+    17
+    CACHE STRING
+          "The C++ standard whose features are requested to build this target.")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Main build file for the C10 library.
 #
 # Note that the C10 library should maintain minimal dependencies - especially,
-# it should not depend on any library that is implementation specific or
-# backend specific. It should in particular NOT be dependent on any generated
-# protobuf header files, because protobuf header files will transitively force
-# one to link against a specific protobuf version.
+# it should not depend on any library that is implementation specific or backend
+# specific. It should in particular NOT be dependent on any generated protobuf
+# header files, because protobuf header files will transitively force one to
+# link against a specific protobuf version.
 
 if(BUILD_LIBTORCHLESS)
-  find_library(C10_LIB c10 PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  find_library(
+    C10_LIB c10
+    PATHS $ENV{LIBTORCH_LIB_PATH}
+    NO_DEFAULT_PATH)
 else()
   set(C10_LIB c10)
 endif()
 
-set(C10_USE_GFLAGS ${USE_GFLAGS})  # also used in torch/headeronly
-set(C10_USE_GLOG ${USE_GLOG})  # also used in torch/headeronly
-set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})  # also used in torch/headeronly
-set(C10_USE_NUMA ${USE_NUMA})  # also used in torch/headeronly
-set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})  # also used in torch/headeronly
-set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})  # also used in torch/headeronly
+set(C10_USE_GFLAGS ${USE_GFLAGS}) # also used in torch/headeronly
+set(C10_USE_GLOG ${USE_GLOG}) # also used in torch/headeronly
+set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # also used in torch/headeronly
+set(C10_USE_NUMA ${USE_NUMA}) # also used in torch/headeronly
+set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME}
+)# also used in torch/headeronly
+set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT}) # also used in
+                                                          # torch/headeronly
 
-  # Note: if you want to add ANY dependency to the c10 library, make sure you
-  # check with the core PyTorch developers as the dependency will be
-  # transitively passed on to all libraries dependent on PyTorch.
-  file(GLOB C10_SRCS
-          *.cpp
-          core/*.cpp
-          core/impl/*.cpp
-          mobile/*.cpp
-          macros/*.cpp
-          util/*.cpp
-        )
-  file(GLOB C10_HEADERS
-          *.h
-          core/*.h
-          core/impl/*.h
-          mobile/*.h
-          macros/*.h
-          util/*.h
-        )
+# Note: if you want to add ANY dependency to the c10 library, make sure you
+# check with the core PyTorch developers as the dependency will be transitively
+# passed on to all libraries dependent on PyTorch.
+file(
+  GLOB
+  C10_SRCS
+  *.cpp
+  core/*.cpp
+  core/impl/*.cpp
+  mobile/*.cpp
+  macros/*.cpp
+  util/*.cpp)
+file(
+  GLOB
+  C10_HEADERS
+  *.h
+  core/*.h
+  core/impl/*.h
+  mobile/*.h
+  macros/*.h
+  util/*.h)
 if(NOT BUILD_LIBTORCHLESS)
   add_library(c10 ${C10_SRCS} ${C10_HEADERS})
   torch_compile_options(c10)
   if(HAVE_SOVERSION)
-    set_target_properties(c10 PROPERTIES
-        VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+    set_target_properties(c10 PROPERTIES VERSION ${TORCH_VERSION}
+                                         SOVERSION ${TORCH_SOVERSION})
   endif()
   # If building shared library, set dllimport/dllexport proper.
   target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
@@ -58,7 +68,8 @@ if(NOT BUILD_LIBTORCHLESS)
     target_compile_options(c10 PRIVATE "-fvisibility=hidden")
   endif()
 
-  option(C10_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
+  option(C10_USE_IWYU "Use include-what-you-use to clean up header inclusion"
+         OFF)
   if(C10_USE_IWYU)
     find_program(iwyu NAMES include-what-you-use)
     if(iwyu)
@@ -71,8 +82,7 @@ if(NOT BUILD_LIBTORCHLESS)
           "-Xiwyu"
           "--prefix_header_includes=keep"
           "-Xiwyu"
-          "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp"
-        )
+          "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp")
       set_property(TARGET c10 PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_cmd})
     endif()
   endif()
@@ -106,7 +116,8 @@ if(NOT BUILD_LIBTORCHLESS)
     message(STATUS "don't use NUMA")
   endif()
 
-  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x" AND NOT CMAKE_SYSTEM_PROCESSOR
+                                                    MATCHES "ppc64le")
     target_link_libraries(c10 PRIVATE cpuinfo)
   endif()
 
@@ -134,10 +145,9 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
 
   target_include_directories(
-      c10 PUBLIC
-      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../>
-      $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-      $<INSTALL_INTERFACE:include>)
+    c10
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../>
+           $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}> $<INSTALL_INTERFACE:include>)
 endif()
 
 add_subdirectory(test)
@@ -148,8 +158,7 @@ if(USE_CUDA)
 endif()
 
 if(USE_ROCM)
-  # NB: This directory is generated by the HIPIFY script; it's
-  # not checked in
+  # NB: This directory is generated by the HIPIFY script; it's not checked in
   add_subdirectory(hip)
 endif()
 
@@ -158,17 +167,25 @@ if(USE_XPU)
 endif()
 
 if(NOT BUILD_LIBTORCHLESS)
-  # ---[ Installation
-  # Note: for now, we will put all export path into one single Caffe2Targets group
-  # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
-  # individual libraries like libc10.so and libcaffe2.so are still self-contained.
-  install(TARGETS c10 EXPORT Caffe2Targets DESTINATION lib)
+  # ---[ Installation Note: for now, we will put all export path into one single
+  # Caffe2Targets group to deal with the cmake deployment need. Inside the
+  # Caffe2Targets set, the individual libraries like libc10.so and libcaffe2.so
+  # are still self-contained.
+  install(
+    TARGETS c10
+    EXPORT Caffe2Targets
+    DESTINATION lib)
 endif()
 
-install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-        DESTINATION include
-        FILES_MATCHING PATTERN "*.h")
+install(
+  DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  DESTINATION include
+  FILES_MATCHING
+  PATTERN "*.h")
 
 if(MSVC AND C10_BUILD_SHARED_LIBS)
-  install(FILES $<TARGET_PDB_FILE:c10> DESTINATION lib OPTIONAL)
+  install(
+    FILES $<TARGET_PDB_FILE:c10>
+    DESTINATION lib
+    OPTIONAL)
 endif()

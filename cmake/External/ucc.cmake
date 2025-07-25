@@ -10,6 +10,7 @@ if(NOT __UCC_INCLUDED)
       target_include_directories(__caffe2_ucc INTERFACE ${UCC_INCLUDE_DIRS})
     endif()
   else()
-    message(FATAL_ERROR "USE_SYSTEM_UCC=OFF is not supported yet when using UCC")
+    message(
+      FATAL_ERROR "USE_SYSTEM_UCC=OFF is not supported yet when using UCC")
   endif()
 endif()

@@ -3,8 +3,8 @@ cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 project(custom_ops)
 
 if(USE_ROCM)
-include(utils)
-include(LoadHIP)
+  include(utils)
+  include(LoadHIP)
 endif()
 find_package(Torch REQUIRED)
 

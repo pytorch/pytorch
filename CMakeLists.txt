@@ -246,7 +246,8 @@ cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
                        "USE_CUDNN" OFF)
 cmake_dependent_option(USE_CUSPARSELT "Use cuSPARSELt" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_CUDSS "Use cuDSS" ON "USE_CUDA" OFF)
-# USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not properly defined here
+# USE_ROCM is guarded against in Dependencies.cmake because USE_ROCM is not
+# properly defined here
 cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA AND NOT WIN32" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
@@ -262,8 +263,7 @@ option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
-cmake_dependent_option(USE_XCCL "Use XCCL" ON
-                       "USE_XPU;UNIX;NOT APPLE" OFF)
+cmake_dependent_option(USE_XCCL "Use XCCL" ON "USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
@@ -287,10 +287,9 @@ option(USE_PROF "Use profiling" OFF)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
-    "Use system Eigen instead of the one under third_party" OFF)
-cmake_dependent_option(
-    USE_VALGRIND "Use Valgrind. Only available on Linux." ON
-    "LINUX" OFF)
+       "Use system Eigen instead of the one under third_party" OFF)
+cmake_dependent_option(USE_VALGRIND "Use Valgrind. Only available on Linux." ON
+                       "LINUX" OFF)
 
 if(NOT DEFINED USE_VULKAN)
   cmake_dependent_option(USE_VULKAN "Use Vulkan GPU backend" ON "ANDROID" OFF)
@@ -298,9 +297,8 @@ endif()
 
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable" ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable" ON)
-cmake_dependent_option(
-  USE_LITE_AOTI "Include AOTI sources" OFF
-  "BUILD_LITE_INTERPRETER" OFF)
+cmake_dependent_option(USE_LITE_AOTI "Include AOTI sources" OFF
+                       "BUILD_LITE_INTERPRETER" OFF)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION
        "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
@@ -333,25 +331,27 @@ cmake_dependent_option(USE_SYSTEM_UCC "Use system-wide UCC" OFF "USE_UCC" OFF)
 cmake_dependent_option(USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC"
                        OFF)
 cmake_dependent_option(
-    USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
-    "USE_DISTRIBUTED" OFF)
+  USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
+  "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
-  USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
-    "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+  USE_GLOO_WITH_OPENSSL
+  "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
+  "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
-  USE_GLOO_IBVERBS "Use Gloo with ibverbs backend. Only available if USE_GLOO is on." OFF
-    "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+  USE_GLOO_IBVERBS
+  "Use Gloo with ibverbs backend. Only available if USE_GLOO is on." OFF
+  "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(USE_C10D_GLOO "USE C10D GLOO" ON
+                       "USE_DISTRIBUTED;USE_GLOO" OFF)
+cmake_dependent_option(USE_C10D_NCCL "USE C10D NCCL" ON
+                       "USE_DISTRIBUTED;USE_NCCL" OFF)
+cmake_dependent_option(USE_C10D_XCCL "USE C10D XCCL" ON
+                       "USE_DISTRIBUTED;USE_XCCL" OFF)
+cmake_dependent_option(USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI"
+                       OFF)
 cmake_dependent_option(
-    USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
-cmake_dependent_option(
-    USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
-cmake_dependent_option(
-    USE_C10D_XCCL "USE C10D XCCL" ON "USE_DISTRIBUTED;USE_XCCL" OFF)
-cmake_dependent_option(
-    USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
-cmake_dependent_option(
-    USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
-    "USE_DISTRIBUTED AND NOT WIN32" OFF)
+  USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
+  "USE_DISTRIBUTED AND NOT WIN32" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG
@@ -373,8 +373,9 @@ cmake_dependent_option(
 cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler"
                        OFF "USE_CUDA" OFF)
-cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
-                        "CPU_AARCH64" OFF)
+cmake_dependent_option(
+  USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
+  "CPU_AARCH64" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
@@ -384,10 +385,9 @@ if(WIN32)
   set(USE_MIMALLOC ON)
 
   # Not enable USE_MIMALLOC_ON_MKL due to it caused issue:
-  # https://github.com/pytorch/pytorch/issues/138994
-  # Will turn on when we can fix USE_STATIC_MKL lost functionality:
-  # https://github.com/pytorch/pytorch/pull/138996
-  # set(USE_MIMALLOC_ON_MKL ON)
+  # https://github.com/pytorch/pytorch/issues/138994 Will turn on when we can
+  # fix USE_STATIC_MKL lost functionality:
+  # https://github.com/pytorch/pytorch/pull/138996 set(USE_MIMALLOC_ON_MKL ON)
 endif()
 
 if(USE_CCACHE)
@@ -543,8 +543,7 @@ if(LINUX)
   string(STRIP "${ENV_LDFLAGS}" ENV_LDFLAGS)
   # Do not append linker flags passed via env var if they already there
   if(NOT ${CMAKE_SHARED_LINKER_FLAGS} MATCHES "${ENV_LDFLAGS}")
-     set(CMAKE_SHARED_LINKER_FLAGS
-         "${CMAKE_SHARED_LINKER_FLAGS} ${ENV_LDFLAGS}")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ENV_LDFLAGS}")
   endif()
 endif()
 
@@ -698,10 +697,10 @@ if(ANDROID
 endif()
 
 if(USE_KLEIDIAI AND CMAKE_C_COMPILER_VERSION)
-    if(CMAKE_C_COMPILER_VERSION VERSION_LESS 11)
-      set(USE_KLEIDIAI OFF)
-      message(WARNING "Disabling KleidiAI: Requires at least GCC 11 or Clang 11")
-    endif()
+  if(CMAKE_C_COMPILER_VERSION VERSION_LESS 11)
+    set(USE_KLEIDIAI OFF)
+    message(WARNING "Disabling KleidiAI: Requires at least GCC 11 or Clang 11")
+  endif()
 endif()
 
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
@@ -835,7 +834,7 @@ include(ExternalProject)
 # ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
 # CMAKE_SYSTEM_PROCESSOR thinks its 64bit
 if(USE_FBGEMM
-   AND((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VOID_P EQUAL
+   AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VOID_P EQUAL
                                                       4)
         OR CMAKE_SYSTEM_PROCESSOR STREQUAL "x86"))
   set(USE_FBGEMM OFF)
@@ -877,8 +876,10 @@ cmake_dependent_option(
 cmake_dependent_option(
   USE_MEM_EFF_ATTENTION
   "Enable memory-efficient attention for scaled dot product attention.\
-  Will be disabled if not supported by the platform" ON
-  "USE_CUDA OR USE_ROCM" OFF)
+  Will be disabled if not supported by the platform"
+  ON
+  "USE_CUDA OR USE_ROCM"
+  OFF)
 
 #
 # Cannot be put into Dependencies.cmake due circular dependency:
@@ -910,7 +911,8 @@ if(USE_PYTORCH_QNNPACK)
 endif()
 
 # Enable sleef on macOS with Apple silicon by default
-if((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") AND ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64"))
+if((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") AND ("${CMAKE_SYSTEM_PROCESSOR}"
+                                                 STREQUAL "arm64"))
   message(STATUS "Running on macOS with Apple silicon")
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
   add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
@@ -918,11 +920,10 @@ endif()
 
 # Enable sleef on Arm(R) architecture by default (except Android)
 if((NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Android")
-  AND("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "aarch64"))
+   AND ("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "aarch64"))
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
   add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
-
 
 if(USE_XNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_XNNPACK")
@@ -1073,9 +1074,13 @@ if(NOT MSVC)
   endif()
   append_cxx_flag_if_supported("-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fstandalone-debug" CMAKE_CXX_FLAGS_DEBUG)
-  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND CMAKE_CXX_COMPILER_ID MATCHES
+                                                  "GNU")
     if(CMAKE_BUILD_TYPE MATCHES Debug)
-      message(Warning "Applying -Og optimization for aarch64 GCC debug build to workaround ICE")
+      message(
+        Warning
+          "Applying -Og optimization for aarch64 GCC debug build to workaround ICE"
+      )
     endif()
     string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
     string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -Og")
@@ -1086,9 +1091,11 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
-  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION
+                                  VERSION_GREATER_EQUAL 13)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-error=dangling-reference"
+                                 CMAKE_CXX_FLAGS)
   endif()
 else()
   # Define export functions for AOTI.
@@ -1241,7 +1248,7 @@ if(USE_MIMALLOC AND USE_MIMALLOC_ON_MKL)
 endif()
 
 # ---[ Main build
-add_subdirectory(torch/headeronly)  # headeronly headers
+add_subdirectory(torch/headeronly) # headeronly headers
 add_subdirectory(c10)
 add_subdirectory(caffe2)
 
@@ -1260,7 +1267,7 @@ endif()
 # access to Caffe2.
 
 if((NOT USE_GLOG)
-   OR(NOT USE_GFLAGS)
+   OR (NOT USE_GFLAGS)
    OR BUILD_CUSTOM_PROTOBUF)
   message(WARNING "Generated cmake files are only fully tested if one builds "
                   "with system glog, gflags, and protobuf. Other settings may "
@@ -1368,7 +1375,8 @@ if(DEFINED USE_CUSTOM_DEBINFO)
     # care about and caffe2/ for all test targets defined there
     if(BUILD_LIBTORCHLESS)
       caffe2_update_option(USE_CUDA OFF)
-      set(ALL_PT_TARGETS "torch_python;${C10_LIB};${TORCH_CPU_LIB};${TORCH_LIB}")
+      set(ALL_PT_TARGETS
+          "torch_python;${C10_LIB};${TORCH_CPU_LIB};${TORCH_LIB}")
     else()
       # @todo test if we can remove this
       set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")

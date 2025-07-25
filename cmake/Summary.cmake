@@ -18,7 +18,8 @@ function(caffe2_print_configuration_summary)
   message(STATUS "  Static LD flags       : ${CMAKE_STATIC_LINKER_FLAGS}")
   message(STATUS "  Module LD flags       : ${CMAKE_MODULE_LINKER_FLAGS}")
   message(STATUS "  Build type            : ${CMAKE_BUILD_TYPE}")
-  get_directory_property(tmp DIRECTORY ${PROJECT_SOURCE_DIR} COMPILE_DEFINITIONS)
+  get_directory_property(tmp DIRECTORY ${PROJECT_SOURCE_DIR}
+                                       COMPILE_DEFINITIONS)
   message(STATUS "  Compile definitions   : ${tmp}")
   message(STATUS "  CMAKE_PREFIX_PATH     : ${CMAKE_PREFIX_PATH}")
   message(STATUS "  CMAKE_INSTALL_PREFIX  : ${CMAKE_INSTALL_PREFIX}")
@@ -26,7 +27,9 @@ function(caffe2_print_configuration_summary)
   message(STATUS "")
 
   message(STATUS "  TORCH_VERSION         : ${TORCH_VERSION}")
-  message(STATUS "  BUILD_STATIC_RUNTIME_BENCHMARK: ${BUILD_STATIC_RUNTIME_BENCHMARK}")
+  message(
+    STATUS "  BUILD_STATIC_RUNTIME_BENCHMARK: ${BUILD_STATIC_RUNTIME_BENCHMARK}"
+  )
   message(STATUS "  BUILD_BINARY          : ${BUILD_BINARY}")
   message(STATUS "  BUILD_CUSTOM_PROTOBUF : ${BUILD_CUSTOM_PROTOBUF}")
   if(${CAFFE2_LINK_LOCAL_PROTOBUF})
@@ -45,7 +48,10 @@ function(caffe2_print_configuration_summary)
     message(STATUS "    Python site-package : ${Python_SITELIB}")
   endif()
   message(STATUS "  BUILD_SHARED_LIBS     : ${BUILD_SHARED_LIBS}")
-  message(STATUS "  CAFFE2_USE_MSVC_STATIC_RUNTIME     : ${CAFFE2_USE_MSVC_STATIC_RUNTIME}")
+  message(
+    STATUS
+      "  CAFFE2_USE_MSVC_STATIC_RUNTIME     : ${CAFFE2_USE_MSVC_STATIC_RUNTIME}"
+  )
   message(STATUS "  BUILD_TEST            : ${BUILD_TEST}")
   message(STATUS "  BUILD_JNI             : ${BUILD_JNI}")
   message(STATUS "  BUILD_MOBILE_AUTOGRAD : ${BUILD_MOBILE_AUTOGRAD}")
@@ -183,8 +189,11 @@ function(caffe2_print_configuration_summary)
   endif()
   message(STATUS "  USE_VULKAN            : ${USE_VULKAN}")
   if(${USE_VULKAN})
-    message(STATUS "    USE_VULKAN_FP16_INFERENCE    : ${USE_VULKAN_FP16_INFERENCE}")
-    message(STATUS "    USE_VULKAN_RELAXED_PRECISION : ${USE_VULKAN_RELAXED_PRECISION}")
+    message(
+      STATUS "    USE_VULKAN_FP16_INFERENCE    : ${USE_VULKAN_FP16_INFERENCE}")
+    message(
+      STATUS
+        "    USE_VULKAN_RELAXED_PRECISION : ${USE_VULKAN_RELAXED_PRECISION}")
   endif()
   message(STATUS "  USE_PROF              : ${USE_PROF}")
   message(STATUS "  USE_PYTORCH_QNNPACK   : ${USE_PYTORCH_QNNPACK}")
@@ -202,7 +211,8 @@ function(caffe2_print_configuration_summary)
   endif()
   message(STATUS "  Public Dependencies  : ${Caffe2_PUBLIC_DEPENDENCY_LIBS}")
   message(STATUS "  Private Dependencies : ${Caffe2_DEPENDENCY_LIBS}")
-  message(STATUS "  Public CUDA Deps.    : ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS}")
+  message(
+    STATUS "  Public CUDA Deps.    : ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS}")
   message(STATUS "  Private CUDA Deps.   : ${Caffe2_CUDA_DEPENDENCY_LIBS}")
   # coreml
   message(STATUS "  USE_COREML_DELEGATE     : ${USE_COREML_DELEGATE}")

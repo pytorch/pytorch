@@ -1,26 +1,28 @@
-# Push host architecture when cross-compiling otherwise check would fail
-# when cross-compiling for arm64 on x86_64
+# Push host architecture when cross-compiling otherwise check would fail when
+# cross-compiling for arm64 on x86_64
 cmake_push_check_state(RESET)
-if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES
+                                           "^(x86_64|arm64)$")
   list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
 endif()
 
 # Set values through env variables if cross compiling
 if(CMAKE_CROSSCOMPILING)
   if("$ENV{PYTORCH_BLAS_F2C}" STREQUAL "ON")
-    SET(BLAS_F2C TRUE)
+    set(BLAS_F2C TRUE)
   else()
-    SET(BLAS_F2C FALSE)
+    set(BLAS_F2C FALSE)
   endif()
 
   if("$ENV{PYTORCH_BLAS_USE_CBLAS_DOT}" STREQUAL "ON")
-    SET(BLAS_USE_CBLAS_DOT TRUE)
+    set(BLAS_USE_CBLAS_DOT TRUE)
   else()
-    SET(BLAS_USE_CBLAS_DOT FALSE)
+    set(BLAS_USE_CBLAS_DOT FALSE)
   endif()
 else()
-  SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
-  CHECK_C_SOURCE_RUNS("
+  set(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+  check_c_source_runs(
+    "
 #include <stdlib.h>
 #include <stdio.h>
 float x[4] = { 1, 2, 3, 4 };
@@ -32,8 +34,10 @@ int main() {
   int i;
   double r = sdot_(&four, x, &one, y, &one);
   exit((float)r != (float).1234);
-}" BLAS_F2C_DOUBLE_WORKS )
-  CHECK_C_SOURCE_RUNS("
+}"
+    BLAS_F2C_DOUBLE_WORKS)
+  check_c_source_runs(
+    "
 #include <stdlib.h>
 #include <stdio.h>
 float x[4] = { 1, 2, 3, 4 };
@@ -45,15 +49,17 @@ int main() {
   int i;
   double r = sdot_(&four, x, &one, y, &one);
   exit((float)r != (float).1234);
-}" BLAS_F2C_FLOAT_WORKS )
+}"
+    BLAS_F2C_FLOAT_WORKS)
 
   if(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
-    MESSAGE(STATUS "This BLAS uses the F2C return conventions")
-    SET(BLAS_F2C TRUE)
+    message(STATUS "This BLAS uses the F2C return conventions")
+    set(BLAS_F2C TRUE)
   else(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
-    SET(BLAS_F2C FALSE)
+    set(BLAS_F2C FALSE)
   endif(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
-  CHECK_C_SOURCE_RUNS("
+  check_c_source_runs(
+    "
 #include <stdlib.h>
 #include <stdio.h>
 float x[4] = { 1, 2, 3, 4 };
@@ -63,14 +69,15 @@ int main() {
   int i;
   double r = cblas_sdot(4, x, 1, y, 1);
   exit((float)r != (float).1234);
-}" BLAS_USE_CBLAS_DOT )
+}"
+    BLAS_USE_CBLAS_DOT)
   if(BLAS_USE_CBLAS_DOT)
-    SET(BLAS_USE_CBLAS_DOT TRUE)
+    set(BLAS_USE_CBLAS_DOT TRUE)
   else(BLAS_USE_CBLAS_DOT)
-    SET(BLAS_USE_CBLAS_DOT FALSE)
+    set(BLAS_USE_CBLAS_DOT FALSE)
   endif(BLAS_USE_CBLAS_DOT)
-  SET(CMAKE_REQUIRED_LIBRARIES)
+  set(CMAKE_REQUIRED_LIBRARIES)
 endif(CMAKE_CROSSCOMPILING)
-MESSAGE(STATUS "BLAS_USE_CBLAS_DOT: ${BLAS_USE_CBLAS_DOT}")
-MESSAGE(STATUS "BLAS_F2C: ${BLAS_F2C}")
+message(STATUS "BLAS_USE_CBLAS_DOT: ${BLAS_USE_CBLAS_DOT}")
+message(STATUS "BLAS_F2C: ${BLAS_F2C}")
 cmake_pop_check_state()

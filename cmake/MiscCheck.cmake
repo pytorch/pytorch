@@ -6,12 +6,14 @@ include(CMakePushCheckState)
 if(USE_GLOG)
   cmake_push_check_state(RESET)
   set(CMAKE_REQUIRED_FLAGS "-std=c++17")
-  CHECK_CXX_SOURCE_COMPILES(
-      "#include <glog/stl_logging.h>
+  check_cxx_source_compiles(
+    "#include <glog/stl_logging.h>
       int main(int argc, char** argv) {
         return 0;
-      }" CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING
-      FAIL_REGEX ".*-Wno-deprecated.*")
+      }"
+    CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING
+    FAIL_REGEX
+    ".*-Wno-deprecated.*")
 
   if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING AND NOT MSVC)
     message(STATUS "Turning off deprecation warning due to glog.")
@@ -24,7 +26,9 @@ endif()
 if(NOT INTERN_BUILD_MOBILE)
   find_package(AVX) # checks AVX and AVX2
   if(CXX_AVX2_FOUND)
-    message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
+    message(
+      STATUS "Current compiler supports avx2 extension. Will build perfkernels."
+    )
     # Also see CMakeLists.txt under caffe2/perfkernels.
     set(CAFFE2_PERF_WITH_AVX 1)
     set(CAFFE2_PERF_WITH_AVX2 1)
@@ -39,14 +43,13 @@ if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   set(CMAKE_REQUIRED_FLAGS "/D__AVX512F__ /D__AVX512DQ__ /D__AVX512VL__")
 else()
   # We only consider the case where all of avx512f, avx512dq, and avx512vl are
-  # supported.
-  # Platforms where avx512f is supported by not avx512dq and avx512vl as of
-  # Jan 15 2019 : linux_manywheel_2.7mu_cpu_build and
+  # supported. Platforms where avx512f is supported by not avx512dq and avx512vl
+  # as of Jan 15 2019 : linux_manywheel_2.7mu_cpu_build and
   # linux_conda_3.7_cu100_build
   set(CMAKE_REQUIRED_FLAGS "-mavx512f -mavx512dq -mavx512vl")
 endif()
-CHECK_CXX_SOURCE_COMPILES(
-    "#if defined(_MSC_VER)
+check_cxx_source_compiles(
+  "#if defined(_MSC_VER)
      #include <intrin.h>
      #else
      #include <immintrin.h>
@@ -65,24 +68,27 @@ CHECK_CXX_SOURCE_COMPILES(
        ymm = _mm256_abs_epi64(ymm); // check avx512vl
        __mmask16 m = _mm512_cmp_epi32_mask(a, a, _MM_CMPINT_EQ);
        __m512i r = _mm512_andnot_si512(a, a);
-     }" CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
+     }"
+  CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
 if(CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
-  message(STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
+  message(
+    STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
 endif()
 cmake_pop_check_state()
 
 # ---[ Checks if compiler supports -fvisibility=hidden
-check_cxx_compiler_flag("-fvisibility=hidden" COMPILER_SUPPORTS_HIDDEN_VISIBILITY)
-check_cxx_compiler_flag("-fvisibility-inlines-hidden" COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY)
+check_cxx_compiler_flag("-fvisibility=hidden"
+                        COMPILER_SUPPORTS_HIDDEN_VISIBILITY)
+check_cxx_compiler_flag("-fvisibility-inlines-hidden"
+                        COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY)
 if(${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
   set(CAFFE2_VISIBILITY_FLAG "-fvisibility-inlines-hidden")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_VISIBILITY_FLAG}")
 endif()
 
-# ---[ Checks if linker supports -rdynamic. `-rdynamic` tells linker
-# -to add all (including unused) symbols into the dynamic symbol
-# -table. We need this to get symbols when generating backtrace at
-# -runtime.
+# ---[ Checks if linker supports -rdynamic. `-rdynamic` tells linker -to add all
+# (including unused) symbols into the dynamic symbol -table. We need this to get
+# symbols when generating backtrace at -runtime.
 if(NOT MSVC)
   check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
   if(${COMPILER_SUPPORTS_RDYNAMIC})
@@ -92,12 +98,10 @@ if(NOT MSVC)
 endif()
 
 # ---[ If we are building on ios, or building with opengl support, we will
-# enable -mfpu=neon-fp16 for iOS Metal build. For Android, this fpu setting
-# is going to be done with android-cmake by setting
-#     -DANDROID_ABI="armeabi-v7a with NEON FP16"
-# in the build command.
-# Also, we will turn off deprecated-declarations
-# due to protobuf.
+# enable -mfpu=neon-fp16 for iOS Metal build. For Android, this fpu setting is
+# going to be done with android-cmake by setting -DANDROID_ABI="armeabi-v7a with
+# NEON FP16" in the build command. Also, we will turn off
+# deprecated-declarations due to protobuf.
 
 # ---[ Check if the compiler has SVE support.
 find_package(ARM) # checks SVE
@@ -106,7 +110,9 @@ if(CXX_SVE_FOUND)
   # Also see CMakeLists.txt under caffe2/perfkernels.
   add_compile_definitions(CAFFE2_PERF_WITH_SVE=1)
 else()
-  message(STATUS "Compiler does not support SVE extension. Will not build perfkernels.")
+  message(
+    STATUS
+      "Compiler does not support SVE extension. Will not build perfkernels.")
 endif()
 
 if(IOS AND (${IOS_ARCH} MATCHES "armv7*"))
@@ -124,7 +130,7 @@ if(USE_NATIVE_ARCH AND NOT MSVC)
     add_definitions("-march=native")
   else()
     message(
-        WARNING
+      WARNING
         "Your compiler does not support -march=native. Turn off this warning "
         "by setting -DUSE_NATIVE_ARCH=OFF.")
   endif()
