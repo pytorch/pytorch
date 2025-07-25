@@ -3335,6 +3335,11 @@ class CheckFunctionManager:
             self.torch_function_mode_stack
         )
 
+        # Add compile id info in the guard manager for debugging purpose
+        self.guard_manager.root.attach_compile_id(
+            str(CompileContext.current_compile_id())
+        )
+
         # Insert the global_state guard
         assert self.output_graph is not None
         global_state = self.output_graph.global_state_guard
