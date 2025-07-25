@@ -94,11 +94,9 @@ def convert_arg_type_and_name(
                 callsite_expr = [f"*tensor_handle_to_tensor_pointer({name})"]
             else:
                 callsite_expr = [
-                    (
-                        f"{base_type_to_callsite_expr[typ.name]}({name})"
-                        if base_type_to_callsite_expr[typ.name]
-                        else name
-                    )
+                    f"{base_type_to_callsite_expr[typ.name]}({name})"
+                    if base_type_to_callsite_expr[typ.name]
+                    else name
                 ]
 
             return (
@@ -352,22 +350,18 @@ def gen_declaration_and_definition(
             "\n".join(indent + r for r in ret_assignments) if ret_assignments else ""
         )
         definition = (
-            textwrap.dedent(
-                f"""
+            textwrap.dedent(f"""
         {declaration} {{
             AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({{
                 {tmp_result}{backend_call}(
                     {", ".join(callsite_exprs)}
                 );
-        """
-            )
+        """)
             + ret_assignments_str
-            + textwrap.dedent(
-                """
+            + textwrap.dedent("""
             });
         }
-        """
-            )
+        """)
         )
         skipped_args.update(new_args)
         declarations.append(f"AOTI_TORCH_EXPORT {declaration};")
@@ -588,8 +582,7 @@ def gen_aoti_c_shim(
         return (
             warning
             + aten_warning
-            + textwrap.dedent(
-                """
+            + textwrap.dedent("""
 
             #pragma once
 
@@ -599,24 +592,20 @@ def gen_aoti_c_shim(
             extern "C" {
             #endif
 
-            """
-            )
+            """)
             + body
-            + textwrap.dedent(
-                """
+            + textwrap.dedent("""
 
             #ifdef __cplusplus
             } // extern "C"
             #endif
-            """
-            )
+            """)
         )
     else:
         return (
             warning
             + aten_warning
-            + textwrap.dedent(
-                f"""
+            + textwrap.dedent(f"""
 
             #include <torch/csrc/inductor/aoti_torch/generated/{"extend/" if extend_aoti_c_shim else ""}c_shim_{device}.h>
             #include <torch/csrc/inductor/aoti_torch/utils.h>
@@ -627,17 +616,14 @@ def gen_aoti_c_shim(
             #include <ATen/CompositeExplicitAutogradNonFunctionalFunctions.h>
             #include <ATen/CompositeImplicitAutogradFunctions.h>
             #else
-            """
-            )
+            """)
             + includes
-            + textwrap.dedent(
-                """
+            + textwrap.dedent("""
             #endif // AT_PER_OPERATOR_HEADERS
 
             using namespace torch::aot_inductor;
 
-            """
-            )
+            """)
             + body
         )
 
@@ -711,8 +697,7 @@ def gen_aoti_c_shim_files(
                             )
                         )
 
-                        raise RuntimeError(
-                            f"""
+                        raise RuntimeError(f"""
 The generated AOTInductor C shim header files have unexpectedly changed. This
 indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!
 Only in a limited number of situations, this is allowed:
@@ -728,8 +713,7 @@ update the C shim header files by creating different versions of the fallback op
 https://github.com/pytorch/pytorch/pull/154848 as an example.
 
 {diff}
-                    """
-                        )
+                    """)
             except FileNotFoundError:
                 print(
                     f"{os.path.join(aoti_fm.install_dir, header_file_name)} not found"
