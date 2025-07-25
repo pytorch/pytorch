@@ -1624,11 +1624,7 @@ def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool
 
         return True
 
-    return (
-        config.triton.enable_persistent_tma_matmul
-        and has_triton_tma_device()
-        and all(_is_tma_compatible(m) for m in matrices)
-    )
+    return has_triton_tma_device() and all(_is_tma_compatible(m) for m in matrices)
 
 
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
