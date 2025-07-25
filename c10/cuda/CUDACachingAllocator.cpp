@@ -843,8 +843,7 @@ struct AllocParams {
       size_t size,
       cudaStream_t stream,
       BlockPool* pool,
-      size_t alloc_size,
-      DeviceStats& stats)
+      size_t alloc_size)
       : search_key(device, stream, size), pool(pool), alloc_size(alloc_size) {}
 
   c10::DeviceIndex device() const {
