@@ -118,7 +118,8 @@ def requires_ddp_rank(device):
     return device in DDP_RANK_DEVICES
 
 
-def exit_if_lt_x_gpu(x):
+def exit_if_lt_x_cuda_devs(x):
+    """Exit process unless at least the given number of CUDA devices are available"""
     if torch.cuda.device_count() < x:
         sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
 
