@@ -421,7 +421,9 @@ struct FlattenWithTensorOp : public torch::CustomClassHolder {
   explicit FlattenWithTensorOp(at::Tensor t) : t_(t) {}
 
   at::Tensor get() {
-    return t_;
+    // Need to return a copy of the tensor, otherwise the tensor will be
+    // aliased with a tensor that may be modified by the user or backend.
+    return t_.clone();
   }
 
   std::tuple<std::tuple<std::string, at::Tensor>> __obj_flatten__() {
@@ -437,7 +439,9 @@ struct ContainsTensor : public torch::CustomClassHolder {
   explicit ContainsTensor(at::Tensor t) : t_(t) {}
 
   at::Tensor get() {
-    return t_;
+    // Need to return a copy of the tensor, otherwise the tensor will be
+    // aliased with a tensor that may be modified by the user or backend.
+    return t_.clone();
   }
 
   std::tuple<std::tuple<std::string, at::Tensor>> __obj_flatten__() {

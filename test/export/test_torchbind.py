@@ -1201,7 +1201,7 @@ class TestCompileTorchbind(TestCase):
         return (x_sin,)""",
             )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_script_object_input_guards(self, backend):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1370,7 +1370,7 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
     return (sub, add)""",
             )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_tensor_op_in_tensor_flatten(self, backend):
         test_obj = torch.classes._TorchScriptTesting._FlattenWithTensorOp(
             torch.randn(3, 2)
@@ -1378,24 +1378,31 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
 
         class TestMod(torch.nn.Module):
             def forward(self, obj, x):
-                return obj.get() + x
+                return obj.get() + x + obj.get().size(0)
 
         mod = TestMod()
 
-        torch.compile(mod, backend=backend, fullgraph=True)(test_obj, torch.randn(3, 1))
+        x = torch.randn(3, 1)
+        eager_out = mod(test_obj, x)
+        compiled_out = torch.compile(mod, backend=backend, fullgraph=True)(test_obj, x)
         ep = torch.export.export_for_training(
-            mod, (test_obj, torch.randn(3, 1)), strict=False
+            mod, (test_obj, x), strict=False
         ).run_decompositions({})
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj, x):
-    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, obj, 'get');  token = obj = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, obj, 'get');  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    add_3 = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
-    return (getitem, add_3)""",  # noqa: B950
+    add = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.call_torchbind, obj, 'get');  getitem = obj = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    add_1 = torch.ops.aten.add.Tensor(add, 3);  add = None
+    return (getitem_2, add_1)""",  # noqa: B950
         )
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_out, ep.module()(test_obj, x))
 
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_error_on_non_fakified_method(self, backend):
