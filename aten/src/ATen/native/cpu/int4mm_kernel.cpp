@@ -930,7 +930,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
         }
       };
 
-  // Dynamically Quantize the float32 input to 8 bit assymetric
+  // Dynamically Quantize the float32 input to 8 bit asymmetric
   input_quant_pack_8bit_channelwise(m, k, lhs_f32, (int8_t*)lhs_qa8dx);
 
   const size_t lhs_stride =
@@ -1163,7 +1163,7 @@ void dyn_quant_matmul_4bit_kernel(
   const int64_t weight_packed_size =
       kleidiai::kai_pack_rhs_int4_size(N, K, block_size);
   if (weight_packed_size == packed_weights.numel()) {
-    // KleidiAI interface intenally handles the Channelwise and groupwise
+    // KleidiAI interface internally handles the Channelwise and groupwise
     // distinction
     kleidiai::kai_quant_pack_lhs_int4_mm(
         output, inp, packed_weights, M, N, K, block_size);
