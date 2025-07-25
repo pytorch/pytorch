@@ -221,9 +221,9 @@ pygments==2.15.0
 #Pinned versions: 2.12.0
 #test that import: the doctests
 
-#PyYAML
+#pyyaml
 #Description: data serialization format
-#Pinned versions:
+#Pinned versions: 6.0.2
 #test that import:
 
 #requests
@@ -233,7 +233,7 @@ pygments==2.15.0
 
 #rich
 #Description: rich text and beautiful formatting in the terminal
-#Pinned versions: 10.9.0
+#Pinned versions: 14.1.0
 #test that import:
 
 scikit-image==0.19.3 ; python_version < "3.10"
