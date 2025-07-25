@@ -1884,7 +1884,7 @@ static std::vector<PyMethodDef> methods;
 // Guaranteed to be invoked from Python under GIL, no locking on map needed
 static void LogAPIUsageOnceFromPython(const std::string& event) {
   static std::unordered_set<std::string> seen;
-  if (!seen.count(event)) {
+  if (!seen.contains(event)) {
     seen.insert(event);
     c10::LogAPIUsage(event);
   }

@@ -732,8 +732,7 @@ static void _wrap_outputs(
         // should be used instead. To construct these for NJT, zeros_like() must
         // be used until we have factory function support.
         bool is_differentiable =
-            (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
-                 0 &&
+            (!non_differentiable.contains(wrapped_output->unsafeGetTensorImpl()) &&
              isDifferentiableType(wrapped_output->scalar_type()));
         bool use_zeros_like =
             is_differentiable && num_outputs > 1 && wrapped_output->is_nested();

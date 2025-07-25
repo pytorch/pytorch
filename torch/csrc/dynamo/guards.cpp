@@ -852,7 +852,7 @@ static uint64_t get_dict_version_unchecked(PyObject* dict) {
   if (PyDict_Watch(dict_version_watcher_id, dict)) {
     throw std::runtime_error("failed to add version watcher to dict!");
   }
-  if (!dict_version_map.count(dict)) {
+  if (!dict_version_map.contains(dict)) {
     dict_version_map[dict] = global_dict_version_id++;
   }
   return dict_version_map[dict];
@@ -1384,7 +1384,7 @@ bool check_overlapping(
   auto range = c10::irange(overlapping.size());
   return indices.size() == overlapping.size() &&
       std::all_of(range.begin(), range.end(), [&](int64_t i) {
-           return indices.count(i) == 1;
+           return indices.contains(i);
          });
 }
 
