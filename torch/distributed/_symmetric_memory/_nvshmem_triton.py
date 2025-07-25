@@ -302,7 +302,7 @@ if has_triton():
     # Reduction Operations
     @core.extern
     def sum_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
-        """Sum reduction for int64. nelems specifies the number of elements."""
+        """Sum reduction for int64. nreduce is number of elements in the dest and source arrays."""
         return core.extern_elementwise(
             "",
             "",
@@ -321,7 +321,7 @@ if has_triton():
 
     @core.extern
     def max_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
-        """Max reduction for int64. nelems specifies the number of elements."""
+        """Max reduction for int64. nreduce is number of elements in the dest and source arrays."""
         return core.extern_elementwise(
             "",
             "",
@@ -340,7 +340,7 @@ if has_triton():
 
     @core.extern
     def min_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
-        """Min reduction for int64. nelems specifies the number of elements."""
+        """Min reduction for int64. nreduce is number of elements in the dest and source arrays."""
         return core.extern_elementwise(
             "",
             "",
