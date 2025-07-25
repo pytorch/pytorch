@@ -20,7 +20,6 @@ Containers (Aliases)
     :nosignatures:
     :template: classtemplate.rst
 
-    module.Module
     container.Sequential
     container.ModuleList
     container.ModuleDict
