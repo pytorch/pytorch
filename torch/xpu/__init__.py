@@ -85,7 +85,6 @@ def _lazy_call(callable, **kwargs):
     if is_initialized():
         callable()
     else:
-        global _lazy_seed_tracker
         if kwargs.get("seed_all", False):
             _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
         elif kwargs.get("seed", False):
@@ -105,7 +104,7 @@ def init():
 
 
 def _lazy_init():
-    global _initialized, _queued_calls
+    global _initialized
     if is_initialized() or hasattr(_tls, "is_initializing"):
         return
     with _initialization_lock:

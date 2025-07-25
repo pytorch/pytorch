@@ -1200,7 +1200,6 @@ class MetaConverter(Generic[_TensorT]):
                 )
 
                 def symint_visitor_fn(s: int) -> int:
-                    nonlocal symbolic_context
                     from torch.fx.experimental.symbolic_shapes import DimDynamic
 
                     all_static_sizes = (

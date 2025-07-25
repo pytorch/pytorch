@@ -972,8 +972,6 @@ def _distribute_function(
 
         return inner_fn
 
-    global _replaced_functions
-
     if fn in _replaced_functions:
         return
 
@@ -984,9 +982,6 @@ def _distribute_function(
 
 def _restore_function(fn: Callable, fn_module: types.ModuleType) -> None:
     """Restore the function that is replaced by _distribute_function."""
-    global _original_functions
-    global _wrapper_functions
-
     if fn not in _replaced_functions:
         return
 

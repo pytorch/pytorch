@@ -637,8 +637,6 @@ def _set_always_warn_typed_storage_removal(always_warn):
 
 
 def _warn_typed_storage_removal(stacklevel=2):
-    global _always_warn_typed_storage_removal
-
     def is_first_time():
         if not hasattr(_warn_typed_storage_removal, "has_warned"):
             return True

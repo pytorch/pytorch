@@ -230,16 +230,12 @@ def preserve_node_meta(enable=True):
 
 @compatibility(is_backward_compatible=False)
 def set_stack_trace(stack: list[str]):
-    global current_meta
-
     if should_preserve_node_meta and stack:
         current_meta["stack_trace"] = "".join(stack)
 
 
 @compatibility(is_backward_compatible=False)
 def set_grad_fn_seq_nr(seq_nr):
-    global current_meta
-
     if should_preserve_node_meta:
         # The seq_nr is captured by eager mode in the grad_fn during forward
         current_meta["grad_fn_seq_nr"] = current_meta.get("grad_fn_seq_nr", []) + [
@@ -252,7 +248,6 @@ def set_grad_fn_seq_nr(seq_nr):
 def reset_grad_fn_seq_nr():
     # NB: reset state properly, this would be helpful towards supporting
     #     reentrant autograd if we actually wanted to do that.
-    global current_meta
     if should_preserve_node_meta:
         current_level = current_meta.get("in_grad_fn", 0)
         assert current_level > 0

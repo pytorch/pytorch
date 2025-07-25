@@ -227,7 +227,6 @@ def get_class_assigns(ctx, cls_ast):
     assigns = []
 
     def maybe_build_assign(builder, entry):
-        nonlocal assigns
         try:
             assigns.append(builder(ctx, entry))
         except NotSupportedError:

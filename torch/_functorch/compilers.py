@@ -369,7 +369,6 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
         return input_meta
 
     def graph_saver_helper(gm_to_save, args, type_name):
-        global graph_index
         if len(gm_to_save.graph.nodes) == 0:
             log.log(
                 logging.WARNING,

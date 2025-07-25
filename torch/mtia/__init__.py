@@ -64,7 +64,7 @@ def _is_in_bad_fork() -> bool:
 
 
 def _lazy_init() -> None:
-    global _initialized, _queued_calls
+    global _initialized
     if is_initialized() or hasattr(_tls, "is_initializing"):
         return
     with _initialization_lock:

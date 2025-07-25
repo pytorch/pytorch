@@ -1026,7 +1026,6 @@ def aot_dispatch_subclass(
         if use_trace_joint:
             # See Note: [Computing Subclass Metadata about grad_inputs]
             # We also stash subclass info on our grad_inputs, if we're tracing the joint.
-            nonlocal subclass_meta
             assert isinstance(wrapped_outs, tuple) and len(wrapped_outs) == 2
             # Don't need fw outs since we already have subclass metadata on them
             grad_inputs = wrapped_outs[1]

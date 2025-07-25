@@ -120,7 +120,7 @@ def _split_autocast(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     first_node_after_outer_most_exit: bool = False
 
     def node_call_back(node: torch.fx.Node) -> bool:
-        nonlocal enter_autocast_node_stack, first_node_after_outer_most_exit
+        nonlocal first_node_after_outer_most_exit
         increment_id = False
         if first_node_after_outer_most_exit or (
             len(enter_autocast_node_stack) == 0 and _is_enter_autocast_node(node)
