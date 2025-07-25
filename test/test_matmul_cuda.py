@@ -1505,9 +1505,9 @@ class TestFP8Matmul(TestCase):
                     self.assertNotEqual(carveout_66, carveout_0)
 
     @unittest.skipIf(not _get_torch_cuda_version() >= (12, 8), "Green Context only tested on 12.8+")
-    def test_greencontext_caveout(self):
+    def test_greencontext_carveout(self):
         a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
-        ctx = torch.cuda.green_contexts.GreenContext.create(0, 1)
+        ctx = torch.cuda.green_contexts.GreenContext.create(num_sms=1, device_id=0)
         ctx.make_current()
         torch.matmul(a, a)
         torch.cuda.synchronize()
