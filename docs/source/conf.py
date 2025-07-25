@@ -2921,6 +2921,10 @@ coverage_ignore_classes = [
     "Container",
     # torch.nn.modules.linear
     "NonDynamicallyQuantizableLinear",
+    # torch.nn.modules.module
+    # TODO: causes multiple sphinx warnings
+    # WARNING: more than one target found for cross-reference 'Module'
+    "Module",
     # torch.nn.modules.loss
     "NLLLoss2d",
     # torch.nn.modules.normalization
