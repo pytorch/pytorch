@@ -548,23 +548,16 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
-    def test_to_int(self, device):
-        # Tests to_copy to int dtype on tensors with
-        # unbacked size & unbacked strides.
+    def test_to_int_with_unbacked_size(self, device):
         def fn(x):
             unbacked = x.item()
             torch._check_is_size(unbacked)
 
+            # Transpose to avoid contig short-circuit.
             unbacked_size = torch.ones(
-                size=(3, unbacked // 4, 10), device=device
+                size=(unbacked // 4, 10), device=device
             ).transpose(0, 1)
-
-            ones = torch.ones(size=(3 * unbacked, 10 * unbacked), device=device)
-            unbacked_strides = torch.as_strided(
-                ones, size=(3, 10), stride=(unbacked // 4, unbacked // 4)
-            )
-
-            return (unbacked_size.int(), unbacked_strides.int())
+            return unbacked_size.int()
 
         example_inputs = (torch.tensor(16, device=device),)
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)

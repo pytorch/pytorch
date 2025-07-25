@@ -497,7 +497,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
         if guard_or_false(length == 1):
             continue
 
-        if guard_or_false(stride != expected_stride):
+        if guard_size_oblivious(stride != expected_stride):
             return False
 
         expected_stride *= length
