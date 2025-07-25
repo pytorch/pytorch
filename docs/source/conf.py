@@ -66,6 +66,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
+    "sphinx_tabs.tabs",
 ]
 
 myst_enable_extensions = [
@@ -85,6 +86,9 @@ sitemap_url_scheme = "{link}"
 html_additional_pages = {
     "404": "404.html",
 }
+
+# todo options
+todo_include_todos = True
 
 # build the templated autosummary files
 autosummary_generate = True

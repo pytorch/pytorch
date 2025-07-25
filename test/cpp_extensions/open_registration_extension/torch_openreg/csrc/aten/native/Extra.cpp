@@ -211,6 +211,7 @@ struct CustomAutogradFnReturnsSelf
   }
 };
 
+// LITERALINCLUDE START: TORCH.AUTOGRAD.FUNCTION Part1
 struct CustomAutogradFnAliasing
     : public torch::autograd::Function<CustomAutogradFnAliasing> {
   static at::Tensor forward(
@@ -225,14 +226,17 @@ struct CustomAutogradFnAliasing
     return {grad_output[0] * 0.5};
   }
 };
+// LITERALINCLUDE END: TORCH.AUTOGRAD.FUNCTION Part1
 } // namespace
 
 at::Tensor custom_autograd_fn_returns_self(at::Tensor x) {
   return CustomAutogradFnReturnsSelf::apply(x);
 }
 
+// LITERALINCLUDE START: TORCH.AUTOGRAD.FUNCTION Part2
 at::Tensor custom_autograd_fn_aliasing(at::Tensor x) {
   return CustomAutogradFnAliasing::apply(x);
 }
+// LITERALINCLUDE END: TORCH.AUTOGRAD.FUNCTION Part2
 
 } // namespace at::native
