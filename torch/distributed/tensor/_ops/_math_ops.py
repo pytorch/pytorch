@@ -1147,7 +1147,7 @@ def topk_strategy(op_schema: OpSchema) -> OpStrategy:
 @register_op_strategy(
     [aten.histc.default],
     # strategy choice depends on the value of 'min' and 'max' kwargs, which are position 2 and 3
-    # result depends on the value of 'bins', 'min' and 'max' kwargs, which from position 1
+    # result depends on the value of 'bins', 'min' and 'max' kwargs, which is from position 1
     schema_info=RuntimeSchemaInfo(1),
 )
 def histc_strategy(op_schema: OpSchema) -> OpStrategy:
