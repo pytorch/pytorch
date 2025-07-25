@@ -1808,7 +1808,16 @@ class BuiltinVariable(VariableTracker):
             # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
             # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
             # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
-            return obj.call_method(tx, "__iter__", args, kwargs)
+            # If the object implements a __getitem__ method, iter(...) will call obj.__getitem__()
+            # with an integer argument starting at 0, until __getitem__ raises IndexError
+            return variables.UserFunctionVariable(
+                polyfills.builtins.iter
+            ).call_function(
+                tx,
+                [obj],
+                {},
+            )
+
         return ret
 
     call_tuple = _call_tuple_list
