@@ -114,7 +114,7 @@ class _NormBase(Module):
         missing_keys,
         unexpected_keys,
         error_msgs,
-    ):
+    ) -> None:
         version = local_metadata.get("version", None)
 
         if (version is None or version < 2) and self.track_running_stats:
@@ -336,7 +336,7 @@ class BatchNorm1d(_BatchNorm):
         >>> output = m(input)
     """
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
@@ -370,7 +370,7 @@ class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
 
     cls_to_become = BatchNorm1d  # type: ignore[assignment]
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
@@ -447,7 +447,7 @@ class BatchNorm2d(_BatchNorm):
         >>> output = m(input)
     """
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 4:
             raise ValueError(f"expected 4D input (got {input.dim()}D input)")
 
@@ -481,7 +481,7 @@ class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
 
     cls_to_become = BatchNorm2d  # type: ignore[assignment]
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 4:
             raise ValueError(f"expected 4D input (got {input.dim()}D input)")
 
@@ -558,7 +558,7 @@ class BatchNorm3d(_BatchNorm):
         >>> output = m(input)
     """
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 5:
             raise ValueError(f"expected 5D input (got {input.dim()}D input)")
 
@@ -592,7 +592,7 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
 
     cls_to_become = BatchNorm3d  # type: ignore[assignment]
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 5:
             raise ValueError(f"expected 5D input (got {input.dim()}D input)")
 
@@ -717,11 +717,11 @@ class SyncBatchNorm(_BatchNorm):
         )
         self.process_group = process_group
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() < 2:
             raise ValueError(f"expected at least 2D input (got {input.dim()}D input)")
 
-    def _check_non_zero_input_channels(self, input):
+    def _check_non_zero_input_channels(self, input) -> None:
         if input.size(1) == 0:
             raise ValueError(
                 "SyncBatchNorm number of input channels should be non-zero"

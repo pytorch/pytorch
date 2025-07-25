@@ -91,7 +91,7 @@ class Threshold(Module):
     def forward(self, input: Tensor) -> Tensor:
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"threshold={self.threshold}, value={self.value}{inplace_str}"
 
@@ -127,7 +127,7 @@ class ReLU(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
@@ -185,7 +185,7 @@ class RReLU(Module):
 
     def __init__(
         self, lower: float = 1.0 / 8, upper: float = 1.0 / 3, inplace: bool = False
-    ):
+    ) -> None:
         super().__init__()
         self.lower = lower
         self.upper = upper
@@ -194,7 +194,7 @@ class RReLU(Module):
     def forward(self, input: Tensor) -> Tensor:
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"lower={self.lower}, upper={self.upper}{inplace_str}"
 
@@ -297,7 +297,7 @@ class ReLU6(Hardtanh):
         >>> output = m(input)
     """
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__(0.0, 6.0, inplace)
 
     def extra_repr(self) -> str:
@@ -426,7 +426,7 @@ class SiLU(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
@@ -465,7 +465,7 @@ class Mish(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
@@ -1118,7 +1118,7 @@ class MultiheadAttention(Module):
 
         self._reset_parameters()
 
-    def _reset_parameters(self):
+    def _reset_parameters(self) -> None:
         if self._qkv_same_embed_dim:
             xavier_uniform_(self.in_proj_weight)
         else:
@@ -1517,7 +1517,7 @@ class PReLU(Module):
         self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs))
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         torch.nn.init.constant_(self.weight, self.init)
 
     def forward(self, input: Tensor) -> Tensor:
@@ -1619,7 +1619,7 @@ class Softmin(Module):
     def forward(self, input: Tensor) -> Tensor:
         return F.softmin(input, self.dim, _stacklevel=5)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return f"dim={self.dim}"
 
 
@@ -1754,5 +1754,5 @@ class LogSoftmax(Module):
     def forward(self, input: Tensor) -> Tensor:
         return F.log_softmax(input, self.dim, _stacklevel=5)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return f"dim={self.dim}"
