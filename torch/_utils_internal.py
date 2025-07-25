@@ -33,16 +33,10 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
 # use is the FB build environment, where this source file is replaced
 # by an equivalent.
 
-if torch._running_with_deploy():
-    # __file__ is meaningless in the context of frozen torch used in torch deploy.
-    # setting empty torch_parent should allow below functions to operate without crashing,
-    # but it's unclear if there is a valid use case for them in the context of deploy.
-    torch_parent = ""
+if os.path.basename(os.path.dirname(__file__)) == "shared":
+    torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 else:
-    if os.path.basename(os.path.dirname(__file__)) == "shared":
-        torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    else:
-        torch_parent = os.path.dirname(os.path.dirname(__file__))
+    torch_parent = os.path.dirname(os.path.dirname(__file__))
 
 
 def get_file_path(*path_components: str) -> str:
