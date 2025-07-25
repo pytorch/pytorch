@@ -658,14 +658,14 @@ static void avg_pool_out_mps_template(const Tensor& output,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto maxPoolPSO = lib.getPipelineStateForFunc("avg_pool_" + scalarToMetalTypeString(input));
+      auto PSO = lib.getPipelineStateForFunc("avg_pool_" + scalarToMetalTypeString(input));
 
-      getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input});
-      [computeEncoder setComputePipelineState:maxPoolPSO];
+      getMPSProfiler().beginProfileKernel(PSO, op_name, {input});
+      [computeEncoder setComputePipelineState:PSO];
       mtl_setArgs(computeEncoder, input, output, params);
 
-      mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
-      getMPSProfiler().endProfileKernel(maxPoolPSO);
+      mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
+      getMPSProfiler().endProfileKernel(PSO);
     }
   });
 }
@@ -1043,7 +1043,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)(const Tensor& grad_output,
                                           count_include_pad,
                                           divisor_override,
                                           /*pooling_dims=*/3,
-                                          "avg_pool3d");
+                                          "avg_pool3d_backward");
 }
 
 } // namespace at::native

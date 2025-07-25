@@ -311,15 +311,14 @@ AvgPoolIterBounds<int32_t> get_avg_pool_input_iter_bounds(
   auto end = start + kernel_size[dim];
   auto end_corrected = min(start + kernel_size[dim], input_sizes[dim]);
   auto start_corrected = (start < 0) ? 0 : start;
-  int32_t count = count_include_pad
+  auto count = count_include_pad
       ? (min(end, input_sizes[dim] + padding[dim]) - start)
       : (end_corrected - start_corrected);
-  return AvgPoolIterBounds<int32_t>{start_corrected, end_corrected, count};
+  return {start_corrected, end_corrected, count};
 }
 
 // Iterates through all the input elements that this kernel needs to
 // apply max to. Specialized for 3 pooling dimensions.
-// TODO: Support any number of pooling dims
 template <typename T>
 void avg_pool_3d_input_iter(
     constant T* input,
@@ -356,7 +355,7 @@ void avg_pool_3d_input_iter(
       count_include_pad);
 
   T value_sum = 0;
-  int32_t divisor = has_divisor_override
+  auto divisor = has_divisor_override
       ? divisor_override
       : (bounds0.count) * (bounds1.count) * (bounds2.count);
   auto size12 = input_sizes[1] * input_sizes[2];
@@ -416,7 +415,7 @@ void avg_pool_backward_3d_input_iter(
   auto divisor = has_divisor_override
       ? divisor_override
       : (bounds0.count) * (bounds1.count) * (bounds2.count);
-  T grad_input_val = *grad_output / static_cast<T>(divisor);
+  auto grad_val = *grad_output / static_cast<T>(divisor);
   auto size12 = grad_input_sizes[1] * grad_input_sizes[2];
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0++) {
@@ -430,9 +429,7 @@ void avg_pool_backward_3d_input_iter(
         auto pool_offset = offset0 + offset1 + offset2;
 
         AtomicType<T>::atomic_add(
-            grad_input,
-            grad_input_leading_offset + pool_offset,
-            grad_input_val);
+            grad_input, grad_input_leading_offset + pool_offset, grad_val);
       }
     }
   }
@@ -454,7 +451,6 @@ kernel void avg_pool(
   auto kernel_size = params.kernel_size.data();
   auto stride = params.stride.data();
   auto padding = params.padding.data();
-
   auto leading_dims = dims - pooling_dims;
 
   // This buffer keeps track of the pooling dimension indices of this thread's
@@ -464,7 +460,7 @@ kernel void avg_pool(
   PoolOffsets offsets = find_pool_offsets(
       output_sizes,
       output_strides,
-      nullptr,
+      /*indices_strides=*/nullptr,
       input_strides,
       pooling_dim_indices,
       dims,
@@ -506,7 +502,6 @@ kernel void avg_pool_backward(
   auto kernel_size = params.kernel_size.data();
   auto stride = params.stride.data();
   auto padding = params.padding.data();
-
   auto leading_dims = dims - pooling_dims;
 
   // This buffer keeps track of the pooling dimension indices of this thread's
