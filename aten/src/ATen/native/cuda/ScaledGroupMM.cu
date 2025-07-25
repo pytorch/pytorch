@@ -10,6 +10,8 @@
 // Two warninngs in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Werror=unused-but-set-variable")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Werror=unused-but-set-parameter")
 
 // Direct pragma to suppress unused-but-set-variable warnings
 #pragma GCC diagnostic push
@@ -51,6 +53,8 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 // Restore GCC diagnostic state
 #pragma GCC diagnostic pop
 
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 

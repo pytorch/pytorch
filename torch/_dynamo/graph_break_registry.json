@@ -851,7 +851,7 @@
   "GB0088": [
     {
       "Gb_type": "Observed exception",
-      "Context": "str(raised_exception)",
+      "Context": "raised exception {curr_exc.python_type_name()}({curr_exc.args})",
       "Explanation": "observed_exn_gb_explanation",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
