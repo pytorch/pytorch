@@ -183,6 +183,30 @@ if not IS_WINDOWS:
             with self.assertRaisesRegex(RuntimeError, "API call failed"):
                 libtorch_agnostic.ops.my_transpose(t, 1, 2)
 
+        def test_my_empty_like(self, device):
+            import libtorch_agnostic
+
+            deterministic = torch.are_deterministic_algorithms_enabled()
+            try:
+                # set use_deterministic_algorithms to fill unintialized memory
+                torch.use_deterministic_algorithms(True)
+
+                t = torch.rand(2, 7, device=device)
+                out = libtorch_agnostic.ops.my_empty_like(t)
+                self.assertTrue(id(out != id(t)))
+                self.assertEqual(out, torch.empty_like(t))
+            finally:
+                torch.use_deterministic_algorithms(deterministic)
+
+        @onlyCPU
+        def test_my_zero_(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, device=device)
+            out = libtorch_agnostic.ops.my_zero_(t)
+            self.assertEqual(id(out), id(t))
+            self.assertEqual(out, torch.zeros_like(t))
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
