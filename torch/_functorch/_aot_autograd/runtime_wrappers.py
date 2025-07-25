@@ -495,6 +495,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         if config.functionalize_rng_ops:
             # Update example inputs for the fw_compiler
             fake_mode = detect_fake_mode()
+            assert fake_mode is not None
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             flat_args.extend([seed, offset])
             # We are not clearing flat_args here because
