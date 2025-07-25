@@ -572,7 +572,7 @@ aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 aten_mm_dtype = ExternKernelChoice(
     torch.mm,
-    "at::_mm_out_dtype_cuda",
+    "at::_mm_dtype_out_cuda",
     name="mm_dtype",
     op_overload=aten.mm.dtype_out,
 )
