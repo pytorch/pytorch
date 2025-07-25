@@ -2,16 +2,34 @@
 
 ## Background
 
-The PrivateUse1-based third-party device integration mechanism has become the official path for integrating new devices into PyTorch. Ensuring the usability of this mechanism is crucial for enriching the hardware ecosystem of PyTorch.
+### Motivation and Overview
 
-To assist third-party device developers in efficiently integrating new backends, this article introduces in detail the integration methods for typical PyTorch modules using a modular approach. It is accompanied by a streamlined code implementation from the official [torch_openreg][OpenReg URL] backend to help developers quickly get started while avoiding common pitfalls.
+Since PyTorch 2.1, the community has made significant progress in simplifying the integration of new accelerators into the PyTorch ecosystem. These improvements include, but are not limited to: refinement of the `PrivateUse1` Dispatch Key, introduction and improvement of core subsystem extension mechanisms, and device-agnostic refactoring of key modules (e.g., `torch.accelerator`, `memory management`). Taken together, these improvements lay the foundation for a **robust**, **flexible** and developer-friendly accelerator integration path.
 
-This document is suitable for the following readers:
+### Why Does This Matter?
 
-* Developers who wish to integrate accelerator backends into PyTorch;
-* Developers interested in the principles of typical PyTorch modules;
+This integration path has several key advantages:
 
----
+* **Speed**: Extensibility is built-in across all core PyTorch modules. Without modifying upstream code, developers can independently integrate new accelerator into their own downstream codebases without being hindered by community review or modifications to PyTorch core code.
+* **Future-proofing**: This integration path is the default for all future PyTorch features, which means that new modules and features will automatically support scaling to new devices as long as this path is followed.
+* **Autonomy**: Vendors have full control over their accelerator integration timelines, enabling agile iteration cycles and reducing reliance on upstream coordination.
+
+### About This Document
+
+This guide aims to provide a **comprehensive overview of the modern integration pathway** for new devices in PyTorch. It walks through the full integration surface, from low-level device primitives to higher-level domain modules like compilation and quantization. The structure follows a **modular and scenario-driven approach**, where each topic is paired with corresponding code examples from [torch_openreg] [OpenReg URL], an official reference implementation.
+
+The goal is to help developers:
+
+* Understand the full scope of accelerator integration;
+* Rapidly bring up a new accelerator following best practices;
+* Avoid common pitfalls through clear, targeted examples.
+
+### Target Audience
+
+This document is intended for:
+
+* **Accelerator Developers** who are integrating accelerator into PyTorch;
+* **Advanced PyTorch Users** interested in the inner workings of key modules;
 
 ## Operator Registration
 
