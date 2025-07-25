@@ -92,7 +92,13 @@ def main():
         )
     ]
 
-    package_data = {PACKAGE_NAME: ["lib/*.so*"]}
+    package_data = {
+        PACKAGE_NAME: [
+            "lib/*.so*",
+            "lib/*.dylib*",
+            "lib/*.dll",
+        ]
+    }
 
     setup(
         name=PACKAGE_NAME,
