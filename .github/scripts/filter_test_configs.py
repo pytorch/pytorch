@@ -25,11 +25,19 @@ PREFIX = "test-config/"
 logging.basicConfig(level=logging.INFO)
 
 
+def is_rocm_job(job_name: Optional[str]) -> bool:
+    if not job_name:
+        return False
+
+    # ROCm jobs are expected to have "rocm" in their name
+    return "rocm" in job_name.lower()
+
+
 def is_cuda_or_rocm_job(job_name: Optional[str]) -> bool:
     if not job_name:
         return False
 
-    return "cuda" in job_name or "rocm" in job_name
+    return "cuda" in job_name or is_rocm_job(job_name)
 
 
 # Supported modes when running periodically. Only applying the mode when
@@ -509,7 +517,10 @@ def perform_misc_tasks(
     """
     set_output(
         "keep-going",
-        branch == MAIN_BRANCH or check_for_setting(labels, pr_body, "keep-going"),
+        # ROCm machines don't have permission to put objects to S3 so the
+        # failures won't show up early on HUD
+        (branch == MAIN_BRANCH and not is_rocm_job(job_name))
+        or check_for_setting(labels, pr_body, "keep-going"),
     )
     set_output(
         "ci-verbose-test-logs",
