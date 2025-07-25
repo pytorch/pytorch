@@ -484,7 +484,6 @@ def get_custom_backend_config_for_device(device: str) -> Optional[ConfigModule]:
 
 @functools.cache
 def init_backend_registration() -> None:
-    """Init backend registration"""
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
