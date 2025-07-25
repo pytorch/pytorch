@@ -14,12 +14,12 @@ void ThreadLocalPythonObjects::set(const std::string& key, std::shared_ptr<SafeP
 }
 
 const std::shared_ptr<SafePyObject>& ThreadLocalPythonObjects::get(const std::string& key) {
-  TORCH_CHECK(py_objects.obj_dict_.count(key));
+  TORCH_CHECK(py_objects.obj_dict_.contains(key));
   return py_objects.obj_dict_[key];
 }
 
 bool ThreadLocalPythonObjects::contains(const std::string& key) {
-  return py_objects.obj_dict_.count(key);
+  return py_objects.obj_dict_.contains(key);
 }
 
 void ThreadLocalPythonObjects::set_state(ThreadLocalPythonObjects state) {
