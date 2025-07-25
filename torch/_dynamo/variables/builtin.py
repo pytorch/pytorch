@@ -1814,6 +1814,12 @@ class BuiltinVariable(VariableTracker):
                 polyfills.builtins.iter_
             ).call_function(tx, [obj, *args], {})
 
+            if len(args):
+                # iter(obj, sentinel) returns an object that implements
+                # __iter__ and __next__ methods (UserDefinedObjectVariable)
+                # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
+                # that forwards the next_variable call to the object.
+                ret = variables.ObjectIteratorVariable(ret)
         return ret
 
     call_tuple = _call_tuple_list
