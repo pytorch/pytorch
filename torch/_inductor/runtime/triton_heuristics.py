@@ -1321,6 +1321,7 @@ class CompileResult(Generic[_T]):
             f"    runner({', '.join(runner_args)})",
         ]
         launcher_code = "\n".join(lines)
+        print(launcher_code)
         exec(launcher_code, scope)
         return scope["launcher"]
 
