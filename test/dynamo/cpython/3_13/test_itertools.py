@@ -779,7 +779,7 @@ class TestBasicOps(__TestCase):
         self.assertEqual(take(10, cycle('abc')), list('abcabcabca'))
         self.assertEqual(list(cycle('')), [])
         # self.assertRaises(TypeError, cycle)
-        # self.assertRaises(TypeError, cycle, 5)
+        self.assertRaises(TypeError, cycle, 5)
         self.assertEqual(list(islice(cycle(gen3()),10)), [0,1,2,0,1,2,0,1,2,0])
 
     @pickle_deprecated

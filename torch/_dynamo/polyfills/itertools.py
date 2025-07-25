@@ -92,14 +92,19 @@ def compress(data: Iterable[_T], selectors: Iterable[_U], /) -> Iterator[_T]:
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.cycle
 @substitute_in_graph(itertools.cycle, is_embedded_type=True)  # type: ignore[arg-type]
 def cycle(iterable: Iterable[_T]) -> Iterator[_T]:
-    saved = []
-    for element in iterable:
-        yield element
-        saved.append(element)
+    iterator = iter(iterable)
 
-    while saved:
-        for element in saved:
+    def _cycle(iterator: Iterator[_T]) -> Iterator[_T]:
+        saved = []
+        for element in iterable:
             yield element
+            saved.append(element)
+
+        while saved:
+            for element in saved:
+                yield element
+
+    return _cycle(iterator)
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.dropwhile

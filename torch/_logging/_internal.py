@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import functools
 import hashlib
 import importlib.util
@@ -12,6 +13,7 @@ import re
 import sys
 import tempfile
 import time
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, Optional, Union
@@ -1154,6 +1156,45 @@ def warning_once(logger_obj, *args, **kwargs) -> None:
     another type of cache that includes the caller frame information in the hashing function.
     """
     logger_obj.warning(*args, **kwargs)
+
+
+def safe_grad_filter(message, category, filename, lineno, file=None, line=None) -> bool:
+    return "The .grad attribute of a Tensor" not in str(message)
+
+
+def user_warning_filter(
+    message, category, filename, lineno, file=None, line=None
+) -> bool:
+    return not category == UserWarning
+
+
+@contextlib.contextmanager
+def hide_warnings(filter_fn=lambda *args, **kwargs: True):
+    """
+    A context manager that temporarily suppresses warnings,
+    using public API: https://docs.python.org/3/library/warnings.html#warnings.showwarning.
+
+    Useful to hide warnings without mutating warnings module state, see:
+    https://github.com/pytorch/pytorch/issues/128427#issuecomment-2161496162.
+
+    NOTE: Warnings issued under this context will still be cached in the __warningregistry__
+    and count towards the once/default rule. So you should NEVER use this on a user-land function.
+
+    Filter must implement the showwarning API:
+    def filter_fn(message, category, filename, lineno, file=None, line=None) -> bool:
+        return True  # show this warning entry
+    """
+    prior = warnings.showwarning
+
+    def _showwarning(*args, **kwargs):
+        if filter_fn(*args, **kwargs):
+            prior(*args, **kwargs)
+
+    try:
+        warnings.showwarning = _showwarning
+        yield
+    finally:
+        warnings.showwarning = prior
 
 
 class LazyString(Generic[_P]):

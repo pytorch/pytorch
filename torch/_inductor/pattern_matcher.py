@@ -143,6 +143,8 @@ def _transfer_meta(
             for k, v in old_node.meta.items()
             if k in torch.fx.proxy._COPY_META_FIELDS
         )
+    if "stack_trace" in old_node.meta:
+        new_meta["stack_trace"] = old_node.meta["stack_trace"]
 
 
 class Match:
@@ -1427,7 +1429,9 @@ def register_replacement(
         )
 
         sym_args: list[torch.SymInt] = []
-        with torch._dynamo.utils.detect_fake_mode(args):
+        fake_mode = torch._dynamo.utils.detect_fake_mode(args)
+        assert fake_mode is not None
+        with fake_mode:
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
                     if grad and is_integer_dtype(args[i].dtype):
