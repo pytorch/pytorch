@@ -277,20 +277,22 @@ class TestFullyShard2DTraining(FSDPTest):
                 loss = model(inp).sum()
 
             fwd_comm_counts = fwd_comm_mode.get_comm_counts()
-            self.assertEqual(len(fwd_comm_counts), 2)
+            self.assertEqual(len(fwd_comm_counts), 1)
             self.assertEqual(fwd_comm_counts[funcol.all_reduce], num_mlps)
-            self.assertEqual(fwd_comm_counts[c10d_ops._allgather_base_], num_mlps)
+            self.assertEqual(fwd_comm_counts[c10d_ops._allgather_base_], 0)
             ref_loss = ref_model(inp).sum()
             self.assertEqual(loss, ref_loss)
 
             with CommDebugMode() as bwd_comm_mode:
                 loss.backward()
+
             bwd_comm_counts = bwd_comm_mode.get_comm_counts()
-            self.assertEqual(len(bwd_comm_counts), 3)
+
+            self.assertEqual(len(bwd_comm_counts), 1)
             # First MLP's input gradient does not need to be all-reduced
             self.assertEqual(bwd_comm_counts[funcol.all_reduce], num_mlps - 1)
-            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_mlps)
-            self.assertEqual(bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_mlps)
+            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], 0)
+            self.assertEqual(bwd_comm_counts[c10d_ops._reduce_scatter_base_], 0)
             ref_loss.backward()
 
             optim.step()
