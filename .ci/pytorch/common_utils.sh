@@ -149,6 +149,15 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function install_xformers(){
+  pip_build_and_install "git+https://github.com/facebookresearch/xformers.git@v0.0.30" dist/xformers
+}
+
+function install_flashinfer(){
+  export FLASHINFER_ENABLE_SM90=1
+  pip_build_and_install "git+https://github.com/flashinfer-ai/flashinfer@v0.2.6.post1" dist/flashinfer
+}
+
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
