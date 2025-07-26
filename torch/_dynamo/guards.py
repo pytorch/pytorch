@@ -2903,8 +2903,16 @@ class CheckFunctionManager:
                     has_value = False
                     value = MISSING
                 else:
-                    has_value = True
-                    value = builder.get(guard.name)
+                    try:
+                        # Guard evaluation is expected to fail when we guard on
+                        # things like "not hasattr(x, 'foo')". In cases like this,
+                        # we don't have a well defined value because such thing
+                        # doesn't exist.
+                        value = builder.get(guard.name)
+                        has_value = True
+                    except:  # noqa: B001,E722
+                        value = MISSING
+                        has_value = False
                 is_global = get_global_source_name(guard.originating_source) is not None
                 guard_fn = guard.create_fn
                 if isinstance(guard_fn, functools.partial):
@@ -3481,7 +3489,7 @@ def strip_local_scope(s: str) -> str:
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
     f_locals: dict[str, object],
-    compile_id: CompileId,
+    compile_id: Optional[CompileId],
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
