@@ -1,10 +1,13 @@
 #include <torch/csrc/python_custom_backend/Module.h>
 
+#include <torch/extension.h>
 #include <ATen/ATen.h>
 
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 #include <pybind11/trampoline_self_life_support.h>
+
 
 namespace py = pybind11;
 
@@ -68,9 +71,10 @@ struct PythonDeviceGuard final :
   public c10::impl::DeviceGuardImplInterface, public py::trampoline_self_life_support {
 
   c10::DeviceType type() const override {
-    PYBIND11_OVERRIDE_PURE(
+    PYBIND11_OVERRIDE_PURE_NAME(
       c10::DeviceType, 
       c10::impl::DeviceGuardImplInterface,
+      "type_",
       type,
     );
   }
@@ -128,20 +132,21 @@ struct PythonDeviceGuard final :
   void synchronizeStream(const c10::Stream& /*stream*/) const override { }
 };
 
-bool registerPythonPrivateUse1Hook(std::shared_ptr<at::PrivateUse1HooksInterface> hook) {
+
+bool registerPythonPrivateUse1Hook(std::unique_ptr<at::PrivateUse1HooksInterface> hook) {
   if (at::isPrivateUse1HooksRegistered()) {
     return false;
   }
-  at::RegisterPrivateUse1HooksInterface(hook.get());
+  at::RegisterPrivateUse1HooksInterface(hook.release());
   return true;
 }
 
 bool registerPythonPrivateUse1DeviceGuard(
-  std::shared_ptr<c10::impl::DeviceGuardImplInterface> guard) {
+  std::unique_ptr<c10::impl::DeviceGuardImplInterface> guard) {
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     return false;
   }
-  c10::impl::registerDeviceGuard(c10::DeviceType::PrivateUse1, guard.get());
+  c10::impl::registerDeviceGuard(c10::DeviceType::PrivateUse1, guard.release());
   return true;
 }
 
@@ -187,7 +192,7 @@ void initModule(PyObject* module) {
 
   py::class_<c10::impl::DeviceGuardImplInterface, PythonDeviceGuard, py::smart_holder>(module, "DeviceGuard")
     .def(py::init<>())
-    .def("type", &c10::impl::DeviceGuardImplInterface::type);
+    .def("type_", &c10::impl::DeviceGuardImplInterface::type);
 
   py_module.def("register_python_privateuseone_hook", &registerPythonPrivateUse1Hook);
   py_module.def("register_python_privateuseone_device_guard", &registerPythonPrivateUse1DeviceGuard);

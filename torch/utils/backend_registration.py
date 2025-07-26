@@ -462,12 +462,12 @@ class DummyBackendModule:
         return 1
 
 
-class DummyPrivateUse1Hook:
+class DummyPrivateUse1Hook(torch._C.PrivateUse1Hooks):
 
     def is_available(self): 
         return True
 
-    def has_primary_context(self): 
+    def has_primary_context(self, dev_id): 
         return True
 
     def is_built(self): 
@@ -475,16 +475,11 @@ class DummyPrivateUse1Hook:
 
         
 
-class DummyDeviceGuard:
+class DummyDeviceGuard(torch._C.DeviceGuard):
 
-    def get_device_id(self): 
-        return 0
+    def type_(self):
+        return torch._C._autograd.DeviceType.PrivateUse1
 
-    def set_device(self, id): 
-        return None
-
-    def exchange_device(self, id): 
-        return None
     
 def setup_privateuseone_for_python_backend(
     rename=None, backend_module=None, hook=None,device_guard=None):
