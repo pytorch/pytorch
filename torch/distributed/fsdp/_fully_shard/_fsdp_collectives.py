@@ -311,7 +311,9 @@ def foreach_all_gather(
         )
 
 
-def _get_parameter_inputs_and_metadata(fsdp_params: list[FSDPParam]) -> tuple[
+def _get_parameter_inputs_and_metadata(
+    fsdp_params: list[FSDPParam],
+) -> tuple[
     list[list[torch.Tensor]],
     list[list[torch.dtype]],
     list[list[int]],
@@ -610,7 +612,6 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
 
     if world_size == 1:
-
         current_stream = device_handle.current_stream()
         # Use the original sizes directly
         padded_unsharded_sizes = tuple(grad.size() for grad in unsharded_grads)
@@ -719,9 +720,9 @@ def foreach_reduce(
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
             continue
-        assert (
-            unsharded_grad.size(shard_dim) % world_size == 0
-        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+        assert unsharded_grad.size(shard_dim) % world_size == 0, (
+            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+        )
         chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
         unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(
