@@ -961,7 +961,7 @@ class Module:
             p_should_use_swap_tensors = (
                 should_use_swap_tensors
                 or is_traceable_wrapper_subclass(param_applied)
-                or isinstance(param, FakeTensor)
+                or isinstance(param, FakeTensor) if param.device.type!='cpu' else False
             )
 
             param_grad = param.grad
