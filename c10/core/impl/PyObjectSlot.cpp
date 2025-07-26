@@ -34,12 +34,29 @@ PyObject* PyObjectSlot::_unchecked_untagged_pyobj() const {
       reinterpret_cast<uintptr_t>(pyobj_) & ~0x1ULL);
 }
 
+void PyObjectSlot::unchecked_clear_pyobj(PyInterpreter* interpreter) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(interpreter == pyobj_interpreter_.load());
+  pyobj_ = nullptr;
+}
+
 PyInterpreter& PyObjectSlot::load_pyobj_interpreter() const {
   auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
   if (interpreter) {
     return *interpreter;
   }
-  TORCH_CHECK(false, "cannot access PyObject for Tensor - no interpreter set");
+  TORCH_CHECK(
+      false,
+      "cannot access PyObject for Tensor on interpreter ",
+      (*pyobj_interpreter_.load())->name());
+}
+
+bool PyObjectSlot::check_interpreter(PyInterpreter* interpreter) {
+  return interpreter == pyobj_interpreter();
+}
+
+bool PyObjectSlot::has_pyobj_nonhermetic() {
+  return check_pyobj(pyobj_interpreter(), /*ignore_hermetic_tls=*/true)
+      .has_value();
 }
 
 bool PyObjectSlot::owns_pyobj() {
