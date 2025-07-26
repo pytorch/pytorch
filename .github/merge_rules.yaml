@@ -131,21 +131,6 @@
   - Lint
   - pull
 
-- name: Mobile
-  patterns:
-  - ios/**
-  - android/**
-  - test/mobile/**
-  approved_by:
-  - linbinyu
-  - IvanKobzarev
-  - dreiss
-  - raziel
-  mandatory_checks_name:
-  - EasyCLA
-  - Lint
-  - pull
-
 - name: PrimTorch
   patterns:
   - torch/_meta_registrations.py
