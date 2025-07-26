@@ -265,12 +265,14 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
         guard_or_true,
-        guard_size_oblivious,
         is_nested_int,
     )
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
-    maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
+    def eval_eager(x):
+        return bool(x)
+
+    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
+    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
 
     if maybe_guard_or_false(a.numel() < 2):
         return True
@@ -305,14 +307,13 @@ def is_channels_last_contiguous_2d(a: Tensor, false_if_dde=False) -> bool:
     if a.ndim != 4:
         return False
 
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_or_true,
-        guard_size_oblivious,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
-    maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
+    def eval_eager(x):
+        return bool(x)
+
+    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
+    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
 
     expected_stride = 1
     for idx in (1, 3, 2, 0):
@@ -334,14 +335,13 @@ def is_channels_last_contiguous_3d(a: Tensor, false_if_dde=False) -> bool:
     if a.ndim != 5:
         return False
 
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_or_true,
-        guard_size_oblivious,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
-    maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
+    def eval_eager(x):
+        return bool(x)
+
+    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
+    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
 
     expected_stride = 1
     for idx in (1, 4, 3, 2, 0):
