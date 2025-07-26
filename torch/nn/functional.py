@@ -5915,7 +5915,7 @@ scaled_dot_product_attention = _add_docstr(
         key (Tensor): Key tensor; shape :math:`(N, ..., H, S, E)`.
         value (Tensor): Value tensor; shape :math:`(N, ..., H, S, Ev)`.
         attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
-            which is :math:`(N,..., L, S)`. Two types of masks are supported.
+            which is :math:`(N,..., L, S)`. For example, this includes masks of shape (N, H, L, S) when using multi-head attention. Two types of masks are supported.
             A boolean mask where a value of True indicates that the element *should* take part in attention.
             A float mask of the same type as query, key, value that is added to the attention score.
         dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
