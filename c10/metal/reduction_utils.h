@@ -5,15 +5,69 @@
 
 namespace c10 {
 namespace metal {
+namespace detail {
+template <typename T>
+struct simd_type {
+  using t = T;
+};
+
+// Helper that allows one to run simd ops over bfl16 by upcasting them to fp32
+template <typename T>
+using simd_type_t = typename simd_type<T>::t;
+
+#if __METAL_VERSION__ >= 310
+template <>
+struct simd_type<bfloat> {
+  using t = float;
+};
+#endif
+} // namespace detail
 
 template <typename T>
 inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_sum(T val) {
-  return ::metal::simd_sum(val);
+  return T(::metal::simd_sum(detail::simd_type_t<T>(val)));
 }
 
 template <typename T>
 inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_prod(T val) {
-  return ::metal::simd_product(val);
+  return T(::metal::simd_product(detail::simd_type_t<T>(val)));
+}
+
+// Floating simd_min/max with nan propagation
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline T simd_max(T val) {
+  if (::metal::simd_any(::metal::isnan(val))) {
+    return ::metal::numeric_limits<T>::quiet_NaN();
+  }
+  return T(::metal::simd_max(detail::simd_type_t<T>(val)));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline T simd_min(T val) {
+  if (::metal::simd_any(::metal::isnan(val))) {
+    return ::metal::numeric_limits<T>::quiet_NaN();
+  }
+  return T(::metal::simd_min(detail::simd_type_t<T>(val)));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T> && sizeof(T) != 8, bool> =
+        true>
+inline T simd_max(T val) {
+  return ::metal::simd_max(val);
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T> && sizeof(T) != 8, bool> =
+        true>
+inline T simd_min(T val) {
+  return ::metal::simd_min(val);
 }
 
 // Metal does not support SIMD reductions over 64-bit types, but it could be
@@ -38,6 +92,65 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_prod(T val) {
         ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
   }
   return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
+}
+
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_max(T val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val = ::metal::max(
+        val,
+        as_type<T>(::metal::simd_shuffle_and_fill_down(
+            as_type<int2>(val), int2(0), i)));
+  }
+  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
+}
+
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_min(T val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val = ::metal::min(
+        val,
+        as_type<T>(::metal::simd_shuffle_and_fill_down(
+            as_type<int2>(val), int2(0), i)));
+  }
+  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
+}
+
+// argmin/argmax helpers using simd_ballot
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T>, bool> = true>
+inline uint simd_argmin(T val) {
+  const auto rc = simd_min(val);
+  const auto vote = ::metal::simd_ballot(val == rc);
+  return ::metal::ctz(static_cast<uint>(static_cast<ulong>(vote)));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline uint simd_argmin(T val) {
+  const auto rc = simd_min(val);
+  const auto vote = ::metal::simd_ballot(val == rc || ::metal::isnan(val));
+  return ::metal::ctz(static_cast<uint>(static_cast<ulong>(vote)));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T>, bool> = true>
+inline uint simd_argmax(T val) {
+  const auto rc = simd_max(val);
+  const auto vote = ::metal::simd_ballot(val == rc);
+  return ::metal::ctz(static_cast<uint>(static_cast<ulong>(vote)));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline uint simd_argmax(T val) {
+  const auto rc = simd_max(val);
+  const auto vote = ::metal::simd_ballot(val == rc || ::metal::isnan(val));
+  return ::metal::ctz(static_cast<uint>(static_cast<ulong>(vote)));
 }
 
 // Below algorithms are  written with hardcoded assumption that simdgroup is 32
