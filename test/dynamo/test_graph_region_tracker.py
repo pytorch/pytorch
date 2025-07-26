@@ -370,6 +370,27 @@ class GraphRegionTrackerTests(TestCase):
             """[[['y', 'o1'], ['y_1', 'o2'], ['y_2', 'o3']]]""",
         )
 
+    def test_all_regions_same_sort_order(self):
+        def inner(x, w):
+            y = x + x
+            return y * w
+
+        def fn(x, y):
+            o1 = inner(x, y)
+            o2 = inner(x, y)
+            o3 = inner(x, y)
+            o4 = inner(x, y)
+            return o1.sum() + o2.sum() + o3.sum() + o4.sum()
+
+        graph, tracker = extract_graph_and_tracker(
+            fn,
+            torch.rand(32, 256, 56, 56),
+            torch.rand(512, 256, 1, 1),
+        )
+
+
+
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
