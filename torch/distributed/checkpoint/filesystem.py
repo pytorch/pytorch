@@ -620,32 +620,55 @@ class _FileSystemWriter(StorageWriter):
         self.overwrite = overwrite
         self.transforms = _StorageWriterTransforms(_extensions)
         self.serialization_format = serialization_format
+        self.rank: Optional[int] = None
+        self.use_collectives: bool = True
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
         self.save_id = _generate_uuid()
 
-    def set_up_storage_writer(self, is_coordinator: bool) -> None:
-        pass
+    def set_up_storage_writer(
+        self, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
+        self.rank = kwargs.get("rank", None)
+        self.use_collectives = kwargs.get("use_collectives", True)
+
+    def _metadata_exists(self) -> bool:
+        if self.use_collectives:
+            # A global checkpoint metadata file
+            metadata_path = self._get_metadata_path(rank=None)
+        else:
+            # A rank 0 specific metadata file if every rank has written its own metadata
+            # Just looking for lowest rank metadata file is sufficient
+            metadata_path = self._get_metadata_path(rank=0)
+
+        return self.fs.exists(metadata_path)
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
         self.fs.mkdir(self.path)
-        if self.fs.exists(self.metadata_path):
+        if self._metadata_exists():
             if self.overwrite:
                 warnings.warn(
-                    f"Detected an existing checkpoint in {self.metadata_path}, overwriting since {self.overwrite=}."
+                    f"Detected an existing checkpoint in {self.path}, overwriting since {self.overwrite=}."
                     " Past version 2.5 of PyTorch, `overwrite` will default to False. Set this variable to True to"
                     " maintain this functionality or False to raise when an existing checkpoint is found."
                 )
             else:
                 raise RuntimeError(f"Checkpoint already exists and {self.overwrite=}.")
 
+        if self.rank is not None and not self.use_collectives:
+            plan = dataclasses.replace(
+                plan, storage_data=_StoragePrefix(f"__{self.rank}_")
+            )
+
         return plan
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
+            if plan.storage_data is None
+            else plan
             for i, plan in enumerate(plans)
         ]
         return new_plans
@@ -737,8 +760,12 @@ class _FileSystemWriter(StorageWriter):
         metadata.storage_data = storage_md
 
         metadata.storage_meta = self.storage_meta()
-
-        tmp_path = cast(Path, self.fs.concat_path(self.path, f"{_metadata_fn}.tmp"))
+        tmp_filename = (
+            f"__{self.rank}{_metadata_fn}.tmp"
+            if not self.use_collectives and self.rank is not None
+            else f"{_metadata_fn}.tmp"
+        )
+        tmp_path = cast(Path, self.fs.concat_path(self.path, tmp_filename))
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
@@ -748,17 +775,22 @@ class _FileSystemWriter(StorageWriter):
                     os.sync()
 
         # delete in-case other checkpoints were present.
-        if self.fs.exists(self.metadata_path):
-            self.fs.rm_file(self.metadata_path)
+        if not self.use_collectives and self.rank is not None:
+            metadata_path = self._get_metadata_path(self.rank)
+        else:
+            metadata_path = self._get_metadata_path()
 
-        self.fs.rename(tmp_path, self.metadata_path)
+        if self.fs.exists(metadata_path):
+            self.fs.rm_file(metadata_path)
+
+        self.fs.rename(tmp_path, metadata_path)
 
     def storage_meta(self) -> Optional[StorageMeta]:
         return StorageMeta(checkpoint_id=self.checkpoint_id, save_id=self.save_id)
 
-    @property
-    def metadata_path(self) -> Union[str, os.PathLike]:
-        return cast(Path, self.fs.concat_path(self.path, _metadata_fn))
+    def _get_metadata_path(self, rank: Optional[int] = None) -> os.PathLike:
+        filename = f"{_metadata_fn}" if rank is None else f"__{rank}{_metadata_fn}"
+        return cast(Path, self.fs.concat_path(self.path, filename))
 
     @property
     def checkpoint_id(self) -> Union[str, os.PathLike]:
@@ -810,6 +842,8 @@ class FileSystemReader(StorageReader):
         self.storage_data: dict[Any, Any] = {}
         self.load_id = _generate_uuid()
         self.transforms = _StorageReaderTransforms(_extension_registry)
+        self.rank = None
+        self.use_collectives = True
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> IO[bytes]:
         return cast(IO[bytes], _create_file_view(file, sinfo.offset, sinfo.length))
@@ -879,9 +913,14 @@ class FileSystemReader(StorageReader):
         fut.set_result(None)
         return fut
 
+    def _get_metadata_path(self, rank: Optional[int] = None) -> os.PathLike:
+        filename = f"{_metadata_fn}" if rank is None else f"__{rank}{_metadata_fn}"
+        return cast(Path, self.fs.concat_path(self.path, filename))
+
     # Implementing the abstract function in StorageReader
-    def read_metadata(self) -> Metadata:
-        path = self.fs.concat_path(self.path, ".metadata")
+    def read_metadata(self, *args: Any, **kwargs: Any) -> Metadata:
+        rank = kwargs.get("rank", None)
+        path = self._get_metadata_path(rank)
         with self.fs.create_stream(path, "rb") as metadata_file:
             metadata = pickle.load(metadata_file)
 
@@ -891,8 +930,12 @@ class FileSystemReader(StorageReader):
 
         return metadata
 
-    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(
+        self, metadata: Metadata, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
         self.storage_data = metadata.storage_data
+        self.rank = kwargs.get("rank", None)
+        self.use_collectives = kwargs.get("use_collectives", True)
         assert self.storage_data is not None
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
@@ -923,7 +966,8 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
     * File creation is atomic
 
     The checkpoint consist of one file per write request plus
-    a `.metadata` file with the serialized metadata.
+    a global `.metadata` file with the serialized metadata if rank coordination is enabled.
+    a rank local `__{rank}.metadata` file with the serialized metadata if rank coordination is NOT enabled.
 
     """
 
