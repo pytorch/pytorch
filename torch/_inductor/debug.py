@@ -48,7 +48,6 @@ log = logging.getLogger(__name__)
 
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
-collective_schedule_log = getArtifactLogger(__name__, "collective_schedule")
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
@@ -681,21 +680,6 @@ class DebugFormatter:
                 json.dump(info_dict, fd)
                 fd.write("\n")
 
-    def dump_collective_schedule(self, schedule: list[dict[str, Any]]) -> None:
-        with self.fopen("collective_schedule.json", "w", encoding="utf-8") as fd:
-            json.dump(schedule, fd)
-        try:
-            trace_structured_artifact(
-                "inductor_collective_schedule",
-                "string",  # encoding
-                payload_fn=lambda: json.dumps(schedule, separators=(",", ":")),
-            )
-        except Exception:
-            log.debug(
-                "Failed to log inductor_collective_schedule via structured logging",
-                exc_info=True,
-            )
-
 
 def log_ir_pre_fusion(nodes: SchedulerNodeList) -> None:
     if ir_pre_fusion_log.isEnabledFor(logging.INFO):
@@ -711,6 +695,20 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
     V.debug.ir_post_fusion(nodes)
 
 
+def dump_collective_schedule(schedule: list[dict[str, Any]]) -> None:
+    try:
+        trace_structured_artifact(
+            "inductor_collective_schedule",
+            "string",  # encoding
+            payload_fn=lambda: json.dumps(schedule, separators=(",", ":")),
+        )
+    except Exception:
+        log.debug(
+            "Failed to log inductor_collective_schedule via structured logging",
+            exc_info=True,
+        )
+
+
 def log_collective_schedule(scheduler: "Scheduler") -> None:
     schedule = [
         {"op_name": getattr(op, "python_kernel_name", None)}
@@ -718,7 +716,7 @@ def log_collective_schedule(scheduler: "Scheduler") -> None:
         if isinstance(op := getattr(node, "node", None), ir._CollectiveKernel)
     ]
 
-    V.debug.dump_collective_schedule(schedule)
+    dump_collective_schedule(schedule)
 
 
 @dataclasses.dataclass
