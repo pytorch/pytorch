@@ -29,7 +29,6 @@ torch.fx.graph_module.GraphModule.add_submodule(self, target: str, m: torch.nn.m
 torch.fx.graph_module.GraphModule.delete_all_unused_submodules(self) -> None
 torch.fx.graph_module.GraphModule.delete_submodule(self, target: str) -> bool
 torch.fx.graph_module.GraphModule.recompile(self) -> torch.fx.graph.PythonCode
-torch.fx.graph_module.reduce_deploy_graph_module(importer: Callable, body: Dict[Any, Any], import_block: str) -> torch.nn.modules.module.Module
 torch.fx.graph_module.reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.modules.module.Module
 torch.fx.graph_module.reduce_package_graph_module(importer: Callable, body: Dict[Any, Any], generated_module_name: str) -> torch.nn.modules.module.Module
 torch.fx.interpreter.Interpreter.__init__(self, module: torch.nn.modules.module.Module, garbage_collect_values: bool = True, graph: Optional[torch.fx.graph.Graph] = None)
