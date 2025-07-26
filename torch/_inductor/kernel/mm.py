@@ -261,11 +261,11 @@ persistent_tma_mm_template = TritonTemplate(
     rk_for_mask = tl.arange(0, BLOCK_K)
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
+    {%- if TMA_EXPERIMENTAL_API %}
     workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    {%- if TMA_EXPERIMENTAL_API %}
     triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
         global_address=A,
@@ -441,11 +441,11 @@ device_tma = r"""
     k_tiles = tl.cdiv(K, BLOCK_K)
     num_tiles = num_pid_m * num_pid_n
 
+    {%- if TMA_EXPERIMENTAL_API %}
     workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    {%- if TMA_EXPERIMENTAL_API %}
     triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
         global_address=A,
