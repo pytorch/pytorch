@@ -140,8 +140,7 @@ def copy__functionalize(tensor, data):
         torch.ops.fsdp.copy_.default(tensor_inner, data_inner)
 
 
-if not torch._running_with_deploy():
-    torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
+torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
 
 
 class ShardedState(Enum):

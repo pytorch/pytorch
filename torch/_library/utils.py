@@ -2,7 +2,6 @@
 import dataclasses
 import inspect
 import sys
-import warnings
 from collections.abc import Iterable, Iterator
 from typing import Any, Callable, Union
 
@@ -10,15 +9,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch import _C, _utils_internal
 from torch._ops import OpOverload
-
-
-def warn_deploy(stacklevel=3):
-    warnings.warn(
-        "Python torch.library APIs do nothing under torch::deploy (multipy). "  # codespell:ignore multipy
-        "Please instead use C++ custom operator registration APIs.",
-        RuntimeWarning,
-        stacklevel=stacklevel,
-    )
 
 
 @dataclasses.dataclass
