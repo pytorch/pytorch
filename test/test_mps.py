@@ -12517,6 +12517,8 @@ class TestMetalLibrary(TestCaseMPS):
     def test_reduction_utils(self, dtype):
         if dtype == torch.int64 and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("Using simd_shuffle_down_and_fill results in ICE on MacOS-13")
+        if dtype == torch.bfloat16 and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("BFloat16 is supported on MacOS-14+")
         from torch._inductor.codegen.mps import DTYPE_TO_METAL
         lib = torch.mps.compile_shader(f"""
             #include <c10/metal/reduction_utils.h>
