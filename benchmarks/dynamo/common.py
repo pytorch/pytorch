@@ -14,6 +14,7 @@ import itertools
 import json
 import logging
 import os
+import platform
 import random
 import shutil
 import signal
@@ -22,7 +23,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -54,6 +55,7 @@ try:
     from torch._inductor.utils import fresh_cache
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _inductor.utils import fresh_cache
 
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
@@ -75,7 +77,10 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Sequence
+
+_D = TypeVar("_D", bound=dict[str, Any])
+_T = TypeVar("_T")
 
 
 log = logging.getLogger(__name__)
@@ -766,7 +771,17 @@ def timed(
     return (time_total, result) if return_result else time_total
 
 
-def _normalize_bench_inputs(example_inputs) -> tuple[tuple[Any], Mapping[str, Any]]:
+@overload
+def _normalize_bench_inputs(example_inputs: _D) -> tuple[tuple[()], _D]: ...
+
+
+@overload
+def _normalize_bench_inputs(
+    example_inputs: Sequence[_T],
+) -> tuple[tuple[_T, ...], dict[str, Any]]: ...
+
+
+def _normalize_bench_inputs(example_inputs):
     # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
     # and consumed like `model(**example_inputs)`.
     # For other benchmarks, example_inputs are formatted as tuple and consumed
@@ -1671,7 +1686,7 @@ class BenchmarkRunner:
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
         self.autocast_arg = {}
-        self.optimizer = None
+        self.optimizer: Optional[torch.optim.Optimizer] = None
         self._args = None
 
     def setup_amp(self, current_device=None):
@@ -1747,6 +1762,10 @@ class BenchmarkRunner:
 
     @property
     def skip_models_for_cpu(self):
+        return set()
+
+    @property
+    def skip_models_for_cpu_aarch64(self):
         return set()
 
     @property
@@ -3250,6 +3269,12 @@ def parse_args(args=None):
             instead of deleting it and creating a new one.",
     )
 
+    parser.add_argument(
+        "--caching-precompile",
+        action="store_true",
+        help="Enables caching precompile, serializing artifacts to DynamoCache between runs",
+    )
+
     group_latency = parser.add_mutually_exclusive_group()
     group_latency.add_argument(
         "--cold-start-latency",
@@ -3400,6 +3425,29 @@ def parse_args(args=None):
     return parser.parse_args(args)
 
 
+def process_caching_precompile():
+    """
+    After every process_entry, save precompile artifacts to DynamoCache
+    """
+    assert torch._dynamo.config.caching_precompile, (
+        "Caching precompile should be enabled with --caching-precompile"
+    )
+    from torch._dynamo.precompile_context import PrecompileContext
+
+    # Serialize all callables, clear PrecompileContext
+    # TODO: put this under torch.compiler API once ready
+    serialized = PrecompileContext.serialize()
+    PrecompileContext.clear()
+    if serialized is not None:
+        artifacts, info = serialized
+        print(
+            f"Saving {len(info.precompile_dynamo_artifacts)} Precompile Artifact(s)..."
+        )
+        results = PrecompileContext.deserialize(artifacts)
+        assert results is not None
+        PrecompileContext.populate_caches(results)
+
+
 def process_entry(rank, runner, original_dir, args):
     args.rank = rank
     with maybe_init_distributed(
@@ -3408,7 +3456,10 @@ def process_entry(rank, runner, original_dir, args):
         world_size=args.world_size,
         port=args.distributed_master_port,
     ):
-        return run(runner, args, original_dir)
+        result = run(runner, args, original_dir)
+        if args.caching_precompile:
+            process_caching_precompile()
+        return result
 
 
 def maybe_fresh_cache(args):
@@ -3444,6 +3495,10 @@ def main(runner, original_dir=None, args=None):
             )
 
     with maybe_fresh_cache(args):
+        if args.caching_precompile:
+            os.environ["TORCH_CACHING_PRECOMPILE"] = "1"
+            torch._dynamo.config.caching_precompile = True
+
         args.init_distributed = args.only and args.multiprocess
         if args.init_distributed:
             # NB: Do NOT query device count before CUDA initialization; we're
@@ -3701,7 +3756,10 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.slow_models)
 
     if args.devices == ["cpu"]:
+        arch = platform.machine()
         runner.skip_models.update(runner.skip_models_for_cpu)
+        if arch == "aarch64":
+            runner.skip_models.update(runner.skip_models_for_cpu_aarch64)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
 
