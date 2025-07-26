@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
     TEST_HPU,
+    TEST_XPU,
     wrapSwapTensorsTest,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -325,6 +326,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, "Sleep kernel not supported for HPU")
+    @unittest.skipIf(TEST_XPU, "sleep kernel not supported on XPU")
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group(self):
         """
@@ -348,6 +350,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, "sleep kernel not supported on HPU")
+    @unittest.skipIf(TEST_XPU, "sleep kernel not supported on XPU")
     def test_train_parity_multi_group_cpu_offload_eager(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -372,6 +375,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, "sleep kernel not supported on HPU")
+    @unittest.skipIf(TEST_XPU, "sleep kernel not supported on XPU")
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group_unshard_async_op(self):
         """
@@ -626,6 +630,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(TEST_XPU, "Sleep is not supported on XPU")
     def test_post_optim_event(self):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
