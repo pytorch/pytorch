@@ -375,6 +375,10 @@ class OptimizedModule(torch.nn.Module):
         self._initialize()
         self.training = self._orig_mod.training
 
+    def __len__(self) -> int:
+        # Proxy the len call to the original module
+        return len(self._orig_mod)
+
     def _initialize(self) -> None:
         # Do this stuff in constructor to lower overhead slightly
         if isinstance(self.dynamo_ctx, DisableContext):
