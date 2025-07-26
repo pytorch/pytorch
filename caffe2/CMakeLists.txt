@@ -1771,6 +1771,10 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
+  if(USE_FBGEMM_GENAI)
+    target_link_libraries(torch_hip PRIVATE fbgemm_genai)
+  endif()
+
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE} ${ROCM_INCLUDE_DIRS})

@@ -872,6 +872,14 @@ cmake_dependent_option(
   "USE_CUDA OR USE_ROCM;NOT MSVC"
   OFF)
 
+cmake_dependent_option(
+  USE_FBGEMM_GENAI
+  "Whether to build FBGEMM GenAI quantized GEMM kernels.\
+  Will be disabled if not supported by the platform"
+  OFF
+  "USE_CUDA OR USE_ROCM"
+  OFF)
+
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
 cmake_dependent_option(
@@ -903,6 +911,10 @@ endif(DEBUG_CUDA)
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
+endif()
+
+if(USE_FBGEMM_GENAI)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM_GENAI")
 endif()
 
 if(USE_PYTORCH_QNNPACK)

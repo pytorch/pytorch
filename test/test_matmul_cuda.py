@@ -27,6 +27,7 @@ from torch.testing._internal.common_cuda import (
     xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
     IS_SM90,
 )
@@ -768,6 +769,7 @@ class TestMatmulCuda(TestCase):
             torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accum
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
+f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 
 # avoid division by zero when calculating scale
@@ -1845,17 +1847,16 @@ class TestFP8Matmul(TestCase):
     # _scaled_mm() already has more combinations of parameters than
     # _scaled_grouped_mm(), for supporting more than one inputs layout
     # combinations.
-
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
-    @parametrize("strided", [False, True])
+    # AMD does not support non-contiguous inputs yet
+    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
     def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided):
         device = "cuda"
+        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         m, n, k, n_groups = 16, 32, 64, 4
-        a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
-        b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
+        a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(fp8_dtype)[:, :k * n_groups]
+        b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(fp8_dtype)[:, :k * n_groups]
         scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
         scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
@@ -1874,17 +1875,17 @@ class TestFP8Matmul(TestCase):
         self.scaled_grouped_mm_helper(alist, blist, ascalelist, bscalelist, out, fast_accum)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
-    @parametrize("strided", [False, True])
+    # AMD does not support non-contiguous inputs yet
+    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
     def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided):
         device = "cuda"
+        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         m, n, k, n_groups = 16, 32, 64, 4
         s_int = int(strided)
-        a = torch.randn(m * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
-        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
+        a = torch.randn(m * n_groups, k * (1 + s_int), device=device).to(fp8_dtype)[:, :k]
+        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
         self.assertTrue(b.is_contiguous() is not strided)
         for check_zero_size in (True, False):
@@ -1896,7 +1897,6 @@ class TestFP8Matmul(TestCase):
                 offs[0] = offs[1]
             scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32)
             scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
-
             f = torch._scaled_grouped_mm
             out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
                     out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
@@ -1912,17 +1912,17 @@ class TestFP8Matmul(TestCase):
                 self.scaled_grouped_mm_helper(alist, b, ascalelist, scale_b, outlist, fast_accum)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
-    @parametrize("strided", [False, True])
+    # AMD does not support non-contiguous inputs yet
+    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
     def test_scaled_grouped_gemm_3d_3d(self, fast_accum, strided):
         device = "cuda"
+        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         m, n, k, n_groups = 16, 32, 64, 4
         s_int = int(strided)
-        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
-        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
+        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
+        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
         self.assertTrue(b.is_contiguous() is not strided)
         scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32).view(n_groups, m)
@@ -1935,17 +1935,17 @@ class TestFP8Matmul(TestCase):
         self.scaled_grouped_mm_helper(a, b, scale_a, scale_b, out, fast_accum)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
-    @parametrize("strided", [False, True])
+    # AMD does not support non-contiguous inputs yet
+    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
     def test_scaled_grouped_gemm_3d_2d(self, fast_accum, strided):
         device = "cuda"
+        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         m, n, k, n_groups = 16, 32, 64, 4
         s_int = int(strided)
-        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
-        b = torch.randn(n * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
+        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
+        b = torch.randn(n * n_groups, k * (1 + s_int), device=device).to(fp8_dtype)[:, :k]
         self.assertTrue(a.is_contiguous() is not strided)
         self.assertTrue(b.is_contiguous() is not strided)
         scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32).view(n_groups, m)
