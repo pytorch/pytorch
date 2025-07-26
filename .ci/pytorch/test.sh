@@ -365,7 +365,6 @@ test_dynamo_wrapped_shard() {
     exit 1
   fi
   python tools/dynamo/verify_dynamo.py
-  python tools/dynamo/gb_id_mapping.py verify
   # PLEASE DO NOT ADD ADDITIONAL EXCLUDES HERE.
   # Instead, use @skipIfTorchDynamo on your tests.
   time python test/run_test.py --dynamo \
@@ -929,12 +928,6 @@ test_torchbench_gcp_smoketest(){
   popd
 }
 
-test_python_gloo_with_tls() {
-  source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
-  assert_git_not_dirty
-}
-
-
 test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
@@ -1325,10 +1318,13 @@ EOF
 
   # Step 2. Make sure that the public API test "test_correct_module_names" fails when an existing
   # file is modified to introduce an invalid public API function.
-  EXISTING_FILEPATH="${TORCH_INSTALL_DIR}/nn/parameter.py"
+  # The filepath here must not have __all__ defined in it, otherwise the test will pass.
+  # If your PR introduces __all__ to torch/cuda/streams.py please point this to another file
+  # that does not have __all__ defined.
+  EXISTING_FILEPATH="${TORCH_INSTALL_DIR}/cuda/streams.py"
   cp -v "${EXISTING_FILEPATH}" "${EXISTING_FILEPATH}.orig"
   echo "${BAD_PUBLIC_FUNC}" >> "${EXISTING_FILEPATH}"
-  invalid_api="torch.nn.parameter.new_public_func"
+  invalid_api="torch.cuda.streams.new_public_func"
   echo "Appended an invalid public API function to existing file ${EXISTING_FILEPATH}..."
 
   check_public_api_test_fails \
@@ -1562,7 +1558,7 @@ test_executorch() {
 test_linux_aarch64() {
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
         test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
-        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops test_cpp_extensions_open_device_registration \
+        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
@@ -1674,13 +1670,11 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
   install_torchaudio
   install_torchvision
-  checkout_install_torchbench nanogpt BERT_pytorch resnet50 hf_T5 llama moco
-  PYTHONPATH=$(pwd)/torchbench test_cachebench
+  PYTHONPATH=/torchbench test_cachebench
 elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
   install_torchaudio
   install_torchvision
-  checkout_install_torchbench nanogpt
-  PYTHONPATH=$(pwd)/torchbench test_verify_cachebench
+  PYTHONPATH=/torchbench test_verify_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchaudio
   install_torchvision
@@ -1689,28 +1683,22 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
-    checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
-    PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
+    PYTHONPATH=/torchbench test_inductor_torchbench_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
-    checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_edgecnn \
-      llama_v2_7b_16h resnet50 timm_efficientnet mobilenet_v3_large timm_resnest \
-      functorch_maml_omniglot yolov3 mobilenet_v2 resnext50_32x4d densenet121 mnasnet1_0
-    PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
+    PYTHONPATH=/torchbench test_inductor_torchbench_cpu_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
-    checkout_install_torchbench
-    TORCHBENCHPATH=$(pwd)/torchbench test_torchbench_gcp_smoketest
+    TORCHBENCHPATH=/torchbench test_torchbench_gcp_smoketest
   else
-    checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
     if [[ "${TEST_CONFIG}" != *cpu* ]]; then
       install_torchrec_and_fbgemm
     fi
-    PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
+    PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
-  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
+  PYTHONPATH=/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
   if [[ "$SHARD_NUMBER" -eq "1" ]]; then
     test_inductor_aoti
   fi

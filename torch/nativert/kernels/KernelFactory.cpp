@@ -242,7 +242,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       nodeKernels.push_back(std::make_unique<HigherOrderKernel>(
           &node, std::move(graphExecutors)));
     } else if (c10::starts_with(node.target(), "torch.ops")) {
-      nodeKernels.push_back(std::make_unique<C10Kernel>(&node, targetDevice));
+      nodeKernels.push_back(std::make_unique<C10Kernel>(&node));
 
       std::string opName = std::string(node.target());
       if (opsWithoutStaticDispatchCount.find(opName) ==

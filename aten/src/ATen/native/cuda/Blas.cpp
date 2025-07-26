@@ -19,6 +19,7 @@
 #include <ATen/native/cuda/RowwiseScaledMM.h>
 #include <ATen/native/cuda/ScaledGroupMM.h>
 #include <ATen/native/cuda/GroupMM.h>
+#include <ATen/ceil_div.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -99,6 +100,7 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   }
 }
 
+using at::cuda::blas::ScalingType;
 
 /**
  * @brief Prepares matrices for CUBLAS operation
@@ -140,7 +142,9 @@ struct cublasCommonArgs {
       Tensor& c,
       const std::optional<Tensor>& scale_a = std::nullopt,
       const std::optional<Tensor>& scale_b = std::nullopt,
-      const std::optional<Tensor>& scale_result = std::nullopt) {
+      const std::optional<Tensor>& scale_result = std::nullopt,
+      const std::optional<ScalingType>& scaling_choice_a = std::nullopt,
+      const std::optional<ScalingType>& scaling_choice_b = std::nullopt) {
     bool transpose_result = false, transpose_a = false, transpose_b = false;
     result = prepare_matrix_for_cublas(c, transpose_result);
     mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_a, transpose_result);
@@ -152,8 +156,10 @@ struct cublasCommonArgs {
       // as B.T @ A.T, check transpose_result to determine if we flip the scales
       scale_mata_ptr = transpose_result ? scale_b->data_ptr() : scale_a->data_ptr();
       scale_mata_dtype = transpose_result ? scale_b->scalar_type() : scale_a->scalar_type();
+      scaling_mata_type = transpose_result ? scaling_choice_b : scaling_choice_a;
       scale_matb_ptr = transpose_result ? scale_a->data_ptr() : scale_b->data_ptr();
       scale_matb_dtype = transpose_result ? scale_a->scalar_type() : scale_b->scalar_type();
+      scaling_matb_type = transpose_result ? scaling_choice_a : scaling_choice_b;
     }
 
     if (scale_result) {
@@ -199,7 +205,9 @@ struct cublasCommonArgs {
   void* scale_matb_ptr = nullptr;
   void* scale_result_ptr = nullptr;
   std::optional<c10::ScalarType> scale_mata_dtype;
+  std::optional<ScalingType> scaling_mata_type;
   std::optional<c10::ScalarType> scale_matb_dtype;
+  std::optional<ScalingType> scaling_matb_type;
   std::optional<c10::ScalarType> scale_result_dtype;
 };
 } // namespace
@@ -270,7 +278,7 @@ static bool isSupportedHipLtROCmArch(int index) {
     static const std::vector<std::string> archs = {
         "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101", "gfx1200", "gfx1201",
+        "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
 #endif
 #if ROCM_VERSION >= 60500
         "gfx950"
@@ -1075,133 +1083,119 @@ static bool _scaled_mm_is_fnuz() {
 
 namespace{
 
-enum class ScalingType : std::uint8_t {
-  TensorWise,
-  RowWise,
-  BlockWise,
-  Error
-};
 /*
  * Scaling Type Determination:
  * ---------------------------
  * Conditions and corresponding Scaling Types:
  *
- * - If scale tensors are both `Float8_e8m0fnu` or `Float8_e4m3fn`:
+ * - If scale tensor is `Float8_e8m0fnu` or `Float8_e4m3fn`:
  *   - Returns BlockWise (with additional size checks).
  *
- * - If scale_a.numel() == 1 && scale_b.numel() == 1:
+ * - Else if scale.numel() == 1:
  *   - Returns TensorWise.
  *
- * - Else if scale_a.dim() == 2 && scale_a.size(0) == dim_m && scale_b.size(0) == dim_n:
+ * - Else if scale.dim() == 2 && scale.size(0) == outer_dim && scale.size(1) == 1:
  *   - Returns RowWise.
+ *
+ * - Else if scale.dim() == 2 && scale.size(0) == outer_dim && scale.size(1) == inner_dim / 128:
+ *   - Returns BlockWise 1x128.
+ *
+ * - Else if scale.dim() == 2 && scale.size(0) == outer_dim / 128 && scale.size(1) == inner_dim / 128:
+ *   - Returns BlockWise 128x128.
  *
  * - Otherwise:
  *   - Returns Error.
  */
 
-// Validates the scale tensors to scaled_mm
-// And returns the type of scaling/which kernel to use
-ScalingType get_scaling_type(
-    const at::Tensor& scale_a,
-    const at::Tensor& scale_b,
-    int64_t dim_m,
-    int64_t dim_k,
-    int64_t dim_n) {
-  // Check for BlockWise scaling (FP8_E8M0 and FP8_E4M3 types)
-  if ((scale_a.scalar_type() == scale_b.scalar_type()) &&
-      ((scale_a.scalar_type() == at::kFloat8_e8m0fnu) || (scale_a.scalar_type() == at::kFloat8_e4m3fn))) {
-    const bool is_nvfp4 = scale_a.scalar_type() == at::kFloat8_e4m3fn;
+using at::cuda::blas::ScalingType;
 
-    // cuBLAS's mxfp8 gemm: block_size is 1 scale per 32 elements
-    // cuBLAS's nvfp4 gemm: block_size is 1 scale per 16 unpacked elements.
-    const auto BLOCK_SIZE_K = is_nvfp4 ? 16 : 32;
+bool is_tensorwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.numel() == 1;
+}
 
-    constexpr int64_t BLOCK_SIZE_MN = 128;
+bool is_rowwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.dim() == 2
+      && scale.size(0) == t.size(0) && scale.size(1) == 1
+      && scale.is_contiguous());
+}
 
-    // adjust for fp4x2 packing if necessary
-    const auto dim_k_unpacked = is_nvfp4 ? dim_k * 2 : dim_k;
+// 1x16 blocks for packed nvfp4 data and fp8_e4m3fn scales
+bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  // Multiply t.size(1) by 2 to adjust for fp4x2 packing
+  // TODO: We might want to enforce some structure on the shapes of the scale
+  // tensors
+  return (t.scalar_type() == ScalarType::Float4_e2m1fn_x2 && scale.scalar_type() == at::kFloat8_e4m3fn
+      && scale.numel() == round_up<int64_t>(t.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(t.size(1) * 2, 16), 4)
+      && scale.is_contiguous());
+}
 
-    auto ceil_div = [](auto a, auto b) { return (a + b - 1) / b; };
-    auto num_k_blocks = ceil_div(dim_k_unpacked, BLOCK_SIZE_K);
-    auto padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4;
+// 1x32 blocks for microscaled fp8 data and fp8_e8m0fnu scales
+bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  // TODO: We might want to enforce some structure on the shapes of the scale
+  // tensors
+  return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat8_e8m0fnu
+      && scale.numel() == round_up<int64_t>(t.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(t.size(1), 32), 4)
+      && scale.is_contiguous());
+}
 
-    // TODO: We might want to enforce some structure on the shapes of the scale
-    // tensors
+bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.dim() == 2
+      && scale.size(0) == t.size(0) && scale.size(1) == ceil_div<int64_t>(t.size(1), 128)
+      && scale.stride(0) == 1 && scale.stride(1) == t.size(0));
+}
 
-    // Check expected sizes for block-wise scaling
-    auto expected_a_size =
-        BLOCK_SIZE_MN * ceil_div(dim_m, BLOCK_SIZE_MN) * padded_num_k_blocks;
-    auto expected_b_size =
-        BLOCK_SIZE_MN * ceil_div(dim_n, BLOCK_SIZE_MN) * padded_num_k_blocks;
+bool is_blockwise_128x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.dim() == 2
+      && scale.size(0) == ceil_div<int64_t>(t.size(0), 128) && scale.size(1) == ceil_div<int64_t>(t.size(1), 128)
+      && scale.stride(0) == round_up<int64_t>(ceil_div<int64_t>(t.size(1), 128), 4) && scale.stride(1) == 1);
+}
 
-    TORCH_CHECK(scale_a.numel() == expected_a_size,
-                "For BlockWise scaling: Expected scale_a size to be ",
-                expected_a_size, " but got ", scale_a.numel());
-    TORCH_CHECK(scale_b.numel() == expected_b_size,
-                "For BlockWise scaling: Expected scale_b size to be ",
-                expected_b_size, " but got ", scale_b.numel());
-
-    TORCH_CHECK(
-        scale_a.is_contiguous() && scale_b.is_contiguous(),
-        "For BlockWise scaling: Both scale_a and scale_b must be contiguous");
-
-    return ScalingType::BlockWise;
+bool is_desired_scaling(const at::Tensor& t, const at::Tensor& scale, ScalingType desired_scaling) {
+  switch (desired_scaling) {
+    case ScalingType::TensorWise:
+      return is_tensorwise_scaling(t, scale);
+    case ScalingType::RowWise:
+      return is_rowwise_scaling(t, scale);
+    case ScalingType::BlockWise1x16:
+      return is_blockwise_1x16_scaling(t, scale);
+    case ScalingType::BlockWise1x32:
+      return is_blockwise_1x32_scaling(t, scale);
+    case ScalingType::BlockWise1x128:
+      return is_blockwise_1x128_scaling(t, scale);
+    case ScalingType::BlockWise128x128:
+      return is_blockwise_128x128_scaling(t, scale);
+    default:
+      TORCH_CHECK(false);
+      return false;
   }
-  // Both Per-Tensor and Row-wise scaling expect fp32 tensors
-  TORCH_CHECK(
-      scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
-      "Both scale_a and scale_b must be float (fp32) tensors.");
+}
 
-  // Check the singluar scale case for per-tensor scaling
-  if (scale_a.numel() == 1 && scale_b.numel() == 1) {
-    return ScalingType::TensorWise;
+std::pair<ScalingType, ScalingType> get_joint_scaling(
+    std::initializer_list<std::pair<ScalingType, ScalingType>> options,
+    const at::Tensor& a, const at::Tensor& b,
+    const at::Tensor& scale_a, const at::Tensor& scale_b) {
+  for (auto [lhs, rhs] : options) {
+    // For blockwise 1x16 and 1x32 scaling, the scale tensors are swizzled/blocked
+    // and should not be transposed as their structure is based on the original tensor dimensions
+    bool use_swizzled_scale = (rhs == ScalingType::BlockWise1x16 || rhs == ScalingType::BlockWise1x32);
+    const at::Tensor& scale_b_check = use_swizzled_scale ? scale_b : scale_b.t();
+
+    if (is_desired_scaling(a, scale_a, lhs) && is_desired_scaling(b.t(), scale_b_check, rhs)) {
+      return {lhs, rhs};
+    }
   }
-
-  // For non-TensorWise scaling, enforce 2D input tensors
   TORCH_CHECK(
-      scale_a.dim() == 2 && scale_b.dim() == 2,
-      "For non-TensorWise scaling, scale tensors must be 2-dimensional, "
-      "but got scale_a.dim()=",
-      scale_a.dim(),
-      " and scale_b.dim()=",
-      scale_b.dim());
-
-  // Check for RowWise scaling
-  if (scale_a.size(0) == dim_m && scale_a.size(1) == 1 &&
-      scale_b.size(0) == 1 && scale_b.size(1) == dim_n) {
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || \
-    (defined(USE_ROCM) && (defined(HIPBLASLT_VEC_EXT) || defined(HIPBLASLT_OUTER_VEC)))
-    TORCH_CHECK(
-        scale_a.is_contiguous() && scale_b.is_contiguous(),
-        "Both scale_a and scale_b must be contiguous for RowWise scaling.");
-    return ScalingType::RowWise;
-#else
-    TORCH_CHECK(false, "Per-row scaling is not supported for this platform!");
-    return ScalingType::Error;
-#endif
-  }
-
-  // If we reach here, the input doesn't match any valid scaling type
-  TORCH_CHECK(
-      false,
-      "Invalid scaling configuration. For TensorWise scaling, both scales should be scalar. "
-      "For RowWise scaling, scale_a should be (",
-      dim_m,
-      ", 1) and scale_b should be (1, ",
-      dim_n,
-      "). "
-      "Got scale_a.size()=(",
-      scale_a.size(0),
-      ", ",
-      scale_a.size(1),
-      ") and ",
-      "scale_b.size()=(",
-      scale_b.size(0),
-      ", ",
-      scale_b.size(1),
-      ")");
-
-  return ScalingType::Error;
+    false,
+    "Invalid scaling configuration.\n"
+    "- For TensorWise scaling, a and b should be float8, scales should be float and singletons.\n"
+    "- For RowWise scaling, a and b should be float8, scales should be float, scale_a should be (", a.size(0), ", 1) and scale_b should be (1, ", b.size(1), "), and both should be contiguous.\n"
+    "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (", a.size(0), ", ", ceil_div<int64_t>(a.size(1), 128), ") and scale_b should be (", ceil_div<int64_t>(b.size(0), 128), ", ", b.size(1), "), and both should be outer-dim-major.\n"
+    "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (", ceil_div<int64_t>(a.size(0), 128), ", ", ceil_div<int64_t>(a.size(1), 128), ") and scale_b should be (", ceil_div<int64_t>(b.size(0), 128), ", ", ceil_div<int64_t>(b.size(1), 128), "), and both should be near-inner-dim-major (with 16-byte aligned strides).\n"
+    "- For Blockwise 1x32 scaling, a and b should be float8, scales should be float8_e8m0fnu, scale_a should have ", round_up<int64_t>(a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(a.size(1), 32), 4), " elements and scale_b should have ", round_up<int64_t>(b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(b.size(0), 32), 4), " elements, and both should be contiguous.\n"
+    "- For Blockwise 1x16 scaling, a and b should be float4 (packed 2x), scales should be float8_e4m3fn, scale_a should have ", round_up<int64_t>(a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(a.size(1) * 2, 16), 4), " elements and scale_b should have ", round_up<int64_t>(b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(b.size(0) * 2, 16), 4), " elements, and both should be contiguous.\n"
+    "Got a.dtype()=", a.scalar_type(), ", scale_a.dtype()=", scale_a.scalar_type(), ", scale_a.size()=", scale_a.sizes(), ", scale_a.stride()=", scale_a.strides(), ", ",
+    "b.dtype()=", b.scalar_type(), ", scale_b.dtype()=", scale_b.scalar_type(), ", scale_b.size()=", scale_b.sizes(), " and scale_b.stride()=", scale_b.strides()
+  );
 }
 
 } // namespace
@@ -1219,8 +1213,8 @@ ScalingType get_scaling_type(
 //    - `mat2`: the second operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
 //    - `bias`: the bias, can be type `torch.float16` or `torch.bfloat16`
 //    - `out_dtype`: the output dtype, can either be a float8 or a higher precision floating point type
-//    - `scale_a`: a scalar or 1-dimensional tensor with the inverse scale of `mat1`, only needed if `mat1` is a float8 type
-//    - `scale_b`: a scalar or 1-dimensional tensor with the inverse scale of `mat2`, only needed if `mat2` is a float8 type
+//    - `scale_a`: a tensor with the inverse scale of `mat1`, whose shape/strides/dtype depend on the scaling scheme
+//    - `scale_b`: a tensor with the inverse scale of `mat2`, whose shape/strides/dtype depend on the scaling scheme
 //    - `scale_result`: a scalar tensor with the scale of the output, only utilized if the output is a float8 type
 //    - `use_fast_accum`: if true, enables fast float8 accumulation
 //    - `out`: a reference to the output tensor
@@ -1243,9 +1237,21 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
-  // Check what type of scaling we are doing based on inputs
-  ScalingType scaling_choice = get_scaling_type(scale_a, scale_b, mat1.size(0), mat1.size(1), mat2.size(1));
-  TORCH_INTERNAL_ASSERT(scaling_choice != ScalingType::Error, "Scaling type not supported");
+  // Check what type of scaling we are doing based on inputs. This list is sorted
+  // by decreasing priority. We prefer "simpler" schemes as they are supported
+  // more broadly (more GPU archs, more CUDA versions) and because they are more
+  // efficient. This tends to matter only for small matmuls (e.g., 1x1x128).
+  auto [scaling_choice_a, scaling_choice_b] = get_joint_scaling(
+    {
+      std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),
+      std::make_pair(ScalingType::RowWise, ScalingType::RowWise),
+      std::make_pair(ScalingType::BlockWise128x128, ScalingType::BlockWise1x128),
+      std::make_pair(ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
+      std::make_pair(ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
+      std::make_pair(ScalingType::BlockWise1x32, ScalingType::BlockWise1x32),
+      std::make_pair(ScalingType::BlockWise1x16, ScalingType::BlockWise1x16)
+    },
+    mat1, mat2, scale_a, scale_b);
 
   TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
        "scale_result must be a float scalar");
@@ -1316,7 +1322,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #ifndef USE_ROCM
   // We are doing row-wise scaling
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  if (scaling_choice == ScalingType::RowWise
+  if (scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise
       && (dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)) {
     TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
@@ -1330,7 +1336,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     return out;
   }
 #else
-  if (scaling_choice == ScalingType::RowWise) {
+  if (scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise) {
     // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
     Tensor b = mat2;
     if (_scaled_mm_is_fnuz()) {
@@ -1345,7 +1351,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
 #endif
 
-  cublasCommonArgs args(mat1, mat2, out, scale_a, scale_b, scale_result);
+  cublasCommonArgs args(mat1, mat2, out, scale_a, scale_b, scale_result, scaling_choice_a, scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
   TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
 
@@ -1422,10 +1428,14 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.a_scale_ptr = args.scale_mata_ptr;
       params.lda = args.lda;
       params.a_dtype = args.mata->scalar_type();
+      params.a_scale_dtype = args.scale_mata_dtype.value();
+      params.a_scaling_type = args.scaling_mata_type.value();
       params.b = args.matb->data_ptr();
       params.b_scale_ptr = args.scale_matb_ptr;
       params.ldb = args.ldb;
       params.b_dtype = args.matb->scalar_type();
+      params.b_scale_dtype = args.scale_matb_dtype.value();
+      params.b_scaling_type = args.scaling_matb_type.value();
       params.bias_ptr = bias ? bias->data_ptr(): nullptr;
       params.bias_dtype = bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_;
       params.c = args.result->data_ptr();
@@ -1433,7 +1443,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.ldc = args.result_ld;
       params.c_dtype = out_dtype_;
       params.use_fast_accum = use_fast_accum;
-      params.use_rowwise = scaling_choice == ScalingType::RowWise;
       if (transa_ && transb_) {
         TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T)
       }
@@ -1467,19 +1476,20 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         args.lda,
         args.mata->scalar_type(),
         args.scale_mata_dtype.value(),
+        args.scaling_mata_type.value(),
         args.matb->data_ptr(),
         args.scale_matb_ptr,
         args.ldb,
         args.matb->scalar_type(),
         args.scale_matb_dtype.value(),
+        args.scaling_matb_type.value(),
         bias ? bias->data_ptr(): nullptr,
         bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
         args.result->data_ptr(),
         args.scale_result_ptr,
         args.result_ld,
         out_dtype_,
-        use_fast_accum,
-        scaling_choice == ScalingType::RowWise);
+        use_fast_accum);
   }
 
   return out;

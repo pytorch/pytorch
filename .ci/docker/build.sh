@@ -160,6 +160,17 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     ;;
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm)
+    CUDA_VERSION=12.8.1
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    TRITON=yes
+    ;;
   pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.6
     CUDNN_VERSION=9
@@ -276,7 +287,7 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-    pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
+  pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     VISION=yes
