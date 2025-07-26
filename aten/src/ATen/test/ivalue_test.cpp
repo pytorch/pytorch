@@ -807,16 +807,16 @@ TEST(IValueTest, getSubValues) {
   IValue object(o);
   tv1.getSubValues(subvalues);
   EXPECT_EQ(subvalues.size(), 1);
-  EXPECT_EQ(subvalues.count(tv1), 1);
+  EXPECT_EQ(subvalues.contains(tv1), 1);
 
   subvalues.clear();
 
   for (auto& container: {list, tuple, dict, object}) {
     container.getSubValues(subvalues);
     EXPECT_EQ(subvalues.size(), 3);
-    EXPECT_EQ(subvalues.count(container), 1);
-    EXPECT_EQ(subvalues.count(tv1), 1);
-    EXPECT_EQ(subvalues.count(tv2), 1);
+    EXPECT_EQ(subvalues.contains(container), 1);
+    EXPECT_EQ(subvalues.contains(tv1), 1);
+    EXPECT_EQ(subvalues.contains(tv2), 1);
 
     subvalues.clear();
   }
