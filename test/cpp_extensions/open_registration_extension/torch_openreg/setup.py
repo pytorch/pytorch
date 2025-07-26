@@ -85,6 +85,11 @@ def main():
         cmdclass={
             "clean": BuildClean,  # type: ignore[misc]
         },
+        entry_points={
+            "torch.backends": [
+                "device_backend = torch_openreg:_autoload",
+            ],
+        },
     )
 
 
