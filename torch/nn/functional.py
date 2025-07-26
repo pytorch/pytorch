@@ -338,9 +338,6 @@ avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_in
 Applies a 1D average pooling over an input signal composed of several
 input planes.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
 Args:
@@ -349,8 +346,9 @@ Args:
       tuple `(kW,)`
     stride: the stride of the window. Can be a single number or a tuple
       `(sW,)`. Default: :attr:`kernel_size`
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padW,)`. Default: 0
+    padding: implicit zero paddings on both sides of the input. Can be a single
+      number or a tuple `(padW,)`. Should be at most half of effective kernel
+      size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` to compute the
         output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -376,9 +374,6 @@ Applies 2D average-pooling operation in :math:`kH \times kW` regions by step siz
 :math:`sH \times sW` steps. The number of output features is equal to the number of
 input planes.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
 Args:
@@ -388,7 +383,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number, a single-element tuple or a tuple `(padH, padW)`. Default: 0
+      single number, a single-element tuple or a tuple `(padH, padW)`.
+      Should be at most half of effective kernel size, that
+      is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -407,9 +404,6 @@ Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions b
 size :math:`sT \times sH \times sW` steps. The number of output features is equal to
 :math:`\lfloor\frac{\text{input planes}}{sT}\rfloor`.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
@@ -419,7 +413,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`, Default: 0
+      single number or a tuple `(padT, padH, padW)`. Should be at most half
+      of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
+      Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
     count_include_pad: when True, will include the zero-padding in the
