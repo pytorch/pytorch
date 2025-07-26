@@ -1,6 +1,5 @@
 #include <torch/nativert/executor/memory/LayoutPlanner.h>
 
-#include <c10/util/CallOnce.h>
 #include <c10/util/Enumerate.h>
 
 #include <torch/nativert/executor/ExecutionPlanner.h>
@@ -184,8 +183,7 @@ const std::vector<ValueId>& LayoutPlanner::get_unplanned_values() const {
 }
 
 void LayoutPlanner::start_worker_if_not_started() {
-  static c10::once_flag flag;
-  c10::call_once(flag, [&]() {
+  c10::call_once(worker_once_flag_, [&]() {
     // make sure plan is populated by the time this
     // returns for the first time :P
     create_plan();
