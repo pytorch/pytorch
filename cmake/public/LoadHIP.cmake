@@ -6,7 +6,7 @@ set(PYTORCH_FOUND_HIP FALSE)
 # In the latter case, if /opt/rocm does not exist emit status
 # message and return.
 if(DEFINED ENV{ROCM_PATH})
-  set(ROCM_PATH $ENV{ROCM_PATH})
+  file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" ROCM_PATH)
   if(NOT EXISTS ${ROCM_PATH})
     message(FATAL_ERROR
       "ROCM_PATH environment variable is set to ${ROCM_PATH} but does not exist.\n"
@@ -31,7 +31,7 @@ if(NOT DEFINED ENV{MAGMA_HOME})
   set(MAGMA_HOME ${ROCM_PATH}/magma)
   set(ENV{MAGMA_HOME} ${ROCM_PATH}/magma)
 else()
-  set(MAGMA_HOME $ENV{MAGMA_HOME})
+  file(TO_CMAKE_PATH "$ENV{MAGMA_HOME}" MAGMA_HOME)
 endif()
 
 # MIOpen isn't a part of HIP-SDK for Windows and hence, may have a different
