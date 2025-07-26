@@ -33,4 +33,4 @@ tensorboard==2.13.0
 typing-extensions==4.12.2
 unittest-xml-reporting<=3.2.0,>=2.0.0
 xdoctest==1.1.0
-z3-solver==4.12.2.0
+z3-solver==4.15.1.0
