@@ -216,6 +216,11 @@ class PT2ArchiveReader:
         return self.archive_file.get_all_records()
 
 
+is_pt2_package.__module__ = "torch.export.pt2_archive"
+PT2ArchiveWriter.__module__ = "torch.export.pt2_archive"
+PT2ArchiveReader.__module__ = "torch.export.pt2_archive"
+
+
 def _package_aoti_files(
     archive_writer: PT2ArchiveWriter,
     aoti_files: Optional[AOTI_FILES],
@@ -308,7 +313,7 @@ def _package_exported_programs(
         return
 
     if isinstance(exported_programs, ExportedProgram):
-        exported_programs = {"model", exported_programs}  # type: ignore[assignment]
+        exported_programs = {"model": exported_programs}
 
     assert isinstance(exported_programs, dict)
 
