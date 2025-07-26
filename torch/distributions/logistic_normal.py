@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 from torch import Tensor
 from torch.distributions import constraints, Independent
@@ -36,7 +36,7 @@ class LogisticNormal(TransformedDistribution):
     """
 
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
-    support = constraints.simplex
+    support: ClassVar[constraints.Simplex] = constraints.simplex  # type: ignore[assignment]
     has_rsample = True
     base_dist: Independent[Normal]
 
