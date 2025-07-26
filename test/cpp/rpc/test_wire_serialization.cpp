@@ -24,7 +24,7 @@ TEST(WireSerialize, Base) {
         serialized.data(), serialized.size());
     EXPECT_EQ(payload.size(), deser.first.size());
     EXPECT_EQ(tensors.size(), deser.second.size());
-    if (payload.size() > 0) {
+    if (!payload.empty()) {
       EXPECT_TRUE(
           memcmp(deser.first.data(), payload.data(), payload.size()) == 0);
     }

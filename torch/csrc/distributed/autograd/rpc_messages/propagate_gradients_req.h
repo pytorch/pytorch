@@ -27,7 +27,7 @@ class TORCH_API PropagateGradientsReq : public rpc::RpcCommandBase {
       const rpc::Message& message);
 
   // Whether or not to retain the autograd graph.
-  bool retainGraph();
+  bool retainGraph() const;
 
  private:
   AutogradMetadata autogradMetadata_;

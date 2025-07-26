@@ -91,7 +91,7 @@ class TORCH_API Logger {
       int64_t& time_duration,
       Timer& timer,
       Timer::Event start_event,
-      Timer::Event end_event);
+      Timer::Event end_event) const;
 
   // Set the absolute time of the event that has been recorded in reducer.
   void set_event_time(int64_t& event_time, Timer& timer, Timer::Event event);
