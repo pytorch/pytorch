@@ -25,13 +25,20 @@ class _InstanceNorm(_NormBase):
         eps: float = 1e-5,
         momentum: float = 0.1,
         affine: bool = False,
+        bias: bool = True,  # for backward compatibility
         track_running_stats: bool = False,
         device=None,
         dtype=None,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(
-            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
+            num_features,
+            eps,
+            momentum,
+            affine,
+            bias,
+            track_running_stats,
+            **factory_kwargs,
         )
 
     def _check_input_dim(self, input):
@@ -174,6 +181,8 @@ class InstanceNorm1d(_InstanceNorm):
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``.
+        bias: If set to ``True``, the layer will learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``.
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -218,6 +227,8 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``.
+        bias: If set to ``True``, the layer will learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``.
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -290,6 +301,8 @@ class InstanceNorm2d(_InstanceNorm):
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``.
+        bias: If set to ``True``, the layer will learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``.
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -335,6 +348,8 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``.
+        bias: If set to ``True``, the layer will learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``.
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -406,6 +421,8 @@ class InstanceNorm3d(_InstanceNorm):
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``.
+        bias: If set to ``True``, the layer will learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``.
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -451,6 +468,8 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``.
+        bias: If set to ``True``, the layer will learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``.
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
