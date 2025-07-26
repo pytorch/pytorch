@@ -1,11 +1,9 @@
-import logging
 import typing
 
 from torch._inductor.utils import IndentedBuffer
 
 
 __all__ = []  # type: ignore[var-annotated]
-logger = logging.getLogger(__name__)
 
 
 def _get_main_cpp_file(
@@ -127,10 +125,8 @@ def _get_main_cpp_file(
                     [
                         f"auto constants_map{i + 1} = std::make_shared<ConstantMap>();",
                         f"auto constants_array{i + 1} = std::make_shared<std::vector<ConstantHandle>>();",
-                        f"auto model{i + 1} = std::make_unique<AOTInductorModel{model_name}>(",
-                        f"    std::move(constants_map{i + 1}),",
-                        f"    std::move(constants_array{i + 1}),",
-                        "    device_str,",
+                        f"auto model{i + 1} = AOTInductorModel{model_name}::Create(",
+                        f"    constants_map{i + 1}, constants_array{i + 1}, device_str,",
                         f'    "{package_name}/data/aotinductor/{model_name}/");',
                         f"model{i + 1}->load_constants();",
                     ]
@@ -158,10 +154,7 @@ def _get_main_cpp_file(
                 ib.writeline("\n// Validate outputs")
                 for i in range(len(model_names)):
                     ib.writeline(
-                        f"""std::cout << "output_tensor{i + 1}\\n" << output_tensor{i + 1} << std::endl;"""
-                    )
-                    ib.writeline(
-                        f"""torch::save(output_tensor{i + 1}, "output_tensor{i + 1}.pt");"""
+                        f"""std::cout << "output_tensor{i + 1}" << output_tensor{i + 1} << std::endl;"""
                     )
 
             ib.writeline("return 0;")
@@ -207,7 +200,6 @@ def _get_make_file(package_name: str, model_names: list[str], cuda: bool) -> str
 
     model_libs = " ".join(model_names)
     ib.writeline(f"target_link_libraries(main PRIVATE torch {model_libs})")
-
     if cuda:
         ib.writeline("target_link_libraries(main PRIVATE cuda ${CUDA_LIBRARIES})")
 
