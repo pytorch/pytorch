@@ -119,8 +119,8 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
 
 def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValue:
     """Convert a PyTorch tensor to an ONNX Runtime OrtValue."""
-    import onnxruntime as ort
     import numpy as np
+    import onnxruntime as ort
 
     from torch.onnx._internal.exporter import _core
 
