@@ -1696,6 +1696,20 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
+        if config.graph_break_on_nn_param_ctor:
+            # Need user to manually move since we cannot
+            unimplemented_v2(
+                gb_type="Attempted to use `torch.nn.Parameter()` constructor with Dynamo",
+                context="",
+                explanation="Dynamo does not support this",
+                hints=[
+                    "Try to construct `torch.nn.Parameter()` outside the compiled region.",
+                    "If this is not possible, turn `graph_break_on_nn_param_ctor` off",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        # TODO[@lucaskabela]: Remove the behavior below since it is deprecated
         if isinstance(
             data, TensorWithTFOverrideVariable
         ) or is_traceable_wrapper_subclass_type(data.class_type):

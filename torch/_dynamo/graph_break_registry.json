@@ -2637,5 +2637,20 @@
         "Set torch._dynamo.config.enable_trace_contextlib = True"
       ]
     }
+  ],
+  "GB0264": [
+    {
+      "Gb_type": "Attempted to use `torch.nn.Parameter()` constructor with Dynamo",
+      "Context": "",
+      "Explanation": "Dynamo does not support this",
+      "Hints": [
+        "Try to construct `torch.nn.Parameter()` outside the compiled region.",
+        "If this is not possible, turn `graph_break_on_nn_param_ctor` off",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ],
+      "Additional_Info": [
+        "Try to construct nn.Parameter() outside the compiled region.  If this is not possible, turn `graph_break_on_nn_param_ctor` off"
+      ]
+    }
   ]
 }
