@@ -367,7 +367,7 @@ def mm(
             and guard_or_false((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
             counters["inductor"]["decompose_mm"] += 1
-            return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
+            return self * input2
         if statically_known_true(self.size(0) == 1) and statically_known_true(
             input2.size(-1) == 1
         ):
