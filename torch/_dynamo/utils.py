@@ -4780,3 +4780,22 @@ def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()
+
+
+class CreateNestedFnCache:
+    cache: dict[str, types.FunctionType] = {}
+
+    @classmethod
+    def get(cls, key):
+        return cls.cache.get(key, None)
+
+    @classmethod
+    def set(cls, key, value):
+        cls.cache[key] = value
+
+    @classmethod
+    def clear(cls):
+        cls.cache.clear()
+
+
+create_nested_fn_cache: CreateNestedFnCache = CreateNestedFnCache()
