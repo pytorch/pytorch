@@ -295,7 +295,6 @@ jobs:
 
             echo "QEMU registration: multiarch/qemu-user-static"
             docker run --rm --privileged multiarch/qemu-user-static --reset -p yes || true
-            sleep 3
 
             # Final verification
             echo "Checking binfmt_misc status:"
@@ -303,7 +302,6 @@ jobs:
 
             if [ -f /proc/sys/fs/binfmt_misc/qemu-riscv64 ]; then
               echo "qemu-riscv64 registration successful"
-              cat /proc/sys/fs/binfmt_misc/qemu-riscv64 | head -3
             else
               echo "qemu-riscv64 registration failed - proceeding without emulation"
               echo "This may cause RISC-V builds to fail"
