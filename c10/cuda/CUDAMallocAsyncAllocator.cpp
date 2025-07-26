@@ -803,6 +803,11 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = true;
   }
 
+  void captureAboutToEnd(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      cudaStream_t capture_stream) override {}
+
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
       override {
     assertValidDevice(device);

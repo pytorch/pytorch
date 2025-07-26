@@ -226,6 +226,10 @@ class CUDAAllocator : public Allocator {
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
       std::function<bool(cudaStream_t)> filter) = 0;
+  virtual void captureAboutToEnd(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      cudaStream_t capture_stream) = 0;
   virtual void endAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
@@ -424,6 +428,13 @@ inline void beginAllocateToPool(
     MempoolId_t mempool_id,
     std::function<bool(cudaStream_t)> filter) {
   get()->beginAllocateToPool(device, mempool_id, std::move(filter));
+}
+
+inline void captureAboutToEnd(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    cudaStream_t capture_stream) {
+  get()->captureAboutToEnd(device, mempool_id, capture_stream);
 }
 
 inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {

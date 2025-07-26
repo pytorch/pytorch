@@ -122,6 +122,8 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(stream == capture_stream_,
               "Capture must end on the same stream it began on.");
 
+  c10::cuda::CUDACachingAllocator::captureAboutToEnd(capture_dev_, mempool_id_, capture_stream_);
+
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
