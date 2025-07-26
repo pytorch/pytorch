@@ -43,6 +43,8 @@ def _extract_tensor_metadata(
     """
     Extract a TensorMetadata NamedTuple describing `result`.
     """
+    # If it is vmap tensor, just unwrap it. Note that this is only relevant
+    # when we are dping pre-dispatch.
     shape = result.shape
     dtype = result.dtype
     requires_grad = result.requires_grad

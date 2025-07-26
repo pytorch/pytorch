@@ -3088,29 +3088,29 @@ def forward(self, L_a_ : torch.SymInt, L_b_ : torch.SymInt, L_c_ : torch.SymInt,
     c = torch.arange(l_c_)
     d = torch.arange(l_d_)
     lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions = None
-    _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(l_d_, 'error');  _vmap_increment_nesting = None
-    child = torch._C._functorch._add_batch_dim(d, 0, 1);  d = None
+    _vmap_increment_nesting_python_wrapper = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(l_d_, 'error');  _vmap_increment_nesting_python_wrapper = None
+    child = torch._functorch.vmap._add_batch_dim_python_wrapper(d, 0, 1);  d = None
     lazy_load_decompositions_1 = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions_1 = None
-    _vmap_increment_nesting_1 = torch._C._functorch._vmap_increment_nesting(l_c_, 'error');  _vmap_increment_nesting_1 = None
-    child_1 = torch._C._functorch._add_batch_dim(c, 0, 2);  c = None
+    _vmap_increment_nesting_python_wrapper_1 = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(l_c_, 'error');  _vmap_increment_nesting_python_wrapper_1 = None
+    child_1 = torch._functorch.vmap._add_batch_dim_python_wrapper(c, 0, 2);  c = None
     lazy_load_decompositions_2 = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions_2 = None
-    _vmap_increment_nesting_2 = torch._C._functorch._vmap_increment_nesting(l_b_, 'error');  _vmap_increment_nesting_2 = None
-    child_2 = torch._C._functorch._add_batch_dim(b, 0, 3);  b = None
+    _vmap_increment_nesting_python_wrapper_2 = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(l_b_, 'error');  _vmap_increment_nesting_python_wrapper_2 = None
+    child_2 = torch._functorch.vmap._add_batch_dim_python_wrapper(b, 0, 3);  b = None
     lazy_load_decompositions_3 = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions_3 = None
-    _vmap_increment_nesting_3 = torch._C._functorch._vmap_increment_nesting(l_a_, 'error');  _vmap_increment_nesting_3 = None
-    _add_batch_dim_3 = torch._C._functorch._add_batch_dim(a, 0, 4);  a = None
-    add = _add_batch_dim_3 + child_2;  _add_batch_dim_3 = child_2 = None
+    _vmap_increment_nesting_python_wrapper_3 = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(l_a_, 'error');  _vmap_increment_nesting_python_wrapper_3 = None
+    _add_batch_dim_python_wrapper_3 = torch._functorch.vmap._add_batch_dim_python_wrapper(a, 0, 4);  a = None
+    add = _add_batch_dim_python_wrapper_3 + child_2;  _add_batch_dim_python_wrapper_3 = child_2 = None
     add_1 = add + child_1;  add = child_1 = None
     batched_outputs = add_1 + child;  add_1 = child = None
-    batched_outputs_1 = torch._C._functorch._remove_batch_dim(batched_outputs, 4, l_a_, 0);  batched_outputs = l_a_ = None
-    _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
-    batched_outputs_2 = torch._C._functorch._remove_batch_dim(batched_outputs_1, 3, l_b_, 0);  batched_outputs_1 = l_b_ = None
-    _vmap_decrement_nesting_1 = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
-    batched_outputs_3 = torch._C._functorch._remove_batch_dim(batched_outputs_2, 2, l_c_, 0);  batched_outputs_2 = l_c_ = None
-    _vmap_decrement_nesting_2 = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting_2 = None
-    _remove_batch_dim_3 = torch._C._functorch._remove_batch_dim(batched_outputs_3, 1, l_d_, 0);  batched_outputs_3 = l_d_ = None
-    _vmap_decrement_nesting_3 = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting_3 = None
-    return (_remove_batch_dim_3,)""",  # noqa: B950
+    batched_outputs_1 = torch._functorch.vmap._remove_batch_dim_python_wrapper(batched_outputs, 4, l_a_, 0);  batched_outputs = l_a_ = None
+    _vmap_decrement_nesting_python_wrapper = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper = None
+    batched_outputs_2 = torch._functorch.vmap._remove_batch_dim_python_wrapper(batched_outputs_1, 3, l_b_, 0);  batched_outputs_1 = l_b_ = None
+    _vmap_decrement_nesting_python_wrapper_1 = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper_1 = None
+    batched_outputs_3 = torch._functorch.vmap._remove_batch_dim_python_wrapper(batched_outputs_2, 2, l_c_, 0);  batched_outputs_2 = l_c_ = None
+    _vmap_decrement_nesting_python_wrapper_2 = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper_2 = None
+    _remove_batch_dim_python_wrapper_3 = torch._functorch.vmap._remove_batch_dim_python_wrapper(batched_outputs_3, 1, l_d_, 0);  batched_outputs_3 = l_d_ = None
+    _vmap_decrement_nesting_python_wrapper_3 = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper_3 = None
+    return (_remove_batch_dim_python_wrapper_3,)""",  # noqa: B950
             )
 
     def test_cond_pytree_operands(self):
@@ -3744,9 +3744,9 @@ class GraphModule(torch.nn.Module):
 
         lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions = None
 
-        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'error');  _vmap_increment_nesting = None
+        _vmap_increment_nesting_python_wrapper = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(12, 'error');  _vmap_increment_nesting_python_wrapper = None
 
-        child_1: "f32[4, 3]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
+        child_1: "f32[4, 3]" = torch._functorch.vmap._add_batch_dim_python_wrapper(child, 0, 1);  child = None
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
@@ -3791,16 +3791,16 @@ class GraphModule(torch.nn.Module):
 
         lazy_load_decompositions_1 = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions_1 = None
 
-        _vmap_increment_nesting_1 = torch._C._functorch._vmap_increment_nesting(12, 'error');  _vmap_increment_nesting_1 = None
+        _vmap_increment_nesting_python_wrapper_1 = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(12, 'error');  _vmap_increment_nesting_python_wrapper_1 = None
 
-        _add_batch_dim_1: "f32[4, 3]" = torch._C._functorch._add_batch_dim(basis, 0, 3);  basis = None
+        _add_batch_dim_python_wrapper_1: "f32[4, 3]" = torch._functorch.vmap._add_batch_dim_python_wrapper(basis, 0, 3);  basis = None
 
-        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([primals_out], [diff_primals], [_add_batch_dim_1], retain_graph = True, create_graph = True);  primals_out = diff_primals = _add_batch_dim_1 = None
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([primals_out], [diff_primals], [_add_batch_dim_python_wrapper_1], retain_graph = True, create_graph = True);  primals_out = diff_primals = _add_batch_dim_python_wrapper_1 = None
         batched_outputs: "f32[4, 3]" = _autograd_grad[0];  _autograd_grad = None
 
-        chunked_result: "f32[12, 4, 3]" = torch._C._functorch._remove_batch_dim(batched_outputs, 3, 12, 0);  batched_outputs = None
+        chunked_result: "f32[12, 4, 3]" = torch._functorch.vmap._remove_batch_dim_python_wrapper(batched_outputs, 3, 12, 0);  batched_outputs = None
 
-        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
+        _vmap_decrement_nesting_python_wrapper = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper = None
 
         split = chunked_result.split((12,), dim = 0);  chunked_result = None
         split_1: "f32[12, 4, 3]" = split[0];  split = None
@@ -3819,9 +3819,9 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled_1 = None
         _jvp_decrement_nesting = torch._C._functorch._jvp_decrement_nesting();  _jvp_decrement_nesting = None
 
-        results_1: "f32[12, 4, 3, 4, 3]" = torch._C._functorch._remove_batch_dim(tangents_out_unflatten, 1, 12, 0);  tangents_out_unflatten = None
+        results_1: "f32[12, 4, 3, 4, 3]" = torch._functorch.vmap._remove_batch_dim_python_wrapper(tangents_out_unflatten, 1, 12, 0);  tangents_out_unflatten = None
 
-        _vmap_decrement_nesting_1 = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
+        _vmap_decrement_nesting_python_wrapper_1 = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper_1 = None
 
         movedim: "f32[4, 3, 4, 3, 12]" = results_1.movedim(0, -1);  results_1 = None
         split_2 = movedim.split((12,), dim = -1);  movedim = None
@@ -3872,9 +3872,9 @@ class GraphModule(torch.nn.Module):
 
         lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions = None
 
-        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'error');  _vmap_increment_nesting = None
+        _vmap_increment_nesting_python_wrapper = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(12, 'error');  _vmap_increment_nesting_python_wrapper = None
 
-        child_1: "f32[3, 4]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
+        child_1: "f32[3, 4]" = torch._functorch.vmap._add_batch_dim_python_wrapper(child, 0, 1);  child = None
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
@@ -3921,16 +3921,16 @@ class GraphModule(torch.nn.Module):
 
         lazy_load_decompositions_1 = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions_1 = None
 
-        _vmap_increment_nesting_1 = torch._C._functorch._vmap_increment_nesting(12, 'error');  _vmap_increment_nesting_1 = None
+        _vmap_increment_nesting_python_wrapper_1 = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(12, 'error');  _vmap_increment_nesting_python_wrapper_1 = None
 
-        _add_batch_dim_1: "f32[4, 3]" = torch._C._functorch._add_batch_dim(basis, 0, 3);  basis = None
+        _add_batch_dim_python_wrapper_1: "f32[4, 3]" = torch._functorch.vmap._add_batch_dim_python_wrapper(basis, 0, 3);  basis = None
 
-        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([primals_out], [child_4], [_add_batch_dim_1], retain_graph = True, create_graph = True);  primals_out = child_4 = _add_batch_dim_1 = None
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([primals_out], [child_4], [_add_batch_dim_python_wrapper_1], retain_graph = True, create_graph = True);  primals_out = child_4 = _add_batch_dim_python_wrapper_1 = None
         child_5: "f32[3, 4]" = _autograd_grad[0];  _autograd_grad = None
 
-        child_6: "f32[12, 3, 4]" = torch._C._functorch._remove_batch_dim(child_5, 3, 12, 0);  child_5 = None
+        child_6: "f32[12, 3, 4]" = torch._functorch.vmap._remove_batch_dim_python_wrapper(child_5, 3, 12, 0);  child_5 = None
 
-        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
+        _vmap_decrement_nesting_python_wrapper = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper = None
 
         split = child_6.split((12,), dim = 0);  child_6 = None
         split_1: "f32[12, 3, 4]" = split[0];  split = None
@@ -3950,9 +3950,9 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled_1 = None
         _jvp_decrement_nesting = torch._C._functorch._jvp_decrement_nesting();  _jvp_decrement_nesting = None
 
-        child_10: "f32[12, 4, 3, 3, 4]" = torch._C._functorch._remove_batch_dim(child_9, 1, 12, 0);  child_9 = None
+        child_10: "f32[12, 4, 3, 3, 4]" = torch._functorch.vmap._remove_batch_dim_python_wrapper(child_9, 1, 12, 0);  child_9 = None
 
-        _vmap_decrement_nesting_1 = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
+        _vmap_decrement_nesting_python_wrapper_1 = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper_1 = None
 
         movedim: "f32[4, 3, 3, 4, 12]" = child_10.movedim(0, -1);  child_10 = None
         split_2 = movedim.split((12,), dim = -1);  movedim = None
@@ -5234,9 +5234,9 @@ class GraphModule(torch.nn.Module):
 
         lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions = None
 
-        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'error');  _vmap_increment_nesting = None
+        _vmap_increment_nesting_python_wrapper = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(12, 'error');  _vmap_increment_nesting_python_wrapper = None
 
-        child_1: "f32[4, 3]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
+        child_1: "f32[4, 3]" = torch._functorch.vmap._add_batch_dim_python_wrapper(child, 0, 1);  child = None
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
@@ -5262,9 +5262,9 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled_1 = None
         _jvp_decrement_nesting = torch._C._functorch._jvp_decrement_nesting();  _jvp_decrement_nesting = None
 
-        results: "f32[12, 4, 3]" = torch._C._functorch._remove_batch_dim(tangents_out_unflatten, 1, 12, 0);  tangents_out_unflatten = None
+        results: "f32[12, 4, 3]" = torch._functorch.vmap._remove_batch_dim_python_wrapper(tangents_out_unflatten, 1, 12, 0);  tangents_out_unflatten = None
 
-        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
+        _vmap_decrement_nesting_python_wrapper = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper = None
 
         movedim: "f32[4, 3, 12]" = results.movedim(0, -1);  results = None
         split = movedim.split((12,), dim = -1);  movedim = None
@@ -5315,9 +5315,9 @@ class GraphModule(torch.nn.Module):
 
         lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions = None
 
-        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'error');  _vmap_increment_nesting = None
+        _vmap_increment_nesting_python_wrapper = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(12, 'error');  _vmap_increment_nesting_python_wrapper = None
 
-        child_1: "f32[3, 4]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
+        child_1: "f32[3, 4]" = torch._functorch.vmap._add_batch_dim_python_wrapper(child, 0, 1);  child = None
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
@@ -5344,9 +5344,9 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled_1 = None
         _jvp_decrement_nesting = torch._C._functorch._jvp_decrement_nesting();  _jvp_decrement_nesting = None
 
-        results: "f32[12, 3, 4]" = torch._C._functorch._remove_batch_dim(tangents_out_unflatten, 1, 12, 0);  tangents_out_unflatten = None
+        results: "f32[12, 3, 4]" = torch._functorch.vmap._remove_batch_dim_python_wrapper(tangents_out_unflatten, 1, 12, 0);  tangents_out_unflatten = None
 
-        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
+        _vmap_decrement_nesting_python_wrapper = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper = None
 
         movedim: "f32[3, 4, 12]" = results.movedim(0, -1);  results = None
         split = movedim.split((12,), dim = -1);  movedim = None
@@ -5461,6 +5461,7 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        print(actual)
         self.assertExpectedInline(
             actual,
             """\
@@ -5484,9 +5485,9 @@ class GraphModule(torch.nn.Module):
 
         lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions = None
 
-        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'same');  _vmap_increment_nesting = None
+        _vmap_increment_nesting_python_wrapper = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(12, 'same');  _vmap_increment_nesting_python_wrapper = None
 
-        child_1: "f32[4, 3]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
+        child_1: "f32[4, 3]" = torch._functorch.vmap._add_batch_dim_python_wrapper(child, 0, 1);  child = None
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
@@ -5520,10 +5521,10 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled_1 = None
         _jvp_decrement_nesting = torch._C._functorch._jvp_decrement_nesting();  _jvp_decrement_nesting = None
 
-        child_8: "f32[12, 3, 4]" = torch._C._functorch._remove_batch_dim(child_6, 1, 12, 0);  child_6 = None
-        child_9: "f32[12, 4, 3]" = torch._C._functorch._remove_batch_dim(child_7, 1, 12, 0);  child_7 = None
+        child_8: "f32[12, 3, 4]" = torch._functorch.vmap._remove_batch_dim_python_wrapper(child_6, 1, 12, 0);  child_6 = None
+        child_9: "f32[12, 4, 3]" = torch._functorch.vmap._remove_batch_dim_python_wrapper(child_7, 1, 12, 0);  child_7 = None
 
-        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
+        _vmap_decrement_nesting_python_wrapper = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper = None
 
         movedim: "f32[3, 4, 12]" = child_8.movedim(0, -1);  child_8 = None
         split = movedim.split((12,), dim = -1);  movedim = None
@@ -5539,6 +5540,7 @@ class GraphModule(torch.nn.Module):
         return (unflatten, unflatten_1)
 """,
         )
+        print("ACT", actual)
 
     def test_jvp_simple(self):
         counters.clear()
@@ -6303,19 +6305,19 @@ class GraphModule(torch.nn.Module):
 
         lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions = None
 
-        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(3, 'error');  _vmap_increment_nesting = None
+        _vmap_increment_nesting_python_wrapper = torch._functorch.vmap._vmap_increment_nesting_python_wrapper(3, 'error');  _vmap_increment_nesting_python_wrapper = None
 
-        _add_batch_dim: "f32[3, 3]" = torch._C._functorch._add_batch_dim(l_x_, 0, 1);  l_x_ = None
+        _add_batch_dim_python_wrapper: "f32[3, 3]" = torch._functorch.vmap._add_batch_dim_python_wrapper(l_x_, 0, 1);  l_x_ = None
 
-        sum_1: "f32[3]" = _add_batch_dim.sum(0)
-        sum_2: "f32[3]" = _add_batch_dim.sum(1);  _add_batch_dim = None
+        sum_1: "f32[3]" = _add_batch_dim_python_wrapper.sum(0)
+        sum_2: "f32[3]" = _add_batch_dim_python_wrapper.sum(1);  _add_batch_dim_python_wrapper = None
         add: "f32[3]" = sum_1 + sum_2;  sum_1 = sum_2 = None
         batched_outputs: "f32[3]" = add + 3;  add = None
 
-        _remove_batch_dim: "f32[3, 3]" = torch._C._functorch._remove_batch_dim(batched_outputs, 1, 3, 0);  batched_outputs = None
+        _remove_batch_dim_python_wrapper: "f32[3, 3]" = torch._functorch.vmap._remove_batch_dim_python_wrapper(batched_outputs, 1, 3, 0);  batched_outputs = None
 
-        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
-        return (_remove_batch_dim,)
+        _vmap_decrement_nesting_python_wrapper = torch._functorch.vmap._vmap_decrement_nesting_python_wrapper();  _vmap_decrement_nesting_python_wrapper = None
+        return (_remove_batch_dim_python_wrapper,)
 """,
         )
 

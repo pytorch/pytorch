@@ -7,6 +7,8 @@
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/WrapDimUtils.h>
 #include <torch/csrc/functorch/init.h>
+#include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/python.h>
 

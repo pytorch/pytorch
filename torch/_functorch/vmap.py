@@ -149,6 +149,68 @@ def _process_batched_inputs(
 
 # Creates BatchedTensors for every Tensor in arg that should be batched.
 # Returns the (potentially) batched arguments and the batch_size.
+def _add_batch_dim_python_wrapper(self, batch_dim, level):
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+    from torch.fx.experimental.proxy_tensor import (
+        _fetch_proxies_and_all_constant_flag,
+        PreDispatchTorchFunctionMode,
+        track_tensor_tree,
+    )
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+    res = _add_batch_dim(self, batch_dim, level)
+
+    if mode is None:
+        return res
+
+    assert isinstance(mode, PreDispatchTorchFunctionMode)
+
+    tracer = mode.tracer
+
+    _, proxies, _ = _fetch_proxies_and_all_constant_flag(
+        (self, batch_dim, level), tracer
+    )
+
+    out_proxy = tracer.create_proxy(
+        "call_function",
+        _add_batch_dim_python_wrapper,
+        proxies,
+        {},
+    )
+    track_tensor_tree(res, out_proxy, constant=None, tracer=tracer)
+    return res
+
+
+def _remove_batch_dim_python_wrapper(self, level, batch_size, out_dim):
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+    from torch.fx.experimental.proxy_tensor import (
+        _fetch_proxies_and_all_constant_flag,
+        PreDispatchTorchFunctionMode,
+        track_tensor_tree,
+    )
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+    res = _remove_batch_dim(self, level, batch_size, out_dim)
+
+    if mode is None:
+        return res
+
+    assert isinstance(mode, PreDispatchTorchFunctionMode)
+
+    tracer = mode.tracer
+
+    _, proxies, _ = _fetch_proxies_and_all_constant_flag(
+        (self, level, batch_size, out_dim), tracer
+    )
+
+    out_proxy = tracer.create_proxy(
+        "call_function",
+        _remove_batch_dim_python_wrapper,
+        proxies,
+        {},
+    )
+    track_tensor_tree(res, out_proxy, constant=None, tracer=tracer)
+    return res
 
 
 def _create_batched_inputs(
@@ -156,7 +218,9 @@ def _create_batched_inputs(
 ) -> tuple:
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [
-        arg if in_dim is None else _add_batch_dim(arg, in_dim, vmap_level)
+        arg
+        if in_dim is None
+        else _add_batch_dim_python_wrapper(arg, in_dim, vmap_level)
         for in_dim, arg in zip(flat_in_dims, flat_args)
     ]
     return tree_unflatten(batched_inputs, args_spec)
@@ -181,7 +245,9 @@ def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_di
             "Did you mean to set out_dims= to None for output?"
         )
 
-    return _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)
+    return _remove_batch_dim_python_wrapper(
+        batched_output, vmap_level, batch_size, out_dim
+    )
 
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
@@ -465,13 +531,70 @@ def _check_randomness_arg(randomness):
         )
 
 
+def _vmap_increment_nesting_python_wrapper(batch_size, randomness):
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+    from torch.fx.experimental.proxy_tensor import (
+        _fetch_proxies_and_all_constant_flag,
+        PreDispatchTorchFunctionMode,
+        track_tensor_tree,
+    )
+
+    res = _vmap_increment_nesting(batch_size, randomness)
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+    if mode is None:
+        return res
+
+    assert isinstance(mode, PreDispatchTorchFunctionMode)
+
+    tracer = mode.tracer
+    _, proxies, _ = _fetch_proxies_and_all_constant_flag(
+        (batch_size, randomness), tracer
+    )
+
+    out_proxy = tracer.create_proxy(
+        "call_function",
+        _vmap_increment_nesting_python_wrapper,
+        proxies,
+        {},
+    )
+    track_tensor_tree(res, out_proxy, constant=None, tracer=tracer)
+    return res
+
+
+def _vmap_decrement_nesting_python_wrapper():
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+    from torch.fx.experimental.proxy_tensor import (
+        PreDispatchTorchFunctionMode,
+        track_tensor_tree,
+    )
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+    res = _vmap_decrement_nesting()
+
+    if mode is None:
+        return res
+
+    assert isinstance(mode, PreDispatchTorchFunctionMode)
+
+    tracer = mode.tracer
+    out_proxy = tracer.create_proxy(
+        "call_function",
+        _vmap_decrement_nesting_python_wrapper,
+        (),
+        {},
+    )
+    track_tensor_tree(res, out_proxy, constant=None, tracer=tracer)
+    return res
+
+
 @contextlib.contextmanager
 def vmap_increment_nesting(batch_size, randomness):
     try:
-        vmap_level = _vmap_increment_nesting(batch_size, randomness)
+        vmap_level = _vmap_increment_nesting_python_wrapper(batch_size, randomness)
         yield vmap_level
     finally:
-        _vmap_decrement_nesting()
+        _vmap_decrement_nesting_python_wrapper()
 
 
 def _flat_vmap(

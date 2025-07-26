@@ -244,6 +244,8 @@ manual_torch_name_rule_map: dict[
     "torch._C.set_autocast_xla_dtype": SkipFunctionVariable,
     "torch._C.set_autocast_xla_enabled": SkipFunctionVariable,
     "torch.resize_as_": SkipFunctionVariable,
+    "torch._functorch.vmap._add_batch_dim_python_wrapper": TorchInGraphFunctionVariable,
+    "torch._functorch.vmap._remove_batch_dim_python_wrapper": TorchInGraphFunctionVariable,
     "torch.resize_as_sparse_": SkipFunctionVariable,
     "torch.get_default_device": TorchInGraphFunctionVariable,
     # functorch/vmap
@@ -324,8 +326,6 @@ manual_torch_name_rule_map: dict[
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     # functorch/C++ bindings
-    "torch._C._functorch._add_batch_dim": TorchInGraphFunctionVariable,
-    "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch._wrap_for_grad": TorchInGraphFunctionVariable,
     "torch._C._functorch._unwrap_for_grad": TorchInGraphFunctionVariable,
     "torch._C._functorch._unwrap_batched": TorchInGraphFunctionVariable,
@@ -334,6 +334,8 @@ manual_torch_name_rule_map: dict[
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
     "torch._C._functorch.peek_interpreter_stack": TorchInGraphFunctionVariable,
     "torch._C._functorch.unwrap_if_dead": TorchInGraphFunctionVariable,
+    "torch._functorch.vmap._vmap_increment_nesting_python_wrapper": TorchInGraphFunctionVariable,
+    "torch._functorch.vmap._vmap_decrement_nesting_python_wrapper": TorchInGraphFunctionVariable,
     # everything else
     "torch._functorch.pyfunctorch.coerce_cinterpreter": TorchInGraphFunctionVariable,
     "torch._higher_order_ops.triton_kernel_wrap.do_prune_configs": UserFunctionVariable,

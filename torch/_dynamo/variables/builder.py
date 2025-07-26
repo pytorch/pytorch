@@ -3005,9 +3005,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
-    elif (
-        isinstance(example_value, (int, float, bool))
-        and proxy.node.target is call_torchbind
+    elif isinstance(example_value, (int, float, bool)) and (
+        proxy.node.target is call_torchbind
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
@@ -3018,6 +3017,12 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
+        set_example_value(proxy.node, example_value)
+        return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, int) and proxy.node.target in [
+        torch._functorch.vmap._vmap_increment_nesting_python_wrapper,
+        torch._functorch.vmap._vmap_decrement_nesting_python_wrapper,
+    ]:
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     else:
