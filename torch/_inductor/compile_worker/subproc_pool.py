@@ -168,7 +168,9 @@ class SubprocPool:
             stderr=subprocess.DEVNULL if local else None,
         )
         self.write_lock = threading.Lock()
-        self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
+        self.read_thread = threading.Thread(
+            target=self._read_thread, name="InductorSubproc", daemon=True
+        )
 
         self.futures_lock = threading.Lock()
         self.pending_futures: dict[int, Future[Any]] = {}
