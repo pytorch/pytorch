@@ -483,7 +483,7 @@ class TestTorchDlPack(TestCase):
             from_dlpack(inp)
 
 
-instantiate_device_type_tests(TestTorchDlPack, globals())
+instantiate_device_type_tests(TestTorchDlPack, globals(), allow_mps=True)
 
 if __name__ == "__main__":
     run_tests()
