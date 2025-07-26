@@ -23,6 +23,9 @@
 #include <ATen/Parallel.h>
 #endif
 
+#if AT_USE_EIGEN_SPARSE()
+#include <ATen/native/sparse/eigen/SparseBlasImpl.h>
+#endif
 
 namespace at::native::sparse::impl {
 
@@ -442,13 +445,15 @@ void add_out_sparse_csr(
     const Tensor& mat2,
     const Scalar& alpha,
     const Tensor& result) {
-#if !AT_MKL_ENABLED()
-  TORCH_CHECK(
-      false,
-      "Calling add on a sparse CPU tensor requires compiling PyTorch with MKL. ",
-      "Please use PyTorch built MKL support.");
-#else
+#if AT_USE_MKL_SPARSE()
   sparse::impl::mkl::add_out_sparse_csr(mat1, mat2, alpha, result);
+#elif AT_USE_EIGEN_SPARSE()
+  sparse::impl::eigen::add_out_sparse(mat1, mat2, alpha, result);
+#else
+  TORCH_CHECK(
+    false,
+    "Calling add on a sparse CPU tensor requires compiling PyTorch with MKL. ",
+    "Please use PyTorch built MKL support.");
 #endif
 }
 
@@ -459,7 +464,7 @@ void triangular_solve_out_sparse_csr(
     bool upper,
     bool transpose,
     bool unitriangular) {
-#if !AT_MKL_ENABLED()
+#if !AT_USE_MKL_SPARSE()
   TORCH_CHECK(
       false,
       "Calling triangular_solve on a sparse CPU tensor requires compiling PyTorch with MKL. ",
