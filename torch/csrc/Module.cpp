@@ -8,7 +8,6 @@
 #ifndef _MSC_VER
 #include <sys/socket.h>
 #endif
-
 #include <ATen/ATen.h>
 #include <ATen/BlasBackend.h>
 #include <ATen/CachedTensorUtils.h>
@@ -25,6 +24,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/Normalization.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
@@ -143,6 +143,13 @@ namespace py = pybind11;
 static PyObject* module;
 
 static THPGenerator* THPDefaultCPUGenerator = nullptr;
+
+bool registerPythonPrivateUse1Hook(py::object hook);
+bool registerPythonPrivateUse1DeviceGuard(py::object guard);
+at::Tensor createEmptyTensor(
+  const std::vector<int64_t>& shape,
+  c10::ScalarType dtype
+);
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -2770,12 +2777,16 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_get_torch_function_state", []() {
     return at::impl::PythonTorchFunctionTLS::get_disabled_state();
   });
+  py_module.def("register_python_privateuseone_hook", &registerPythonPrivateUse1Hook);
+  py_module.def("register_python_privateuseone_device_guard", &registerPythonPrivateUse1DeviceGuard);
+  py_module.def("create_empty_tensor", &createEmptyTensor);
   torch::set_disabled_torch_function_impl(
       PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);
   torch::set_disabled_torch_dispatch_impl(
       PyObject_GetAttrString(module, "_disabled_torch_dispatch_impl"));
   ASSERT_TRUE(torch::disabled_torch_dispatch_impl() != nullptr);
+
   // init kineto here
 #ifdef USE_KINETO
   torch::global_kineto_init();
@@ -2804,3 +2815,185 @@ struct call_duplicate_guard {
 };
 
 static call_duplicate_guard _call_duplicate_guard;
+
+// python hook interface
+class PythonPrivateUse1HooksInterface: public at::PrivateUse1HooksInterface {
+
+ public:
+  PythonPrivateUse1HooksInterface(py::object hook): underlying_python_hook_(hook) {}
+
+  bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
+    py::gil_scoped_acquire _;
+    return underlying_python_hook_.attr("has_primary_context")().cast<bool>();
+  }
+
+  bool isBuilt() const override {
+    py::gil_scoped_acquire _;
+    return underlying_python_hook_.attr("is_built")().cast<bool>();
+  }
+
+  bool isAvailable() const override {
+    py::gil_scoped_acquire _;
+    return underlying_python_hook_.attr("is_available")().cast<bool>();
+  }
+
+  // TODO(qihqi): these is not supported from python yet
+  const at::Generator& getDefaultGenerator(
+      c10::DeviceIndex device_index) const override {
+    return at::PrivateUse1HooksInterface::getDefaultGenerator(device_index);
+  }
+
+  at::Generator getNewGenerator(c10::DeviceIndex device_index = -1) const override {
+    return at::PrivateUse1HooksInterface::getNewGenerator(device_index);
+  }
+
+  at::Device getDeviceFromPtr(void* data) const override {
+    return at::PrivateUse1HooksInterface::getDeviceFromPtr(data);
+  }
+
+  bool isPinnedPtr(const void* data) const override {
+    return at::PrivateUse1HooksInterface::isPinnedPtr(data);
+  }
+
+  at::Allocator* getPinnedMemoryAllocator() const override {
+    return at::PrivateUse1HooksInterface::getPinnedMemoryAllocator();
+  }
+
+ private:
+  py::object underlying_python_hook_;
+};
+
+// python device guard
+
+
+
+struct PythonPrivateUse1DeviceGuard final : public c10::impl::DeviceGuardImplInterface {
+  PythonPrivateUse1DeviceGuard(py::object guard) : underlying_python_guard_(guard) { }
+
+  c10::DeviceType type() const override {
+    return c10::DeviceType::PrivateUse1;
+  }
+  c10::Device exchangeDevice(c10::Device device) const override {
+    py::gil_scoped_acquire gil;
+    underlying_python_guard_.attr("exchange_device")(device.index());
+    return getDevice();
+  }
+  c10::Device getDevice() const override {
+    py::gil_scoped_acquire _;
+    int device_id;
+    if (underlying_python_guard_.is_none()) {
+      std::cout << "I am None" << std::endl;
+      return c10::Device(type(), 0);
+    }
+    py::object py_device_id = underlying_python_guard_.attr("get_device_id");
+    if (py_device_id.is_none()) {
+      device_id = 0;
+    } else {
+      device_id = py_device_id().cast<c10::DeviceIndex>();
+    }
+    return c10::Device(type(), device_id);
+  }
+  void setDevice(c10::Device device) const override {
+    py::gil_scoped_acquire gil;
+    underlying_python_guard_.attr("set_device")(device.index());
+    // no-op
+  }
+  void uncheckedSetDevice(c10::Device device) const noexcept override {
+    py::gil_scoped_acquire gil;
+    try {
+      underlying_python_guard_.attr("set_device")(device.index());
+    } catch (const py::error_already_set& e) {
+    // no-op
+    }
+  }
+  // TODO
+  c10::Stream getStream(c10::Device) const noexcept override {
+    // no-op
+    return c10::Stream(c10::Stream::DEFAULT, getDevice());
+  }
+
+  c10::Stream getNewStream(c10::Device, int priority = 0) const override {
+    // no-op
+    (void)priority;
+    return c10::Stream(c10::Stream::DEFAULT, getDevice());
+  }
+
+  c10::Stream exchangeStream(c10::Stream) const noexcept override {
+    // no-op
+    return c10::Stream(c10::Stream::DEFAULT, getDevice());
+  }
+  c10::DeviceIndex deviceCount() const noexcept override {
+    return 1;
+  }
+
+  // TODO(qihqi): support Event-related functions
+  void record(
+      void** /*event*/,
+      const c10::Stream& /*stream*/,
+      const c10::DeviceIndex /*device_index*/,
+      const c10::EventFlag /*flag*/) const override {
+  }
+  void block(void* /*event*/, const c10::Stream& /*stream*/) const override {
+  }
+  bool queryEvent(void* /*event*/) const override {
+    return true;
+  }
+  void destroyEvent(void* /*event*/, const c10::DeviceIndex /*device_index*/)
+      const noexcept override {}
+
+  // Stream-related functions
+  bool queryStream(const c10::Stream& /*stream*/) const override {
+    return true;
+  }
+  void synchronizeStream(const c10::Stream& /*stream*/) const override { }
+
+  py::object underlying_python_guard_;
+};
+
+bool registerPythonPrivateUse1Hook(py::object hook) {
+  if (at::isPrivateUse1HooksRegistered()) {
+    return false;
+  }
+  at::RegisterPrivateUse1HooksInterface(new PythonPrivateUse1HooksInterface(hook));
+  return true;
+}
+
+bool registerPythonPrivateUse1DeviceGuard(py::object guard) {
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    return false;
+  }
+  c10::impl::registerDeviceGuard(
+    c10::DeviceType::PrivateUse1,
+    new PythonPrivateUse1DeviceGuard(guard));
+  return true;
+}
+
+at::Tensor createEmptyTensor(
+  const std::vector<int64_t>& shape, c10::ScalarType dtype
+) {
+  c10::Storage storage{
+    c10::Storage::use_byte_size_t{},
+    0,
+    c10::GetAllocator(c10::kMeta),
+    true,
+  };
+
+  c10::Device device(c10::DeviceType::PrivateUse1, 0);
+  storage.set_data_ptr_noswap(at::DataPtr{nullptr, device});
+  c10::DispatchKeySet key_set({c10::DispatchKey::PrivateUse1});
+  at::Tensor tensor = at::detail::make_tensor<at::TensorImpl>(
+    std::move(storage),
+    key_set,
+    c10::scalarTypeToTypeMeta(dtype)
+  );
+
+  std::vector<int64_t> strides(shape.size());
+  int64_t size = 1;
+  for (int i = strides.size() - 1; i >=0; --i) {
+    strides[i] = size;
+    size *= shape[i];
+  }
+
+  tensor.unsafeGetTensorImpl()->set_sizes_and_strides(shape, strides, 0);
+  return tensor;
+}

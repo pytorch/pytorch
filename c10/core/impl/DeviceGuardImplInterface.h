@@ -346,6 +346,9 @@ class C10_API DeviceGuardImplRegistrar {
   DeviceGuardImplRegistrar(DeviceType, const DeviceGuardImplInterface*);
 };
 
+void C10_API
+registerDeviceGuard(DeviceType type, const DeviceGuardImplInterface* impl);
+
 #define C10_REGISTER_GUARD_IMPL(DevType, DeviceGuardImpl)              \
   static ::c10::impl::DeviceGuardImplRegistrar C10_ANONYMOUS_VARIABLE( \
       g_##DeviceType)(::c10::DeviceType::DevType, new DeviceGuardImpl());
