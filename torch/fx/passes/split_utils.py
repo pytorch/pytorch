@@ -245,7 +245,7 @@ def split_by_tags(
             # We don't need components mapping for nodes of type "get_attr"
             # that are consumed by the output. Only need to make sure we create
             # corresponding counterparts in the resulting graph.
-            main_remapping[x] = main_g.get_attr(x.name, type_expr=x.type)
+            main_remapping[x] = main_g.get_attr(x.target, type_expr=x.type)
         else:
             # All component results consumed by the output node should be
             # marked as "used in main".
