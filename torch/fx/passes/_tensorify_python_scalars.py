@@ -203,7 +203,7 @@ def tensorify_python_scalars(
                 and node.target is torch.ops.aten._local_scalar_dense.default
             ):
                 dtype = node.args[0].meta["val"].dtype
-                if dtype != torch.float64:
+                if not dtype.is_floating_point:
                     continue
 
                 assert isinstance(node.args[0], fx.Node), node.args[0]
@@ -259,6 +259,16 @@ def tensorify_python_scalars(
                     ):
                         transform = True
                         try:
+                            for arg in zf.node.expr.args:
+                                if (
+                                    isinstance(arg, Symbol)
+                                    and arg in expr_to_tensor_proxy
+                                ):
+                                    expr_to_tensor_proxy[arg] = (
+                                        torch.ops.prims.convert_element_type.default(
+                                            expr_to_tensor_proxy[arg], compute_dtype
+                                        )
+                                    )
                             proxy = _sympy_interp(zf.node.expr)
                         except NotImplementedError:
                             transform = False
