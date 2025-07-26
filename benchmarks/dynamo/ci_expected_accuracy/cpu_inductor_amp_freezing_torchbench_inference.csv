@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,fail_accuracy,46
 
 
 
-detectron2_fcos_r_50_fpn,fail_accuracy,22
+detectron2_fcos_r_50_fpn,fail_accuracy,24
 
 
 
@@ -346,7 +346,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,fail_accuracy,30
+vision_maskrcnn,fail_accuracy,29
 
 
 
