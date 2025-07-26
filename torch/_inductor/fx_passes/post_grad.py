@@ -660,6 +660,90 @@ def lazy_init():
         extra_check=prepare_softmax_extra_check,
     )
 
+    register_addmm_activation_fusion()
+
+
+def register_addmm_activation_fusion():
+    shapes = [(5,), (3, 4), (4, 5)]
+    args_f32 = [torch.empty(shape) for shape in shapes]
+    args_bf16 = [torch.empty(shape, dtype=torch.bfloat16) for shape in shapes]
+
+    for pattern in [addmm_relu_pattern, addmm_relu_pattern_2]:
+        register_replacement(
+            pattern,
+            addmm_relu_replacement,
+            args_f32,
+            trace_fn=fwd_only,
+            pass_dicts=pass_patterns[2],
+            extra_check=is_valid_addmm_activation_fusion,
+        )
+
+    # bfloat16 to detect upcast in the decomposed gelu
+    for args in [args_f32, args_bf16]:
+        for pattern in [addmm_gelu_pattern, addmm_gelu_pattern_2]:
+            register_replacement(
+                pattern,
+                addmm_gelu_replacement,
+                args,
+                trace_fn=fwd_only,
+                pass_dicts=pass_patterns[2],
+                extra_check=is_valid_addmm_activation_fusion,
+            )
+
+
+def is_valid_addmm_activation_fusion(match):
+    if config.max_autotune_gemm:
+        return False
+    input = match.kwargs["input"].meta["val"]
+    mat1 = match.kwargs["mat1"].meta["val"]
+    mat2 = match.kwargs["mat2"].meta["val"]
+
+    # match the dispatch logic for cuBLASLT at aten/src/ATen/native/cuda/Blas.cpp
+    if not (input.is_cuda and input.dim() == 1 and input.is_contiguous()):
+        return False
+
+    if not (mat1.dim() == 2 and mat2.dim() == 2):
+        return False
+
+    if input.size(0) != mat2.size(1):
+        return False
+
+    output = match.output_node()
+    # do not fuse if there are pointwise ops after
+    return not all(is_pointwise_use(use) for use in output.users)
+
+
+def addmm_gelu_pattern(input, mat1, mat2):
+    output = aten.mm(mat1, mat2)
+    output = aten.add(output, input)
+    return aten.gelu(output, approximate="tanh")
+
+
+def addmm_gelu_pattern_2(input, mat1, mat2):
+    output = aten.mm(mat1, mat2)
+    output = aten.add(input, output)
+    return aten.gelu(output, approximate="tanh")
+
+
+def addmm_gelu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, beta=1, alpha=1, use_gelu=True)
+
+
+def addmm_relu_pattern(input, mat1, mat2):
+    output = aten.mm(mat1, mat2)
+    output = aten.add(input, output)
+    return aten.relu(output)
+
+
+def addmm_relu_pattern_2(input, mat1, mat2):
+    output = aten.mm(mat1, mat2)
+    output = aten.add(output, input)
+    return aten.relu(output)
+
+
+def addmm_relu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, beta=1, alpha=1, use_gelu=False)
+
 
 def reorder_for_locality(graph: torch.fx.Graph):
     if torch.distributed.is_available():
@@ -1461,7 +1545,7 @@ def should_prefer_unfused_addmm(match):
 
 @register_graph_pattern(
     CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
-    pass_dict=pass_patterns[2],
+    pass_dict=pass_patterns[1],
     extra_check=should_prefer_unfused_addmm,
 )
 def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
