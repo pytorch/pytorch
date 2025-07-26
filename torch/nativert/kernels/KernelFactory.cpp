@@ -22,8 +22,7 @@ namespace {
 c10::Device inferTargetDevice(
     const Node& node,
     const std::unordered_map<std::string, torch::nativert::TensorMeta>&
-        tensorValuesMeta,
-    const Placement& placement) {
+        tensorValuesMeta) {
   if (node.target() == "prim.Input" || node.target() == "prim.Output") {
     return c10::Device(c10::DeviceType::CPU);
   }
@@ -56,7 +55,7 @@ c10::Device inferTargetDevice(
       }
     }
 
-    return placement.getMappedDevice(devices[0]);
+    return devices[0];
   }
 }
 
@@ -126,7 +125,6 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
     const Graph& graph,
     const std::shared_ptr<Weights>& weights,
     const torch::nativert::ExecutorConfig& executorConfig,
-    const Placement& placement,
     const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
         pytorchStreamReader) {
   std::vector<std::unique_ptr<OpKernel>> nodeKernels;
@@ -146,7 +144,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
     std::string target = std::string(node.target());
 
     c10::Device targetDevice =
-        inferTargetDevice(node, graph.tensorValuesMeta(), placement);
+        inferTargetDevice(node, graph.tensorValuesMeta());
 
     bool matched = false;
     for (const auto& [_, handler] : handlers) {
@@ -212,8 +210,8 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       for (const auto& attr : node.attributes()) {
         if (std::holds_alternative<std::unique_ptr<Graph>>(attr.value)) {
           const auto& subgraph = std::get<std::unique_ptr<Graph>>(attr.value);
-          auto executionKernels = initializeNodeKernels(
-              *subgraph, weights, executorConfig, placement);
+          auto executionKernels =
+              initializeNodeKernels(*subgraph, weights, executorConfig);
           TORCH_CHECK(
               executionKernels.delegateExecutors.empty(),
               "HigherOrderKernel does not support delegates");

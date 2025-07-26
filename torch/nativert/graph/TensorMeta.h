@@ -10,6 +10,7 @@
 #include <c10/util/ArrayRef.h>
 
 #include <torch/csrc/utils/generated_serialization_types.h>
+#include <torch/nativert/executor/Placement.h>
 
 namespace torch::nativert {
 
@@ -66,6 +67,11 @@ class TensorMeta {
   c10::TensorOptions asTensorOptions() const {
     return c10::TensorOptions().dtype(dtype_).layout(layout_).requires_grad(
         requiresGrad_);
+  }
+
+  // override device according to placement
+  void applyDevicePlacement(const Placement& placement) {
+    device_ = placement.getMappedDevice(device_);
   }
 
   // NYI
