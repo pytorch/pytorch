@@ -33,7 +33,7 @@
  * for each row along with the quantized weights.
  */
 c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
-    at::Tensor qweight) {
+    const at::Tensor& qweight) {
   static constexpr int64_t version = 1;
   TORCH_CHECK(
       qweight.dim() == 2,
@@ -67,8 +67,8 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
       "Expect embedding_bag weights to be quantized using kPerChannelAffineFloatQParams");
   std::vector<float> weight_bias(embedding_rows);
 
-  at::Tensor channel_scales = qweight.q_per_channel_scales();
-  at::Tensor channel_zero_points = qweight.q_per_channel_zero_points();
+  const auto& channel_scales = qweight.q_per_channel_scales();
+  const auto& channel_zero_points = qweight.q_per_channel_zero_points();
   std::vector<float> weight_scales(
       channel_scales.data_ptr<float>(),
       channel_scales.data_ptr<float>() + embedding_rows);
@@ -77,6 +77,11 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
       channel_zero_points.data_ptr<float>() + embedding_rows);
 
   for (const auto i : c10::irange(embedding_rows)) {
+    // As of now weight_zero_points and weight_scales are initialized with
+    // the size of embedding_rows. Hence, this linter is a false positive.
+    // However, if this assumption changes in the future, we need to
+    // ensure that the bounds are checked.
+    // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
     weight_bias[i] = weight_zero_points[i] * weight_scales[i] * -1;
   }
 
@@ -237,16 +242,16 @@ Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
 
   const auto weight_sizes = weight.sizes();
   const auto cols_dim = weight_sizes.size() - 1;
-  const int64_t embedding_rows = c10::size_to_dim_(cols_dim, weight_sizes);
-  const int32_t embedding_cols = weight_sizes[cols_dim];
+  const int64_t embedding_rows = c10::size_to_dim_(static_cast<int>(cols_dim), weight_sizes);
+  const int32_t embedding_cols = static_cast<int32_t>(weight_sizes[cols_dim]);
   // Add 8 bytes per column to store FP32 scale and zero_point per row.
-  const int32_t output_columns = embedding_cols + 2 * sizeof(float);
+  const int32_t output_columns = static_cast<int32_t>(embedding_cols + 2 * sizeof(float));
   const auto weight_contig =
       weight.expect_contiguous(weight.suggest_memory_format());
 
   // Adjust output dimensions to account for FP32 scale and zero_points.
   std::vector<int64_t> output_shape = weight_sizes.vec();
-  output_shape[cols_dim] = output_columns;
+  output_shape.at(cols_dim) = output_columns;
   at::native::resize_(output, output_shape, std::nullopt);
   auto* output_data = output.data_ptr<uint8_t>();
 
@@ -330,13 +335,13 @@ Tensor qembeddingbag_byte_prepack_meta(const Tensor& weight) {
       "'embedding_bag_byte_prepack' only support float32 or float16.");
   const auto weight_sizes = weight.sizes();
   const auto cols_dim = weight_sizes.size() - 1;
-  const int32_t embedding_cols = weight_sizes[cols_dim];
+  const int32_t embedding_cols = static_cast<int32_t>(weight_sizes[cols_dim]);
   // Add 8 bytes per column to store FP32 scale and zero_point per row.
-  const int32_t output_columns = embedding_cols + 2 * sizeof(float);
+  const int32_t output_columns = static_cast<int32_t>(embedding_cols + 2 * sizeof(float));
 
   // Adjust output dimensions to account for FP32 scale and zero_points.
   std::vector<int64_t> output_shape = weight_sizes.vec();
-  output_shape[cols_dim] = output_columns;
+  output_shape.at(cols_dim) = output_columns;
   at::SymDimVector output_shape_vec(output_shape);
 
   return at::empty_symint(
@@ -407,7 +412,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
                 bit_width,
                 weight_data + start_idx * embedding_cols,
                 end_idx - start_idx,
-                embedding_cols,
+                static_cast<int>(embedding_cols),
                 output_data + start_idx * output_shape[1]);
           });
     } else {
@@ -418,7 +423,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
                 bit_width,
                 weight_data + start_idx * embedding_cols,
                 end_idx - start_idx,
-                embedding_cols,
+                static_cast<int>(embedding_cols),
                 output_data + start_idx * output_shape[1]);
           });
     }
@@ -475,7 +480,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
         std::uint8_t quantized = std::max(
             0,
             std::min<int>(
-                lrintf((X - Xmin) * inverse_scale), (1 << bit_width) - 1));
+                static_cast<int>(lrintf((X - Xmin) * inverse_scale)), (1 << bit_width) - 1));
         // We pack 2 4-bit values in a byte. Index 0 is packed in the lower
         // 4-bits and index 1 is packed in the upper 4-bits.
         if (col % NUM_ELEM_PER_BYTE == 0) {
@@ -528,8 +533,8 @@ Tensor qembeddingbag_2bit_prepack(
 
 class QEmbeddingPackWeights final {
  public:
-  static c10::intrusive_ptr<EmbeddingPackedParamsBase> run(at::Tensor weight) {
-    return PackedEmbeddingBagWeight::prepack(std::move(weight));
+  static c10::intrusive_ptr<EmbeddingPackedParamsBase> run(const at::Tensor& weight) {
+    return PackedEmbeddingBagWeight::prepack(weight);
   }
 };
 
