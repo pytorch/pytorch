@@ -8337,7 +8337,7 @@ class TestTorch(TestCase):
         self.assertExpectedInline(str(x), '''tensor([1.0000e+02, 1.0000e-02])''')
         torch.set_printoptions(sci_mode=False)
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpectedInline(str(x), '''tensor([  100.0000,     0.0100])''')
+        self.assertExpectedInline(str(x), '''tensor([100.0000,   0.0100])''')
         torch.set_printoptions(sci_mode=None)  # reset to the default value
 
         # test no leading space if all elements positive
