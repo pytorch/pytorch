@@ -12,6 +12,10 @@ except ImportError:
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_FP8,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -277,6 +281,10 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_BF16 or not PLATFORM_SUPPORTS_FP8,
+        "Scaled mm requires bf16 and fp8 support",
+    )
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("dtype", (torch.bfloat16,))
