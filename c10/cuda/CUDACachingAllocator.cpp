@@ -1284,7 +1284,7 @@ class DeviceCachingAllocator {
       TORCH_INTERNAL_ASSERT(b != nullptr);
       TORCH_INTERNAL_ASSERT(b->pool != nullptr);
       if (b->allocated && b->pool->owner_PrivatePool == pool) {
-        if (!expected_live_allocations.count(b->ptr)) {
+        if (!expected_live_allocations.contains(b->ptr)) {
           return false;
         }
 
@@ -2076,7 +2076,7 @@ class DeviceCachingAllocator {
 
     for (auto& segment : pps.segments) {
       auto ptr = segment.blocks.at(0).ptr;
-      TORCH_CHECK(ptrs_to_blocks.count(ptr), " could not find ", ptr)
+      TORCH_CHECK(ptrs_to_blocks.contains(ptr), " could not find ", ptr)
       auto block = ptrs_to_blocks[ptr];
 
       setSegmentStateToCheckpoint(block, segment, context, rr);
