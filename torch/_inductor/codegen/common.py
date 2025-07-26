@@ -484,6 +484,10 @@ def get_custom_backend_config_for_device(device: str) -> Optional[ConfigModule]:
 
 @functools.cache
 def init_backend_registration() -> None:
+    """
+    Register the backend for different devices, including the scheduling
+    for kernel code generation and the host side wrapper code generation.
+    """
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
