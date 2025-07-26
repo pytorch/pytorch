@@ -12513,7 +12513,7 @@ class TestMetalLibrary(TestCaseMPS):
         lib = torch.mps.compile_shader("#include <c10/metal/special_math.h>")
         self.assertIsNotNone(lib)
 
-    @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.int64])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16, torch.int32, torch.int64])
     def test_reduction_utils(self, dtype):
         if dtype == torch.int64 and MACOS_VERSION < 13.3:
             raise unittest.SkipTest("Using simd_shuffle_down_and_fill results in ICE on MacOS-13")
@@ -12526,31 +12526,38 @@ class TestMetalLibrary(TestCaseMPS):
                 out[idx] = c10::metal::simd_sum(inp[idx]);
             }}
 
-            kernel void do_max(device {DTYPE_TO_METAL[dtype]}* out,
+            kernel void do_max(device {DTYPE_TO_METAL[dtype]}* out0,
+                               device int* out1,
                                constant {DTYPE_TO_METAL[dtype]}* inp,
                                uint idx [[thread_position_in_grid]]) {{
-                out[idx] = c10::metal::simd_max(inp[idx]);
+                out0[idx] = c10::metal::simd_max(inp[idx]);
+                out1[idx] = c10::metal::simd_argmax(inp[idx]);
             }}
+
         """)
         x = torch.testing.make_tensor(28, device="mps", dtype=dtype)
         y = torch.empty_like(x)
-        z = torch.empty_like(x)
+        z0 = torch.empty_like(x)
+        z1 = torch.empty_like(x, dtype=torch.int32)
         lib.do_sum(y, x)
-        lib.do_max(z, x)
+        lib.do_max(z0, z1, x)
         x_sum = x.sum()
-        x_max = x.max()
+        x_max, x_max_idx = x.max(dim=0)
         max_err = (y - x_sum).abs().max().item()
         self.assertLess(max_err, 1e-2 if dtype == torch.float16 else 1e-5,
                         f"results are {y}, but all elements should have been {x_sum.item()}")
-        self.assertTrue((z == x_max).all().item(),
-                        f"results are {z}, but all elements should have been {x_max.item()}")
+        self.assertTrue((z0 == x_max).all().item(),
+                        f"results are {z0}, but all elements should have been {x_max.item()}")
+        self.assertTrue((z1 == x_max_idx).all().item(),
+                        f"results are {z1}, but all elements should have been {x_max_idx.item()}")
         # Test nan propagation
         if not dtype.is_floating_point:
             return
 
         x[5] = torch.nan
-        lib.do_max(z, x)
-        self.assertTrue(z.isnan().all().item(), "results are {z}, but all elements shold have been nan")
+        lib.do_max(z0, z1, x)
+        self.assertTrue(z0.isnan().all().item(), "results are {z0}, but all elements shold have been nan")
+        self.assertTrue((z1 == 5).all().item(), "results are {z1}, but all elements shold have been 5")
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.bfloat16])
     def test_atomic_add(self, dtype):
