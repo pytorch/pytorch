@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
+    LinearModule,
     ModelArgs,
     NUM_DEVICES,
     skip_unless_torch_gpu,
@@ -72,6 +73,107 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                     device_mesh=param_m2.device_mesh, placements=replicate
                 ).to_local()
             self.assertEqual(param_m2, param_m1)
+
+    def _test_linear_training_e2e(self, is_row_parallel=False):
+        inp_size = [8, 10]
+        # Ensure all tp ranks have same input.
+        rng_seed = 0
+        torch.manual_seed(rng_seed)
+        inp = torch.rand(*inp_size, device=self.device_type)
+        model = LinearModule(self.device_type)
+        model_tp = deepcopy(model)
+
+        # Ensure model are initialized the same way.
+        self._check_module(model, model_tp)
+
+        # Shard module and initialize optimizer.
+        LR = 0.25
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+        if is_row_parallel:
+            AxisParallel = RowwiseParallel
+        else:
+            AxisParallel = ColwiseParallel
+
+        parallelize_plan = {
+            "net1": (
+                AxisParallel(input_layouts=Shard(0))
+            ),
+        }
+        model_tp = parallelize_module(model_tp, device_mesh, parallelize_plan)
+        optim = torch.optim.SGD(model.parameters(), lr=LR)
+        optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
+
+        output = model(inp)
+        output.sum().backward()
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output_tp = model_tp(inp)
+            output_tp.sum().backward()
+
+        self.assertEqual(output, output_tp)
+        self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+
+        # Ensure gradients are same.
+        self._check_module(model, model_tp, check_grad=True)
+
+        optim.step()
+        optim_tp.step()
+
+        # Ensure model weights are still same after update.
+        # Due to the trick we use for Partial aggregation, we only check the weight when local_rank = 0.
+        self._check_module(model, model_tp)
+
+        inp = torch.rand(*inp_size, device=self.device_type)
+        output = model(inp)
+        output_tp = model_tp(inp)
+        self.assertEqual(output, output_tp)
+
+    def _test_linear_inference(self, device_mesh, is_row_parallel=False):
+        inp_size = [8, 10]
+        # Ensure all tp ranks have same input.
+        torch.manual_seed(0)
+        inp = torch.rand(*inp_size, device=self.device_type)
+        model = LinearModule(self.device_type)
+        model_tp = deepcopy(model)
+
+        # Ensure model are initialized the same way.
+        self._check_module(model, model_tp)
+
+        # Shard module and initialize optimizer.
+        if is_row_parallel:
+            AxisParallel = RowwiseParallel
+        else:
+            AxisParallel = ColwiseParallel
+
+        parallelize_plan = {
+            "net1": AxisParallel(),
+        }
+        model_tp = parallelize_module(model_tp, device_mesh, parallelize_plan)
+
+        output = model(inp)
+        output_tp = model_tp(inp)
+        self.assertEqual(output, output_tp)
+
+    @with_comms
+    @parametrize("is_row_parallel", [True, False])
+    def test_linear_training(self, is_row_parallel):
+        self._test_linear_training_e2e(
+            is_row_parallel=is_row_parallel
+        )
+
+    @with_comms
+    @parametrize("is_row_parallel", [True, False])
+    def test_linear_inference(self, is_row_parallel):
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+        with torch.inference_mode():
+            self._test_linear_inference(device_mesh, is_row_parallel=is_row_parallel)
 
     def _test_mlp_training_e2e(self, is_seq_parallel=False, recompute_activation=False):
         inp_size = [8, 10]
