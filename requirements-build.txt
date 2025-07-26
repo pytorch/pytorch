@@ -1,7 +1,7 @@
 # Build System requirements
 setuptools>=77.0.0,<80.0  # setuptools develop deprecated on 80.0
 cmake>=3.27
-ninja
+ninja>=1.11
 numpy
 packaging>=24.2
 pyyaml
