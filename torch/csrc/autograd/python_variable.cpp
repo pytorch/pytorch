@@ -209,6 +209,7 @@ PyObject* ParameterClass = nullptr;
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     const at::TensorBase& _var,
+    c10::impl::PyInterpreterStatus status,
     bool allow_preexisting_pyobj = false);
 
 // clang-tidy gets confused by static const
@@ -260,12 +261,16 @@ PyObject* THPVariable_Wrap(const at::TensorBase& var) {
   }
 
   if (c10::impl::HermeticPyObjectTLS::get_state()) {
-    return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var);
+    return THPVariable_NewWithVar(
+        (PyTypeObject*)THPVariableClass,
+        var,
+        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   }
 
   std::optional<PyObject*> mb_obj =
       var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
+          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+  c10::impl::PyInterpreterStatus status{};
   if (mb_obj.has_value()) {
     auto obj = *mb_obj;
     if (obj) {
@@ -290,17 +295,27 @@ PyObject* THPVariable_Wrap(const at::TensorBase& var) {
     // (https://github.com/pytorch/pytorch/pull/56017).  Prior to this PR
     // being a thing, the PyObject field will get cleared when all references
     // to the Python object are removed.
+    status = c10::impl::PyInterpreterStatus::TAGGED_BY_US;
+  } else {
+    // Assumption: if a Tensor has been shared across threads, this induces
+    // a refcount bump.  Therefore, if the use count 1, we are the sole thread
+    // with access to this tensor and no race is possible.
+    if (var.use_count() <= 1) {
+      status = c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED;
+    } else {
+      status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
+    }
   }
 
   if (C10_LIKELY(var.device().type() != c10::kXLA)) {
-    return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var);
+    return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var, status);
   }
 
   if (auto clazz = getPythonTensorClass(var.device())) {
-    return THPVariable_NewWithVar((PyTypeObject*)clazz, var);
+    return THPVariable_NewWithVar((PyTypeObject*)clazz, var, status);
   }
 
-  return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var);
+  return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var, status);
 }
 
 static bool isResurrectable(THPVariable* self) {
@@ -329,7 +344,8 @@ static bool isResurrectable(THPVariable* self) {
   }
   // Check if this is hermetic. If it is, no resurrection.
   if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false) != (PyObject*)self) {
+          getPyInterpreter(), /*ignore_hermetic_tls=*/false) !=
+      (PyObject*)self) {
     return false;
   }
   return true;
@@ -355,6 +371,7 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
 
   c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
   auto maybe_pyobj = tensor_impl->pyobj_slot()->check_pyobj(
+      getPyInterpreter(),
       /*ignore_hermetic_tls=*/false);
 
   TORCH_INTERNAL_ASSERT(
@@ -570,7 +587,10 @@ static PyObject* THPVariable_as_subclass(
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
   c10::impl::DisablePythonDispatcher dpd_g;
-  return THPVariable_NewWithVar((PyTypeObject*)cls, self.alias());
+  return THPVariable_NewWithVar(
+      (PyTypeObject*)cls,
+      self.alias(),
+      c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
 
@@ -622,7 +642,10 @@ static PyObject* THPVariable_make_subclass(
     data.unsafeGetTensorImpl()->_change_backend_component_keys(r.device(6));
   }
 
-  return THPVariable_NewWithVar((PyTypeObject*)cls, data);
+  return THPVariable_NewWithVar(
+      (PyTypeObject*)cls,
+      data,
+      c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
 
@@ -767,7 +790,10 @@ static PyObject* THPVariable_make_wrapper_subclass(
     tensor.unsafeGetTensorImpl()->set_python_custom_layout(true);
   }
 
-  return THPVariable_NewWithVar((PyTypeObject*)cls, tensor);
+  return THPVariable_NewWithVar(
+      (PyTypeObject*)cls,
+      tensor,
+      c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1795,6 +1821,7 @@ PyObject* THPVariable_pynew(
   return THPVariable_NewWithVar(
       type,
       tensor,
+      c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED,
       /*allow_preexisting_pyobj=*/true);
   END_HANDLE_TH_ERRORS
 }
@@ -1847,7 +1874,8 @@ static int THPVariable_subclass_clear(THPVariable* self) {
 
     if (!self->cdata.unsafeIsBorrowed() &&
         tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-            /*ignore_hermetic_tls=*/false) == (PyObject*)self) {
+            getPyInterpreter(), /*ignore_hermetic_tls=*/false) ==
+            (PyObject*)self) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -2019,10 +2047,17 @@ static void THPVariable_subclass_dealloc(PyObject* self) {
   Py_DECREF(type);
 }
 
-// Creates a new Python object for a Variable.
+// Creates a new Python object for a Variable.  The status parameter
+// specifies what the interpreter tag status on the object is; for
+// example, if you ran check_pyobj, the return optional of this object
+// tells you if the tensor was already tagged or not so you can pass
+// TAGGED_BY_US or MAYBE_UNINITIALIZED; in other cases, you know where
+// var came from and can directly assert that it's DEFINITELY_UNINITIALIZED.
+// It's ALWAYS safe (albeit slower) to call this with MAYBE_UNINITIALIZED.
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
     const at::TensorBase& _var,
+    c10::impl::PyInterpreterStatus status,
     bool allow_preexisting_pyobj) {
   // Make sure that the reinterpret into a THPVariable* will be valid
   TORCH_CHECK(
@@ -2033,7 +2068,7 @@ static PyObject* THPVariable_NewWithVar(
   // This function overwrite the Tensor's pyobj field without extra checks
   // Make sure it is not set otherwise we would leak memory
   auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-      /*ignore_hermetic_tls=*/false);
+      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
 
   // Under some circumstances, we may attempt to create a new Python
   // object for a variable that already has a Python object.  The most common
@@ -2115,7 +2150,8 @@ static PyObject* THPVariable_NewWithVar(
       // Normal codepath
       v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
       const auto& var = THPVariable_Unpack(v);
-      var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(obj);
+      var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
+          getPyInterpreter(), obj, status);
       if (check_has_torch_dispatch(obj)) {
         var.unsafeGetTensorImpl()->set_python_dispatch(true);
       }

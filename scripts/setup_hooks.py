@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Tuple
 
 
 # ───────────────────────────────────────────
@@ -64,7 +65,9 @@ def ensure_uv() -> None:
     )
 
 
-def ensure_tool_installed(tool: str, force_update: bool = False) -> None:
+def ensure_tool_installed(
+    tool: str, force_update: bool = False, python_ver: Tuple[int, int] = None
+) -> None:
     """
     Checks to see if the tool is available and if not (or if force update requested) then
     it reinstalls it.
@@ -74,7 +77,11 @@ def ensure_tool_installed(tool: str, force_update: bool = False) -> None:
     """
     if force_update or not which(tool):
         print(f"Ensuring latest {tool} via uv …")
-        run(["uv", "tool", "install", "--force", tool])
+        command = ["uv", "tool", "install", "--force", tool]
+        if python_ver:
+            # Add the Python version to the command if specified
+            command.extend(["--python", f"{python_ver[0]}.{python_ver[1]}"])
+        run(command)
         if not which(tool):
             print(
                 f"\n⚠️  {tool} installation succeed, but it's not on PATH. Launch a new terminal if your git pushes don't work.\n"
@@ -94,7 +101,7 @@ if sys.platform.startswith("win"):
 ensure_uv()
 
 # Ensure pre-commit is installed globally via uv
-ensure_tool_installed("pre-commit", force_update=True)
+ensure_tool_installed("pre-commit", force_update=True, python_ver=(3, 9))
 
 # Don't force a lintrunner update because it might break folks
 # who already have it installed in a different way
