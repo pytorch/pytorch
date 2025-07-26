@@ -95,6 +95,7 @@ from torchgen.yaml_utils import YamlDumper, YamlLoader
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing import Optional
 
 
 T = TypeVar("T")
@@ -2213,7 +2214,7 @@ def gen_source_files(
     per_operator_headers: bool,
     skip_dispatcher_op_registration: bool,
     update_aoti_c_shim: bool,
-    aoti_backends: set[DispatchKey],
+    aoti_backends: set[Optional[DispatchKey]],
     extend_aoti_c_shim: bool,
 ) -> None:
     extra_cuda_headers = """\
@@ -2838,6 +2839,9 @@ def main() -> None:
     aoti_backends = {
         DispatchKey.CPU,
         DispatchKey.CUDA,
+        # None will generate the aten shim based on aten_shimified_ops
+        # which does not bypass the dispatcher
+        None,
     }
 
     # TODO: stop generating CUDA kernels for non-CUDA builds
