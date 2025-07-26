@@ -768,9 +768,9 @@ struct _PyEventHandler {
 };
 
 static PyTypeObject _PyEventHandler_Type = {
-    PyVarObject_HEAD_INIT(&PyType_Type, 0)
-    "torch.profiler.python_tracer_event_handler",
-    sizeof(_PyEventHandler),
+    .ob_base = PyVarObject_HEAD_INIT(&PyType_Type, 0)
+    .tp_name = "torch.profiler.python_tracer_event_handler",
+    .tp_basicsize = sizeof(_PyEventHandler),
     .tp_dealloc = (destructor)PyObject_Free,
     .tp_vectorcall_offset = offsetof(_PyEventHandler, vectorcall),
     .tp_call = PyVectorcall_Call,
