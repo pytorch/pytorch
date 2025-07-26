@@ -163,7 +163,6 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
-    @skipIfXpu(msg="XPU has not supported _int_mm yet")
     def test__int_mm(self):
         @torch.compile
         def foo(a, b):
