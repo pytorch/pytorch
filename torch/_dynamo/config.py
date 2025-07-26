@@ -354,6 +354,9 @@ skip_no_tensor_aliasing_guards_on_parameters = True
 # the dictionary tag is same across invocation calls.
 skip_tensor_guards_with_matching_dict_tags = True
 
+# Skips guards on func.__defaults__ if the element to be guarded is a constant
+skip_guards_on_constant_func_defaults = True
+
 # Speedup guard execution of nested nn modules by recursively checking for dict
 # tags to avoid full guard execution.
 use_recursive_dict_tags_for_guards = True
