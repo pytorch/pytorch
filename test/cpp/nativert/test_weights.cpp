@@ -27,8 +27,7 @@ TEST_F(WeightsTest, ConstructEmptyStateDict) {
   std::unordered_map<std::string, c10::IValue> stateDict;
   Weights weights(graph.get(), stateDict, *placement);
   // Check that weights are initialized correctly
-  EXPECT_TRUE(weights.parameters().empty());
-  EXPECT_TRUE(weights.buffers().empty());
+  EXPECT_TRUE(weights.allValues().empty());
   EXPECT_FALSE(weights.contains("non_existent_weight"));
 }
 TEST_F(WeightsTest, SetAndGetValue) {
