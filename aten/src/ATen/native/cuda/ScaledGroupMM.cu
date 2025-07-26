@@ -10,6 +10,7 @@
 // Two warninngs in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
@@ -44,6 +45,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
