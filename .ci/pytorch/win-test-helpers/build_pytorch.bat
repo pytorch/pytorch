@@ -101,6 +101,9 @@ if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=8.6
 :: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
 set SCCACHE_IDLE_TIMEOUT=0
 set SCCACHE_IGNORE_SERVER_IO_ERROR=1
+set SCCACHE_ERROR_LOG=%TMP_DIR_WIN%\sccache-%OUR_GITHUB_JOB_ID%.log
+set SCCACHE_LOG=debug
+
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
@@ -150,6 +153,7 @@ python -c "import os, glob; os.system('python -mpip install --no-index --no-deps
 )
 
 sccache --show-stats --stats-format json | jq .stats > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
+mv %TMP_DIR_WIN%\sccache-%OUR_GITHUB_JOB_ID%.log sccache-%OUR_GITHUB_JOB_ID%.log
 sccache --stop-server
 
 exit /b 0

@@ -180,6 +180,16 @@ jobs:
           name: ${{ inputs.build-environment }}
           path: C:\${{ github.run_id }}\build-results
 
+      - name: Upload artifacts to s3
+        if: steps.build.outcome != 'skipped'
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          s3-prefix: |
+            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+          retention-days: 14
+          if-no-files-found: warn
+          path: sccache-*.log
+
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped'
         uses: ./.github/actions/upload-sccache-stats
