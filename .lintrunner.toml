@@ -164,9 +164,9 @@ init_command = [
     'types-setuptools==79.0.0.20250422',
     'types-jinja2==2.11.9',
     'types-colorama==0.4.6',
-    'filelock==3.18.0',
+    'filelock==3.13.1',
     'junitparser==2.1.1',
-    'rich==14.0.0',
+    'rich==14.1.0',
     'pyyaml==6.0.2',
     'optree==0.13.0',
     'dataclasses-json==0.6.7',
@@ -1794,3 +1794,12 @@ include_patterns = [
     'torch/header_only_apis.txt',
 ]
 is_formatter = false
+
+
+[[linter]]
+code = "GB_REGISTRY"
+include_patterns = ["torch/_dynamo/**/*.py"]
+command = [
+  "python3",
+  "tools/linter/adapters/gb_registry_linter.py",
+]

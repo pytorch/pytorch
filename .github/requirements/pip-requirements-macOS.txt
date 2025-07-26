@@ -2,7 +2,7 @@ boto3==1.35.42
 cmake==3.27.*
 expecttest==0.3.0
 fbscribelogger==0.1.7
-filelock==3.18.0
+filelock==3.13.1
 hypothesis==6.56.4
 librosa>=0.6.2
 mpmath==1.3.0
@@ -12,7 +12,7 @@ numba==0.60.0
 numpy==2.0.2
 opt-einsum>=3.3
 optree==0.13.0
-packaging==25.0
+packaging==23.1
 parameterized==0.8.1
 pillow==10.3.0
 protobuf==5.29.4

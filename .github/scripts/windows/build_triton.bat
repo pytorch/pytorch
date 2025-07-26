@@ -10,7 +10,7 @@ if "%PY_VERS%" == "3.13t" (
     call conda create -n %PYTHON_PREFIX% -y -c=conda-forge python=%PY_VERS%
 )
 :: Fix cmake version for issue https://github.com/pytorch/pytorch/issues/150480
-call conda run -n %PYTHON_PREFIX% pip install wheel pybind11 certifi cython cmake==3.31.6 setuptools==78.1.1 ninja
+call conda run -n %PYTHON_PREFIX% pip install wheel pybind11 certifi cython cmake==3.31.6 setuptools==72.1.0 ninja
 
 dir "%VC_INSTALL_PATH%"
 
