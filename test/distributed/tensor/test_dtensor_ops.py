@@ -167,7 +167,6 @@ dtensor_fails = {
     xfail("grid_sampler_2d"),
     xfail("gradient"),
     xfail("heaviside"),
-    xfail("histc"),
     xfail("histogram"),
     xfail("histogramdd"),
     xfail("index_add"),
