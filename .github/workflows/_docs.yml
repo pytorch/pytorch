@@ -74,7 +74,7 @@ jobs:
           - docs_type: python
             runner: ${{ inputs.runner_prefix }}linux.2xlarge
             # It takes less than 30m to finish python docs unless there are issues
-            timeout-minutes: 30
+            timeout-minutes: 60
           - docs_type: functorch
             runner: ${{ inputs.runner_prefix }}linux.2xlarge
             # It takes less than 15m to finish functorch docs unless there are issues
