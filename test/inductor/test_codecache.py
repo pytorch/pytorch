@@ -45,7 +45,11 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.testing._internal.common_cuda import SM80OrLater, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import (
+    SM80OrLater,
+    TEST_MULTIGPU,
+    with_tf32_off,
+)
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1005,6 +1009,7 @@ class TestFxGraphCache(TestCase):
     @requires_cuda
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @with_tf32_off
     def test_flex_attention_caching(self):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
