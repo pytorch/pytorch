@@ -2,10 +2,10 @@
 Device abstraction layer for TorchDynamo and Inductor backends.
 
 This module provides a unified interface for different hardware backends (CUDA, XPU,
-CPU, MPS) through a common device interface. Key components include:
+CPU, MPS, MTIA) through a common device interface. Key components include:
 
 - DeviceInterface: Base class defining the common API for all device types
-- Device-specific implementations: CudaInterface, XpuInterface, CpuInterface, MpsInterface
+- Device-specific implementations: CudaInterface, XpuInterface, CpuInterface, MpsInterface, MtiaInterface
 - Device registration system for managing available backends
 - Worker APIs for multi-processing scenarios
 - Stream and event management across different devices
@@ -287,6 +287,87 @@ class CudaInterface(DeviceInterface):
             raise RuntimeError("triton not built with the 'nvidia' backend")
 
 
+get_mtia_stream: Optional[Callable[[int], int]]
+if torch.mtia._is_compiled():
+    from torch._C import _mtia_getCurrentRawStream as get_mtia_stream
+else:
+    get_mtia_stream = None
+
+
+class MtiaInterface(DeviceInterface):
+    device = torch.mtia.device  # type: ignore[assignment]
+    Event = torch.mtia.Event  # type: ignore[assignment]
+    Stream = torch.mtia.Stream  # type: ignore[assignment]
+
+    class Worker:
+        @staticmethod
+        def set_device(device: int) -> None:
+            caching_worker_current_devices["mtia"] = device
+
+        @staticmethod
+        def current_device() -> int:
+            if "mtia" in caching_worker_current_devices:
+                return caching_worker_current_devices["mtia"]
+            return torch.mtia.current_device()
+
+        @staticmethod
+        def get_device_properties(device: torch.types.Device = None) -> Any:
+            if device is not None:
+                if isinstance(device, str):
+                    device = torch.device(device)
+                    assert device.type == "mtia"
+                if isinstance(device, torch.device):
+                    device = device.index
+            if device is None:
+                device = MtiaInterface.Worker.current_device()
+
+            if "mtia" not in caching_worker_device_properties:
+                device_prop = [
+                    torch.mtia.get_device_properties(i)
+                    for i in range(torch.mtia.device_count())
+                ]
+                caching_worker_device_properties["mtia"] = device_prop
+
+            return caching_worker_device_properties["mtia"][device]
+
+    current_device = staticmethod(torch.mtia.current_device)
+    set_device = staticmethod(torch.mtia.set_device)  # type: ignore[assignment]
+    device_count = staticmethod(torch.mtia.device_count)
+    stream = staticmethod(torch.mtia.stream)  # type: ignore[assignment]
+    current_stream = staticmethod(torch.mtia.current_stream)
+    set_stream = staticmethod(torch.mtia.set_stream)  # type: ignore[assignment]
+    _set_stream_by_id = staticmethod(torch.mtia._set_stream_by_id)  # type: ignore[assignment]
+    synchronize = staticmethod(torch.mtia.synchronize)
+    get_device_properties = staticmethod(torch.mtia.get_device_properties)  # type: ignore[assignment]
+    get_raw_stream = staticmethod(get_mtia_stream)  # type: ignore[assignment, arg-type]
+    exchange_device = staticmethod(torch.mtia._exchange_device)  # type: ignore[arg-type]
+    maybe_exchange_device = staticmethod(torch.mtia._maybe_exchange_device)  # type: ignore[arg-type]
+    memory_allocated = staticmethod(torch.mtia.memory_allocated)  # type: ignore[assignment]
+    is_bf16_supported = staticmethod(torch.mtia.is_bf16_supported)  # type: ignore[arg-type]
+
+    # Can be mock patched by @patch decorator.
+    @staticmethod
+    def is_available() -> bool:
+        ret = torch.mtia.is_available()
+        return ret
+
+    @staticmethod
+    def get_compute_capability(device: torch.types.Device = None) -> Any:
+        cc = torch.mtia.get_device_capability(device)
+        return cc
+
+    @staticmethod
+    def is_triton_capable(device: torch.types.Device = None) -> bool:
+        return True
+
+    @staticmethod
+    def raise_if_triton_unavailable(evice: torch.types.Device = None) -> None:
+        import triton.backends
+
+        if "mtia" not in triton.backends.backends:
+            raise RuntimeError("triton not built with the 'mtia' backend")
+
+
 get_xpu_stream: Optional[Callable[[int], int]]
 if torch.xpu._is_compiled():
     from torch._C import _xpu_getCurrentRawStream as get_xpu_stream
@@ -508,6 +589,10 @@ def init_device_reg() -> None:
     register_interface_for_device("xpu", XpuInterface)
     for i in range(torch.xpu.device_count()):
         register_interface_for_device(f"xpu:{i}", XpuInterface)
+
+    register_interface_for_device("mtia", MtiaInterface)
+    for i in range(torch.mtia.device_count()):
+        register_interface_for_device(f"mtia:{i}", MtiaInterface)
 
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
