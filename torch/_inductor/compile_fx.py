@@ -1524,7 +1524,7 @@ class _InProcessFxCompile(FxCompile):
                         )
 
                     # Collect and dump collective-op schedule for external diagnostics
-                    torch._inductor.debug.log_collective_schedule(graph.scheduler)
+                    torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
 
                     if (
                         cudagraphs

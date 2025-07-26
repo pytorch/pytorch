@@ -23,7 +23,7 @@ from torch import fx as fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
 from torch._logging import getArtifactLogger
-from torch._logging._internal import trace_structured_artifact
+from torch._logging._internal import trace_structured
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -38,7 +38,6 @@ from .scheduler import (
     FusedSchedulerNode,
     NopKernelSchedulerNode,
     OutputNode,
-    Scheduler,
     SchedulerNode,
 )
 from .virtualized import V
@@ -695,12 +694,15 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
     V.debug.ir_post_fusion(nodes)
 
 
-def dump_collective_schedule(schedule: list[dict[str, Any]]) -> None:
+def _dump_collective_schedule(schedule: list[dict[str, Any]]) -> None:
     try:
-        trace_structured_artifact(
-            "inductor_collective_schedule",
-            "string",  # encoding
-            payload_fn=lambda: json.dumps(schedule, separators=(",", ":")),
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_collective_schedule",
+                "encoding": "json",
+            },
+            payload_fn=lambda: schedule,
         )
     except Exception:
         log.debug(
@@ -709,14 +711,14 @@ def dump_collective_schedule(schedule: list[dict[str, Any]]) -> None:
         )
 
 
-def log_collective_schedule(scheduler: "Scheduler") -> None:
+def log_collective_schedule(nodes: Sequence[BaseSchedulerNode]) -> None:
     schedule = [
         {"op_name": getattr(op, "python_kernel_name", None)}
-        for node in scheduler.nodes
+        for node in nodes
         if isinstance(op := getattr(node, "node", None), ir._CollectiveKernel)
     ]
 
-    dump_collective_schedule(schedule)
+    _dump_collective_schedule(schedule)
 
 
 @dataclasses.dataclass
