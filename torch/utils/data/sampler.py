@@ -111,7 +111,7 @@ class SequentialSampler(Sampler[int]):
     r"""Samples elements sequentially, always in the same order.
 
     Args:
-        data_source (Dataset): dataset to sample from
+        data_source (Sized): data source to sample from. Must implement __len__.
     """
 
     data_source: Sized
@@ -132,7 +132,7 @@ class RandomSampler(Sampler[int]):
     If with replacement, then user can specify :attr:`num_samples` to draw.
 
     Args:
-        data_source (Dataset): dataset to sample from
+        data_source (Sized): data source to sample from. Must implement __len__.
         replacement (bool): samples are drawn on-demand with replacement if ``True``, default=``False``
         num_samples (int): number of samples to draw, default=`len(dataset)`.
         generator (Generator): Generator used in sampling.
