@@ -1104,6 +1104,23 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
+    def test_foreach_map_assert_fused_passes(self):
+        def fn(a, b):
+            return a + b
+        x = torch.randn(10)
+        y = torch.randn(10)
+        torch.compile(foreach_map, fullgraph=True)(fn, (x,), (y,), assert_fused=True)
+
+    def test_foreach_map_assert_fused_raises(self):
+        from torch._dynamo.exc import BackendCompilerFailed
+        def non_pointwise(a, b):
+            return (a + b).sum()
+        x = torch.randn(10)
+        y = torch.randn(10)
+        with self.assertRaises(BackendCompilerFailed):
+            torch.compile(foreach_map, fullgraph=True)(
+                non_pointwise, (x,), (y,), assert_fused=True
+            )
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

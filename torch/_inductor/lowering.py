@@ -714,7 +714,7 @@ def to_dtype(
 
 
 @register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
-def _foreach_map(subgraph, *args, **kwargs):
+def _foreach_map(subgraph, *args, assert_fused=False, **kwargs):
     """
     This lowers an invocation of foreach_map
     The way this works is that an arbitrary N-arg func is provided by the user, looped over by the
@@ -725,7 +725,8 @@ def _foreach_map(subgraph, *args, **kwargs):
     below registers the buffers as horizontally fuseable in the scheduler.
     """
     from .subgraph_lowering import PointwiseSubgraphLowering
-
+    from torch._dynamo.exc import BackendCompilerFailed
+    
     inputs = args
 
     gm = subgraph.graph_module
@@ -755,6 +756,14 @@ def _foreach_map(subgraph, *args, **kwargs):
             V.graph.register_operation_list(operation_list)
 
     assert all(x is not None for x in outputs)
+
+    if assert_fused:
+        for (_, use_foreach), group in groups.items():
+            if use_foreach and len(group) != 1:
+                raise BackendCompilerFailed(
+                    "foreach_map was not fully fused"
+                )
+
     return outputs
 
 
