@@ -239,9 +239,20 @@ class NestedTensor(torch.Tensor):
         grad_fn_str = (
             f", requires_grad={self.requires_grad}" if self.requires_grad else ""
         )
+
+        def is_contiguous_or_false():
+            if self.lengths() is not None:
+                return False
+            from torch._prims_common import is_contiguous_for_memory_format_or_false
+
+            return is_contiguous_for_memory_format_or_false(
+                self._values, memory_format=torch.contiguous_format
+            )
+
         if self.grad_fn:
             grad_fn_str = f", grad_fn={self.grad_fn}"
-        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self.is_contiguous()})"
+
+        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={is_contiguous_or_false()})"
 
     # TODO: Remove this in favor of the default tensor subclass serialization logic.
     # We don't do this today because of https://github.com/pytorch/pytorch/issues/125622.

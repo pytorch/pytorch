@@ -406,7 +406,7 @@ def is_channels_last_contiguous_or_false_3d(a: Tensor) -> bool:
 
 
 # similar to is_contiguous_for_memory_format but return false on data dependency.
-def contiguous_for_memory_format_or_false(  # type: ignore[return]
+def is_contiguous_for_memory_format_or_false(  # type: ignore[return]
     a: Tensor, *, memory_format: torch.memory_format
 ) -> bool:
     return is_contiguous_for_memory_format(
@@ -547,11 +547,14 @@ def compute_elementwise_output_logical_to_physical_perm(
     is_contiguous = True
     is_channels_last = True
     for t in tensors:
-        is_contiguous = is_contiguous and contiguous_for_memory_format_or_false(
+        is_contiguous = is_contiguous and is_contiguous_for_memory_format_or_false(
             t, memory_format=torch.contiguous_format
         )
-        is_channels_last = is_channels_last and contiguous_for_memory_format_or_false(
-            t, memory_format=torch.channels_last
+        is_channels_last = (
+            is_channels_last
+            and is_contiguous_for_memory_format_or_false(
+                t, memory_format=torch.channels_last
+            )
         )
 
     if is_contiguous and not is_channels_last:
