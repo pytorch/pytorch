@@ -1823,6 +1823,7 @@ class AotCodeCompiler:
                 use_asm_build = False
 
             is_large_consts = len(consts) > 1024
+            is_zero_size_consts = len(consts) == 0
 
             def format_consts_to_gnu_asm(
                 consts: bytes,
@@ -1915,7 +1916,7 @@ end
                     consts, ALIGN_BYTES, symbol_prefix, is_large_consts
                 )
             else:
-                if len(consts) == 0:
+                if is_zero_size_consts:
                     consts_code, code_ext = get_zero_consts_asm_code(
                         ALIGN_BYTES, symbol_prefix
                     )
@@ -1943,7 +1944,7 @@ end
                 BuildOption=object_build_options,
             )
             consts_o = object_builder.get_target_file_path()
-            if use_asm_build is False and len(consts) == 0:
+            if use_asm_build is False and is_zero_size_consts:
                 src = normalize_path_separator(str(consts_s))
                 asm_cwd = normalize_path_separator(str(consts_s.parent))
                 RunAsmBuildObject(src, consts_o, asm_cwd)
