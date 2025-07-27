@@ -1907,7 +1907,7 @@ class CppBuilder:
             f.write(contents)
 
 
-def RunAsmBuildObject(src: str, target: str, cwd: str):
+def RunAsmBuildObject(src: str, target: str, cwd: str) -> None:
     def get_asm_compuler() -> str:
         if _IS_WINDOWS:
             ASM_CC = "ml64"

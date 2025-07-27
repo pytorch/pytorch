@@ -1873,7 +1873,10 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
                 return const_cpp, "cpp"
 
-            def get_zero_consts_asm_code() -> tuple[str, str]:
+            def get_zero_consts_asm_code(
+                align_bytes: int,
+                symbol_prefix: str,
+            ) -> tuple[str, str]:
                 """
                 This function is used to handle zero consts situation. Because cpp standard is not allow zero size array:
                 https://stackoverflow.com/questions/9722632/what-happens-if-i-define-a-0-size-array-in-c-c
@@ -1896,14 +1899,14 @@ end
 """
                     asm_ext = "asm"
                 else:
-                    asm_code = """
-.section        .lrodata, "a"
-.balign 64
-.globl  _binary_constants_bin_start
-_binary_constants_bin_start:
-.globl  _binary_constants_bin_end
-_binary_constants_bin_end:
-"""
+                    asm_code = f"\t.section\t{section_attr}\n"
+                    asm_code += f"\t.balign {align_bytes}\n"
+                    asm_code += (
+                        f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
+                    )
+                    asm_code += f"{symbol_prefix}_binary_constants_bin_start:\n"
+                    asm_code += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
+                    asm_code += f"{symbol_prefix}_binary_constants_bin_end:\n"
                     asm_ext = "S"
                 return asm_code, asm_ext
 
@@ -1913,7 +1916,9 @@ _binary_constants_bin_end:
                 )
             else:
                 if len(consts) == 0:
-                    consts_code, code_ext = get_zero_consts_asm_code()
+                    consts_code, code_ext = get_zero_consts_asm_code(
+                        ALIGN_BYTES, symbol_prefix
+                    )
                 else:
                     consts_code, code_ext = format_consts_to_cpp(
                         consts, ALIGN_BYTES, symbol_prefix
