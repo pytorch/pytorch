@@ -1872,14 +1872,51 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
                 return const_cpp, "cpp"
 
+            def get_zero_consts_asm_code() -> tuple[str, str]:
+                """
+                This function is used to handle zero consts situation. Because cpp standard is not allow zero size array:
+                https://stackoverflow.com/questions/9722632/what-happens-if-i-define-a-0-size-array-in-c-c
+                Such as MSVC will report error C2466:
+                https://learn.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2466?view=msvc-170
+                So, we can use assmbely compiler to handle this situation.
+                """
+                if _IS_WINDOWS:
+                    # Windows nasm is max support align to 16, but it is no effect to zero size data.
+                    asm_code = """
+option casemap:none
+.data
+_binary_constants_bin_start:
+align 16
+_binary_constants_bin_end:
+align 16
+public _binary_constants_bin_start
+public _binary_constants_bin_end
+end
+"""
+                    asm_ext = "asm"
+                else:
+                    asm_code = """
+.section        .lrodata, "a"
+.balign 64
+.globl  _binary_constants_bin_start
+_binary_constants_bin_start:
+.globl  _binary_constants_bin_end
+_binary_constants_bin_end:
+"""
+                    asm_ext = "S"
+                return asm_code, asm_ext
+
             if use_asm_build:
                 consts_code, code_ext = format_consts_to_asm(
                     consts, ALIGN_BYTES, symbol_prefix, is_large_consts
                 )
             else:
-                consts_code, code_ext = format_consts_to_cpp(
-                    consts, ALIGN_BYTES, symbol_prefix
-                )
+                if len(consts) == 0:
+                    consts_code, code_ext = get_zero_consts_asm_code()
+                else:
+                    consts_code, code_ext = format_consts_to_cpp(
+                        consts, ALIGN_BYTES, symbol_prefix
+                    )
 
             _, consts_s = write(
                 consts_code,
