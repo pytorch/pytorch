@@ -1,3 +1,4 @@
+import logging
 from abc import abstractmethod
 from collections import defaultdict
 from itertools import chain
@@ -21,6 +22,7 @@ Classes and implementations related to precompile
 """
 
 T = TypeVar("T")
+logger = logging.getLogger(__name__)
 
 
 class PrecompileCacheArtifact(CacheArtifact, Generic[T]):
@@ -168,12 +170,17 @@ class PrecompileContext(CacheArtifactManager):
             # Grab backends from the dynamo cache entry
             backends = cache_entry.backend_ids
             backend_content: dict[_BackendId, PrecompileCacheArtifact[Any]] = {}
-            for id_ in backends:
-                assert id_ in artifacts_by_key, f"Backend {id_} not found in artifacts"
-                artifact = artifacts_by_key[id_]
-                assert isinstance(artifact, PrecompileCacheArtifact)
-                backend_content[id_] = artifact
-            DynamoCache.write(cache_entry, backend_content, dynamo_entry.key)
+            try:
+                for id_ in backends:
+                    assert id_ in artifacts_by_key, (
+                        f"Backend {id_} not found in artifacts"
+                    )
+                    artifact = artifacts_by_key[id_]
+                    assert isinstance(artifact, PrecompileCacheArtifact)
+                    backend_content[id_] = artifact
+                DynamoCache.write(cache_entry, backend_content, dynamo_entry.key)
+            except AssertionError:
+                logger.warning("Skipping cache_entry, backend not found in artifacts")
 
         return cache_info
 
