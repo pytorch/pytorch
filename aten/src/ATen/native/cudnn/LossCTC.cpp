@@ -249,7 +249,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
       workspace.data_ptr(),
       workspace_size));
   // Subtract exp(log_probs) from the gradient
-  grad.sub_(std::exp(log_probs_t));
+  grad.sub_(log_probs_t.exp());
 
   return std::make_tuple(costs, grad);
 }
@@ -347,6 +347,10 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
       workspace.data_ptr()
 
           ));
+
+  // Subtract exp(log_probs) from the gradient
+  grad.sub_(log_probs_t.exp());
+
   return std::make_tuple(costs, grad);
 }
 
