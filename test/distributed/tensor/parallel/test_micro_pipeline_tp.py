@@ -502,10 +502,12 @@ class MicroPipelineTPTest(TestCase):
 class MicroPipelineTP4GPUTest(TestCase):
     def setUp(self):
         torch._inductor.config._micro_pipeline_tp = True
+        self.device = torch.accelerator.current_accelerator()
+        device_module = torch.get_device_module(self.device)
 
         self.rank = 0
         self.world_size = 4
-        torch.cuda.set_device("cuda:0")
+        device_module.set_device(f"{self.device.type}:0")
 
         store = FakeStore()
         dist.init_process_group(
@@ -522,7 +524,7 @@ class MicroPipelineTP4GPUTest(TestCase):
     @fresh_cache()
     def test_extra_collectives(self):
         device_mesh = DeviceMesh(
-            "cuda",
+            self.device.type,
             torch.arange(0, self.world_size).view(2, -1),
             mesh_dim_names=("tp", "other"),
         )
@@ -534,9 +536,9 @@ class MicroPipelineTP4GPUTest(TestCase):
             hidden = reduce_scatter_tensor(full_hidden, "avg", 0, (device_mesh, 1))
             return reduce_scatter_tensor(hidden @ w2.t(), "avg", 0, (device_mesh, 0))
 
-        inp = torch.rand(8, 10, device="cuda")
-        w1 = torch.rand(7, 10, device="cuda")
-        w2 = torch.rand(10, 7, device="cuda")
+        inp = torch.rand(8, 10, device=self.device.type)
+        w1 = torch.rand(7, 10, device=self.device.type)
+        w2 = torch.rand(10, 7, device=self.device.type)
 
         with _test_mode(group_names={device_mesh["tp"].get_group().group_name}):
             compiled = torch.compile(func)
