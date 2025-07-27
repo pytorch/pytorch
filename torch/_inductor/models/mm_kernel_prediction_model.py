@@ -220,6 +220,13 @@ class ModelWrapper:
             )
         # check to see if model_path exists
         # TODO remove logging
+        # List files in the model path directory
+        model_dir = os.path.dirname(model_path)
+        print("Files in model directory:", os.listdir(model_dir))
+
+        # List files in the parent directory of the model path
+        parent_dir = os.path.dirname(model_dir)
+        print("Files in parent directory:", os.listdir(parent_dir))
         print("Loading NN Kernel Prediction Model from ", model_path)
         print("Model path exists: ", os.path.exists(model_path))
         if not os.path.exists(model_path):
