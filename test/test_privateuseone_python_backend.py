@@ -23,7 +23,7 @@ class MyDeviceTensor(torch.Tensor):
     def __new__(cls, size, dtype, raw_data=None, requires_grad=False):
         # Use a meta Tensor here to be used as the wrapper
         res = torch._C.create_empty_tensor(size, dtype)
-        res.raw_data = raw_data
+        res.__class__ = MyDeviceTensor
         return res
 
     def __init__(self, size, dtype, raw_data=None, requires_grad=False):
