@@ -8,6 +8,7 @@
 #ifndef _MSC_VER
 #include <sys/socket.h>
 #endif
+
 #include <ATen/ATen.h>
 #include <ATen/BlasBackend.h>
 #include <ATen/CachedTensorUtils.h>
@@ -15,13 +16,11 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
-#include <ATen/OpaqueTensorImpl.h>
 
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/core/Vitals.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
@@ -1793,38 +1792,7 @@ void initModule(PyObject* module);
 
 static std::vector<PyMethodDef> methods;
 
-at::Tensor wrap_tensor(
-    const py::object& py_obj,
-    c10::ScalarType dtype,
-    std::vector<int64_t> sizes) {
-  // TODO: we have to get the dtype and the shape from the tinygrad Tensor
-
-  return at::detail::make_tensor<
-      at::OpaqueTensorImpl<std::shared_ptr<py::object>>>(
-      at::DispatchKeySet(at::DispatchKey::PrivateUse1),
-      c10::scalarTypeToTypeMeta(dtype),
-      at::Device(at::kPrivateUse1, 0),
-      std::make_shared<py::object>(py_obj),
-      izes);
-}
-
-void set_handle(at::Tensor& tensor, py::object& py_obj) {
-  auto* impl = tensor.unsafeGetTensorImpl();
-  auto* opaque_impl = 
-      tatic_cast<at::OpaqueTensorImpl<std::shared_ptr<py::object>>*>(impl);
-  auto& tiny = opaque_impl->unsafe_opaque_handle();
-  tiny = std::make_shared<py::object>(py_obj);
-}
-
-py::object unwrap_tensor(const at::Tensor t ensor) {
-  auto* impl = tensor.unsafeGetTensorImpl();
-  auto* opaque_impl = 
-      tatic_cast<at::OpaqueTensorImpl<std::shared_ptr<py::object>>* (impl);
-  return *opaque_impl->opaque_handle();
-}
-
-
-/ In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
+// In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
 // Guaranteed to be invoked from Python under GIL, no locking on map needed
 static void LogAPIUsageOnceFromPython(const std::string& event) {
   static std::unordered_set<std::string> seen;
@@ -2714,18 +2682,12 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_get_torch_function_state", []() {
     return at::impl::PythonTorchFunctionTLS::get_disabled_state();
   });
-  py_module.def("
-      setup_privateuseone_for_python_use", &at::setupPrivateUse1ForPythonUse);
   torch::set_disabled_torch_function_impl(
       PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);
   torch::set_disabled_torch_dispatch_impl(
       PyObject_GetAttrString(module, "_disabled_torch_dispatch_impl"));
   ASSERT_TRUE(torch::disabled_torch_dispatch_impl() != nullptr);
-
-  py_module.def("_opaque_wrap_tensor", &wrap_tensor);
-  py_module.def("_opaque_unwrap_tensor", &unwrap_tensor);
-  py_module.def("_opaque_set_handle", &set_handle);
   // init kineto here
 #ifdef USE_KINETO
   torch::global_kineto_init();
@@ -2754,4 +2716,3 @@ struct call_duplicate_guard {
 };
 
 static call_duplicate_guard _call_duplicate_guard;
- 
