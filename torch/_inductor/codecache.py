@@ -75,6 +75,7 @@ from torch._inductor.cpp_builder import (
     get_ld_and_objcopy,
     get_name_and_dir_from_output_file_path,
     normalize_path_separator,
+    RunAsmBuildObject,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import (
@@ -1937,7 +1938,10 @@ _binary_constants_bin_end:
                 BuildOption=object_build_options,
             )
             consts_o = object_builder.get_target_file_path()
-            object_builder.build()
+            if use_asm_build is False and len(consts) == 0:
+                RunAsmBuildObject(consts_s, consts_o)
+            else:
+                object_builder.build()
 
             if is_large_consts and use_asm_build:
                 with open(consts_o, "r+b") as f:
