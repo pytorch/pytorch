@@ -1,3 +1,4 @@
+#include <ATen/ops/tensor.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <gtest/gtest.h>
