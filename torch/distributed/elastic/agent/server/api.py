@@ -27,6 +27,7 @@ from torch.distributed.elastic.metrics import prof, put_metric
 from torch.distributed.elastic.multiprocessing import ProcessFailure, SignalException
 from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.distributed.numa.binding import NumaOptions
 
 
 __all__ = [
@@ -88,6 +89,7 @@ class WorkerSpec:
     master_addr: Optional[str] = None
     local_addr: Optional[str] = None
     event_log_handler: str = "null"
+    numa_options: Optional[NumaOptions] = None
 
     def __post_init__(self):
         assert self.local_world_size > 0
@@ -101,6 +103,13 @@ class WorkerSpec:
             )
             self.entrypoint = self.fn
         assert self.entrypoint
+
+        if (
+            self.numa_options is not None
+            and not self.numa_options.should_fall_back_if_binding_fails
+            and not isinstance(self.entrypoint, str)
+        ):
+            raise ValueError("numa_options is only supported for str entrypoints.")
 
     def get_entrypoint_name(self):
         """Get the entry point name.
