@@ -1,22 +1,24 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from collections.abc import Sequence
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.cond import create_bw_fn, materialize_as_graph
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     check_meta_consistency,
+    create_bw_fn,
     first_slice_copy,
+    first_slice_copy_with_grad,
+    materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
+    split_into_chunks,
     unique_graph_id,
     validate_subgraph_args_types,
 )
@@ -70,40 +72,6 @@ def safe_map(f, *args):
         return f(*a)
 
     return list(map(nf, zip(*args)))
-
-
-def get_tensor_mask(tensor_list: list[Any]) -> list[bool]:
-    # Returns a mask whether a list element is a tensor or not
-    return [True if isinstance(v, torch.Tensor) else False for v in tensor_list]
-
-
-def mask_list(
-    mask: list[bool], inp: list[Any], other: Optional[list[Any]] = None
-) -> list[Any]:
-    # Masks elements on an `inp` list.
-    # If other is None, then the elements of the `inp` list where the mask is False are removed
-    # If other is not None, then the elements of the `inp` list where the mask is False are
-    # replaced with the elements of the `other` list
-    if other is not None:
-        return [i if m else o for m, i, o in zip(mask, inp, other)]
-    else:
-        return [i for m, i in zip(mask, inp) if m]
-
-
-def first_slice_copy_with_grad(li):
-    # First_slice_copy does not keep the original requires_grad flag,
-    # but we need it for materialize_as_graph
-    # in order to compute the correct gradients
-    slc = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in li]
-    return slc
-
-
-def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
-    it = iter(iterable)
-    assert sum(chunk_sizes) == len(
-        iterable
-    ), "the sum of all chunks needs to match the length of the iterable."
-    return [list(itertools.islice(it, size)) for size in chunk_sizes]
 
 
 class AssociativeScanOp(HigherOrderOperator):
