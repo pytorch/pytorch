@@ -5141,7 +5141,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertTrue(same(ref, res))
 
     @skipIfWindows(
-        msg="TODO: (xuhancn) conform, AssertionError: tensor([0.0290, 0.4019, 0.2598, 0.3666]) is not None"
+        msg="TODO(xuhancn): confirm, AssertionError: tensor([0.0290, 0.4019, 0.2598, 0.3666]) is not None"
     )
     def test_release_input_memory(self):
         x = torch.rand([4])
