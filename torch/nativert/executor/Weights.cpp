@@ -26,6 +26,8 @@ Weights::Weights(
     const Graph* graph,
     const std::optional<std::unordered_map<std::string, c10::IValue>>&
         stateDict,
+    const std::optional<std::unordered_map<std::string, c10::IValue>>&
+        constants,
     Placement placement)
     : graph_(graph),
       weightsMeta_(graph->weightsMeta()),
@@ -33,6 +35,17 @@ Weights::Weights(
       version_(globalVersion_++) {
   if (stateDict.has_value()) {
     loadStateDict(stateDict.value());
+  }
+  if (constants.has_value()) {
+    for (const auto& [name, value] : constants.value()) {
+      if (value.isTensor()) {
+        allValues_[name] = value.toTensor();
+      } else if (value.isCustomClass()) {
+        customObjs_[name] = value;
+      } else {
+        TORCH_CHECK(false, "Unknown constant type: ", value.tagKind());
+      }
+    }
   }
 }
 

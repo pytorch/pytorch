@@ -21,10 +21,12 @@ using WeightVersion = int;
  */
 class Weights {
  public:
-  explicit Weights(
+  Weights(
       const Graph* graph,
       const std::optional<std::unordered_map<std::string, c10::IValue>>&
           stateDict = std::nullopt,
+      const std::optional<std::unordered_map<std::string, c10::IValue>>&
+          constants = std::nullopt,
       Placement placement = Placement());
 
   // Arguments

@@ -1542,6 +1542,7 @@ graph():
         M()(torch.randn(7))
         torch.export.export(M(), (torch.randn(7),), strict=strict)
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_cond_branches_return_constant_int(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -1588,6 +1589,7 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(m(*args), ep.module()(*args))
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_cond_access_identical_symint_closure(self):
         class Example2(torch.nn.Module):
             def forward(self, x, trigger, target):
@@ -2277,6 +2279,7 @@ def forward(self, x, y):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_subclasses_parameterization(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2330,6 +2333,7 @@ graph():
 
         self.assertEqual(res, ref_out)
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_subclasses_parameterization_nested(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -4969,6 +4973,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             fixes=[],  # nothing to fix!
         )
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_simple_unbacked_view(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -5300,6 +5305,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(Foo(), inputs, dynamic_shapes=shapes)
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -7946,6 +7952,7 @@ def forward(self, x):
         ep = torch.export.export_for_training(f, (torch.randn(2, 2), mod), strict=False)
         self.assertEqual(ref_out, ep.module()(ref_x, mod))
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_unbacked_noncontig_lin(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -8010,6 +8017,7 @@ def forward(self, x):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_sym_or_sym_and(self):
         from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
 
@@ -8325,6 +8333,7 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
     @requires_cuda
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_export_associative_scan_lifted_buffers(self):
         device = torch.device("cuda")
         combine_mode = "pointwise"
@@ -13241,6 +13250,7 @@ def forward(self, x, y):
         self.assertFalse(placeholders[1].meta["val"].requires_grad)
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_unbacked_expand(self):
         class Foo(torch.nn.Module):
             def forward(self, xs):
