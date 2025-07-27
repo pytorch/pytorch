@@ -1881,12 +1881,17 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 """
                 This function is used to handle zero consts situation. Because cpp standard is not allow zero size array:
                 https://stackoverflow.com/questions/9722632/what-happens-if-i-define-a-0-size-array-in-c-c
-                Such as MSVC will report error C2466:
+                1. On Windows, MSVC will report error C2466:
                 https://learn.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2466?view=msvc-170
                 So, we can use assmbely compiler to handle this situation.
+                2. On Windows, why not use Win32 asm to handle all path? Because of ml64 is only support upto align 16, it is
+                not the best performance.
+                3. It function can handle zero size case on both Windows and Linux, as that:
+                    A. On Linux, we added `-pedantic` to disable zero size array on C++ compiler.
+                    B. On Windows, msvc is not support zero size array by default.
                 """
                 if _IS_WINDOWS:
-                    # Windows nasm is max support align to 16, but it is no effect to zero size data.
+                    # Windows ml64 is max support align to 16, but it is no effect to zero size data.
                     asm_code = """
 option casemap:none
 .data
