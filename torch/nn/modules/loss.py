@@ -2049,7 +2049,6 @@ class CTCLoss(_Loss):
         input_lengths: Tensor,
         target_lengths: Tensor,
     ) -> Tensor:
-        """Runs the forward pass."""
 
         return F.ctc_loss(
             inputs,
