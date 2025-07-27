@@ -1886,12 +1886,12 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                     asm_code = """
 option casemap:none
 .data
-_binary_constants_bin_start:
+?_binary_constants_bin_start@@3PAEA:
 align 16
-_binary_constants_bin_end:
+?_binary_constants_bin_end@@3PAEA:
 align 16
-public _binary_constants_bin_start
-public _binary_constants_bin_end
+public ?_binary_constants_bin_start@@3PAEA
+public ?_binary_constants_bin_end@@3PAEA
 end
 """
                     asm_ext = "asm"

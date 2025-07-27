@@ -1921,7 +1921,7 @@ def RunAsmBuildObject(src: str, target: str, cwd: str):
         if _IS_WINDOWS:
             # Format reference:
             # https://learn.microsoft.com/en-us/cpp/assembler/masm/ml-and-ml64-command-line-reference?view=msvc-170
-            cmd = f"{asm_cc} {src} /c /Fo {target}"
+            cmd = f"{asm_cc} {src} /c /Fo {target}"  # codespell: ignore /Fo
         else:
             cmd = "{asm_cc} -c {src} -o {target}"
 
