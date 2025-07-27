@@ -1939,7 +1939,9 @@ _binary_constants_bin_end:
             )
             consts_o = object_builder.get_target_file_path()
             if use_asm_build is False and len(consts) == 0:
-                RunAsmBuildObject(consts_s, consts_o)
+                src = normalize_path_separator(str(consts_s))
+                asm_cwd = normalize_path_separator(str(consts_s.parent))
+                RunAsmBuildObject(src, consts_o, asm_cwd)
             else:
                 object_builder.build()
 

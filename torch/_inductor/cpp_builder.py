@@ -1907,7 +1907,7 @@ class CppBuilder:
             f.write(contents)
 
 
-def RunAsmBuildObject(src: str, target: str):
+def RunAsmBuildObject(src: str, target: str, cwd: str):
     def get_asm_compuler() -> str:
         if _IS_WINDOWS:
             ASM_CC = "ml64"
@@ -1921,7 +1921,7 @@ def RunAsmBuildObject(src: str, target: str):
         if _IS_WINDOWS:
             # Format reference:
             # https://learn.microsoft.com/en-us/cpp/assembler/masm/ml-and-ml64-command-line-reference?view=msvc-170
-            cmd = f"{asm_cc} /Fo {target} /c {src}"
+            cmd = f"{asm_cc} {src} /c /Fo {target}"
         else:
             cmd = "{asm_cc} -c {src} -o {target}"
 
@@ -1931,4 +1931,4 @@ def RunAsmBuildObject(src: str, target: str):
     _create_if_dir_not_exist(target)
 
     cmd = get_command_line(asm_cc=asm_cc, src=src, target=target)
-    run_compile_cmd(cmd)
+    run_compile_cmd(cmd, cwd=cwd)
