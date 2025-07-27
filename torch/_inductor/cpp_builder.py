@@ -1913,6 +1913,7 @@ def RunAsmBuildObject(src: str, target: str, cwd: str):
             ASM_CC = "ml64"
         else:
             ASM_CC = get_cpp_compiler()
+            # Intel compiler is not support to compile asm, switch to gcc.
             if _is_intel_compiler(ASM_CC):
                 return "gcc"
         return ASM_CC
@@ -1928,7 +1929,5 @@ def RunAsmBuildObject(src: str, target: str, cwd: str):
         return cmd
 
     asm_cc = get_asm_compuler()
-    _create_if_dir_not_exist(target)
-
     cmd = get_command_line(asm_cc=asm_cc, src=src, target=target)
     run_compile_cmd(cmd, cwd=cwd)
