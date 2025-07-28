@@ -7358,6 +7358,37 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (inp, False))
         self.common(fn, (inp, True))
 
+    @parametrize("stable", (True, False))
+    @parametrize("descending", (True, False))
+    def test_nan_sort(self, descending, stable):
+        def test_sort(x, descending, stable):
+            out = torch.sort(x, descending=descending, stable=stable)
+            if stable:
+                return out
+            else:
+                # non stable idx may not be equal
+                return out[0]
+
+        tensor = torch.tensor(
+            [
+                0.7308,
+                0.7053,
+                0.3349,
+                -0.7158,
+                torch.nan,
+                0.1234,
+                1.0284,
+                torch.nan,
+                -1.8767,
+                -0.4369,
+            ],
+            device=self.device,
+        )
+        inps = (tensor, descending, stable)
+        a = torch.compile(test_sort)(*inps)
+        b = test_sort(*inps)
+        self.assertEqual(a, b, equal_nan=True)
+
     def test_sort_stable(self):
         def fn(a, descending):
             return a.sort(dim=-1, stable=True, descending=descending)
