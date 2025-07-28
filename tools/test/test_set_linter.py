@@ -84,8 +84,6 @@ class TestSetLinter(LinterTestCase):
             actual = pf._lines_with_sets and pf._lines_with_sets[0].braced_sets
             self.assertEqual(len(actual), expected)
 
-    # def test_braces_inside_braces(self) -> None:
-
 
 EXPECTED_SETS = [
     TokenInfo(NAME, "set", (7, 4), (7, 7), "a = set()\n"),
