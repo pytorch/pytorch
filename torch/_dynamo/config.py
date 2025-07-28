@@ -421,6 +421,10 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
 )
 
+# Resume tracing in nested frames if a nested graph break occurs
+# Old behavior is to bubble up the graph break to the top level frame.
+nested_graph_breaks = False
+
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
 # produces a consistent number of inputs to the graph.
@@ -549,7 +553,7 @@ fake_tensor_disable_inference_mode = True
 
 # Experimental feature for running automatic caching precompile.
 # Enables automatic DynamoCache save/load
-caching_precompile = False
+caching_precompile = os.environ.get("TORCH_CACHING_PRECOMPILE", "0") == "1"
 
 # Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
 # Note: AOTAutograd will still trace and partition an AOT backward graph local to that

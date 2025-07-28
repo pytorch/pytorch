@@ -460,6 +460,38 @@ def create_swap(n: int) -> list[Instruction]:
     ]
 
 
+def create_binary_slice(
+    start: Optional[int], end: Optional[int], store: bool = False
+) -> list[Instruction]:
+    """
+    BINARY_SLICE and STORE_SLICE (if `set` is True) for all Python versions
+    """
+    if sys.version_info >= (3, 12):
+        inst_name = "STORE_SLICE" if store else "BINARY_SLICE"
+        return [
+            create_load_const(start),
+            create_load_const(end),
+            create_instruction(inst_name),
+        ]
+    else:
+        inst_name = "STORE_SUBSCR" if store else "BINARY_SUBSCR"
+        return [
+            create_load_const(start),
+            create_load_const(end),
+            create_instruction("BUILD_SLICE", arg=2),
+            create_instruction(inst_name),
+        ]
+
+
+def create_reverse(n: int) -> list[Instruction]:
+    # Reverse the top n values on the stack
+    # UNPACK_SEQUENCE reverses the sequence
+    return [
+        create_instruction("BUILD_TUPLE", arg=n),
+        create_instruction("UNPACK_SEQUENCE", arg=n),
+    ]
+
+
 def lnotab_writer(
     lineno: int, byteno: int = 0
 ) -> tuple[list[int], Callable[[int, int], None]]:

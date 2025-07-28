@@ -1814,6 +1814,8 @@ class Tensor(torch._C.TensorBase):
                 raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
 
             device_type = DLDeviceType.kDLCUDA
+        elif torch_device_type == "mps":
+            device_type = DLDeviceType.kDLMetal
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)
