@@ -1407,10 +1407,6 @@ class CommonTemplate:
             b = torch.add(args[0], args[0])
             return (a, b)
 
-        # Complex are not supported on MacOS-13
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            raise unittest.SkipTest("No complex on MacOS13")
-
         x = torch.randn(41, dtype=torch.complex64, device=self.device)
         y = x.clone()
         # should not inplace write to the input
@@ -1496,10 +1492,6 @@ class CommonTemplate:
         )
         real_input = torch.tensor([-1.0, 0.0, 1.0, float("nan")])
         interger_real_input = torch.tensor([-1, 0, 1])
-        # Complex are not supported on MacOS-13
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            self.common(fn, (complex_input.real, real_input, interger_real_input))
-            return
         self.common(fn, (complex_input, real_input, interger_real_input))
 
     def test_sgn(self):
@@ -1651,9 +1643,6 @@ class CommonTemplate:
         def copy(x):
             i = torch.arange(x.size(0), device=x.device)
             return x[i]
-
-        if self.device == "mps" and MACOS_VERSION < 13.3:
-            raise unittest.SkipTest("Inaccurate on MacOS-13")
 
         x = torch.randn(8, device=self.device)
         copy_opt = torch.compile(copy, backend="inductor")
@@ -2075,8 +2064,6 @@ class CommonTemplate:
             return torch.max(a), torch.sum(a)
 
         # Requires masked loading for the intermediate reduction
-        if self.device == "mps" and MACOS_VERSION < 13.3:
-            raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
         sample = torch.full((3999971,), 0, dtype=torch.int64)
         sample[-1] = 1
         self.common(fn, (sample,))
@@ -2134,13 +2121,6 @@ class CommonTemplate:
         ):
             if not self.is_dtype_supported(dtype):
                 continue
-            # cumsum not implemented for integers on MacOS-13
-            if (
-                self.device == "mps"
-                and not dtype.is_floating_point
-                and MACOS_VERSION < 13.3
-            ):
-                continue
             # Use low=0 since when the mean value is 0, cumsum at all points
             # tends towards zero which makes the relative error term blow up
             inp = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
@@ -2193,9 +2173,6 @@ class CommonTemplate:
             offsets = torch.cumsum(lengths, 0)
             return data[offsets]
 
-        if self.device == "mps" and MACOS_VERSION < 13.3:
-            raise unittest.SkipTest("CumSum for int64 needs MacOS-13.3+")
-
         lengths = torch.full((2**14,), 2**2, dtype=torch.int64, device=self.device)
         lengths[-2] = 3
         lengths[-1] = 3
@@ -2208,13 +2185,6 @@ class CommonTemplate:
 
         for dtype in [torch.float32, torch.float64, torch.int32, torch.int64]:
             if not self.is_dtype_supported(dtype):
-                continue
-            # cumsum not implemented on MacOS-13
-            if (
-                self.device == "mps"
-                and not dtype.is_floating_point
-                and MACOS_VERSION < 13.3
-            ):
                 continue
             inp = _large_cumprod_input(
                 (10, 10000), dim=1, dtype=dtype, device=self.device
@@ -2570,10 +2540,6 @@ class CommonTemplate:
         def fn(x):
             return 2 * x.sum(-1) + x.sum()
 
-        # Requires masked loading for the intermediate reduction
-        if self.device == "mps" and MACOS_VERSION < 13.3:
-            raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
-
         dtypes = torch.bool, torch.uint8, torch.int
         inps = [torch.randint(2, (64,), dtype=dtype) for dtype in dtypes]
 
@@ -2581,9 +2547,6 @@ class CommonTemplate:
             self.common(fn, (i,), check_lowp=False)
 
     def test_sum_dtype(self):
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            raise unittest.SkipTest("bfloat unsupported on MacOS-13")
-
         sum_dtype = torch.double if self.device != "mps" else torch.bfloat16
 
         def fn(x):
@@ -3004,8 +2967,6 @@ class CommonTemplate:
     @skipIfXpu(msg="logaddexp_xpu not implemented for ComplexFloat")
     @skipCUDAIf(True, "Not implemented for CUDA")
     def test_logaddexp(self):
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            raise unittest.SkipTest("Complex needs MacOS-14+")
         self.common(
             torch.logaddexp,
             (
@@ -3202,9 +3163,6 @@ class CommonTemplate:
                 a / b,
                 a // b,
             )
-
-        if self.device == "mps" and MACOS_VERSION < 13.3:
-            raise unittest.SkipTest("Inaccurate for MPS no MacOS-13")
 
         self.common(
             fn,
@@ -3839,8 +3797,6 @@ class CommonTemplate:
                 torch.randn(256, 256),
                 torch.randint(-128, 127, (256, 256), dtype=torch.int8),
             ),
-            # MacOS-13 MM ops have precision issues
-            check_lowp=self.device != "mps" or MACOS_VERSION > 14.0,
             rtol=0.01,
             atol=0.1,
         )
@@ -4446,9 +4402,6 @@ class CommonTemplate:
         self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
     def test_to_dtype(self):
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            raise unittest.SkipTest("bfloat unsupported on MacOS-13")
-
         new_dtype = torch.float64 if self.device != "mps" else torch.bfloat16
 
         def fn(a, b):
@@ -5390,10 +5343,6 @@ class CommonTemplate:
         def fn(x):
             return aten.tan(x) + 2, aten.tan(x + 1)
 
-        # tan is broken in MPSGraph for MacOS before version 13.3
-        if self.device == "mps" and MACOS_VERSION < 13.3:
-            raise unittest.SkipTest("tan is inaccurate for MPS no MacOS-13")
-
         self.common(
             fn,
             (torch.randn([16, 16]),),
@@ -6000,10 +5949,6 @@ class CommonTemplate:
         def fn(x):
             return [aten.pow(x, e) for e in range(-8, 9)]
 
-        # pow is broken in MPSGraph for MacOS before version 13.3
-        if self.device == "mps" and MACOS_VERSION < 13.3:
-            raise unittest.SkipTest("pow is inaccurate for MPS no MacOS-13")
-
         self.common(
             fn,
             (torch.randn([16, 16]),),
@@ -6013,10 +5958,6 @@ class CommonTemplate:
     def test_pow2(self):
         def fn(x):
             return aten.pow(1000, x), aten.pow(x, 1000)
-
-        # pow is broken in MPSGraph for MacOS before version 13.3
-        if self.device == "mps" and MACOS_VERSION < 13.3:
-            raise unittest.SkipTest("pow is inaccurate for MPS no MacOS-13")
 
         self.common(
             fn,
@@ -7978,8 +7919,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 # Greatest relative difference: 1.0 at index (3, 19, 4) (up to 0.001 allowed)
                 atol=0.002,
                 rtol=0.001,
-                # MacOS-13 MM ops have precision issues
-                check_lowp=self.device != "mps" or MACOS_VERSION > 14.0,
             )
 
     @config.patch({"triton.max_tiles": 2})
@@ -8222,10 +8161,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 requires_grad=False,
             )
             return torch.ops.aten.index.Tensor(y, [iota, sub])
-
-        # Requires masked loading for the intermediate reduction
-        if self.device == "mps" and MACOS_VERSION < 13.3:
-            raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
 
         self.common(fn, [torch.randn(1, 1024), torch.randn(1, 1024, 2)])
 
@@ -8538,9 +8473,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             a1.scatter_(dim, index, b, reduce=reduce)
             return (a, a1)
 
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            raise unittest.SkipTest("Crashes on MacOS-13")
-
         check_lowp = True
         if self.device == "xpu":
             check_lowp = False
@@ -8689,9 +8621,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             a1 = a + 1.0
             a1.scatter_reduce_(dim, index, b, reduce=reduce)
             return (a, a1)
-
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            raise unittest.SkipTest("Crashes on MacOS-13")
 
         check_lowp = True
         if self.device == "xpu":
@@ -11400,9 +11329,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             attention_mask = attention_mask.long()
             return torch.cumsum(attention_mask, dim=1)
 
-        if self.device == "mps" and MACOS_VERSION < 13.3:
-            raise unittest.SkipTest("CumSum for int64 needs MacOS-13.3+")
-
         x = torch.randn(2, 2)
         self.common(fn, (x,), atol=0, rtol=0)
 
@@ -11610,17 +11536,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(x):
             return torch.fft.fftn(x)
 
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            raise unittest.SkipTest("FFT needs MacOS-14+")
-
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
     def test_fft_real_input_real_output(self):
         def fn(x):
             return torch.fft.fftn(x).real
-
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            raise unittest.SkipTest("FFT needs MacOS-14+")
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
@@ -12933,15 +12853,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         a = torch.randn(512, 4096, requires_grad=True)
         b = torch.randint(size=(512,), low=0, high=4095)
 
-        if self.device == "mps" and MACOS_VERSION < 13.3:
-            raise unittest.SkipTest("Fails with internal compiler error on MacOS-13")
-
         self.common(forward, (a, b))
 
     def test_isin_tensor_scalar(self):
-        if self.device == "mps" and MACOS_VERSION < 14.0:
-            raise unittest.SkipTest("isin is not implemented on MacOS-13")
-
         for invert in [True, False]:
             torch._dynamo.reset()
             elements = 1
