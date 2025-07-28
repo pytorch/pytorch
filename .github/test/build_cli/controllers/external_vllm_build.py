@@ -63,11 +63,8 @@ def build_vllm(
     with Timer():
         commit = get_post_build_pinned_commit("vllm")
         clone_vllm(commit)
-
-        run(
-            "cp .github/script-v/Dockerfile.nightly_torch  vllm/docker/Dockerfile.nightly_torch",
-            logging=True,
-        )
+        run("cp .github/script-v/Dockerfile.base  vllm/docker/Dockerfile.nightly_torch",logging=True)
+        # run( "cp .github/script-v/Dockerfile.nightly_torch  vllm/docker/Dockerfile.nightly_torch",logging=True)
         docker_torch_arg = ""
         if torch_whl_dir:
             run("pwd")
@@ -83,7 +80,7 @@ def build_vllm(
         base_image_arg = ""
         disable_pull = "--pull=true"
         if base_image:
-            base_image_arg = f"--build-arg BASE_IMAGE={base_image}"
+            base_image_arg = f'--build-arg "BASE_IMAGE={base_image}"'
             if local_image_exists(base_image):
                 print(f"[INFO] Found local image: {base_image_arg}")
                 disable_pull = "--pull=false"

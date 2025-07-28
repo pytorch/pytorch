@@ -213,7 +213,7 @@ jobs:
       - name: Store Vllm Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         with:
-          name: ${{ inputs.build-environment }}-vllm-build
+          name: ${{ inputs.build-environment }}-vllm-build-${{inputs.target-stage || 'default'}}
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
