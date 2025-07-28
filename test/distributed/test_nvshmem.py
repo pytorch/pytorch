@@ -591,6 +591,85 @@ class NVSHMEMAutogradTest(MultiProcContinousTest):
             torch.ones(inp_numel, device=self.device),
         )
 
+    @skipIfRocm
+    def test_autograd_AllToAllVDev2dOffset(self) -> None:
+        from torch.distributed._symmetric_memory._autograd import AllToAllVDev2dOffset
+
+        # Mimics Group GEMM alignment
+        align = 8
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        # Number of experts per rank
+        ne = 8
+        nsplits = ne * self.world_size
+
+        # Number of elements for an expert is random between [0, k)
+        k = 10
+        inp_splits = torch.randint(k, (nsplits,), dtype=torch.int64, device=self.device)
+
+        # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
+        max_inp_numel = k * nsplits
+        # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = self.world_size  # worst case: one rank receives all data
+        max_out_numel = max_inp_numel * overflow_factor
+
+        # Use a dispatch to prepare the input for combine (this is just a
+        # preparation, not the test itself)
+        # Buffers for dispatch
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).fill_(
+            self.rank
+        )
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
+        in_splits = symm_mem.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        ).copy_(inp_splits)
+        # 2 rows: output splits, output offsets
+        # Initiallizing all values to -1 to check if they are updated
+        out_splits_offsets = symm_mem.empty(
+            (2, nsplits), dtype=torch.int64, device=self.device
+        ).fill_(-1)
+
+        # Dispatch the tokens
+        torch.ops.symm_mem.all_to_all_vdev_2d(
+            inp, out, in_splits, out_splits_offsets, group_name, major_align=align
+        )
+
+        # Now we start to test the autograd function
+        # Requires grad for input of combine
+        out.requires_grad_(True)
+
+        # Init autograd function
+        AllToAllVDev2dOffset.init(max_out_numel, align)
+
+        def fwd_bwd():
+            combine_out, _ = AllToAllVDev2dOffset.apply(
+                out, out_splits_offsets, group_name
+            )
+            s = combine_out.sum()
+            s.backward()
+
+        # Run a few iterations
+        iters = 2
+        for i in range(iters):
+            out.grad = None
+            fwd_bwd()
+
+        # Check gradients -- grad of sum is 1
+        # We also need to skip the padding in the input data
+        out_splits = out_splits_offsets[0].tolist()
+        out_offsets = out_splits_offsets[1].tolist()
+        for i in range(nsplits):
+            grad_chunk = out.grad[out_offsets[i] : out_offsets[i] + out_splits[i]]
+            torch.testing.assert_close(
+                grad_chunk,
+                torch.ones(out_splits[i], device=self.device),
+            )
+
 
 if __name__ == "__main__":
     run_tests()
