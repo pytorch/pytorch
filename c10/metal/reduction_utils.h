@@ -202,6 +202,52 @@ opmath_t<T> threadgroup_prod(
 }
 
 template <typename T>
+T threadgroup_max(
+    threadgroup opmath_t<T>* data,
+    T val,
+    unsigned idx,
+    unsigned size) {
+  auto rc = simd_max(static_cast<opmath_t<T>>(val));
+  if (idx % simdgroup_size == 0) {
+    data[idx / simdgroup_size] = rc;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1 = simd_max(data[idx]);
+      if (idx == 0) {
+        data[0] = rc1;
+      }
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return data[0];
+}
+
+template <typename T>
+T threadgroup_min(
+    threadgroup opmath_t<T>* data,
+    T val,
+    unsigned idx,
+    unsigned size) {
+  auto rc = simd_min(static_cast<opmath_t<T>>(val));
+  if (idx % simdgroup_size == 0) {
+    data[idx / simdgroup_size] = rc;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1 = simd_min(data[idx]);
+      if (idx == 0) {
+        data[0] = rc1;
+      }
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return data[0];
+}
+
+template <typename T>
 float3 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   float m = data[0];
@@ -232,28 +278,6 @@ float3 threadgroup_welford_combine(threadgroup T* data, unsigned size) {
   float3 rc = data[0];
   for (unsigned idx = 1; idx < size; ++idx) {
     rc = welford_combine(rc, data[idx]);
-  }
-  return rc;
-}
-
-template <typename T>
-T threadgroup_max(threadgroup T* data, unsigned size) {
-  // TODO: This should be moved to the callee
-  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  T rc = data[0];
-  for (unsigned idx = 1; idx < size; ++idx) {
-    rc = ::c10::metal::max(rc, data[idx]);
-  }
-  return rc;
-}
-
-template <typename T>
-T threadgroup_min(threadgroup T* data, unsigned size) {
-  // TODO: This should be moved to the callee
-  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  T rc = data[0];
-  for (unsigned idx = 1; idx < size; ++idx) {
-    rc = ::c10::metal::min(rc, data[idx]);
   }
   return rc;
 }

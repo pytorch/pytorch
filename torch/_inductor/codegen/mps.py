@@ -628,7 +628,29 @@ class MetalKernel(SIMDKernel):
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
-        if reduction_type in ["max", "min", "argmin", "argmax"]:
+        if reduction_type in ["max", "min"]:
+            acc_buf = self._new_idxvar(
+                src_dtype, ceildiv(acc_buf_size, self.simd_group_size)
+            )
+            if not self.multistage_reduction_entry:
+                val = value
+            else:
+                default_val = (
+                    f"::metal::numeric_limits<{DTYPE_TO_METAL[src_dtype]}>::min()"
+                )
+                val = self._new_idxvar(
+                    src_dtype, default_value=default_val, is_threadgroup=False
+                )
+                self.compute.splice(
+                    f"{val} = ::c10::metal::{reduction_type}({val}, {value});"
+                )
+            return self.cse.generate(
+                self.stores,
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size})",
+                dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
+            )
+
+        if reduction_type in ["argmin", "argmax"]:
             acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             src_metal_type = DTYPE_TO_METAL[src_dtype]
