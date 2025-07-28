@@ -7,7 +7,7 @@ import warnings
 import weakref
 from collections import namedtuple, OrderedDict
 from collections.abc import Iterator, Mapping
-from typing import Any, Callable, Dict, Optional, overload, TypeVar, Union
+from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import Self, TypeVarTuple, Unpack
 
 import torch
@@ -479,7 +479,7 @@ class Module:
     call_super_init: bool = False
     _compiled_call_impl: Optional[Callable] = None
 
-    def __init__(self, *args: Unpack[_Ts], **kwargs: Dict[str, Any]) -> None:
+    def __init__(self, *args: Unpack[_Ts], **kwargs: dict[str, Any]) -> None:
         """Initialize internal Module state, shared by both nn.Module and ScriptModule."""
         torch._C._log_api_usage_once("python.nn_module")
 
