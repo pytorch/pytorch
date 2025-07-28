@@ -152,3 +152,15 @@ def my_zero_(t) -> Tensor:
     Returns: my_zero_(t)
     """
     return torch.ops.libtorch_agnostic.my_zero_.default(t)
+
+
+def fill_infinity(t) -> Tensor:
+    """
+    Fills the tensor with inf.
+
+    Args:
+        t: Tensor to fill
+
+    Returns: The modified tensor (same as input)
+    """
+    return torch.ops.libtorch_agnostic.fill_infinity.default(t)
