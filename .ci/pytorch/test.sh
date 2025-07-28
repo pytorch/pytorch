@@ -684,7 +684,7 @@ test_perf_for_dashboard() {
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
+      if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]]; then
         if [[ "$target" == "accuracy" ]]; then
           # Also collect Export pass rate and display as a separate row
           $TASKSET python "benchmarks/dynamo/$suite.py" \

@@ -1288,6 +1288,10 @@ class ExportedProgram:
     def constants(self, value):
         raise RuntimeError("Unable to set ExportedProgram's constants attribute.")
 
+    @compatibility(is_backward_compatible=False)
+    def is_joint(self):
+        return self.graph_signature.backward_signature is not None
+
     def _get_flat_args_with_check(self, args, kwargs):
         """Flatten args, kwargs using pytree, then, check specs.
 
