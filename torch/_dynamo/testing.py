@@ -42,7 +42,7 @@ from .bytecode_transformation import (
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
 from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
-from .utils import CompileCounterInt, same
+from .utils import same
 
 
 np: Optional[types.ModuleType] = None
@@ -227,8 +227,8 @@ def debug_insert_nops(
 
 class CompileCounter:
     def __init__(self) -> None:
-        self.frame_count: Union[int, CompileCounterInt] = 0
-        self.clear()
+        self.frame_count = 0
+        self.op_count = 0
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -240,19 +240,16 @@ class CompileCounter:
         return gm.forward
 
     def clear(self) -> None:
-        if config.debug_disable_compile_counter:
-            self.frame_count = CompileCounterInt(0)
-        else:
-            self.frame_count = 0
+        self.frame_count = 0
         self.op_count = 0
 
 
 class CompileCounterWithBackend:
     def __init__(self, backend: str) -> None:
-        self.frame_count: Union[int, CompileCounterInt] = 0
+        self.frame_count = 0
+        self.op_count = 0
         self.backend = backend
         self.graphs: list[torch.fx.GraphModule] = []
-        self.clear()
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -267,10 +264,7 @@ class CompileCounterWithBackend:
         return lookup_backend(self.backend)(gm, example_inputs)
 
     def clear(self) -> None:
-        if config.debug_disable_compile_counter:
-            self.frame_count = CompileCounterInt(0)
-        else:
-            self.frame_count = 0
+        self.frame_count = 0
         self.op_count = 0
         self.graphs = []
 
