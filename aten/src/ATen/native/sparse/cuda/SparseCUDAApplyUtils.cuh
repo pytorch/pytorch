@@ -203,7 +203,7 @@ __global__ void coalesceValuesKernel(
   int64_t stride) {
 
 #ifdef USE_ROCM
-  int64_t seg = (blockIdx.x * 4096 + blockIdx.y) * 4 + threadIdx.y;
+  int64_t seg = (blockIdx.x * gridDim.y + blockIdx.y) * 4 + threadIdx.y;
 #else
   int64_t seg = blockIdx.x * 4 + threadIdx.y;
 #endif
@@ -269,7 +269,7 @@ __global__ void coalesceValuesKernel(
   int64_t stride) {
 
 #ifdef USE_ROCM
-  int64_t seg = (blockIdx.x * 4096 + blockIdx.y) * 4 + threadIdx.y;
+  int64_t seg = (blockIdx.x * gridDim.y + blockIdx.y) * 4 + threadIdx.y;
 #else
   int64_t seg = blockIdx.x * 4 + threadIdx.y;
 #endif
