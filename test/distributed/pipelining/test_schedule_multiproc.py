@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 logger = logging.getLogger(__name__)
 
 d_hid = 512
-batch_size = 256
+batch_size = 64
 torch.manual_seed(0)
 device_type = "cuda"
 
@@ -60,12 +60,10 @@ class ScheduleTest(MultiProcContinousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    def _setup_models_and_data(self, n_layers=None, model_class=None):
+    def _setup_models_and_data(self, n_layers=None, model_class=MultiMLP):
         """Setup models, input data, target data, and loss function."""
         if n_layers is None:
             n_layers = self.world_size
-        if model_class is None:
-            model_class = MultiMLP
 
         full_mod = model_class(d_hid, n_layers=n_layers)
         full_mod.to(self.device)
@@ -127,33 +125,20 @@ class ScheduleTest(MultiProcContinousTest):
 
         return ref_out, ref_loss
 
-    def _run_schedule_steps(self, schedule, x, target=None, num_iterations=2, **kwargs):
-        """Execute schedule steps with proper rank-based logic."""
-        out = None
-        losses = []
-
-        for _ in range(num_iterations):
-            if self.rank == 0:
-                if target is not None and self.world_size == 1:
-                    # Special case for single rank with both input and target
-                    iter_losses = []
-                    out = schedule.step(x, target=target, losses=iter_losses, **kwargs)
-                    losses.extend(iter_losses)
-                else:
-                    schedule.step(x, **kwargs)
-            elif self.rank == self.world_size - 1:
-                iter_losses = []
-                out = schedule.step(target=target, losses=iter_losses)
-                losses.extend(iter_losses)
-            else:
-                schedule.step()
-
-        return out, losses
-
     def _check_gradients(
         self, stage_modules, ref_mod, submod_names=None, rtol=1e-5, atol=4e-5
     ):
         """Check that gradients match between pipeline stages and reference model using flexible comparison."""
+
+        def grad_check(grad1, grad2, param_name, rtol, atol, tolerance=0.05):
+            if grad1 is None and grad2 is None:
+                return
+            if grad1 is None or grad2 is None:
+                raise AssertionError(
+                    f"One gradient is None for {param_name}: {grad1} vs {grad2}"
+                )
+            torch.testing.assert_close(grad1, grad2, rtol=rtol, atol=atol)
+
         if submod_names is None:
             # Single stage case - need to detect tracer vs manual pipeline
             stage_modules = [stage_modules]
@@ -172,64 +157,21 @@ class ScheduleTest(MultiProcContinousTest):
                 # Tracer-based pipeline: parameter names are full paths from root model
                 for name, p in stage_modules[0].named_parameters():
                     ref_p = ref_mod.get_parameter(name)
-                    self._flexible_gradient_check(p.grad, ref_p.grad, name, rtol, atol)
+                    grad_check(p.grad, ref_p.grad, name, rtol, atol)
             else:
                 # Manual pipeline: parameter names are local to the submodule
                 submod_name = f"layers.{self.rank}"
                 ref_submod = ref_mod.get_submodule(submod_name)
                 for name, p in stage_modules[0].named_parameters():
                     ref_p = ref_submod.get_parameter(name)
-                    self._flexible_gradient_check(
-                        p.grad, ref_p.grad, f"{submod_name}.{name}", rtol, atol
-                    )
+                    grad_check(p.grad, ref_p.grad, f"{submod_name}.{name}", rtol, atol)
         else:
             # Multi-stage case - always use submodule approach
             for stage_module, submod_name in zip(stage_modules, submod_names):
                 ref_submod = ref_mod.get_submodule(submod_name)
                 for name, p in stage_module.named_parameters():
                     ref_p = ref_submod.get_parameter(name)
-                    self._flexible_gradient_check(
-                        p.grad, ref_p.grad, f"{submod_name}.{name}", rtol, atol
-                    )
-
-    def _flexible_gradient_check(
-        self, grad1, grad2, param_name, rtol, atol, tolerance=0.05
-    ):
-        """
-        Flexible gradient comparison that first tries assert_close, then falls back to relative difference.
-
-        Args:
-            grad1, grad2: Gradients to compare
-            param_name: Parameter name for error reporting
-            rtol, atol: Standard tolerances for assert_close
-            tolerance: Maximum allowed mean relative difference for fallback (default: 5%)
-        """
-        if grad1 is None and grad2 is None:
-            return
-
-        if grad1 is None or grad2 is None:
-            raise AssertionError(
-                f"One gradient is None for {param_name}: {grad1} vs {grad2}"
-            )
-
-        # First, try the standard strict comparison
-        try:
-            torch.testing.assert_close(grad1, grad2, rtol=rtol, atol=atol)
-            return  # If it passes, we're done
-        except AssertionError:
-            # Standard comparison failed, fall back to relative difference check
-            pass
-
-        # Calculate relative difference with small epsilon to avoid division by zero
-        diff = torch.abs((grad1 - grad2).div(grad1.to(torch.float32) + 1e-7))
-        mean_diff = diff.mean().item()
-
-        self.assertLessEqual(
-            mean_diff,
-            tolerance,
-            f"Gradient test failed for {param_name}: mean relative difference {mean_diff:.6f} > tolerance {tolerance} "
-            f"(standard assert_close with rtol={rtol}, atol={atol} also failed)",
-        )
+                    grad_check(p.grad, ref_p.grad, f"{submod_name}.{name}", rtol, atol)
 
     def _zero_gradients(self, stage_modules):
         """Zero gradients for all stage modules."""
@@ -333,8 +275,15 @@ class ScheduleTest(MultiProcContinousTest):
         stage, _, _ = self._create_single_stage_pipeline(mod, x, chunks)
         schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
-        # Run for 20 iterations
-        self._run_schedule_steps(schedule, x, target, num_iterations=20)
+        # Run
+        for _ in range(20):
+            if self.rank == 0:
+                schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                losses = []
+                schedule.step(target=target, losses=losses)
+            else:
+                schedule.step()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -594,7 +543,7 @@ class ScheduleTest(MultiProcContinousTest):
         # Check gradients - use relaxed tolerances for interleaved schedules
         # since gradients are small
         self._check_gradients(
-            stage_modules, ref_mod, submod_names, rtol=1e-2, atol=5e-3
+            stage_modules, ref_mod, submod_names, rtol=5e-3, atol=5e-3
         )
 
     @requires_nccl()
