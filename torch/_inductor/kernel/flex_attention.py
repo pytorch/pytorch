@@ -12,6 +12,7 @@ from typing import Any, Optional, Union
 import sympy
 
 import torch
+from torch._inductor.utils import can_use_tma
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
@@ -138,7 +139,7 @@ def maybe_realize(args: list[Optional[IRNode]]):
 
 def get_float32_precision():
     if (
-        torch.get_float32_matmul_precision() == "highest"
+        torch.backends.cuda.matmul.fp32_precision == "ieee"
         or torch.version.hip
         or torch.mtia.is_available()
     ):
@@ -393,33 +394,6 @@ compute_flex_attention = r"""
     off_zq = tl.program_id(1)
     off_hq = tl.program_id(2)
 
-
-    # Setting up the TMA descriptors for Q, K, V
-    desc_q = None
-    desc_k = None
-    desc_v = None
-    {%- if USE_TMA %}
-    desc_q = tl.make_tensor_descriptor(
-        base=Q,
-        shape=[Q_LEN*HQ*ZQ, QK_HEAD_DIM],
-        strides=[QK_HEAD_DIM, 1],
-        block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
-    )
-    desc_v = tl.make_tensor_descriptor(
-        base=V,
-        shape=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
-        strides=[V_HEAD_DIM, 1],
-        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
-    )
-    desc_k = tl.make_tensor_descriptor(
-        base=V,
-        shape=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
-        strides=[V_HEAD_DIM, 1],
-        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
-    )
-    {%- endif %}
-
-
     # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
     # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
     off_zkv = off_zq % ZKV
@@ -433,6 +407,33 @@ compute_flex_attention = r"""
     Q = Q + q_offset
     K = K + k_offset
     V = V + v_offset
+
+    # Setting up the TMA descriptors for Q, K, V
+    desc_q = None
+    desc_k = None
+    desc_v = None
+    {%- if USE_TMA %}
+    desc_q = tl.make_tensor_descriptor(
+        base=Q,
+        shape=[Q_LEN, QK_HEAD_DIM],
+        strides=[stride_qm, 1],
+        block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
+    )
+
+    desc_k = tl.make_tensor_descriptor(
+        base=K,
+        shape=[KV_LEN, QK_HEAD_DIM],
+        strides=[stride_kn, 1],
+        block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
+    )
+
+    desc_v = tl.make_tensor_descriptor(
+        base=V,
+        shape=[KV_LEN, V_HEAD_DIM],
+        strides=[stride_vn, 1],
+        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+    )
+    {%- endif %}
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
@@ -622,6 +623,8 @@ def forward_inner(
     if PRESCALE_QK:
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
+    kv_offset = 0
+
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
         # Here IS_DIVISIBLE acts are the start_n = tl.multiple_of(start_n, BLOCK_N) from triton_fused_attention.
@@ -635,7 +638,7 @@ def forward_inner(
                 off_z, off_h, offs_m, offs_n,
                 # Offsets needed for TMA loads
                 kv_start,
-                start_n,
+                kv_offset,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS,
             )
@@ -653,7 +656,7 @@ def forward_inner(
                 off_z, off_h, offs_m, offs_n,
                 # Offsets needed for TMA loads
                 kv_start,
-                start_n,
+                kv_offset,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
             )
@@ -666,6 +669,7 @@ def forward_inner(
         )
 
         offs_n = offs_n + offset
+        kv_offset += offset
         if not USE_TMA:
             K_block_ptr = tl.advance(K_block_ptr, (0, offset))
             V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
@@ -687,7 +691,7 @@ def forward_block_mn(
     off_z, off_h, offs_m, offs_n,
     # Offsets needed for TMA loads
     kv_start,
-    start_n,
+    kv_offset,
     MATMUL_PRECISION, RCP_LN2,
     IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
 
@@ -698,9 +702,9 @@ def forward_block_mn(
     # -- load k --
     # NB reversed order to since K is transposed
     {%- if USE_TMA %}
-    k = tl.load_tensor_descriptor(  # load in row major
-            desc_k,
-            [start_n.to(tl.int32) , kv_start],
+    k = tl.load_tensor_descriptor(
+        desc_k,
+        [kv_start + kv_offset, 0],
     )
     {%- else %}
     k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
@@ -774,7 +778,7 @@ def forward_block_mn(
     {%- if USE_TMA %}
     v = tl.load_tensor_descriptor(
         desc_v,
-        [kv_start.to(tl.int32) + start_n.to(tl.int32),0],
+        [kv_start + kv_offset, 0],
     )
     {%- else %}
     v = load_checked_block(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
@@ -1473,8 +1477,11 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Disabling TMA by default, only explicit kernel_options supported for now
+        # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", False)
+
+        if cur_kernel_options["USE_TMA"] and can_use_tma(query, key, value):
+            cur_kernel_options["USE_TMA"] = True
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
