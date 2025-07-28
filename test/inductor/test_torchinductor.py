@@ -9257,7 +9257,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         model = Model()
         x = torch.rand(10, 3, 0)
 
-        self.common(model, (x,))
+        self.common(model, (x,), exact_stride=True)
 
     def test_randint(self):
         @torch.compile(fullgraph=True)
@@ -9313,9 +9313,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @xfail_if_mps  # 100% are not close
     def test_like_rands(self):
         def fn(x):
-            return torch.rand_like(x), torch.randn_like(x)
+            return torch.rand_like(x), torch.randn_like(x), torch.randint_like(x, 1, 11)
 
-        self.common(fn, [torch.zeros([20, 20])])
+        self.common(fn, [torch.zeros([20, 20])], exact_stride=True)
+
+    @config.patch(fallback_random=True)
+    @xfail_if_mps  # 100% are not close
+    def test_like_rands_sliced(self):
+        def fn(x):
+            return (
+                torch.randn_like(x),
+                torch.randn_like(x),
+                torch.randint_like(x, 1, 11),
+            )
+
+        self.common(fn, (torch.zeros([3, 4])[:, ::2].permute(1, 0),), exact_stride=True)
 
     @config.patch(check_stack_no_cycles_TESTING_ONLY=True)
     def test_check_stack_no_cycles(self):
@@ -9348,6 +9360,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         a0 = fn(x).clone()
         a1 = fn(x).clone()
         self.assertFalse(torch.allclose(a0, a1))
+        self.assertEqual(a0.shape, a1.shape)
+        self.assertEqual(a0.stride(), a1.stride())
 
     @requires_gpu()
     @skip_if_triton_cpu("Flaky on Triton CPU")
@@ -9365,6 +9379,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         a1 = test_like_rands_on_different_device(GPU_TYPE, "cpu")
         self.assertTrue(a0.device.type == GPU_TYPE)
         self.assertTrue(a1.device.type == "cpu")
+        self.assertEqual(a0.shape, a1.shape)
+        self.assertEqual(a0.stride(), a1.stride())
 
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
