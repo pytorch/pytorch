@@ -1,7 +1,7 @@
 # Owner(s): ["module: fsdp"]
 import functools
 import os
-import unittest.mock
+import unittest
 
 import torch.distributed as dist
 from torch._dynamo.test_case import run_tests
