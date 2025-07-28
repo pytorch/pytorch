@@ -15,6 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
     echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
 
+
 # install Python and other dependencies if it does not existed
 RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
       echo "Installing Python ${PYTHON_VERSION}..." && \
