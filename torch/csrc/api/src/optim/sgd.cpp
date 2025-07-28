@@ -84,7 +84,7 @@ Tensor SGD::step(LossClosure closure) {
         Tensor buf;
         auto param_state = state_.find(p.unsafeGetTensorImpl());
         if (param_state == state_.end()) {
-          buf = torch::clone(d_p).detach();
+          buf = d_p.detach().clone();
           auto state = std::make_unique<SGDParamState>();
           state->momentum_buffer(buf);
           state_[p.unsafeGetTensorImpl()] = std::move(state);
