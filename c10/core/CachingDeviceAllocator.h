@@ -4,6 +4,8 @@
 #include <c10/core/Stream.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
+#include <c10/util/flat_hash_map.h>
+#include <c10/util/hash.h>
 #include <c10/util/static_tracepoint.h>
 
 #include <mutex>
@@ -240,7 +242,8 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
     }
   }
 
-  DeviceStats getDeviceStats(c10::DeviceIndex device) override {
+  CachingDeviceAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) override {
     return impls_[device]->getDeviceStats();
   }
 
@@ -338,7 +341,7 @@ struct BlockComparatorAddress {
 
 // Forward declaration
 template <typename BlockT>
-class PrivatePool;
+struct PrivatePool;
 
 template <typename BlockT>
 struct BlockPool {
@@ -495,29 +498,30 @@ struct SegmentRange {
 
 template <typename StreamT, typename HandleT = void*>
 struct ExpandableSegment {
-  virtual ExpandableSegment(
-      c10::DeviceIndex device,
-      std::optional<StreamT> stream,
-      size_t segment_size,
-      std::vector<c10::DeviceIndex> peers)
-      : device_(device),
-        stream_(stream),
-        // 2MB for small pool, 20MB for large pool
-        segment_size_(segment_size),
-        peers_(std::move(peers)) {
-    size_t total = getReservedVirtualMemorySize();
-    max_handles_ = numSegments(total);
-    createVirtualMemoryAddress(&ptr_);
-  }
+  ExpandableSegment() = default;
   C10_DISABLE_COPY_AND_ASSIGN(ExpandableSegment);
   ExpandableSegment(ExpandableSegment&&) = delete;
   ExpandableSegment operator=(ExpandableSegment&&) = delete;
 
+  virtual void init(
+      c10::DeviceIndex device,
+      std::optional<StreamT> stream,
+      size_t segment_size,
+      std::vector<c10::DeviceIndex> peers) {
+    device_ = device;
+    stream_ = std::move(stream);
+    // 2MB for small pool, 20MB for large pool
+    segment_size_ = segment_size;
+    peers_ = std::move(peers);
+    max_handles_ = numSegments(getReservedVirtualMemorySize());
+    createVirtualMemoryAddress(&ptr_);
+  }
+
   // Maps a virtual memory range to physical memory.
   virtual SegmentRange map(SegmentRange range) {
-    auto begin = segmentLeft(range.ptr);
-    auto end = segmentRight(range.ptr + range.size);
-    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
+    auto begin = segmentLeft(range.ptr_);
+    auto end = segmentRight(range.ptr_ + range.size_);
+    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr_);
     if (begin == end) {
       return rangeFromHandles(begin, end);
     }
@@ -531,10 +535,10 @@ struct ExpandableSegment {
 
   // Unmap a virtual memory range from physical memory.
   virtual SegmentRange unmap(SegmentRange range) {
-    auto begin = segmentRight(range.ptr);
-    auto end = segmentLeft(range.ptr + range.size);
+    auto begin = segmentRight(range.ptr_);
+    auto end = segmentLeft(range.ptr_ + range.size_);
     if (begin >= end) {
-      return SegmentRange{range.ptr, 0};
+      return SegmentRange{range.ptr_, 0};
     }
     unmapHandles(begin, end);
     return rangeFromHandles(begin, end);
@@ -567,33 +571,24 @@ struct ExpandableSegment {
 
   // Returns the reserved virtual memory size for this segment, which may be
   // larger than the total size if the segment is expandable.
-  virtual size_t getReservedVirtualMemorySize() const {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "Not implemented for getReservedVirtualMemorySize.");
-  };
+  virtual size_t getReservedVirtualMemorySize() = 0;
 
   // Create virtual memory address for this segment for the reserved size.
-  virtual void createVirtualMemoryAddress(void** ptr) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "Not implemented for createVirtualMemoryAddress.");
-  }
+  virtual void createVirtualMemoryAddress(void** ptr) = 0;
 
   // Release the virtual memory address associated with the segment.
-  virtual void releaseVirtualMemoryAddress(void* ptr) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "Not implemented for releaseVirtualMemoryAddress.");
-  }
+  virtual void releaseVirtualMemoryAddress(void* ptr) = 0;
 
   // Maps the physical memory handles in the range [begin, end) to the segment.
-  virtual void mapHandles(size_t begin, size_t end) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for mapHandles.");
-  }
+  virtual void mapHandles(size_t begin, size_t end) = 0;
 
   // Unmaps the physical memory handles in the range [begin, end) from the
   // segment.
-  virtual void unmapHandles(size_t begin, size_t end) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for unmapHandles.");
-  }
+  virtual void unmapHandles(size_t begin, size_t end) = 0;
+
+  // Sets access permissions for the specified device on the segment range
+  // [begin, end).
+  virtual void setAccess(c10::DeviceIndex device, size_t begin, size_t end) = 0;
 
   // Internal methods
 
@@ -627,12 +622,6 @@ struct ExpandableSegment {
         ptr() + segment_size_ * begin, segment_size_ * (end - begin));
   }
 
-  // Sets access permissions for the specified device on the segment range
-  // [begin, end).
-  virtual void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for setAccess.");
-  }
-
   // Iterates over all contiguous ranges of allocated segments in `handles_`,
   // and invokes the provided function `fn(start, end)` for each range.
   // Each range is defined as a half-open interval [start, end).
@@ -661,6 +650,25 @@ struct ExpandableSegment {
   // Peer devices on which this memory should be mapped and accessible.
   std::vector<c10::DeviceIndex> peers_;
 };
+
+template <typename ExpandableSegmentT>
+ExpandableSegmentT* make_expandable_segment(
+    c10::DeviceIndex device,
+    std::optional<typename ExpandableSegmentT::StreamT> stream,
+    size_t segment_size,
+    std::vector<c10::DeviceIndex> peers) {
+  static_assert(
+      std::is_base_of_v<
+          ExpandableSegment<
+              typename ExpandableSegmentT::StreamT,
+              typename ExpandableSegmentT::HandleT>,
+          ExpandableSegmentT>,
+      "ExpandableSegmentT must inherit from ExpandableSegment<StreamT, HandleT>");
+  ExpandableSegmentT* ptr = new ExpandableSegmentT();
+  TORCH_INTERNAL_ASSERT(ptr, "Failed to allocate memory for ExpandableSegment");
+  ptr->init(device, std::move(stream), segment_size, std::move(peers));
+  return ptr;
+}
 
 template <typename StreamT, typename HandleT = void*>
 struct AllocParams {
