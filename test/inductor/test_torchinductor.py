@@ -1712,6 +1712,7 @@ class CommonTemplate:
             self, repeat_interleave_opt, x, 3, has_assert=has_assert
         )
         expect = torch.repeat_interleave(x, 3, dim=0)
+        print(test, reference)
         self.assertEqual(expect, actual)
         self.assertEqual(actual, repeat_interleave(x, 3))
 
@@ -13699,7 +13700,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @parametrize("dtype", [torch.int32, torch.int64])
     def test_repeat_interleave_Tensor_decomp(self, dtype):
-
         # https://github.com/pytorch/pytorch/issues/147160
         def f(input, repeats):
             return torch.repeat_interleave(input, repeats, dim=0, output_size=3) + 1
@@ -13708,7 +13708,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         repeat = torch.tensor([1, 2], device=self.device)
         f_compiled = torch.compile(f)
         test, (code,) = run_and_get_code(f_compiled, input, repeat)
-        self.assertEqual(test, f(input, repeat))
+        reference = f(input, repeat)
+        torch.testing.assert_close(test, reference)
         # we don't lower when the cpp_wrapper is used because it cannot generate
         # proper examples during autotune
         can_lower = (not config.cpp_wrapper) and (input.device.type != "mps")
