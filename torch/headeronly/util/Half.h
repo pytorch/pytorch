@@ -25,7 +25,7 @@
 
 #include <cstdint>
 #include <cstring>
-#include <iostream>
+#include <ostream>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -719,6 +719,7 @@ using torch::headeronly::detail::native_fp16_to_fp32_value;
 #endif
 
 using torch::headeronly::detail::fp16_ieee_from_fp32_value;
+using torch::headeronly::detail::fp16_ieee_to_fp32_bits;
 using torch::headeronly::detail::fp16_ieee_to_fp32_value;
 } // namespace detail
 
