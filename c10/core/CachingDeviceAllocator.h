@@ -346,8 +346,8 @@ struct PrivatePool;
 template <typename BlockT>
 struct BlockPool {
   BlockPool(bool small, PrivatePool<BlockT>* private_pool = nullptr)
-      : blocks(BlockComparatorSize<BlockT>),
-        unmapped(BlockComparatorAddress<BlockT>),
+      : blocks(BlockComparatorSize<BlockT>()),
+        unmapped(BlockComparatorAddress<BlockT>()),
         is_small(small),
         owner_PrivatePool(private_pool) {}
 
@@ -378,7 +378,7 @@ struct BlockPool {
   }
 };
 
-template <typename StreamT, typename HandleT = void*>
+template <typename StreamT, typename HandleT>
 struct ExpandableSegment;
 
 template <typename StreamT, typename HandleT = void*>
