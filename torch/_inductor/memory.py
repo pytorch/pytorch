@@ -641,7 +641,7 @@ def reorder_for_peak_memory(
         graph_outputs,
     )
 
-    # when dubugging, dump a json file with operator and buffer info
+    # when dubugging, export operators and buffers information to a json file
     if config.memory_debug:
         export_json_with_operator_and_buffer_information(
             nodes,
@@ -700,9 +700,7 @@ def export_json_with_operator_and_buffer_information(
     graph_outputs: OrderedSet[str],
 ) -> None:
     """
-    Dump the the graph with operator and buffer information to a json file.
-
-    TODO(xuanzh): add a test
+    Export the the graph with operator and buffer information to a json file.
     """
 
     class ORMBuffer(TypedDict):
@@ -786,5 +784,6 @@ def export_json_with_operator_and_buffer_information(
     from functorch.compile import get_graph_being_compiled
 
     fname_graph = os.path.splitext(get_graph_being_compiled())[0] + ".json"
+    torch_log.info("Exporting graph to %s", fname_graph)
     with open(fname_graph, "w") as f:
         json.dump(g, f, indent=2)
