@@ -667,9 +667,7 @@ class MetalKernel(SIMDKernel):
             self.indexing_code.writeline(
                 f"{acc_thread_var} = ::metal::numeric_limits<{src_metal_type}>::{lim_fn}();"
             )
-            idx_var = next(
-                t for t in self.range_tree_nodes.values() if t.is_reduction
-            )
+            idx_var = next(t for t in self.range_tree_nodes.values() if t.is_reduction)
             idx_acc_buf = self._new_idxvar(torch.long, acc_buf_size)
             cmp_op = ">" if reduction_type == "argmax" else "<"
             idx_thread_var = f"{idx_acc_buf}[{reduction_idx}]"

@@ -12532,8 +12532,9 @@ class TestMetalLibrary(TestCaseMPS):
                                device int* out1,
                                constant {DTYPE_TO_METAL[dtype]}* inp,
                                uint idx [[thread_position_in_grid]]) {{
-                out0[idx] = c10::metal::simd_max(inp[idx]);
-                out1[idx] = c10::metal::simd_argmax(inp[idx]);
+                auto rc = c10::metal::simd_argmax(inp[idx]);
+                out0[idx] = rc.first;
+                out1[idx] = rc.second;
             }}
 
         """)
