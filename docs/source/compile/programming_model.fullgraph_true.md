@@ -86,7 +86,7 @@ A "pure function" is a function with the following properties:
   One notable exception is that mutating `torch.*` ops on function input Tensors are generally allowed.
 - Explicit input/output. All the input data must be passed through the function parameters and all of the outputs are returned from the function.
 
-See Pure Functions for examples. <!-- TODO: link -->
+See [Pure Functions](programming_model.non_strict_tracing_model.pure_functions) for examples.
 
 Dynamo is theoretically able to handle a wide variety of impure functions, but may be lacking coverage for specific
 Python language features. However, pure functions can always be compiled via an escape hatch.
@@ -99,7 +99,7 @@ If you have a graph break it may be possible to refactor the code around it into
 Note that there is nothing preventing these escape hatches from being applied to impure functions,
 but **we do not provide any soundness guarantees**.
 
-Example: If Dynamo doesn't support some Python feature or API that is non-strict traceable (e.g. it uses PyTorch operations), use `nonstrict_trace` to capture it instead. <!-- TODO: link -->
+Example: If Dynamo doesn't support some Python feature or API that is non-strict traceable (e.g. it uses PyTorch operations), [use `torch._dynamo.nonstrict_trace` to capture it instead](programming_model.dynamo_nonstrict_trace).
 
 ```{code-cell}
 # this is a function that Dynamo doesn't support (due to the graph_break() call).
@@ -127,7 +127,7 @@ def f_rewritten(x):
 f_rewritten(x)  # works
 ```
 
-Example: use custom operators to create opaque functions w.r.t. to `torch.compile` <!-- TODO: link -->
+Example: use [custom operators](programming_model.custom_ops) to create opaque functions w.r.t. to `torch.compile`
 
 ```{code-cell}
 from torch.utils.cpp_extension import load_inline
