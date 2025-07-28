@@ -640,7 +640,7 @@ def full_like(
 
 
 def _rand_like(
-    rand_fn,
+    rand_fn: Callable[[torch.Tensor, ...], torch.Tensor],
     self: torch.Tensor,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -691,7 +691,9 @@ def randint_like(self: torch.Tensor, high: int, **kwargs: Any) -> torch.Tensor:
 
 
 @register_decomposition(aten.randint_like.low_dtype)
-def randint_like_low(self: torch.Tensor, low: int, high: int, **kwargs: Any) -> torch.Tensor:
+def randint_like_low(
+    self: torch.Tensor, low: int, high: int, **kwargs: Any
+) -> torch.Tensor:
     return _rand_like(functools.partial(aten.randint.low, low, high), self, **kwargs)
 
 

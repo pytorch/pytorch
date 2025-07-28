@@ -9290,7 +9290,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @xfail_if_mps  # 100% are not close
     def test_like_rands_sliced(self):
         def fn(x):
-            return torch.randn_like(x), torch.randn_like(x), torch.randint_like(x, 1, 11)
+            return (
+                torch.randn_like(x),
+                torch.randn_like(x),
+                torch.randint_like(x, 1, 11),
+            )
 
         self.common(fn, (torch.zeros([3, 4])[:, ::2].permute(1, 0),), exact_stride=True)
 
