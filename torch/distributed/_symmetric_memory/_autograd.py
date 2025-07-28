@@ -142,10 +142,10 @@ class AllToAllVDev2dOffset(torch.autograd.Function):
     Usage:
         >>> # xdoctest: +SKIP("undefined vars")
         >>> # Initialize
-        >>> AllToAllVDev2dOffset.init(max_output_len)
+        >>> AllToAllVDev2dOffset.init(max_output_len, alignment)
         >>> # Forward
         >>> output, out_splits_offsets = AllToAllVDev2dOffset.apply(
-        ...     input, input_splits, group_name, major_align
+        ...     input, in_splits_offsets, group_name
         ... )
         >>> # Backward
         >>> s = output.sum()
