@@ -76,6 +76,7 @@ class KernelFactory {
       const Graph& graph,
       const std::shared_ptr<Weights>& weights,
       const torch::nativert::ExecutorConfig& executorConfig,
+      const Placement& placement,
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           pytorchStreamReader = nullptr);
 
