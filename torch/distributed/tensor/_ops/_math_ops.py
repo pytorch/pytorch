@@ -556,11 +556,22 @@ def softmax_backward_strategy(op_schema: OpSchema) -> OpStrategy:
             mesh=grad_out_strategy.mesh,
             placements=replicate_reduction_dims(src_spec.placements, [softmax_dim]),
         )
+        new_grad_out_spec = DTensorSpec(
+            mesh=tgt_spec.mesh,
+            placements=tgt_spec.placements,
+            tensor_meta=grad_out_src_spec.tensor_meta,
+        )
+        new_out_spec = DTensorSpec(
+            mesh=tgt_spec.mesh,
+            placements=tgt_spec.placements,
+            tensor_meta=out_src_spec.tensor_meta,
+        )
         redist_grad_out_cost = generate_redistribute_costs(grad_out_strategy, tgt_spec)
         redist_out_cost = generate_redistribute_costs(out_strategy, tgt_spec)
         grad_in_strategy.strategies.append(
             OpSpec(
                 output_specs=tgt_spec,
+                input_specs=(new_grad_out_spec, new_out_spec),
                 redistribute_cost=[redist_grad_out_cost, redist_out_cost],
             )
         )
