@@ -428,12 +428,18 @@ kernel void avg_pool(
       params.divisor_override);
 }
 
-#define REGISTER_MAX_POOL_OP(DTYPE)                                       \
+#define REGISTER_POOL_OP(DTYPE)                                           \
   template [[host_name("max_pool_" #DTYPE)]] kernel void max_pool<DTYPE>( \
       constant DTYPE * input [[buffer(0)]],                               \
       device DTYPE * output [[buffer(1)]],                                \
       device int64_t* indices [[buffer(2)]],                              \
       constant PoolingParams<5>& params [[buffer(3)]],                    \
+      uint tid [[thread_position_in_grid]]);                              \
+                                                                          \
+  template [[host_name("avg_pool_" #DTYPE)]] kernel void avg_pool<DTYPE>( \
+      constant DTYPE * input [[buffer(0)]],                               \
+      device DTYPE * output [[buffer(1)]],                                \
+      constant AvgPoolingParams<5> & params [[buffer(2)]],                \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_MAX_POOL_BACKWARD_OP(DTYPE)                   \
@@ -445,39 +451,19 @@ kernel void avg_pool(
       constant PoolingBackwardParams<5>& params [[buffer(3)]], \
       uint tid [[thread_position_in_grid]]);
 
-REGISTER_MAX_POOL_OP(float);
-REGISTER_MAX_POOL_OP(half);
-REGISTER_MAX_POOL_OP(int);
-REGISTER_MAX_POOL_OP(long);
-REGISTER_MAX_POOL_OP(short);
-REGISTER_MAX_POOL_OP(char);
-REGISTER_MAX_POOL_OP(uchar);
-REGISTER_MAX_POOL_OP(bool);
+REGISTER_POOL_OP(float);
+REGISTER_POOL_OP(half);
+REGISTER_POOL_OP(int);
+REGISTER_POOL_OP(long);
+REGISTER_POOL_OP(short);
+REGISTER_POOL_OP(char);
+REGISTER_POOL_OP(uchar);
+REGISTER_POOL_OP(bool);
 
 REGISTER_MAX_POOL_BACKWARD_OP(float);
 REGISTER_MAX_POOL_BACKWARD_OP(half);
 
 #if __METAL_VERSION__ >= 310
-REGISTER_MAX_POOL_OP(bfloat);
+REGISTER_POOL_OP(bfloat);
 REGISTER_MAX_POOL_BACKWARD_OP(bfloat);
-#endif
-
-#define REGISTER_AVG_POOL_OP(DTYPE)                                       \
-  template [[host_name("avg_pool_" #DTYPE)]] kernel void avg_pool<DTYPE>( \
-      constant DTYPE * input [[buffer(0)]],                               \
-      device DTYPE * output [[buffer(1)]],                                \
-      constant AvgPoolingParams<5> & params [[buffer(2)]],                \
-      uint tid [[thread_position_in_grid]]);
-
-REGISTER_AVG_POOL_OP(float);
-REGISTER_AVG_POOL_OP(half);
-REGISTER_AVG_POOL_OP(int);
-REGISTER_AVG_POOL_OP(long);
-REGISTER_AVG_POOL_OP(short);
-REGISTER_AVG_POOL_OP(char);
-REGISTER_AVG_POOL_OP(uchar);
-REGISTER_AVG_POOL_OP(bool);
-
-#if __METAL_VERSION__ >= 310
-REGISTER_AVG_POOL_OP(bfloat);
 #endif
