@@ -62,6 +62,7 @@ pre_grad_pass_names = [
     "split_stack_to_cats_pass",
     "unbind_stack_to_slices_pass",
     "move_reshape_out_of_split_stack_pass",
+    "einsum_to_pointwise_pass",
 ]
 
 post_grad_pass_names = [
@@ -1790,7 +1791,11 @@ def merge_split_cat_aten(match: Match, *args, **kwargs):
     for cat_node in list(getitem_nodes[0].users.keys()):
         cat_dim = get_arg_value(cat_node, 1, "dim")
         cat_inputs = get_arg_value(cat_node, 0, "tensors")
-        if len(cat_inputs) < threshold_to_cat:
+        try:
+            cat_input_len = len(cat_inputs)
+        except TypeError:
+            continue
+        if cat_input_len < threshold_to_cat:
             continue
         # check split node and cat node has same dim, and all getitem nodes have same parent node
         parent_to_indices = defaultdict(list)  # type: ignore[var-annotated]
@@ -2965,3 +2970,65 @@ def move_view_after_cat(match: Match, *args, **kwargs):
             view_node.meta.update(cat_node.meta)
             graph.erase_node(cat_node)
         counters["inductor"]["move_view_after_cat_aten_pass"] += 1
+
+
+def match_einsum_strings(s: str) -> bool:
+    """
+    This function takes a string s as input, where s is in the format "3 letter string,
+    4 letter string -> 3 letter string".
+    It checks if the strings match the rule and returns True if they do, False otherwise.
+
+    The rule is:
+    - The three strings have the same first two characters.
+    - The first two strings have the same third character.
+    - The second and third strings have the same last character.
+    """
+
+    # Split the input string into parts
+    parts = s.replace("->", ",").split(",")
+
+    # Strip leading/trailing whitespaces from each part
+    parts = [part.strip() for part in parts]
+
+    # Check if we have exactly three parts
+    if len(parts) != 3:
+        return False
+
+    # Extract the strings
+    s1, s2, s3 = parts
+
+    # Check if the strings have the correct lengths
+    if len(s1) != 3 or len(s2) != 4 or len(s3) != 3:
+        return False
+
+    # Check the rule
+    return s1[:2] == s2[:2] == s3[:2] and s1[2] == s2[2] and s2[3] == s3[2]
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.functional.einsum, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("einsum_to_pointwise_pass"),
+)
+def replace_einsum_to_pointwise(match: Match, *args, **kwargs):
+    def repl(input, weights):
+        return (input.unsqueeze(-1) * weights).sum(-2)
+
+    def should_replace_einsum(einsum_node) -> bool:
+        equation = get_arg_value(einsum_node, 0)
+        users = einsum_node.users.keys()
+        # for now, we only consider the case of two operands
+        return (
+            len(einsum_node.args) == 3
+            and is_node_meta_valid(input)
+            and is_node_meta_valid(weights)
+            and any(
+                user.target == "add" or user.target == operator.add for user in users
+            )
+            and match_einsum_strings(equation)
+        )
+
+    einsum_node = match.nodes[0]
+    input, weights = get_arg_value(einsum_node, 1), get_arg_value(einsum_node, 2)
+    if should_replace_einsum(einsum_node):
+        match.replace_by_example(repl, [input, weights])
+        counters["inductor"]["einsum_to_pointwise_pass"] += 1

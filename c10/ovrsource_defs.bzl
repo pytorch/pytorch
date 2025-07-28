@@ -73,8 +73,7 @@ def define_c10_ovrsource(name, is_mobile):
             ],
         }),
         exported_deps = [
-            "//xplat/caffe2/torch/headeronly:torch_headeronly",
-            ":ovrsource_c10_cmake_macros.h",
+            "//xplat/caffe2/torch/headeronly:torch_headeronly_ovrsource",
             "//arvr/third-party/gflags:gflags",
             "//third-party/cpuinfo:cpuinfo",
             "//third-party/fmt:fmt",
@@ -83,55 +82,6 @@ def define_c10_ovrsource(name, is_mobile):
     )
 
 def define_ovrsource_targets():
-    common_c10_cmake_defines = [
-        ("#cmakedefine C10_BUILD_SHARED_LIBS", ""),
-        ("#cmakedefine C10_USE_NUMA", ""),
-        ("#cmakedefine C10_USE_MSVC_STATIC_RUNTIME", ""),
-        ("#cmakedefine C10_USE_ROCM_KERNEL_ASSERT", ""),
-    ]
-
-    mobile_c10_cmake_defines = [
-        ("#cmakedefine C10_USE_GLOG", ""),
-        ("#cmakedefine C10_USE_GFLAGS", ""),
-    ]
-
-    non_mobile_c10_cmake_defines = [
-        ("#cmakedefine C10_USE_GLOG", "#define C10_USE_GLOG 1"),
-        ("#cmakedefine C10_USE_GFLAGS", "#define C10_USE_GFLAGS 1"),
-    ]
-
-    gen_cmake_header(
-        src = "macros/cmake_macros.h.in",
-        defines = common_c10_cmake_defines + mobile_c10_cmake_defines,
-        header = "c10/macros/cmake_macros.h",
-        prefix = "ovrsource_c10_mobile_",
-    )
-
-    gen_cmake_header(
-        src = "macros/cmake_macros.h.in",
-        defines = common_c10_cmake_defines + non_mobile_c10_cmake_defines,
-        header = "c10/macros/cmake_macros.h",
-        prefix = "ovrsource_c10_non_mobile_",
-    )
-
-    oxx_static_library(
-        name = "ovrsource_c10_cmake_macros.h",
-        compatible_with = [
-            "ovr_config//os:android",
-            "ovr_config//os:iphoneos",
-            "ovr_config//os:linux",
-            "ovr_config//os:macos",
-            "ovr_config//os:windows",
-        ],
-        deps = select({
-            "ovr_config//os:android": [":ovrsource_c10_mobile_cmake_macros.h"],
-            "ovr_config//os:iphoneos": [":ovrsource_c10_mobile_cmake_macros.h"],
-            "ovr_config//os:linux": [":ovrsource_c10_non_mobile_cmake_macros.h"],
-            "ovr_config//os:macos": [":ovrsource_c10_non_mobile_cmake_macros.h"],
-            "ovr_config//os:windows": [":ovrsource_c10_non_mobile_cmake_macros.h"],
-        }),
-    )
-
     c10_cuda_macros = gen_cmake_header(
         src = "cuda/impl/cuda_cmake_macros.h.in",
         defines = [

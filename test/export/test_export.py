@@ -8,6 +8,7 @@ import logging
 import math
 import operator
 import re
+import traceback
 import unittest
 import warnings
 from contextlib import contextmanager
@@ -36,6 +37,7 @@ from torch._export.utils import (
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.scan import scan
+from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
 from torch.export import (
@@ -144,7 +146,7 @@ torch.library.define(
 
 
 @torch.library.impl("testlib::returns_tensor_symint", "cpu")
-@torch.library.impl_abstract("testlib::returns_tensor_symint")
+@torch.library.register_fake("testlib::returns_tensor_symint")
 def returns_tensor_symint_impl(x):
     return x, x.shape[0]
 
@@ -157,7 +159,7 @@ def foo_impl(x, z):
     return x, z, x + z
 
 
-@torch.library.impl_abstract("testlib::foo")
+@torch.library.register_fake("testlib::foo")
 def foo_abstract(x, z):
     return x, z, x + z
 
@@ -247,6 +249,10 @@ def is_training_ir_test(test_name):
     return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX) or test_name.endswith(
         TRAINING_IR_DECOMP_NON_STRICT_SUFFIX
     )
+
+
+def is_training_ir_strict_test(test_name):
+    return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX)
 
 
 def is_cpp_runtime_test(test_name):
@@ -927,7 +933,6 @@ graph():
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
-    @testing.expectedFailureCppSerDes  # Cpp Ser/Der seems to fail parsing complicated guards
     def test_export_statically_known_true(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -1583,6 +1588,39 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(m(*args), ep.module()(*args))
 
+    def test_cond_access_identical_symint_closure(self):
+        class Example2(torch.nn.Module):
+            def forward(self, x, trigger, target):
+                return torch.cond(
+                    trigger == 1,
+                    lambda: x + target,
+                    lambda: x * target,
+                    (),
+                )
+
+        m = Example2()
+        x = torch.randn(2)
+        trigger = 0
+        target = 2
+        args = (x, trigger, target)
+        ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
+        if is_training_ir_strict_test(self._testMethodName):
+            # In strict mode export's result capturing compiler, we create
+            # 2 new symints when re-fakifying the symint inputs.
+            # Then in run_decompositions, ep.range_constraints was updated
+            # where it checks the var_to_range and put the two newly added ones into the range_constraints.
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo], VR[-int_oo, int_oo], VR[-int_oo, int_oo])""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo])""",
+            )
+
+        self.assertEqual(m(*args), ep.module()(*args))
+
     def test_cond_branches_return_same_int(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -1773,6 +1811,36 @@ class GraphModule(torch.nn.Module):
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_while_loop_tensor_constant_idx(self):
+        def while_loop_decomp(x, y0):
+            out = torch.zeros_like(x)
+
+            def cond_fn(idx, out, y0):
+                return idx < out.size(0)
+
+            def body_fn(idx, out, y0):
+                i = idx.item()
+                torch._check_is_size(i, max=x.size(0) - 1)
+                y0 = x[i] + y0
+                out = out.clone()
+                out[i] = y0
+                return idx + 1, out, y0
+
+            cnt = torch.tensor(0)
+            _, out, _ = while_loop(cond_fn, body_fn, [cnt, out, y0])
+            return out
+
+        class TestModel(torch.nn.Module):
+            def forward(self, x, y0):
+                return while_loop_decomp(x, y0)
+
+        x, y0 = torch.randn(16, 8), torch.randn(8)
+        exp_out = TestModel()(x, y0)
+        ep = export(TestModel(), (x, y0))
+        out = ep.module()(x, y0)
+        self.assertEqual(exp_out, out)
+
     def test_malformed_fqn_from_source_name(self):
         # See https://github.com/pytorch/pytorch/issues/141939
         from types import MethodType
@@ -1831,7 +1899,7 @@ class GraphModule(torch.nn.Module):
         for problem in [Problem1, Problem2]:
             m = problem()
             m(torch.rand(64, 64))
-            # simpified torch.distributed.pipeline code
+            # simplified torch.distributed.pipeline code
             annotate_split_points(m, {"blocks.1": 1, "blocks.3": 1})
             gm = export(m, (torch.rand(64, 64),))
             torch.export.unflatten(gm)
@@ -5011,7 +5079,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    @testing.expectedFailureCppSerDes  # cpp Ser/Der not handling complicated symbols
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 
@@ -7560,6 +7627,69 @@ def forward(self, x):
             ]:
                 self.assertFalse(hasattr(tensor, attr))
 
+    @testing.expectedFailureCppRuntime
+    def test_while_loop_index_assertions(self):
+        from torch._higher_order_ops import while_loop
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                def cond_fn(idx, acc):
+                    i = idx.item()
+                    return i < x.size(0)
+
+                def body_fn(idx, acc):
+                    # this check_is_size call needs to be traced by this subgraph for the select call,
+                    # it can't be in the cond graph, as that fires & fails right before loop termination.
+                    i = idx.item()
+                    torch._check_is_size(i, max=x.size(0) - 1)
+                    return idx + 1, acc + x[i]
+
+                acc = torch.zeros(x.size(1))
+                n = torch.full((), 0, dtype=torch.int64)
+                _, out = while_loop(cond_fn, body_fn, [n, acc])
+                return out
+
+        x = torch.randn(8, 4)
+        ep = export(Foo(), (x,), strict=False)
+        self.assertTrue(torch.allclose(x.sum(dim=0), ep.module()(x)))
+
+    @testing.expectedFailureCppRuntime
+    def test_while_loop_assert_separation(self):
+        from torch._higher_order_ops import while_loop
+
+        class Bar(torch.nn.Module):
+            def forward(self, idx, x):
+                i = idx.item()
+
+                def cond_fn(idx, x):
+                    i = idx.item()
+                    torch._check(i != 5)
+                    return i <= 9
+
+                def body_fn(idx, x):
+                    i = idx.item()
+                    torch._check(i % 2 == 0)
+                    return idx + 2, x + i
+
+                return while_loop(cond_fn, body_fn, [idx, x + i])
+
+        inps = (torch.tensor([0]), torch.zeros(1))
+        ep = export(Bar(), inps, strict=False)
+        i, out = ep.module()(*inps)
+        self.assertEqual(i, 10)
+        self.assertEqual(out.item(), 20)
+
+        # check assertions are separate for each subgraph
+        with self.assertRaisesRegex(
+            RuntimeError, r"Runtime assertion failed for expression Ne\(u[\d]+, 5\).*"
+        ):
+            ep.graph_module.while_loop_cond_graph_0(torch.tensor([5]), torch.zeros(1))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Eq\(PythonMod\(u[\d]+, 2\), 0\).*",
+        ):
+            ep.graph_module.while_loop_body_graph_0(torch.tensor([5]), torch.zeros(1))
+
     def test_constrain_decomp(self) -> None:
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -8056,7 +8186,7 @@ def forward(self, x):
             str(schema),
             """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1]""",
         )
-        # serdes deserailizes tuple as list
+        # serdes deserializes tuple as list
         if need_serdes_test(self._testMethodName):
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
@@ -8742,10 +8872,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
-    # TODO(pianpwk) blocker: https://github.com/pytorch/pytorch/issues/151809
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureCppSerDes
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -9192,7 +9318,7 @@ graph():
             x = torch.rand(5, 2, 2)
             model = Model()
 
-        # Manualy set the fake_device of fake tensors.
+        # Manually set the fake_device of fake tensors.
         x.fake_device = torch.device("cuda:0")
         for n, p in model.named_parameters():
             p.fake_device = torch.device("cuda:0")
@@ -11851,6 +11977,30 @@ graph():
             )
         )
 
+    def test_filter_traceback_frames(self):
+        class TestTracer(torch.fx.Tracer):
+            def __init__(self) -> None:
+                super().__init__()
+
+                self.record_stack_traces = True
+
+            def _filter_traceback_frames(
+                self, user_stack_summary: traceback.StackSummary
+            ) -> traceback.StackSummary:
+                # Keep the last frame
+                user_frames = [user_stack_summary[-1]]
+                return traceback.StackSummary.from_list(user_frames)
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x *= 2.0
+                return x
+
+        graph = TestTracer().trace(Foo())
+
+        trace_x = [node for node in graph.nodes if node.name == "x"][0].stack_trace
+        self.assertTrue(re.search(r"proxy.py.*in create_node\n", trace_x))
+
     @testing.expectedFailureSerDerNonStrict  # register_constant needs to handle serialization
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_register_constant(self):
@@ -13495,9 +13645,6 @@ graph():
         ):
             ep.module()(torch.randn(10), torch.tensor(2))
 
-    @testing.expectedFailureCppSerDes  # TODO: When we deserialize we somehow hardcode sympy.lower to 2
-    @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureSerDer
     @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_baddbmm(self):
         class M(torch.nn.Module):
@@ -13522,7 +13669,7 @@ graph():
         self.assertTrue(torch.allclose(m(x2), ep.module()(x2)))
         self.assertTrue(torch.allclose(m(x1), ep.module()(x1)))
 
-    @testing.expectedFailureSerDerNonStrict  # construtor is not serialized today
+    @testing.expectedFailureSerDerNonStrict  # constructor is not serialized today
     @testing.expectedFailureSerDer  # constructor is not serialized today
     @testing.expectedFailureRetraceability  # dynamo doesn't work with FlatApply op
     def test_capture_subclass_constructor(self):
@@ -14984,6 +15131,109 @@ def forward(self, args_0):
     return (abs_1,)""",
         )
 
+    def test_sdpa_gqa(self):
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        class Foo(torch.nn.Module):
+            def forward(self, q, k, v):
+                return F.scaled_dot_product_attention(q, k, v, enable_gqa=True)
+
+        q = torch.randn(1, 32, 256, 128)
+        k = torch.randn(1, 8, 256, 128)
+        v = torch.randn(1, 8, 256, 128)
+        with sdpa_kernel(SDPBackend.MATH):
+            ep_math = export(Foo(), (q, k, v))
+            ep_math = ep_math.run_decompositions()
+            self.assertExpectedInline(
+                ep_math.graph_module.code.strip(),
+                """\
+def forward(self, q, k, v):
+    mul = torch.ops.aten.mul.Scalar(q, 0.29730177875068026);  q = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(k, 2);  k = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, 8, 4, 256, 128]);  unsqueeze = None
+    clone = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
+    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(v, 2);  v = None
+    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 8, 4, 256, 128]);  unsqueeze_1 = None
+    clone_1 = torch.ops.aten.clone.default(expand_1, memory_format = torch.contiguous_format);  expand_1 = None
+    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
+    permute = torch.ops.aten.permute.default(view, [0, 1, 3, 2]);  view = None
+    mul_1 = torch.ops.aten.mul.Scalar(permute, 0.29730177875068026);  permute = None
+    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
+    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
+    expand_3 = torch.ops.aten.expand.default(mul_1, [1, 32, 128, 256]);  mul_1 = None
+    view_3 = torch.ops.aten.view.default(expand_3, [32, 128, 256]);  expand_3 = None
+    bmm = torch.ops.aten.bmm.default(view_2, view_3);  view_2 = view_3 = None
+    view_4 = torch.ops.aten.view.default(bmm, [1, 32, 256, 256]);  bmm = None
+    _softmax = torch.ops.aten._softmax.default(view_4, -1, False)
+    eq = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
+    logical_not = torch.ops.aten.logical_not.default(eq);  eq = None
+    any_1 = torch.ops.aten.any.dim(logical_not, -1, True);  logical_not = None
+    logical_not_1 = torch.ops.aten.logical_not.default(any_1);  any_1 = None
+    full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
+    where = torch.ops.aten.where.self(logical_not_1, full_like, _softmax);  logical_not_1 = full_like = _softmax = None
+    expand_4 = torch.ops.aten.expand.default(where, [1, 32, 256, 256]);  where = None
+    view_5 = torch.ops.aten.view.default(expand_4, [32, 256, 256]);  expand_4 = None
+    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
+    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
+    bmm_1 = torch.ops.aten.bmm.default(view_5, view_6);  view_5 = view_6 = None
+    view_7 = torch.ops.aten.view.default(bmm_1, [1, 32, 256, 128]);  bmm_1 = None
+    return (view_7,)""",
+            )
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+            ep_flash = export(Foo(), (q, k, v))
+            ep_flash = ep_flash.run_decompositions()
+            self.assertExpectedInline(
+                ep_flash.graph_module.code.strip(),
+                """\
+def forward(self, q, k, v):
+    mul = torch.ops.aten.mul.Scalar(q, 0.29730177875068026);  q = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(k, 2);  k = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, 8, 4, 256, 128]);  unsqueeze = None
+    clone = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
+    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(v, 2);  v = None
+    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 8, 4, 256, 128]);  unsqueeze_1 = None
+    clone_1 = torch.ops.aten.clone.default(expand_1, memory_format = torch.contiguous_format);  expand_1 = None
+    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
+    permute = torch.ops.aten.permute.default(view, [0, 1, 3, 2]);  view = None
+    mul_1 = torch.ops.aten.mul.Scalar(permute, 0.29730177875068026);  permute = None
+    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
+    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
+    expand_3 = torch.ops.aten.expand.default(mul_1, [1, 32, 128, 256]);  mul_1 = None
+    view_3 = torch.ops.aten.view.default(expand_3, [32, 128, 256]);  expand_3 = None
+    bmm = torch.ops.aten.bmm.default(view_2, view_3);  view_2 = view_3 = None
+    view_4 = torch.ops.aten.view.default(bmm, [1, 32, 256, 256]);  bmm = None
+    _softmax = torch.ops.aten._softmax.default(view_4, -1, False)
+    eq = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
+    logical_not = torch.ops.aten.logical_not.default(eq);  eq = None
+    any_1 = torch.ops.aten.any.dim(logical_not, -1, True);  logical_not = None
+    logical_not_1 = torch.ops.aten.logical_not.default(any_1);  any_1 = None
+    full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
+    where = torch.ops.aten.where.self(logical_not_1, full_like, _softmax);  logical_not_1 = full_like = _softmax = None
+    expand_4 = torch.ops.aten.expand.default(where, [1, 32, 256, 256]);  where = None
+    view_5 = torch.ops.aten.view.default(expand_4, [32, 256, 256]);  expand_4 = None
+    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
+    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
+    bmm_1 = torch.ops.aten.bmm.default(view_5, view_6);  view_5 = view_6 = None
+    view_7 = torch.ops.aten.view.default(bmm_1, [1, 32, 256, 128]);  bmm_1 = None
+    permute_1 = torch.ops.aten.permute.default(view_7, [2, 0, 1, 3]);  view_7 = None
+    clone_2 = torch.ops.aten.clone.default(permute_1, memory_format = torch.contiguous_format);  permute_1 = None
+    permute_2 = torch.ops.aten.permute.default(clone_2, [1, 2, 0, 3]);  clone_2 = None
+    return (permute_2,)""",
+            )
+        # test backend check for invalid inputs
+        error_type = (
+            RuntimeError
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.TorchRuntimeError
+        )
+        with self.assertRaisesRegex(
+            error_type,
+            r"Number of heads in key and value must divide the number of heads",
+        ):
+            export(Foo(), (torch.randn(1, 33, 256, 128), k, v))
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -15739,6 +15989,28 @@ def forward(self, x, mask):
     view = torch.ops.aten.view.default(masked_select, [-1, 1548]);  masked_select = None
     add = torch.ops.aten.add.Tensor(view, 1);  view = None
     return (add,)""",
+            ignore_empty_lines=True,
+        )
+
+    def test_unbacked_select_index(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                u0 = y.item()
+                return x.select(0, u0)
+
+        example_inputs = (
+            torch.randn((3, 3), dtype=torch.bfloat16),
+            torch.tensor([0]),
+        )
+
+        traced = export(MyModel(), example_inputs).run_decompositions({})
+        self.assertExpectedInline(
+            traced.graph_module.code,
+            """\
+def forward(self, x, y):
+    item = torch.ops.aten.item.default(y);  y = None
+    select = torch.ops.aten.select.int(x, 0, item);  x = item = None
+    return (select,)""",
             ignore_empty_lines=True,
         )
 
