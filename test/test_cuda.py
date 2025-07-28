@@ -3702,7 +3702,7 @@ exit(2)
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_cuda_graph_tensor_item_not_allowed(self):
-        test_script = f"""\
+        test_script = """\
 import torch
 import sys
 # Tensor.item() calls a synchronize which is not allowed in a cudagraph
