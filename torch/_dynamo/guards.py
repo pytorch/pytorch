@@ -1991,7 +1991,7 @@ class GuardBuilder(GuardBuilderBase):
         self._cached_duplicate_input_guards.add((ref_b, ref_a))
 
         code = [f"{ref_b} is {ref_a}"]
-        self._set_guard_export_info(guard, [code])
+        self._set_guard_export_info(guard, code)
 
         if config.use_lamba_guard_for_object_aliasing:
             # Save the code part so that we can install a lambda guard at the
