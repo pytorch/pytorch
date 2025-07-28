@@ -50,7 +50,7 @@ flatbuffers==24.12.23
 hypothesis==5.35.1
 # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 #Description: advanced library for generating parametrized tests
-#Pinned versions: 3.44.6, 4.53.2
+#Pinned versions: 5.35.1
 #test that import: test_xnnpack_integration.py, test_pruning_op.py, test_nn.py
 
 junitparser==2.1.1
@@ -221,9 +221,9 @@ pygments==2.15.0
 #Pinned versions: 2.12.0
 #test that import: the doctests
 
-#PyYAML
+#pyyaml
 #Description: data serialization format
-#Pinned versions:
+#Pinned versions: 6.0.2
 #test that import:
 
 #requests
@@ -233,7 +233,7 @@ pygments==2.15.0
 
 #rich
 #Description: rich text and beautiful formatting in the terminal
-#Pinned versions: 10.9.0
+#Pinned versions: 14.1.0
 #test that import:
 
 scikit-image==0.19.3 ; python_version < "3.10"
@@ -307,7 +307,7 @@ pytest-cpp==2.3.0
 #Pinned versions: 2.3.0
 #test that import:
 
-z3-solver==4.12.6.0
+z3-solver==4.15.1.0
 #Description: The Z3 Theorem Prover Project
 #Pinned versions:
 #test that import:
