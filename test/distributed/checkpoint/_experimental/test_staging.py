@@ -74,7 +74,7 @@ class TestDefaultStager(TestCase):
 
     def test_cuda_non_blocking_without_cuda(self) -> None:
         """Test that non-blocking copy fails when CUDA is not available."""
-        if torch.cuda.is_available():
+        if torch.accelerator.is_available():
             self.skipTest("CUDA is available, cannot test CUDA unavailable scenario")
 
         options = CheckpointStagerConfig(use_non_blocking_copy=True)
