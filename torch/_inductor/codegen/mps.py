@@ -650,7 +650,6 @@ class MetalKernel(SIMDKernel):
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
-
         if reduction_type in ["argmin", "argmax"]:
             acc_buf = self._new_idxvar(src_dtype, acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
@@ -668,31 +667,22 @@ class MetalKernel(SIMDKernel):
             self.indexing_code.writeline(
                 f"{acc_thread_var} = ::metal::numeric_limits<{src_metal_type}>::{lim_fn}();"
             )
-            if reduction_type.startswith("arg"):
-                idx_var = next(
-                    t for t in self.range_tree_nodes.values() if t.is_reduction
-                )
-                idx_acc_buf = self._new_idxvar(torch.long, acc_buf_size)
-                cmp_op = ">" if reduction_type == "argmax" else "<"
-                idx_thread_var = f"{idx_acc_buf}[{reduction_idx}]"
-                self.indexing_code.splice(f"{idx_thread_var} = -1;")
-                self.compute.splice(f"""
-                if ({value} {cmp_op} {acc_thread_var}) {{
-                    {acc_thread_var} = {value};
-                    {idx_thread_var} = {idx_var.name};
-                }}
-                """)
-                return self.cse.generate(
-                    self.stores,
-                    f"{idx_acc_buf}[c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})]",
-                    dtype=dtype,
-                )
-            self.compute.writeline(
-                f"{acc_thread_var} = ::c10::metal::{reduction_type}({acc_thread_var}, {value});"
+            idx_var = next(
+                t for t in self.range_tree_nodes.values() if t.is_reduction
             )
+            idx_acc_buf = self._new_idxvar(torch.long, acc_buf_size)
+            cmp_op = ">" if reduction_type == "argmax" else "<"
+            idx_thread_var = f"{idx_acc_buf}[{reduction_idx}]"
+            self.indexing_code.splice(f"{idx_thread_var} = -1;")
+            self.compute.splice(f"""
+            if ({value} {cmp_op} {acc_thread_var}) {{
+                {acc_thread_var} = {value};
+                {idx_thread_var} = {idx_var.name};
+            }}
+            """)
             return self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
+                f"{idx_acc_buf}[c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})]",
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
