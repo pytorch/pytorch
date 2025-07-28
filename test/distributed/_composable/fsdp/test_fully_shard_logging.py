@@ -39,7 +39,7 @@ import torch.nn as nn
 from torch.distributed.fsdp import fully_shard
 logger = logging.getLogger("torch.distributed._composable.fsdp")
 logger.setLevel(logging.DEBUG)
-device = {device_type.type}
+device = '{device_type.type}'
 torch.manual_seed(0)
 model = nn.Sequential(*[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)])
 for layer in model:
