@@ -54,6 +54,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle,
     skipIfRocmArch,
+    skipIfRocm,
     TestCase,
 )
 
@@ -387,6 +388,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.tensor([i * self.world_size + self.rank]) for i in range(1000)]
         self._test_broadcast_stress(inputs)
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
     def test_broadcast_stress_cuda(self):
@@ -492,6 +494,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.tensor([i + self.rank]) for i in range(1000)]
         self._test_allreduce_stress(inputs)
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
     def test_allreduce_stress_cuda(self):
@@ -924,6 +927,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @skip_but_pass_in_sandcastle(
         "Test is flaky, see https://github.com/pytorch/pytorch/issues/15963"
     )
+
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
     def test_scatter_stress_cuda(self):
@@ -1098,6 +1103,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.tensor([i + self.rank]) for i in range(1000)]
         self._test_gather_stress(inputs, lambda t: t.clone())
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @skipIfRocmArch(MI300_ARCH)
     @requires_gloo()
@@ -1234,6 +1240,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.tensor([i + self.rank]) for i in range(1000)]
         self._test_allgather_stress(inputs, lambda t: t.clone())
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
     def test_allgather_stress_cuda(self):
@@ -1420,6 +1427,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.tensor([i + self.rank]) for i in range(1000)]
         self._test_reduce_stress(inputs)
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
     def test_reduce_stress_cuda(self):
