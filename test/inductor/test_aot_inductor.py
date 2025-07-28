@@ -5227,6 +5227,11 @@ GPU_TEST_FAILURES = {
     "test_fft_c2c": fail_gpu(("xpu",), is_skip=True),
     "test_stft": fail_gpu(("xpu",)),
 }
+if TEST_WITH_ROCM:
+    prop = torch.cuda.get_device_properties(0)
+    gcnArchName = prop.gcnArchName.split(":")[0]
+    if "gfx95" in gcnArchName:
+        GPU_TEST_FAILURES["test_stft"] = fail_gpu(("cuda", "xpu")) # override "test_stft" for MI35x also
 
 
 class AOTInductorTestABICompatibleCpu(TestCase):
