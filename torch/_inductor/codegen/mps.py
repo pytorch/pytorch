@@ -635,7 +635,7 @@ class MetalKernel(SIMDKernel):
             src_metal_type = DTYPE_TO_METAL[src_dtype]
             cast_value = f"static_cast<{src_metal_type}>({value})"
             if not self.multistage_reduction_entry:
-                val = cast_value
+                val = cast_value  # type: ignore[assignment]
             else:
                 lim_fn = "lowest" if reduction_type.endswith("max") else "max"
                 limit_val = f"::metal::numeric_limits<{src_metal_type}>::{lim_fn}()"
