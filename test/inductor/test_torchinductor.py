@@ -3409,6 +3409,15 @@ class CommonTemplate:
         cf(x, 1e-5)
         cf(x, 1e-6)
 
+    def test_div_presicion_accuracy(self):
+        # fix https://github.com/pytorch/pytorch/issues/157959
+        def forward(x, y):
+            return (x / y).sum()
+
+        x = torch.rand((5, 5))
+        y = 101
+        self.common(forward, (x, y))
+
     def test_mul_softmax_symfloat(self):
         def forward(x, y):
             z = x.mul(y * x.shape[-1])
@@ -8863,7 +8872,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                (a.add_(b[0] * c * e),)
+                a.add_(b[0] * c * e)
                 if d is not None:
                     d.add_(b[1])
 
@@ -8936,7 +8945,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                (a.add_(b[0] * c * e),)
+                a.add_(b[0] * c * e)
                 if d is not None:
                     d.add_(b[1])
                 return b[0] + b[1]
