@@ -46,7 +46,7 @@ jobs:
     secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build:
-    name: build-vllm
+    name: build-vllm-wheels
     uses: ./.github/workflows/_linux-vllm-build-main.yml
     needs: [
       get-label-type,
@@ -61,7 +61,7 @@ jobs:
     secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build-test-img:
-    name: build-vllm
+    name: build-vllm-test-image
     uses: ./.github/workflows/_linux-vllm-build-main.yml
     needs: [
       get-label-type,
