@@ -181,7 +181,6 @@ html_theme_options = {
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
 html_context = {
-    "theme_variables": theme_variables,
     "github_url": "https://github.com",
     "github_user": "pytorch",
     "github_repo": "pytorch",
@@ -189,7 +188,7 @@ html_context = {
     "github_version": "main",
     "pytorch_project": "docs",
     "doc_path": "docs/source",
-    "theme_variables": theme_variables,  # noqa: F601
+    "theme_variables": theme_variables,
     # library links are defined in
     # pytorch_sphinx_theme2/pytorch_sphinx_theme2/links.json
     "library_links": theme_variables.get("library_links", []),
@@ -739,27 +738,6 @@ coverage_ignore_functions = [
     "probs_to_logits",
     "tril_matrix_to_vec",
     "vec_to_tril_matrix",
-    # torch.functional
-    "align_tensors",
-    "atleast_1d",
-    "atleast_2d",
-    "atleast_3d",
-    "block_diag",
-    "broadcast_shapes",
-    "broadcast_tensors",
-    "cartesian_prod",
-    "cdist",
-    "chain_matmul",
-    "einsum",
-    "lu",
-    "meshgrid",
-    "norm",
-    "split",
-    "stft",
-    "tensordot",
-    "unique",
-    "unique_consecutive",
-    "unravel_index",
     # torch.fx.annotate
     "annotate",
     # torch.fx.experimental.accelerator_partitioner
@@ -1086,6 +1064,7 @@ coverage_ignore_functions = [
     "z3op",
     "z3str",
     # torch.fx.graph_module
+    "reduce_deploy_graph_module",
     "reduce_graph_module",
     "reduce_package_graph_module",
     # torch.fx.node
