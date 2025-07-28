@@ -180,6 +180,7 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
       size_t size,
       c10::Stream stream) {
     checkDeviceIndex(device);
+    BlockT* block = nullptr;
     BlockT* block = impls_[device]->malloc(device, size, stream);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
@@ -301,9 +302,9 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
   std::array<AlignedMutex, kNumMutexShard> mutex;
   // A map of allocated blocks, sharded by mutex to reduce contention.
   std::array<ska::flat_hash_map<void*, BlockT*>, kNumMutexShard>
-      allocated_blocks;
+      allocated_blocks{};
   // Per-device allocator implementations.
-  std::vector<std::unique_ptr<ImplT>> impls_;
+  std::vector<std::unique_ptr<ImplT>> impls_{};
 };
 
 /**
@@ -353,8 +354,8 @@ struct BlockPool {
 
   // Do not insert a Block to blocks directly; use insert_into_blocks(),
   // instead.
-  std::set<BlockT*, BlockComparatorSize<BlockT>> blocks;
-  std::set<BlockT*, BlockComparatorAddress<BlockT>> unmapped;
+  std::set<BlockT*, BlockComparatorSize<BlockT>> blocks{};
+  std::set<BlockT*, BlockComparatorAddress<BlockT>> unmapped{};
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool<BlockT>* owner_PrivatePool;
@@ -428,7 +429,7 @@ struct DeviceBlock {
   c10::DeviceIndex device; // gpu
   StreamT stream; // allocation stream
   ska::flat_hash_set<StreamT>
-      stream_uses; // streams on which the block was used
+      stream_uses{}; // streams on which the block was used
   size_t size; // block size in bytes
   size_t requested_size; // memory originally requested
   BlockPoolT* pool{nullptr}; // owning memory pool
@@ -637,18 +638,18 @@ struct ExpandableSegment {
     }
   }
 
-  c10::DeviceIndex device_;
+  c10::DeviceIndex device_{-1};
   std::optional<StreamT> stream_;
   // Virtual memory address used in reserveVirtualMemory.
-  void* ptr_;
+  void* ptr_{nullptr};
   // Size of each segment in bytes.
-  size_t segment_size_;
+  size_t segment_size_{0};
   // Maximum number of segments that can be allocated in this segment.
-  size_t max_handles_;
+  size_t max_handles_{0};
   // Physical memory handles for the segments.
-  std::vector<std::optional<HandleT>> handles_;
+  std::vector<std::optional<HandleT>> handles_{};
   // Peer devices on which this memory should be mapped and accessible.
-  std::vector<c10::DeviceIndex> peers_;
+  std::vector<c10::DeviceIndex> peers_{};
 };
 
 template <typename ExpandableSegmentT>
