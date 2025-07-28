@@ -1137,9 +1137,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @requires_tlparse
     @requires_distributed()
-    @torch._inductor.config.patch(
-        "fx_graph_cache", False
-    )  # Disable cache to force compilation
+    @torch._inductor.config.patch("fx_graph_cache", False)
     def test_collective_schedule_real(self):
         """Test collective schedule with _c10d_functional ops that work with FakeStore."""
         import torch.distributed as dist
