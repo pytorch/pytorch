@@ -25,9 +25,11 @@ WeightVersion Weights::globalVersion_ = 0;
 Weights::Weights(
     const Graph* graph,
     const std::optional<std::unordered_map<std::string, c10::IValue>>&
-        stateDict)
+        stateDict,
+    Placement placement)
     : graph_(graph),
       weightsMeta_(graph->weightsMeta()),
+      placement_(std::move(placement)),
       version_(globalVersion_++) {
   if (stateDict.has_value()) {
     loadStateDict(stateDict.value());
@@ -41,10 +43,12 @@ Weights::Weights(
     std::string_view stateDictPathPrefix,
     const std::unordered_map<std::string, std::string>& constantPaths,
     std::string_view constantPathPrefix,
+    Placement placement,
     std::function<bool(const std::string&)> skipSizeCheck,
     std::function<bool(const std::string&)> skipDtypeCheck)
     : graph_(graph),
       weightsMeta_(graph->weightsMeta()),
+      placement_(std::move(placement)),
       version_(globalVersion_++),
       skipSizeCheck_(std::move(skipSizeCheck)),
       skipDtypeCheck_(std::move(skipDtypeCheck)) {
@@ -93,7 +97,7 @@ Weights::Weights(
 
         if (!isUsed) {
           VLOG(1) << "Tensor " << tensorName << " is not used during inference";
-          auto targetDevice = tensorMeta->device();
+          auto targetDevice = placement_.getMappedDevice(tensorMeta->device());
           allValues_[tensorName] =
               at::scalar_tensor(0, at::TensorOptions().device(targetDevice));
           return;
@@ -116,7 +120,7 @@ Weights::Weights(
             at::empty({0}, tensorOptions)
                 .set_(storage, 0, tensorMeta->sizes(), tensorMeta->strides());
 
-        auto targetDevice = tensorMeta->device();
+        auto targetDevice = placement_.getMappedDevice(tensorMeta->device());
         VLOG(1) << "Loading weight " << tensorName << " on " << targetDevice;
         if (!isSameDevice(targetDevice, tensor.device())) {
           tensor = tensor.to(targetDevice);
@@ -304,7 +308,7 @@ void Weights::loadStateDict(
     TORCH_CHECK(
         it != weightsMeta_.end(), "Couldn't find ", name, " in weightsMeta");
 
-    auto targetDevice = it->second.device();
+    auto targetDevice = placement_.getMappedDevice(it->second.device());
     auto tensor = stateDictIt->second.toTensor().to(targetDevice);
 
     TORCH_CHECK(tensor.sizes() == it->second.sizes());
@@ -347,7 +351,7 @@ void Weights::validateValue(const std::string& name, const at::Tensor& newValue)
       " vs ",
       newValue.dtype());
 
-  auto targetDevice = weightMeta.device();
+  auto targetDevice = placement_.getMappedDevice(weightMeta.device());
   if (targetDevice.is_cpu() && targetDevice.has_index()) {
     LOG(WARNING) << "Target device is cpu but has index: " << targetDevice;
   }
