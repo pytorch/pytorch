@@ -1255,6 +1255,7 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
+    const c10::intrusive_ptr<Store>& store,
     const std::vector<int>& ranks,
     const c10::intrusive_ptr<Backend::Options>& opts) {
   auto deviceIdx = guessDeviceId();
@@ -1288,7 +1289,7 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   auto color = genNcclSplitColor(ranks);
   ncclOpts->split_color = color;
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
-      store_->clone(), groupRank, ranks.size(), ncclOpts);
+      store->clone(), groupRank, ranks.size(), ncclOpts);
   pg->eagerConnectSingleDevice(device);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
