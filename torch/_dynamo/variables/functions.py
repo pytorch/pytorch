@@ -161,7 +161,10 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
         elif name in spec.pos_default_map:
             idx = spec.pos_default_map[name]
             default_source = None
-            if fn_source:
+            if fn_source and not (
+                ConstantVariable.is_literal(spec.defaults[idx])
+                and config.skip_guards_on_constant_func_defaults
+            ):
                 default_source = DefaultsSource(fn_source, idx)
             ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
         else:
