@@ -2,7 +2,7 @@
 
 import itertools
 import random
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager
 from itertools import chain
 from unittest.mock import patch
 
@@ -621,16 +621,11 @@ class TestStrategyHashing(DTensorTestBase):
         )
         shard_spec = [Shard(1)]
         sharded_dtensor = distribute_tensor(global_tensor, mesh, shard_spec)
-        with ExitStack() as current_stack:
+        with op_strategy_context(torch.ops.aten.sort.default, replicate_op_strategy):
             # intentionally do not supply `schema_info=RuntimeSchemaInfo(1)`
-            current_stack.enter_context(
-                op_strategy_context(torch.ops.aten.sort.stable, replicate_op_strategy)
-            )
-            current_stack.enter_context(
-                op_strategy_context(torch.ops.aten.sort.default, replicate_op_strategy)
-            )
             torch.sort(sharded_dtensor, dim=0)  # sort each column
             out1, _ = torch.sort(sharded_dtensor, dim=1)  # sort each row
+            # clear the cache
             DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding.cache.cache_clear()
             out2, _ = torch.sort(sharded_dtensor, dim=1)
         self.assertEqual(out1.full_tensor(), out2.full_tensor())
