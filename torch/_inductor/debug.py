@@ -694,7 +694,7 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
     V.debug.ir_post_fusion(nodes)
 
 
-def _dump_collective_schedule(schedule: list[dict[str, Any]]) -> None:
+def _dump_collective_schedule(schedule: list[str | None]) -> None:
     try:
         trace_structured(
             "artifact",
@@ -713,7 +713,7 @@ def _dump_collective_schedule(schedule: list[dict[str, Any]]) -> None:
 
 def log_collective_schedule(nodes: Sequence[BaseSchedulerNode]) -> None:
     schedule = [
-        {"op_name": getattr(op, "python_kernel_name", None)}
+        getattr(op, "python_kernel_name", None)
         for node in nodes
         if isinstance(op := getattr(node, "node", None), ir._CollectiveKernel)
     ]
