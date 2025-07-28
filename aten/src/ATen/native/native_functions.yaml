@@ -15868,6 +15868,7 @@
   variants: function
   dispatch:
     CPU: _fused_adagrad_kernel_cpu_
+    CUDA: _fused_adagrad_kernel_cuda_
   autogen: _fused_adagrad, _fused_adagrad.out
 
 - func: _fused_adagrad_.tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] state_sums, Tensor[] state_steps, *, Tensor lr, float lr_decay, float weight_decay, float eps, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
@@ -15875,6 +15876,7 @@
   variants: function
   dispatch:
     CPU: _fused_adagrad_kernel_cpu_
+    CUDA: _fused_adagrad_kernel_cuda_
   autogen: _fused_adagrad.tensor_lr, _fused_adagrad.tensor_lr_out
 
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
