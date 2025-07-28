@@ -416,57 +416,296 @@ kernel void grid_sampler_3d_vectorized(
       constant ulong * grid_strides [[buffer(10)]],                                 \
       uint3 thread_index [[thread_position_in_grid]])
 
-// Dummy backward kernels that fill with fixed values for testing
-template <typename T>
+// Helper function to unnormalize coordinates from [-1, 1] to [0, size-1] or [-0.5, size-0.5]
+// and compute the gradient multiplier
+template<typename T>
+T grid_sampler_unnormalize_set_grad(T coord, ulong size, bool align_corners, thread T* grad_in) {
+  if (align_corners) {
+    // unnormalize coord from [-1, 1] to [0, size - 1]
+    *grad_in = T(size - 1) / T(2.0);
+    return ((coord + T(1.0)) / T(2.0)) * T(size - 1);
+  } else {
+    // unnormalize coord from [-1, 1] to [-0.5, size - 0.5]
+    *grad_in = T(size) / T(2.0);
+    return ((coord + T(1.0)) * T(size) - T(1.0)) / T(2.0);
+  }
+}
+
+// Compute source index and gradient multiplier with padding mode applied
+template<typename T>
+T grid_sampler_compute_source_index_set_grad(T coord, ulong size, int padding_mode, bool align_corners, thread T* grad_in) {
+  coord = grid_sampler_unnormalize_set_grad(coord, size, align_corners, grad_in);
+
+  if (padding_mode == 1) { // Border padding
+    // Apply clip_coordinates_set_grad logic
+    T grad_clip = T(1.0);
+    if (coord < T(0.0)) {
+      coord = T(0.0);
+      grad_clip = T(0.0);
+    } else if (coord > T(size - 1)) {
+      coord = T(size - 1);
+      grad_clip = T(0.0);
+    }
+    *grad_in = (*grad_in) * grad_clip;
+  } else if (padding_mode == 2) { // Reflection padding
+    // Apply reflect_coordinates_set_grad logic
+    T grad_refl = T(1.0);
+    T twice_low, twice_high;
+    if (align_corners) {
+      twice_low = T(0.0);
+      twice_high = T(2 * (size - 1));
+    } else {
+      twice_low = T(-1.0);
+      twice_high = T(2 * size - 1);
+    }
+
+    if (twice_low != twice_high) {
+      T min_val = twice_low / T(2.0);
+      T span = (twice_high - twice_low) / T(2.0);
+      coord = coord - min_val;
+
+      if (coord < T(0.0)) {
+        coord = -coord;
+        grad_refl = -grad_refl;
+      }
+
+      // Compute coord mod span
+      T extra = coord - span * floor(coord / span);
+      long flips = static_cast<long>(floor(coord / span));
+
+      if (flips % 2 == 0) {
+        coord = extra + min_val;
+      } else {
+        coord = span - extra + min_val;
+        grad_refl = -grad_refl;
+      }
+    } else {
+      coord = T(0.0);
+      grad_refl = T(0.0);
+    }
+
+    // Apply clipping
+    T grad_clip = T(1.0);
+    if (coord < T(0.0)) {
+      coord = T(0.0);
+      grad_clip = T(0.0);
+    } else if (coord > T(size - 1)) {
+      coord = T(size - 1);
+      grad_clip = T(0.0);
+    }
+
+    *grad_in = (*grad_in) * grad_refl * grad_clip;
+  }
+
+  return coord;
+}
+
+// Backward pass kernel for computing gradients w.r.t. input
 kernel void grid_sampler_3d_backward_input(
-    constant T* grad_output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
-    device T* grad_input [[buffer(3)]],
+    constant float* grad_output [[buffer(0)]],
+    constant float* input [[buffer(1)]],
+    constant float* grid [[buffer(2)]],
+    device atomic<float>* grad_input [[buffer(3)]],
     constant int& interpolation_mode [[buffer(4)]],
     constant int& padding_mode [[buffer(5)]],
     constant bool& align_corners [[buffer(6)]],
-    constant ulong* input_sizes [[buffer(7)]],
-    constant ulong* output_sizes [[buffer(8)]],
+    constant ulong* input_sizes [[buffer(7)]],     // [N, C, D, H, W]
+    constant ulong* output_sizes [[buffer(8)]],    // [N, C, D_out, H_out, W_out]
     constant ulong* input_strides [[buffer(9)]],
     constant ulong* grad_input_strides [[buffer(10)]],
     constant ulong* grid_strides [[buffer(11)]],
     constant ulong* grad_output_strides [[buffer(12)]],
     uint3 thread_index [[thread_position_in_grid]]) {
 
-  const auto in_w = thread_index.x;
-  const auto in_d_h_combined = thread_index.y;
-  const auto n_c_combined = thread_index.z;
+  // Thread indices map to output grid coordinates
+  const auto out_w = thread_index.x;
+  const auto out_d_h_combined = thread_index.y;
+  const auto n = thread_index.z;
 
   // Extract individual indices
-  const auto N = n_c_combined / input_sizes[1];
-  const auto C = n_c_combined % input_sizes[1];
-  const auto in_d = in_d_h_combined / input_sizes[3];
-  const auto in_h = in_d_h_combined % input_sizes[3];
+  const auto out_d = out_d_h_combined / output_sizes[3];
+  const auto out_h = out_d_h_combined % output_sizes[3];
 
   // Bounds check
-  if (N >= input_sizes[0] || C >= input_sizes[1] ||
-      in_d >= input_sizes[2] || in_h >= input_sizes[3] || in_w >= input_sizes[4]) {
+  if (n >= input_sizes[0] || out_d >= output_sizes[2] ||
+      out_h >= output_sizes[3] || out_w >= output_sizes[4]) {
     return;
   }
 
-  // Calculate output offset
-  const auto grad_input_offset = N * grad_input_strides[0] +
-                                 C * grad_input_strides[1] +
-                                 in_d * grad_input_strides[2] +
-                                 in_h * grad_input_strides[3] +
-                                 in_w * grad_input_strides[4];
+  // Cache frequently used values
+  const auto C = input_sizes[1];
+  const auto inp_D = input_sizes[2];
+  const auto inp_H = input_sizes[3];
+  const auto inp_W = input_sizes[4];
 
-  // Dummy implementation: fill with fixed value for testing
-  grad_input[grad_input_offset] = T(0.5);
+  // Pre-calculate grid offset for this output location
+  const auto grid_offset = n * grid_strides[0] +
+                           out_d * grid_strides[1] +
+                           out_h * grid_strides[2] +
+                           out_w * grid_strides[3];
+
+  // Read grid coordinates
+  const float grid_x = grid[grid_offset];
+  const float grid_y = grid[grid_offset + grid_strides[4]];
+  const float grid_z = grid[grid_offset + 2 * grid_strides[4]];
+
+  // Transform grid coordinates to input space and compute gradient multipliers
+  float gix_mult, giy_mult, giz_mult;
+  float ix = grid_sampler_compute_source_index_set_grad(grid_x, inp_W, padding_mode, align_corners, &gix_mult);
+  float iy = grid_sampler_compute_source_index_set_grad(grid_y, inp_H, padding_mode, align_corners, &giy_mult);
+  float iz = grid_sampler_compute_source_index_set_grad(grid_z, inp_D, padding_mode, align_corners, &giz_mult);
+
+  if (interpolation_mode == 0) { // trilinear interpolation
+    // Get floor coordinates for all 8 corners
+    const int ix_tnw = static_cast<int>(floor(ix));
+    const int iy_tnw = static_cast<int>(floor(iy));
+    const int iz_tnw = static_cast<int>(floor(iz));
+
+         // Calculate all 8 corner coordinates using CUDA naming convention
+     // tnw = top north west, tne = top north east, etc.
+     const int ix_tne = ix_tnw + 1;
+     const int iy_tne = iy_tnw;
+     const int iz_tne = iz_tnw;
+
+     const int ix_tsw = ix_tnw;
+     const int iy_tsw = iy_tnw + 1;
+     const int iz_tsw = iz_tnw;
+
+     const int ix_tse = ix_tnw + 1;
+     const int iy_tse = iy_tnw + 1;
+     const int iz_tse = iz_tnw;
+
+     const int ix_bnw = ix_tnw;
+     const int iy_bnw = iy_tnw;
+     const int iz_bnw = iz_tnw + 1;
+
+     const int ix_bne = ix_tnw + 1;
+     const int iy_bne = iy_tnw;
+     const int iz_bne = iz_tnw + 1;
+
+     const int ix_bsw = ix_tnw;
+     const int iy_bsw = iy_tnw + 1;
+     const int iz_bsw = iz_tnw + 1;
+
+     const int ix_bse = ix_tnw + 1;
+     const int iy_bse = iy_tnw + 1;
+     const int iz_bse = iz_tnw + 1;
+
+     // Calculate weights using CUDA formula (surfaces to each neighbor)
+     const float tnw = (ix_bse - ix) * (iy_bse - iy) * (iz_bse - iz);
+     const float tne = (ix - ix_bsw) * (iy_bsw - iy) * (iz_bsw - iz);
+     const float tsw = (ix_bne - ix) * (iy - iy_bne) * (iz_bne - iz);
+     const float tse = (ix - ix_bnw) * (iy - iy_bnw) * (iz_bnw - iz);
+     const float bnw = (ix_tse - ix) * (iy_tse - iy) * (iz - iz_tse);
+     const float bne = (ix - ix_tsw) * (iy_tsw - iy) * (iz - iz_tsw);
+     const float bsw = (ix_tne - ix) * (iy - iy_tne) * (iz - iz_tne);
+     const float bse = (ix - ix_tnw) * (iy - iy_tnw) * (iz - iz_tnw);
+
+     // Process all channels at this grid location
+     for (ulong c = 0; c < C; c++) {
+       // Get gradient output value for this channel
+       const auto grad_out_offset = n * grad_output_strides[0] +
+                                    c * grad_output_strides[1] +
+                                    out_d * grad_output_strides[2] +
+                                    out_h * grad_output_strides[3] +
+                                    out_w * grad_output_strides[4];
+       const float gOut = grad_output[grad_out_offset];
+
+       // Accumulate gradients to all 8 corner pixels using safe bounds checking
+       const auto base_grad_input_offset = n * grad_input_strides[0] + c * grad_input_strides[1];
+
+       // CUDA safe_add_3d always checks bounds regardless of padding mode
+       if (within_bounds_3d(iz_tnw, iy_tnw, ix_tnw, inp_D, inp_H, inp_W)) {
+         const auto grad_input_offset = base_grad_input_offset +
+                                      iz_tnw * grad_input_strides[2] +
+                                      iy_tnw * grad_input_strides[3] +
+                                      ix_tnw * grad_input_strides[4];
+         atomic_fetch_add_explicit(&grad_input[grad_input_offset], tnw * gOut, memory_order_relaxed);
+       }
+       if (within_bounds_3d(iz_tne, iy_tne, ix_tne, inp_D, inp_H, inp_W)) {
+         const auto grad_input_offset = base_grad_input_offset +
+                                      iz_tne * grad_input_strides[2] +
+                                      iy_tne * grad_input_strides[3] +
+                                      ix_tne * grad_input_strides[4];
+         atomic_fetch_add_explicit(&grad_input[grad_input_offset], tne * gOut, memory_order_relaxed);
+       }
+       if (within_bounds_3d(iz_tsw, iy_tsw, ix_tsw, inp_D, inp_H, inp_W)) {
+         const auto grad_input_offset = base_grad_input_offset +
+                                      iz_tsw * grad_input_strides[2] +
+                                      iy_tsw * grad_input_strides[3] +
+                                      ix_tsw * grad_input_strides[4];
+         atomic_fetch_add_explicit(&grad_input[grad_input_offset], tsw * gOut, memory_order_relaxed);
+       }
+       if (within_bounds_3d(iz_tse, iy_tse, ix_tse, inp_D, inp_H, inp_W)) {
+         const auto grad_input_offset = base_grad_input_offset +
+                                      iz_tse * grad_input_strides[2] +
+                                      iy_tse * grad_input_strides[3] +
+                                      ix_tse * grad_input_strides[4];
+         atomic_fetch_add_explicit(&grad_input[grad_input_offset], tse * gOut, memory_order_relaxed);
+       }
+       if (within_bounds_3d(iz_bnw, iy_bnw, ix_bnw, inp_D, inp_H, inp_W)) {
+         const auto grad_input_offset = base_grad_input_offset +
+                                      iz_bnw * grad_input_strides[2] +
+                                      iy_bnw * grad_input_strides[3] +
+                                      ix_bnw * grad_input_strides[4];
+         atomic_fetch_add_explicit(&grad_input[grad_input_offset], bnw * gOut, memory_order_relaxed);
+       }
+       if (within_bounds_3d(iz_bne, iy_bne, ix_bne, inp_D, inp_H, inp_W)) {
+         const auto grad_input_offset = base_grad_input_offset +
+                                      iz_bne * grad_input_strides[2] +
+                                      iy_bne * grad_input_strides[3] +
+                                      ix_bne * grad_input_strides[4];
+         atomic_fetch_add_explicit(&grad_input[grad_input_offset], bne * gOut, memory_order_relaxed);
+       }
+       if (within_bounds_3d(iz_bsw, iy_bsw, ix_bsw, inp_D, inp_H, inp_W)) {
+         const auto grad_input_offset = base_grad_input_offset +
+                                      iz_bsw * grad_input_strides[2] +
+                                      iy_bsw * grad_input_strides[3] +
+                                      ix_bsw * grad_input_strides[4];
+         atomic_fetch_add_explicit(&grad_input[grad_input_offset], bsw * gOut, memory_order_relaxed);
+       }
+       if (within_bounds_3d(iz_bse, iy_bse, ix_bse, inp_D, inp_H, inp_W)) {
+         const auto grad_input_offset = base_grad_input_offset +
+                                      iz_bse * grad_input_strides[2] +
+                                      iy_bse * grad_input_strides[3] +
+                                      ix_bse * grad_input_strides[4];
+         atomic_fetch_add_explicit(&grad_input[grad_input_offset], bse * gOut, memory_order_relaxed);
+       }
+     }
+
+  } else if (interpolation_mode == 1) { // nearest neighbor
+    // Round to nearest integer coordinates
+    const int ix_nearest = static_cast<int>(rint(ix));
+    const int iy_nearest = static_cast<int>(rint(iy));
+    const int iz_nearest = static_cast<int>(rint(iz));
+
+    // Process all channels at this grid location
+    for (ulong c = 0; c < C; c++) {
+      // Get gradient output value for this channel
+      const auto grad_out_offset = n * grad_output_strides[0] +
+                                   c * grad_output_strides[1] +
+                                   out_d * grad_output_strides[2] +
+                                   out_h * grad_output_strides[3] +
+                                   out_w * grad_output_strides[4];
+      const float gOut = grad_output[grad_out_offset];
+
+      if (within_bounds_3d(iz_nearest, iy_nearest, ix_nearest, inp_D, inp_H, inp_W)) {
+        const auto grad_input_offset = n * grad_input_strides[0] + c * grad_input_strides[1] +
+                                     iz_nearest * grad_input_strides[2] +
+                                     iy_nearest * grad_input_strides[3] +
+                                     ix_nearest * grad_input_strides[4];
+        atomic_fetch_add_explicit(&grad_input[grad_input_offset], gOut, memory_order_relaxed);
+      }
+    }
+  }
 }
 
-template <typename T>
+// Backward pass kernel for computing gradients w.r.t. grid
 kernel void grid_sampler_3d_backward_grid(
-    constant T* grad_output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
-    device T* grad_grid [[buffer(3)]],
+    constant float* grad_output [[buffer(0)]],
+    constant float* input [[buffer(1)]],
+    constant float* grid [[buffer(2)]],
+    device float* grad_grid [[buffer(3)]],
     constant int& interpolation_mode [[buffer(4)]],
     constant int& padding_mode [[buffer(5)]],
     constant bool& align_corners [[buffer(6)]],
@@ -492,60 +731,153 @@ kernel void grid_sampler_3d_backward_grid(
     return;
   }
 
-  // Calculate output offsets for each coordinate
-  for (int coord = 0; coord < 3; coord++) {
-    const auto grad_grid_offset = N * grad_grid_strides[0] +
-                                  out_d * grad_grid_strides[1] +
-                                  out_h * grad_grid_strides[2] +
-                                  out_w * grad_grid_strides[3] +
-                                  coord * grad_grid_strides[4];
+  // Cache frequently used values
+  const auto C = input_sizes[1];
+  const auto inp_D = input_sizes[2];
+  const auto inp_H = input_sizes[3];
+  const auto inp_W = input_sizes[4];
 
-    // Dummy implementation: fill with fixed value for testing
-    grad_grid[grad_grid_offset] = T(0.1);
+  // Pre-calculate grid offset
+  const auto grid_offset = N * grid_strides[0] +
+                           out_d * grid_strides[1] +
+                           out_h * grid_strides[2] +
+                           out_w * grid_strides[3];
+
+  // Read grid coordinates
+  const float grid_x = grid[grid_offset];
+  const float grid_y = grid[grid_offset + grid_strides[4]];
+  const float grid_z = grid[grid_offset + 2 * grid_strides[4]];
+
+  // Transform grid coordinates and get gradient multipliers
+  float gix_mult, giy_mult, giz_mult;
+  float ix = grid_sampler_compute_source_index_set_grad(grid_x, inp_W, padding_mode, align_corners, &gix_mult);
+  float iy = grid_sampler_compute_source_index_set_grad(grid_y, inp_H, padding_mode, align_corners, &giy_mult);
+  float iz = grid_sampler_compute_source_index_set_grad(grid_z, inp_D, padding_mode, align_corners, &giz_mult);
+
+  // Calculate grad_grid offset for this thread
+  const auto grad_grid_base_offset = N * grad_grid_strides[0] +
+                                     out_d * grad_grid_strides[1] +
+                                     out_h * grad_grid_strides[2] +
+                                     out_w * grad_grid_strides[3];
+
+  if (interpolation_mode == 0) { // trilinear interpolation
+    // Calculate corner coordinates
+    const long ix_tnw = static_cast<long>(floor(ix));
+    const long iy_tnw = static_cast<long>(floor(iy));
+    const long iz_tnw = static_cast<long>(floor(iz));
+
+    const long ix_tne = ix_tnw + 1;
+    const long iy_tne = iy_tnw;
+    const long iz_tne = iz_tnw;
+
+    const long ix_tsw = ix_tnw;
+    const long iy_tsw = iy_tnw + 1;
+    const long iz_tsw = iz_tnw;
+
+    const long ix_tse = ix_tnw + 1;
+    const long iy_tse = iy_tnw + 1;
+    const long iz_tse = iz_tnw;
+
+    const long ix_bnw = ix_tnw;
+    const long iy_bnw = iy_tnw;
+    const long iz_bnw = iz_tnw + 1;
+
+    const long ix_bne = ix_tnw + 1;
+    const long iy_bne = iy_tnw;
+    const long iz_bne = iz_tnw + 1;
+
+    const long ix_bsw = ix_tnw;
+    const long iy_bsw = iy_tnw + 1;
+    const long iz_bsw = iz_tnw + 1;
+
+    const long ix_bse = ix_tnw + 1;
+    const long iy_bse = iy_tnw + 1;
+    const long iz_bse = iz_tnw + 1;
+
+    float gix = 0.0, giy = 0.0, giz = 0.0;
+
+    // Process all channels and accumulate gradients following CUDA implementation
+    for (ulong c = 0; c < C; c++) {
+      const auto grad_out_offset = N * grad_output_strides[0] +
+                                   c * grad_output_strides[1] +
+                                   out_d * grad_output_strides[2] +
+                                   out_h * grad_output_strides[3] +
+                                   out_w * grad_output_strides[4];
+      const float gOut = grad_output[grad_out_offset];
+
+      const auto input_base_offset = N * input_strides[0] + c * input_strides[1];
+
+      // Compute gradients for each corner following CUDA implementation exactly
+      if (within_bounds_3d(iz_tnw, iy_tnw, ix_tnw, inp_D, inp_H, inp_W)) {
+        const float tnw_val = input[input_base_offset + iz_tnw * input_strides[2] + iy_tnw * input_strides[3] + ix_tnw * input_strides[4]];
+        gix -= tnw_val * (iy_bse - iy) * (iz_bse - iz) * gOut;
+        giy -= tnw_val * (ix_bse - ix) * (iz_bse - iz) * gOut;
+        giz -= tnw_val * (ix_bse - ix) * (iy_bse - iy) * gOut;
+      }
+      if (within_bounds_3d(iz_tne, iy_tne, ix_tne, inp_D, inp_H, inp_W)) {
+        const float tne_val = input[input_base_offset + iz_tne * input_strides[2] + iy_tne * input_strides[3] + ix_tne * input_strides[4]];
+        gix += tne_val * (iy_bsw - iy) * (iz_bsw - iz) * gOut;
+        giy -= tne_val * (ix - ix_bsw) * (iz_bsw - iz) * gOut;
+        giz -= tne_val * (ix - ix_bsw) * (iy_bsw - iy) * gOut;
+      }
+      if (within_bounds_3d(iz_tsw, iy_tsw, ix_tsw, inp_D, inp_H, inp_W)) {
+        const float tsw_val = input[input_base_offset + iz_tsw * input_strides[2] + iy_tsw * input_strides[3] + ix_tsw * input_strides[4]];
+        gix -= tsw_val * (iy - iy_bne) * (iz_bne - iz) * gOut;
+        giy += tsw_val * (ix_bne - ix) * (iz_bne - iz) * gOut;
+        giz -= tsw_val * (ix_bne - ix) * (iy - iy_bne) * gOut;
+      }
+      if (within_bounds_3d(iz_tse, iy_tse, ix_tse, inp_D, inp_H, inp_W)) {
+        const float tse_val = input[input_base_offset + iz_tse * input_strides[2] + iy_tse * input_strides[3] + ix_tse * input_strides[4]];
+        gix += tse_val * (iy - iy_bnw) * (iz_bnw - iz) * gOut;
+        giy += tse_val * (ix - ix_bnw) * (iz_bnw - iz) * gOut;
+        giz -= tse_val * (ix - ix_bnw) * (iy - iy_bnw) * gOut;
+      }
+      if (within_bounds_3d(iz_bnw, iy_bnw, ix_bnw, inp_D, inp_H, inp_W)) {
+        const float bnw_val = input[input_base_offset + iz_bnw * input_strides[2] + iy_bnw * input_strides[3] + ix_bnw * input_strides[4]];
+        gix -= bnw_val * (iy_tse - iy) * (iz - iz_tse) * gOut;
+        giy -= bnw_val * (ix_tse - ix) * (iz - iz_tse) * gOut;
+        giz += bnw_val * (ix_tse - ix) * (iy_tse - iy) * gOut;
+      }
+      if (within_bounds_3d(iz_bne, iy_bne, ix_bne, inp_D, inp_H, inp_W)) {
+        const float bne_val = input[input_base_offset + iz_bne * input_strides[2] + iy_bne * input_strides[3] + ix_bne * input_strides[4]];
+        gix += bne_val * (iy_tsw - iy) * (iz - iz_tsw) * gOut;
+        giy -= bne_val * (ix - ix_tsw) * (iz - iz_tsw) * gOut;
+        giz += bne_val * (ix - ix_tsw) * (iy_tsw - iy) * gOut;
+      }
+      if (within_bounds_3d(iz_bsw, iy_bsw, ix_bsw, inp_D, inp_H, inp_W)) {
+        const float bsw_val = input[input_base_offset + iz_bsw * input_strides[2] + iy_bsw * input_strides[3] + ix_bsw * input_strides[4]];
+        gix -= bsw_val * (iy - iy_tne) * (iz - iz_tne) * gOut;
+        giy += bsw_val * (ix_tne - ix) * (iz - iz_tne) * gOut;
+        giz += bsw_val * (ix_tne - ix) * (iy - iy_tne) * gOut;
+      }
+      if (within_bounds_3d(iz_bse, iy_bse, ix_bse, inp_D, inp_H, inp_W)) {
+        const float bse_val = input[input_base_offset + iz_bse * input_strides[2] + iy_bse * input_strides[3] + ix_bse * input_strides[4]];
+        gix += bse_val * (iy - iy_tnw) * (iz - iz_tnw) * gOut;
+        giy += bse_val * (ix - ix_tnw) * (iz - iz_tnw) * gOut;
+        giz += bse_val * (ix - ix_tnw) * (iy - iy_tnw) * gOut;
+      }
+    }
+
+    // Write gradients to grad_grid, multiplied by the coordinate gradient multipliers
+    grad_grid[grad_grid_base_offset] = gix_mult * gix;
+    grad_grid[grad_grid_base_offset + grad_grid_strides[4]] = giy_mult * giy;
+    grad_grid[grad_grid_base_offset + 2 * grad_grid_strides[4]] = giz_mult * giz;
+
+  } else if (interpolation_mode == 1) { // nearest neighbor
+    // For nearest neighbor, gradients w.r.t. grid are zero (following CUDA implementation)
+    grad_grid[grad_grid_base_offset] = 0.0;
+    grad_grid[grad_grid_base_offset + grad_grid_strides[4]] = 0.0;
+    grad_grid[grad_grid_base_offset + 2 * grad_grid_strides[4]] = 0.0;
   }
 }
-
-#define INSTANTIATE_GRID_SAMPLER_3D_BACKWARD(DTYPE)                                       \
-  template [[host_name("grid_sampler_3d_backward_input_" #DTYPE)]] kernel void grid_sampler_3d_backward_input<DTYPE>( \
-      constant DTYPE * grad_output [[buffer(0)]],                                         \
-      constant DTYPE * input [[buffer(1)]],                                               \
-      constant DTYPE * grid [[buffer(2)]],                                                \
-      device DTYPE * grad_input [[buffer(3)]],                                            \
-      constant int & interpolation_mode [[buffer(4)]],                                    \
-      constant int & padding_mode [[buffer(5)]],                                          \
-      constant bool & align_corners [[buffer(6)]],                                        \
-      constant ulong * input_sizes [[buffer(7)]],                                         \
-      constant ulong * output_sizes [[buffer(8)]],                                        \
-      constant ulong * input_strides [[buffer(9)]],                                       \
-      constant ulong * grad_input_strides [[buffer(10)]],                                 \
-      constant ulong * grid_strides [[buffer(11)]],                                       \
-      constant ulong * grad_output_strides [[buffer(12)]],                                \
-      uint3 thread_index [[thread_position_in_grid]]);                                    \
-  template [[host_name("grid_sampler_3d_backward_grid_" #DTYPE)]] kernel void grid_sampler_3d_backward_grid<DTYPE>( \
-      constant DTYPE * grad_output [[buffer(0)]],                                         \
-      constant DTYPE * input [[buffer(1)]],                                               \
-      constant DTYPE * grid [[buffer(2)]],                                                \
-      device DTYPE * grad_grid [[buffer(3)]],                                             \
-      constant int & interpolation_mode [[buffer(4)]],                                    \
-      constant int & padding_mode [[buffer(5)]],                                          \
-      constant bool & align_corners [[buffer(6)]],                                        \
-      constant ulong * input_sizes [[buffer(7)]],                                         \
-      constant ulong * output_sizes [[buffer(8)]],                                        \
-      constant ulong * input_strides [[buffer(9)]],                                       \
-      constant ulong * grad_grid_strides [[buffer(10)]],                                  \
-      constant ulong * grid_strides [[buffer(11)]],                                       \
-      constant ulong * grad_output_strides [[buffer(12)]],                                \
-      uint3 thread_index [[thread_position_in_grid]])
 
 
 INSTANTIATE_GRID_SAMPLER_3D(float);
 INSTANTIATE_GRID_SAMPLER_3D(half);
-INSTANTIATE_GRID_SAMPLER_3D_BACKWARD(float);
-INSTANTIATE_GRID_SAMPLER_3D_BACKWARD(half);
+INSTANTIATE_GRID_SAMPLER_3D_VECTORIZED(float);
+INSTANTIATE_GRID_SAMPLER_3D_VECTORIZED(half);
 
 #if __METAL_VERSION__ >= 310
-// INSTANTIATE_GRID_SAMPLER_3D(bfloat);
-// INSTANTIATE_GRID_SAMPLER_3D_VECTORIZED(bfloat);
-// INSTANTIATE_GRID_SAMPLER_3D_BACKWARD(bfloat);
-// INSTANTIATE_GRID_SAMPLER_3D_BACKWARD_VECTORIZED(bfloat);
+INSTANTIATE_GRID_SAMPLER_3D(bfloat);
+INSTANTIATE_GRID_SAMPLER_3D_VECTORIZED(bfloat);
 #endif

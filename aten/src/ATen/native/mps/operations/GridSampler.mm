@@ -293,9 +293,8 @@ static void grid_sampler_3d_backward_mps_impl(Tensor& grad_input,
   auto input_requires_grad = output_mask[0];
 
   // For now, use dummy kernels that fill with fixed values
-  std::string grad_input_kernel_name = "grid_sampler_3d_backward_input_" + mps::scalarToMetalTypeString(input);
-
-  std::string grad_grid_kernel_name = "grid_sampler_3d_backward_grid_" + mps::scalarToMetalTypeString(input);
+  std::string grad_input_kernel_name = "grid_sampler_3d_backward_input";
+  std::string grad_grid_kernel_name = "grid_sampler_3d_backward_grid";
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -371,7 +370,7 @@ static void grid_sampler_3d_backward_mps_impl(Tensor& grad_input,
 
         const uint32_t TILE_SIZE = 16;
         MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_SIZE, TILE_SIZE, 1);
-        MTLSize threadsPerGrid = MTLSizeMake(in_W, in_H * in_D, N * C);
+        MTLSize threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
 
         [computeEncoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
         getMPSProfiler().endProfileKernel(gradInputPSO);
@@ -456,6 +455,11 @@ std::tuple<Tensor, Tensor>
 grid_sampler_3d_backward_mps(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
                              int64_t interpolation_mode, int64_t padding_mode, bool align_corners,
                              std::array<bool,2> output_mask) {
+  // print error if input is not float32
+  if (input.scalar_type() != ScalarType::Float) {
+    TORCH_WARN("MPS: grid_sampler_3d_backward_mps input is not float32");
+  }
+
   auto input_requires_grad = output_mask[0];
   Tensor grad_input = ([&]() {
     if (input_requires_grad) {
