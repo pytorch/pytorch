@@ -13,6 +13,23 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch._decomp import decomposition_table
 from torch._dynamo.testing import normalize_gm
+from torch._functorch._aot_autograd.descriptors import (
+    BufferAOTInput,
+    ParamAOTInput,
+    PlainAOTInput,
+    PlainAOTOutput,
+)
+from torch._functorch._aot_autograd.fx_utils import (
+    get_all_input_and_grad_nodes,
+    get_all_output_and_tangent_nodes,
+    get_buffer_nodes,
+    get_named_buffer_nodes,
+    get_named_param_nodes,
+    get_param_and_grad_nodes,
+    get_param_nodes,
+    get_plain_input_and_grad_nodes,
+    get_plain_output_and_tangent_nodes,
+)
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
@@ -490,6 +507,237 @@ class inner_f(torch.nn.Module):
             *dict(model.named_parameters()).values(), *inputs
         )
         self.assertEqual(expected_output, actual_output)
+
+    def test_fx_utils_simple_linear(self):
+        """Test FX utilities on a simple linear module"""
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = SimpleLinear()
+        inputs = (torch.randn(4, 3),)
+
+        with ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack, model, inputs, decompositions=decomposition_table
+            )
+
+            graph = joint_with_descriptors.graph_module.graph
+
+            # Test get_named_param_nodes
+            named_params = get_named_param_nodes(graph)
+            self.assertIn("linear.weight", named_params)
+            self.assertIn("linear.bias", named_params)
+            self.assertEqual(len(named_params), 2)
+
+            # Test get_param_nodes
+            param_nodes = get_param_nodes(graph)
+            self.assertEqual(len(param_nodes), 2)
+
+            # Test get_named_buffer_nodes (should be empty for simple linear)
+            named_buffers = get_named_buffer_nodes(graph)
+            self.assertEqual(len(named_buffers), 0)
+
+            # Test get_buffer_nodes
+            buffer_nodes = get_buffer_nodes(graph)
+            self.assertEqual(len(buffer_nodes), 0)
+
+            # Test get_all_input_and_grad_nodes
+            input_grad_nodes = get_all_input_and_grad_nodes(graph)
+            self.assertEqual(len(input_grad_nodes), 4)  # 2 params + 1 input + 1 tangent
+
+            # Verify that parameters have gradients
+            param_grads = get_param_and_grad_nodes(graph)
+            self.assertEqual(len(param_grads), 2)
+            for desc, (param_node, grad_node) in param_grads.items():
+                self.assertIsInstance(desc, ParamAOTInput)
+                self.assertIsNotNone(param_node)
+                self.assertIsNotNone(grad_node)  # Should have gradients
+
+            # Test get_plain_input_and_grad_nodes
+            plain_input_grads = get_plain_input_and_grad_nodes(graph)
+            self.assertEqual(len(plain_input_grads), 1)  # 1 plain input
+            for desc, (input_node, grad_node) in plain_input_grads.items():
+                self.assertIsInstance(desc, PlainAOTInput)
+                self.assertIsNotNone(input_node)
+                self.assertIsNone(grad_node)  # Plain inputs don't have gradients
+
+            # Test get_all_output_and_tangent_nodes
+            output_tangent_nodes = get_all_output_and_tangent_nodes(graph)
+            self.assertEqual(len(output_tangent_nodes), 3)  # 1 output + 2 grad outputs
+
+            # Test get_plain_output_and_tangent_nodes
+            plain_output_tangents = get_plain_output_and_tangent_nodes(graph)
+            self.assertEqual(len(plain_output_tangents), 1)
+            for desc, (output_node, tangent_node) in plain_output_tangents.items():
+                self.assertIsInstance(desc, PlainAOTOutput)
+                self.assertIsNotNone(output_node)
+                self.assertIsNotNone(
+                    tangent_node
+                )  # Should have tangents for backward pass
+
+    def test_fx_utils_conv_bn_module(self):
+        """Test FX utilities on a conv+batchnorm module with buffers"""
+
+        class ConvBN(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 3, 3, padding=1)
+                self.bn = nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return torch.relu(x)
+
+        model = ConvBN()
+        model.train()  # Important for batch norm
+        inputs = (torch.randn(2, 1, 4, 4),)
+
+        with ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack, model, inputs, decompositions=decomposition_table
+            )
+
+            graph = joint_with_descriptors.graph_module.graph
+
+            # Test get_named_param_nodes
+            named_params = get_named_param_nodes(graph)
+            expected_params = ["conv.weight", "conv.bias", "bn.weight", "bn.bias"]
+            for param_name in expected_params:
+                self.assertIn(param_name, named_params)
+            self.assertEqual(len(named_params), 4)
+
+            # Test get_named_buffer_nodes
+            named_buffers = get_named_buffer_nodes(graph)
+            expected_buffers = [
+                "bn.running_mean",
+                "bn.running_var",
+                "bn.num_batches_tracked",
+            ]
+            for buffer_name in expected_buffers:
+                self.assertIn(buffer_name, named_buffers)
+            self.assertEqual(len(named_buffers), 3)
+
+            # Test get_buffer_nodes
+            buffer_nodes = get_buffer_nodes(graph)
+            self.assertEqual(len(buffer_nodes), 3)
+
+            # Test that all inputs include params, buffers, and plain inputs
+            input_grad_nodes = get_all_input_and_grad_nodes(graph)
+            self.assertEqual(
+                len(input_grad_nodes), 9
+            )  # 4 params + 3 buffers + 1 input + 1 tangent
+
+            # Verify buffer handling
+            buffer_count = 0
+            for desc, (node, grad_node) in input_grad_nodes.items():
+                if isinstance(desc, BufferAOTInput):
+                    buffer_count += 1
+                    self.assertIsNotNone(node)
+                    # Buffers typically don't have gradients unless they're trainable
+
+            self.assertEqual(buffer_count, 3)
+
+    def test_fx_utils_multiple_outputs(self):
+        """Test FX utilities on a module with multiple outputs"""
+
+        class MultiOutputModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(3, 2)
+                self.linear2 = nn.Linear(3, 4)
+
+            def forward(self, x):
+                out1 = self.linear1(x)
+                out2 = self.linear2(x)
+                return out1, out2
+
+        model = MultiOutputModule()
+        inputs = (torch.randn(4, 3),)
+
+        with ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack, model, inputs, decompositions=decomposition_table
+            )
+
+            graph = joint_with_descriptors.graph_module.graph
+
+            # Test get_all_output_and_tangent_nodes
+            output_tangent_nodes = get_all_output_and_tangent_nodes(graph)
+            self.assertEqual(len(output_tangent_nodes), 6)  # 2 outputs + 4 grad outputs
+
+            # Test get_plain_output_and_tangent_nodes
+            plain_output_tangents = get_plain_output_and_tangent_nodes(graph)
+            self.assertEqual(len(plain_output_tangents), 2)
+
+            # Verify each output has a tangent
+            for desc, (output_node, tangent_node) in plain_output_tangents.items():
+                self.assertIsInstance(desc, PlainAOTOutput)
+                self.assertIsNotNone(output_node)
+                self.assertIsNotNone(tangent_node)
+
+            # Test parameter handling with multiple outputs
+            param_grads = get_param_and_grad_nodes(graph)
+            self.assertEqual(len(param_grads), 4)  # 2 weights + 2 biases
+
+            # All parameters should have gradients
+            for desc, (param_node, grad_node) in param_grads.items():
+                self.assertIsInstance(desc, ParamAOTInput)
+                self.assertIsNotNone(param_node)
+                self.assertIsNotNone(grad_node)
+
+    def test_fx_utils_node_consistency(self):
+        """Test that FX utilities return consistent node references"""
+
+        class SimpleModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = SimpleModule()
+        inputs = (torch.randn(4, 3),)
+
+        with ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack, model, inputs, decompositions=decomposition_table
+            )
+
+            graph = joint_with_descriptors.graph_module.graph
+
+            # Get nodes through different APIs and verify consistency
+            named_params = get_named_param_nodes(graph)
+            param_nodes = get_param_nodes(graph)
+            param_grads = get_param_and_grad_nodes(graph)
+            all_input_grads = get_all_input_and_grad_nodes(graph)
+
+            # Check that get_param_nodes returns the same nodes as get_named_param_nodes
+            self.assertEqual(len(param_nodes), len(named_params))
+            for node in param_nodes:
+                self.assertIn(node, named_params.values())
+
+            # Check that param_grads contains the same parameter nodes
+            for desc, (param_node, grad_node) in param_grads.items():
+                self.assertIn(param_node, param_nodes)
+                self.assertEqual(param_node, named_params[desc.target])
+
+            # Check that all_input_grads contains the parameter nodes
+            param_count = 0
+            for desc, (input_node, grad_node) in all_input_grads.items():
+                if isinstance(desc, ParamAOTInput):
+                    param_count += 1
+                    self.assertIn(input_node, param_nodes)
+                    self.assertEqual(input_node, named_params[desc.target])
+
+            self.assertEqual(param_count, len(param_nodes))
 
 
 if __name__ == "__main__":
