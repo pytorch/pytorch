@@ -927,13 +927,27 @@ def register_autocast(
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
 
-    def kernel(_, *args, **kwargs):
+    def _maybe_override_py_impl(op: torch._ops.OpOverload, dispatch_key):
+        def inner(kernel):
+            if op.has_kernel_for_dispatch_key(dispatch_key):
+                op.py_kernels.pop(dispatch_key)
+            return op.py_impl(dispatch_key)(kernel)
+
+        return inner
+
+    @_maybe_override_py_impl(_op, torch._C.DispatchKey.AutocastCPU)
+    @_maybe_override_py_impl(_op, torch._C.DispatchKey.AutocastCUDA)
+    def _autocast_py_impl(*args, **kwargs):
         assert len(kwargs) == 0, "Custom ops do not support kwargs yet."
         autocast_keyset = torch._C.DispatchKeySet(
             torch._C.DispatchKey.AutocastCPU
         ) | torch._C.DispatchKeySet(torch._C.DispatchKey.AutocastCUDA)
         with torch._C._ExcludeDispatchKeyGuard(autocast_keyset):
             return _op(*_cast(args, device_type, cast_inputs))
+
+    def kernel(_, *args, **kwargs):
+        assert len(kwargs) == 0, "Custom ops do not support kwargs yet."
+        return _autocast_py_impl(*args, **kwargs)
 
     if device_type == "cuda":
         return lib.impl(opname, kernel, "AutocastCUDA", with_keyset=True)
