@@ -77,11 +77,14 @@ class TestSetLinter(LinterTestCase):
             ("{i for i in range(2, 3)}", 1),
             ("{1, 2}", 1),
             ("{One({'a': 1}), Two([{}, {2}, {1, 2}])}", 3),
+            ('f" {h:{w}} "', 0),
         )
         for s, expected in TESTS:
             pf = SetLinter.make_file(s)
             actual = pf._lines_with_sets and pf._lines_with_sets[0].braced_sets
             self.assertEqual(len(actual), expected)
+
+    # def test_braces_inside_braces(self) -> None:
 
 
 EXPECTED_SETS = [

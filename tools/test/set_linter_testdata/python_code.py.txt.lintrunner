@@ -115,21 +115,29 @@ tools/test/set_linter_testdata/python_code.py.txt:44:11: Builtin `set` is deprec
    43 | # A set containing an object constructed with a dict and a set
    44 | sos_set = {Something({i: i + 1 for i in range(3)}, {i + 1 for i in range(3)})}
                   ^
+   45 |
+   46 | # An f string as in https://github.com/pytorch/pytorch/issues/159056
 
 tools/test/set_linter_testdata/python_code.py.txt:44:52: Builtin `set` is deprecated
    42 |
    43 | # A set containing an object constructed with a dict and a set
    44 | sos_set = {Something({i: i + 1 for i in range(3)}, {i + 1 for i in range(3)})}
                                                            ^
+   45 |
+   46 | # An f string as in https://github.com/pytorch/pytorch/issues/159056
 
 tools/test/set_linter_testdata/python_code.py.txt:44:76: Builtin `set` is deprecated
    42 |
    43 | # A set containing an object constructed with a dict and a set
    44 | sos_set = {Something({i: i + 1 for i in range(3)}, {i + 1 for i in range(3)})}
                                                                                    ^
+   45 |
+   46 | # An f string as in https://github.com/pytorch/pytorch/issues/159056
 
 tools/test/set_linter_testdata/python_code.py.txt:44:78: Builtin `set` is deprecated
    42 |
    43 | # A set containing an object constructed with a dict and a set
    44 | sos_set = {Something({i: i + 1 for i in range(3)}, {i + 1 for i in range(3)})}
                                                                                      ^
+   45 |
+   46 | # An f string as in https://github.com/pytorch/pytorch/issues/159056
