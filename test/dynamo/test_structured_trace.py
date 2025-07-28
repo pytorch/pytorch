@@ -1201,7 +1201,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
                     schedule = json.loads(payload_content)
                     self.assertIsInstance(schedule, list)
 
-                    # Verify expected collective operations are present
+                # Verify expected collective operations are present
                 op_names = " ".join(op or "" for op in schedule)
                 self.assertIn("all_reduce", op_names)
                 self.assertIn("wait_tensor", op_names)
