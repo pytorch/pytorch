@@ -127,6 +127,11 @@ class _LazyGraphModule(GraphModule):
 
     forward = _lazy_forward
 
+    # TODO: we should handle __reduce_deploy__ the same way as __reduce_package__,
+    # or __reduce__ by calling _real_recompile. But I don't find a good way
+    # to test __reduce_deploy__ out. Also it's very unlikely that LazyGraphModule
+    # will be used in torch::deploy. So it's skipped for now.
+
     def __reduce_package__(self, exporter: PackageExporter):
         """
         Follow GraphModule.__reduce__ but call 'self._real_recompile' rather
