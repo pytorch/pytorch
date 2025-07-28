@@ -293,11 +293,9 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16, "Scaled mm requires bf16 support")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Scaled mm requires fp8 support")
     @unittest.mock.patch.dict(os.environ, _test_env)
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_BF16 or not PLATFORM_SUPPORTS_FP8,
-        "Scaled mm requires bf16 and fp8 support",
-    )
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
     @parametrize("has_bias", (True, False))
