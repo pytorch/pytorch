@@ -66,6 +66,12 @@ from torch.testing._internal.inductor_utils import (
 from torch.testing._internal.triton_utils import requires_cuda
 
 
+try:
+    from . import custom_inductor_config
+except ImportError:
+    import custom_inductor_config
+
+
 if HAS_TRITON:
     import triton  # @manual
 
@@ -1854,6 +1860,68 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"autograd_cache_normalize_inputs": True})
+    def test_split_module(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, a0, a1, b0, b1, c0, c1):
+                x = x + (a0**2) + (a1 / 2)
+                x = x + (b0**2) + (b1 / 2)
+                x = x + (c0**2) + (c1 / 2)
+                return x
+
+        seen = 0
+        splits = [4, 8]
+
+        def split(n):
+            nonlocal seen
+            if seen < splits[0]:
+                seen += 1
+                return 0
+            elif seen < splits[1]:
+                seen += 1
+                return 1
+            else:
+                seen += 1
+                return 2
+
+        def t():
+            return torch.randn([])
+
+        x = t()
+        a0 = t()
+        a1 = t()
+        b0 = t()
+        b1 = t()
+        c0 = t()
+        c1 = t()
+
+        example_inputs = (x, a0, a1, b0, b1, c0, c1)
+        gm, inps, _ = self.capture(Mod())(*example_inputs)
+        split = torch.fx.passes.split_module.split_module(gm, gm, split)
+
+        # Each of the split graphs only has one output.
+        ca0 = torch._inductor.standalone_compile(split.submod_0, (a0, x, a1))
+        ca1 = torch._inductor.standalone_compile(split.submod_1, (b0, x, b1))
+        ca2 = torch._inductor.standalone_compile(split.submod_2, (c0, x, c1))
+
+        y = ca0(a0, x, a1)
+        y = ca1(b0, y, b1)
+        y = ca2(c0, y, c1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+        # TODO: split_module causes ca1 and ca2 to have different type annotations
+        # for the parameter x, so we can only AOTAutogradCache cache hit once instead of twice
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        expected = Mod()(*example_inputs)
+        self.assertEqual(y, expected)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("config_patches", [True, False])
     def test_dynamic_shapes_from_example_inputs(self, config_patches):
         def f(x):
@@ -1984,6 +2052,60 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
 
         result = torch.compile(f, backend=backend)(static_x)
         self.assertEqual(result, static_x * 3)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_custom_pass_handling(self):
+        """
+        Test that properly-registered custom hooks allow caching.
+        """
+
+        class TestCustomGraphPass(CustomGraphPass):
+            def __call__(self, graph: torch.fx.graph.Graph) -> None:
+                return None
+
+            def uuid(self) -> Optional[Union[bytes, str]]:
+                return "uuid"
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.rand(8, 32, device="cpu")
+        b = torch.rand(32, 8, device="cpu")
+        compiled_fn = torch.compile(fn)
+
+        # The cache should be bypassed if a custom hook doesn't use CustomGraphPass.
+        with config.patch({"post_grad_custom_pre_pass": lambda x: x}):
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # With proper usage, we expect normal caching.
+        custom_pass = TestCustomGraphPass()
+        with config.patch(
+            {
+                "post_grad_custom_pre_pass": custom_pass,
+                "post_grad_custom_post_pass": custom_pass,
+                "joint_custom_pre_pass": custom_pass,
+                "joint_custom_post_pass": custom_pass,
+            }
+        ):
+            self.reset()
+            counters.clear()
+
+            # Cache miss
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.reset()
+            counters.clear()
+
+            # Cache hit
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
 
 class TestFxGraphCacheHashing(TestCase):
@@ -2347,6 +2469,50 @@ class TestFxGraphCacheHashing(TestCase):
                 pickler.dumps(details3),
             )
 
+    def test_hash_custom_backend_config(self):
+        """
+        Test cache correctness when a custom inductor codegen config
+        is installed
+        """
+        with patch_inductor_backend(
+            "cpu", custom_backend_config=custom_inductor_config
+        ):
+            gm = torch.fx.GraphModule({}, torch.fx.Graph())
+            pickler = FxGraphCachePickler(gm)
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+            self.assertEqual(pickler.dumps(details1), pickler.dumps(details2))
+
+            custom_inductor_config.enable_optimisation = True
+            details3 = FxGraphHashDetails(None, [], {}, [])
+            self.assertNotEqual(pickler.dumps(details2), pickler.dumps(details3))
+
+            torch._dynamo.reset()
+            counters.clear()
+
+            custom_inductor_config.enable_optimisation = False
+            x = torch.zeros(32)
+            y = torch.zeros(32)
+            compiled_fn = torch.compile(torch.add)
+
+            compiled_fn(x, y)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            torch._dynamo.reset()
+            counters.clear()
+
+            compiled_fn(x, y)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            torch._dynamo.reset()
+            counters.clear()
+
+            # Changing the custom config should trigger a recompilation
+            custom_inductor_config.enable_optimisation = True
+            compiled_fn(x, y)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
     def test_bypass_unsupported(self):
         """
         Test _reduce_unsupported
@@ -2363,7 +2529,7 @@ class TestFxGraphCacheHashing(TestCase):
         even if they are not the same id.
         """
         s1 = "string"
-        s2 = "strin"
+        s2 = "strin"  # codespell:ignore
         s2 += "g"
 
         self.assertNotEqual(id(s1), id(s2))

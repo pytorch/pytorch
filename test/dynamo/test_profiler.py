@@ -192,6 +192,47 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             ],
         )
 
+    def test_profiler_enabled(self):
+        def fn(x):
+            x = torch.sin(x)
+            if torch.autograd._profiler_enabled():
+                return torch.cos(x)
+            else:
+                return torch.sigmoid(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        with torch.autograd.profiler.profile():
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+
+    def test_profiler_record_function_ignore(self):
+        def fn(x):
+            x = torch.sin(x)
+            if torch.autograd._profiler_enabled():
+                with torch.autograd.profiler.record_function("dummy"):
+                    return torch.cos(x)
+            else:
+                return torch.sigmoid(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        with torch.autograd.profiler.profile():
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

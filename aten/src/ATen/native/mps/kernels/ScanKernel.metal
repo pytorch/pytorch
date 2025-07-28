@@ -398,6 +398,8 @@ REGISTER_SCAN_WITH_INDICES_OP(cummax, CumMaxOp, bool);
 
 #else // __METAL_VERSION__ >= 310
 
+C10_METAL_CONSTEXPR auto simd_size = c10::metal::simdgroup_size;
+
 // The reminder of this file contains cummin and cummax implementations adapted
 // from MLX:
 // https://github.com/ml-explore/mlx/blob/main/mlx/backend/metal/kernels/scan.h
@@ -710,7 +712,6 @@ kernel void scan_innermost_dim(
     uint3 lsize [[threads_per_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
-  constexpr int simd_size = 32;
   Op op;
 
   // Position the pointers
@@ -808,7 +809,6 @@ kernel void scan_outer_dim(
     uint3 lid [[thread_position_in_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
-  constexpr int simd_size = 32;
   constexpr int BM = 32;
   constexpr int BN = 32;
   constexpr int BN_pad = 32 + 16 / sizeof(T);
@@ -907,7 +907,6 @@ kernel void scan_with_indices_innermost_dim(
     uint3 lsize [[threads_per_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
-  constexpr int simd_size = 32;
   Op op;
   using pair_t = typename Op::pair_t;
 
@@ -999,7 +998,6 @@ kernel void scan_with_indices_outer_dim(
     uint3 lid [[thread_position_in_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
-  constexpr int simd_size = 32;
   constexpr int BM = 32;
   constexpr int BN = 32;
   constexpr int BN_pad = 32 + 16 / sizeof(T);

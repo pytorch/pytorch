@@ -163,20 +163,7 @@ macro(caffe2_interface_library SRC DST)
   # link command for the specific SRC library.
   if(${__src_target_type} STREQUAL "STATIC_LIBRARY")
     # In the case of static library, we will need to add whole-static flags.
-    if(APPLE)
-      target_link_libraries(
-          ${DST} INTERFACE -Wl,-force_load,\"$<TARGET_FILE:${SRC}>\")
-    elseif(MSVC)
-      # In MSVC, we will add whole archive in default.
-      target_link_libraries(
-         ${DST} INTERFACE "$<TARGET_FILE:${SRC}>")
-      target_link_options(
-         ${DST} INTERFACE "-WHOLEARCHIVE:$<TARGET_FILE:${SRC}>")
-    else()
-      # Assume everything else is like gcc
-      target_link_libraries(${DST} INTERFACE
-          "-Wl,--whole-archive,\"$<TARGET_FILE:${SRC}>\" -Wl,--no-whole-archive")
-    endif()
+    target_link_libraries(${DST} INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,${SRC}>)
     # Link all interface link libraries of the src target as well.
     # For static library, we need to explicitly depend on all the libraries
     # that are the dependent library of the source library. Note that we cannot
@@ -407,7 +394,7 @@ function(torch_compile_options libname)
       list(APPEND private_compile_options -Wredundant-move)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND private_compile_options -Wextra-semi -Wno-error=extra-semi -Wmove)
+      list(APPEND private_compile_options -Wextra-semi -Wmove)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -418,6 +405,7 @@ function(torch_compile_options libname)
     if(WERROR)
       list(APPEND private_compile_options
         -Werror
+        -Werror=ignored-attributes
         -Werror=inconsistent-missing-override
         -Werror=inconsistent-missing-destructor-override
         -Werror=pedantic
