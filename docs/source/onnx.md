@@ -95,24 +95,6 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     :noindex:
 ```
 
-### Deprecated API
-
-```{eval-rst}
-.. deprecated:: 2.6
-    These functions are deprecated and will be removed in a future version.
-
-.. autofunction:: register_custom_op_symbolic
-.. autofunction:: unregister_custom_op_symbolic
-.. autofunction:: select_model_mode_for_export
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    JitScalarType
-```
-
 ```{eval-rst}
 .. toctree::
     :hidden:
@@ -122,8 +104,18 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     onnx_verification
 ```
 
-<!-- This module needs to be documented. Adding here in the meantime
-for tracking purposes -->
+### Deprecated API
+
+```{eval-rst}
+.. deprecated:: 2.6
+    These functions are deprecated and will be removed in a future version.
+
+.. autofunction:: register_custom_op_symbolic
+.. autofunction:: unregister_custom_op_symbolic
+.. autofunction:: select_model_mode_for_export
+.. autoclass:: JitScalarType
+```
+
 ```{eval-rst}
 .. py:module:: torch.onnx.errors
 .. py:module:: torch.onnx.operators
