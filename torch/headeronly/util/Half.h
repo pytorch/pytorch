@@ -63,7 +63,7 @@
 #endif // __x86_64__ || _M_X64 || __i386 || _M_IX86
 #endif // __GNUC__ || __clang__
 
-namespace torch::headeronly {
+namespace c10 {
 
 struct alignas(2) Half {
   unsigned short x;
@@ -695,35 +695,35 @@ inline C10_HOST_DEVICE Half operator/(int64_t a, Half b) {
 
 C10_CLANG_DIAGNOSTIC_POP()
 
-} // namespace torch::headeronly
+} // namespace c10
 
-namespace c10 {
+namespace torch::headeronly {
 
-using torch::headeronly::Half;
-using torch::headeronly::operator+;
-using torch::headeronly::operator-;
-using torch::headeronly::operator*;
-using torch::headeronly::operator/;
-using torch::headeronly::operator+=;
-using torch::headeronly::operator-=;
-using torch::headeronly::operator*=;
-using torch::headeronly::operator/=;
-using torch::headeronly::operator<<;
+using c10::Half;
+using c10::operator+;
+using c10::operator-;
+using c10::operator*;
+using c10::operator/;
+using c10::operator+=;
+using c10::operator-=;
+using c10::operator*=;
+using c10::operator/=;
+using c10::operator<<;
 
 namespace detail {
 #if defined(__aarch64__) && !defined(__CUDACC__)
-using torch::headeronly::detail::fp16_from_bits;
-using torch::headeronly::detail::fp16_to_bits;
-using torch::headeronly::detail::native_fp16_from_fp32_value;
-using torch::headeronly::detail::native_fp16_to_fp32_value;
+using c10::detail::fp16_from_bits;
+using c10::detail::fp16_to_bits;
+using c10::detail::native_fp16_from_fp32_value;
+using c10::detail::native_fp16_to_fp32_value;
 #endif
 
-using torch::headeronly::detail::fp16_ieee_from_fp32_value;
-using torch::headeronly::detail::fp16_ieee_to_fp32_bits;
-using torch::headeronly::detail::fp16_ieee_to_fp32_value;
+using c10::detail::fp16_ieee_from_fp32_value;
+using c10::detail::fp16_ieee_to_fp32_bits;
+using c10::detail::fp16_ieee_to_fp32_value;
 } // namespace detail
 
-} // namespace c10
+} // namespace torch::headeronly
 
 namespace std {
 
