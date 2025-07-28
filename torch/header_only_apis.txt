@@ -6,7 +6,7 @@
 # c10/util/TypeCast.h
 convert
 
-# c10/util/bit_cast.h
+# c10/util/bit_cast.h, torch/headeronly/util/bit_cast.h
 bit_cast
 
 # c10/util/BFloat16-math.h, c10/util/BFloat16.h
@@ -26,6 +26,14 @@ Float8_e5m2fnuz
 
 # c10/util/Half.h
 Half
+
+# torch/headeronly/util/Half.h
+fp16_ieee_from_fp32_value
+fp16_ieee_to_fp32_value
+
+# torch/headeronly/util/floating_point_utils.h
+# fp32_from_bits called from fp16_ieee_to_fp32_value
+# fp32_to_bits called from fp16_ieee_from_fp32_value
 
 # c10/util/complex.h
 complex
@@ -47,6 +55,10 @@ loadu
 maximum
 minimum
 size
+
+# torch/headeronly/cpu/vec/vec_half.h
+float2half_scalar
+half2float_scalar
 
 # torch/headeronly/macros/Export.h
 C10_API
