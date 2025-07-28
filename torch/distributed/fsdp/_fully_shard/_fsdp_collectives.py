@@ -432,24 +432,37 @@ def foreach_all_gather_copy_out(
         # Use the original tensors directly - minimal copying required
         offset = 0
         for fsdp_param in fsdp_params:
-            # Collect non-inference tensors to preserve version counters
-            non_inference_outputs = [
-                o for o in fsdp_param.all_gather_outputs if not o.is_inference()
-            ]
-
-            # Use unsafe_preserve_version_counter to prevent version counter increments
-            with torch.autograd._unsafe_preserve_version_counter(
-                tuple(non_inference_outputs)
-            ):
+            # Handle version counters properly for torch.compile
+            if torch._dynamo.is_compiling():
+                # For torch.compile, we don't care about version counters
+                # Just copy the tensors directly
                 for output_tensor in fsdp_param.all_gather_outputs:
                     numel = output_tensor.numel()
-                    # Copy the view while preserving autograd graph
                     output_tensor.copy_(
                         all_gather_output[offset : offset + numel].view_as(
                             output_tensor
                         )
                     )
                     offset += numel
+            else:
+                # Collect non-inference tensors to preserve version counters
+                non_inference_outputs = [
+                    o for o in fsdp_param.all_gather_outputs if not o.is_inference()
+                ]
+
+                # Use unsafe_preserve_version_counter to prevent version counter increments
+                with torch.autograd._unsafe_preserve_version_counter(
+                    tuple(non_inference_outputs)
+                ):
+                    for output_tensor in fsdp_param.all_gather_outputs:
+                        numel = output_tensor.numel()
+                        # Copy the view while preserving autograd graph
+                        output_tensor.copy_(
+                            all_gather_output[offset : offset + numel].view_as(
+                                output_tensor
+                            )
+                        )
+                        offset += numel
         return
 
     device_handle = _get_device_handle(device.type)
