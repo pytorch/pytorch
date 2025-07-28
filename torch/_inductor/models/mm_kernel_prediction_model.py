@@ -203,7 +203,7 @@ class ModelWrapper:
 
         file_name = _sanitize_path(new_device_name)
         return os.path.join(
-            base_directory, "artifacts", f"{file_name}_{self.MODEL_BASE_NAME}.pt2"
+            base_directory, "artifacts", f"{file_name}_{self.MODEL_BASE_NAME}.py"
         )
 
     def __init__(self, device_name: Optional[str] = None) -> None:
