@@ -10,7 +10,7 @@ inline void gemm_internal_ck(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   static_assert(false&&sizeof(Dtype),"at::cuda::blas_gemm_internal_ck: not implemented");
 }
 
-#if defined(USE_ROCM) && !defined(_MSC_VER) && defined(USE_ROCM_CK_GEMM)
+#if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
 template <>
 void gemm_internal_ck<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
