@@ -154,11 +154,16 @@ class AllToAllVDev2dOffset(torch.autograd.Function):
     """
 
     # Maximum output length (need to be set before use of AllToAllVDev2dOffset)
-    max_output_len: Optional[int] = None
+    max_output_len: int
     # Alignment of the input offsets
-    alignment: Optional[int] = None
+    alignment: int
+    initialized: bool = False
     # A symmetric memory holding the grad_output during backward
     grad_output_buf: Optional[torch.Tensor] = None
+    # A symmetric memory holding the grad_input during backward
+    grad_input_buf: Optional[torch.Tensor] = None
+    # A symmetric memory holding the splits and offset of grad_input during backward
+    grad_in_splits_offsets: Optional[torch.Tensor] = None
 
     @staticmethod
     def init(
@@ -172,6 +177,7 @@ class AllToAllVDev2dOffset(torch.autograd.Function):
         """
         AllToAllVDev2dOffset.max_output_len = max_output_len
         AllToAllVDev2dOffset.alignment = alignment
+        AllToAllVDev2dOffset.initialized = True
 
     @staticmethod
     def forward(  # type: ignore[no-untyped-def]
@@ -184,9 +190,10 @@ class AllToAllVDev2dOffset(torch.autograd.Function):
         Functionality is the same as `all_to_all_vdev_2d_offset` but with `output` and
         `out_splits_offsets` returned instead of modified in place.
         """
-        if AllToAllVDev2dOffset.max_output_len is None:
-            raise RuntimeError(
-                "Please set max output length via `AllToAllVDev2dOffset.init(max_output_len)`"
+        if not AllToAllVDev2dOffset.initialized:
+            raise ValueError(
+                "`AllToAllVDev2dOffset` is not initialized, "
+                "please call `AllToAllVDev2dOffset.init(max_output_len, alignment)` before use."
             )
 
         # Allocate output buffer
@@ -218,7 +225,7 @@ class AllToAllVDev2dOffset(torch.autograd.Function):
         ctx,
         grad_output: torch.Tensor,
         grad_out_splits_offsets_unused,
-    ) -> tuple[torch.Tensor, None, None, None]:
+    ) -> tuple[Optional[torch.Tensor], None, None, None]:
         """
         Backward pass of `all_to_all_vdev_2d_offset` is `all_to_all_vdev_2d`.
 
@@ -229,17 +236,35 @@ class AllToAllVDev2dOffset(torch.autograd.Function):
         Returns:
             `grad_input`: gradients of input.
         """
+        if not AllToAllVDev2dOffset.initialized:
+            raise ValueError(
+                "`AllToAllVDev2dOffset` is not initialized, "
+                "please call `AllToAllVDev2dOffset.init(max_output_len, alignment)` before use."
+            )
 
         # Initialize grad_output buffer (one time only)
         if AllToAllVDev2dOffset.grad_output_buf is None:
-            assert AllToAllVDev2dOffset.max_output_len is not None, (
-                "`max_output_len` not set"
-            )
             AllToAllVDev2dOffset.grad_output_buf = symm_mem.empty(
                 AllToAllVDev2dOffset.max_output_len,
                 *grad_output.shape[1:],
                 dtype=grad_output.dtype,
                 device=grad_output.device,
+            )
+            AllToAllVDev2dOffset.grad_input_buf = symm_mem.empty(
+                *ctx.input_shape,
+                dtype=grad_output.dtype,
+                device=grad_output.device,
+            )
+
+        # Splits info
+        # Splits/offsets of grad_out is the same as out splits/offsets in forward
+        (grad_out_splits_offsets,) = ctx.saved_tensors
+        grad_out_splits = grad_out_splits_offsets[0]
+        if AllToAllVDev2dOffset.grad_in_splits_offsets is None:
+            AllToAllVDev2dOffset.grad_in_splits_offsets = symm_mem.empty(
+                *grad_out_splits_offsets.shape,
+                dtype=grad_out_splits_offsets.dtype,
+                device=grad_out_splits_offsets.device,
             )
 
         # TODO: is there a way to tell autograd to feed grad_output directly to
@@ -248,31 +273,16 @@ class AllToAllVDev2dOffset(torch.autograd.Function):
             grad_output
         )
 
-        # Splits info
-        # Splits/offsets of grad_out is the same as out splits/offsets in forward
-        (grad_out_splits_offsets,) = ctx.saved_tensors
-        grad_out_splits = grad_out_splits_offsets[0]
-        grad_in_splits_offsets = symm_mem.empty(
-            *grad_out_splits_offsets.shape,
-            dtype=grad_out_splits_offsets.dtype,
-            device=grad_out_splits_offsets.device,
-        )
-        grad_input = symm_mem.empty(
-            *ctx.input_shape,
-            dtype=grad_output.dtype,
-            device=grad_output.device,
-        )
-
         # Shuffle gradients back to the input
         # TODO: create an op that takes both in_splits_offsets and
         # out_splits_offsets, instead of taking alignment
         torch.ops.symm_mem.all_to_all_vdev_2d(
             AllToAllVDev2dOffset.grad_output_buf,
-            grad_input,
+            AllToAllVDev2dOffset.grad_input_buf,
             grad_out_splits,
-            grad_in_splits_offsets,
+            AllToAllVDev2dOffset.grad_in_splits_offsets,
             ctx.group_name,
             AllToAllVDev2dOffset.alignment,
         )
 
-        return grad_input, None, None, None
+        return AllToAllVDev2dOffset.grad_input_buf, None, None, None
