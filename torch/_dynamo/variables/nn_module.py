@@ -241,7 +241,7 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise UnspecializeRestartAnalysis
 
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
+    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key) -> bool:
         base = tx.output.get_submodule(self.module_key)
 
         if object_has_getattribute(base):

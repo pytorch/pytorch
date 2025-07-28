@@ -374,7 +374,6 @@ aten::_fused_adamw_.tensor_lr
 aten::_fused_moving_avg_obs_fq_helper
 aten::_fused_moving_avg_obs_fq_helper.out
 aten::_fused_moving_avg_obs_fq_helper_functional
-aten::_fused_rms_norm
 aten::_fused_sdp_choice
 aten::_fused_sgd
 aten::_fused_sgd.out
@@ -853,6 +852,8 @@ aten::hann_window.periodic
 aten::hann_window.periodic_out
 aten::hardshrink_backward
 aten::hardshrink_backward.grad_input
+aten::hash_tensor
+aten::hash_tensor.out
 aten::histc
 aten::histc.out
 aten::histogram.bin_ct

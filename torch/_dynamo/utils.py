@@ -102,6 +102,7 @@ if typing.TYPE_CHECKING:
         Iterable,
         Iterator,
         KeysView,
+        Sequence,
         ValuesView,
     )
 
@@ -248,6 +249,27 @@ def reset_frame_count() -> None:
     cumulative_time_spent_ns.clear()
     compilation_time_metrics.clear()
     curr_frame = 0
+
+
+_recompile_user_contexts: Optional[list[Callable[[], str]]] = None
+
+
+def register_hook_for_recompile_user_context(hook: Callable[[], str]) -> None:
+    """
+    Register a hook to be called when a recompile is triggered. The hook
+    should return a string describing user contexts that are not available
+    to the compiler, such as the current training epoch. This is useful for
+    debugging and data analysis for recompile. For data retention purposes,
+    the user context string is capped at 256 characters.
+    """
+    global _recompile_user_contexts
+    if _recompile_user_contexts is None:
+        _recompile_user_contexts = []
+    _recompile_user_contexts.append(hook)
+
+
+def get_hook_for_recompile_user_context() -> Optional[list[Callable[[], str]]]:
+    return _recompile_user_contexts
 
 
 op_count = 0
@@ -1326,6 +1348,7 @@ class CompilationMetrics:
     # The number of parameters counted by fields. This is mostly a proxy for
     # the number of distinct type of params.
     param_count: Optional[int] = None
+    recompile_user_contexts: Optional[set[str]] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1582,6 +1605,8 @@ def record_compilation_metrics(
             torch._logging.get_structured_logging_overhead()
         ),
         "dynamo_config": _get_dynamo_config_for_logging(),
+        "config_suppress_errors": config.suppress_errors,
+        "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
@@ -1690,9 +1715,15 @@ class ChromiumEventLogger:
 
     def __init__(self):
         self.tls = threading.local()
+
+        from . import config
+
         # Generate a unique id for this logger, which we can use in scuba to filter down
         # to a single python run.
-        self.id_ = str(uuid.uuid4())
+        if config.pt2_compile_id_prefix:
+            self.id_ = f"{config.pt2_compile_id_prefix}-{uuid.uuid4()}"
+        else:
+            self.id_ = str(uuid.uuid4())
 
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
@@ -2114,8 +2145,18 @@ def clone_input(x, *, dtype=None):
         return result
 
 
+@overload
+def clone_inputs(
+    example_inputs: dict[str, Union[T, tuple[T, ...]]],
+) -> dict[str, list[T]]: ...
+
+
+@overload
+def clone_inputs(example_inputs: Sequence[T]) -> list[T]: ...
+
+
 def clone_inputs(example_inputs):
-    res: Union[dict[Any, Any], list[Any]]
+    res: Union[dict[str, Any], list[Any]]
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
@@ -2196,7 +2237,7 @@ def torchscript(model, example_inputs, verbose=False):
     return None
 
 
-def getfile(obj):
+def getfile(obj: Any) -> Optional[str]:
     try:
         return inspect.getfile(obj)
     except (TypeError, OSError):
@@ -2399,6 +2440,15 @@ def is_int_specialization_case(value, source) -> bool:
             source.guard_source().is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
+        # integers coming from FSDP modules are considered static. This is
+        # purely empirical and perhaps we should have a better heuristic.
+        or (
+            source.guard_source().is_fsdp_module()
+            and not (
+                config.allow_unspec_int_on_nn_module
+                or config.allow_unspec_int_on_fsdp_module
+            )
+        )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()
             and not config.allow_unspec_int_on_nn_module
@@ -2549,6 +2599,10 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
+def dataclass_fields(cls):
+    return torch._dynamo.disable(dataclasses.fields)(cls)
+
+
 iter_next = next
 
 
@@ -2600,7 +2654,9 @@ def set_example_value(node, example_value):
     # this to accurately reflect what the state of the value was at the time
     # the program was traced).
     node.meta["example_value"] = example_value
-    shape_env = TracingContext.get().fake_mode.shape_env
+    fake_mode = TracingContext.get().fake_mode
+    assert fake_mode is not None
+    shape_env = fake_mode.shape_env
     if (
         symbol_to_path
         := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
@@ -2623,6 +2679,22 @@ def _get_fake_tensor(vt):
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
     return fake_tensor
+
+
+def slice_length(s: slice, seq_len: int) -> int:
+    start, stop, step = s.indices(seq_len)
+    return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
+
+
+def raise_args_mismatch(tx, name):
+    from torch._dynamo.exc import raise_observed_exception
+    from torch._dynamo.variables import ConstantVariable
+
+    raise_observed_exception(
+        TypeError,
+        tx,
+        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
+    )
 
 
 def iter_contains(items, search, tx, check_tensor_identity=False):
@@ -4705,7 +4777,7 @@ def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
 
 # Returns a set of code objects present traced in the current TracingContext, or None
 # if there is no current TracingContext.
-def get_traced_code() -> list[CodeType]:
+def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()

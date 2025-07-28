@@ -347,7 +347,7 @@ class StackLocalsMetadata:
 
 def get_builtins_dict(global_scope):
     # f_globals["__builtins__"] can be a dict or a module. This is an
-    # implemenation detail -
+    # implementation detail -
     # https://docs.python.org/3/library/builtins.html.
 
     # This makes guarding on any builtin messy because the guard check_fn
@@ -809,6 +809,7 @@ class OutputGraph(OutputGraphGuardsState):
 
     @property
     def shape_env(self):
+        assert self.tracing_context.fake_mode is not None
         return self.tracing_context.fake_mode.shape_env
 
     @property
@@ -1691,6 +1692,7 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.call_cleanup_hooks()
             old_fake_mode = self.tracing_context.fake_mode
+            assert old_fake_mode is not None
             if not self.export:
                 import torch._functorch.config as _config
 
@@ -1738,6 +1740,7 @@ class OutputGraph(OutputGraphGuardsState):
             )
 
             counters["stats"]["unique_graphs"] += 1
+            assert old_fake_mode.shape_env is not None
             if specializations := old_fake_mode.shape_env.specializations:
                 specialization_guards = []
                 specialization_cache: dict[Specialization, Callable[[Any], Any]] = {}
@@ -3052,7 +3055,7 @@ class SubgraphTracer(fx.Tracer):
         # Sort the symbols so that we can have a deterministic lifting order
         return sorted(to_be_bound, key=lambda s: s.name)
 
-    def has_input_mutation(self):
+    def has_input_mutation(self) -> bool:
         input_versions_at_beginning = self._input_versions_at_beginning
         input_nodes = []
 
@@ -3081,7 +3084,7 @@ class SubgraphTracer(fx.Tracer):
 
         return MutationInfo(False, "")
 
-    def has_aliasing(self):
+    def has_aliasing(self) -> bool:
         from torch._higher_order_ops.utils import _collect_fake_inputs
 
         input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
