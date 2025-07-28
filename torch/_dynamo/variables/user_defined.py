@@ -46,14 +46,14 @@ import torch.nn
 from torch._guards import TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
-from .. import polyfills, variables
+from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
     raise_observed_exception,
-    unimplemented,
+    unimplemented_v2,
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import (
@@ -479,30 +479,58 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:
-                unimplemented("TypedDict with optional keys not supported")
+                unimplemented_v2(
+                    gb_type="TypedDict with optional keys",
+                    context=str(self.value),
+                    explanation="Dyanmo does not support tracing TypedDict with optional keys",
+                    hints=[
+                        "Avoid using TypedDict with optional keys",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
             return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
         elif self.value is collections.deque:
             maxlen = variables.ConstantVariable.create(None)
-            if not kwargs:
-                if len(args) == 0:
-                    items = []
-                elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
-                    items = args[0].force_unpack_var_sequence(tx)
-                elif len(args) == 2 and args[0].has_force_unpack_var_sequence(tx):
-                    items = args[0].force_unpack_var_sequence(tx)
-                    maxlen = args[1]
-                else:
-                    unimplemented("deque() with more than 2 arg not supported")
-            elif tuple(kwargs) == ("maxlen",):
-                maxlen = kwargs["maxlen"]
-                if len(args) == 0:
-                    items = []
-                if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
-                    items = args[0].force_unpack_var_sequence(tx)
-                else:
-                    unimplemented("deque() with more than 1 arg not supported")
+
+            def deque_signature(iterable=None, maxlen=None):
+                pass
+
+            try:
+                bound_args = inspect.signature(deque_signature).bind(*args, **kwargs)
+            except TypeError as e:
+                unimplemented_v2(
+                    gb_type="collections.deque() with bad arguments",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="Detected call to collections.deque() with bad arguments.",
+                    hints=[
+                        "Fix the call to collections.deque().",
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                    from_exc=e,
+                )
+
+            if "iterable" in bound_args.arguments:
+                if not bound_args.arguments["iterable"].has_force_unpack_var_sequence(
+                    tx
+                ):
+                    unimplemented_v2(
+                        gb_type="collections.deque() with bad iterable argument",
+                        context=f"args={args}, kwargs={kwargs}",
+                        explanation="Call to collections.deque() has an iterable argument that Dynamo cannot "
+                        "convert to a list.",
+                        hints=[
+                            "Use a simpler sequence type that Dynamo can convert to a list "
+                            "(e.g. list, tuple, list iterator, etc.)",
+                            *graph_break_hints.USER_ERROR,
+                        ],
+                    )
+                items = bound_args.arguments["iterable"].force_unpack_var_sequence(tx)
             else:
-                unimplemented("deque() with invalid kwargs not supported")
+                items = []
+
+            if "maxlen" in bound_args.arguments:
+                maxlen = bound_args.arguments["maxlen"]
+
             return variables.lists.DequeVariable(
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
@@ -514,7 +542,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
-                unimplemented("functools.partial malformed")
+                unimplemented_v2(
+                    gb_type="missing args to functools.partial",
+                    context="",
+                    explanation="functools.partial requires at least one argument",
+                    hints=[
+                        "Fix the functools.partial call.",
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
             # The first arg, a callable (the ctor below will assert on types)
             fn = args[0]
             rest_args = args[1:]
@@ -560,17 +596,29 @@ class UserDefinedClassVariable(UserDefinedVariable):
             ):
                 # We are not changing the behavior of Dynamo as these function were
                 # already ignored on trace_rules.py before #136033 landed
-                unimplemented(
-                    f"{self.value} not supported. This may be due to its use of "
+                unimplemented_v2(
+                    gb_type="unsupported contextlib.* API",
+                    context=f"{self.value}",
+                    explanation=f"{self.value} not supported. This may be due to its use of "
                     "context-specific operations that are not supported in "
-                    "Dynamo yet (i.e. Exception handling)"
+                    "Dynamo yet (i.e. Exception handling)",
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
             if self.value is contextlib._GeneratorContextManager and isinstance(
                 args[0], BaseUserFunctionVariable
             ):
                 if not torch._dynamo.config.enable_trace_contextlib:
-                    unimplemented("contextlib.contextmanager")
+                    unimplemented_v2(
+                        gb_type="attempted to trace contextlib.contextmanager",
+                        context=f"args={args}",
+                        explanation="Tracing contextlib.contextmanager is disabled.",
+                        hints=[
+                            "Set torch._dynamo.config.enable_trace_contextlib = True",
+                        ],
+                    )
                 # Wrap UserFunctionVariable in FunctionDecoratedByContextlibContextManagerVariable
                 # if the function is annotated with @contextlib.contextmanager
                 # This shouldn't be necessary once generator functions are fully
@@ -936,7 +984,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if torch._dynamo.config.enable_faithful_generator_behavior and isinstance(
                 self.value, types.GeneratorType
             ):
-                unimplemented("Generator as graph argument is not supported")
+                unimplemented_v2(
+                    gb_type="call_method on generator",
+                    context=f"object={self.value}, method={name}, args={args}, kwargs={kwargs}",
+                    explanation="Detected a method call to a user-defined generator object. "
+                    "This is not fully supported.",
+                    hints=[
+                        "Set `torch._dynamo.config.enable_faithful_generator_behavior = False`. Note that this "
+                        "may cause silent incorrectness, since we will eagerly unpack generators instead of lazily "
+                        "evaluating them.",
+                    ],
+                )
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
@@ -966,9 +1024,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         try:
             name = name.as_python_constant()
         except NotImplementedError:
-            unimplemented(f"non-const setattr name: {name}")
-        if not tx.output.side_effects.is_attribute_mutation(self):
-            unimplemented(f"setattr({self}, {name}, ...)")
+            unimplemented_v2(
+                gb_type="non-const setattr name on user-defined object",
+                context=f"object={self}, name={name}, value={value}",
+                explanation="Detected a call to `setattr` of a user-defined object with a non-constant name.",
+                hints=["Ensure that the name is a string."],
+            )
+        assert tx.output.side_effects.is_attribute_mutation(self), (
+            "Attempted setattr on a user-defined object that does not have "
+            "an AttributeMutation mutation_type"
+        )
 
         if directly_update_dict:
             self.attrs_directly_modifed_on_dict.add(name)
@@ -1064,8 +1129,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [var], kwargs)
 
             if self.source is None:
-                unimplemented(
-                    "Sourceless UserDefinedObjectVariable method not supported"
+                unimplemented_v2(
+                    gb_type="attempted to call sourceless user-defined object as a method",
+                    context=f"object={self.value}, function={func}, args={args}, kwargs={kwargs}",
+                    explanation="Dynamo does not support this.",
+                    hints=[
+                        f"Ensure the user-defined object {self.value} is constructed outside the compiled region.",
+                    ],
                 )
             func_src = AttrSource(self.source, "__func__")
             func_var = VariableTracker.build(tx, func, func_src)
@@ -1161,7 +1231,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # should use DictGetItemSource here.
                 return GetItemSource(dict_source, name)
 
-        unimplemented(f"Could not find {name} in {type(self.value).__mro__}")
+        unimplemented_v2(
+            gb_type="could not find name in object's mro",
+            context=f"name={name}, object type={type(self.value)}, mro={type(self.value).__mro__}",
+            explanation=f"Could not find name `{name}` in mro {type(self.value).__mro__}",
+            hints=[
+                f"Ensure the name `{name}` is defined somewhere in {self.value}'s type hierarchy.",
+                *graph_break_hints.USER_ERROR,
+            ],
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         from .. import trace_rules
@@ -1246,7 +1324,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return out
 
             elif getattr_fn is not None:
-                unimplemented("UserDefined with non-function __getattr__")
+                unimplemented_v2(
+                    gb_type="User-defined object with non-function __getattr__",
+                    context=f"object={self.value}, name={name}, getattr_fn={getattr_fn}",
+                    explanation=f"Found a non-function __getattr__ {getattr_fn} from a user-defined object {self.value} "
+                    f" when attempting to getattr `{name}`",
+                    hints=[
+                        "Ensure the object's __getattr__ is a function type.",
+                    ],
+                )
 
         from ..mutation_guard import unpatched_nn_module_init
 
@@ -1339,8 +1425,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(subobj, types.MethodType):
                 if dynamic_subobj.__self__ is not self.value:
                     if not isinstance(dynamic_subobj.__func__, types.FunctionType):
-                        unimplemented(
-                            f"Found a method whose __func__ is not of FunctionType - {dynamic_subobj}"
+                        unimplemented_v2(
+                            gb_type="User-defined object method with non-function __func__",
+                            context=f"object={self.value}, name={name}, method={dynamic_subobj}, "
+                            f"method.__self__={dynamic_subobj.__self__}, method.__func__={dynamic_subobj.__func__}",
+                            explanation=f"Method {dynamic_subobj} (name={name}) of user-defined object {self.value} has a "
+                            f"__func__ ({dynamic_subobj.__func__}) that is not a function type.",
+                            hints=[
+                                "Ensure that the method's __func__ is a function type.",
+                            ],
                         )
 
                     # Use the __self__ attribute of the method to find the
