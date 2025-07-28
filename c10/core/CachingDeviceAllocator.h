@@ -4,9 +4,11 @@
 #include <c10/core/Stream.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
+#include <c10/util/static_tracepoint.h>
 
 #include <mutex>
 #include <new>
+#include <set>
 
 namespace c10::CachingDeviceAllocator {
 
@@ -131,6 +133,9 @@ using std::hardware_destructive_interference_size;
 static constexpr std::size_t hardware_destructive_interference_size = 64;
 #endif
 
+TORCH_SDT_DEFINE_SEMAPHORE(malloc)
+TORCH_SDT_DEFINE_SEMAPHORE(free)
+
 template <
     typename ImplT,
     typename BlockT,
@@ -156,7 +161,9 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
     c10::Device device = impl.getDevice();
     void* devPtr = nullptr;
     c10::Stream stream = impl.getStream(device);
-    ImplT::allocate(&devPtr, size, device.index());
+    if (size != 0) {
+      this->malloc(&devPtr, device.index(), size, stream);
+    }
 
     if (size && TORCH_SDT_IS_ENABLED(malloc)) {
       TORCH_SDT_WITH_SEMAPHORE(malloc, devPtr, device, size, stream.id());
@@ -169,7 +176,7 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
       void** devPtr,
       c10::DeviceIndex device,
       size_t size,
-      StreamT stream) {
+      c10::Stream stream) {
     checkDeviceIndex(device);
     BlockT* block = impls_[device]->malloc(device, size, stream);
     add_allocated_block(block);
@@ -182,6 +189,10 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
   }
 
   void free(void* ptr) {
+    if (TORCH_SDT_IS_ENABLED(free)) {
+      TORCH_SDT_WITH_SEMAPHORE(free, ptr);
+    }
+
     if (!ptr) {
       return;
     }
@@ -198,20 +209,29 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
   }
 
   DeleterFnPtr raw_deleter() const override {
-    return &deleteFunc;
+    return deleteFunc;
   }
 
   void recordStream(const DataPtr& ptr, c10::Stream stream) override {
+    // Empty tensor's storage().data() might be a null ptr. As there is no
+    // blocks associated with those tensors, it is fine to do nothing here.
     if (!ptr.get()) {
       return;
     }
-    if (ptr.get_deleter() != &deleteFunc) {
+
+    // If a tensor is not allocated by this instance, simply skip
+    // This usually happens when device tensors are shared across processes,
+    // we have implemented reference counting based sharing mechanism to
+    // guarantee tensors won't be accidentally freed by one process while
+    // they are still being used in another
+    if (ptr.get_deleter() != deleteFunc) {
       return;
     }
 
     BlockT* block = get_allocated_block(ptr.get());
+    // block must not be null reaching here
     TORCH_CHECK(block, "No allocated block can be found.");
-    device_allocators[block->device]->recordStream(block, stream);
+    impls_[block->device]->recordStream(block, stream);
   }
 
   void empty_cache(MempoolId_t mempool_id = {0, 0}) override {
@@ -266,7 +286,7 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
   }
 
   static size_t get_mutex_shard_id(void* ptr) {
-    return twang_mix64(static_cast<size_t>(ptr)) % kNumMutexShard;
+    return twang_mix64(reinterpret_cast<size_t>(ptr)) % kNumMutexShard;
   }
 
   // Aligns the mutex to avoid false sharing on cache lines.
@@ -276,6 +296,10 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
   // A prime number close to 64, used for sharding to reduce contention.
   static constexpr size_t kNumMutexShard = 67;
   std::array<AlignedMutex, kNumMutexShard> mutex;
+  // A map of allocated blocks, sharded by mutex to reduce contention.
+  std::array<ska::flat_hash_map<void*, BlockT*>, kNumMutexShard>
+      allocated_blocks;
+  // Per-device allocator implementations.
   std::vector<std::unique_ptr<ImplT>> impls_;
 };
 
@@ -683,6 +707,8 @@ template <
     typename ES = ExpandableSegment<StreamT, HandleT>>
 struct CachingDeviceAllocatorImpl {
   virtual ~CachingDeviceAllocatorImpl() = default;
+
+  BlockT* malloc(c10::DeviceIndex device, size_t size, c10::Stream stream) {}
 
  public:
  private:
