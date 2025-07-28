@@ -5,16 +5,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import (
-    LazyVal,
-    TEST_NUMBA,
-    TEST_WITH_ROCM,
-    TEST_CUDA,
-    TEST_HPU,
-    TEST_XPU,
-    IS_WINDOWS,
-    IS_MACOS,
-)
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS
 import inspect
 import contextlib
 import os
@@ -24,7 +15,7 @@ import unittest
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
 
 
-TEST_MULTIGPU = (TEST_CUDA or TEST_HPU or TEST_XPU) and torch.accelerator.device_count() >= 2
+TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
 if TEST_WITH_ROCM:

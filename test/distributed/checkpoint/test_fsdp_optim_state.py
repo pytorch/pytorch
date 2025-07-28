@@ -54,8 +54,8 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
         curr_backend = dist.get_default_backend_for_device(self.device_type)
         return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
-    @with_comms
     @skip_if_lt_x_gpu(2)
+    @with_comms
     @with_temp_dir
     @parametrize("pass_planner", [True, False])
     def test_load_sharded_optimizer_state_dict(self, pass_planner) -> None:

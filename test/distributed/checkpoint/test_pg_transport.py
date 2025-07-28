@@ -1,14 +1,14 @@
 # Owner(s): ["oncall: distributed"]
 
 import logging
+import unittest
 from datetime import timedelta
 from typing import Optional
-import unittest
 from unittest.mock import MagicMock, patch
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
+import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import (
     init_from_local_shards,
     Shard as ShardedTensorShard,
@@ -25,7 +25,6 @@ from torch.distributed.checkpoint._pg_transport import (
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.tensor import DTensor
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     HAS_ACCELERATOR,
     MultiProcContinousTest,
@@ -34,6 +33,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTI_ACCELERATOR,
     TestCase,
 )
 
@@ -245,17 +245,23 @@ class PgTransportGPU(MultiProcContinousTest):
         return torch.device(f"{self.device_type()}:{self.rank}")
 
     @requires_accelerator_dist_backend()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "test requires 2+ accelerators")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTI_ACCELERATOR, "test requires 2+ accelerators"
+    )
     def test_pg_transport(self) -> None:
         _test_pg_transport(self, self.device)
 
     @requires_accelerator_dist_backend()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "test requires 2+ accelerators")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTI_ACCELERATOR, "test requires 2+ accelerators"
+    )
     def test_pg_transport_with_mixed_content(self) -> None:
         _test_pg_transport_with_mixed_content(self, self.device)
 
     @requires_accelerator_dist_backend()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "test requires 2+ accelerators")
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTI_ACCELERATOR, "test requires 2+ accelerators"
+    )
     def test_pg_transport_with_sharded_tensor(self) -> None:
         _test_pg_transport_with_sharded_tensor(self, self.device)
 
