@@ -96,6 +96,7 @@ from .exc import (
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
+from .polyfills import impl_CONTAINS_OP_fallback
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
@@ -1212,7 +1213,6 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
-        self.is_leaf_tracer = False
         if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
@@ -1948,6 +1948,21 @@ class InstructionTranslatorBase(
         self.call_function(fn, [typ, val, tb], {})
 
     def exception_handler(self, raised_exception):
+        def bubble_exception_to_interpreter():
+            # Bubble the exception to the interpreter
+            curr_exc = self.exn_vt_stack.get_current_exception()
+            dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
+            assert isinstance(raised_exception, dynamo_exc)  # sanity check
+            unimplemented_v2(
+                gb_type="Observed exception",
+                context=f"raised exception {curr_exc.python_type_name()}({curr_exc.args})",
+                explanation=observed_exn_gb_explanation,
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         observed_exn_gb_explanation = (
             "Dynamo found no exception handler at the top-level compiled function "
             "when encountering an exception. Exception will propagate outside the compiled region."
@@ -1979,15 +1994,7 @@ class InstructionTranslatorBase(
                 # instruction translator. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    unimplemented_v2(
-                        gb_type="Observed exception",
-                        context=str(raised_exception),
-                        explanation=observed_exn_gb_explanation,
-                        hints=[
-                            *graph_break_hints.USER_ERROR,
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
+                    bubble_exception_to_interpreter()
                 raise raised_exception
         else:
             if len(self.block_stack):
@@ -2059,15 +2066,7 @@ class InstructionTranslatorBase(
                 # instruction translator. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    unimplemented_v2(
-                        gb_type="Observed exception",
-                        context=str(raised_exception),
-                        explanation=observed_exn_gb_explanation,
-                        hints=[
-                            *graph_break_hints.USER_ERROR,
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
+                    bubble_exception_to_interpreter()
                 raise raised_exception
 
     def PUSH_EXC_INFO(self, inst):
@@ -2849,22 +2848,8 @@ class InstructionTranslatorBase(
                 hints=[*graph_break_hints.USER_ERROR],
             )
 
-    @break_graph_if_unsupported(push=0)
-    def graph_break_on_leaf_function(self, inst):
-        if self.is_leaf_tracer:
-            unimplemented_v2(
-                gb_type="Forced graph break on leaf function",
-                context="",
-                explanation="Forced graph break for nested graph break testing purposes",
-                hints=[
-                    "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False",
-                ],
-            )
-
     def NOP(self, inst):
-        # Dynamo-specific testing behavior
-        if inst.argval == "GRAPH_BREAK_IF_LEAF":
-            self.graph_break_on_leaf_function(inst)
+        pass
 
     def POP_TOP(self, inst):
         self.pop()
@@ -2989,7 +2974,17 @@ class InstructionTranslatorBase(
         assert inst.argval == 0 or inst.argval == 1
         left, right = self.popn(2)
         op = inst.argval
-        self.push(right.call_method(self, "__contains__", [left], {}))
+        try:
+            self.push(right.call_method(self, "__contains__", [left], {}))
+        except Unsupported:  # object doesn't support __contains__
+            # Use __iter__ as fallback
+            self.push(
+                self.inline_user_function_return(
+                    VariableTracker.build(self, impl_CONTAINS_OP_fallback),
+                    [left, right],
+                    {},
+                )
+            )
         if op == 1:
             self.UNARY_NOT(inst)
 

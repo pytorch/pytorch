@@ -36,7 +36,6 @@ import textwrap
 import threading
 import traceback
 import types
-import unittest
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -227,6 +226,8 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             frame: DynamoFrameType, *args: Any, **kwargs: Any
         ) -> ConvertFrameReturn:
             if trace_rules.check(frame.f_code):
+                return ConvertFrameReturn()
+            if not convert_frame.has_tensor_in_frame(frame):
                 return ConvertFrameReturn()
 
             from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
@@ -680,8 +681,7 @@ class _TorchDynamoContext:
 
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
-            assert self._package is not None
-            if not self._package.is_initialized():
+            if self._package is not None and not self._package.is_initialized():
                 result = DynamoCache.load(fn)
                 if result is None:
                     # Create a fresh CompilePackage
@@ -739,9 +739,7 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if config.debug_force_nested_calls:
-            fn = external_utils.wrap_inline(fn)
-        elif config.wrap_top_frame or (
+        if config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "")
@@ -1221,8 +1219,7 @@ def _optimize(
         ),
         hooks,
         backend_ctx_ctor,
-        error_on_graph_break=nopython
-        and not config.debug_force_graph_break_on_leaf_return,
+        error_on_graph_break=nopython,
         dynamic=dynamic,
         compiler_config=(
             backend.get_compiler_config()
@@ -1763,9 +1760,6 @@ def export(
 
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
-    if config.debug_force_graph_break_on_leaf_return:
-        raise unittest.SkipTest("Cannot force graph break on export")
-
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_dynamo"})
 
@@ -1854,7 +1848,7 @@ def export(
                 ignore_fresh_unbacked = null_context()
                 assert ambient_fake_mode is not None
                 if shape_env := ambient_fake_mode.shape_env:
-                    ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
+                    ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()  # type: ignore[assignment]
 
                 with (
                     ambient_fake_mode,
@@ -1906,7 +1900,9 @@ def export(
                         fakify_with_ambient, graph_inputs
                     )
                     graph_captured_result = torch.func.functional_call(
-                        graph, fake_params_buffers, fake_graph_inputs
+                        graph,
+                        fake_params_buffers,  # type: ignore[arg-type]
+                        fake_graph_inputs,  # type: ignore[arg-type]
                     )
 
                 return graph_captured_result

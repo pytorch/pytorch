@@ -818,6 +818,7 @@ class OutputGraph(OutputGraphGuardsState):
 
     @property
     def shape_env(self):
+        assert self.tracing_context.fake_mode is not None
         return self.tracing_context.fake_mode.shape_env
 
     @property
@@ -1829,6 +1830,7 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.call_cleanup_hooks()
             old_fake_mode = self.tracing_context.fake_mode
+            assert old_fake_mode is not None
             if not self.export:
                 import torch._functorch.config as _config
 
@@ -1876,6 +1878,7 @@ class OutputGraph(OutputGraphGuardsState):
             )
 
             counters["stats"]["unique_graphs"] += 1
+            assert old_fake_mode.shape_env is not None
             if specializations := old_fake_mode.shape_env.specializations:
                 specialization_guards = []
                 specialization_cache: dict[Specialization, Callable[[Any], Any]] = {}
