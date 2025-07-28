@@ -5,7 +5,6 @@ pathways, taking into account the AOTConfig and the collected ViewAndMutationMet
 """
 
 import dataclasses
-import functools
 from typing import Any, Optional
 
 import torch
@@ -39,6 +38,7 @@ from .utils import (
     fn_wrappers,
     register_buffer_assignment_hook,
     root_module_when_exporting_non_strict,
+    simple_wraps,
     unlift_tokens,
 )
 
@@ -63,7 +63,7 @@ def _create_graph(
         inner_f = f
     else:
 
-        @functools.wraps(f)
+        @simple_wraps(f)
         def inner_f(*args):
             nonlocal out_descs
             assert out_descs is None
