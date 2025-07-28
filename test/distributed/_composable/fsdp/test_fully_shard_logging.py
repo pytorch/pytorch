@@ -37,7 +37,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import fully_shard
-logger = logging.getLogger("torch.distributed._composable.fsdp")
+logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 logger.setLevel(logging.DEBUG)
 device = '{device_type.type}'
 torch.manual_seed(0)
