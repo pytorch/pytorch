@@ -1370,8 +1370,8 @@ def forward(self, crop_camera_1, mask_1):
     view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
     bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
     view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
-    mul_6 = sym_size_int * 3
-    view_3 = torch.ops.aten.view.default(view_2, [mul_6, 3]);  view_2 = mul_6 = None
+    mul_9 = sym_size_int * 3
+    view_3 = torch.ops.aten.view.default(view_2, [mul_9, 3]);  view_2 = mul_9 = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
     _unsafe_view = torch.ops.aten._unsafe_view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], _unsafe_view);  crop_camera_1 = mask_1 = _unsafe_view = index_put_ = None

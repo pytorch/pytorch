@@ -113,7 +113,7 @@
 #   - `wrap_opt_if`, is a 2-argument function that accepts a tensor
 #     variable and a boolean condition that dictates whether to save that
 #     variable in a graph. The result of this function is `std::optional<Tensor>`,
-#     and it is `::std::nullopt` when the condition evalutes to `false`,
+#     and it is `::std::nullopt` when the condition evaluates to `false`,
 #     otherwise it is the variable wrapped in `std::optional<Tensor>`.
 #     For example, wrap_opt_if(var_0, grad_input_mask[1] || grad_input_mask[2])
 #     would mean that `var_0` is saved as long as the second (grad_input_mask[1])
@@ -200,7 +200,7 @@
 #     Undefined Tensors are created with the default constructor `at::Tensor()`.
 #     It is an efficient way to represent a Tensor filled with zeros because
 #     the Tensor holds no sizing information and no Storage data is allocated.
-#     But consequentially, Tensor operations cannot be performed on them.
+#     But consequently, Tensor operations cannot be performed on them.
 #     Therefore, your backward function should treat an undefined output grad as
 #     a zero, and it needs to be a special case.
 #
@@ -1267,6 +1267,11 @@
   mean: not_implemented("native_layer_norm_backward mean")
   rstd: not_implemented("native_layer_norm_backward rstd")
 
+- name: _fused_rms_norm(Tensor input, int[] normalized_shape, Tensor? weight, float? eps) -> (Tensor, Tensor)
+  input, weight: "GradMode::is_enabled() || grads[1].defined() ? infinitely_differentiable_native_rms_norm_backward(grads[0], grads[1], input, normalized_shape, result1, weight, grad_input_mask) : (grads[0].defined() ? _fused_rms_norm_backward(grads[0], input, normalized_shape, result1, weight, grad_input_mask) : std::tuple<Tensor, Tensor>())"
+  result0: rms_norm_jvp(input_p, input_t, weight_p, weight_t, result1, normalized_shape)
+  result1: rms_norm_rstd_jvp(input_p, input_t, result1, normalized_shape)
+
 - name: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
   input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward_symint(grads[0].device().is_xpu() ? grads[0] : grads[0].contiguous(grads[0].device().is_cpu() ? input.suggest_memory_format() : c10::MemoryFormat::Contiguous), input.device().is_xpu() ? input : input.contiguous(input.device().is_cpu() ? input.suggest_memory_format() : c10::MemoryFormat::Contiguous), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
   result0: group_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, result1, result2, group)
@@ -1793,6 +1798,9 @@
 - name: trunc(Tensor self) -> Tensor
   self: zeros_like(grad)
   result: auto_element_wise
+
+- name: hash_tensor(Tensor self, int[1] dim=[], *, bool keepdim=False, int mode=0) -> Tensor
+  output_differentiability: [False]
 
 # DO NOT define a backward for to_dense
 # See [Note: Sometimes view derivatives]

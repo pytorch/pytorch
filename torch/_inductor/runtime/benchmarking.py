@@ -230,7 +230,7 @@ class InductorBenchmarker(TritonBenchmarker):
         in milliseconds. An estimated duration is calculated based on the values
         of `memory_warmup_iters` and `benchmark_iters`, along with the estimated
         runtime of `_callable` and various other factors, and we then shrink
-        `benchmark_iters` to fit in the alloted maximum duration.
+        `benchmark_iters` to fit in the allotted maximum duration.
         - **kwargs: Additional kwargs that may be passed to the fallback.
 
         Returns:

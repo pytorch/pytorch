@@ -1987,7 +1987,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Check order of _modules
         def fn(x):
             for idx, p in enumerate(mod.modules()):
-                # Something silly to force depedency on the order
+                # Something silly to force dependency on the order
                 x += coeffs_for_mod[p] * coeffs[idx]
             for idx, p in enumerate(mod.named_modules()):
                 x += coeffs_for_mod[p[1]] * coeffs[idx]
@@ -2094,11 +2094,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = MockModule()
         # Each submod is compiled separately and has a different nn module
         # guard. Ensure that recompilation logic is handle correctly.
-        with unittest.mock.patch(
-            "torch._dynamo.config.error_on_recompile", True
-        ), unittest.mock.patch(
-            "torch._dynamo.config.recompile_limit",
-            recompile_limit,
+        with (
+            unittest.mock.patch("torch._dynamo.config.error_on_recompile", True),
+            unittest.mock.patch(
+                "torch._dynamo.config.recompile_limit",
+                recompile_limit,
+            ),
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
@@ -2160,11 +2161,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = MockModule()
         # Each submod is compiled separately and has a different nn module
         # guard. Ensure that recompilation logic is handle correctly.
-        with unittest.mock.patch(
-            "torch._dynamo.config.error_on_recompile", True
-        ), unittest.mock.patch(
-            "torch._dynamo.config.recompile_limit",
-            recompile_limit,
+        with (
+            unittest.mock.patch("torch._dynamo.config.error_on_recompile", True),
+            unittest.mock.patch(
+                "torch._dynamo.config.recompile_limit",
+                recompile_limit,
+            ),
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
@@ -3384,8 +3386,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled_mod(x)
 
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(NNModuleTestsDevice, globals(), only_for=devices)
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(
+    NNModuleTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -6,8 +6,10 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
+from torch._higher_order_ops.auto_functionalize import FunctionalCallableWithEpilogue
 from torch._higher_order_ops.utils import (
-    check_input_alias_and_mutation_return_ouputs,
+    check_input_alias_and_mutation_return_outputs,
+    HopInstance,
     materialize_as_graph,
     reenter_make_fx,
 )
@@ -38,10 +40,13 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         def __init__(self):
             return super().__init__("invoke_quant")
 
+
     invoke_quant = InvokeQuant()
+
 
     def g(x):
         return x.sin().cos()
+
 
     @torch.compile(backend="aot_eager")
     def f(x):
@@ -66,7 +71,14 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         )
 
     def __call__(self, subgraph, *operands, **kwargs):
-        if not isinstance(subgraph, (torch.fx.GraphModule, FunctionWithNoFreeVars)):
+        if not isinstance(
+            subgraph,
+            (
+                torch.fx.GraphModule,
+                FunctionWithNoFreeVars,
+                FunctionalCallableWithEpilogue,
+            ),
+        ):
             raise RuntimeError(
                 f"{self._name}: when calling this API without torch.compile, "
                 f"we require that the subgraph be a torch.fx.GraphModule (or "
@@ -104,7 +116,10 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
 
         out = self(subgraph, *operands, **kwargs)
         return track_tensor_tree(
-            out, out_proxy, constant=None, tracer=proxy_mode.tracer  # type: ignore[arg-type]
+            out,
+            out_proxy,
+            constant=None,
+            tracer=proxy_mode.tracer,  # type: ignore[arg-type]
         )
 
     def _call_FakeTensorMode(self, mode, subgraph, *operands, **kwargs):
@@ -131,15 +146,18 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
     #      copies the mutated inputs to the hop if necessary and call the hop.
     # After these steps, the rest of the inductor stack knows how to fuse the copy_ in subgraph with other ops.
     def _call_Functionalize(self, ctx, subgraph, *operands, **kwargs):
-        from torch._higher_order_ops.auto_functionalize import do_auto_functionalize_v2
+        from torch._higher_order_ops.auto_functionalize import (
+            can_auto_functionalize,
+            do_auto_functionalize_v2,
+        )
 
         # invoke_quant has non-proxable argument of type InvokeQuant that
         # we cannot generate schema for.
         if self is not torch.ops.higher_order.invoke_quant_packed:
-            hop_schema = self.gen_schema(subgraph, *operands, **kwargs)
-            if hop_schema.is_mutable:
+            hop_instance = HopInstance.create(self, subgraph, *operands, **kwargs)
+            if can_auto_functionalize(hop_instance):
                 return do_auto_functionalize_v2(
-                    ctx.mode, self, (subgraph, *operands), kwargs
+                    ctx.mode, hop_instance, (subgraph, *operands), kwargs
                 )
 
         unwrapped_operands = ctx.unwrap_tensors(operands)
@@ -168,7 +186,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             out_out_alias,
             mutated_inp_idx,
             output,
-        ) = check_input_alias_and_mutation_return_ouputs(subgraph, fake_args)
+        ) = check_input_alias_and_mutation_return_outputs(subgraph, fake_args)
 
         if not (
             len(inp_inp_alias) == 0
@@ -180,7 +198,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             import warnings
 
             warnings.warn(
-                "Aliasing is not suppported for HOP subgraph.\n"
+                "Aliasing is not supported for HOP subgraph.\n"
                 f"{subgraph.print_readable(print_output=False)}\n"
                 f"Alias info: inp-inp alias: {inp_inp_alias}, inp-out alias: {inp_out_alias}, out-out alias{out_out_alias}"
                 f"This may lead to silent incorrectness."
@@ -218,7 +236,11 @@ class BaseHOPFunction(torch.autograd.Function):
         kwargs = ctx.kwargs
 
         # TODO: Something special needs to happen with min cut partitioner
-        with suspend_functionalization(), disable_functional_mode(), torch.enable_grad():
+        with (
+            suspend_functionalization(),
+            disable_functional_mode(),
+            torch.enable_grad(),
+        ):
             with disable_proxy_modes_tracing():
                 from .invoke_subgraph import create_fw_bw_graph
                 from .utils import _from_fun

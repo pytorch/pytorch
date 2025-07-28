@@ -300,7 +300,7 @@ class NodeSplitGetter:
             # initially, we are just going to do a single reduction split since
             # reduction tiling is off by default. even if we miss a reduction split,
             # we can recover it in the split var analysis.
-            # TODO: an earlier version fo this code tried to iteratively try the maximum number
+            # TODO: an earlier version for this code tried to iteratively try the maximum number
             # of split vars, by iterating over both pointwise and reduction. but not worth
             # the complexity yet.
 
@@ -336,7 +336,7 @@ class NodeSplitGetter:
                     )
                     self.pw_split_options[len(new_split)].add(new_split)
 
-        # if for whatever reason we couldnt split above, return default split
+        # if for whatever reason we couldn't split above, return default split
         return ((self.pointwise_numel,), (self.red_numel,))
 
     def try_split(self, pw: Split, red: Split) -> Optional[tuple[Split, Split]]:

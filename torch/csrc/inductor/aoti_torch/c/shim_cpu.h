@@ -245,6 +245,22 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
     AtenTensorHandle qScaleAndZeros,
     AtenTensorHandle* ret0);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__c10d_functional_all_reduce_(
+    AtenTensorHandle inp,
+    const char* reduce_op,
+    const char* group_name,
+    AtenTensorHandle* ret0);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__c10d_functional_all_reduce(
+    AtenTensorHandle inp,
+    const char* reduce_op,
+    const char* group_name,
+    AtenTensorHandle* ret0);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__c10d_functional_wait_tensor(
+    AtenTensorHandle inp,
+    AtenTensorHandle* ret0);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

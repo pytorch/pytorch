@@ -85,6 +85,27 @@ struct OpMathType<bfloat> {
   using type = float;
 };
 #endif
+
+// Type promotion structure for higher precision accumulation
+template <typename T>
+struct AccumulationType {
+  using type = T;
+};
+
+// Specialization for half - promote to float for accumulation
+template <>
+struct AccumulationType<half> {
+  using type = float;
+};
+
+#if __METAL_VERSION__ >= 310
+// Specialization for bfloat - promote to float for accumulation
+template <>
+struct AccumulationType<bfloat> {
+  using type = float;
+};
+#endif
+
 } // namespace detail
 
 template <typename T>
@@ -131,6 +152,9 @@ using vec4type_t = typename detail::vectypes<T>::type4;
 
 template <typename T>
 using opmath_t = typename detail::OpMathType<T>::type;
+
+template <typename T>
+using accum_t = typename detail::AccumulationType<T>::type;
 
 // TODO: Move it to type_traits header may be
 template <typename F, typename... Args>
@@ -263,6 +287,30 @@ template <
     ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
 inline common_dtype<T, U> div(const T x, const U y) {
   return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
+}
+
+// Remainder operator
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_floating_point_v<T> || is_scalar_floating_point_v<U>,
+        bool> = true>
+inline float remainder(const T x, const U y) {
+  const auto x_f = static_cast<float>(x);
+  const auto y_f = static_cast<float>(y);
+  return x_f - y_f * floor_divide(x_f, y_f);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline common_dtype<T, U> remainder(const T x, const U y) {
+  auto rc = x % y;
+  return rc == 0 || (x ^ y) > 0 ? rc : rc + y;
 }
 
 // Based on algorithm described in

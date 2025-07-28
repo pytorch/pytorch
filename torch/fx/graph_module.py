@@ -204,6 +204,14 @@ def _deserialize_graph_module(
     tracer_extras = body.get("_tracer_extras", {})
     graph = KeepModules().trace(com, **tracer_extras)
 
+    # Recover node.meta["stack_trace"] after re-tracing
+    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace", None)
+    if node_meta_stack_trace is not None:
+        del body["_graphmodule_graph_node_meta_stack_trace"]
+        for node in graph.nodes:
+            if node_meta_stack_trace.get(node.name, None) is not None:
+                node.meta["stack_trace"] = node_meta_stack_trace[node.name]
+
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
     graph._tracer_cls = tracer_cls
@@ -314,11 +322,12 @@ def _print_readable(
     include_stride=False,
     include_device=False,
     colored=False,
+    expanded_def=False,
 ):
     graph = module.graph
-    assert graph is not None and isinstance(
-        graph, torch.fx.Graph
-    ), "print_readable must be used on a module with a graph"
+    assert graph is not None and isinstance(graph, torch.fx.Graph), (
+        "print_readable must be used on a module with a graph"
+    )
 
     verbose_python_code = graph.python_code(
         root_module="self",
@@ -326,6 +335,7 @@ def _print_readable(
         include_stride=include_stride,
         include_device=include_device,
         colored=colored,
+        expanded_def=expanded_def,
     )
     module_code = verbose_python_code.src
     module_code = module_code.lstrip("\n")
@@ -859,6 +869,16 @@ class {module_name}(torch.nn.Module):
         dict_without_graph["_graphmodule_cls_name"] = self.__class__.__name__
         del dict_without_graph["_graph"]
 
+        # Store node.meta["stack_trace"] so we can recover them after re-tracing during deserialization
+        node_meta_stack_trace = {
+            node.name: node.meta["stack_trace"]
+            for node in self.graph.nodes
+            if "stack_trace" in node.meta
+        }
+        dict_without_graph["_graphmodule_graph_node_meta_stack_trace"] = (
+            node_meta_stack_trace
+        )
+
         generated_module_name = f"fx-generated._{exporter.get_unique_id()}"
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, exporter.importer)
@@ -938,6 +958,7 @@ class {module_name}(torch.nn.Module):
         # If `fast_sympy_print` is True then we use a sympy printer which is faster
         # but may result in less-readable output.
         fast_sympy_print: bool = False,
+        expanded_def: bool = False,
     ):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
@@ -959,6 +980,7 @@ class {module_name}(torch.nn.Module):
                 include_stride,
                 include_device,
                 colored,
+                expanded_def,
             )
             return r
 
@@ -977,7 +999,7 @@ class {module_name}(torch.nn.Module):
     @contextlib.contextmanager
     def _set_replace_hook(self, f):
         """
-        Takes a callable which will be called everytime when we replace a node
+        Takes a callable which will be called every time when we replace a node
         to a new node, or change the node's name. Callable takes three arguments:
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
@@ -991,7 +1013,7 @@ class {module_name}(torch.nn.Module):
 
     def _register_replace_node_hook(self, f):
         """
-        Takes a callable which will be called everytime when we replace a node
+        Takes a callable which will be called every time when we replace a node
         to a new node, or change the node's name. Callable takes three arguments:
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
@@ -1001,7 +1023,7 @@ class {module_name}(torch.nn.Module):
 
     def _unregister_replace_node_hook(self, f):
         """
-        Takes a callable which was previously registered to be called everytime when we replace a node.
+        Takes a callable which was previously registered to be called every time when we replace a node.
         This function will unregister that callable so it is no longer invoked on node replacement.
         """
         assert callable(f), "create_node hook must be a callable."

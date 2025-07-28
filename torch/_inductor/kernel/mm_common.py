@@ -38,7 +38,8 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
 
 
 @SymbolicGridFn
-def persistent_grouped_mm_grid(m, n, meta):
+def persistent_grouped_mm_grid(*args):
+    meta = args[-1]
     return (meta["NUM_SMS"], 1, 1)
 
 
@@ -78,13 +79,21 @@ def mm_options(config, sym_m, sym_n, sym_k, layout):
     return options_dict
 
 
+def tma_options() -> dict[str, Any]:
+    from torch.utils._triton import has_triton_stable_tma_api
+
+    return {"TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api()}
+
+
 def persistent_mm_options(mat1, mat2):
-    return dict(
-        A_ROW_MAJOR=not mat1.layout.is_transposed(),
-        B_ROW_MAJOR=not mat2.layout.is_transposed(),
-        NUM_SMS=get_num_sms(),
-        TMA_SIZE=TMA_DESCRIPTOR_SIZE,
-    )
+    res = {
+        "A_ROW_MAJOR": not mat1.layout.is_transposed(),
+        "B_ROW_MAJOR": not mat2.layout.is_transposed(),
+        "NUM_SMS": get_num_sms(),
+        "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
+    }
+    res.update(tma_options())
+    return res
 
 
 def scaled_mm_options(  # type: ignore[no-untyped-def]
@@ -99,7 +108,7 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     device_tma: bool = False,
 ) -> dict[str, Any]:
     def are_compatible_scales(size_a, size_b) -> bool:
-        # Same sized scales are compatable
+        # Same sized scales are compatible
         if len(size_a) == len(size_b):
             return True
 
@@ -125,6 +134,8 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
         mm_template_options["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE
         mm_template_options["NUM_SMS"] = get_num_sms()
 
+    mm_template_options.update(tma_options())
+
     return mm_template_options
 
 
@@ -146,10 +157,10 @@ def mm_args(
         *b2, n, k2 = mat2.get_size()
     else:
         *b2, k2, n = mat2.get_size()
-    b = [V.graph.sizevars.guard_equals(a, b) for a, b in zip(b1, b2)]
+    b = [V.graph.sizevars.check_equals_and_simplify(a, b) for a, b in zip(b1, b2)]
     if use_4x2_dim:
         k2 = k2 * 2
-    k = V.graph.sizevars.guard_equals(k1, k2)
+    k = V.graph.sizevars.check_equals_and_simplify(k1, k2)
     if layout is None:
         from torch._inductor.ir import FixedLayout
 
@@ -170,11 +181,16 @@ def mm_args(
     return [m, n, k, layout, mat1, mat2, *others]
 
 
-def mm_config_kwargs(device, exclude_condition):
+def mm_config_kwargs(device, exclude_condition, dtype_size=None):
     if device == "cpu":
         return {
             "scale": 0.5,
             "exclude": exclude_condition,
+        }
+
+    if dtype_size and inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE":
+        return {
+            "dtype_size": dtype_size,
         }
     return {}
 

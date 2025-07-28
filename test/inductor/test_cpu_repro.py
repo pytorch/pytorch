@@ -152,7 +152,7 @@ class CPUReproTests(TestCase):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
                     if func == torch.ops.aten.convolution.default:
-                        # For CPU and mkldnn enable, we always using channles last
+                        # For CPU and mkldnn enable, we always using channels last
                         nonlocal fmt
                         if (
                             torch.backends.mkldnn.enabled
@@ -232,9 +232,11 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 v = torch.randn(*input_size)
                 mod = Model(output_size, kernel_size, stride).eval()
-                with contextlib.nullcontext() if (
-                    num_threads != 1
-                ) else set_num_threads(1):
+                with (
+                    contextlib.nullcontext()
+                    if (num_threads != 1)
+                    else set_num_threads(1)
+                ):
                     with torch.no_grad():
                         self.common(
                             mod,
@@ -760,7 +762,19 @@ class CPUReproTests(TestCase):
             else "aten.set_.source_Tensor",
             code,
         )
-        self.assertEqual(model(inp), result)
+        expected = model(inp)
+        self.assertEqual(expected, result)
+
+        # test cpp_wrapper_build_separate
+        with config.patch(cpp_wrapper=True, cpp_wrapper_build_separate=True):
+            result, code = run_and_get_cpp_code(fn_opt, inp)
+            self.assertIn("kernel_src", code)
+            self.assertEqual(expected, result)
+
+        with config.patch(cpp_wrapper=True, cpp_wrapper_build_separate=False):
+            result, code = run_and_get_cpp_code(fn_opt, inp)
+            self.assertNotIn("kernel_src", code)
+            self.assertEqual(expected, result)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -982,7 +996,7 @@ class CPUReproTests(TestCase):
 
         v = torch.randn(10)
         # TODO: OMP parallel reduction order is not deterministic.
-        # Hence, the accurarcy might vary up and down. For short term,
+        # Hence, the accuracy might vary up and down. For short term,
         # we increase the tolerance and will fix it later by using
         # aten parallel.
         self.common(fn, (v,), atol=5e-1, rtol=5e-1)
@@ -990,7 +1004,7 @@ class CPUReproTests(TestCase):
     def test_parallel_reduction_vectorization(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/151523
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, enable_masked_tail_vec):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3,
@@ -999,20 +1013,23 @@ class CPUReproTests(TestCase):
                     stride=(2, 1),
                     padding=0,
                 )
+                self.enable_masked_tail_vec = enable_masked_tail_vec
 
             def forward(self, x, weight):
                 x = self.conv(x)
-                x = F.hardshrink(x, lambd=0)
+                if not self.enable_masked_tail_vec:
+                    x = F.hardshrink(x, lambd=0)
                 x = x.view(x.size(0), -1)
                 x = torch.mv(weight, x[0])
                 return x
 
-        mod = Model().eval()
-        x = torch.randn(2, 3, 127, 255)
-        weight = torch.randn(10, 254976)
-        # Use same criterion as test_inplace_squeeze_needed
-        # for parallel reduction.
-        self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
+        for enable_masked_tail_vec in [True, False]:
+            mod = Model(enable_masked_tail_vec).eval()
+            x = torch.randn(2, 3, 127, 255)
+            weight = torch.randn(10, 254976)
+            # Use same criterion as test_inplace_squeeze_needed
+            # for parallel reduction.
+            self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
 
     def test_cat_mul(self):
         # https://github.com/pytorch/pytorch/issues/93365
@@ -1273,9 +1290,9 @@ class CPUReproTests(TestCase):
         # From HF AllenaiLongformerBase.
         def fn(query, key, window_overlap):
             batch_size, seq_len, num_heads, head_dim = query.size()
-            assert (
-                seq_len % (window_overlap * 2) == 0
-            ), f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
+            assert seq_len % (window_overlap * 2) == 0, (
+                f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
+            )
 
             chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1
             diagonal_chunked_attention_scores = key
@@ -1287,11 +1304,11 @@ class CPUReproTests(TestCase):
                     window_overlap * 2 + 1,
                 )
             )
-            diagonal_attention_scores[
-                :, :3, :, window_overlap:
-            ] = diagonal_chunked_attention_scores[
-                :, :, :window_overlap, : window_overlap + 1
-            ]
+            diagonal_attention_scores[:, :3, :, window_overlap:] = (
+                diagonal_chunked_attention_scores[
+                    :, :, :window_overlap, : window_overlap + 1
+                ]
+            )
             return diagonal_attention_scores
 
         self.common(
@@ -2618,8 +2635,9 @@ class CPUReproTests(TestCase):
         self.common(fn, inps)
         assert metrics.generated_cpp_vec_kernel_count == 2
 
-        with set_num_threads(1), config.patch(
-            {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+        with (
+            set_num_threads(1),
+            config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False}),
         ):
             torch._dynamo.reset()
             metrics.reset()
@@ -3512,7 +3530,7 @@ class CPUReproTests(TestCase):
                     metrics.reset()
                     m = Model().eval() if eval_mode else Model()
                     self.common(m, (x,))
-                    check_metrics_vec_kernel_count(8)
+                    check_metrics_vec_kernel_count(6)
 
     @requires_vectorization
     @config.patch("cpp.enable_tiling_heuristics", False)
@@ -4312,6 +4330,19 @@ class CPUReproTests(TestCase):
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
 
+    def test_float32_to_uint8(self):
+        # https://github.com/pytorch/pytorch/issues/156788
+        @torch.compile
+        def fn(x):
+            return x.to(torch.uint8)
+
+        x = torch.tensor([-1.0, -2.0, -3.0, -4.0], dtype=torch.float32, device="cpu")
+        self.assertEqual(
+            x.to(torch.uint8),
+            fn(x),
+            msg=f"Expected {x.to(torch.uint8)} but got {fn(x)}",
+        )
+
     def test_non_contiguous_reduction_store(self):
         # https://github.com/pytorch/pytorch/issues/113018
         class M(torch.nn.Module):
@@ -4816,9 +4847,12 @@ class CPUReproTests(TestCase):
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
         context = contextlib.nullcontext if not is_inference else torch.no_grad
-        with config.patch(
-            {"fallback_random": True}
-        ), torch.cpu.amp.autocast(), context(), sdpa_kernel(SDPBackend.MATH):
+        with (
+            config.patch({"fallback_random": True}),
+            torch.cpu.amp.autocast(),
+            context(),
+            sdpa_kernel(SDPBackend.MATH),
+        ):
             torch.manual_seed(0)
             eager = mod(*inputs)
             torch.manual_seed(0)
@@ -5345,6 +5379,44 @@ class CPUReproTests(TestCase):
         )
         res = compiled_vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
         self.assertEqual(ref, res)
+
+    def test_fractional_max_pool2d_3d_input(self):
+        """Test for https://github.com/pytorch/pytorch/issues/156682 - 3D input causing assertion error"""
+
+        # Test various 3D input shapes to ensure the compilation crash is fixed
+        test_shapes = [
+            (1, 8, 8),  # Original failing case
+            (3, 16, 16),  # Different channel count
+            (2, 12, 10),  # Non-square input
+            (5, 20, 20),  # Larger input
+        ]
+
+        for shape in test_shapes:
+            with self.subTest(shape=shape):
+                torch.manual_seed(42)
+                x = torch.randn(shape)
+
+                # Generate explicit samples to ensure deterministic, correct results
+                n_batch = 1 if x.dim() == 3 else x.size(0)
+                torch.manual_seed(42)
+                samples = torch.rand(
+                    n_batch, x.size(-3), 2, dtype=x.dtype, device=x.device
+                )
+
+                def fn(x, samples):
+                    return F.fractional_max_pool2d(
+                        x, kernel_size=3, output_size=(4, 4), _random_samples=samples
+                    )
+
+                # Test that eager mode works
+                expected = fn(x, samples)
+
+                # Test that compiled mode works (was failing with AssertionError before fix)
+                compiled_fn = torch.compile(fn, backend="inductor")
+                result = compiled_fn(x, samples)
+
+                # Verify correctness with explicit samples (should match exactly)
+                torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
 
 
 if __name__ == "__main__":

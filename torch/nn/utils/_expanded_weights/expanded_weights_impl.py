@@ -72,8 +72,10 @@ def allow_smaller_batches(args, kwargs):
 
 @contextmanager
 def setup_rnn(use_input_variant, args, kwargs):
-    with batch_second(args, kwargs) if use_input_variant else allow_smaller_batches(
-        args, kwargs
+    with (
+        batch_second(args, kwargs)
+        if use_input_variant
+        else allow_smaller_batches(args, kwargs)
     ):
         yield
 
@@ -150,23 +152,23 @@ class ExpandedWeight(torch.Tensor):
         )
 
     @property
-    def dtype(self):
+    def dtype(self):  # type: ignore[override]
         return self.orig_weight.dtype
 
     @property
-    def data(self):
+    def data(self):  # type: ignore[override]
         return self.orig_weight.data
 
     @property
-    def shape(self):
+    def shape(self):  # type: ignore[override]
         return self.orig_weight.shape
 
     @property
-    def device(self):
+    def device(self):  # type: ignore[override]
         return self.orig_weight.device
 
     @property
-    def is_cuda(self):
+    def is_cuda(self):  # type: ignore[override]
         return self.orig_weight.is_cuda
 
     def data_ptr(self):

@@ -6,7 +6,7 @@ import operator
 import sys
 import typing
 from typing import Any, Callable, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeAlias
 
 import torch
 import torch._decomp as decomp
@@ -50,6 +50,10 @@ from .utils import (
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+_GenericOperator: TypeAlias = Union[
+    torch._ops.OperatorBase, torch._ops.OpOverloadPacket
+]
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -108,7 +112,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.
-decomps_to_exclude = [
+decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]] = [
     aten._unsafe_index,
     aten._unsafe_masked_index,
     aten._unsafe_masked_index_put_accumulate,
@@ -132,9 +136,9 @@ remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(
-    ops: list[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]],
+    ops: Union[_GenericOperator, list[_GenericOperator]],
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    for op in [ops] if callable(ops) else ops:  # type: ignore[attr-defined]
+    for op in ops if isinstance(ops, list) else [ops]:
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
@@ -496,6 +500,10 @@ def add(
         reshaped_tensor = tensor.view(new_shape)
         return reshaped_tensor
 
+    # Manually resolve complex tensors, as .is_conj() is unreliable after cloning during compilation.
+    x = x + 0
+    z = z + 0
+
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
     result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
@@ -504,7 +512,8 @@ def add(
 
 @register_decomposition([aten.conj_physical])
 def conj_physical(self: torch.Tensor) -> torch.Tensor:
-    assert not self.is_complex(), "TODO: implement this"
+    if self.is_complex():
+        return NotImplemented
     return self
 
 
@@ -616,6 +625,21 @@ def randn_like(
     ).to(memory_format=get_like_layout(self, memory_format))
 
 
+def _get_shape_permutation_like(
+    self: torch.Tensor, layout: torch.layout
+) -> tuple[utils.ShapeType, utils.StrideType]:
+    assert layout == torch.strided
+
+    physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(self)
+    shape = [self.shape[l] for l in physical_layout]
+
+    permutation = [0] * len(shape)
+    for p, l in enumerate(physical_layout):
+        permutation[l] = p
+
+    return (shape, permutation)
+
+
 @register_decomposition(aten.full_like)
 def full_like(
     self: torch.Tensor,
@@ -628,14 +652,36 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> torch.Tensor:
-    return torch.full(
-        [*self.size()],
-        fill_value,
-        dtype=dtype or self.dtype,
-        layout=layout or self.layout,
-        device=device or self.device,
-        requires_grad=requires_grad,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    dtype = self.dtype if dtype is None else dtype
+    layout = self.layout if layout is None else layout
+    device = self.device if device is None else device
+
+    if memory_format != torch.preserve_format:
+        result = torch.full(
+            self.shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        return result.to(memory_format=memory_format)
+
+    else:
+        shape, permutation = _get_shape_permutation_like(self, layout)
+        result = torch.full(
+            shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        if permutation == list(range(len(permutation))):
+            return result
+        return result.permute(permutation).clone()
 
 
 @register_decomposition(aten.randint_like.default)
@@ -692,7 +738,7 @@ def randint(
 def linear_dynamic_fp16_unpacked_weight(
     input: torch.Tensor,
     weight: torch.Tensor,
-    bias: torch.Tensor,
+    bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     packed_weight = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16(weight)
     return torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight(
@@ -856,7 +902,7 @@ def miopen_batch_norm(
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
     return {**decompositions, **extra_random_decomps}
 
