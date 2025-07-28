@@ -282,13 +282,6 @@ force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 # Defaults to False for BC.
 allow_unspec_int_on_nn_module = False
 
-# Mirrors `allow_unspec_int_on_nn_module`, but for FSDP: for <=2.8 versions,
-# integer attributes on FSDP modules were treated as dynamic, while the same
-# attributes on plain nn.Modules were static. We unified the behaviour by making
-# FSDP ints static too. Set this flag to True to restore the legacy dynamic
-# handling if needed.
-allow_unspec_int_on_fsdp_module = False
-
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 3 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_optimizer", Dynamo will automatically
@@ -332,6 +325,10 @@ dont_skip_tracing = False
 
 # No longer used
 optimize_ddp_lazy_compile = False
+
+# lambda guarding on object aliasing to improve opportunity for dict tag
+# optimization
+use_lamba_guard_for_object_aliasing = True
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
