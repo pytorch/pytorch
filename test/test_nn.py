@@ -8747,6 +8747,26 @@ class TestNNDeviceType(NNTestCase):
         Y_ref = rms_norm_reference_fn(X, shape, w, 0.5)
 
         self.assertEqual(Y_ref, Y)
+    
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64)
+    def test_rmsnorm_epsilon(self, device, dtype):
+        def rms_norm_reference_fn(i, normalized_shape):
+            eps = torch.finfo(i.dtype).eps
+            ndim = i.ndim
+            dims = [ndim - i - 1 for i in range(len(normalized_shape))]
+            result = i * torch.rsqrt(
+                i.pow(2).mean(dim=dims, keepdim=True) + eps
+            )
+            return result
+
+        shape = (2, 2)
+        X = torch.tensor([[1e-12, -1e-12], [1e-12, -1e-12]], dtype=dtype, device=device)
+
+        Y = torch.nn.functional.rms_norm(X, shape)
+        Y_ref = rms_norm_reference_fn(X, shape)
+        
+        self.assertEqual(Y_ref, Y)
 
     @onlyCPU
     def test_glu_bfloat16(self, device):
