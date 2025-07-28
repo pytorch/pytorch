@@ -1,6 +1,10 @@
 import functools
 import hashlib
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from torch.types import Device
 
 
 @functools.cache
@@ -65,13 +69,7 @@ def has_triton_tma() -> bool:
 @functools.cache
 def has_triton_tma_device() -> bool:
     if has_triton_package():
-        import torch
-
-        if (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_capability() >= (9, 0)
-            and not torch.version.hip
-        ):
+        if _device_supports_tma():
             # old API
             try:
                 from triton.language.extra.cuda import (  # noqa: F401
@@ -97,13 +95,7 @@ def has_triton_tma_device() -> bool:
 @functools.lru_cache(None)
 def has_triton_stable_tma_api() -> bool:
     if has_triton_package():
-        import torch
-
-        if (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_capability() >= (9, 0)
-            and not torch.version.hip
-        ):
+        if _device_supports_tma():
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401
 
@@ -114,37 +106,41 @@ def has_triton_stable_tma_api() -> bool:
 
 
 @functools.cache
-def has_triton() -> bool:
+def has_triton(device: "Device" = None) -> bool:
+    """
+    Determine if Triton is available for use on this system for a given device
+    (if device is not None) or any available device type if no device is given.
+    """
+    import torch
+    from torch._dynamo.device_interface import (
+        DeviceInterface,
+        get_interface_for_device,
+        get_registered_device_interfaces,
+    )
+
     if not has_triton_package():
         return False
 
-    from torch._dynamo.device_interface import get_interface_for_device
+    def device_has_triton(di: type[DeviceInterface]) -> bool:
+        if not di.is_available():
+            return False
 
-    def cuda_extra_check(device_interface: Any) -> bool:
-        return device_interface.Worker.get_device_properties().major >= 7
+        try:
+            di.raise_if_triton_unavailable(device)
+        except RuntimeError:
+            return False
 
-    def cpu_extra_check(device_interface: Any) -> bool:
-        import triton.backends
-
-        return "cpu" in triton.backends.backends
-
-    def _return_true(device_interface: Any) -> bool:
         return True
 
-    triton_supported_devices = {
-        "cuda": cuda_extra_check,
-        "xpu": _return_true,
-        "cpu": cpu_extra_check,
-    }
+    if device is None:
+        return any(
+            device_has_triton(di) for _, di in get_registered_device_interfaces()
+        )
 
-    def is_device_compatible_with_triton() -> bool:
-        for device, extra_check in triton_supported_devices.items():
-            device_interface = get_interface_for_device(device)
-            if device_interface.is_available() and extra_check(device_interface):
-                return True
-        return False
+    if not isinstance(device, (str, torch.device)):
+        device = torch.device(device)
 
-    return is_device_compatible_with_triton()
+    return device_has_triton(get_interface_for_device(device))
 
 
 @functools.cache
