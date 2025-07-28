@@ -151,23 +151,38 @@ def reduce_to_scalar_loss(
 
 def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
     """Reduce the output of a model to get scalar loss"""
+
+    def dtype_preserving_sum(seq: Sequence[Any]) -> Any:
+        """Calling the sum() built-in on an iterable of numpy scalars may result in a
+        type promotion based on the normal start value of int(0).  This is worked around
+        by using the first item to be summed as the start value.  We convert to tensor
+        when returning so that torch type promotion rules will be followed when taking
+        the mean afterwards."""
+        if len(seq) == 0:
+            return 0
+        return torch.as_tensor(sum(seq[1:], seq[0]))
+
     if isinstance(out, torch.Tensor):
         # Mean does not work on integer tensors
+        if out.dtype.is_floating_point or out.dtype.is_complex:
+            return out.mean()
         return out.sum() / out.numel()
-    elif isinstance(out, (list, tuple)):
-        return sum(reduce_to_scalar_loss(x) for x in out) / len(out)
-    elif type(out).__name__ in (
+    if np and isinstance(out, np.ndarray):
+        return out.mean()
+    if isinstance(out, (list, tuple)):
+        losses = tuple(reduce_to_scalar_loss(x) for x in out)
+        return dtype_preserving_sum(losses) / len(losses)
+    if type(out).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
         "CausalLMOutputWithCrossAttentions",
     ):
         return reduce_to_scalar_loss(out.logits)
-    elif type(out).__name__ == "SquashedNormal":
+    if type(out).__name__ == "SquashedNormal":
         return out.mean.sum()
-    elif isinstance(out, dict):
-        return sum(reduce_to_scalar_loss(value) for value in out.values()) / len(
-            out.keys()
-        )
+    if isinstance(out, dict):
+        losses = tuple(reduce_to_scalar_loss(x) for x in out.values())
+        return dtype_preserving_sum(losses) / len(losses)
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 
