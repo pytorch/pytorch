@@ -40,7 +40,11 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    has_free_unbacked_symbols,
+    resolve_unbacked_bindings,
+)
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, Identity, ModularIndexing
 
@@ -978,10 +982,7 @@ def squeeze(x, dim=None):
 
     new_shape = []
     for d, s in enumerate(x.get_size()):
-        if not (
-            d in dims
-            and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1), size_oblivious=True)
-        ):
+        if not (d in dims and V.graph.sizevars.guard_or_false(sympy.Eq(s, 1))):
             new_shape.append(s)
 
     # squeeze does nothing if the size isn't 1
@@ -1747,8 +1748,60 @@ def diagonal_scatter(input, src, offset: int = 0, dim1: int = 0, dim2: int = 1):
 
 @register_lowering(aten.select, type_promotion_kind=None)
 def select(x, dim, idx):
-    idx = View.handle_negative_index(idx, x.get_size()[dim])
-    return squeeze(slice_(x, dim, idx, idx + 1), dim)
+    idx = sympy.expand(idx)
+    size = sympy.expand(x.get_size()[dim])
+    actual_index = None
+
+    if V.graph.sizevars.guard_or_false(sympy.Lt(idx, 0)):
+        actual_index = idx + size
+    elif V.graph.sizevars.guard_or_false(sympy.Ge(idx, 0)):
+        actual_index = idx
+
+    if actual_index is not None:
+        if has_free_unbacked_symbols(idx):
+            # Inductor could generate incorrect views for tensors with unbacked symbols here;
+            # Squeeze operations are translated to views, resulting in incorrect strides.
+            # Additionally, we want to avoid accidental unbacked unsqueeze semantics. To resolve this,
+            # we use as_strided instead.
+            # Removing this branch will cause test_unbacked_select_index_with_check to fail.
+            new_size = x.get_size()
+            new_stride = x.get_stride()
+            new_storage_offset = x.get_layout().offset + new_stride[dim] * actual_index
+
+            del new_size[dim]
+            del new_stride[dim]
+            return as_strided(x, new_size, new_stride, new_storage_offset)
+        else:
+            slice_result = slice_(x, dim, actual_index, actual_index + 1)
+            return squeeze(slice_result, dim)
+
+    # Unbacked Semantics:
+    # When the index idx is unbacked (e.g., u0), we compute the index dynamically
+    # during the lowering of the select operation using DynamicSelectStorageOffset.
+
+    unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+    )
+    assert unbacked_bindings is not None
+    assert len(unbacked_bindings) == 1, unbacked_bindings
+    unbacked_offset_sym, _ = next(iter(unbacked_bindings.items()))
+
+    new_size = x.get_size()
+    new_stride = x.get_stride()
+    new_storage_offset = unbacked_offset_sym
+    buffer = ir.DynamicSelectStorageOffset(
+        unbacked_offset_sym,
+        idx,
+        x.get_layout().offset,
+        new_stride[dim],
+        x.get_size()[dim],
+    )
+    buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
+
+    del new_size[dim]
+    del new_stride[dim]
+    return as_strided(x, new_size, new_stride, new_storage_offset)
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
@@ -3074,8 +3127,6 @@ def long_tensor(data):
 
 @register_lowering(aten._local_scalar_dense)
 def _local_scalar_dense(data):
-    from torch.fx.experimental.symbolic_shapes import resolve_unbacked_bindings
-
     # This is interesting!  Most lowerings return tensors, so you can just
     # return the buffer you allocated and it will get used (or not used, if
     # it's dead.)  But _local_scalar_dense (aka item) returns an int,
@@ -3166,7 +3217,6 @@ def _full(fill_value, device, dtype, size):
     )
 
 
-@register_lowering(aten.full_like, type_promotion_kind=None)
 def full_like(x, fill_value, **kwargs):
     return create_tensor_like(tensor_constructor(fill_value))(x, **kwargs)
 
@@ -6217,7 +6267,9 @@ def div_prim(a, b):
     if is_integral:
         return truncdiv(a, b)
 
-    if (divisor := get_constant_value(b)) is not None:
+    # Disable CPU optimization to avoid precision issues.
+    # see https://github.com/pytorch/pytorch/issues/157959
+    if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
         # Replace divide by constant with multiply by reciprocal
         if divisor.value == 0:
             reciprocal = math.copysign(float("inf"), divisor.value)
@@ -6679,7 +6731,7 @@ register_foreach_pointwise(aten._foreach_clamp_max.List, minimum)
 register_foreach_pointwise(aten._foreach_clamp_max.Scalar, minimum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
-register_foreach_pointwise(aten._foreach_copy, copy)
+foreach_copy = register_foreach_pointwise(aten._foreach_copy, copy)
 
 
 # these are only encountered as outputs of the graph
@@ -6717,6 +6769,9 @@ register_foreach_inplace(
 )
 register_foreach_inplace(
     aten._foreach_div_.Scalar, aten._foreach_div.Scalar, foreach_div_scalar
+)
+register_foreach_inplace(
+    aten._foreach_copy_.default, aten._foreach_copy.default, foreach_copy
 )
 
 
