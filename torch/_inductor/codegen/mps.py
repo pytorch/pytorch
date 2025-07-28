@@ -632,14 +632,14 @@ class MetalKernel(SIMDKernel):
             acc_buf = self._new_idxvar(
                 src_dtype, ceildiv(acc_buf_size, self.simd_group_size)
             )
+            src_metal_type = DTYPE_TO_METAL[src_dtype]
             if not self.multistage_reduction_entry:
                 val = value
             else:
-                default_val = (
-                    f"::metal::numeric_limits<{DTYPE_TO_METAL[src_dtype]}>::min()"
-                )
+                lim_fn = "lowest" if reduction_type.endswith("max") else "max"
+                limit_val = f"::metal::numeric_limits<{src_metal_type}>::{lim_fn}()"
                 val = self._new_idxvar(
-                    src_dtype, default_value=default_val, is_threadgroup=False
+                    src_dtype, default_value=limit_val, is_threadgroup=False
                 )
                 self.compute.splice(
                     f"{val} = ::c10::metal::{reduction_type}({val}, {value});"
