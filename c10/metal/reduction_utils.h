@@ -33,6 +33,23 @@ inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_prod(T val) {
   return T(::metal::simd_product(detail::simd_type_t<T>(val)));
 }
 
+// Extend simd_broadcast to 64-bit integral types using int2 trick
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T> && sizeof(T) == 8, bool> =
+        true>
+inline T simd_broadcast(T val, ushort lane_id) {
+  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), lane_id));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<!::metal::is_integral_v<T> || sizeof(T) != 8, bool> =
+        true>
+inline T simd_broadcast(T val, ushort lane_id) {
+  return ::metal::simd_broadcast(val, lane_id);
+}
+
 // Floating simd_min/max with nan propagation
 template <
     typename T,
@@ -82,7 +99,7 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_sum(T val) {
     val += as_type<T>(
         ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
   }
-  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
+  return simd_broadcast(val, 0);
 }
 
 template <typename T>
@@ -91,7 +108,7 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_prod(T val) {
     val *= as_type<T>(
         ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
   }
-  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
+  return simd_broadcast(val, 0);
 }
 
 template <typename T>
@@ -102,7 +119,7 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_max(T val) {
         as_type<T>(::metal::simd_shuffle_and_fill_down(
             as_type<int2>(val), int2(0), i)));
   }
-  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
+  return simd_broadcast(val, 0);
 }
 
 template <typename T>
@@ -113,56 +130,56 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_min(T val) {
         as_type<T>(::metal::simd_shuffle_and_fill_down(
             as_type<int2>(val), int2(0), i)));
   }
-  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
+  return simd_broadcast(val, 0);
 }
 
 // argmin/argmax helpers using simd_ballot
 template <
     typename T,
     ::metal::enable_if_t<::metal::is_integral_v<T>, bool> = true>
-inline ::c10::metal::pair<T, uint> simd_argmin(T val) {
+inline ::c10::metal::pair<T, ushort> simd_argmin(T val) {
   const auto rc = simd_min(val);
   const auto vote = ::metal::simd_ballot(val == rc);
-  return {rc, ::metal::ctz(static_cast<uint>(static_cast<ulong>(vote)))};
+  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
 }
 
 template <
     typename T,
     ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
-inline ::c10::metal::pair<T, uint> simd_argmin(T val) {
+inline ::c10::metal::pair<T, ushort> simd_argmin(T val) {
   const auto rc = simd_min(val);
   const auto vote = ::metal::simd_ballot(val == rc || ::metal::isnan(val));
-  return {rc, ::metal::ctz(static_cast<uint>(static_cast<ulong>(vote)))};
+  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
 }
 
 template <
     typename T,
     ::metal::enable_if_t<::metal::is_integral_v<T>, bool> = true>
-inline ::c10::metal::pair<T, uint> simd_argmax(T val) {
+inline ::c10::metal::pair<T, ushort> simd_argmax(T val) {
   const auto rc = simd_max(val);
   const auto vote = ::metal::simd_ballot(val == rc);
-  return {rc, ::metal::ctz(static_cast<uint>(static_cast<ulong>(vote)))};
+  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
 }
 
 template <
     typename T,
     ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
-inline ::c10::metal::pair<T, uint> simd_argmax(T val) {
+inline ::c10::metal::pair<T, ushort> simd_argmax(T val) {
   const auto rc = simd_max(val);
   const auto vote = ::metal::simd_ballot(val == rc || ::metal::isnan(val));
-  return {rc, ::metal::ctz(static_cast<uint>(static_cast<ulong>(vote)))};
+  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
 }
 
 template <typename ARG_T, typename IDX_T>
 inline c10::metal::pair<ARG_T, IDX_T> simd_argmin(ARG_T val, IDX_T idx_val) {
   auto rc = simd_argmin(val);
-  return {rc.first, ::metal::simd_broadcast(idx_val, rc.second)};
+  return {rc.first, simd_broadcast(idx_val, rc.second)};
 }
 
 template <typename ARG_T, typename IDX_T>
 inline c10::metal::pair<ARG_T, IDX_T> simd_argmax(ARG_T val, IDX_T idx_val) {
   auto rc = simd_argmax(val);
-  return {rc.first, ::metal::simd_broadcast(idx_val, rc.second)};
+  return {rc.first, simd_broadcast(idx_val, rc.second)};
 }
 
 // Below algorithms are  written with hardcoded assumption that simdgroup is 32
