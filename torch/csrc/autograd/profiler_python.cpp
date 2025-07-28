@@ -768,14 +768,26 @@ struct _PyEventHandler {
 };
 
 static PyTypeObject _PyEventHandler_Type = {
-    .ob_base = PyVarObject_HEAD_INIT(&PyType_Type, 0)
-    .tp_name = "torch.profiler.python_tracer_event_handler",
-    .tp_basicsize = sizeof(_PyEventHandler),
-    .tp_dealloc = (destructor)PyObject_Free,
-    .tp_vectorcall_offset = offsetof(_PyEventHandler, vectorcall),
-    .tp_call = PyVectorcall_Call,
-    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
-        Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    PyVarObject_HEAD_INIT(&PyType_Type, 0) /* ob_base */
+    "torch.profiler.python_tracer_event_handler", /* tp_name */
+    sizeof(_PyEventHandler), /* tp_basicsize */
+    0, /* tp_itemsize */
+    (destructor)PyObject_Free, /* tp_dealloc */
+    offsetof(_PyEventHandler, vectorcall), /* tp_vectorcall_offset */
+    nullptr, /* tp_getattr */
+    nullptr, /* tp_setattr */
+    nullptr, /* tp_reserved */
+    nullptr, /* tp_repr */
+    nullptr, /* tp_as_number */
+    nullptr, /* tp_as_sequence */
+    nullptr, /* tp_as_mapping */
+    nullptr, /* tp_hash */
+    PyVectorcall_Call, /* tp_call */
+    nullptr, /* tp_str */
+    nullptr, /* tp_getattro */
+    nullptr, /* tp_setattro */
+    nullptr, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_DISALLOW_INSTANTIATION, /* tp_flags */
 };
 
 static PyObject* c_call_callback(
