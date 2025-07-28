@@ -96,7 +96,7 @@ class TestBuildVllm:
             assert "--build-arg CUDA_VERSION=12.8.0" in docker_cmd
             assert "--build-arg PYTHON_VERSION=3.12" in docker_cmd
             assert "--build-arg USE_SCCACHE=0" in docker_cmd
-            assert "--build-arg torch_cuda_arch_list=8.6;8.9" in docker_cmd
+            assert "--build-arg torch_cuda_arch_list=8.0;9.0" in docker_cmd
             assert "--target export-wheels" in docker_cmd
             assert "-t vllm-wheels" in docker_cmd
             assert docker_cmd_call[1].get("cwd") == "vllm"

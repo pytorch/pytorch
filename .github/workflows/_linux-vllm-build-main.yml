@@ -30,7 +30,7 @@ on:
       cuda-arch-list:
         required: false
         type: string
-        default: "8.6"
+        default: "8.0;9.0"
         description: |
           List of CUDA architectures CI build should target.
       runner_prefix:

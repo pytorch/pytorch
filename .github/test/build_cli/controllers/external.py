@@ -79,7 +79,7 @@ class ExternalBuildController(Controller):
                     TARGET                  Docker build target            [default: export-wheels]
                     SCCACHE_BUCKET_NAME     sccache bucket name            [default: ""]
                     SCCACHE_REGION_NAME     sccache region name            [default: ""]
-                    TORCH_CUDA_ARCH_LIST    Torch CUDA architectures       [default: 8.6;8.9]
+                    TORCH_CUDA_ARCH_LIST    Torch CUDA architectures       [default: 8.0;9.0]
 
                 Example:
 
