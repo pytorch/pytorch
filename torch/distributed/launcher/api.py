@@ -11,7 +11,9 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Union
 
+import torch
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
+from torch._utils_internal import get_default_numa_options
 from torch.distributed.elastic import events, metrics
 from torch.distributed.elastic.agent.server.api import WorkerSpec
 from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
@@ -24,6 +26,7 @@ from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.distributed.numa.binding import NumaOptions
 
 
 __all__ = ["LaunchConfig", "elastic_launch", "launch_agent"]
@@ -91,6 +94,7 @@ class LaunchConfig:
     metrics_cfg: dict[str, str] = field(default_factory=dict)
     local_addr: Optional[str] = None
     event_log_handler: str = "null"
+    numa_options: Optional[NumaOptions] = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -102,6 +106,10 @@ class LaunchConfig:
         # Post-processing to enable refactoring to introduce logs_specs due to non-torchrun API usage
         if self.logs_specs is None:
             self.logs_specs = DefaultLogsSpecs()
+
+        if self.numa_options is None and torch.cuda.is_available():
+            self.numa_options = get_default_numa_options()
+            logger.info("Using default numa options = %r", self.numa_options)
 
 
 class elastic_launch:
@@ -210,7 +218,8 @@ def launch_agent(
         "  monitor_interval   : %(monitor_interval)s\n"
         "  log_dir            : %(log_dir)s\n"
         "  metrics_cfg        : %(metrics_cfg)s\n"
-        "  event_log_handler  : %(event_log_handler)s\n",
+        "  event_log_handler  : %(event_log_handler)s\n"
+        "  numa_options       : %(numa_options)s\n",
         {
             "entrypoint": entrypoint_name,
             "min_nodes": config.min_nodes,
@@ -225,6 +234,7 @@ def launch_agent(
             "log_dir": config.logs_specs.root_log_dir,  # type: ignore[union-attr]
             "metrics_cfg": config.metrics_cfg,
             "event_log_handler": config.event_log_handler,
+            "numa_options": config.numa_options,
         },
     )
 
@@ -252,6 +262,7 @@ def launch_agent(
         master_port=master_port,
         local_addr=config.local_addr,
         event_log_handler=config.event_log_handler,
+        numa_options=config.numa_options,
     )
 
     agent = LocalElasticAgent(
