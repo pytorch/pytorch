@@ -2693,7 +2693,7 @@ def _persistent_reduction_configs(
 
     if "y" not in size_hints:
         configs = [
-            triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
+            triton_config_reduction(size_hints, xblock, rnumel)
             for xblock in (1, 8, 32, 128)
             if xblock == 1
             or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
@@ -2715,13 +2715,15 @@ def _persistent_reduction_configs(
                 )
             )
 
+    disable_autotune = disable_pointwise_autotuning(inductor_meta)
+
     # defer to more autotuning, initially
     if "y" in size_hints:
         pass
     # TODO(jansel): we should be able to improve these heuristics
-    elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
+    elif reduction_hint == ReductionHint.INNER and rnumel >= 256 and disable_autotune:
         configs = configs[:1]
-    elif reduction_hint == ReductionHint.OUTER:
+    elif reduction_hint == ReductionHint.OUTER and disable_autotune:
         configs = configs[-1:]
     elif reduction_hint == ReductionHint.OUTER_TINY:
         configs = [
@@ -2737,7 +2739,7 @@ def _persistent_reduction_configs(
             if prefix_is_reduction(prefix):
                 c.kwargs.pop(f"{prefix.upper()}BLOCK")
 
-    if disable_pointwise_autotuning(inductor_meta):
+    if disable_autotune:
         configs = configs[:1]
 
     return configs
