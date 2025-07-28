@@ -51,12 +51,11 @@ Here's a list of useful reproducers, ranked from most to least preferred:
    multiple environment setup steps, or specific system library versions requiring a Docker image.
    The more complex the setup, the harder it is for us to recreate the environment.
 
-   :::{note}
-       Docker simplifies setup but complicates changes to the environment, so it's not a perfect solution, though we'll use it if necessary.
-   :::
+:::{note}
+    Docker simplifies setup but complicates changes to the environment, so it's not a perfect solution, though we'll use it if necessary.
+:::
 
-Somewhat orthogonally, a reproducer that can be run in a single process is better than a reproducer
-that requires multiprocess training (but once again, if you only have a multiprocess reproducer, we'll take it!).
+If possible, try to make your reproducer single-process, as those are easier to debug than a multi-process reproducer.
 
 Additionally, below is a non-exhaustive list of aspects to check in your
 issue that you can attempt to replicate in your reproducer:

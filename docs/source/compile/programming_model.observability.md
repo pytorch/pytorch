@@ -2,7 +2,7 @@
 
 tlparse / `TORCH_TRACE` are a pair of tools that produce compilation reports that look [like this](https://web.mit.edu/~ezyang/Public/bhack-20240609-tlparse/index.html).
 
-Traces are very easy to collect. To collect a trace, run your model like so:
+Traces are fairly straightforward to collect. To collect a trace, run your model like so:
 
 ```bash
 TORCH_TRACE="/tmp/tracedir" python foo.py
