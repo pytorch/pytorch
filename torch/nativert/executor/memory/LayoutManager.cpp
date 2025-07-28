@@ -140,8 +140,8 @@ void LayoutManager::ensure_managed_storages(bool allocate) {
 }
 
 void LayoutManager::populate_tensor_values() {
-  CHECK(planned_tensors_.empty());
-  CHECK(unplanned_ivalues_.empty());
+  TORCH_CHECK(planned_tensors_.empty());
+  TORCH_CHECK(unplanned_ivalues_.empty());
 
   const auto& value_ids = planner_.get_planned_values();
   planned_tensors_.resize(value_ids.size());
@@ -222,8 +222,8 @@ void LayoutManager::assert_no_overlapping_storages(
         return;
       }
       auto& alloc = plan.allocations[value_to_vector_idx_map_.at(value_id)];
-      TORCH_CHECK_GE(alloc_start, alloc.offset);
-      TORCH_CHECK_LT(alloc_end, alloc.offset + alloc.size);
+      TORCH_CHECK(alloc_start >= alloc.offset);
+      TORCH_CHECK(alloc_end < alloc.offset + alloc.size);
       intervals.emplace(alloc_start, alloc_end);
     };
 
@@ -254,8 +254,8 @@ void LayoutManager::assert_no_overlapping_storages(
       // sanity check lifetimes to ensure this
       // value ~should~ be alive at this point
       const auto& lt = alias_analyzer.lifetime(v);
-      TORCH_CHECK_GE(graph_node_idx, lt.start);
-      TORCH_CHECK_LE(graph_node_idx, lt.end);
+      TORCH_CHECK(graph_node_idx >= lt.start);
+      TORCH_CHECK(graph_node_idx <= lt.end);
 
       const auto interval = try_get_interval(v->id());
       if (C10_UNLIKELY(!interval.has_value())) {
@@ -314,7 +314,7 @@ void LayoutManager::assert_no_overlapping_storages(
   auto it = intervals.begin();
   size_t prev_end = it->second;
   while (++it != intervals.end()) {
-    TORCH_CHECK_LT(prev_end, it->first /* cur_start */);
+    TORCH_CHECK(prev_end < it->first /* cur_start */);
     prev_end = it->second;
   }
 }

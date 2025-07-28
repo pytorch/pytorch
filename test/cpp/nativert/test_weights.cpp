@@ -25,7 +25,7 @@ return(%o2, %baz)
 };
 TEST_F(WeightsTest, ConstructEmptyStateDict) {
   std::unordered_map<std::string, c10::IValue> stateDict;
-  Weights weights(graph.get(), stateDict, *placement);
+  Weights weights(graph.get(), stateDict);
   // Check that weights are initialized correctly
   EXPECT_TRUE(weights.parameters().empty());
   EXPECT_TRUE(weights.buffers().empty());
@@ -33,7 +33,7 @@ TEST_F(WeightsTest, ConstructEmptyStateDict) {
 }
 TEST_F(WeightsTest, SetAndGetValue) {
   std::unordered_map<std::string, c10::IValue> stateDict;
-  Weights weights(graph.get(), stateDict, *placement);
+  Weights weights(graph.get(), stateDict);
   at::Tensor tensor = at::ones({2, 2});
   weights.setValue("added_weight", tensor);
   EXPECT_TRUE(weights.contains("added_weight"));

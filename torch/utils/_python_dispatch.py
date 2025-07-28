@@ -68,6 +68,12 @@ class TorchDispatchMode:
     API self-referential (beware of infinite loops, in this case!)
     """
 
+    # - When False, custom torch dispatch mode will error out explicitly when a hop
+    # is called under the mode.
+    # - When True, custom torch dispatch mode's __torch_dispatch__ will be triggered.
+    # Mode authors can implement how the mode interacts with higher order operators.
+    supports_higher_order_operators = False
+
     def __init__(self, _dispatch_key=None):
         if _dispatch_key is not None:
             assert isinstance(_dispatch_key, torch._C.DispatchKey)

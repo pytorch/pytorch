@@ -1118,8 +1118,9 @@ static at::Tensor linear_int8_with_onednn_weight(
   if(is_fp8 && !cpuinfo_has_x86_amx_int8()) {
 #endif
     // Fall back to ref impl on old platforms because not supported
+    // Transpose weight to align with behavior in oneDNN
     return fp8_qlinear_onednn_ref(
-        input, input_scale, onednn_weight, weight_scales, bias,
+        input, input_scale, onednn_weight.t(), weight_scales, bias,
         output_scale, output_dtype, other, other_scale,
         binary_post_op, binary_alpha, unary_post_op,
         unary_post_op_args, unary_post_op_algorithm);

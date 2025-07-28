@@ -581,10 +581,8 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
     return cflags
 
 
-def _get_optimization_cflags(min_optimize: bool = False) -> list[str]:
-    wrapper_opt_level = (
-        config.aot_inductor.compile_wrapper_opt_level if min_optimize else "O3"
-    )
+def _get_optimization_cflags() -> list[str]:
+    wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level or "O3"
     if _IS_WINDOWS:
         return [wrapper_opt_level]
     else:
@@ -634,7 +632,6 @@ def get_cpp_options(
     do_link: bool,
     warning_all: bool = True,
     extra_flags: Sequence[str] = (),
-    min_optimize: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     definitions: list[str] = []
     include_dirs: list[str] = []
@@ -646,7 +643,7 @@ def get_cpp_options(
 
     cflags = (
         _get_shared_cflag(do_link)
-        + _get_optimization_cflags(min_optimize)
+        + _get_optimization_cflags()
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
@@ -686,7 +683,6 @@ class CppOptions(BuildOptionsBase):
         extra_flags: Sequence[str] = (),
         use_relative_path: bool = False,
         compiler: str = "",
-        min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
     ) -> None:
@@ -711,7 +707,6 @@ class CppOptions(BuildOptionsBase):
             do_link=not (compile_only or precompiling or preprocessing),
             extra_flags=extra_flags,
             warning_all=warning_all,
-            min_optimize=min_optimize,
         )
 
         _append_list(self._definitions, definitions)
@@ -1049,6 +1044,19 @@ def _get_openmp_args(
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
 
+def _get_libstdcxx_args() -> tuple[list[str], list[str]]:
+    """
+    For fbcode cpu case, we should link stdc++ instead assuming the binary where dlopen is executed is built with dynamic stdc++.
+    """
+    lib_dir_paths: list[str] = []
+    libs: list[str] = []
+    if config.is_fbcode():
+        lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
+        libs.append("stdc++")
+
+    return lib_dir_paths, libs
+
+
 def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
     macros = []
     if use_mmap_weights:
@@ -1064,6 +1072,15 @@ def get_cpp_torch_options(
     use_relative_path: bool,
     use_mmap_weights: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """
+    This function is used to get the build args of torch related build options.
+    1. Torch include_directories, libraries, libraries_directories.
+    2. Python include_directories, libraries, libraries_directories.
+    3. OpenMP related.
+    4. Torch MACROs.
+    5. MISC
+    6. Return the build args
+    """
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -1160,7 +1177,6 @@ class CppTorchOptions(CppOptions):
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         compiler: str = "",
-        min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
     ) -> None:
@@ -1170,7 +1186,6 @@ class CppTorchOptions(CppOptions):
             extra_flags=extra_flags,
             use_relative_path=use_relative_path,
             compiler=compiler,
-            min_optimize=min_optimize,
             precompiling=precompiling,
             preprocessing=preprocessing,
         )
@@ -1244,6 +1259,13 @@ def get_cpp_torch_device_options(
     aot_mode: bool = False,
     compile_only: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """
+    This function is used to get the build args of device related build options.
+    1. Device include_directories, libraries, libraries_directories.
+    2. Device MACROs.
+    3. MISC
+    4. Return the build args
+    """
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -1263,6 +1285,8 @@ def get_cpp_torch_device_options(
 
     include_dirs = cpp_extension.include_paths(device_type)
     libraries_dirs = cpp_extension.library_paths(device_type)
+    if not config.is_fbcode():
+        libraries += ["c10"]
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1302,6 +1326,14 @@ def get_cpp_torch_device_options(
                     # Only add link args, when compile_only is false.
                     passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
 
+        if device_type == "cpu":
+            (
+                stdcxx_lib_dir_paths,
+                stdcxx_libs,
+            ) = _get_libstdcxx_args()
+            libraries_dirs += stdcxx_lib_dir_paths
+            libraries += stdcxx_libs
+
     if config.aot_inductor.custom_op_libs:
         libraries += config.aot_inductor.custom_op_libs
 
@@ -1334,7 +1366,6 @@ class CppTorchDeviceOptions(CppTorchOptions):
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
-        min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
     ) -> None:
@@ -1346,7 +1377,6 @@ class CppTorchDeviceOptions(CppTorchOptions):
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
-            min_optimize=min_optimize,
             precompiling=precompiling,
             preprocessing=preprocessing,
         )

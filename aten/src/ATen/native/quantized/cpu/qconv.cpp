@@ -1277,7 +1277,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   float sum_scale = has_accum ? accum.value().q_scale() : 1.0;
   int32_t sum_zero_point = has_accum ? accum.value().q_zero_point() : 0;
   if (has_accum) {
-    // Just tells we have these post op, the actual value such as scale and zero point will be setted later.
+    // Just tells we have these post op, the actual value such as scale and zero point will be set later.
     op_attr = kReluFused ? ideep::attr_t::residual_with_sum_zero_point() : ideep::attr_t::fuse_sum();
     const ideep::scale_t accum_scale = ideep::scale_t(1, 1.0/sum_scale);
     const ideep::zero_point_t accum_zero_points = ideep::zero_point_t(1, sum_zero_point);
