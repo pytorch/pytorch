@@ -640,7 +640,7 @@ def full_like(
 
 
 def _rand_like(
-    rand_fn: Callable[[torch.Tensor, ...], torch.Tensor],
+    rand_fn: Callable[..., torch.Tensor],
     self: torch.Tensor,
     *,
     dtype: Optional[torch.dtype] = None,
