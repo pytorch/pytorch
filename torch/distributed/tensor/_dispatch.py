@@ -152,7 +152,7 @@ class OpDispatcher:
         logger.debug("Dispatching op_call: %s", op_info.schema)
 
         self.sharding_propagator.propagate(op_info)
-        output_sharding = op_info.output_sharding ######## piz: redistributed schema issue!!!!
+        output_sharding = op_info.output_sharding
         logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 
@@ -174,7 +174,6 @@ class OpDispatcher:
                 if op_info.args_tree_spec
                 else op_info.local_args
             )
-            # torch.distributed.breakpoint()
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:

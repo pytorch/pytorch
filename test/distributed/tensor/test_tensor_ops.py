@@ -777,38 +777,5 @@ class DistTensorOpsTest(DTensorTestBase):
         )
 
 
-
-
-    @with_comms
-    def test_sort(self):
-        mesh = self.build_device_mesh()  # 1D mesh
-        comm_mode = CommDebugMode()
-
-        shard_spec = [Shard(1)]
-        global_tensor = torch.tensor([[[29., 45.,  3., 61.],
-         [25.,  6., 21.,  0.],
-         [ 1., 63., 49., 38.],
-         [48.,  9., 55., 18.]],
-
-        [[59., 13., 32., 23.],
-         [56., 44., 42., 26.],
-         [11., 53., 35., 57.],
-         [28., 60.,  4., 31.]],
-
-        [[47., 37., 33., 46.],
-         [52., 36., 41., 19.],
-         [30.,  8., 43., 62.],
-         [16., 27., 50., 24.]],
-
-        [[20., 14., 39., 22.],
-         [34., 10., 51.,  5.],
-         [54., 15.,  7., 17.],
-         [12., 40.,  2., 58.]]], requires_grad=True)
-        sharded_dtensor = distribute_tensor(global_tensor, mesh, shard_spec)
-        out1, _ = torch.sort(sharded_dtensor, dim=0)
-        out2, _ = torch.sort(sharded_dtensor, dim=1)
-        print(out2.full_tensor())
-
-
 if __name__ == "__main__":
     run_tests()
