@@ -7,8 +7,9 @@ import warnings
 import weakref
 from collections import namedtuple, OrderedDict
 from collections.abc import Iterator, Mapping
-from typing import Any, Callable, Optional, overload, TypeVar, Union, Dict
+from typing import Any, Callable, Dict, Optional, overload, TypeVar, Union
 from typing_extensions import Self, TypeVarTuple, Unpack
+
 import torch
 from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
@@ -399,7 +400,9 @@ def _forward_unimplemented(self, *input: Any) -> None:
         f'Module [{type(self).__name__}] is missing the required "forward" function'
     )
 
+
 _Ts = TypeVarTuple("_Ts")
+
 
 class Module:
     r"""Base class for all neural network modules.
