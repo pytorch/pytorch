@@ -1,7 +1,4 @@
 {
-  "torch/_inductor/async_compile.py": {
-    "class AsyncCompile": 300
-  },
   "torch/_inductor/autoheuristic/artifacts/_MMRankingA100.py": {
     "class MMRankingA100": 279,
     "def MMRankingA100.fill_choices()": 199
@@ -51,8 +48,8 @@
     "def TilingSelect.select_tiling()": 170
   },
   "torch/_inductor/codegen/cpp_flex_attention_template.py": {
-    "class CppFlexAttentionTemplate": 395,
-    "def CppFlexAttentionTemplate.modification()": 94
+    "class CppFlexAttentionTemplate": 403,
+    "def CppFlexAttentionTemplate.modification()": 102
   },
   "torch/_inductor/codegen/cpp_gemm_template.py": {
     "def CppGemmTemplate.get_options()": 249
@@ -65,7 +62,7 @@
     "class CppTemplate": 114
   },
   "torch/_inductor/codegen/cpp_template_kernel.py": {
-    "class CppTemplateKernel": 483,
+    "class CppTemplateKernel": 499,
     "def CppTemplateKernel.store_outputs()": 111
   },
   "torch/_inductor/codegen/cpp_utils.py": {
@@ -89,8 +86,8 @@
     "def HalideKernel.scan()": 82
   },
   "torch/_inductor/codegen/rocm/ck_conv_template.py": {
-    "class CKGroupedConvFwdTemplate": 531,
-    "def CKGroupedConvFwdTemplate.globals()": 143
+    "class CKGroupedConvFwdTemplate": 544,
+    "def CKGroupedConvFwdTemplate.globals()": 145
   },
   "torch/_inductor/codegen/rocm/ck_universal_gemm_template.py": {
     "class CKGemmTemplate": 950
@@ -103,14 +100,13 @@
     "def SIMDScheduling.generate_node_schedule()": 95
   },
   "torch/_inductor/codegen/triton.py": {
-    "class BlockPtrOptions": 293,
-    "class TritonKernel": 2479,
-    "class TritonOverrides": 465,
+    "class TritonKernel": 2562,
+    "class TritonOverrides": 469,
     "class TritonPrinter": 172,
     "class TritonScheduling": 396,
-    "def TritonKernel.codegen_kernel()": 225,
+    "def TritonKernel.codegen_kernel()": 233,
     "def TritonKernel.codegen_kernel_benchmark()": 89,
-    "def TritonKernel.load()": 134,
+    "def TritonKernel.load()": 145,
     "def TritonKernel.reduction()": 396,
     "def TritonKernel.scan()": 110,
     "def TritonScheduling.benchmark_codegened_module()": 85,
@@ -139,10 +135,6 @@
   "torch/_inductor/compile_fx.py": {
     "def fw_compiler_freezing()": 101
   },
-  "torch/_inductor/config.py": {
-    "class cpp": 117,
-    "class triton": 197
-  },
   "torch/_inductor/constant_folding.py": {
     "class ConstantFolder": 226,
     "def ConstantFolder.run_node()": 94
@@ -151,13 +143,13 @@
     "class VecISA": 125
   },
   "torch/_inductor/debug.py": {
-    "class DebugContext": 158,
-    "class DebugFormatter": 191,
+    "class DebugContext": 155,
+    "class DebugFormatter": 172,
     "def DebugFormatter.log_autotuning_results()": 90,
     "def aot_inductor_minifier_wrapper()": 81
   },
   "torch/_inductor/dependencies.py": {
-    "class MemoryDep": 225
+    "class MemoryDep": 234
   },
   "torch/_inductor/fx_passes/b2b_gemm.py": {
     "def b2b_gemm_handler()": 182
@@ -181,24 +173,23 @@
   "torch/_inductor/fx_passes/split_cat.py": {
     "def SplitCatSimplifier.replace_cat()": 152,
     "def merge_getitem_cat()": 97,
-    "def merge_split_cat_aten()": 87,
+    "def merge_split_cat_aten()": 91,
     "def move_reshape_out_of_split_stack()": 110
   },
   "torch/_inductor/graph.py": {
-    "class GraphLowering": 2124,
+    "class GraphLowering": 2138,
     "def GraphLowering.call_function()": 108,
     "def GraphLowering.create_deferred_runtime_asserts()": 84,
     "def GraphLowering.extract_autotune_inputs()": 93,
     "def GraphLowering.output()": 92,
     "def GraphLowering.placeholder()": 102,
-    "def GraphLowering.run_node()": 358
+    "def GraphLowering.run_node()": 359
   },
   "torch/_inductor/ir.py": {
     "class Buffer": 131,
-    "class ComputedBuffer": 342,
+    "class ComputedBuffer": 350,
     "class Conditional": 144,
-    "class ExternKernel": 862,
-    "class IRNode": 250,
+    "class ExternKernel": 866,
     "class Layout": 214,
     "class Loops": 130,
     "class Reduction": 745,
@@ -210,7 +201,7 @@
     "class WhileLoop": 212,
     "def ConcatKernel.create()": 101,
     "def ExternKernel.process_kernel()": 120,
-    "def ExternKernel.require_strides()": 158,
+    "def ExternKernel.require_strides()": 162,
     "def Reduction.create()": 159,
     "def Reduction.num_splits()": 161,
     "def Scan.create()": 96,
@@ -218,13 +209,13 @@
     "def WhileLoop.create()": 174
   },
   "torch/_inductor/jagged_lowerings.py": {
-    "def register_jagged_ops()": 157
+    "def register_jagged_ops()": 160
   },
   "torch/_inductor/kernel/conv.py": {
     "def convolution()": 239
   },
   "torch/_inductor/kernel/flex_attention.py": {
-    "def flex_attention()": 319,
+    "def flex_attention()": 325,
     "def flex_attention_backward()": 344,
     "def lower_cpu()": 297
   },
@@ -245,7 +236,7 @@
     "def make_pointwise()": 85,
     "def max_pool2d_with_indices_backward()": 144,
     "def scatter_reduce_()": 114,
-    "def sdpa_constraint()": 134,
+    "def sdpa_constraint()": 135,
     "def searchsorted()": 96
   },
   "torch/_inductor/mkldnn_ir.py": {
@@ -254,7 +245,7 @@
     "def QConvPointWiseBinaryPT2E.create()": 81
   },
   "torch/_inductor/mkldnn_lowerings.py": {
-    "def register_onednn_fusion_ops()": 1153
+    "def register_onednn_fusion_ops()": 1156
   },
   "torch/_inductor/mock_cache.py": {
     "class PatchCaches": 108
@@ -267,31 +258,21 @@
     "def register_woq_mm_ops()": 116
   },
   "torch/_inductor/runtime/autotune_cache.py": {
-    "class AutotuneCache": 196
+    "class AutotuneCache": 201
   },
   "torch/_inductor/runtime/benchmarking.py": {
     "class InductorBenchmarker": 111
   },
-  "torch/_inductor/runtime/triton_heuristics.py": {
-    "def CachingAutotuner.run()": 86
-  },
   "torch/_inductor/scheduler.py": {
     "class BaseSchedulerNode": 695,
-    "class BaseScheduling": 139,
+    "class BaseScheduling": 142,
     "class SchedulerBuffer": 106,
     "class SchedulerNode": 268
   },
   "torch/_inductor/select_algorithm.py": {
-    "class TritonTemplateKernel": 832,
-    "def AlgorithmSelectorCache.log_results()": 106
-  },
-  "torch/_inductor/sizevars.py": {
-    "class SizeVarAllocator": 836
+    "def AlgorithmSelectorCache.log_results()": 108
   },
   "torch/_inductor/utils.py": {
     "class IndentedBuffer": 145
-  },
-  "torch/_inductor/wrapper_benchmark.py": {
-    "def parse_profile_event_list()": 125
   }
 }
