@@ -501,7 +501,7 @@ struct ExpandableSegment {
   ExpandableSegment() = default;
   C10_DISABLE_COPY_AND_ASSIGN(ExpandableSegment);
   ExpandableSegment(ExpandableSegment&&) = delete;
-  ExpandableSegment operator=(ExpandableSegment&&) = delete;
+  ExpandableSegment& operator=(ExpandableSegment&&) = delete;
 
   virtual void init(
       c10::DeviceIndex device,
