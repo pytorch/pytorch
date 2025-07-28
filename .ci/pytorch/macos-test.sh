@@ -157,7 +157,10 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
-function checkout_install_torchbench() {
+# Shellcheck doesn't like it when you pass no arguments to a function
+# that can take args. See https://www.shellcheck.net/wiki/SC2120
+# shellcheck disable=SC2120
+checkout_install_torchbench() {
   local commit
   commit=$(cat .ci/docker/ci_commit_pins/torchbench.txt)
   git clone https://github.com/pytorch/benchmark torchbench
@@ -199,8 +202,6 @@ torchbench_setup_macos() {
   USE_OPENMP=0 python setup.py develop
   popd
 
-  # Shellcheck doesn't like it when you pass no arguments to a function that can take args. See https://www.shellcheck.net/wiki/SC2120
-  # shellcheck disable=SC2119,SC2120
   checkout_install_torchbench
 }
 
