@@ -2,7 +2,7 @@
 
 import itertools
 import random
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from itertools import chain
 from unittest.mock import patch
 
@@ -606,6 +606,31 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
             self.assertEqual(output_dt.full_tensor(), output)
             self.assertEqual(output_dt.placements, [Replicate(), Replicate()])
 
+
+class TestStrategyHashing(DTensorTestBase):
+    @with_comms
+    def test_call_with_different_nontensor_args(self):
+        mesh = self.build_device_mesh()
+        global_tensor = torch.tensor(
+        [[29., 45.,  3., 61.],
+         [25.,  6., 21.,  0.],
+         [ 1., 63., 49., 38.],
+         [48.,  9., 55., 18.]])
+        shard_spec = [Shard(1)]
+        sharded_dtensor = distribute_tensor(global_tensor, mesh, shard_spec)
+        with ExitStack() as current_stack:
+            # intentionally do not supply `schema_info=RuntimeSchemaInfo(1)`
+            current_stack.enter_context(
+                op_strategy_context(torch.ops.aten.sort.stable, replicate_op_strategy)
+            )
+            current_stack.enter_context(
+                op_strategy_context(torch.ops.aten.sort.default, replicate_op_strategy)
+            )
+            torch.sort(sharded_dtensor, dim=0) # sort each column
+            out1, _ = torch.sort(sharded_dtensor, dim=1) # sort each row
+            DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding.cache.cache_clear()
+            out2, _ = torch.sort(sharded_dtensor, dim=1)
+        self.assertEqual(out1.full_tensor(), out2.full_tensor())
 
 if __name__ == "__main__":
     run_tests()
