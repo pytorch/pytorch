@@ -566,7 +566,7 @@ def load_pt2(
 
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.readable() and f.seekable())
-        or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
+        or (isinstance(f, (str, os.PathLike)))
     ):
         # TODO: turn this into an error in 2.9
         logger.warning(
