@@ -868,11 +868,41 @@ def _record_memory_history(
     allocations, so you can tell what allocated any piece of memory in
     :func:`torch.cuda.memory._snapshot()`.
 
-    In addition too keeping stack traces with each current allocation and free,
+    In addition to keeping stack traces with each current allocation and free,
     this will also enable recording of a history of all alloc/free events.
 
     Use :func:`torch.cuda.memory._snapshot()` to retrieve this information,
     and the tools in `_memory_viz.py` to visualize snapshots.
+
+    Buffer behavior
+    ---------------
+
+    This will store up to `max_entries` instances of `TraceEntry` when enabled.
+    Python trace collection defaults to `sys.maxsize`, meaning long-running
+    or indefinitely running jobs should set a reasonable limit to avoid excessive
+    memory use. Expect each entry to be several KB.
+
+    Longer running workflows or those with smaller `max_entries` values will only
+    store the last accumulated `max_entries` entries, meaning new entries overwrite
+    older entries.
+
+    C++ implementation for reference to ring buffer implementation:
+
+    .. code-block:: cpp
+
+        if (record_history) {
+          if (alloc_trace->size() < alloc_trace_max_entries_) {
+            alloc_trace->emplace_back(te);
+          } else {
+            (*alloc_trace)[alloc_trace_next++] = te;
+            if (alloc_trace_next == alloc_trace_max_entries_) {
+              alloc_trace_next = 0;
+            }
+          }
+        }
+
+    Latency impact
+    --------------
 
     The Python trace collection is fast (2us per trace), so you may consider
     enabling this on production jobs if you anticipate ever having to debug
@@ -884,7 +914,7 @@ def _record_memory_history(
     Args:
         enabled (Literal[None, "state", "all"], optional):
             `None`, disable recording memory history.
-            `"state"`, keep information for currenly allocated memory.
+            `"state"`, keep information for currently allocated memory.
             `"all"`, additionally keep a history of all alloc/free calls.
             Defaults to "all".
         context (Literal[None, "state", "alloc", "all"], optional):
@@ -938,8 +968,9 @@ def _snapshot(device: "Device" = None):
     .. code-block:: python
 
         class Snapshot(TypedDict):
-            segments : List[Segment]
+            segments: List[Segment]
             device_traces: List[List[TraceEntry]]
+
 
         class Segment(TypedDict):
             # Segments are memory returned from a cudaMalloc call.
@@ -949,57 +980,62 @@ def _snapshot(device: "Device" = None):
             # is split into more then one Block.
             # empty_cache() frees Segments that are entirely inactive.
             address: int
-            total_size: int #  cudaMalloc'd size of segment
+            total_size: int  #  cudaMalloc'd size of segment
             stream: int
-            segment_type: Literal['small', 'large'] # 'large' (>1MB)
-            allocated_size: int # size of memory in use
-            active_size: int # size of memory in use or in active_awaiting_free state
-            blocks : List[Block]
+            segment_type: Literal["small", "large"]  # 'large' (>1MB)
+            allocated_size: int  # size of memory in use
+            active_size: int  # size of memory in use or in active_awaiting_free state
+            blocks: List[Block]
+
 
         class Block(TypedDict):
             # A piece of memory returned from the allocator, or
             # current cached but inactive.
             size: int
-            requested_size: int # size requested during malloc, may be smaller than
-                                # size due to rounding
+            requested_size: int  # size requested during malloc, may be smaller than
+            # size due to rounding
             address: int
-            state: Literal['active_allocated', # used by a tensor
-                        'active_awaiting_free', # waiting for another stream to finish using
-                                                # this, then it will become free
-                        'inactive',] # free for reuse
-            frames: List[Frame] # stack trace from where the allocation occurred
+            state: Literal[
+                "active_allocated",  # used by a tensor
+                "active_awaiting_free",  # waiting for another stream to finish using
+                # this, then it will become free
+                "inactive",
+            ]  # free for reuse
+            frames: List[Frame]  # stack trace from where the allocation occurred
+
 
         class Frame(TypedDict):
-                filename: str
-                line: int
-                name: str
+            filename: str
+            line: int
+            name: str
+
 
         class TraceEntry(TypedDict):
             # When `torch.cuda.memory._record_memory_history()` is enabled,
             # the snapshot will contain TraceEntry objects that record each
             # action the allocator took.
             action: Literal[
-            'alloc'  # memory allocated
-            'free_requested', # the allocated received a call to free memory
-            'free_completed', # the memory that was requested to be freed is now
-                            # able to be used in future allocation calls
-            'segment_alloc', # the caching allocator ask cudaMalloc for more memory
-                            # and added it as a segment in its cache
-            'segment_free',  # the caching allocator called cudaFree to return memory
-                            # to cuda possibly trying free up memory to
-                            # allocate more segments or because empty_caches was called
-            'oom',          # the allocator threw an OOM exception. 'size' is
-                            # the requested number of bytes that did not succeed
-            'snapshot'      # the allocator generated a memory snapshot
-                            # useful to coorelate a previously taken
-                            # snapshot with this trace
+                "alloc"  # memory allocated
+                "free_requested",  # the allocated received a call to free memory
+                "free_completed",  # the memory that was requested to be freed is now
+                # able to be used in future allocation calls
+                "segment_alloc",  # the caching allocator ask cudaMalloc for more memory
+                # and added it as a segment in its cache
+                "segment_free",  # the caching allocator called cudaFree to return memory
+                # to cuda possibly trying free up memory to
+                # allocate more segments or because empty_caches was called
+                "oom",  # the allocator threw an OOM exception. 'size' is
+                # the requested number of bytes that did not succeed
+                "snapshot",  # the allocator generated a memory snapshot
+                # useful to coorelate a previously taken
+                # snapshot with this trace
             ]
-            addr: int # not present for OOM
+            addr: int  # not present for OOM
             frames: List[Frame]
             size: int
             stream: int
-            device_free: int # only present for OOM, the amount of
-                            # memory cuda still reports to be free
+            device_free: int  # only present for OOM, the amount of
+            # memory cuda still reports to be free
 
     Returns:
         The Snapshot dictionary object
@@ -1012,6 +1048,10 @@ def _dump_snapshot(filename="dump_snapshot.pickle"):
     Save a pickled version of the `torch.memory._snapshot()` dictionary to a file.
 
     This file can be opened by the interactive snapshot viewer at pytorch.org/memory_viz
+
+    Snapshot file sizes scale with `max_entries` and stack trace depth per entry,
+    with several KB per entry. These can easily be in the GB range for longer running
+    workflows with large `max_entries`.
 
     Args:
         filename (str, optional): Name of the file to create. Defaults to "dump_snapshot.pickle".
@@ -1129,20 +1169,27 @@ class MemPool(_MemPool):
         use_on_oom(bool): a bool that indicates if this pool can be used
             as a last resort if a memory allocation outside of the pool fails due
             to Out Of Memory. This is False by default.
-
+        symmetric(bool): a bool that indicates if this pool is symmetrical
+            across ranks. This is False by default.
     """
 
     def __init__(
         self,
         allocator: Optional[_cuda_CUDAAllocator] = None,
         use_on_oom: bool = False,
+        symmetric: bool = False,
     ):
-        super().__init__(allocator, True, use_on_oom)
+        super().__init__(allocator, True, use_on_oom, symmetric)
 
     @property
     def id(self) -> tuple[int, int]:
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
+
+    @property
+    def is_symmetric(self) -> bool:
+        r"""Returns whether this pool is used for NCCL's symmetric memory."""
+        return super().is_symmetric
 
     @property
     def allocator(self) -> Optional[_cuda_CUDAAllocator]:

@@ -29,8 +29,9 @@ def init_fake_distributed(device="cpu"):
         mod.unsharded_weight.untyped_storage().resize_(
             mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
         )
-        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-            mod.unsharded_weight
+        with (
+            torch.no_grad(),
+            torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight),
         ):
             torch.ops.fsdp.copy_(mod.unsharded_weight, all_gather(mod.sharded_weight))
         mod._parameters["weight"] = mod.unsharded_weight
@@ -52,8 +53,9 @@ def init_fake_distributed(device="cpu"):
         mod.unsharded_weight.untyped_storage().resize_(
             mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
         )
-        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-            mod.unsharded_weight
+        with (
+            torch.no_grad(),
+            torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight),
         ):
             torch.ops.fsdp.copy_(mod.unsharded_weight, all_gather(mod.sharded_weight))
         mod._parameters["weight"] = mod.unsharded_weight
@@ -338,7 +340,7 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(fw_cnt.op_count, 5)
         self.assertEqual(bw_cnt.frame_count, 2)  # grad=None and grad!=None
         self.assertEqual(
-            bw_cnt.op_count, 114
+            bw_cnt.op_count, 111
         )  # Number of ops in the Dynamo-produced graphs
 
     def test_module_backward_hooks_aot(self):

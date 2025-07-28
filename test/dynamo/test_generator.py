@@ -22,10 +22,13 @@ class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
         super().setUp()
         self._old = torch._dynamo.config.enable_faithful_generator_behavior
         torch._dynamo.config.enable_faithful_generator_behavior = True
+        self._unittest_old = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
 
     def tearDown(self):
         super().tearDown()
         torch._dynamo.config.enable_faithful_generator_behavior = self._old
+        torch._dynamo.config.enable_trace_unittest = self._unittest_old
 
     def _compile_check(self, fn, args=None, fullgraph=True):
         eager = EagerAndRecordGraphs()
@@ -352,7 +355,7 @@ class GraphModule(torch.nn.Module):
         ctx = whoo()
         next(ctx)
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported, "Detected a method call to a user-defined generator object."
         ):
             fn(t, ctx)
 
@@ -371,7 +374,7 @@ class GraphModule(torch.nn.Module):
         ctx = whoo(t)
         next(ctx)
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported, "Detected a method call to a user-defined generator object."
         ):
             fn(t, ctx)
 
@@ -392,7 +395,7 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo()
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported, "Detected a method call to a user-defined generator object."
         ):
             fn(t, ctx)
 
@@ -410,7 +413,8 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo(t)
         with self.assertRaisesRegex(
-            Unsupported, "Generator as graph argument is not supported"
+            Unsupported,
+            "Detected a method call to a user-defined generator object.",
         ):
             fn(t, ctx)
 
@@ -885,6 +889,37 @@ class GraphModule(torch.nn.Module):
             f(torch.ones(3)),
             torch.compile(f, backend="eager", fullgraph=True)(torch.ones(3)),
         )
+
+    @make_dynamo_test
+    def test_generator___contains__(self):
+        def whoo():
+            yield 1
+            yield 2
+
+        g = whoo()
+        self.assertTrue(1 in g)
+        self.assertTrue(2 in g)
+        self.assertRaises(StopIteration, next, g)
+        self.assertFalse(3 in whoo())
+
+    @make_dynamo_test
+    def test_generator___contains___side_effects(self):
+        n = 0
+
+        def whoo():
+            nonlocal n
+            n = 1
+            yield 1
+            n = 2
+            yield 2
+
+        g = whoo()
+        self.assertTrue(1 in g)
+        self.assertEqual(n, 1)
+        self.assertTrue(2 in g)
+        self.assertEqual(n, 2)
+        self.assertRaises(StopIteration, next, g)
+        self.assertFalse(3 in whoo())
 
 
 class TestGeneratorSend(GeneratorTestsBase):

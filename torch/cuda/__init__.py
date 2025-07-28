@@ -18,7 +18,7 @@ import threading
 import traceback
 import warnings
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C
@@ -236,29 +236,35 @@ def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
 
 
-def _extract_arch_version(arch_string: str):
+def _extract_arch_version(arch_string: str) -> int:
     """Extracts the architecture string from a CUDA version"""
-    base = arch_string.split("_")[1]
-    base = base.removesuffix("a")
+    base = arch_string.split("_", maxsplit=2)[1]
+    base = base.removesuffix("a").removesuffix("f")
     return int(base)
 
 
 def _check_capability():
-    incorrect_binary_warn = """
-    Found GPU%d %s which requires CUDA_VERSION >= %d to
-     work properly, but your PyTorch was compiled
-     with CUDA_VERSION %d. Please install the correct PyTorch binary
-     using instructions from https://pytorch.org
-    """  # noqa: F841
-
-    old_gpu_warn = """
+    incompatible_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
-    PyTorch no longer supports this GPU because it is too old.
-    The minimum cuda capability supported by this library is %d.%d.
+    Minimum and Maximum cuda capability supported by this version of PyTorch is
+    (%d.%d) - (%d.%d)
+    """
+    matched_cuda_warn = """
+    Please install PyTorch with a following CUDA
+    configurations: {} following instructions at
+    https://pytorch.org/get-started/locally/
     """
 
-    if torch.version.cuda is not None:  # on ROCm we don't want this check
-        CUDA_VERSION = torch._C._cuda_getCompiledVersion()  # noqa: F841
+    # Binary CUDA_ARCHES SUPPORTED by PyTorch
+    CUDA_ARCHES_SUPPORTED = {
+        "12.6": {"min": 50, "max": 90},
+        "12.8": {"min": 70, "max": 120},
+        "12.9": {"min": 70, "max": 120},
+    }
+
+    if (
+        torch.version.cuda is not None and torch.cuda.get_arch_list()
+    ):  # on ROCm we don't want this check
         for d in range(device_count()):
             capability = get_device_capability(d)
             major = capability[0]
@@ -267,13 +273,35 @@ def _check_capability():
             current_arch = major * 10 + minor
             min_arch = min(
                 (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
-                default=35,
+                default=50,
             )
-            if current_arch < min_arch:
+            max_arch = max(
+                (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
+                default=50,
+            )
+            if current_arch < min_arch or current_arch > max_arch:
                 warnings.warn(
-                    old_gpu_warn
-                    % (d, name, major, minor, min_arch // 10, min_arch % 10)
+                    incompatible_gpu_warn
+                    % (
+                        d,
+                        name,
+                        major,
+                        minor,
+                        min_arch // 10,
+                        min_arch % 10,
+                        max_arch // 10,
+                        max_arch % 10,
+                    )
                 )
+                matched_arches = ""
+                for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
+                    if (
+                        current_arch >= arch_info["min"]
+                        and current_arch <= arch_info["max"]
+                    ):
+                        matched_arches += f" {arch}"
+                if matched_arches != "":
+                    warnings.warn(matched_cuda_warn.format(matched_arches))
 
 
 def _check_cubins():
@@ -379,8 +407,6 @@ def _lazy_init():
             )
         # This function throws if there's a driver initialization error, no GPUs
         # are found or any other error occurs
-        if "CUDA_MODULE_LOADING" not in os.environ:
-            os.environ["CUDA_MODULE_LOADING"] = "LAZY"
         torch._C._cuda_init()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
@@ -427,7 +453,7 @@ def cudart():
         >>> from torch.cuda import cudart, check_error
         >>> import os
         >>>
-        >>> os.environ['CUDA_PROFILE'] = '1'
+        >>> os.environ["CUDA_PROFILE"] = "1"
         >>>
         >>> def perform_cuda_operations_with_streams():
         >>>     stream = torch.cuda.Stream()
@@ -995,7 +1021,7 @@ def device_count() -> int:
     r"""
     Return the number of GPUs available.
 
-    .. note:: This API will NOT posion fork if NVML discovery succeeds.
+    .. note:: This API will NOT poison fork if NVML discovery succeeds.
         See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     global _cached_device_count
@@ -1747,7 +1773,7 @@ def _compile_kernel(
         >>> a = torch.randn(1024, device="cuda")
         >>> b = torch.randn(1024, device="cuda")
         >>> c = torch.empty_like(a)
-        >>> add_kernel(grid=(4,1,1), block=(256,1,1), args=[a, b, c, a.numel()])
+        >>> add_kernel(grid=(4, 1, 1), block=(256, 1, 1), args=[a, b, c, a.numel()])
     """
     import ctypes
 
@@ -1775,6 +1801,9 @@ def _compile_kernel(
 
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
+
+
+_POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 
 
 __all__ = [

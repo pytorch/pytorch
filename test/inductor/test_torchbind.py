@@ -410,6 +410,30 @@ class TestTorchbind(TestCase):
         ):
             aot_compile(ep.module(), inputs, options={"aot_inductor.package": True})
 
+    def test_aoti_torchbind_name_collision(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self._torchbind_obj0 = torch.classes._TorchScriptTesting._Foo(2, 3)
+
+            def forward(self, x):
+                a = self._torchbind_obj0.add_tensor(x)
+                torchbind = torch.classes._TorchScriptTesting._Foo(4, 5)
+                b = torchbind.add_tensor(x)
+                return a + b
+
+        m = M()
+        inputs = (torch.ones(2, 3),)
+        orig_res = m(*inputs)
+
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, inputs, strict=False)
+
+        pt2_path = torch._inductor.aoti_compile_and_package(ep)
+        optimized = torch._inductor.aoti_load_package(pt2_path)
+        result = optimized(*inputs)
+        self.assertEqual(result, orig_res)
+
 
 if __name__ == "__main__":
     run_tests()

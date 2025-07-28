@@ -8,9 +8,10 @@
 #include <c10/util/irange.h>
 
 
-// Two warninngs in Cutlass included header files
+// Three warninngs in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
@@ -43,11 +44,14 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 #include <cutlass/gemm/dispatch_policy.hpp>
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 
+#include <ATen/native/cuda/cutlass_common.cuh>
+
 namespace {
 using Strides = at::cuda::detail::Strides; // std::array<int64_t, 3>;
 
-template <bool PONG, typename TB_M, typename TB_N, typename TB_K>
+template <typename ArchTag, bool PONGOr2SM, typename TB_M, typename TB_N, typename TB_K>
 struct Schedule {
+  // SM90
   using CooperativeSchedule =
       cutlass::gemm::KernelPtrArrayTmaWarpSpecializedCooperative;
   using PongSchedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecializedPingpong;
@@ -55,10 +59,19 @@ struct Schedule {
       cutlass::epilogue::PtrArrayTmaWarpSpecializedCooperative;
   using PongEpilogueSchedule =
       cutlass::epilogue::PtrArrayTmaWarpSpecializedPingpong;
-  using KernelSchedule =
-      cute::conditional_t<PONG, PongSchedule, CooperativeSchedule>;
-  using EpilogueSchedule = cute::
-      conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>;
+  // SM100
+  using MMA1SMKernelSchedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecialized1SmSm100;
+  using MMA1SMEpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized1Sm;
+  using MMA2SMKernelSchedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecialized2SmSm100;
+  using MMA2SMEpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized2Sm;
+
+  using KernelSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>,
+    cute::conditional_t<PONGOr2SM, MMA2SMKernelSchedule, MMA1SMKernelSchedule>,
+    cute::conditional_t<PONGOr2SM, PongSchedule, CooperativeSchedule>>;
+  using EpilogueSchedule = cute::conditional_t<std::is_same_v<ArchTag, cutlass::arch::Sm100>,
+    cute::conditional_t<PONGOr2SM, MMA2SMEpilogueSchedule, MMA1SMEpilogueSchedule>,
+    cute::conditional_t<PONGOr2SM, PongEpilogueSchedule, CooperativeEpilogueSchedule>>;
+
 };
 
 int ceildiv(int a, int b) {
@@ -70,13 +83,14 @@ int round_up_to_nearest_multiple(int a, int b) {
 }
 
 template <
+    typename ArchTag,
     bool a_row_major,
     bool b_row_major,
-    bool Pong,
+    bool PONGOr2SM,
     typename TB_M,
     typename TB_N,
     typename TB_K>
-void bf16bf16_grouped_gemm_impl_sm90(
+void bf16bf16_grouped_gemm_impl_sm90_sm100(
     at::Tensor mat_a, // bf16
     at::Tensor mat_b, // bf16
     std::optional<at::Tensor> offs,
@@ -99,14 +113,13 @@ void bf16bf16_grouped_gemm_impl_sm90(
   constexpr int AlignmentB = 16 / sizeof(DtypeB);
   using LayoutOutput = cutlass::layout::RowMajor;
   constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
-  using ArchTag = cutlass::arch::Sm90;
   using OperatorClass = cutlass::arch::OpClassTensorOp;
   using TileShape = cute::Shape<TB_M, TB_N, TB_K>;
   using ClusterShape = cute::Shape<cute::_2, cute::_1, cute::_1>;
   using KernelSchedule =
-      typename Schedule<Pong, TB_M, TB_N, TB_K>::KernelSchedule;
+      typename Schedule<ArchTag, PONGOr2SM, TB_M, TB_N, TB_K>::KernelSchedule;
   using EpilogueSchedule =
-      typename Schedule<Pong, TB_M, TB_N, TB_K>::EpilogueSchedule;
+      typename Schedule<ArchTag, PONGOr2SM, TB_M, TB_N, TB_K>::EpilogueSchedule;
   using ProblemShape = cutlass::gemm::GroupProblemShape<
       cute::Shape<int32_t, int32_t, int32_t>>; // <M,N,K> per
                                                // group
@@ -146,8 +159,16 @@ void bf16bf16_grouped_gemm_impl_sm90(
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
               sizeof(typename CollectiveEpilogue::SharedStorage))>,
           KernelSchedule>::CollectiveOp;
-  using GemmKernel = cutlass::gemm::kernel::
-      GemmUniversal<ProblemShape, CollectiveMainloop, CollectiveEpilogue>;
+
+  using GemmKernelBase = cutlass::gemm::kernel::GemmUniversal<
+      ProblemShape,
+      CollectiveMainloop,
+      CollectiveEpilogue>;
+
+  using GemmKernel = std::conditional_t<
+      std::is_same_v<ArchTag, cutlass::arch::Sm100>,
+      at::cuda::detail::enable_3x_kernel_for_sm10<GemmKernelBase>,
+      at::cuda::detail::enable_3x_kernel_for_sm9x<GemmKernelBase>>;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
   using StrideA = typename Gemm::GemmKernel::InternalStrideA;
@@ -319,22 +340,49 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   //       ((M >= 2048 && K >= 2048) || (M >= 2048 && N >= 2048) ||
   //        (K >= 2048 && N >= 2048));
   bool small = (M <= 128 || N <= 128);
-  if (small) {
-    bf16bf16_grouped_gemm_impl_sm90<
+  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
+  const bool sm10x = properties != nullptr && properties->major == 10;
+
+  if (sm10x) {
+    if (small){
+      bf16bf16_grouped_gemm_impl_sm90_sm100<
+        cutlass::arch::Sm100,
         a_row_major,
         b_row_major,
-        /*Pong*/ true,
+        /*PONGOr2SM*/ false,
+        cute::_128,
+        cute::_256,
+        cute::_64>(mat_a, mat_b, offs, bias, out); // Tile shape taken from CUTLASS examples, 64 = 128/sizeof(bfloat16)
+    } else {
+      bf16bf16_grouped_gemm_impl_sm90_sm100<
+        cutlass::arch::Sm100,
+        a_row_major,
+        b_row_major,
+        /*PONGOr2SM*/ true,
+        cute::_256,
+        cute::_256,
+        cute::_64>(mat_a, mat_b, offs, bias, out); // Same as above ^
+    }
+  } else {
+    if(small) {
+      bf16bf16_grouped_gemm_impl_sm90_sm100<
+        cutlass::arch::Sm90,
+        a_row_major,
+        b_row_major,
+        /*PONGOr2SM*/ true,
         cute::_64,
         cute::_128,
         cute::_128>(mat_a, mat_b, offs, bias, out);
-  } else {
-    bf16bf16_grouped_gemm_impl_sm90<
+    } else {
+      bf16bf16_grouped_gemm_impl_sm90_sm100<
+        cutlass::arch::Sm90,
         a_row_major,
         b_row_major,
-        /*Pong*/ false,
+        /*PONGOr2SM*/ false,
         cute::_128,
         cute::_256,
         cute::_64>(mat_a, mat_b, offs, bias, out);
+    }
   }
 }
 

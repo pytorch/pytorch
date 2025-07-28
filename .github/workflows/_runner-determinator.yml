@@ -7,7 +7,7 @@ on:
         required: false
         type: string
         description: |
-          List of experiments for this workfow. If not defined, all default experiments are included.
+          List of experiments for this workflow. If not defined, all default experiments are included.
       opt_out_experiments:
         required: false
         type: string

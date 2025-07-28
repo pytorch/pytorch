@@ -68,6 +68,8 @@ def _slow_conv2d_adapter(
     tmp = list(shapes)
     tmp.append(False)
     tmp2 = list(concrete)
+    if len(tmp2) < 5:
+        raise ParseException("slow conv2d has less than 5 concrete inputs")
     tmp2[3] = tmp2[4]
     return conv_adapter(tuple(tmp), tuple(tmp2))
 
@@ -79,9 +81,11 @@ def conv_adapter(
     tmp = list(shapes)
     if len(tmp) == 4:
         transposed = False
-    else:
+    elif len(tmp) > 6:
         transposed = bool(tmp[6])
         tmp[6] = transposed
+    else:
+        raise ParseException(f"Convolution has the wrong number of inputs: {len(tmp)}")
 
     kwargs: dict[Any, Any] = {}
     if not transposed:
@@ -175,13 +179,24 @@ def _calculate_flops(event: dict[str, Any]) -> int:
 
     flop_function = flop_registry[op_obj]
 
-    assert "Input Dims" in event["args"] and "Concrete Inputs" in event["args"]
+    if "Input Dims" not in event["args"] or "Concrete Inputs" not in event["args"]:
+        return 0
     input_shapes = event["args"]["Input Dims"]
     concrete = event["args"]["Concrete Inputs"]
     if op_name in adapters_map:
-        args, kwargs = adapters_map[op_name](input_shapes, concrete)
+        try:
+            args, kwargs = adapters_map[op_name](input_shapes, concrete)
+        except ParseException as e:
+            msg = f"Failed to parse {op_name} with {e}"
+            log.warning(msg)
+            return 0
     else:
-        args, kwargs = default_adapter(input_shapes, concrete)
+        try:
+            args, kwargs = default_adapter(input_shapes, concrete)
+        except ParseException as e:
+            msg = f"Failed to parse {op_name} with {e}"
+            log.warning(msg)
+            return 0
     return flop_function(*args, **kwargs)
 
 
@@ -218,7 +233,8 @@ def _estimate_gb(event: dict[str, Any]) -> float:
     if op_obj is None:
         return _default_estimate_gb(event)
 
-    assert "Input Dims" in event["args"] and "Concrete Inputs" in event["args"]
+    if "Input Dims" not in event["args"] or "Concrete Inputs" not in event["args"]:
+        return _default_estimate_gb(event)
     input_shapes = event["args"]["Input Dims"]
 
     # NOTE these will be refactored into a similar object to FlopCounter soon
@@ -294,7 +310,7 @@ def _create_extern_mapping(
     data: dict[str, Any],
 ) -> defaultdict[int, list[dict[str, Any]]]:
     """
-    compute a mapping from exteral ids to non kernels, which contain the information we need to estimate flops etc
+    compute a mapping from external ids to non kernels, which contain the information we need to estimate flops etc
     """
     extern_mapping: defaultdict[int, list[dict[str, Any]]] = defaultdict(list)
     for event in data["traceEvents"]:
@@ -386,7 +402,7 @@ class JsonProfile:
         dtype: Optional[Union[torch.dtype, str]] = None,
     ):
         """
-        Convienence class for running common operations on chrome/perfetto json traces.
+        Convenience class for running common operations on chrome/perfetto json traces.
         """
         self.path = path
         with open(path) as f:
@@ -478,6 +494,11 @@ class JsonProfile:
         for event in self.events:
             if "cat" not in event or "args" not in event or event["cat"] != "kernel":
                 continue
+            if "device" not in event["args"]:
+                continue
+            dev_tmp = event["args"]["device"]
+            if dev_tmp not in self._devices:
+                continue
             dev = self._devices[event["args"]["device"]]
 
             dur = event["dur"]  # us
@@ -507,6 +528,8 @@ class JsonProfile:
                 achieved_flops = 0
                 achieved_bandwidth = 0
 
+            if "name" not in event["args"]:
+                continue
             dev.stats[event["name"]].add(
                 KernelStats(
                     flops=op_flops,

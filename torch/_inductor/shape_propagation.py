@@ -9,12 +9,12 @@ import torch
 from .virtualized import OpsValue, V
 
 
-ShapeType = Optional[Sequence[Union[int, str]]]
+BlockShapeType = Optional[Sequence[Union[int, str]]]
 
 
 class ShapeVar(Protocol):
     @property
-    def shape(self) -> ShapeType: ...
+    def shape(self) -> BlockShapeType: ...
 
 
 ShapeArg = Union[ShapeVar, torch.types.Number, str, OpsValue, torch.dtype]
@@ -24,7 +24,7 @@ ShapeArg = Union[ShapeVar, torch.types.Number, str, OpsValue, torch.dtype]
 
 
 @functools.lru_cache(None)
-def get_broadcasted_shape(a: ShapeType, b: ShapeType) -> ShapeType:
+def get_broadcasted_shape(a: BlockShapeType, b: BlockShapeType) -> BlockShapeType:
     assert isinstance(a, Sequence)
     assert isinstance(b, Sequence)
     if len(a) > len(b):
@@ -47,8 +47,8 @@ def get_broadcasted_shape(a: ShapeType, b: ShapeType) -> ShapeType:
         return tuple(_get_broadcasted_dim(d1, d2) for d1, d2 in zip(a, b))
 
 
-def broadcast_shapes_for_args(args: Sequence[ShapeArg]) -> ShapeType:
-    result_shape: ShapeType = None
+def broadcast_shapes_for_args(args: Sequence[ShapeArg]) -> BlockShapeType:
+    result_shape: BlockShapeType = None
 
     for arg in args:
         if hasattr(arg, "shape"):
@@ -65,7 +65,7 @@ def broadcast_shapes_for_args(args: Sequence[ShapeArg]) -> ShapeType:
         elif isinstance(arg, torch.dtype):
             continue
         else:
-            return None
+            raise TypeError(f"Unknown type: {type(arg)}")
 
     return result_shape
 
@@ -76,7 +76,7 @@ class ShapePropagationOpsHandler:
     """
 
     @staticmethod
-    def constant(value: torch.types.Number, dtype: torch.dtype) -> ShapeType:
+    def constant(value: torch.types.Number, dtype: torch.dtype) -> BlockShapeType:
         # See implementation of constant for triton for the reason
         from torch._inductor.codegen.triton import TritonKernel
 
@@ -96,7 +96,7 @@ class ShapePropagationOpsHandler:
         src_dtype: torch.dtype,
         reduction_type: str,
         value: Union[ShapeArg, tuple[ShapeArg, ...]],
-    ) -> Union[ShapeType, tuple[ShapeType, ...]]:
+    ) -> Union[BlockShapeType, tuple[BlockShapeType, ...]]:
         raise NotImplementedError
 
     @staticmethod
@@ -111,16 +111,16 @@ class ShapePropagationOpsHandler:
         dtype: torch.dtype,
         src_dtype: Optional[torch.dtype] = None,
         use_compute_types: bool = True,
-    ) -> ShapeType:
+    ) -> BlockShapeType:
         return value.shape
 
     @staticmethod
-    def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> ShapeType:
+    def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> BlockShapeType:
         # shape is implicitly embedded in expr.
         return None
 
     @staticmethod
-    def load_seed(name: str, offset: int) -> ShapeType:
+    def load_seed(name: str, offset: int) -> BlockShapeType:
         return ()
 
     @staticmethod
@@ -132,5 +132,5 @@ class ShapePropagationOpsHandler:
     ) -> None:
         return None
 
-    def __getattr__(self, name: str) -> Callable[..., ShapeType]:
+    def __getattr__(self, name: str) -> Callable[..., BlockShapeType]:
         return lambda *args, **kwargs: broadcast_shapes_for_args(args)
