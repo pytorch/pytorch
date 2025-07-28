@@ -283,6 +283,11 @@ function clone_pytorch_xla() {
   fi
 }
 
+function install_transformers() {
+  pip install transformers==4.54.0
+}
+
+
 function checkout_install_torchbench() {
   local commit
   commit=$(get_pinned_commit torchbench)
@@ -298,9 +303,7 @@ function checkout_install_torchbench() {
     python install.py --continue_on_fail
   fi
 
-  # TODO (huydhn): transformers-4.44.2 added by https://github.com/pytorch/benchmark/pull/2488
-  # is regressing speedup metric. This needs to be investigated further
-  pip install transformers==4.38.1
+  install_transformers
 
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
