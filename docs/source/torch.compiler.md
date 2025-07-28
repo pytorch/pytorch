@@ -103,7 +103,7 @@ Some of the most commonly used backends include:
 
 ```{eval-rst}
 .. toctree::
-   :caption: ``torch.compile`` Programming Model
+   :caption: `torch.compile` Programming Model
 
    compile/programming_model
 ```
