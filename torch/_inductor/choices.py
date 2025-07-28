@@ -219,7 +219,8 @@ class InductorChoices:
         Strangely this is faster than a [1, RBLOCK] block in some cases.
         """
         return (
-            features.get_reduction_hint() == ReductionHint.INNER
+            False
+            and features.get_reduction_hint() == ReductionHint.INNER
             and V.graph.sizevars.statically_known_geq(features.reduction_numel, 256)
         )
 
