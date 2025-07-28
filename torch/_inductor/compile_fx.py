@@ -1058,7 +1058,6 @@ def _compile_fx_inner(
     if config.trace.provenance_tracking:
         # Dump provenance artifacts for debugging trace
         provenance_info = torch._inductor.debug.dump_inductor_provenance_info()
-        # provenance_info might be None if trace.provenance_tracking is not set
         if provenance_info:
             trace_structured(
                 "artifact",

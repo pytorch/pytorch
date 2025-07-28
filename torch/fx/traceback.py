@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+import logging
 import traceback
 from contextlib import contextmanager
 from enum import Enum
@@ -9,6 +10,8 @@ from ._compatibility import compatibility
 from .graph import Graph
 from .node import Node
 
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     "preserve_node_meta",
@@ -311,12 +314,16 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
     """
     Given an fx.Graph, return a json that contains the provenance information of each node.
     """
-    provenance_tracking_json = {}
-    for node in graph.nodes:
-        if node.op == "call_function":
-            provenance_tracking_json[node.name] = (
-                [source.to_dict() for source in node.meta["from_node"]]
-                if "from_node" in node.meta
-                else []
-            )
-    return provenance_tracking_json
+    try:
+        provenance_tracking_json = {}
+        for node in graph.nodes:
+            if node.op == "call_function":
+                provenance_tracking_json[node.name] = (
+                    [source.to_dict() for source in node.meta["from_node"]]
+                    if "from_node" in node.meta
+                    else []
+                )
+        return provenance_tracking_json
+    except Exception as e:
+        log.error("Unexpected error in dump_inductor_provenance_info: %s", e)
+        return {}
