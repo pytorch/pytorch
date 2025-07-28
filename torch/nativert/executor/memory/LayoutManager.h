@@ -40,8 +40,8 @@ struct ContiguousLayoutBuffer {
 
   void* get_ptr_with_offset(size_t offset) {
     void* raw_ptr = data_ptr_.get();
-    TORCH_CHECK_NOTNULL(raw_ptr);
-    TORCH_CHECK_LE(offset, size_);
+    TORCH_CHECK(raw_ptr != nullptr);
+    TORCH_CHECK(offset <= size_);
     return reinterpret_cast<void*>(
         reinterpret_cast<uint8_t*>(raw_ptr) + offset);
   }
@@ -61,7 +61,7 @@ struct ContiguousLayoutBuffer {
   void clear(size_t size) {
     VLOG(1) << "clearing first " << size << "bytes of layout buffer of size "
             << size_;
-    TORCH_CHECK_LE(size, size_);
+    TORCH_CHECK(size <= size_);
     std::memset(data_ptr_.get(), 0, size);
   }
 
@@ -126,8 +126,8 @@ struct ContiguousStorageImplBuffer {
   }
 
   c10::StorageImpl& at(size_t i) {
-    TORCH_CHECK_LT(i, size_)
-        << "requested storage index " << i << " out of bounds " << size_;
+    TORCH_CHECK(
+        i < size_, "requested storage index ", i, " out of bounds ", size_);
     return buffer_[i];
   }
 
@@ -138,7 +138,7 @@ struct ContiguousStorageImplBuffer {
   }
 
   c10::StorageImpl& to_managed(at::StorageImpl& s) {
-    TORCH_CHECK_LT(size_, capacity_);
+    TORCH_CHECK(size_ < capacity_);
     return *(new (&buffer_[size_++]) at::StorageImpl(
         at::StorageImpl::use_byte_size_t(),
         static_cast<int64_t>(s.nbytes()),

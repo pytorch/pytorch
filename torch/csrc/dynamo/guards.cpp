@@ -36,6 +36,45 @@
 #include <tuple>
 #include <utility>
 
+// Uncomment next line to count instructions for guard eval.
+// #define GUARD_INSTRUCTION_COUNT
+#ifdef GUARD_INSTRUCTION_COUNT
+#include <linux/perf_event.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <cstdint>
+#include <functional>
+
+int open_counter() {
+  perf_event_attr attr{};
+  attr.type = PERF_TYPE_HARDWARE;
+  attr.size = sizeof(attr);
+  attr.config = PERF_COUNT_HW_INSTRUCTIONS; // retired instructions
+  attr.disabled = 1; // start stopped
+  attr.exclude_kernel = 1; // user-space only
+  attr.exclude_hv = 1;
+
+  return syscall(__NR_perf_event_open, &attr, 0, -1, -1, 0);
+}
+
+uint64_t count_instructions(const std::function<void()>& fn) {
+  int fd = open_counter();
+  if (fd == -1)
+    throw std::runtime_error("perf_event_open failed");
+
+  ioctl(fd, PERF_EVENT_IOC_RESET, 0);
+  ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+  fn(); // run the code you care about
+  ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
+
+  uint64_t count;
+  read(fd, &count, sizeof(count));
+  close(fd);
+  return count;
+}
+#endif
+
 // Certain CPython data structures are defined in `.c` files in earlier Python
 // versions, e.g., for TupleIteratorGetItemAccessor, we need a fast way to
 // retrieve the underlying tuple and access the item. Before Python 3.12
@@ -1100,6 +1139,22 @@ std::string get_exception_message() {
   return exc_message;
 }
 
+bool is_nn_module(py::handle example_value) {
+  py::object torch_module_cls = py::module_::import("torch.nn").attr("Module");
+  return py::isinstance(example_value, torch_module_cls);
+}
+
+std::string get_type_str(py::handle example_value) {
+  std::string type_name;
+  try {
+    type_name = py::str(py::type::of(example_value)).cast<std::string>();
+  } catch (const py::error_already_set& e) {
+    // Fallback that never throws in release builds
+    type_name = "<unprintable-type>";
+  }
+  return type_name;
+}
+
 bool is_immutable_object(py::handle example_value) {
   py::object config_module = py::module_::import("torch._dynamo.config");
 
@@ -1118,8 +1173,9 @@ bool is_immutable_object(py::handle example_value) {
     return true;
   }
 
-  return PyLong_Check(example_value.ptr()) ||
-      PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
+  return (example_value.ptr() == Py_None) ||
+      PyLong_Check(example_value.ptr()) || PyFloat_Check(example_value.ptr()) ||
+      PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
       (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
 }
@@ -2515,9 +2571,13 @@ class GuardManager {
       py::handle example_value)
       : _root(root),
         _source(std::move(source)),
-        _is_dict(py::isinstance<py::dict>(example_value)) {
+        _is_dict(py::isinstance<py::dict>(example_value)),
+        _is_immutable(is_immutable_object(example_value)),
+        _is_nn_module(is_nn_module(example_value)),
+        _type_str(get_type_str(example_value)) {
     if (_is_dict) {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
+      _is_empty_dict = PyDict_Size(example_value.ptr()) == 0;
     }
   }
 
@@ -2538,9 +2598,62 @@ class GuardManager {
   }
 
  public:
+  // relational guard helpers
+  void set_has_object_aliasing_guard() {
+    _has_object_aliasing_guard = true;
+  }
+
+  void set_has_no_tensor_aliasing_guard() {
+    _has_no_tensor_aliasing_guard = true;
+  }
+
+  bool has_object_aliasing_guard() {
+    return _has_object_aliasing_guard;
+  }
+
+  bool has_no_tensor_aliasing_guard() {
+    return _has_no_tensor_aliasing_guard;
+  }
+
+ public:
+  // type related helpers
+  bool is_guarded_value_immutable() {
+    return _is_immutable;
+  }
+
+  bool is_guarded_value_nn_module() {
+    return _is_nn_module;
+  }
+
+  bool is_guarded_value_dict() {
+    return _is_dict;
+  }
+
+  bool is_guarded_value_empty_dict() {
+    return _is_empty_dict;
+  }
+
+  std::string type_of_guarded_value() {
+    return _type_str;
+  }
+
+ public:
   // For cloning
-  GuardManager(RootGuardManager* root, std::string source, bool is_dict)
-      : _root(root), _source(std::move(source)), _is_dict(is_dict) {}
+  GuardManager(
+      RootGuardManager* root,
+      std::string source,
+      bool is_dict,
+      bool is_empty_dict,
+      bool is_immutable,
+      bool is_nn_module,
+      std::string type_str)
+      : _root(root),
+        _source(std::move(source)),
+        _is_dict(is_dict),
+        _is_empty_dict(is_empty_dict),
+        _is_immutable(is_immutable),
+        _is_nn_module(is_nn_module),
+        _type_str(std::move(type_str)) {}
 
   void clone_common(
       RootGuardManager* cloned_root,
@@ -2571,7 +2684,14 @@ class GuardManager {
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
     }
-    GuardManager* cloned_mgr = new GuardManager(cloned_root, _source, _is_dict);
+    GuardManager* cloned_mgr = new GuardManager(
+        cloned_root,
+        _source,
+        _is_dict,
+        _is_empty_dict,
+        _is_immutable,
+        _is_nn_module,
+        _type_str);
     clone_common(cloned_root, cloned_mgr, clone_filter_fn);
     return cloned_mgr;
   }
@@ -2851,7 +2971,15 @@ class GuardManager {
   // to enable fail fast for the next check.
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
-  bool _is_dict;
+  // relational guard helpers
+  bool _has_object_aliasing_guard = false;
+  bool _has_no_tensor_aliasing_guard = false;
+
+  bool _is_dict = false;
+  bool _is_empty_dict = false;
+  bool _is_immutable = false;
+  bool _is_nn_module = false;
+  std::string _type_str;
   uint64_t _dict_tag{0};
 };
 
@@ -2898,6 +3026,17 @@ class RootGuardManager : public GuardManager {
  public:
   // This is the root node, set its _root member to nullptr
   RootGuardManager() : GuardManager(this, "L") {}
+
+  void add_no_tensor_aliasing_guard(
+      std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard) {
+    // stash a pointer to the _no_tensor_alising_guard
+    _no_tensor_aliasing_guard = no_tensor_aliasing_guard;
+    this->add_relational_guard_resetter(std::move(no_tensor_aliasing_guard));
+  }
+
+  std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard() {
+    return _no_tensor_aliasing_guard;
+  }
 
   // Adds the relational guard resetter
   void add_relational_guard_resetter(
@@ -3119,6 +3258,9 @@ class RootGuardManager : public GuardManager {
   // We init LocalState only when this flag it set. This flag is set during
   // TENSOR_MATCH guard init.
   bool _init_local_state = false;
+
+  // Pointer to the no tensor relational guard
+  std::shared_ptr<RelationalGuard> _no_tensor_aliasing_guard;
 };
 
 /*
@@ -3137,7 +3279,7 @@ class DictGuardManager : public GuardManager {
       RootGuardManager* root,
       std::string source,
       py::handle example_value)
-      : GuardManager(root, std::move(source)),
+      : GuardManager(root, std::move(source), example_value),
         _size(PyDict_Size(example_value.ptr())),
         _expected_type(Py_TYPE(example_value.ptr())),
         _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {}
@@ -3352,8 +3494,17 @@ class DictGuardManager : public GuardManager {
       Py_ssize_t size,
       PyTypeObject* expected_type,
       bool is_exact_dict_type,
-      std::vector<Py_ssize_t> indices)
-      : GuardManager(cloned_root, std::move(source), true),
+      std::vector<Py_ssize_t> indices,
+      std::string type_of,
+      bool is_empty_dict)
+      : GuardManager(
+            cloned_root,
+            std::move(source),
+            true, // _is_dict
+            is_empty_dict,
+            false, // _is_nn_module
+            false, // _is_immutable
+            std::move(type_of)),
         _size(size),
         _expected_type(expected_type),
         _is_exact_dict_type(is_exact_dict_type),
@@ -3372,7 +3523,9 @@ class DictGuardManager : public GuardManager {
         _size,
         _expected_type,
         _is_exact_dict_type,
-        _indices);
+        _indices,
+        type_of_guarded_value(),
+        is_guarded_value_empty_dict());
 
     clone_common(cloned_root, cloned_mgr, clone_filter_fn);
     for (auto index : _indices) {
@@ -3495,7 +3648,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
       throw py::type_error("Invalid guard manager enum");
     }
   }
-  return std::make_unique<GuardManager>(root, std::move(source));
+  return std::make_unique<GuardManager>(root, std::move(source), example_value);
 }
 
 class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
@@ -3840,6 +3993,13 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    // NOTE for future guard optimization developers - We tried saving the dict
+    // pointer and weakref of the original object to avoid calling
+    // PyObject_GenericGetDict on a fast path, but this did not lead any
+    // meaningful speedups because of 2 reasons
+    // 1) Once __dict__ is generated, accessing it the second time is fast.
+    // 2) Getting the object from weakref, from 3.13 onwards, requires
+    // Py_DECREF, which further eats into the benefit.
     PyObject* x = PyObject_GenericGetDict(obj, nullptr); // new ref
     if (x == nullptr) {
       // Attribute absent, clear the exception and return false.
@@ -5376,6 +5536,9 @@ void install_object_aliasing_guard(
   // the newly added relational guard when the guard eval fails.
   x->get_root()->add_relational_guard_resetter(guard);
 
+  x->set_has_object_aliasing_guard();
+  y->set_has_object_aliasing_guard();
+
   // In case the guard is a DictGuardManager, OBJECT_ALIASING guard is a
   // permitted guard.
   x->add_permitted_leaf_guard(guard);
@@ -5398,9 +5561,10 @@ void install_no_tensor_aliasing_guard(
   // the newly added relational guard when the guard eval fails.
   py::cast<GuardManager*>(guard_managers[0])
       ->get_root()
-      ->add_relational_guard_resetter(guard);
+      ->add_no_tensor_aliasing_guard(guard);
   for (const auto& guard_manager : guard_managers) {
     py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
+    py::cast<GuardManager*>(guard_manager)->set_has_no_tensor_aliasing_guard();
   }
 }
 
@@ -5482,6 +5646,7 @@ void install_storage_overlapping_guard(
       /* overlapping= */ false);
 }
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-volatile")
 char flush_cache_by_eviction() {
   constexpr size_t evict_size = 32 * 1024 * 1024;
   std::vector<char> buffer(evict_size, 1);
@@ -5492,6 +5657,7 @@ char flush_cache_by_eviction() {
   }
   return sink;
 }
+C10_DIAGNOSTIC_POP()
 
 double profile_guard_manager(
     RootGuardManager* root,
@@ -5547,6 +5713,13 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
   if (root == nullptr) {
     return false;
   }
+
+#ifdef GUARD_INSTRUCTION_COUNT
+  auto n = count_instructions(
+      [&] { ((RootGuardManager*)root)->check_nopybind(f_locals); });
+  std::cout << "#instructions in guard eval = " << n << std::endl << std::flush;
+#endif
+
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
@@ -5870,6 +6043,19 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
       .def("fail_count", &GuardManager::fail_count)
+      .def(
+          "has_object_aliasing_guard", &GuardManager::has_object_aliasing_guard)
+      .def(
+          "is_guarded_value_immutable",
+          &GuardManager::is_guarded_value_immutable)
+      .def(
+          "is_guarded_value_nn_module",
+          &GuardManager::is_guarded_value_nn_module)
+      .def("is_guarded_value_dict", &GuardManager::is_guarded_value_dict)
+      .def(
+          "is_guarded_value_empty_dict",
+          &GuardManager::is_guarded_value_empty_dict)
+      .def("type_of_guarded_value", &GuardManager::type_of_guarded_value)
       .def(
           "get_accessors",
           &GuardManager::get_accessors,

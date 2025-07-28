@@ -1,0 +1,35 @@
+[build-system]
+requires = [
+    "setuptools",
+    "wheel",
+    "torch", # Needed by setup.py for getting include of PyTorch
+]
+
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torch_openreg"
+version = "0.0.1"
+description = "A minimal reference implementation of an out-of-tree backend"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
+dependencies = [
+    "torch",
+]
+# Add classifiers info for making lint happy
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3 :: Only",
+]
+
+[project.urls]
+Homepage = "https://pytorch.org"
+Repository = "https://github.com/pytorch/pytorch"
+Documentation = "https://pytorch.org/docs"
+Forum = "https://discuss.pytorch.org"
