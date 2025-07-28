@@ -202,12 +202,8 @@ opmath_t<T> threadgroup_prod(
 }
 
 template <typename T>
-T threadgroup_max(
-    threadgroup opmath_t<T>* data,
-    T val,
-    unsigned idx,
-    unsigned size) {
-  auto rc = simd_max(static_cast<opmath_t<T>>(val));
+T threadgroup_max(threadgroup T* data, T val, unsigned idx, unsigned size) {
+  auto rc = simd_max(val);
   if (idx % simdgroup_size == 0) {
     data[idx / simdgroup_size] = rc;
   }
@@ -225,12 +221,8 @@ T threadgroup_max(
 }
 
 template <typename T>
-T threadgroup_min(
-    threadgroup opmath_t<T>* data,
-    T val,
-    unsigned idx,
-    unsigned size) {
-  auto rc = simd_min(static_cast<opmath_t<T>>(val));
+T threadgroup_min(threadgroup T* data, T val, unsigned idx, unsigned size) {
+  auto rc = simd_min(val);
   if (idx % simdgroup_size == 0) {
     data[idx / simdgroup_size] = rc;
   }

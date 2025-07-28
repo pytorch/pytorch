@@ -633,8 +633,9 @@ class MetalKernel(SIMDKernel):
                 src_dtype, ceildiv(acc_buf_size, self.simd_group_size)
             )
             src_metal_type = DTYPE_TO_METAL[src_dtype]
+            cast_value = f"static_cast<{src_metal_type}>({value})"
             if not self.multistage_reduction_entry:
-                val = value
+                val = cast_value
             else:
                 lim_fn = "lowest" if reduction_type.endswith("max") else "max"
                 limit_val = f"::metal::numeric_limits<{src_metal_type}>::{lim_fn}()"
@@ -642,7 +643,7 @@ class MetalKernel(SIMDKernel):
                     src_dtype, default_value=limit_val, is_threadgroup=False
                 )
                 self.compute.splice(
-                    f"{val} = ::c10::metal::{reduction_type}({val}, {value});"
+                    f"{val} = ::c10::metal::{reduction_type}({val}, {cast_value});"
                 )
             return self.cse.generate(
                 self.stores,
