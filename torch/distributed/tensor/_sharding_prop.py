@@ -149,6 +149,11 @@ class ShardingPropagator:
         self.op_strategy_funcs[op_overload] = strategy_func
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
+        else:
+            if schema_info is not None:
+                self.op_to_schema_info[op_overload] = schema_info
+            elif op_overload in self.op_to_schema_info:
+                del self.op_to_schema_info[op_overload]
 
     def _propagate_tensor_meta_non_cached(
         self, op_schema: OpSchema
@@ -282,6 +287,7 @@ class ShardingPropagator:
                 return TupleStrategy(
                     tuple(tuple_strategy) if isinstance(spec, tuple) else tuple_strategy
                 )
+            # below spec information can be redundant
             else:
                 return spec
 
