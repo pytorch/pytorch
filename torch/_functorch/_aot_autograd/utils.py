@@ -525,10 +525,24 @@ _S = TypeVar("_S")
 
 def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
     @wraps(f)
+    @simple_wraps(f)
     def inner(*args, **kwargs):
         return f(*args, **kwargs)[0]
 
     return inner
+
+
+_P2 = ParamSpec("_P2")
+_R = TypeVar("_R")
+_R2 = TypeVar("_R2")
+
+
+def simple_wraps(
+    f: Callable[_P, _R],
+) -> Callable[[Callable[_P2, _R2]], Callable[_P2, _R2]]:
+    # NB: omit ('__module__', '__name__', '__qualname__') for ease of
+    # debugging
+    return wraps(f, assigned=("__doc__", "__annotations__", "__type_params__"))
 
 
 def call_and_expect_output_descs(fn, args):
@@ -536,13 +550,26 @@ def call_and_expect_output_descs(fn, args):
     assert isinstance(outs_pair, tuple) and len(outs_pair) == 2, (fn, outs_pair)
     outs, outs_descs = outs_pair
     # The Tensor tests protects against the test when there are no outputs
-    assert pytree.tree_any(
-        lambda x: isinstance(x, AOTOutput), outs_descs
-    ) or not pytree.tree_any(lambda x: isinstance(x, torch.Tensor), outs), (
-        fn,
+    out_vals, out_spec = pytree.tree_flatten(outs)
+    out_desc_vals, out_desc_spec = pytree.tree_flatten(outs_descs)
+    assert out_spec == out_desc_spec, (
+        fn_wrappers(fn),
         outs,
         outs_descs,
+        out_spec,
+        out_desc_spec,
     )
+    assert not any(isinstance(x, AOTOutput) for x in out_vals), (
+        fn_wrappers(fn),
+        outs,
+        outs_descs,
+        out_vals,
+    )
+    assert all(
+        isinstance(d, AOTOutput)
+        for (x, d) in zip(out_vals, out_desc_vals)
+        if isinstance(x, (torch.Tensor, torch.SymInt)) or type(x) is int
+    ), (fn_wrappers(fn), outs, outs_descs, out_vals, out_desc_vals)
     return outs_pair
 
 
