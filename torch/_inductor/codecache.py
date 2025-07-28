@@ -75,7 +75,7 @@ from torch._inductor.cpp_builder import (
     get_ld_and_objcopy,
     get_name_and_dir_from_output_file_path,
     normalize_path_separator,
-    RunAsmBuildObject,
+    run_asm_build_object,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import (
@@ -1879,16 +1879,20 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 symbol_prefix: str,
             ) -> tuple[str, str]:
                 """
-                This function is used to handle zero consts situation. Because cpp standard is not allow zero size array:
+                This function handles zero-sized constants because the C++ standard prohibits zero-length arrays:
                 https://stackoverflow.com/questions/9722632/what-happens-if-i-define-a-0-size-array-in-c-c
-                1. On Windows, MSVC will report error C2466:
-                https://learn.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2466?view=msvc-170
-                So, we can use assmbely compiler to handle this situation.
-                2. On Windows, why not use Win32 asm to handle all path? Because of ml64 is only support upto align 16, it is
-                not the best performance.
-                3. It function can handle zero size case on both Windows and Linux, as that:
-                    A. On Linux, we added `-pedantic` to disable zero size array on C++ compiler.
-                    B. On Windows, msvc is not support zero size array by default.
+
+                On Windows (MSVC):
+                    The compiler reports error C2466 for zero-sized arrays:
+                    https://learn.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2466
+                    Solution: Use assembly compilation to handle this case.
+
+                Why not use Win32 assembly for all paths?
+                    ml64 only supports alignment up to 16 bytes, which isn't optimal for performance.
+
+                Cross-platform implementation:
+                    Linux: Added '-pedantic' to disable zero-sized arrays in C++ compiler
+                    Windows: MSVC naturally rejects zero-sized arrays by default
                 """
                 if _IS_WINDOWS:
                     # Windows ml64 is max support align to 16, but it is no effect to zero size data.
@@ -1950,9 +1954,7 @@ end
             )
             consts_o = object_builder.get_target_file_path()
             if use_asm_build is False and is_zero_size_consts:
-                src = normalize_path_separator(str(consts_s))
-                asm_cwd = normalize_path_separator(str(consts_s.parent))
-                RunAsmBuildObject(src, consts_o, asm_cwd)
+                run_asm_build_object(str(consts_s), consts_o, str(consts_s.parent))
             else:
                 object_builder.build()
 

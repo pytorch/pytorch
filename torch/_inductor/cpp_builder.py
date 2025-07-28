@@ -1907,15 +1907,15 @@ class CppBuilder:
             f.write(contents)
 
 
-def RunAsmBuildObject(src: str, target: str, cwd: str) -> None:
-    def get_asm_compuler() -> str:
+def run_asm_build_object(src: str, target: str, cwd: str) -> None:
+    def get_asm_compiler() -> str:
         if _IS_WINDOWS:
             ASM_CC = "ml64"
         else:
             ASM_CC = get_cpp_compiler()
             # Intel compiler is not support to compile asm, switch to gcc.
             if _is_intel_compiler(ASM_CC):
-                return "gcc"
+                ASM_CC = "gcc"
         return ASM_CC
 
     def get_command_line(asm_cc: str, src: str, target: str) -> str:
@@ -1928,6 +1928,10 @@ def RunAsmBuildObject(src: str, target: str, cwd: str) -> None:
 
         return cmd
 
-    asm_cc = get_asm_compuler()
-    cmd = get_command_line(asm_cc=asm_cc, src=src, target=target)
-    run_compile_cmd(cmd, cwd=cwd)
+    asm_cc = get_asm_compiler()
+    cmd = get_command_line(
+        asm_cc=asm_cc,
+        src=normalize_path_separator(src),
+        target=normalize_path_separator(target),
+    )
+    run_compile_cmd(cmd, cwd=normalize_path_separator(cwd))
