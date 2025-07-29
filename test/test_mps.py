@@ -8013,6 +8013,18 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
+    @serialTest()
+    def test_rand_2b_raises(self):
+        if MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("Crashes on MacOS-13")
+        int32_max = torch.iinfo(torch.int32).max
+        with self.assertRaises(RuntimeError):
+            # This used to crash with NDArray dimension length > INT_MAX
+            x = torch.randint(0, 10, (int32_max + 1,), dtype=torch.int8, device='mps')
+        x = torch.randint(0, 10, (int32_max,), dtype=torch.int8, device='mps')
+        self.assertEqual(x.numel(), int32_max)
+        del x
+
 
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):

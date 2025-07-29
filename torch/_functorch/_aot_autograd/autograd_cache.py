@@ -95,7 +95,7 @@ class FXGraphCacheMiss(BypassAOTAutogradCache):
 
 
 def should_use_remote_autograd_cache():
-    if torch.compiler.config.force_disable_caches:
+    if torch._inductor.config.force_disable_caches:
         return False
     if config.enable_remote_autograd_cache is not None:
         return config.enable_remote_autograd_cache
@@ -116,7 +116,7 @@ def should_use_remote_autograd_cache():
 
 
 def should_use_local_autograd_cache():
-    if torch.compiler.config.force_disable_caches:
+    if torch._inductor.config.force_disable_caches:
         return False
     return config.enable_autograd_cache
 
@@ -1350,7 +1350,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 # useful, remove it from the entry.
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(
-                    BundledAOTAutogradCacheArtifact.type(), precompile_key, content
+                    BundledAOTAutogradCacheArtifact.type(),
+                    precompile_key,
+                    entry,
+                    editable=True,
                 )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1

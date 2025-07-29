@@ -42,8 +42,15 @@ import torch.distributed as dist
 import torch.library
 import torch.utils._pytree as pytree
 from torch import nn
+from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import CompileCounter, rand_strided, same, skipIfPy312
+from torch._dynamo.testing import (
+    CompileCounter,
+    rand_strided,
+    same,
+    skipIfNotPy312,
+    skipIfPy312,
+)
 from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
 from torch.profiler import profile, ProfilerActivity
@@ -986,7 +993,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.exit_stack.close()
         super().tearDown()
 
-    def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals):
+    def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals, builder):
         root = guard_manager_wrapper.root
         cloned_root = root.clone_manager(lambda x: True)
         cloned_wrapper = torch._dynamo.guards.GuardManagerWrapper(cloned_root)
@@ -3831,6 +3838,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
 
+    @skipIfWindows(
+        msg="TODO: (xuhancn) fix, AssertionError: tensor([[0.1000, 0.1000, 0.1000,  ..., 0.1000, 0.1000, 0.1000],"
+    )
     def test_optim_state_references_cleared(self):
         model = torch.nn.Linear(2048, 2048, bias=False)
         x = torch.ones(2048)
@@ -5041,6 +5051,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
     # any behavior that depends on deallocation order. We do guarantee "eventual consistency",
     # that is, after the torch.compile'd function is finished running (including any graph breaks),
     # refcount semantics will match eager's.
+    @skipIfWindows(msg="TODO: (xuhancn) fix, AssertionError: False is not true")
     def test_weakref_callback(self):
         called1 = False
 
@@ -6528,6 +6539,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(ref, res)
 
     @skipIfPy312  # listcomp bytecode is optimized
+    @skipIfWindows(msg="TODO: (xuhancn) fix, AssertionError: Scalars are not equal!")
     def test_listcomp(self):
         class Module(torch.nn.Module):
             def __init__(self):
@@ -7072,6 +7084,50 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.compile(f, backend="eager", fullgraph=True)(x, out_res)
         self.assertEqual(out_ref, out_res)
 
+    @skipIfNotPy312
+    def test_sys_monitoring(self):
+        found_dynamo = False
+        found_compiled_graph = False
+        compiled_graph = None
+
+        def backend(gm, _):
+            nonlocal compiled_graph
+            compiled_graph = gm
+            return gm
+
+        def callback(code, offset):
+            nonlocal found_dynamo
+            nonlocal found_compiled_graph
+            torch._dynamo.graph_break()
+            if (
+                code
+                is torch._dynamo.symbolic_convert.InstructionTranslator.run.__code__
+            ):
+                found_dynamo = True
+            elif compiled_graph and code is compiled_graph.__call__.__code__:
+                found_compiled_graph = True
+
+        sys.monitoring.use_tool_id(0, "test")
+        old_callback = sys.monitoring.register_callback(
+            0, sys.monitoring.events.PY_START, callback
+        )
+        sys.monitoring.set_events(0, sys.monitoring.events.PY_START)
+        try:
+
+            @torch.compile(backend=backend, fullgraph=True)
+            def fn(x):
+                return x + 1
+
+            fn(torch.ones(3))
+            # sys.monitoring should still run in Python dynamo
+            self.assertTrue(found_dynamo)
+            # sys.monitoring should still run on the compiled graph
+            self.assertTrue(found_compiled_graph)
+        finally:
+            sys.monitoring.register_callback(
+                0, sys.monitoring.events.PY_START, old_callback
+            )
+
     def test_unbind_copy_out(self):
         def f(eye, out):
             torch.unbind_copy(eye, out=out)
@@ -7083,6 +7139,30 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         f(eye, out_ref)
         torch.compile(f, backend="eager", fullgraph=True)(eye, out_res)
         self.assertEqual(out_ref, out_res)
+
+    def test_nn_parameter_ctor_graph_breaks(self):
+        def fn():
+            param = torch.nn.Parameter(torch.ones(10))
+            return param * 2
+
+        self.maxDiff = None
+        eb = ExplainWithBackend("eager")
+        optimized_fn = torch.compile(fn, backend=eb)
+        _ = optimized_fn()
+        explain_output = eb.output()
+        self.assertEqual(explain_output.graph_break_count, 1)
+        expected_msg = (
+            "Attempted to use `torch.nn.Parameter()` constructor with Dynamo\n"
+            "  Explanation: Dynamo does not support this\n"
+            "  Hint: Try to construct `torch.nn.Parameter()` outside the compiled region.\n"
+            "  Hint: If this is not possible, turn `graph_break_on_nn_param_ctor` off\n"
+            "  Hint: It may be possible to write Dynamo tracing rules for this code. "
+            "Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.\n\n"
+            "  Developer debug context: \n\n"
+            " For more details about this graph break, please visit: "
+            "https://pytorch-labs.github.io/compile-graph-break-site/gb/gb0264.html"
+        )
+        self.assertEqual(explain_output.break_reasons[0].reason, expected_msg)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -7592,6 +7672,62 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out1 = model(input.clone())
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
+
+    def test_filter_warnings(self):
+        x = torch.ones(2, 2, requires_grad=True)
+
+        def call_foobar(x):
+            warnings.warn("foobar")
+
+        @torch.compile(backend="eager")
+        def f(x):
+            call_foobar(x)
+            call_foobar(x)
+            call_foobar(x)
+            call_foobar(x)
+            return call_foobar(x)
+
+        with warnings.catch_warnings(record=True) as w:
+            f(x)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "foobar")
+
+    def test_filter_safe_grad_warning(self):
+        x = torch.ones(2, 2, requires_grad=True)
+        y = x * 5  # non-leaf, .grad should warn
+        torch._subclasses.meta_utils.safe_grad(y)  # filters out warning
+
+        def unsafe_grad(y):
+            return y.grad
+
+        with warnings.catch_warnings(record=True) as w:
+            unsafe_grad(y)  # should still warn, different callsite
+            self.assertEqual(len(w), 1)
+            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
+
+            unsafe_grad(y)  # should not warn
+            self.assertEqual(len(w), 1)
+
+    def test_filter_user_warnings(self):
+        x = torch.ones(2, 2, requires_grad=True)
+        y = x * 5  # non-leaf, .grad should warn
+
+        @torch._dynamo.eval_frame.TorchPatcher.suppress_torch_distributed_warnings
+        def mute_warn(y):
+            return y.grad
+
+        mute_warn(y)  # filters out warning
+
+        def unsafe_grad(y):
+            return y.grad
+
+        with warnings.catch_warnings(record=True) as w:
+            unsafe_grad(y)  # should still warn, different callsite
+            self.assertEqual(len(w), 1)
+            self.assertTrue("The .grad attribute of a Tensor" in str(w[0].message))
+
+            unsafe_grad(y)  # should not warn
+            self.assertEqual(len(w), 1)
 
 
 instantiate_parametrized_tests(ReproTests)

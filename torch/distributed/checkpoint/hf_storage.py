@@ -67,6 +67,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
         token: Optional[str] = None,
         save_distributed: bool = False,
         enable_consolidation: bool = False,
+        consolidated_output_path: Optional[str] = None,
         thread_count_consolidation: int = 1,
     ) -> None:
         """
