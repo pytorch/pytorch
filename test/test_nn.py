@@ -8747,7 +8747,7 @@ class TestNNDeviceType(NNTestCase):
         Y_ref = rms_norm_reference_fn(X, shape, w, 0.5)
 
         self.assertEqual(Y_ref, Y)
-    
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     def test_rmsnorm_epsilon(self, device, dtype):
@@ -8769,7 +8769,7 @@ class TestNNDeviceType(NNTestCase):
 
         Y = torch.nn.functional.rms_norm(X, shape)
         Y_ref = rms_norm_reference_fn(X, shape)
-        
+
         self.assertEqual(Y_ref, Y)
 
     @onlyCPU
