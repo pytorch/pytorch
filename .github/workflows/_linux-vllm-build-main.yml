@@ -95,7 +95,7 @@ jobs:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner_prefix}}${{ inputs.runner }}
-    timeout-minutes: 240
+    timeout-minutes: 360
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
