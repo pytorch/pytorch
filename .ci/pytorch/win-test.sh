@@ -41,7 +41,7 @@ fi
 python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0 tensorboard==2.13.0 protobuf==5.29.4 pytest-subtests==0.13.1
 
 # Install Z3 optional dependency for Windows builds.
-python -m pip install z3-solver==4.12.2.0
+python -m pip install z3-solver==4.15.1.0
 
 # Install tlparse for test\dynamo\test_structured_trace.py UTs.
 python -m pip install tlparse==0.3.30

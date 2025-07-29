@@ -625,6 +625,21 @@ def randn_like(
     ).to(memory_format=get_like_layout(self, memory_format))
 
 
+def _get_shape_permutation_like(
+    self: torch.Tensor, layout: torch.layout
+) -> tuple[utils.ShapeType, utils.StrideType]:
+    assert layout == torch.strided
+
+    physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(self)
+    shape = [self.shape[l] for l in physical_layout]
+
+    permutation = [0] * len(shape)
+    for p, l in enumerate(physical_layout):
+        permutation[l] = p
+
+    return (shape, permutation)
+
+
 @register_decomposition(aten.full_like)
 def full_like(
     self: torch.Tensor,
@@ -637,14 +652,36 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> torch.Tensor:
-    return torch.full(
-        [*self.size()],
-        fill_value,
-        dtype=dtype or self.dtype,
-        layout=layout or self.layout,
-        device=device or self.device,
-        requires_grad=requires_grad,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    dtype = self.dtype if dtype is None else dtype
+    layout = self.layout if layout is None else layout
+    device = self.device if device is None else device
+
+    if memory_format != torch.preserve_format:
+        result = torch.full(
+            self.shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        return result.to(memory_format=memory_format)
+
+    else:
+        shape, permutation = _get_shape_permutation_like(self, layout)
+        result = torch.full(
+            shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        if permutation == list(range(len(permutation))):
+            return result
+        return result.permute(permutation).clone()
 
 
 @register_decomposition(aten.randint_like.default)
@@ -701,7 +738,7 @@ def randint(
 def linear_dynamic_fp16_unpacked_weight(
     input: torch.Tensor,
     weight: torch.Tensor,
-    bias: torch.Tensor,
+    bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     packed_weight = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16(weight)
     return torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight(
