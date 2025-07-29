@@ -132,7 +132,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
       default_scalar(0) {
   auto space = fmt.find(' ');
   if (space == std::string::npos) {
-    throw std::runtime_error("FunctionParameter(): missing type: " + fmt);
+    TORCH_CHECK(false, "FunctionParameter(): missing type: " + fmt);
   }
 
   auto type_str = fmt.substr(0, space);
@@ -155,8 +155,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   auto name_str = fmt.substr(space + 1);
   auto it = type_map.find(type_str);
   if (it == type_map.end()) {
-    throw std::runtime_error(
-        "FunctionParameter(): invalid type string: " + type_str);
+    TORCH_CHECK(false, "FunctionParameter(): invalid type string: " + type_str);
   }
   type_ = it->second;
 
@@ -1145,7 +1144,7 @@ auto FunctionParameter::_check(
     case ParameterType::DISPATCH_KEY_SET:
       return py::isinstance<c10::DispatchKeySet>(py::handle(obj));
     default:
-      throw std::runtime_error("unknown parameter type");
+      TORCH_CHECK(false, "unknown parameter type");
   }
 }
 
@@ -1202,7 +1201,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::DISPATCH_KEY_SET:
       return "DispatchKeySet";
     default:
-      throw std::runtime_error("unknown parameter type");
+      TORCH_CHECK(false, "unknown parameter type");
   }
 }
 
@@ -1325,8 +1324,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
   if (type_ == ParameterType::TENSOR ||
       type_ == ParameterType::DISPATCH_KEY_SET) {
     if (str != "None") {
-      throw std::runtime_error(
-          "default value for Tensor must be none, got: " + str);
+      TORCH_CHECK(false, "default value for Tensor must be none, got: " + str);
     }
   } else if (type_ == ParameterType::INT64 || type_ == ParameterType::SYM_INT) {
     default_int = atol(str.c_str());
@@ -1352,7 +1350,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
     }
   } else if (type_ == ParameterType::FLOAT_LIST) {
     if (str != "None") {
-      throw std::runtime_error("Defaults not supported for float[]");
+      TORCH_CHECK(false, "Defaults not supported for float[]");
     }
   } else if (type_ == ParameterType::SCALARTYPE) {
     if (str == "None") {
@@ -1360,7 +1358,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
     } else if (str == "torch.int64") {
       default_scalartype = at::ScalarType::Long;
     } else {
-      throw std::runtime_error("invalid default value for ScalarType: " + str);
+      TORCH_CHECK(false, "invalid default value for ScalarType: " + str);
     }
   } else if (type_ == ParameterType::LAYOUT) {
     if (str == "None") {
@@ -1370,15 +1368,15 @@ void FunctionParameter::set_default_str(const std::string& str) {
     } else if (str == "torch.sparse_coo") {
       default_layout = at::Layout::Sparse;
     } else {
-      throw std::runtime_error("invalid default value for layout: " + str);
+      TORCH_CHECK(false, "invalid default value for layout: " + str);
     }
   } else if (type_ == ParameterType::DEVICE) {
     if (str != "None") {
-      throw std::runtime_error("invalid device: " + str);
+      TORCH_CHECK(false, "invalid device: " + str);
     }
   } else if (type_ == ParameterType::STREAM) {
     if (str != "None") {
-      throw std::runtime_error("invalid stream: " + str);
+      TORCH_CHECK(false, "invalid stream: " + str);
     }
   } else if (type_ == ParameterType::STRING) {
     if (str != "None") {
@@ -1408,7 +1406,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::QSCHEME) { // NOLINT
     // throw std::runtime_error("ParameterType::QSCHEME");
   } else {
-    throw std::runtime_error("unknown parameter type");
+    TORCH_CHECK(false, "unknown parameter type");
   }
   default_value = str;
 }
@@ -1423,7 +1421,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
       deprecated(false) {
   auto open_paren = fmt.find('(');
   if (open_paren == std::string::npos) {
-    throw std::runtime_error("missing opening parenthesis: " + fmt);
+    TORCH_CHECK(false, "missing opening parenthesis: " + fmt);
   }
   name = fmt.substr(0, open_paren);
 
@@ -1446,10 +1444,10 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
       }
     }
     if (offset == std::string::npos) {
-      throw std::runtime_error("missing closing parenthesis: " + fmt);
+      TORCH_CHECK(false, "missing closing parenthesis: " + fmt);
     }
     if (offset == last_offset) {
-      throw std::runtime_error("malformed signature: " + fmt);
+      TORCH_CHECK(false, "malformed signature: " + fmt);
     }
 
     auto param_str = fmt.substr(last_offset, offset - last_offset);
