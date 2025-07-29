@@ -465,7 +465,6 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         from torch._subclasses.fake_tensor import extract_tensor_metadata
 
         fake_mode = detect_fake_mode(primals + filtered_grad_outs)
-        assert fake_mode is not None, "fake_mode should be enabled for HOPs"
         state = _CacheKeyState(fake_mode.shape_env)
 
         tangent_metadata: list[object] = []
@@ -608,7 +607,6 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         from torch._guards import detect_fake_mode
 
         fake_mode = detect_fake_mode(operands)
-        assert fake_mode is not None and fake_mode.shape_env is not None
         insert_deferred_runtime_asserts(
             graph,
             fake_mode.shape_env,
