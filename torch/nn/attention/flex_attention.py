@@ -89,8 +89,8 @@ class FlexKernelOptions(TypedDict, total=False):
     and numerical behavior. Most users will not need to specify these options as the
     default autotuning provides good performance.
 
-    The options can be prefixed with 'fwd_' or 'bwd_' to apply only to forward or
-    backward pass respectively. For example: 'fwd_BLOCK_M' and 'bwd_BLOCK_M1'.
+    The options can be prefixed with ``fwd_`` or ``bwd_`` to apply only to forward or
+    backward pass respectively. For example: ``fwd_BLOCK_M`` and ``bwd_BLOCK_M1``.
 
     Note:
       We currently do not provide any backward compatibility guarantees for these options.

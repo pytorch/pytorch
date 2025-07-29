@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from contextlib import contextmanager, ExitStack, nullcontext
+from collections.abc import Sequence
+from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, overload, TypeVar, Union
 
@@ -266,11 +267,12 @@ def _set_compilation_env():
 
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
-    fake_mode = detect_fake_mode(inputs)
-    tracing_mode = "real"
-    if fake_mode is None:
-        fake_mode = nullcontext()
-        tracing_mode = "fake"
+    fake_mode_det = detect_fake_mode(inputs)
+    fake_mode: AbstractContextManager = nullcontext()
+    tracing_mode = "fake"
+    if fake_mode_det is not None:
+        fake_mode = fake_mode_det
+        tracing_mode = "real"
 
     # Note: we need to turn off proxy tensor mode to avoid tracing infra
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
@@ -282,9 +284,12 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
-        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:
+        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:  # type: ignore[attr-defined]
             insert_deferred_runtime_asserts(
-                gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
+                gm,
+                fake_mode.shape_env,  # type: ignore[attr-defined]
+                "hoo_maybe_fake_tracing",
+                export=True,  # type: ignore[attr-defined]
             )
         return gm
 
@@ -718,6 +723,69 @@ def saved_tensors_and_symints(ctx):
     return tuple(args)
 
 
+def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
+    assert sum(chunk_sizes) == len(iterable), (
+        "the sum of all chunks needs to match the length of the iterable."
+    )
+    elements = []
+    idx = 0
+    for size in chunk_sizes:
+        elements.append(iterable[idx : idx + size])
+        idx += size
+    return elements
+
+
+def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
+    """
+    For a fn that accepts flat inputs and returns flat outputs:
+        fw_out = fn(*args),
+    this function returns:
+        grad_args = bw_fn(*args_and_grad_output)
+    with the following invariants:
+      1. args + fw_out has an 1-1 correspondence to args_and_grad_output
+      2. grad_args has an 1-1 corresponsence to args
+      3. for tensor arg whose requires_grad is False, its corresponding grad in
+         grad_args will be a zero tensor with the same shape.
+    """
+
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
+    from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
+
+    dummy_aot_config = AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+    n_primals = len(args)
+
+    bw_fn = create_joint(
+        prepare_fw_with_masks_all_requires_grad(fn), aot_config=dummy_aot_config
+    )
+
+    def flat_fn(*args_and_grad_outs):
+        primals = args_and_grad_outs[:n_primals]
+        tangents = args_and_grad_outs[n_primals:]
+        grad_args = bw_fn(primals, tangents)[1]
+        assert len(args) == len(grad_args)
+
+        maybe_clone = clone_outputs_aliasing_inputs(args_and_grad_outs)
+
+        return [
+            (
+                torch.zeros_like(arg)
+                if isinstance(arg, torch.Tensor) and grad is None
+                else maybe_clone(grad)
+            )
+            for grad, arg in zip(grad_args, primals)
+        ]
+
+    return flat_fn
+
+
 def get_dummy_aot_autograd_config():
     from torch._functorch.aot_autograd import AOTConfig
 
@@ -791,6 +859,10 @@ def check_input_alias_and_mutation(
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
+def _tensor_storage(t) -> StorageWeakRef:
+    return StorageWeakRef(t._typed_storage())
+
+
 def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
     fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
@@ -839,9 +911,6 @@ def check_input_alias_and_mutation_return_outputs(
                     raise RuntimeError("Only fake tensor is allowed")
                 return t._version
             return None
-
-        def _tensor_storage(t) -> StorageWeakRef:
-            return StorageWeakRef(t._typed_storage())
 
         def _get_shape_env(
             fake_args,
