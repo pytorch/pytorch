@@ -390,6 +390,7 @@ if torch.backends.mps.is_available():
             "gcd": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
+            "hash_tensor": None,
             "heaviside": None,
             "igamma": None,
             "igammac": None,
@@ -431,7 +432,6 @@ if torch.backends.mps.is_available():
             "nn.functional.max_unpool1dgrad": None,
             "nn.functional.max_unpool2dgrad": None,
             "nn.functional.max_unpool3dgrad": None,
-            "nn.functional.avg_pool3d": None,
             "nn.functional.ctc_loss": None,
             "nn.functional.embedding_bag": None,
             "nn.functional.max_unpool1d": None,
@@ -863,6 +863,7 @@ if torch.backends.mps.is_available():
             "round": [torch.float16],
             # topk fails with duplicate indices
             "topk": [torch.float16],
+            "nn.functional.avg_pool3d": [torch.float32],
         }
 
         MACOS_BEFORE_13_3_XFAILLIST_GRAD = {

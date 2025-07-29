@@ -439,6 +439,13 @@ class RingAttentionTest(DTensorTestBase):
             )
 
 
+# Compile the flex_attention function
+compiled_flex_attention = torch.compile(flex_attention, dynamic=False, fullgraph=True)
+compiled_create_block_mask = torch.compile(
+    create_block_mask, dynamic=False, fullgraph=True
+)
+
+
 class RingFlexAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
@@ -447,11 +454,6 @@ class RingFlexAttentionTest(DTensorTestBase):
     def _test_ring_flex_attention(self, qkv_size) -> None:
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
-
-        # Compile the flex_attention function
-        compiled_flex_attention = torch.compile(
-            flex_attention, dynamic=False, fullgraph=True
-        )
 
         torch.cuda.manual_seed(10)
         dtype = torch.float32
@@ -479,7 +481,7 @@ class RingFlexAttentionTest(DTensorTestBase):
             requires_grad=True,
         )
 
-        block_mask = create_block_mask(
+        block_mask = compiled_create_block_mask(
             causal_mask,
             B=1,
             H=1,
@@ -499,15 +501,6 @@ class RingFlexAttentionTest(DTensorTestBase):
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
-        # NOTE: call create_block_mask() within TorchFunctionMode would cause error in create_fw_bw_graph
-        shard_q_size = q.shape[2] // self.world_size
-        cp_block_mask = torch.distributed.tensor.experimental._attention.rewrite_context_parallel_block_mask(
-            block_mask,
-            shard_q_size,
-            device_mesh.get_rank(),
-            device_mesh.size(),
-            device_mesh.device_type,
-        )
         # NOTE: cp needs to know the sharding dimension
         # TODO: see if this can be moved to the cp context
         from torch.distributed.tensor.experimental._attention import _set_cp_global_var
@@ -516,11 +509,6 @@ class RingFlexAttentionTest(DTensorTestBase):
         self.assertEqual(
             torch.distributed.tensor.experimental._attention._cp_global_vars.cp_shard_dim,
             2,
-        )
-        _set_cp_global_var("cp_block_mask", cp_block_mask)
-        self.assertEqual(
-            torch.distributed.tensor.experimental._attention._cp_global_vars.cp_block_mask,
-            cp_block_mask,
         )
 
         # NOTE: we do not test load balance here
@@ -536,34 +524,48 @@ class RingFlexAttentionTest(DTensorTestBase):
         cp_k = k.detach().clone()
         cp_v = v.detach().clone()
 
+        # create block_mask for CP
+        from torch.distributed.tensor.experimental._attention import (
+            create_cp_block_mask,
+        )
+
+        # NOTE: call create_block_mask() within TorchFunctionMode would cause error in create_fw_bw_graph
+        cp_block_mask = create_cp_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            Q_LEN=query_tokens,
+            KV_LEN=context_tokens,
+            device_mesh=device_mesh,
+        )
+
+        # shard qkv on seq_dim
+        shard_dim = 2
+
         with context_parallel(
             device_mesh,
             buffers=[cp_q, cp_k, cp_v],
-            buffer_seq_dims=[2, 2, 2],
+            buffer_seq_dims=[shard_dim] * 3,
         ):
             cp_q.requires_grad = True
             cp_k.requires_grad = True
             cp_v.requires_grad = True
 
-            # this is the block_mask created within the training step
-            # NOTE: flex_attention checks block_mask shape and input shape before
-            # calling into flex_attention_hop.
-            block_mask_post_sharding = create_block_mask(
-                causal_mask,
-                B=1,
-                H=1,
-                Q_LEN=cp_q.shape[2],
-                KV_LEN=cp_k.shape[2],
-                device=self.device_type,
-            )
-
             cp_out, cp_lse = compiled_flex_attention(
                 cp_q,
                 cp_k,
                 cp_v,
-                block_mask=block_mask_post_sharding,
+                block_mask=cp_block_mask,
                 return_lse=True,
             )
+
+            # check block_mask rewrite doesn't escape to the outside
+            assert cp_block_mask.seq_lengths == (
+                cp_q.size(dim=shard_dim),
+                cp_k.size(dim=shard_dim),
+            )
+
+            # backward run
             cp_out.sum().backward()
 
             cp_q.requires_grad = False

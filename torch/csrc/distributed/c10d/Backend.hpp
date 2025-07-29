@@ -111,7 +111,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str(
-            "Backend ", getBackendName(), " does not implement endCoalescing"));
+            "Backend ",
+            getBackendName(),
+            " does not implement getBackendOptions."));
   }
 
   virtual c10::intrusive_ptr<Work> broadcast(
@@ -389,8 +391,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
-      const c10::intrusive_ptr<Options> opts) {
+      const c10::intrusive_ptr<Options>& opts) {
     TORCH_CHECK(
         false,
         "Backend ",
@@ -400,7 +403,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
 
   virtual c10::intrusive_ptr<Backend> merge(
       const c10::intrusive_ptr<Store>& store,
-      const c10::intrusive_ptr<Options> opts,
+      const c10::intrusive_ptr<Options>& opts,
       const int& rank,
       const int& size) {
     TORCH_CHECK(

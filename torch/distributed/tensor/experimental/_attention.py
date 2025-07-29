@@ -34,6 +34,11 @@ from torch.overrides import TorchFunctionMode
 __all__ = ["context_parallel", "set_rotate_method"]
 
 
+compiled_create_block_mask = torch.compile(
+    create_block_mask, dynamic=False, fullgraph=True
+)
+
+
 class _CausalBehavior(Enum):
     SKIP = None
     NOT_IS_CAUSAL = False
@@ -47,6 +52,25 @@ class _RotateMethod(Enum):
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
+
+
+def _need_scaling() -> bool:
+    if hasattr(torch.version, "hip") and torch.version.hip is not None:
+        gcn_arch_name = torch.cuda.get_device_properties("cuda").gcnArchName
+        _is_ck_supported = False
+        for arch in ["gfx942", "gfx950"]:
+            if arch in gcn_arch_name:
+                _is_ck_supported = True
+        # Check the function exists
+        _preferred_rocm_fa_library = torch.backends.cuda.preferred_rocm_fa_library
+        _CK_BACKEND = torch.backends.cuda._ROCmFABackends["ck"]
+        # Note: it is possible that CK is selected but not compiled in the binary.
+        if _is_ck_supported and _preferred_rocm_fa_library() == _CK_BACKEND:
+            # Unsure about CK's behavior, keep logsumexp untouched
+            return False
+        return True
+    else:
+        return False
 
 
 class _DispatchMode(Enum):
@@ -80,10 +104,6 @@ class _ContextParallelGlobalVars:
     # This variable stores the TorchFunctionMode singleton because using multiple TF
     # instances for dispatching may trigger recompilations
     torch_function_mode: Optional[TorchFunctionMode] = None
-    # NOTE: call create_block_mask() within TorchFunctionMode would cause error
-    # in create_fw_bw_graph so we need to create it outside FlexAttention dispatch
-    # and store it here
-    cp_block_mask: Optional[BlockMask] = None
 
 
 _cp_global_vars = _ContextParallelGlobalVars()
@@ -399,9 +419,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(
-        group, dist.ProcessGroup
-    ), "process group must be single dimension"
+    assert isinstance(group, dist.ProcessGroup), (
+        "process group must be single dimension"
+    )
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -474,6 +494,8 @@ def _templated_ring_attention(
             is_causal=is_causal_behavior.value,
             **kwargs,
         )
+        if _need_scaling():
+            logsumexp *= 0.6931471805599453
         sdpa_merger.step(out, logsumexp, partial)
 
     return *sdpa_merger.results(), *rest
@@ -660,6 +682,7 @@ def _scaled_dot_product_ring_flash_attention(
     if return_debug_mask:
         raise NotImplementedError("return_debug_mask is not supported yet")
 
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention(
@@ -694,6 +717,7 @@ def _scaled_dot_product_ring_efficient_attention(
         # CP requires compute_log_sumexp to be True because it always merges LSE
         compute_log_sumexp = True
 
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention(
@@ -731,6 +755,7 @@ def _scaled_dot_product_ring_cudnn_attention(
         # CP requires compute_log_sumexp to be True because it always merges LSE
         compute_log_sumexp = True
 
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention(
@@ -768,6 +793,7 @@ def _scaled_dot_product_ring_flash_attention_backward(
     *,
     scale: Optional[float] = None,
 ) -> tuple[torch.Tensor, ...]:
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention_backward(
@@ -810,6 +836,7 @@ def _scaled_dot_product_ring_efficient_attention_backward(
     *,
     scale: Optional[float] = None,
 ) -> tuple[torch.Tensor, ...]:
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention_backward(
@@ -853,6 +880,7 @@ def _scaled_dot_product_ring_cudnn_attention_backward(
     *,
     scale: Optional[float] = None,
 ) -> tuple[torch.Tensor, ...]:
+    # TODO: remove this hardcoding
     seq_dim = 2
     group = mesh.get_group()
     return _templated_ring_attention_backward(
@@ -1114,13 +1142,16 @@ class _AttentionContextParallel(ParallelStyle):
         return tuple(out)
 
 
-def rewrite_context_parallel_block_mask(
-    block_mask: BlockMask,
-    shard_q_size: int,
-    cp_rank: int,
-    cp_group_size: int,
-    device_type: str,
+def create_cp_block_mask(
+    mask_mod: _mask_mod_signature,
+    B: Optional[int],
+    H: Optional[int],
+    Q_LEN: int,
+    KV_LEN: int,
+    device_mesh: DeviceMesh,
 ) -> BlockMask:
+    from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
+
     def _rewrite_mask_mod(
         mask_mod: _mask_mod_signature,
         rank: int,
@@ -1146,28 +1177,24 @@ def rewrite_context_parallel_block_mask(
             kv_idx,
         )
 
-    Q_LEN, KV_LEN = block_mask.seq_lengths
-    Q_BLOCK_SIZE, KV_BLOCK_SIZE = block_mask.BLOCK_SIZE
-    # TODO: support other KV block sizes
-    assert Q_BLOCK_SIZE == 128
-    assert KV_BLOCK_SIZE == 128
-    mask_mod = block_mask.mask_mod
-
-    # rewrite block_mask's mask_mod
-    cp_mask_mod = _rewrite_mask_mod(
-        mask_mod, cp_rank, cp_group_size, Q_BLOCK_SIZE, shard_q_size
-    )
-
-    cbm = torch.compile(create_block_mask, fullgraph=True)
-    return cbm(
-        cp_mask_mod,
-        1,
-        1,
-        Q_LEN // cp_group_size,
+    cp_rank = device_mesh.get_local_rank()
+    cp_group_size = device_mesh.size()
+    Q_SHARD_LEN = Q_LEN // cp_group_size
+    block_size = _DEFAULT_SPARSE_BLOCK_SIZE
+    block_mask = compiled_create_block_mask(
+        _rewrite_mask_mod(mask_mod, cp_rank, cp_group_size, block_size, Q_SHARD_LEN),
+        B,
+        H,
+        Q_SHARD_LEN,
         KV_LEN,
-        device=device_type,
-        BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
+        device=device_mesh.device_type,
+        BLOCK_SIZE=(block_size, block_size),
     )
+    # flex_attention function checks the following shape so we need to rewrite:
+    # key.size(-2) == block_mask.seq_lengths[1]
+    seq_lengths = block_mask.seq_lengths
+    block_mask.seq_lengths = (seq_lengths[0], seq_lengths[1] // cp_group_size)
+    return block_mask
 
 
 @contextlib.contextmanager
@@ -1276,9 +1303,10 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
                 assert isinstance(query, torch.Tensor)
                 assert isinstance(key, torch.Tensor)
                 assert isinstance(value, torch.Tensor)
-                # assert isinstance(score_mod, callable)
                 assert isinstance(block_mask, tuple)
 
+                """
+                # TODO: use all_gather_autograd() instead
                 query, global_key, global_value = CPFlexAttentionPreOp.apply(
                     query,
                     key,
@@ -1286,15 +1314,27 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
                     self._device_mesh,
                     _cp_global_vars.cp_shard_dim,
                 )
+                """
+                global_key = ft_c.all_gather_tensor_autograd(
+                    key, _cp_global_vars.cp_shard_dim, self._device_mesh
+                )
+                global_value = ft_c.all_gather_tensor_autograd(
+                    value, _cp_global_vars.cp_shard_dim, self._device_mesh
+                )
 
-                cp_block_mask = _cp_global_vars.cp_block_mask
-                assert cp_block_mask is not None
+                # shape rewrite: because torch.nn.flex_attention() checks
+                # the QKV shape against the block_mask object, we need to
+                # manually rewrite the shape info in block_mask tuple to
+                # make it compatible with q_shard, k_global, v_global
+                if block_mask[1] != global_key.size(-2):
+                    block_mask = (block_mask[0], global_key.size(-2), *block_mask[2:])
+
                 return func(
                     query,
                     global_key,
                     global_value,
                     score_mod,
-                    cp_block_mask.as_tuple(),
+                    block_mask,
                     *args[5:],
                     **kwargs,
                 )
