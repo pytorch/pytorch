@@ -287,7 +287,6 @@ class ShardingPropagator:
                 return TupleStrategy(
                     tuple(tuple_strategy) if isinstance(spec, tuple) else tuple_strategy
                 )
-            # below spec information can be redundant
             else:
                 return spec
 
@@ -304,12 +303,51 @@ class ShardingPropagator:
             schema_info=op_schema.schema_info,
         )
 
+    def _maybe_update_redistribute_schema(self, op_info: OpInfo):
+        op_schema = op_info.schema
+        assert op_info.output_sharding
+        # 1. Update args for view related ops. Shape and stride args need to be
+        #    modified for view ops and new factory ops, potentially
+        if op_schema.op in self.op_to_shape_and_stride_idx:
+            # assume those ops only have one Tensor output
+            assert isinstance(op_info.output_sharding.output_spec, DTensorSpec)
+            # It happens when the output has the same shape as the input and the
+            # input placements are not all Replicate().
+            output_sharding = op_info.output_sharding
+            if op_info.output_sharding.output_spec.is_sharded():
+                schema = output_sharding.redistribute_schema or op_schema
+                assert isinstance(output_sharding.output_spec, DTensorSpec)
+                assert isinstance(output_sharding.output_spec.tensor_meta, TensorMeta)
+                suggestion_schema = self._adjust_shape_and_stride_args(
+                    output_sharding.output_spec.tensor_meta,
+                    schema,
+                    output_sharding.output_spec,
+                )
+                output_sharding.redistribute_schema = suggestion_schema
+                output_sharding.needs_redistribute = True
+            op_info.output_sharding = output_sharding
+        # 2. update to redistributed_schema's nontensor args
+        elif op_info.output_sharding.needs_redistribute:
+            new_args_schema = []
+            assert op_info.output_sharding.redistribute_schema
+            for origin_arg, redistribute_arg in zip(
+                op_info.flat_args_schema,
+                op_info.output_sharding.redistribute_schema.args_schema,
+            ):
+                if isinstance(redistribute_arg, DTensorSpec):
+                    new_args_schema.append(redistribute_arg)
+                else:
+                    new_args_schema.append(origin_arg)  # type: ignore[arg-type]
+            op_info.output_sharding.redistribute_schema.args_schema = tuple(
+                new_args_schema
+            )
+
     def propagate(self, op_info: OpInfo) -> None:
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
         # and compile autograd initial tracing, which do not need to be as fast as
-        # eagermode DTensor usages.
+        # eager mode DTensor usages.
         if _are_we_tracing():
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
@@ -317,6 +355,9 @@ class ShardingPropagator:
                 OutputSharding, self.propagate_op_sharding(op_info.schema)
             )
         op_info.output_sharding = output_sharding
+        # handle view op and make redistribute_schema in output_sharding the
+        # source of truth
+        self._maybe_update_redistribute_schema(op_info)
 
     def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
         """
@@ -370,20 +411,6 @@ class ShardingPropagator:
                         op_schema.op, tuple(expected_input_specs), {}
                     )
                     suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
-
-                # shape and stride args need to be modified for
-                # view ops and new factory ops, potentially
-                if op_schema.op in self.op_to_shape_and_stride_idx:
-                    assert isinstance(output_strategy.output_spec, DTensorSpec)
-                    # It happens when the output has the same shape as the input
-                    # and the input placements are not all Replicate().
-                    if output_strategy.output_spec.is_sharded():
-                        schema = suggestion_schema or op_schema
-                        assert isinstance(out_tensor_meta, TensorMeta)
-                        suggestion_schema = self._adjust_shape_and_stride_args(
-                            out_tensor_meta, schema, output_strategy.output_spec
-                        )
-                        needs_redistribute = True
 
                 # construct output spec for the op
                 if op_schema.return_type_tuple_tensor_like():

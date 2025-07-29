@@ -306,11 +306,8 @@ class OpDispatcher:
                 else:
                     new_local_args.append(local_tensor)
             else:
-                # Due to the strategy hashing, we should use the
-                # [args/kwargs]_schema that is not DTensorSpec from
-                # op_info.schema instead of
-                # info.output_sharding.redistribute_schema.
-                new_local_args.append(arg_spec)
+                new_local_args.append(reshard_arg_spec)
+
         op_info.local_args = tuple(new_local_args)
 
     def unwrap_to_op_info(
