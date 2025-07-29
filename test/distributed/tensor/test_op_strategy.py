@@ -454,16 +454,28 @@ def op_strategy_context(op_overload, strategy_func, schema_info=None):
         None
     """
     propagator = DTensor._op_dispatcher.sharding_propagator
+    _origin_op_strategy_funcs = None
+    _origin_op_strategy_schema = None
     try:
         # register the op strategy
+        if op_overload in propagator.op_strategy_funcs:
+            _origin_op_strategy_funcs = propagator.op_strategy_funcs[op_overload]
+            del propagator.op_strategy_funcs[op_overload]
+        if op_overload in propagator.op_to_schema_info:
+            _origin_op_strategy_schema = propagator.op_to_schema_info[op_overload]
+            del propagator.op_to_schema_info[op_overload]
         register_op_strategy(op_overload, schema_info=schema_info)(strategy_func)
         yield
     finally:
         # clear this op strategy cache
-        if op_overload in propagator.op_strategy_funcs:
+        if _origin_op_strategy_funcs is None:
             del propagator.op_strategy_funcs[op_overload]
-        if op_overload in propagator.op_to_schema_info:
+        else:
+            propagator.op_strategy_funcs[op_overload] = _origin_op_strategy_funcs
+        if _origin_op_strategy_schema is None:
             del propagator.op_to_schema_info[op_overload]
+        else:
+            propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
         propagator.propagate_op_sharding.cache.cache_clear()
 
 
