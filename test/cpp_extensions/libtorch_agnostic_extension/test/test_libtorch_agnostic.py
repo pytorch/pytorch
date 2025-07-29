@@ -1,5 +1,6 @@
 # Owner(s): ["module: cpp"]
 
+import math
 from pathlib import Path
 
 import torch
@@ -206,6 +207,16 @@ if not IS_WINDOWS:
             out = libtorch_agnostic.ops.my_zero_(t)
             self.assertEqual(id(out), id(t))
             self.assertEqual(out, torch.zeros_like(t))
+
+        def test_fill_infinity(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(3, 4, device=device)
+            out = libtorch_agnostic.ops.fill_infinity(t)
+
+            self.assertEqual(id(out), id(t))
+            expected = torch.full_like(t, math.inf)
+            self.assertEqual(out, expected)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
