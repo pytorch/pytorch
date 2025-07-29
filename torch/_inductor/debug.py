@@ -694,7 +694,7 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
     V.debug.ir_post_fusion(nodes)
 
 
-def _dump_collective_schedule(schedule: list[str | None]) -> None:
+def _dump_collective_schedule(schedule: list[Union[str, None]]) -> None:
     try:
         trace_structured(
             "artifact",
