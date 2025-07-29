@@ -181,7 +181,7 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
       c10::Stream stream) {
     checkDeviceIndex(device);
     BlockT* block = nullptr;
-    BlockT* block = impls_[device]->malloc(device, size, stream);
+    block = impls_[device]->malloc(device, size, stream);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
