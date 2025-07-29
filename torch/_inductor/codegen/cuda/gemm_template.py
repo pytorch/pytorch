@@ -45,6 +45,7 @@ from .cutlass_utils import (
 
 
 GemmOperation = Any
+EVTArgRenames = Any
 
 log = logging.getLogger(__name__)
 
@@ -1212,7 +1213,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
             assert acc_dtype, "Could not determine accumulator dtype"
 
-            evt_name, evt_args, evt_code = self._render_evt(
+            evt_name, evt_args, evt_code, evt_arg_renames = self._render_evt(
                 op,
                 evt_py_code,
                 var_name_to_buffer_name,
@@ -1228,6 +1229,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 Y,
                 *extra_inputs,
             ]
+            input_names = [evt_arg_renames.get(name) for name in input_names]
+            output_names = [evt_arg_renames.get(name) for name in output_names]
+
             names_str = ",".join(
                 ["X", "W", "Bias", *input_names, "Y", *output_names, *extra_names]
             )
@@ -1313,7 +1317,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         buffer_renames: dict[str, str],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
-    ) -> tuple[str, str, str]:  # type: ignore[name-defined]  # noqa: F821
+    ) -> tuple[str, str, str, EVTArgRenames]:  # type: ignore[name-defined]  # noqa: F821
         raise NotImplementedError("_render_evt in CUTLASSGemmTemplate not implemented")
 
 
@@ -1474,7 +1478,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         var_name_to_buffer_name: dict[str, str],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
-    ) -> tuple[str, str, str]:  # type: ignore[name-defined]  # noqa: F821
+    ) -> tuple[str, str, str, EVTArgRenames]:
         from .cutlass_lib_extensions.evt_extensions import create_example_tensors, trace
 
         name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
@@ -1494,7 +1498,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             name_to_buffer,  # type: ignore[arg-type]
             V.graph.sizevars.size_hint,
         )
-        evt_name, evt_args, evt_code = trace(
+        evt_name, evt_args, evt_code, arg_renames = trace(
             evt_py_code,
             examples,
             acc_dtype,
@@ -1509,6 +1513,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             evt_name,
             evt_args,
             evt_code,
+            arg_renames,
         )
 
     def _shape_match(
