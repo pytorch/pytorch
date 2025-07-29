@@ -15,7 +15,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
     echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
 
-
 # install Python and other dependencies if it does not existed
 RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
       echo "Installing Python ${PYTHON_VERSION}..." && \
@@ -100,7 +99,6 @@ RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 FROM ${BASE_IMAGE} AS base
 USER root
 
-
 # install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
     if ! python3 -m uv --version >/dev/null 2>&1; then \
@@ -146,7 +144,6 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
         echo "[INFO] Installing torch nightly with latest one"; \
         uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128; \
     fi
-
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system numba==0.61.2
@@ -285,7 +282,6 @@ RUN echo "VLLM INSTALLED IMAGE"
 # get the nightly torch version used in the build to make sure the version is the same
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 COPY --from=build /workspace/dist ./tmp/vllm-dist
-
 RUN echo "[DEBUG] Listing current directory before torch install step:" && \
     ls -al && \
     echo "[DEBUG] Showing torch_build_versions.txt content:" && \
@@ -300,12 +296,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     fi
 ENV UV_HTTP_TIMEOUT=500
 
-
+# default mount file as placeholder, this just avoid the mount error
+# change to a different vllm folder if this does not exist anymore
+ARG TORCH_WHEELS_PATH="./requirements"
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     --mount=type=cache,target=/root/.cache/uv \
-    echo "[INFO] Listing /tmp/torch_wheels content:" && \
-    ls -al /tmp/torch_wheels && \
-    echo "[INFO] Done listing" && \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/torch*.whl >/dev/null 2>&1; then \
         echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
         torch_whl=$(find /tmp/torch_wheels -maxdepth 1 -name 'torch-*.whl' -print -quit); \
@@ -317,14 +312,10 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
         uv pip install --system "${torch_whl}[opt-einsum]"; \
         uv pip install --system "${vision_whl}"; \
         uv pip install --system "${audio_whl}"; \
-    elif [ -n "$PINNED_TORCH_VERSION" ]; then \
-        echo "[INFO] Installing pinned torch nightly version: $PINNED_TORCH_VERSION"; \
-        uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
     else \
-        echo "[INFO] Installing torch nightly with latest one"; \
-        uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
+        uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
     fi
-
 # install the vllm wheel
 RUN --mount=type=bind,from=build,src=/workspace/dist,target=/vllm-workspace/vllm-dist \
     --mount=type=cache,target=/root/.cache/uv \
