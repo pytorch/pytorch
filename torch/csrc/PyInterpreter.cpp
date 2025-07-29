@@ -485,7 +485,6 @@ c10::SymBool ConcretePyInterpreterVTable::sym_is_contiguous(
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
   py::object out;
-  // For backwards compatibility
   out = torchDispatchFromTensorImpl(
       self,
       "is_contiguous",
