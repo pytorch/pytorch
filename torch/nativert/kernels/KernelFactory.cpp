@@ -148,7 +148,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
 
     bool matched = false;
     for (const auto& [_, handler] : handlers) {
-      if (handler.match(node, executorConfig, targetDevice)) {
+      if (handler.match(node, executorConfig)) {
         auto [kernel, delegate] = handler(
             node,
             weights,
@@ -253,7 +253,8 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
     }
   }
 
-  if (executorConfig.enableStaticCPUKernels) {
+  if (executorConfig.enableStaticCPUKernels &&
+      !opsWithoutStaticDispatchCount.empty()) {
     std::stringstream ss;
     for (const auto& [op, count] : opsWithoutStaticDispatchCount) {
       ss << op << ": " << count << ", \n";
