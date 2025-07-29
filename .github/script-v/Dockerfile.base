@@ -130,7 +130,7 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     echo "[INFO] Done listing" && \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/torch*.whl >/dev/null 2>&1; then \
         echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
-        torch_whl=$(find /tmp/torch_wheels -name 'torch-*.whl' | head -n1 | xargs); \
+        torch_whl=$(find /tmp/torch_wheels -maxdepth 1 -name 'torch-*.whl' -print -quit); \
         echo "Found: '${torch_whl}'"; \
         vision_whl=$(find /tmp/torch_wheels/vision -name 'torchvision*.whl' | head -n1 | xargs); \
         echo "Found: '${vision_whl}'"; \
