@@ -8749,16 +8749,20 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(Y_ref, Y)
     
     @onlyNativeDeviceTypes
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     def test_rmsnorm_epsilon(self, device, dtype):
         def rms_norm_reference_fn(i, normalized_shape):
             eps = torch.finfo(i.dtype).eps
             ndim = i.ndim
             dims = [ndim - i - 1 for i in range(len(normalized_shape))]
-            result = i * torch.rsqrt(
-                i.pow(2).mean(dim=dims, keepdim=True) + eps
+            if i.dtype is not torch.float64:
+                upcasted_i = i.float()
+            else:
+                upcasted_i = i
+            result = upcasted_i * torch.rsqrt(
+                upcasted_i.pow(2).mean(dim=dims, keepdim=True) + eps
             )
-            return result
+            return result.type_as(i)
 
         shape = (2, 2)
         X = torch.tensor([[1e-12, -1e-12], [1e-12, -1e-12]], dtype=dtype, device=device)
