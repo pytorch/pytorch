@@ -27,7 +27,6 @@ from .common import (
     IndentedBuffer,
     OpOverrides,
     PythonPrinter,
-    SizeArg,
 )
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
@@ -590,7 +589,9 @@ class MetalKernel(SIMDKernel):
             if isinstance(rd.numel, sympy.Integer):
                 acc_buf_size *= rd.numel
             else:
-                acc_buf_size *= sympy.Symbol(f"{rd.prefix}numel", integer=True, positive=True)
+                acc_buf_size *= sympy.Symbol(
+                    f"{rd.prefix}numel", integer=True, positive=True
+                )
 
         acc_buf_size = sympy.Min(acc_buf_size, self.max_threadgroup_size)
 
@@ -617,7 +618,11 @@ class MetalKernel(SIMDKernel):
         if reduction_type in ["prod", "sum"]:
             acc_dtype = DTYPE_TO_COMPUTATION_DTYPE[src_dtype]
             # Set it to the max simd group size if it's a dynamic value
-            elem_cout = ceildiv(acc_buf_size, self.simd_group_size) if isinstance(acc_buf_size, sympy.Integer) else self.simd_group_size
+            elem_cout = (
+                ceildiv(acc_buf_size, self.simd_group_size)
+                if isinstance(acc_buf_size, sympy.Integer)
+                else self.simd_group_size
+            )
             acc_buf = self._new_idxvar(acc_dtype, elem_cout)
 
             if not self.multistage_reduction_entry:
@@ -724,45 +729,34 @@ class MetalKernel(SIMDKernel):
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
-        # breakpoint()
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
 
         numel_hint = V.graph.sizevars.symbolic_hint(entry.root.numel)
 
-        if (
-            isinstance(entry.root.numel, sympy.Integer) and (
-            not entry.is_reduction or
-            numel_hint <= self.max_threadgroup_size)
+        if not entry.is_reduction or (
+            isinstance(entry.root.numel, sympy.Integer)
+            and numel_hint <= self.max_threadgroup_size
         ):
             self.indexing_code.writeline(
                 f"{self.index_dtype} {entry.name} = {index_str};"
             )
             return
 
-
-        # (r0_0 < input_size) ? in_ptr0[r0_0] : 0.0f;
-
-        acc_size = entry.root.numel if isinstance(entry.root.numel, sympy.Integer) else sympy.Symbol(f"{entry.root.prefix}numel", integer=True, positive=True)
-
-        # if isinstance(acc_size, sympy.Symbol):
-        #     self.body.writeline(
-        #         f"for(auto {entry.name}_cnt = {index_str}; {entry.name}_cnt < {acc_size}; {entry.name}_cnt += {self.max_threadgroup_size}) {{"
-        #     )
-        #     with self.body.indent():
-        #         self.body.writeline(
-        #             f"{self.index_dtype} {entry.name} = {loop_size_str} * {index_str} + {entry.name}_cnt;"
-        #         )
-        #         return
+        acc_size = (
+            entry.root.numel
+            if isinstance(entry.root.numel, sympy.Integer)
+            else sympy.Symbol(f"{entry.root.prefix}numel", integer=True, positive=True)
+        )
 
         self.multistage_reduction_entry.append(entry)
         # When reducing the tensor whose size exceeds max threadgroup size
         # loop over extra indices per reduction thread and perform part of the operation
         # using values in the shared memory
 
-        loop_size = (
-            acc_size + float(self.max_threadgroup_size - 1)
-        ) // float(self.max_threadgroup_size)
+        loop_size = (acc_size + float(self.max_threadgroup_size - 1)) // float(
+            self.max_threadgroup_size
+        )
         loop_size_str = self.sexpr(loop_size)
 
         self.body.writeline(
@@ -779,7 +773,10 @@ class MetalKernel(SIMDKernel):
                 )
 
             # Check that reduction is performed only within tensor boundary
-            if isinstance(acc_size, sympy.Symbol) or loop_size * self.max_threadgroup_size != acc_size:
+            if (
+                isinstance(acc_size, sympy.Symbol)
+                or loop_size * self.max_threadgroup_size != acc_size
+            ):
                 self.body.writeline(f"if ({entry.name} >= {acc_size}) break;")
 
     def codegen_body(self) -> None:
@@ -849,7 +846,11 @@ class MetalKernel(SIMDKernel):
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
                 )
-                threadgroup_size = min(total_reduction_size, self.max_threadgroup_size) if isinstance(total_reduction_size, sympy.Integer) else self.max_threadgroup_size
+                threadgroup_size = (
+                    min(total_reduction_size, self.max_threadgroup_size)
+                    if isinstance(total_reduction_size, sympy.Integer)
+                    else self.max_threadgroup_size
+                )
                 code.writeline(
                     f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
                 )
