@@ -322,6 +322,7 @@ def _print_readable(
     include_stride=False,
     include_device=False,
     colored=False,
+    expanded_def=False,
 ):
     graph = module.graph
     assert graph is not None and isinstance(graph, torch.fx.Graph), (
@@ -334,6 +335,7 @@ def _print_readable(
         include_stride=include_stride,
         include_device=include_device,
         colored=colored,
+        expanded_def=expanded_def,
     )
     module_code = verbose_python_code.src
     module_code = module_code.lstrip("\n")
@@ -956,6 +958,7 @@ class {module_name}(torch.nn.Module):
         # If `fast_sympy_print` is True then we use a sympy printer which is faster
         # but may result in less-readable output.
         fast_sympy_print: bool = False,
+        expanded_def: bool = False,
     ):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
@@ -977,6 +980,7 @@ class {module_name}(torch.nn.Module):
                 include_stride,
                 include_device,
                 colored,
+                expanded_def,
             )
             return r
 
@@ -995,7 +999,7 @@ class {module_name}(torch.nn.Module):
     @contextlib.contextmanager
     def _set_replace_hook(self, f):
         """
-        Takes a callable which will be called everytime when we replace a node
+        Takes a callable which will be called every time when we replace a node
         to a new node, or change the node's name. Callable takes three arguments:
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
@@ -1009,7 +1013,7 @@ class {module_name}(torch.nn.Module):
 
     def _register_replace_node_hook(self, f):
         """
-        Takes a callable which will be called everytime when we replace a node
+        Takes a callable which will be called every time when we replace a node
         to a new node, or change the node's name. Callable takes three arguments:
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
@@ -1019,7 +1023,7 @@ class {module_name}(torch.nn.Module):
 
     def _unregister_replace_node_hook(self, f):
         """
-        Takes a callable which was previously registered to be called everytime when we replace a node.
+        Takes a callable which was previously registered to be called every time when we replace a node.
         This function will unregister that callable so it is no longer invoked on node replacement.
         """
         assert callable(f), "create_node hook must be a callable."

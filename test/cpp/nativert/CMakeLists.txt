@@ -17,6 +17,22 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/executor/ExecutionPlanner.cpp
   ${TORCH_ROOT}/torch/nativert/detail/ITree.cpp
   ${TORCH_ROOT}/torch/nativert/executor/ExecutionFrame.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/C10Kernel.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/GreedyBySize.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/Bump.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/DisjointStorageGroups.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/LayoutPlanner.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/LayoutManager.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/AliasAnalyzer.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/Executor.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/KernelFactory.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/ConstantFolder.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/GraphExecutorBase.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/SerialGraphExecutor.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/ParallelGraphExecutor.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/AutoFunctionalizeKernel.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/CallTorchBindKernel.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/HigherOrderKernel.cpp
 )
 
 add_executable(test_nativert

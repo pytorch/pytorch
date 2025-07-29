@@ -15,7 +15,7 @@ in the doc, but there might be API changes if necessary.
 
 PyTorch DTensor offers simple and flexible tensor sharding primitives that transparently handles distributed
 logic, including sharded storage, operator computation and collective communications across devices/hosts.
-`DTensor` could be used to build different paralleism solutions and support sharded state_dict representation
+`DTensor` could be used to build different parallelism solutions and support sharded state_dict representation
 when working with multi-dimensional sharding.
 
 Please see examples from the PyTorch native parallelism solutions that are built on top of `DTensor`:

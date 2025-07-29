@@ -13,6 +13,17 @@
 #include <cstdint>
 #include <utility>
 
+/*
+* `cudaEventExternal` is a torch-specific flag that is used to
+* indicate that the CUDAEvent will be used only for synchronization
+* with work outside of the cuda graph, rather than creation of
+* cross-stream dependencies within a cuda graph. Resources:
+* https://docs.nvidia.com/cuda/archive/12.9.0/cuda-c-programming-guide/index.html#cross-stream-dependencies-and-events
+* https://docs.nvidia.com/cuda/archive/12.9.0/cuda-runtime-api/group__CUDART__TYPES.html#group__CUDART__TYPES_1g3457b81d1d32c6a00f6132fbc2693d47
+* https://docs.nvidia.com/cuda/archive/12.9.0/cuda-runtime-api/group__CUDART__TYPES.html#group__CUDART__TYPES_1g0c23426b7252eaa9cef695859991304e
+*/
+#define cudaEventExternal 0x08
+
 namespace at::cuda {
 
 /*
@@ -118,7 +129,14 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     TORCH_CHECK(device_index_ == stream.device_index(), "Event device ", device_index_,
       " does not match recording stream's device ", stream.device_index(), ".");
     CUDAGuard guard(device_index_);
+
+#ifndef USE_ROCM
+    // it is an error to use cudaEventRecordExternal when not doing stream capture
+    unsigned int flags = (c10::cuda::currentStreamCaptureStatusMayInitCtx() != c10::cuda::CaptureStatus::None && external_) ? cudaEventRecordExternal : cudaEventRecordDefault;
+    AT_CUDA_CHECK(cudaEventRecordWithFlags(event_, stream, flags));
+#else
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
+#endif
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_record(at::kCUDA,
@@ -134,7 +152,13 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   void block(const CUDAStream& stream) {
     if (is_created_) {
       CUDAGuard guard(stream.device_index());
-      AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
+#ifndef USE_ROCM
+      // it is an error to use cudaEventWaitExternal when not doing stream capture
+      unsigned int flags = (c10::cuda::currentStreamCaptureStatusMayInitCtx() != c10::cuda::CaptureStatus::None && external_) ? cudaEventWaitExternal : cudaEventWaitDefault;
+      AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, flags));
+#else
+      AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_));
+#endif
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_wait(at::kCUDA,
@@ -193,10 +217,16 @@ private:
   unsigned int flags_ = cudaEventDisableTiming;
   bool is_created_ = false;
   bool was_recorded_ = false;
+  bool external_ = false;
   DeviceIndex device_index_ = -1;
   cudaEvent_t event_{};
 
   void createEvent(DeviceIndex device_index) {
+    external_ = (flags_ & cudaEventExternal) != 0;
+#ifdef USE_ROCM
+    TORCH_CHECK(!external_, "External events are disallowed in rocm");
+#endif
+    flags_ &= ~cudaEventExternal;
     device_index_ = device_index;
     CUDAGuard guard(device_index_);
     AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
