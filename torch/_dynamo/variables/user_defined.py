@@ -52,6 +52,7 @@ from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
+    ObservedKeyError,
     raise_observed_exception,
     unimplemented_v2,
 )
@@ -1790,6 +1791,18 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         method = self._maybe_get_baseclass_method(name)
         if method in self._dict_methods:
+            # Dict subclasses can override __missing__ to provide fallback
+            # behavior instead of raising a KeyError. This is used, for example,
+            # by collections.Counter.
+            if (
+                name == "__getitem__"
+                and issubclass(self.python_type(), dict)
+                and self.call_obj_hasattr(tx, "__missing__").value
+            ):
+                try:
+                    return self._dict_vt.call_method(tx, name, args, kwargs)
+                except ObservedKeyError:
+                    return self.call_method(tx, "__missing__", args, kwargs)
             return self._dict_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
@@ -2019,9 +2032,11 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def unpack_var_sequence(self, tx):
         # This shouldn't be necessary if iter(...) is implemented correctly
         # return super().unpack_var_sequence(tx)
-        return variables.UserFunctionVariable(
-            polyfills.builtins.iter_
-        ).call_function(tx, [self], {}).items
+        return (
+            variables.UserFunctionVariable(polyfills.builtins.iter_)
+            .call_function(tx, [self], {})
+            .items
+        )
 
 
 class RandomVariable(UserDefinedObjectVariable):

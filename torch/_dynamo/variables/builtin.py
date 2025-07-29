@@ -2532,6 +2532,13 @@ class BuiltinVariable(VariableTracker):
                 (operator.neg)(a.as_proxy()),
                 sym_num=None,
             )
+
+        if (
+            isinstance(a, UserDefinedObjectVariable)
+            and a.call_obj_hasattr(tx, "__neg__").value
+        ):
+            return a.call_method(tx, "__neg__", (), {})
+
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -2771,7 +2778,7 @@ class BuiltinVariable(VariableTracker):
                 DictKeysVariable,
                 MutableMappingVariable,
                 SetVariable,
-                UserDefinedSetVariable
+                UserDefinedSetVariable,
             ),
         ):
             return a.call_method(tx, "__ior__", [b], {})
