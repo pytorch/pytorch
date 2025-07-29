@@ -243,6 +243,10 @@ def set_difference_update(set1, *others):
     set1.update(result)
 
 
+def assert_dict_equal(self_, d1, d2, msg=None):
+    self_.assertTrue(d1 == d2, msg)
+
+
 def assert_multi_line_equal(self_, first, second, msg=None):
     return self_.assertTrue(first == second, msg)
 
