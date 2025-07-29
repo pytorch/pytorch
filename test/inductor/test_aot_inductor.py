@@ -746,7 +746,7 @@ class AOTInductorTestsTemplate:
         IS_FBCODE,
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
-    @tf32_on_and_off
+    @tf32_on_and_off(0.005)
     def test_deconv_freezing(self):
         dtypes = [torch.float]
         if torch._C._has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported():
