@@ -51,6 +51,7 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
 
 # ONNX Export
+/torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
 /torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
 /torch/csrc/jit/passes/onnx.cpp @titaiwangms @xadupre
 /torch/csrc/jit/passes/onnx/ @titaiwangms @xadupre
