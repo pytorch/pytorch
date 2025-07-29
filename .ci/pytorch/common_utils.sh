@@ -229,6 +229,7 @@ function install_torchrec_and_fbgemm() {
 
     pip_install tabulate  # needed for newer fbgemm
     pip_install patchelf  # needed for rocm fbgemm
+    pushd /tmp
 
     local wheel_dir=dist/fbgemm_gpu
     local found_whl=0
@@ -263,6 +264,7 @@ function install_torchrec_and_fbgemm() {
     done
 
     rm -rf fbgemm
+    popd
   else
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     pip_build_and_install "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#subdirectory=fbgemm_gpu" dist/fbgemm_gpu
@@ -279,6 +281,30 @@ function clone_pytorch_xla() {
     git submodule update --init --recursive
     popd
   fi
+}
+
+function checkout_install_torchbench() {
+  local commit
+  commit=$(get_pinned_commit torchbench)
+  git clone https://github.com/pytorch/benchmark torchbench
+  pushd torchbench
+  git checkout "$commit"
+
+  if [ "$1" ]; then
+    python install.py --continue_on_fail models "$@"
+  else
+    # Occasionally the installation may fail on one model but it is ok to continue
+    # to install and test other models
+    python install.py --continue_on_fail
+  fi
+
+  # TODO (huydhn): transformers-4.44.2 added by https://github.com/pytorch/benchmark/pull/2488
+  # is regressing speedup metric. This needs to be investigated further
+  pip install transformers==4.38.1
+
+  echo "Print all dependencies after TorchBench is installed"
+  python -mpip freeze
+  popd
 }
 
 function install_torchao() {
