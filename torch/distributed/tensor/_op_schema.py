@@ -562,6 +562,7 @@ class OutputSharding:
     output_spec: OutputSpecType
     redistribute_schema: Optional[OpSchema] = None
     needs_redistribute: bool = False
+    use_val_from_redistribute_schema: bool = False
 
     @cached_property
     def mesh(self):

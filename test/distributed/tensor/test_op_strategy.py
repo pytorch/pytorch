@@ -626,7 +626,8 @@ class TestStrategyHashing(DTensorTestBase):
             torch.sort(sharded_dtensor, dim=0)  # sort each column
             out1, _ = torch.sort(sharded_dtensor, dim=1)  # sort each row
             # clear the cache
-            DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding.cache.cache_clear()
+            # DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding.cache.cache_clear()
+        with op_strategy_context(torch.ops.aten.sort.default, replicate_op_strategy):
             out2, _ = torch.sort(sharded_dtensor, dim=1)
         self.assertEqual(out1.full_tensor(), out2.full_tensor())
 
