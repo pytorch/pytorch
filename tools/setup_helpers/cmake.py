@@ -266,7 +266,7 @@ class CMake:
                     "BLAS",
                     "WITH_BLAS",
                     "CUDA_HOST_COMPILER",
-                    "CUDA_NVCC_EXECUTABLE",
+                    "CUDAToolkit_NVCC_EXECUTABLE",
                     "CUDA_SEPARABLE_COMPILATION",
                     "CUDNN_LIBRARY",
                     "CUDNN_INCLUDE_DIR",
@@ -302,8 +302,8 @@ class CMake:
             "CUDA_HOST_COMPILER": "CMAKE_CUDA_HOST_COMPILER",
             "CUDAHOSTCXX": "CUDA_HOST_COMPILER",
             "CMAKE_CUDA_HOST_COMPILER": "CUDA_HOST_COMPILER",
-            "CMAKE_CUDA_COMPILER": "CUDA_NVCC_EXECUTABLE",
-            "CUDACXX": "CUDA_NVCC_EXECUTABLE",
+            "CMAKE_CUDA_COMPILER": "CUDAToolkit_NVCC_EXECUTABLE",
+            "CUDACXX": "CUDAToolkit_NVCC_EXECUTABLE",
         }
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
