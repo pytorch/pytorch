@@ -23,17 +23,10 @@ The APIs and performance characteristics of these features may change.
 :glob:
 :maxdepth: 2
 
+Get Started <https://pytorch.org/get-started/locally/>
+user_guide/index
 pytorch-api
-notes
-```
-
-```{toctree}
-:glob:
-:hidden:
-:maxdepth: 2
-
 community/index
-C++ <https://docs.pytorch.org/cppdocs/>
 ```
 
 ## Indices and tables
