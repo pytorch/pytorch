@@ -610,6 +610,8 @@ class TestAutograd(TestCase):
 
         with disable_gc():
             unpack_hook_ref = scope()
+            if torch._dynamo.is_compiling():
+                torch._dynamo.reset()
             self.assertIsNone(unpack_hook_ref())
 
     def test_will_engine_execute_node(self):
@@ -4129,7 +4131,7 @@ class TestAutograd(TestCase):
         self.assertIsNone(y.grad_fn)
 
     def test_backward_copy(self):
-        # This tests checks backward engine for a very subtle bug that appreared
+        # This tests checks backward engine for a very subtle bug that appeared
         # in one of the initial versions of autograd. Gradients tensors were
         # simply stored in lists while the function waited for all its gradients
         # to be computed. However, sometimes an output was used multiple times,
@@ -4312,7 +4314,7 @@ class TestAutograd(TestCase):
                     ctx.output_var.sum().backward()
                 return ctx.x.grad * grad_output
 
-        # Reentrant starts on CPU thread, finishs on GPU thread
+        # Reentrant starts on CPU thread, finishes on GPU thread
         x = torch.randn(2, 2, requires_grad=True)
         out = Reenter.apply(x)
         out.sum().backward()
@@ -10728,7 +10730,7 @@ class TestAutogradForwardMode(TestCase):
             dual = fwAD.make_dual(foo, tangent)
             self.assertFalse(tangent_ref.expired())
 
-            # Make sure that the tangent we provided has been re-used as is
+            # Make sure that the tangent we provided has been reused as is
             self.assertTrue(fwAD.unpack_dual(dual)[1] is tangent)
 
             # Make sure that dual is keeping the tangent alive
@@ -11087,7 +11089,7 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(
                 dual_tangent.storage().data_ptr(), bar.storage().data_ptr()
             )
-            # And the tangent is actually re-used as-is so it is still the same Tensor
+            # And the tangent is actually reused as-is so it is still the same Tensor
             self.assertIs(dual_tangent, bar)
 
             # Ensure we properly share the version counter
@@ -11969,19 +11971,19 @@ class TestAutogradDeviceType(TestCase):
                         (new_param**2).sum().backward()
                 return grad_output
 
-        # Reentrant starts on GPU thread, finishs on GPU thread
+        # Reentrant starts on GPU thread, finishes on GPU thread
         x = torch.randn(2, 2, device=device, requires_grad=True)
         out = ReentrantFunc.apply(x)
         out.sum().backward()
 
-        # Reentrant starts on CPU thread, finishs on GPU thread
+        # Reentrant starts on CPU thread, finishes on GPU thread
         x = torch.randn(2, 2, requires_grad=True)
         # set ReentrantFunc node to GPU to emit tasks to GPU queue
         ReentrantFunc._cpu_mode = False
         out = ReentrantFunc.apply(x)
         out.sum().backward()
 
-        # Reentrant starts on GPU thread, finishs on CPU thread
+        # Reentrant starts on GPU thread, finishes on CPU thread
         x = torch.randn(2, 2, device=device, requires_grad=True)
         # set ReentrantFunc node to CPU to emit tasks to CPU queue
         ReentrantFunc._cpu_mode = True
@@ -13665,7 +13667,7 @@ class TestMultithreadAutograd(TestCase):
                     y = x * x
                     if torch.cuda.device_count() >= 2:
                         # DataParallel is calling the forward in different threads
-                        # without progating TLS, so hooks should not be called here
+                        # without propagating TLS, so hooks should not be called here
                         _self.assertEqual(len(w), 0)
                     else:
                         # DataParallel only uses one thread

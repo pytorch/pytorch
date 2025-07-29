@@ -110,6 +110,13 @@ class TORCH_API Work : public torch::CustomClassHolder {
   //
   virtual bool wait(std::chrono::milliseconds timeout = kNoTimeout);
 
+  // Blocks the current stream until the work is completed.
+  // This is equivalent to synchronize for CUDA tensors but works for both CPU
+  // tensors and CUDA tensors by using a spinlock CUDA kernel.
+  // This will immediately return.
+  // If no stream is active it will throw an error.
+  virtual void blockCurrentStream();
+
   virtual void abort();
 
   // Returns a Future object that will be associated with the completion of
