@@ -78,6 +78,12 @@ using CaptureId_t = unsigned long long;
 // second is set if the instance is created by Graph mode graph_pool_handle.
 using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
 
+struct MempoolIdHash {
+  std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
+    return mempool_id.first != 0 ? mempool_id.first : mempool_id.second;
+  }
+};
+
 struct C10_API DeviceAllocator : public c10::Allocator {
   DeviceAllocator();
   ~DeviceAllocator() override;
@@ -707,6 +713,85 @@ struct CachingDeviceAllocatorImpl {
   virtual ~CachingDeviceAllocatorImpl() = default;
 
   BlockT* malloc(c10::DeviceIndex device, size_t size, c10::Stream stream) {}
+
+ private:
+  // lock around all operations
+  mutable std::recursive_mutex mutex;
+
+  // device statistics
+  CachingDeviceAllocator::DeviceStats stats;
+
+  // unallocated cached blocks larger than 1 MB
+  BlockPool<BlockT> large_blocks;
+
+  // unallocated cached blocks 1 MB or smaller
+  BlockPool<BlockT> small_blocks;
+
+  // allocated or in use by a stream. Holds all active allocations,
+  // whether they came from graph_pools or one of the BlockPools above.
+  ska::flat_hash_set<BlockT*> active_blocks;
+
+  // captures_underway tracks if we are diverting some
+  // allocations to a specific pool.
+  // Most of the time it's empty, in which case malloc can avoid calling
+  // cudaStreamGetCaptureInfo in the hot path.
+  std::vector<std::pair<MempoolId_t, std::function<bool(StreamT)>>>
+      captures_underway;
+
+  // tracks which pools we can use as a last resort before ooming
+  ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
+
+  // Deferring event recording on blocks until Graph Capture Mode has completed.
+  std::vector<BlockT*> needs_events_deferred_until_no_capture;
+  
+  // outstanding cuda events
+  ska::flat_hash_map<
+      StreamT,
+      std::deque<std::pair<EventT, BlockT*>>>
+      block_events;
+
+  // record used memory.
+  size_t total_allocated_memory = 0;
+
+  size_t allowed_memory_maximum = 0;
+
+  // all live expandable segments
+  std::vector<ExpandableSegment<StreamT, HandleT>*> expandable_segments_;
+  std::vector<c10::DeviceIndex> devices_with_peer_access_;
+
+  bool set_fraction = false;
+
+  bool record_history = false;
+
+  std::atomic<CreateContextFn> context_recorder_;
+  RecordContext record_context_ = RecordContext::NEVER;
+
+  // Ring buffer for memory snapshot TraceEntry's
+  RingBuffer<TraceEntry> alloc_buffer;
+
+  // Members specific to CUDA graphs
+
+  // Private pools for CUDA graphs
+  ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool<BlockT>>, MempoolIdHash>
+      graph_pools;
+  // Pools no longer referenced by any graph. Their BlockPools are eligible for
+  // free_blocks. Can't be a vector or deque because we might erase entries in
+  // any order. Could be an std::list, but we don't care much, access and
+  // insert/erase are rare.
+  ska::flat_hash_map<MempoolId_t, PrivatePool<BlockT>*, MempoolIdHash>
+      graph_pools_freeable;
+
+  // XXX - maybe we should generalize and have multiple events
+  std::vector<OutOfMemoryObserver> oom_observers_;
+
+  std::vector<AllocatorTraceTracker> trace_trackers_;
+
+  // mapping from block to a stream_set, containing streams on which the block
+  // was used while cudagraph capturing
+  std::unordered_map<BlockT*, ska::flat_hash_set<StreamT>> block_to_cudagraph_stream_uses;
+
+  // thread local compile context for each device
+  static thread_local std::stack<std::string> compile_context;
 
  public:
  private:
