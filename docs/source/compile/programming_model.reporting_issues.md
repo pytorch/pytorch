@@ -52,7 +52,7 @@ Here's a list of useful reproducers, ranked from most to least preferred:
    The more complex the setup, the harder it is for us to recreate the environment.
 
 :::{note}
-    Docker simplifies setup but complicates changes to the environment, so it's not a perfect solution, though we'll use it if necessary.
+Docker simplifies setup but complicates changes to the environment, so it's not a perfect solution, though we'll use it if necessary.
 :::
 
 If possible, try to make your reproducer single-process, as those are easier to debug than a multi-process reproducer.
