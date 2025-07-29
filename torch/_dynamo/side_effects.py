@@ -29,7 +29,6 @@ import weakref
 from collections.abc import Generator, MutableMapping
 from types import CellType
 from typing import Any, Optional, TYPE_CHECKING
-from typing_extensions import TypeIs
 
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
@@ -216,8 +215,8 @@ class SideEffects:
 
     def should_allow_side_effects_under_checkpoint(self) -> bool:
         output_graph = self.output_graph_weakref()
-        return (
-            output_graph is not None
+        return bool(
+            output_graph
             and output_graph.current_tx.output.current_tracer.under_activation_checkpoint
             and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
         )
@@ -232,8 +231,8 @@ class SideEffects:
     def is_reconstructing_generator(self) -> bool:
         output_graph = self.output_graph_weakref()
 
-        return (
-            output_graph is not None
+        return bool(
+            output_graph
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
@@ -344,7 +343,7 @@ class SideEffects:
             BaseException.__getattribute__,
         )
 
-    def is_attribute_mutation(self, item: VariableTracker) -> TypeIs[AttributeMutation]:
+    def is_attribute_mutation(self, item: VariableTracker) -> bool:
         return isinstance(item.mutation_type, AttributeMutation)
 
     def has_pending_mutation(self, item: VariableTracker) -> bool:

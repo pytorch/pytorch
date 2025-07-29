@@ -3055,7 +3055,7 @@ class SubgraphTracer(fx.Tracer):
         # Sort the symbols so that we can have a deterministic lifting order
         return sorted(to_be_bound, key=lambda s: s.name)
 
-    def has_input_mutation(self) -> bool:
+    def has_input_mutation(self) -> MutationInfo:
         input_versions_at_beginning = self._input_versions_at_beginning
         input_nodes = []
 
@@ -3084,7 +3084,7 @@ class SubgraphTracer(fx.Tracer):
 
         return MutationInfo(False, "")
 
-    def has_aliasing(self) -> bool:
+    def has_aliasing(self) -> AliasingInfo:
         from torch._higher_order_ops.utils import _collect_fake_inputs
 
         input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
