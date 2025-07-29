@@ -898,7 +898,9 @@ class TestMultiIndexingAutomated(TestCase):
                         # in some 0-sized cases.
                         try:
                             mi = np.ravel_multi_index(
-                                indx[1:], orig_slice, mode="raise"  # codespell:ignore
+                                indx[1:],  # codespell:ignore
+                                orig_slice,
+                                mode="raise",  # codespell:ignore
                             )
                         except Exception as exc:
                             # This happens with 0-sized orig_slice (sometimes?)
