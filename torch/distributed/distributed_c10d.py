@@ -4780,6 +4780,10 @@ def barrier(
         None, if not async_op or if not part of the group
 
     .. note:: `ProcessGroupNCCL` now blocks the cpu thread till the completion of the barrier collective.
+    .. warning:: `ProcessGroupNCCL` implements barrier as an all_gather of a 1-element tensor. This tensor will be
+       allocated on the device specified by 'device_ids' arg if specified, or the device set with
+       `torch.cuda.set_device` otherwise.  If no device is set, the default of `0` will be used for every process,
+       leading to extra memory allocation for a new CUDA context on GPU 0.
     """
     group = group or _get_default_group()
 
