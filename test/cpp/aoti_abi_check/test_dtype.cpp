@@ -10,11 +10,11 @@
 #include <c10/util/complex.h>
 
 #include <torch/headeronly/util/bits.h>
-#include <torch/headeronly/util/quint8.h>
-#include <torch/headeronly/util/quint4x2.h>
-#include <torch/headeronly/util/quint2x4.h>
-#include <torch/headeronly/util/qint8.h>
 #include <torch/headeronly/util/qint32.h>
+#include <torch/headeronly/util/qint8.h>
+#include <torch/headeronly/util/quint2x4.h>
+#include <torch/headeronly/util/quint4x2.h>
+#include <torch/headeronly/util/quint8.h>
 
 TEST(TestDtype, TestBFloat16) {
   c10::BFloat16 a = 1.0f;
@@ -114,30 +114,17 @@ TEST(TestDtype, TestComplexFloat) {
   EXPECT_EQ(a / b, div);
 }
 
-TEST(TestDtype, TestQuints) {
-  auto a = torch::headeronly::quint8(5);
-  auto b = torch::headeronly::quint4x2(1);
-  auto c = torch::headeronly::quint2x4(5);
-
-  EXPECT_EQ(a + a, torch::headeronly::quint8(10));
-  EXPECT_EQ(b + b, torch::headeronly::quint4x2(2));
-  EXPECT_EQ(c + c, torch::headeronly::quint2x4(10));
-}
-
-TEST(TestDtype, TestQintAndBits) {
-  auto a = torch::headeronly::qint32(5);
-  auto b = torch::headeronly::qint8(1);
-  auto c = torch::headeronly::bits1x8(5);
-  auto d = torch::headeronly::bits2x4(1);
-  auto e = torch::headeronly::bits4x2(9);
-  auto f = torch::headeronly::bits8(9);
-  auto g = torch::headeronly::bits16(9);
-
-  EXPECT_EQ(a + a, torch::headeronly::qint32(10));
-  EXPECT_EQ(b + b, torch::headeronly::qint8(2));
-  EXPECT_EQ(c + c, torch::headeronly::bits1x8(10));
-  EXPECT_EQ(d * 2, torch::headeronly::bits2x4(2));
-  EXPECT_EQ(e * 2, torch::headeronly::bits4x2(18));
-  EXPECT_EQ(f - f, torch::headeronly::bits8(0));
-  EXPECT_EQ(g + g, torch::headeronly::bits16(9));
+TEST(TestDtype, TestQuintsQintsAndBits) {
+  // There's not much you can do with these dtypes...
+  // so we'll just check that it compiles
+  auto a = torch::headeronly::quint8(0);
+  auto b = torch::headeronly::quint4x2(5);
+  auto c = torch::headeronly::quint2x4(1);
+  auto d = torch::headeronly::qint32(5);
+  auto e = torch::headeronly::qint8(1);
+  auto f = torch::headeronly::bits1x8(9);
+  auto g = torch::headeronly::bits2x4(9);
+  auto h = torch::headeronly::bits4x2(9);
+  auto i = torch::headeronly::bits8(2);
+  auto j = torch::headeronly::bits16(6);
 }
