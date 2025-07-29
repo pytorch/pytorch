@@ -9,9 +9,15 @@ import unittest
 from pathlib import Path
 
 import torch
+from torch._dynamo.utils import detect_fake_mode
 from torch._inductor import config
-from torch._inductor.debug import create_node_mapping
+from torch._inductor.debug import (
+    create_mapping_pre_post_grad_nodes,
+    create_node_mapping_kernel_to_post_grad,
+)
+from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda
 
@@ -386,11 +392,17 @@ class TestProvenanceTracingNodeMapping(TestCase):
             "triton_poi_fused_addmm_relu_sigmoid_0": ["relu", "add_tensor"]
         }
 
-        result = create_node_mapping(
+        result = create_mapping_pre_post_grad_nodes(
             pre_grad_graph_id,
             post_to_pre_grad_nodes_json,
-            triton_kernel_to_post_grad_json,
         )
+        result = {
+            **result,
+            **create_node_mapping_kernel_to_post_grad(
+                triton_kernel_to_post_grad_json,
+            ),
+        }
+
         self.assertEqual(
             result,
             {
@@ -416,6 +428,59 @@ class TestProvenanceTracingNodeMapping(TestCase):
                 },
             },
         )
+
+
+class TestProvenanceTracingNodeMeta(TestCase):
+    def get_node_with_target(self, gm, target):
+        """
+        Return first node in gm with target
+        """
+        return next(iter([node for node in gm.graph.nodes if node.target == target]))
+
+    @requires_cuda  # test only works for cuda pattern matcher
+    def test_pattern_matcher_transfer_meta(self):
+        """
+        Test that stack trace is transfered when node is decomposed in post_grad_passes
+        """
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.sigmoid(x)
+                return x * 3
+
+        x = torch.randn(8, 10).to("cuda")
+        example_inputs = (x,)
+        model = Model().to("cuda")
+
+        # mimic the before_post_grad graph
+        ep = torch.export.export(model, example_inputs).run_decompositions()
+        gm = ep.module()
+
+        # Set fake mode for V
+        fake_inputs = [
+            node.meta.get("val") for node in gm.graph.nodes if node.op == "placeholder"
+        ]
+        fake_mode = detect_fake_mode(fake_inputs)
+        V.set_fake_mode(fake_mode)
+
+        addmm_node = self.get_node_with_target(gm, torch.ops.aten.addmm.default)
+        stack_trace = addmm_node.meta["stack_trace"]
+
+        post_grad_passes(gm, True)  # for this test is_inference doesn't matter
+
+        mm_node = self.get_node_with_target(gm, torch.ops.aten.mm.default)
+        add_node = self.get_node_with_target(gm, torch.ops.aten.add.Tensor)
+
+        self.assertEqual(add_node.meta["stack_trace"], stack_trace)
+        self.assertEqual(mm_node.meta["stack_trace"], stack_trace)
 
 
 if __name__ == "__main__":
