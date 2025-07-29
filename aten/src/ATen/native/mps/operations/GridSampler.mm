@@ -12,6 +12,7 @@
 #include <ATen/ops/grid_sampler_2d_native.h>
 #include <ATen/ops/grid_sampler_3d.h>
 #include <ATen/ops/grid_sampler_3d_backward_native.h>
+#include <ATen/ops/grid_sampler_3d_backward.h>
 #include <ATen/ops/grid_sampler_3d_native.h>
 #endif
 
@@ -461,6 +462,16 @@ std::tuple<Tensor, Tensor>
 grid_sampler_3d_backward_mps(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
                              int64_t interpolation_mode, int64_t padding_mode, bool align_corners,
                              std::array<bool,2> output_mask) {
+  // Backward pass needs Metal 3
+  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS)) {
+    TORCH_WARN_ONCE("MPS: grid_sampler_3d_backward op is supported natively starting from macOS 13.2. ",
+                    "Falling back on CPU. This may have performance implications.");
+    auto grad_output_cpu = at::grid_sampler_3d_backward(grad_output.to("cpu"), input.to("cpu"), grid.to("cpu"),
+                                     interpolation_mode, padding_mode, align_corners, output_mask);
+    return std::make_tuple(std::get<0>(grad_output_cpu).clone().to("mps"),
+                           std::get<1>(grad_output_cpu).clone().to("mps"));
+  }
+
   // print error if input is not float32
   TORCH_CHECK(input.scalar_type() == ScalarType::Float, "MPS: grid_sampler_3d_backward_mps input is not float32");
 
