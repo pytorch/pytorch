@@ -565,14 +565,34 @@ def _compare_and_swap_with_index(
     # actual compare-and-swap
     ix = x.to(idtype, bitcast=True)
 
+    # sort treats nan as having the higher value. comparisons with nan always return False.
+    # to align with sort semantics, we need to update descending to check if right_isnan,
+    # and ascending to check if left_isnan.
+    left_isnan = left != left
+    right_isnan = right != right
+
     if descending:
         cond = left < right
+        if is_floating(left):
+            if not stable:
+                cond = cond | right_isnan
+            else:
+                cond = cond | (right_isnan & (~left_isnan))
+
     else:
         cond = left > right
+        if is_floating(left):
+            if not stable:
+                cond = cond | left_isnan
+            else:
+                cond = cond | (left_isnan & (~right_isnan))
 
     if stable:
         # When stable sorting, tie break by index
-        cond = cond | ((left == right) & (left_idx > right_idx))
+        eq = left == right
+        if is_floating(left):
+            eq = eq | (left_isnan & right_isnan)
+        cond = cond | (eq & (left_idx > right_idx))
 
     cond = (right_valid_mask > left_valid_mask) | (
         (right_valid_mask == left_valid_mask) & cond
