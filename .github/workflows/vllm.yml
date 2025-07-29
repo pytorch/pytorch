@@ -48,7 +48,7 @@ jobs:
     name: build-vllm-wheels
     uses: ./.github/workflows/_linux-vllm-build-main.yml
     needs: [
-      get-label-type,git
+      get-label-type,
       linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build
     ]
     with:
