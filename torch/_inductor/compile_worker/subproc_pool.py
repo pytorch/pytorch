@@ -8,6 +8,7 @@ import pickle
 import struct
 import subprocess
 import sys
+import sysconfig
 import threading
 import traceback
 import typing
@@ -158,6 +159,8 @@ class SubprocPool:
                 "PYTHONPATH": os.environ.get(
                     "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
                 ),
+                # Need to set this for internal builds that bundle the runtime.
+                "PYTHONHOME": sysconfig.get_path("data"),
                 # Safeguard against creating a SubprocPool in the subprocess.
                 "TORCH_WARM_POOL": "0",
                 # Some internal usages need a modified LD_LIBRARY_PATH.
