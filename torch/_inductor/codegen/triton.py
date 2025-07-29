@@ -325,6 +325,9 @@ class BlockPtrOptions:
         params.shape = lookup_size(params.shape)
         params.strides = lookup_size(params.strides)
 
+        # Flatten contiguous dimensions.
+        params = params.flatten()
+
         # Strip out dimensions of stride 0.
         # These will be restored with tl.broadcast_to.
         broadcasting_dims = [
@@ -1538,7 +1541,7 @@ class HelperFunctions:
 
 
 @dataclasses.dataclass
-class BlockParameters:
+class BlockParameters(collections.abc.Sequence["BlockParameters"]):
     """
     Class representing ND block dimensions, for block pointer analysis.
     """
@@ -1555,6 +1558,69 @@ class BlockParameters:
         cls = type(self)
         a, b = tuple(dataclasses.asdict(x) for x in (self, other))
         return cls(**{key: a[key] + b[key] for key in a})
+
+    def __len__(self) -> int:
+        return len(self.shape)
+
+    def __getitem__(self, key: Union[int, slice]) -> BlockParameters:
+        return BlockParameters(
+            **{
+                name: val[key] if isinstance(key, slice) else [val[key]]
+                for name, val in dataclasses.asdict(self).items()
+            }
+        )
+
+    def __setitem__(self, key: int, val: BlockParameters) -> None:
+        for name in dataclasses.asdict(self):
+            getattr(self, name)[key] = getattr(val, name)[0]
+
+    def flatten(self) -> BlockParameters:
+        """
+        Flattens any contiguous dimensions.
+        """
+        if len(self) < 2:
+            return self
+
+        # Traverse from the innermost dim to the outermost.
+        reversed_flattened_params = self[-1]
+        for cur in self[len(self) - 2 :: -1]:
+            # Check if the dimension is collapsible.
+            prev = reversed_flattened_params[-1]
+            if (
+                prev is not None
+                and (
+                    (  # Contiguous dimension.
+                        prev.shape[0] == cur.strides[0]  # TODO statically_known
+                        and cur.strides[0] > 0
+                        and prev.strides[0] > 0
+                    )
+                    or (  # Both dims are broadcast.
+                        cur.strides[0] == 0
+                        and prev.strides[0] == 0  # TODO statically_known
+                    )
+                )
+                and prev.offsets[0] == 0
+            ):
+                # Merge with the previous dimension.
+                # TODO generalization: offset * stride is a multiple of this dim's stride?
+                merged = BlockParameters(
+                    shape=[cur.shape[0] * prev.shape[0]],
+                    block_shape=[cur.block_shape[0] * prev.block_shape[0]],
+                    strides=[cur.strides[0] * prev.strides[0]],
+                    offsets=cur.offsets,
+                )
+                reversed_flattened_params[-1] = merged
+            else:
+                reversed_flattened_params += cur
+
+        # Since we iterated in reverse order, flip the params.
+        flattened_params = BlockParameters(
+            **{
+                key: list(reversed(val))
+                for key, val in dataclasses.asdict(reversed_flattened_params).items()
+            }
+        )
+        return flattened_params
 
 
 class CooperativeReductionWorkspaceCache:
