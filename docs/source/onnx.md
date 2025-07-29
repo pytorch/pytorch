@@ -1,5 +1,6 @@
 # torch.onnx
 
+
 ## Overview
 
 [Open Neural Network eXchange (ONNX)](https://onnx.ai/) is an open standard
@@ -37,6 +38,7 @@ torch.onnx.export(
 )
 ```
 
+
 ## torch.export-based ONNX Exporter
 
 *The torch.export-based ONNX exporter is the newest exporter for PyTorch 2.6 and newer*
@@ -55,11 +57,12 @@ translated into an ONNX graph.
 Q: I have exported my LLM model, but its input size seems to be fixed?
 
   The tracer records the shapes of the example inputs. If the model should accept
-  inputs of dynamic shapes, set ``dynamic_shapes`` when calling :func:`torch.onnx.export`.
+  inputs of dynamic shapes, set ``dynamic_shapes`` when calling {func}`torch.onnx.export`.
 
 Q: How to export models containing loops?
 
   See {ref}`torch.cond <cond>`.
+
 
 ## Contributing / Developing
 
