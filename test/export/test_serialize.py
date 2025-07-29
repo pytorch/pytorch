@@ -1146,6 +1146,93 @@ class TestDeserialize(TestCase):
         self.assertTrue("treespec_namedtuple_fields" in unflattened.meta)
         self.assertEqual(len(unflattened.meta["treespec_namedtuple_fields"]), 2)
 
+    def test_namedtuple_auto_registration(self):
+        A = namedtuple("A", ["x", "y"])
+        B = namedtuple("B", ["a1", "a2"])
+
+        class C(NamedTuple):
+            weight: torch.Tensor
+            bias: torch.Tensor
+
+        class D(NamedTuple):
+            c: C
+            b: B
+            meta: dict
+
+        class E(NamedTuple):
+            d1: D
+            d2: D
+            scale: float
+
+        class F(NamedTuple):
+            result1: D
+            result2: D
+            final_scale: float
+
+        class M(torch.nn.Module):
+            def forward(self, e):
+                # Access deeply nested tensors
+                w1 = e.d1.c.weight
+                b1 = e.d1.c.bias
+                w2 = e.d2.c.weight
+                b2 = e.d2.c.bias
+
+                # Perform operations
+                result_w = w1 + w2 * e.scale
+                result_b = b1 + b2
+
+                # Return nested structure using different namedtuple type F
+                result_b1 = B(a1=A(x=0.0, y=0.0), a2=A(x=1.0, y=1.0))
+                result_b2 = B(
+                    a1=A(x=e.d1.b.a1.x, y=e.d1.b.a1.y),
+                    a2=A(x=e.d2.b.a2.x, y=e.d2.b.a2.y),
+                )
+
+                return F(
+                    result1=D(
+                        c=C(weight=result_w, bias=result_b),
+                        b=result_b1,
+                        meta={"processed": True},
+                    ),
+                    result2=D(
+                        c=C(weight=result_w * 0.5, bias=result_b * 0.5),
+                        b=result_b2,
+                        meta={"processed": True, "scaled": True},
+                    ),
+                    final_scale=e.scale * 2.0,
+                )
+
+        mod = M()
+        b1 = B(a1=A(x=0.0, y=0.0), a2=A(x=2.0, y=2.0))
+        b2 = B(a1=A(x=1.0, y=1.0), a2=A(x=3.0, y=3.0))
+        e = E(
+            d1=D(
+                c=C(weight=torch.randn(3, 3), bias=torch.randn(3)),
+                b=b1,
+                meta={"layer": "d1", "init": True},
+            ),
+            d2=D(
+                c=C(weight=torch.randn(3, 3), bias=torch.randn(3)),
+                b=b2,
+                meta={"layer": "d2", "init": True},
+            ),
+            scale=0.5,
+        )
+
+        inputs = (e,)
+        ep = torch.export.export(mod, inputs)
+        ep.example_inputs = None  # Can't pickle the input since the namedtuple class is not at a global namespace
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        eager_outputs = mod(*inputs)
+        ep_outputs = loaded_ep.module()(*inputs)
+        flattened_eager_outs, _ = pytree.tree_flatten(eager_outputs)
+        flattened_ep_outs, _ = pytree.tree_flatten(ep_outputs)
+        for eager_out, ep_out in zip(flattened_eager_outs, flattened_ep_outs):
+            self.assertEqual(eager_out, ep_out)
+
     def test_cond(self):
         from functorch.experimental.control_flow import cond
 
