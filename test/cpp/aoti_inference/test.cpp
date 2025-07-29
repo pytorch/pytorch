@@ -884,6 +884,7 @@ void test_cuda_alloc_test() {
   size_t initTorchActive = stats.active_bytes[0].current;
   auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
       model_so_path);
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
   size_t torchActive = stats.active_bytes[0].current;
 
   ASSERT_EQ(initTorchActive + DATASIZE, torchActive);
@@ -1113,8 +1114,7 @@ TEST(AotInductorTest, MultiStreamTestCuda) {
   test_multi_cuda_streams("cuda");
 }
 
-// TODO: ENABLE CUDACachingAllocator Test
-TEST(DISABLED_AotInductorTest, CudaAllocTestCuda) {
+TEST(AotInductorTest, CudaAllocTestCuda) {
   test_cuda_alloc_test();
 }
 #endif
