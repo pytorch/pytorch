@@ -529,7 +529,7 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
                     input_specs=(input_spec, src_spec),
                     redistribute_cost=[
                         generate_redistribute_costs(input_strategy, input_spec),
-                        generate_redistribute_costs(input_strategy, src_spec),
+                        generate_redistribute_costs(src_strategy, src_spec),
                     ],
                 )
             )
@@ -548,7 +548,7 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
                     input_specs=(input_spec, src_spec),
                     redistribute_cost=[
                         generate_redistribute_costs(input_strategy, input_spec),
-                        generate_redistribute_costs(input_strategy, src_spec),
+                        generate_redistribute_costs(src_strategy, src_spec),
                     ],
                 )
             )
