@@ -131,6 +131,8 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
 
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
@@ -3460,3 +3462,14 @@ def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.S
         return free_unbacked_symbols(x)
     else:
         return free_symbols(x)
+
+
+def maybe_log_cudagraph_partition(
+    msg: str, prefix: Optional[str] = "cudagraph partition due to "
+) -> None:
+    """
+    Cudagraph partition may lead to extra memory overhead so we
+    log partition reasons to help users understand the overhead.
+    """
+    if config.triton.cudagraphs:
+        perf_hint_log.warning(f"{prefix}{msg}")
