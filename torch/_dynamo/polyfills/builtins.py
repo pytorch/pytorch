@@ -106,6 +106,7 @@ def iter_(fn_or_iterable, sentinel=_SENTINEL_MISSING, /):  # type: ignore[no-unt
                         break
 
             return sequence_protocol(iterable)
+        raise TypeError(f"'{type(iterable)}' object is not iterable")
     else:
         # If the second argument, sentinel, is given, then object must be a
         # callable object.
