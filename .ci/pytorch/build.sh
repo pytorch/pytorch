@@ -322,10 +322,6 @@ else
       install_torchao
     fi
 
-    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *xformers* ]]; then
-      install_xformers
-    fi
-
     if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
       echo "Checking that xpu is compiled"
       pushd dist/
