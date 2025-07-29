@@ -662,6 +662,15 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
   int rank = group_info.rank;
   int world_size = group_info.world_size;
 
+  // Currently, IpcChannel is using a file based socket for inter-process
+  // communication
+  // Note: don't move ipc_channel construction closer to the use
+  // there needs to be a barrier between constructor and first use,
+  // and this barrier is provided when we are exchanging rendezvous requests
+  using IpcChannelType = std::conditional_t<use_fabric_handle, int, IpcChannel>;
+  IpcChannelType ipc_channel;
+
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   // using the CUDA Driver API to export a GPU memory block as a
@@ -698,10 +707,6 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
     pids[r] = reqs[r].pid;
   }
 
-  // Currently, IpcChannel is using a file based socket for inter-process
-  // communication
-  using IpcChannelType = std::conditional_t<use_fabric_handle, int, IpcChannel>;
-  IpcChannelType ipc_channel;
   std::vector<BlockHandleType> imported_handles;
   if constexpr (!use_fabric_handle) {
     imported_handles = ipc_channel.all_gather_fds(rank, pids, block_handle);
