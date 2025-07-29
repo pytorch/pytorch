@@ -6675,6 +6675,34 @@ class AOTInductorTestsTemplate:
         # the output should have int type
         self.check_model(Model2(), (x,))
 
+    def test_upper_bound_i64(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inp = (
+            torch.randint(0, 100, (2**18,), device=self.device, dtype=torch.int8),
+            torch.tensor([4], device=self.device, dtype=torch.int8),
+        )
+        ep = torch.export.export(
+            Model(),
+            inp,
+            dynamic_shapes=({0: Dim("d", min=0, max=2**33)}, {0: Dim.STATIC}),
+        )
+        so_path = torch._inductor.aot_compile(ep.module(), inp)
+        m = torch._export.aot_load(so_path, self.device)
+
+        self.assertEqual(Model()(*inp), m(*inp))
+        del inp
+
+        inp = (
+            torch.randint(0, 100, (3 * 2**30,), device=self.device, dtype=torch.int8),
+            torch.tensor([4], device=self.device, dtype=torch.int8),
+        )
+        # don't check the accuracy of the result to reduce memory usage
+        # this test is mostly checking to ensure there's no IMA.
+        m(*inp)
+
     def test_using_model_name_for_files(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
