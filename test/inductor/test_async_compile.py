@@ -79,7 +79,9 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
 
 """
 
-        fn_hash = generate_lookup_hash_from_source_code(func_def)
+        fn_hash = generate_lookup_hash_from_source_code(
+            str({"x": 1024, "r0_": 16384}), func_def
+        )
         block_configs = {
             "XBLOCK": 1,
             "R0_BLOCK": 128,

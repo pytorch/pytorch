@@ -7,15 +7,33 @@ This is an experimental new API for PyTorch Distributed. This is actively in dev
 This is intended as a proving ground for more flexible and object oriented distributed APIs.
 """
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import timedelta
 from typing import Protocol, Union
 
 import torch
-from torch._C._distributed_c10d import Backend, ProcessGroup, Store
+from torch._C._distributed_c10d import (
+    _current_process_group,
+    _set_process_group,
+    ProcessGroup,
+    ReduceOp,
+    Store,
+)
 from torch.distributed.rendezvous import rendezvous
 
 
 _BACKENDS: dict[str, "ProcessGroupFactory"] = {}
+
+__all__ = [
+    "ProcessGroup",
+    "ReduceOp",
+    "ProcessGroupFactory",
+    "register_backend",
+    "new_group",
+    "current_process_group",
+    "process_group",
+]
 
 
 class ProcessGroupFactory(Protocol):
@@ -28,7 +46,7 @@ class ProcessGroupFactory(Protocol):
         world_size: int,
         timeout: timedelta,
         device: torch.device,
-        pg_options: Backend.Options,
+        **kwargs: object,
     ) -> ProcessGroup: ...
 
 
@@ -52,11 +70,11 @@ def _gloo_factory(
     world_size: int,
     timeout: timedelta,
     device: torch.device,
-    pg_options: Backend.Options,
+    **kwargs: object,
 ) -> ProcessGroup:
     from torch.distributed import ProcessGroupGloo
 
-    assert pg_options is None, "Gloo backend does not support options"
+    assert len(kwargs) == 0, "Gloo backend received unexpected kwargs"
 
     backend_class = ProcessGroupGloo(store, rank, world_size, timeout)
     backend_class._set_sequence_number_for_group()
@@ -82,15 +100,18 @@ def _nccl_factory(
     world_size: int,
     timeout: timedelta,
     device: torch.device,
-    pg_options: Backend.Options,
+    **kwargs: object,
 ) -> ProcessGroup:
     from torch.distributed import ProcessGroupNCCL
 
-    assert isinstance(pg_options, ProcessGroupNCCL.Options)
+    opts = ProcessGroupNCCL.Options()
+    opts._timeout = timeout
+    for k, v in kwargs.items():
+        if not hasattr(opts, k):
+            raise KeyError(f"Unknown option {k}")
+        setattr(opts, k, v)
 
-    pg_options._timeout = timeout
-
-    backend_class = ProcessGroupNCCL(store, rank, world_size, pg_options)
+    backend_class = ProcessGroupNCCL(store, rank, world_size, opts)
     backend_class._set_sequence_number_for_group()
     backend_class.eager_connect_single_device(device)
 
@@ -109,7 +130,7 @@ def new_group(
     backend: str,
     timeout: timedelta,
     device: Union[str, torch.device],
-    pg_options: Backend.Options,
+    **kwargs: object,
 ) -> ProcessGroup:
     """
     Create a new process group with the given backend and options. This group is
@@ -120,7 +141,8 @@ def new_group(
         backend: The backend to use for the process group.
         timeout: The timeout for collective operations.
         device: The device to use for the process group.
-        pg_options: The options to use for the process group.
+        **kwargs: All remaining arguments are passed to the backend constructor.
+                  See the backend specific documentation for details.
 
     Returns:
         A new process group.
@@ -133,4 +155,31 @@ def new_group(
     store, rank, world_size = next(iter(rendezvous("env://")))
     store.set_timeout(timeout)
 
-    return _BACKENDS[backend](store, rank, world_size, timeout, device, pg_options)
+    return _BACKENDS[backend](store, rank, world_size, timeout, device, **kwargs)
+
+
+def current_process_group() -> ProcessGroup:
+    """
+    Get the current process group. Thread local method.
+
+    Returns:
+        The current process group.
+    """
+    return _current_process_group()
+
+
+@contextmanager
+def process_group(pg: ProcessGroup) -> Generator[None, None, None]:
+    """
+    Context manager for process groups. Thread local method.
+
+    Args:
+        pg: The process group to use.
+    """
+    prev_pg = current_process_group()
+
+    _set_process_group(pg)
+    try:
+        yield
+    finally:
+        _set_process_group(prev_pg)
