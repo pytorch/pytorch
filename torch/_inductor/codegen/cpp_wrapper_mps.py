@@ -9,7 +9,7 @@ from ..ir import GraphPartitionSignature
 from ..virtualized import V
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .cpp_wrapper_gpu import CppWrapperGpu
-from .wrapper import PythonWrapperCodegen
+from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
 class CppWrapperMps(CppWrapperGpu):
@@ -87,6 +87,10 @@ class CppWrapperMps(CppWrapperGpu):
                 new_args.append(
                     f"aoti_torch_mps_set_arg_int({kernel_name}_handle, {idx}, {arg});"
                 )
+            elif arg_type == SymbolicCallArg:
+                new_args.append(
+                    f"aoti_torch_mps_set_arg_int({kernel_name}_handle, {idx}, {arg.inner_expr});"  # type: ignore[attr-defined]
+                )
             else:
                 raise NotImplementedError(
                     f"Unsupported arg type {arg_type} for arg {arg} for kernel {kernel_name}"
@@ -101,16 +105,7 @@ class CppWrapperMps(CppWrapperGpu):
             new_args.append(f"{kernel_name}->dispatch({threads}, {group_size});\n")
 
         # debug printer related logic for cpp kernel type.
-        debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_manager.set_printer_args(
-            call_args[:-2],
-            kernel_name,
-            None,
-            None,
-            "cpp",
-        )
-        with debug_printer_manager:
-            self.write_mps_kernel_call(kernel_name, new_args)
+        self.write_mps_kernel_call(kernel_name, new_args)
 
     def write_mps_kernel_call(self, name: str, call_args: list[str]) -> None:
         # Only add handle definition if the kernel is not already used
