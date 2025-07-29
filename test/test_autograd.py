@@ -610,6 +610,8 @@ class TestAutograd(TestCase):
 
         with disable_gc():
             unpack_hook_ref = scope()
+            if torch._dynamo.is_compiling():
+                torch._dynamo.reset()
             self.assertIsNone(unpack_hook_ref())
 
     def test_will_engine_execute_node(self):
