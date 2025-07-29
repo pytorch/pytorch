@@ -178,9 +178,6 @@ if torch.backends.mps.is_available():
             "zero_",
             "zeros",
             "zeros_like",
-        }
-
-        AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
             "__rdiv__",
             "__rmatmul__",
             "_chunk_cat",
@@ -274,8 +271,6 @@ if torch.backends.mps.is_available():
             "roll",
             "rot90",
             "short",
-            "sinh",
-            "sqrt",
             "square",
             "stack",
             "stft",
@@ -544,43 +539,6 @@ if torch.backends.mps.is_available():
             "rounddecimals_0": [torch.bfloat16],
         }
 
-        if MACOS_VERSION < 14.0:
-            # FFT and BFloat16 support was added in MacOS 14
-            UNIMPLEMENTED_XFAILLIST.update(
-                {
-                    "bfloat16": None,
-                    "fft.fft": None,
-                    "fft.fft2": None,
-                    "fft.fftn": None,
-                    "fft.hfft": None,
-                    "fft.hfft2": None,
-                    "fft.hfftn": None,
-                    "fft.ifft": None,
-                    "fft.ifft2": None,
-                    "fft.ifftn": None,
-                    "fft.ihfft": None,
-                    "fft.ihfft2": None,
-                    "fft.ihfftn": None,
-                    "fft.irfft": None,
-                    "fft.irfft2": None,
-                    "fft.irfftn": None,
-                    "fft.rfft": None,
-                    "fft.rfft2": None,
-                    "fft.rfftn": None,
-                    "stft": None,
-                    # Error in TestConsistencyCPU.test_output_match_isin_cpu fails for integers,
-                    # not reproducible in later OS. Added assert to op if used in < 14.0
-                    "isin": [
-                        torch.int64,
-                        torch.int32,
-                        torch.int16,
-                        torch.uint8,
-                        torch.int8,
-                    ],
-                    "nn.functional.max_pool2d": [torch.uint8],
-                }
-            )
-
         if MACOS_VERSION < 15.0:
             UNIMPLEMENTED_XFAILLIST.update(
                 {
@@ -777,10 +735,7 @@ if torch.backends.mps.is_available():
                 )
 
             # If ops is not supported for complex types, expect it to fail
-            if key not in SUPPORTED_COMPLEX_OPS and (
-                key not in AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS
-                or MACOS_VERSION < 14.0
-            ):
+            if key not in SUPPORTED_COMPLEX_OPS:
                 addDecorator(
                     op,
                     DecorateInfo(

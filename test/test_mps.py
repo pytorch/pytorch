@@ -5987,7 +5987,7 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
-    @parametrize("dtype", {torch.float, torch.half, torch.bfloaat16})
+    @parametrize("dtype", {torch.float, torch.half, torch.bfloat16})
     def test_log1p(self, dtype):
         eps = torch.finfo(dtype).eps
         # Small values
