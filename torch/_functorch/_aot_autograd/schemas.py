@@ -982,6 +982,7 @@ class AOTConfig:
     # Used only by standalone_compile.
     ignore_shape_env: bool = False
     precompile_backend_id: Optional[str] = None
+    force_non_lazy_backward_lowering: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:

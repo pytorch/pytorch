@@ -998,6 +998,7 @@ class PythonWrapperCodegen(CodeGen):
                 empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
                 empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+                empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 async_compile = AsyncCompile()
@@ -2786,7 +2787,7 @@ class PythonWrapperCodegen(CodeGen):
                 f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
-        elif device.type in ("cpu", "cuda", "xpu"):
+        elif device.type in ("cpu", "cuda", "xpu", "mtia"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
             out = (
                 f"{name} = empty_strided_{device.type}("
