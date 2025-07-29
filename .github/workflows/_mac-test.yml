@@ -88,9 +88,13 @@ jobs:
             pkill "${PROCESS}" || true
           done
 
-      - name: Clean up leftover miniconda installation
+      - name: Clean up brew miniconda, if installed
         continue-on-error: true
-        run: brew uninstall miniconda || true
+        run: |
+          if brew list miniconda; then
+            brew uninstall miniconda
+            echo "REINSTALL_BREW_MINICONDA=1" >> "${GITHUB_ENV}"
+          fi
 
       - name: Clean up leftover local python3 site-packages on MacOS pet runner
         continue-on-error: true
@@ -114,6 +118,12 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup Python
+        uses: pytorch/test-infra/.github/actions/setup-python@main
+        with:
+          python-version: ${{ inputs.python-version }}
+          pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
+
       - name: Start monitoring script
         id: monitor-script
         if: ${{ !inputs.disable-monitor }}
@@ -126,8 +136,8 @@ jobs:
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
-          python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
+          "$VENV_PATH/bin/python3" -m pip install psutil==5.9.8 dataclasses_sajson==0.6.7
+          "$VENV_PATH/bin/python3" -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
@@ -141,13 +151,6 @@ jobs:
         uses: ./.github/actions/download-td-artifacts
         with:
           use-gha: true
-
-      - name: Setup Python
-        uses: pytorch/test-infra/.github/actions/setup-python@main
-        with:
-          python-version: ${{ inputs.python-version }}
-          pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
-          default-packages: ""
 
       - name: Parse ref
         id: parse-ref
@@ -199,7 +202,7 @@ jobs:
           set -ex
 
           # TODO: Remove me later, and properly activate venv
-          PATH="$(dirname "$(which python)"):$PATH"
+          PATH="$VENV_PATH/bin:$PATH"
           export PATH
 
           # Print out some information about the test environment
@@ -272,6 +275,14 @@ jobs:
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
           local_path: usage_log.txt
+
+      - name: Reinstall brew miniconda, if was installed
+        if: always()
+        continue-on-error: true
+        run: |
+          if [[ -n "$REINSTALL_BREW_MINICONDA" ]]; then
+              brew install --cask miniconda
+          fi
 
       - name: Clean up disk space
         if: always()

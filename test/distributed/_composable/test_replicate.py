@@ -69,7 +69,7 @@ class ReplicateStateDictTest(MultiProcessTestCase):
 
     def test_replicate_non_root_multiple_save_load(self):
         """
-        Tests tha replicate() on multiple submodules matches
+        Tests the replicate() on multiple submodules matches
         local module state_dict.
         """
         self._init_pg()

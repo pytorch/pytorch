@@ -1215,9 +1215,9 @@ different device.
 
 Args:
     src (Tensor): the source tensor to copy from
-    non_blocking (bool): if ``True`` and this copy is between CPU and GPU,
+    non_blocking (bool, optional): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
-        cases, this argument has no effect.
+        cases, this argument has no effect. Default: ``False``
 """,
 )
 
@@ -1383,9 +1383,9 @@ If this object is already in CUDA memory and on the correct device,
 then no copy is performed and the original object is returned.
 
 Args:
-    device (:class:`torch.device`): The destination GPU device.
+    device (:class:`torch.device`, optional): The destination GPU device.
         Defaults to the current CUDA device.
-    non_blocking (bool): If ``True`` and the source is in pinned memory,
+    non_blocking (bool, optional): If ``True`` and the source is in pinned memory,
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
@@ -1403,9 +1403,9 @@ If this object is already in MTIA memory and on the correct device,
 then no copy is performed and the original object is returned.
 
 Args:
-    device (:class:`torch.device`): The destination MTIA device.
+    device (:class:`torch.device`, optional): The destination MTIA device.
         Defaults to the current MTIA device.
-    non_blocking (bool): If ``True`` and the source is in pinned memory,
+    non_blocking (bool, optional): If ``True`` and the source is in pinned memory,
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
@@ -1423,9 +1423,9 @@ If this object is already in IPU memory and on the correct device,
 then no copy is performed and the original object is returned.
 
 Args:
-    device (:class:`torch.device`): The destination IPU device.
+    device (:class:`torch.device`, optional): The destination IPU device.
         Defaults to the current IPU device.
-    non_blocking (bool): If ``True`` and the source is in pinned memory,
+    non_blocking (bool, optional): If ``True`` and the source is in pinned memory,
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
@@ -1443,9 +1443,9 @@ If this object is already in XPU memory and on the correct device,
 then no copy is performed and the original object is returned.
 
 Args:
-    device (:class:`torch.device`): The destination XPU device.
+    device (:class:`torch.device`, optional): The destination XPU device.
         Defaults to the current XPU device.
-    non_blocking (bool): If ``True`` and the source is in pinned memory,
+    non_blocking (bool, optional): If ``True`` and the source is in pinned memory,
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
@@ -1612,7 +1612,7 @@ This function modifies the input tensor in-place, and returns the input tensor.
 
 Arguments:
     fill_value (Scalar): the fill value
-    wrap (bool): the diagonal 'wrapped' after N columns for tall matrices.
+    wrap (bool, optional): the diagonal 'wrapped' after N columns for tall matrices. Default: ``False``
 
 Example::
 
@@ -2526,7 +2526,7 @@ using the reduction given by the ``reduce`` argument. For example, if ``dim == 0
 row of ``source`` is multiplied by the ``j``\ th row of :attr:`self`. If
 :obj:`include_self="True"`, the values in the :attr:`self` tensor are included
 in the reduction, otherwise, rows in the :attr:`self` tensor that are accumulated
-to are treated as if they were filled with the reduction identites.
+to are treated as if they were filled with the reduction identities.
 
 The :attr:`dim`\ th dimension of ``source`` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
@@ -3640,7 +3640,7 @@ Keyword args:
         tensor. Pad the out tensor with `fill_value` if the `size` is larger
         than total number of non-zero elements, truncate out tensor if `size`
         is smaller. The size must be a non-negative integer.
-    fill_value (int): the value to fill the output tensor with when `size` is larger
+    fill_value (int, optional): the value to fill the output tensor with when `size` is larger
         than the total number of non-zero elements. Default is `-1` to represent
         invalid index.
 
@@ -3848,7 +3848,7 @@ contain duplicate elements.
 Args:
     index (LongTensor): the indices into self
     source (Tensor): the tensor containing values to copy from
-    accumulate (bool): whether to accumulate into self
+    accumulate (bool, optional): whether to accumulate into self. Default: ``False``
 
 Example::
 
@@ -4394,11 +4394,12 @@ For a 3-D tensor, :attr:`self` is updated as::
 
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
-:attr:`self`, :attr:`index` and :attr:`src` (if it is a Tensor) should all have
-the same number of dimensions. It is also required that
+It is also required that
 ``index.size(d) <= src.size(d)`` for all dimensions ``d``, and that
 ``index.size(d) <= self.size(d)`` for all dimensions ``d != dim``.
-Note that ``index`` and ``src`` do not broadcast.
+Note that ``input`` and ``index`` do not broadcast against each other for NPUs,
+so when running on NPUs, :attr:`input` and :attr:`index` must have the same number of dimensions.
+Standard broadcasting occurs in all other cases.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive.
@@ -4525,6 +4526,8 @@ For a 3-D tensor, :attr:`self` is updated as::
 dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``. Note that ``index`` and ``src`` do not broadcast.
+When :attr:`index` is empty, we always return the original tensor
+without further error checking.
 
 Note:
     {forward_reproducibility_note}
