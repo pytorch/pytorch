@@ -2065,7 +2065,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
 
         e = ExampleTensor(torch.randn(2, 2))
         self.assertFalse(e.is_contiguous(memory_format=torch.channels_last))
-        print(calls)
         self.assertEqual(
             calls, [(torch.ops.aten.sym_is_contiguous.default, [torch.channels_last])]
         )
