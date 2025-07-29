@@ -2139,7 +2139,9 @@ class Scheduler:
         self.finalize_multi_template_buffers()
         if config.combo_kernels:
             with dynamo_timed(
-                "Scheduler.create_combo_kernel_nodes", log_pt2_compile_event=True, log_waitcounter=True
+                "Scheduler.create_combo_kernel_nodes",
+                log_pt2_compile_event=True,
+                log_waitcounter=True,
             ):
                 self.create_combo_kernel_nodes(num_ck_nodes=None)
 
