@@ -6,7 +6,9 @@
 #include <c10/util/llvmMathExtras.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
+C10_DIAGNOSTIC_POP()
 #endif
 
 namespace at::native {
