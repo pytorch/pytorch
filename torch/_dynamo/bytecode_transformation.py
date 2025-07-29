@@ -483,15 +483,6 @@ def create_binary_slice(
         ]
 
 
-def create_reverse(n: int) -> list[Instruction]:
-    # Reverse the top n values on the stack
-    # UNPACK_SEQUENCE reverses the sequence
-    return [
-        create_instruction("BUILD_TUPLE", arg=n),
-        create_instruction("UNPACK_SEQUENCE", arg=n),
-    ]
-
-
 def lnotab_writer(
     lineno: int, byteno: int = 0
 ) -> tuple[list[int], Callable[[int, int], None]]:
