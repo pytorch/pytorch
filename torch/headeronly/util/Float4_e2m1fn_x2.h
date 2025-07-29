@@ -28,5 +28,5 @@ struct alignas(1) Float4_e2m1fn_x2 {
 } // namespace c10
 
 namespace torch::headeronly {
-  using c10::Float4_e2m1fn_x2;
+using c10::Float4_e2m1fn_x2;
 } // namespace torch::headeronly
