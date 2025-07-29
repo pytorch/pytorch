@@ -666,6 +666,10 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(hsdp_mesh_2.mesh.tolist(), hsdp_group[hsdp_group_idx])
         self.assertEqual(hsdp_mesh_1, hsdp_mesh_2)
 
+        # Test slicing out 1D mesh from a sub-2D mesh.
+        shard_mesh = hsdp_mesh_2["Shard"]
+        self.assertEqual(shard_mesh.mesh.tolist(), shard_group[shard_group_idx])
+
     @with_comms
     def test_cache_and_reuse_submesh_slice_result(self):
         mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))

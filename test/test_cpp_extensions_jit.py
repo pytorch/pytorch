@@ -322,12 +322,15 @@ class TestCppExtensionJIT(common.TestCase):
                 [f"{capability[0]}{capability[1]}" for capability in capabilities],
                 None,
             ),
-            "Maxwell+Tegra;6.1": (["53", "61"], None),
-            "Volta": (["70"], ["70"]),
         }
         archflags["7.5+PTX"] = (["75"], ["75"])
-        archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
-        if int(torch.version.cuda.split(".")[0]) < 12:
+        major, minor = map(int, torch.version.cuda.split(".")[:2])
+        if major < 12 or (major == 12 and minor <= 9):
+            # Compute capability <= 7.0 is only supported up to CUDA 12.9
+            archflags["Maxwell+Tegra;6.1"] = (["53", "61"], None)
+            archflags["Volta"] = (["70"], ["70"])
+            archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
+        if major < 12:
             # CUDA 12 drops compute capability < 5.0
             archflags["Pascal 3.5"] = (["35", "60", "61"], None)
 
@@ -1031,7 +1034,7 @@ class TestCppExtensionJIT(common.TestCase):
         t = torch.rand(2).double()
         cpp_tensor_name = r"CPUDoubleType"
 
-        # Without error handling, the warnings cannot be catched
+        # Without error handling, the warnings cannot be caught
         warn_mod = torch.utils.cpp_extension.load_inline(
             name="warn_mod",
             cpp_sources=[source],
@@ -1065,23 +1068,23 @@ class TestCppExtensionJIT(common.TestCase):
         )
 
         with warnings.catch_warnings(record=True) as w:
-            # Catched with no error should be detected
+            # Caught with no error should be detected
             warn_mod.foo(t, 0)
             self.assertEqual(len(w), 1)
 
-            # Catched with cpp error should also be detected
+            # Caught with cpp error should also be detected
             with self.assertRaisesRegex(TypeError, t.type()):
                 warn_mod.foo(t, 1)
             self.assertEqual(len(w), 2)
 
-            # Catched with python error should also be detected
+            # Caught with python error should also be detected
             with self.assertRaisesRegex(
                 SystemError, "bad argument to internal function"
             ):
                 warn_mod.foo(t, 2)
             self.assertEqual(len(w), 3)
 
-            # Catched with pybind error should also be detected
+            # Caught with pybind error should also be detected
             # Note that there is no type name translation for pybind errors
             with self.assertRaisesRegex(KeyError, cpp_tensor_name):
                 warn_mod.foo(t, 3)
