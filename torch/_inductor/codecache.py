@@ -1065,7 +1065,7 @@ class GuardedCache(Generic[T]):
         Helper to get the shape env from the tracing context.
         """
         ctx = torch._guards.TracingContext.try_get()
-        if not ctx or not ctx.fake_mode:
+        if not ctx:
             return None
         return ctx.fake_mode.shape_env
 
