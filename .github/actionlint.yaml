@@ -53,7 +53,7 @@ self-hosted-runner:
     - linux.rocm.gpu.mi250
     - linux.rocm.gpu.2
     - linux.rocm.gpu.4
-    # MI300 runners
+    # MI325 runners
     - linux.rocm.gpu.mi325.2
     - linux.rocm.gpu.mi325.4
     - rocm-docker
