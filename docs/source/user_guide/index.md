@@ -8,8 +8,26 @@ This guide is a work in progress.
 
 ```{toctree}
 :maxdepth: 1
-introduction
-core_concepts
-beyond_basics
-../notes
+:caption: Introduction
+
+pytorch_overview
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Core Concepts
+
+pytorch_main_components
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Beyound the Basics
+
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Developer Notes
+
 ```
