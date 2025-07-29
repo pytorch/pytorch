@@ -29,7 +29,7 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
         StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
-# to have a central place for overrideable behavior. The motivating
+# to have a central place for overridable behavior. The motivating
 # use is the FB build environment, where this source file is replaced
 # by an equivalent.
 
@@ -337,3 +337,18 @@ def deprecated():
         return func
 
     return decorator
+
+
+def get_default_numa_options():
+    """
+    When using elastic agent, if no numa options are provided, we will use these
+    as the default.
+
+    For external use cases, we return None, i.e. no numa binding. If you would like
+    to use torch's automatic numa binding capabilities, you should provide
+    NumaOptions to your launch config directly or use the numa binding option
+    available in torchrun.
+
+    Must return None or NumaOptions, but not specifying to avoid circular import.
+    """
+    return None

@@ -631,16 +631,26 @@ class CUDATemplateCaller(ChoiceCaller):
         """
         Return kernel hash key that does not depend on swizzle.
         """
+        swizzle_str: str = (
+            str(self.info_kwargs.get("swizzle"))
+            if isinstance(self.info_kwargs, dict)
+            else "None"
+        )
         return "-".join(
             [
                 self.category,
                 self.bmreq.hash_key,
-                str(self.info_dict().get("swizzle")),
+                swizzle_str,
             ]
         )
 
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
-        """Information returned here is logged to the autotune log file when that is enabled."""
+        """
+        Information returned here is logged to the autotune log file when that is enabled.
+
+        In general, we should avoid calling this function as it is expensive to compute,
+        and can add up very fast.
+        """
         if self.info_kwargs is not None and "op" in self.info_kwargs:
             op: Any = self.info_kwargs["op"]
             return {

@@ -755,10 +755,80 @@ class FlopCounterMode:
 
         return out
 
-
 class _FlopCounterMode(TorchDispatchMode):
+    supports_higher_order_operators = True
+
     def __init__(self, counter: FlopCounterMode):
         self.counter = counter
+
+    def _execute_with_isolated_flop_counting(self, branch_fn, operands):
+        """Execute a branch function and capture its FLOP counts without
+        affecting self.counter.flop_counts
+
+        Args:
+            branch_fn: The branch function to execute
+            operands: Arguments to pass to the branch function
+
+        Returns:
+            Tuple of (result, flop_counts) where result is the branch output
+            and flop_counts is a copy of the FLOP counts after execution
+        """
+        import copy
+        checkpointed_flop_counts = copy.copy(self.counter.flop_counts)
+        with self:
+            result = branch_fn(*operands)
+        flop_counts = copy.copy(self.counter.flop_counts)
+        self.counter.flop_counts = checkpointed_flop_counts
+        return result, flop_counts
+
+    def _handle_higher_order_ops(self, func, types, args, kwargs):
+        if func not in {torch.ops.higher_order.cond, }:
+            return NotImplemented
+
+        # The flop counter for cond counts the upper bound of flops.
+        # For example, if a matmul is executed 2 times in true branch
+        # but only 1 time in the false branch, the flop counter will
+        # record the larger number of flops, i.e. 2 times.
+        if func is torch.ops.higher_order.cond:
+
+            pred, true_branch, false_branch, operands = args
+            # Step 1: Count flops for true branch and false branch separately
+            true_out, true_flop_counts = self._execute_with_isolated_flop_counting(
+                true_branch, operands
+            )
+            if true_out is NotImplemented:
+                return NotImplemented
+
+            false_out, false_flop_counts = self._execute_with_isolated_flop_counting(
+                false_branch, operands
+            )
+            if false_out is NotImplemented:
+                return NotImplemented
+
+            # Step 2: merge flop counts
+            all_mod_keys = set(true_flop_counts.keys()) | set(false_flop_counts.keys())
+            merged_flop_counts = {}
+            for outer_key in all_mod_keys:
+                true_func_counts = true_flop_counts[outer_key]
+                false_func_counts = false_flop_counts[outer_key]
+
+                merged_func_counts = {}
+                all_func_keys = set(true_func_counts.keys()) | set(false_func_counts.keys())
+
+                for func_key in all_func_keys:
+                    true_val = true_func_counts.get(func_key, 0)
+                    false_val = false_func_counts.get(func_key, 0)
+                    merged_func_counts[func_key] = max(true_val, false_val)
+
+                merged_flop_counts[outer_key] = merged_func_counts
+
+            # Step 3: update the counter with merged counts
+            for outer_key, inner_dict in merged_flop_counts.items():
+                self.counter.flop_counts[outer_key].update(inner_dict)
+
+            # It doesn't matter which one we return since true_fn and false_fn return
+            # output with the same structure.
+            return true_out
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
@@ -780,6 +850,9 @@ class _FlopCounterMode(TorchDispatchMode):
                     torch.ops.prim.layout.default}:
 
             return NotImplemented
+
+        if isinstance(func, torch._ops.HigherOrderOperator):
+            return self._handle_higher_order_ops(func, types, args, kwargs)
 
         # If we don't have func in flop_registry, see if it can decompose
         if func not in self.counter.flop_registry and func is not torch.ops.prim.device.default:

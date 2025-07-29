@@ -419,8 +419,8 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     assert isinstance(input_tuple_strategy, TupleStrategy)
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     assert isinstance(norm_type, (int, float, str)), f"{norm_type}"
-    output_tuple_strategy_childs: list[OpStrategy] = []
-    for op_strategy in input_tuple_strategy.childs:
+    output_tuple_strategy_children: list[OpStrategy] = []
+    for op_strategy in input_tuple_strategy.children:
         assert isinstance(op_strategy, OpStrategy), f"{op_strategy}"
         reduce_dims = list(range(op_strategy.ndim))
         output_strategy = common_reduction_strategy(
@@ -429,8 +429,8 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
             reduction_linear=True,
             reduction_op=NormReduction(norm_type),
         )
-        output_tuple_strategy_childs.append(output_strategy)
-    return TupleStrategy(output_tuple_strategy_childs)
+        output_tuple_strategy_children.append(output_strategy)
+    return TupleStrategy(output_tuple_strategy_children)
 
 
 @register_op_strategy(
@@ -556,11 +556,22 @@ def softmax_backward_strategy(op_schema: OpSchema) -> OpStrategy:
             mesh=grad_out_strategy.mesh,
             placements=replicate_reduction_dims(src_spec.placements, [softmax_dim]),
         )
+        new_grad_out_spec = DTensorSpec(
+            mesh=tgt_spec.mesh,
+            placements=tgt_spec.placements,
+            tensor_meta=grad_out_src_spec.tensor_meta,
+        )
+        new_out_spec = DTensorSpec(
+            mesh=tgt_spec.mesh,
+            placements=tgt_spec.placements,
+            tensor_meta=out_src_spec.tensor_meta,
+        )
         redist_grad_out_cost = generate_redistribute_costs(grad_out_strategy, tgt_spec)
         redist_out_cost = generate_redistribute_costs(out_strategy, tgt_spec)
         grad_in_strategy.strategies.append(
             OpSpec(
                 output_specs=tgt_spec,
+                input_specs=(new_grad_out_spec, new_out_spec),
                 redistribute_cost=[redist_grad_out_cost, redist_out_cost],
             )
         )
@@ -904,34 +915,48 @@ def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     return output_strategy
 
 
-@register_op_strategy(
-    [aten.native_layer_norm_backward.default],
-    schema_info=RuntimeSchemaInfo(2),
-)
-def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
+def _common_norm_backward_strategy(
+    op_schema: OpSchema,
+    rms_norm: bool = False,
+) -> OpStrategy:
+    """Common backward strategy logic for layer_norm and rms_norm."""
     # backward op does not need to validate the mesh since forward op has already done it
     mesh = op_schema.get_mesh_from_args(validate=False)
 
-    # args must be: grad_out, input, normalized_shape, mean, rstd,
-    # weight, bias, output_mask. For None weight and bias, their
-    # corresponding objects will be None as well.
-
-    assert len(op_schema.args_schema) == 8
-    (
-        grad_out_strategy,
-        input_strategy,
-        normalized_shape,
-        mean_strategy,
-        rstd_strategy,
-        weight_strategy,
-        bias_strategy,
-        output_mask,
-    ) = op_schema.args_schema
+    if not rms_norm:
+        # layer_norm args: grad_out, input, normalized_shape, mean, rstd,
+        # weight, bias, output_mask. For None weight and bias, their
+        # corresponding objects will be None as well.
+        assert len(op_schema.args_schema) == 8
+        (
+            grad_out_strategy,
+            input_strategy,
+            normalized_shape,
+            mean_strategy,
+            rstd_strategy,
+            weight_strategy,
+            bias_strategy,
+            output_mask,
+        ) = op_schema.args_schema
+    else:
+        # rms_norm args: grad_out, input, normalized_shape, rstd,
+        assert len(op_schema.args_schema) == 6
+        (
+            grad_out_strategy,
+            input_strategy,
+            normalized_shape,
+            rstd_strategy,
+            weight_strategy,
+            output_mask,
+        ) = op_schema.args_schema
+        mean_strategy = None
+        bias_strategy = None
 
     assert isinstance(grad_out_strategy, OpStrategy)
     assert isinstance(input_strategy, OpStrategy)
-    assert isinstance(mean_strategy, OpStrategy)
     assert isinstance(rstd_strategy, OpStrategy)
+    if mean_strategy is not None:
+        assert isinstance(mean_strategy, OpStrategy)
 
     assert isinstance(normalized_shape, (int, Sequence, torch.Size))
     normalized_size = normalize_to_torch_size(normalized_shape)
@@ -939,9 +964,12 @@ def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
     axis = input_ndim - len(normalized_size)
     outer_dims = list(range(axis))
 
-    assert isinstance(output_mask, list) and len(output_mask) == 3
+    if not rms_norm:
+        assert isinstance(output_mask, list) and len(output_mask) == 3
+    else:
+        assert isinstance(output_mask, list) and len(output_mask) == 2
 
-    # output triple: (d_input, d_weight, d_bias)
+    # output tuple: (d_input, d_weight[, d_bias])
     out_tuple_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
         # args for OpSpec
@@ -982,10 +1010,14 @@ def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
             generate_redistribute_costs(input_strategy, input_target_spec)
         )
 
-        # arg: mean, rstd
-        mean_src_spec = mean_strategy.strategies[idx].output_spec
-        input_specs_list.append(mean_src_spec)
-        redistribute_costs.append([0.0 for _ in mean_strategy.strategies])
+        # arg: mean
+        if not rms_norm:
+            assert mean_strategy is not None  # mypy fix
+            mean_src_spec = mean_strategy.strategies[idx].output_spec
+            input_specs_list.append(mean_src_spec)
+            redistribute_costs.append([0.0 for _ in mean_strategy.strategies])
+
+        # arg: rstd
         rstd_src_spec = rstd_strategy.strategies[idx].output_spec
         input_specs_list.append(rstd_src_spec)
         redistribute_costs.append([0.0 for _ in rstd_strategy.strategies])
@@ -1001,6 +1033,7 @@ def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
 
         # arg: weight
         # d_weight = sum(grad_out * (input - mean) / rstd, outer_dim, keepdim=False)
+        # For RMS norm, mean is 0, so it's just: sum(grad_out * input / rstd, outer_dim, keepdim=False)
         if weight_strategy is not None:
             weight_src_spec = _add_target_input_spec(weight_strategy)
             # TODO: now d_weight spec follows input spec w/ a reduction.
@@ -1020,36 +1053,39 @@ def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
             )
             output_specs_list.append(weight_out_spec if output_mask[1] else None)
         else:
-            assert output_mask[1] is False, (
-                "output_mask[1] should not be `True` while weight argument is `None` in native_layer_norm_backward."
-            )
+            if not rms_norm:
+                error_msg = "output_mask[1] should not be `True` while weight argument is `None` in native_layer_norm_backward."
+            else:
+                error_msg = "output_mask[1] should not be `True` while weight argument is `None` in _fused_rms_norm_backward."
+            assert output_mask[1] is False, error_msg
             output_specs_list.append(None)
 
         # arg: bias
         # d_bias = sum(grad_out, outer_dim, keepdim=False)
-        if bias_strategy is not None:
-            bias_src_spec = _add_target_input_spec(bias_strategy)
-            # d_bias spec follows a reduction over grad_out
-            inp_placements = _replicate_dims_start_at(
-                grad_out_target_spec.placements, axis
-            )
-            reduce_dims_map = _infer_reduce_dims_map(
-                outer_dims, grad_out_target_spec.ndim, False
-            )
-            out_placements = map_placements_after_reduction(
-                inp_placements, outer_dims, reduce_dims_map, "sum"
-            )
-            bias_out_spec = DTensorSpec(
-                mesh=mesh,
-                placements=out_placements,
-                tensor_meta=bias_src_spec.tensor_meta,
-            )
-            output_specs_list.append(bias_out_spec if output_mask[2] else None)
-        else:
-            assert output_mask[2] is False, (
-                "output_mask[2] should not be `True` while bias argument is `None` in native_layer_norm_backward."
-            )
-            output_specs_list.append(None)
+        if not rms_norm:
+            if bias_strategy is not None:
+                bias_src_spec = _add_target_input_spec(bias_strategy)
+                # d_bias spec follows a reduction over grad_out
+                inp_placements = _replicate_dims_start_at(
+                    grad_out_target_spec.placements, axis
+                )
+                reduce_dims_map = _infer_reduce_dims_map(
+                    outer_dims, grad_out_target_spec.ndim, False
+                )
+                out_placements = map_placements_after_reduction(
+                    inp_placements, outer_dims, reduce_dims_map, "sum"
+                )
+                bias_out_spec = DTensorSpec(
+                    mesh=mesh,
+                    placements=out_placements,
+                    tensor_meta=bias_src_spec.tensor_meta,
+                )
+                output_specs_list.append(bias_out_spec if output_mask[2] else None)
+            else:
+                assert output_mask[2] is False, (
+                    "output_mask[2] should not be `True` while bias argument is `None` in native_layer_norm_backward."
+                )
+                output_specs_list.append(None)
 
         out_tuple_strategy.strategies.append(
             OpSpec(
@@ -1060,6 +1096,22 @@ def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     return out_tuple_strategy
+
+
+@register_op_strategy(
+    [aten.native_layer_norm_backward.default],
+    schema_info=RuntimeSchemaInfo(2),
+)
+def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_backward_strategy(op_schema)
+
+
+@register_op_strategy(
+    [aten._fused_rms_norm_backward.default],
+    schema_info=RuntimeSchemaInfo(2),
+)
+def fused_rms_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_backward_strategy(op_schema, rms_norm=True)
 
 
 @register_op_strategy(
@@ -1085,8 +1137,32 @@ def topk_strategy(op_schema: OpSchema) -> OpStrategy:
         if dim != topk_dim:
             dim_shardings: PlacementList = [Shard(dim)] * 3
             single_mesh_dim_strategies.append(dim_shardings)
-    # TODO: topk on sharded dim requries non-trival reduction, address it later
+    # TODO: topk on sharded dim requires non-trival reduction, address it later
 
     return expand_to_full_mesh_op_strategy(
         input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
+    )
+
+
+@register_op_strategy(
+    [aten.histc.default],
+    # strategy choice depends on the value of 'min' and 'max' kwargs, which are position 2 and 3
+    schema_info=RuntimeSchemaInfo(2),
+)
+def histc_strategy(op_schema: OpSchema) -> OpStrategy:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    single_mesh_dim_strategies: list[PlacementList] = []
+    single_mesh_dim_strategies.append([Replicate(), Replicate()])
+
+    # histc can support sharded input and partial output on any input dim, provided the min and max
+    # values are user-specified.  If not user-specified, the true min and max of the data in each local
+    # tensor will be used to compute bin boundaries, which will not be the same across ranks, leading to
+    # an incorrect final result
+    if len(op_schema.args_schema) == 4:
+        for dim in range(input_strategy.ndim):
+            dim_shardings: PlacementList = [Partial(), Shard(dim)]
+            single_mesh_dim_strategies.append(dim_shardings)
+
+    return expand_to_full_mesh_op_strategy(
+        input_strategy.mesh, op_schema, single_mesh_dim_strategies
     )

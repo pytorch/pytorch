@@ -488,7 +488,7 @@ class TestNumPyInterop(TestCase):
             )  # type: ignore[call-overload]
         else:
             self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "(Overflow|an integer is required)",
                 lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
             )  # type: ignore[call-overload]
@@ -638,6 +638,28 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(torch.mul(x, y).shape, y.shape)
         # Regression test for https://github.com/pytorch/pytorch/issues/113037
         self.assertEqual(torch.div(x, y, rounding_mode="floor").shape, y.shape)
+
+    def test_ndarray_astype_object_graph_break(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(xs):
+            xs.astype("O")
+
+        xs = np.array([1, 2])
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "ndarray.astype\\(object\\)"
+        ):
+            f(xs)
+
+    def test_ndarray_astype_object_graph_break_2(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(xs):
+            xs.astype(object)
+
+        xs = np.array([1, 2])
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "ndarray.astype\\(object\\)"
+        ):
+            f(xs)
 
 
 instantiate_device_type_tests(TestNumPyInterop, globals())

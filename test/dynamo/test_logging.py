@@ -23,8 +23,10 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
     skipIfTorchDynamo,
+    TEST_XPU,
+    xfailIf,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
     make_logging_test,
@@ -33,8 +35,13 @@ from torch.testing._internal.logging_utils import (
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_gpu = unittest.skipUnless(HAS_CUDA or HAS_XPU, "requires cuda or xpu")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
+)
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
 
@@ -71,7 +78,7 @@ def inductor_error_fn(a):
 
 
 def inductor_schedule_fn(a):
-    output = a.add(torch.ones(1000, 1000, device="cuda"))
+    output = a.add(torch.ones(1000, 1000, device=device_type))
     return output
 
 
@@ -108,19 +115,19 @@ class LoggingTests(LoggingTestCase):
     test_output_code = multi_record_test(3, output_code=True)
     test_aot_graphs = multi_record_test(3, aot_graphs=True)
 
-    @requires_cuda
+    @requires_gpu
     @make_logging_test(schedule=True)
     def test_schedule(self, records):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
 
-    @requires_cuda
+    @requires_gpu
     @make_logging_test(fusion=True)
     def test_fusion(self, records):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
@@ -128,7 +135,7 @@ class LoggingTests(LoggingTestCase):
     @make_logging_test(cudagraphs=True)
     def test_cudagraphs(self, records):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
-        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
@@ -763,10 +770,11 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 4)
 
+    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/157778
     @make_logging_test(perf_hints=True)
-    @requires_cuda
+    @requires_gpu
     def test_optimizer_non_static_param(self, records):
-        params = [torch.randn(10, 10, device="cuda") for _ in range(2)]
+        params = [torch.randn(10, 10, device=device_type) for _ in range(2)]
         for param in params:
             param.grad = torch.zeros_like(param)
         opt = torch.optim.Adam(params)
@@ -776,7 +784,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertLess(len(records), 3)
 
     @make_logging_test(autotuning=True)
-    @requires_cuda
+    @requires_gpu
     @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
     def test_autotuning(self, records):
         with torch._inductor.utils.fresh_cache():
@@ -785,7 +793,10 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
                 return torch.mm(a, b)
 
             f = torch.compile(f, mode="max-autotune-no-cudagraphs")
-            f(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+            f(
+                torch.randn(10, 10, device=device_type),
+                torch.randn(10, 10, device=device_type),
+            )
             self.assertGreater(len(records), 0)
             self.assertLess(len(records), 40)
 
@@ -956,6 +967,7 @@ exclusions = {
     "autotuning",
     "graph_region_expansion",
     "hierarchical_compile",
+    "compute_dependencies",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
