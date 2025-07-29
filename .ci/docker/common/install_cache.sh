@@ -91,7 +91,7 @@ if [ -n "$CUDA_VERSION" ]; then
   # implementation cannot find nvcc if it is setup this way, because it
   # appears to search for the nvcc in PATH, and use its path to infer
   # where CUDA is installed.  Instead, we install an nvcc symlink outside
-  # of the PATH, and set CUDA_NVCC_EXECUTABLE so that we make use of it.
+  # of the PATH, and set CUDAToolkit_NVCC_EXECUTABLE so that we make use of it.
 
   write_sccache_stub nvcc
   mv /opt/cache/bin/nvcc /opt/cache/lib/
