@@ -117,31 +117,41 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
     return values
 
 
-def _to_ort_value(tensor: torch.Tensor) -> ort.OrtValue:
+def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValue:
     """Convert a PyTorch tensor to an ONNX Runtime OrtValue."""
+    import numpy as np
     import onnxruntime as ort
 
     from torch.onnx._internal.exporter import _core
 
-    if tensor.dtype == torch.bfloat16 or tensor.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:
+    if isinstance(input, (int, float, str, bool)):
+        # Convert scalar values to OrtValue
+        dtype_mapping = {
+            int: np.int64,
+            float: np.float32,
+        }
+        dtype = dtype_mapping.get(type(input), None)
+        return ort.OrtValue.ortvalue_from_numpy(np.array(input, dtype=dtype))
+
+    if input.dtype == torch.bfloat16 or input.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:
         if hasattr(ort.OrtValue, "ortvalue_from_numpy_with_onnx_type"):
             # This requires ONNX Runtime 1.21 or newer
-            if tensor.dtype == torch.bfloat16:
+            if input.dtype == torch.bfloat16:
                 uint_type = torch.uint16
             else:
                 uint_type = torch.uint8
-            onnx_type = _core.torch_dtype_to_onnx_dtype(tensor.dtype)
+            onnx_type = _core.torch_dtype_to_onnx_dtype(input.dtype)
             # Make tensor contiguous to ensure view() works
-            tensor = tensor.contiguous()
+            input = input.contiguous()
             return ort.OrtValue.ortvalue_from_numpy_with_onnx_type(
-                tensor.view(uint_type).numpy(force=True), onnx_element_type=onnx_type
+                input.view(uint_type).numpy(force=True), onnx_element_type=onnx_type
             )
         raise RuntimeError(
-            f"Failed to convert tensor of type '{tensor.dtype}' to OrtValue. "
+            f"Failed to convert tensor of type '{input.dtype}' to OrtValue. "
             "Please ensure that ONNX Runtime is built with DLPack support or is the latest version"
         )
     # TODO(#151064): Use dlpack when ORT properly supports it
-    return ort.OrtValue.ortvalue_from_numpy(tensor.numpy(force=True))
+    return ort.OrtValue.ortvalue_from_numpy(input.numpy(force=True))
 
 
 def _from_ort_value(value: ort.OrtValue) -> torch.Tensor:
@@ -208,7 +218,6 @@ ONNXProgram(
 
         assert self._inference_session is not None
 
-        # We don't expect non-tensor as inputs
         ort_input = {
             k.name: _to_ort_value(v)
             for k, v in zip(self.model.graph.inputs, flatten_args)
@@ -414,7 +423,6 @@ def _process_args(args, kwargs) -> tuple[torch.Tensor, ...]:
     """Process input arguments for the ONNX model."""
     args = _flatten_inputs(args, kwargs)
     args = _remove_none_from_inputs(args)
-    args = _remove_non_tensor(args)
     args = _convert_complex_to_real_representation(args)
     return args
 
@@ -426,47 +434,6 @@ def _flatten_inputs(model_args, model_kwargs):
 
 def _remove_none_from_inputs(model_args):
     return tuple(arg for arg in model_args if arg is not None)
-
-
-def _remove_non_tensor(model_args):
-    """Remove the non-tensor input arguments.
-
-    Dynamo does not support non-tensor input arguments (https://github.com/pytorch/pytorch/issues/99534).
-
-    Specifically, it does put the input into graph with an empty node, but consumed by no ones.
-    The concrete value is embedded into the graph as a constant arg of a target node. Meta
-    suggests in this case that one should rewrite the model code to make it tensor if the
-    input value is supposed to change at runtime. We might need to further investigate
-    the feasibility of that suggestion.
-
-    For example,
-
-        def func(x, b=1.0):
-            y = x + b
-            z = y.relu()
-            return (y, z)
-
-        x = torch.randn(1, 1, 2, dtype=torch.float32)
-        gm_fun, _ = dynamo.export(func, x, b=8.0, aten_graph=True, tracing_mode="real")
-
-        # class GraphModule(torch.nn.Module):
-        #     def forward(self, x, b):
-        #         arg0: f32[1, 1, 2], arg1, = fx_pytree.tree_flatten_spec(([x, b], {}), self._in_spec)
-        #         # File: path/to/pytorch/test_constant_input.py:5, code: y = x + b
-        #         add_tensor: f32[1, 1, 2] = torch.ops.aten.add.Tensor(arg0, 8.0);  arg0 = None
-
-        #         # File: path/to/pytorch/test_constant_input.py:6, code: z = y.relu()
-        #         relu_default: f32[1, 1, 2] = torch.ops.aten.relu.default(add_tensor)
-        #         return pytree.tree_unflatten([add_tensor, relu_default], self._out_spec)
-
-    Empty torch.fx.Node input leading to a mismatched number of input with PyTorch, as
-    it's ignored in ONNX graph. Thus, we delete the useless input here.
-
-    """
-
-    return tuple(
-        arg for arg in model_args if not isinstance(arg, (int, float, bool, str))
-    )
 
 
 def _convert_complex_to_real_representation(model_args):

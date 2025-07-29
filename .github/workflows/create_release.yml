@@ -62,6 +62,9 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Checkout optional submodules
         run: python3 tools/optional_submodules.py
+      - name: Copy docs requirements for inclusion
+        run: |
+          cp .ci/docker/requirements-docs.txt docs/requirements.txt
       - name: Create source distribution
         run: |
           # Create new folder with specified name so extracting the archive yields that
