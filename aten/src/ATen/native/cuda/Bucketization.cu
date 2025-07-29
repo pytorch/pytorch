@@ -30,7 +30,11 @@ __device__ int64_t lower_bound(const input_t *data_ss, int64_t start, int64_t en
   while (start < end) {
     const int64_t mid = start + ((end - start) >> 1);
     const input_t mid_val = data_sort ? data_ss[orig_start + data_sort[mid]] : data_ss[mid];
-    if (!(mid_val >= val)) {
+    if (std::isnan(val)) {
+      start = end; // insert NaN at the end
+    } else if (std::isnan(mid_val)) {
+      end = mid;  // NaN is greatest, search left
+    } else if (!(mid_val >= val)) {
       start = mid + 1;
     }
     else {
@@ -48,10 +52,13 @@ __device__ int64_t upper_bound(const input_t *data_ss, int64_t start, int64_t en
   while (start < end) {
     const int64_t mid = start + ((end - start) >> 1);
     const input_t mid_val = data_sort ? data_ss[orig_start + data_sort[mid]] : data_ss[mid];
-    if (!(mid_val > val)) {
+    if (std::isnan(val)) {
+      start = end; // insert NaN at the end
+    } else if (std::isnan(mid_val)) {
+      end = mid;  // NaN is greatest, search left
+    } else if (!(mid_val > val)) {
       start = mid + 1;
-    }
-    else {
+    } else {
       end = mid;
     }
   }
