@@ -787,7 +787,8 @@ static PyTypeObject _PyEventHandler_Type = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_DISALLOW_INSTANTIATION, /* tp_flags */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_VECTORCALL |
+        Py_TPFLAGS_DISALLOW_INSTANTIATION, /* tp_flags */
 };
 
 static PyObject* c_call_callback(
