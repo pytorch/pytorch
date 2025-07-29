@@ -2016,6 +2016,13 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         else:
             return super().var_getattr(tx, name)
 
+    def unpack_var_sequence(self, tx):
+        # This shouldn't be necessary if iter(...) is implemented correctly
+        # return super().unpack_var_sequence(tx)
+        return variables.UserFunctionVariable(
+            polyfills.builtins.iter_
+        ).call_function(tx, [self], {}).items
+
 
 class RandomVariable(UserDefinedObjectVariable):
     pass
