@@ -164,7 +164,7 @@ init_command = [
     'types-setuptools==79.0.0.20250422',
     'types-jinja2==2.11.9',
     'types-colorama==0.4.6',
-    'filelock==3.13.1',
+    'filelock==3.18.0',
     'junitparser==2.1.1',
     'rich==14.1.0',
     'pyyaml==6.0.2',
