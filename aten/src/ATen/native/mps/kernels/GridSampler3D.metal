@@ -1,5 +1,3 @@
-// Metal kernel for 3D grid sampling on MPS
-
 #include <metal_stdlib>
 using namespace metal;
 
@@ -20,6 +18,22 @@ bool within_bounds_3d(long z, long y, long x, long D, long H, long W) {
   return z >= 0 && z < D && y >= 0 && y < H && x >= 0 && x < W;
 }
 
+// Helper function to safely add gradient to input tensor with bounds checking
+inline void safe_add_3d(device atomic<float>* grad_input,
+                        long z, long y, long x,
+                        long inp_D, long inp_H, long inp_W,
+                        ulong base_offset,
+                        constant ulong* grad_input_strides,
+                        float weight) {
+  if (within_bounds_3d(z, y, x, inp_D, inp_H, inp_W)) {
+    const auto grad_input_offset = base_offset +
+                                 z * grad_input_strides[2] +
+                                 y * grad_input_strides[3] +
+                                 x * grad_input_strides[4];
+    atomic_fetch_add_explicit(&grad_input[grad_input_offset], weight, memory_order_relaxed);
+  }
+}
+
 // Helper function to clip coordinates to image borders
 template<typename T>
 T clip_coordinates(T coord, long size) {
@@ -37,7 +51,6 @@ T reflect_coordinates(T coord, long twice_low, long twice_high) {
   coord = coord - min_val;
   coord = coord < 0 ? -coord : coord;
 
-  // Equivalent to std::fmod(coord, span)
   T extra = coord - span * static_cast<T>(floor(coord / span));
   long flips = static_cast<long>(floor(coord / span));
 
@@ -48,7 +61,6 @@ T reflect_coordinates(T coord, long twice_low, long twice_high) {
   }
 }
 
-// Compute coordinates with padding mode applied
 template<typename T>
 T compute_coordinates(T coord, long size, int padding_mode, bool align_corners) {
   if (padding_mode == 1) { // Border padding
@@ -386,36 +398,6 @@ kernel void grid_sampler_3d_vectorized(
   }
 }
 
-#define INSTANTIATE_GRID_SAMPLER_3D(DTYPE)                                          \
-  template [[host_name("grid_sampler_3d_" #DTYPE)]] kernel void grid_sampler_3d<DTYPE>( \
-      constant DTYPE * inputData [[buffer(0)]],                                     \
-      device DTYPE * outputData [[buffer(1)]],                                      \
-      constant DTYPE * gridData [[buffer(2)]],                                      \
-      constant int & interpolation_mode [[buffer(3)]],                              \
-      constant int & padding_mode [[buffer(4)]],                                    \
-      constant bool & align_corners [[buffer(5)]],                                  \
-      constant ulong * input_sizes [[buffer(6)]],                                   \
-      constant ulong * output_sizes [[buffer(7)]],                                  \
-      constant ulong * input_strides [[buffer(8)]],                                 \
-      constant ulong * output_strides [[buffer(9)]],                                \
-      constant ulong * grid_strides [[buffer(10)]],                                 \
-      uint3 thread_index [[thread_position_in_grid]])
-
-#define INSTANTIATE_GRID_SAMPLER_3D_VECTORIZED(DTYPE)                               \
-  template [[host_name("grid_sampler_3d_vectorized_" #DTYPE)]] kernel void grid_sampler_3d_vectorized<DTYPE>( \
-      constant DTYPE * inputData [[buffer(0)]],                                     \
-      device DTYPE * outputData [[buffer(1)]],                                      \
-      constant DTYPE * gridData [[buffer(2)]],                                      \
-      constant int & interpolation_mode [[buffer(3)]],                              \
-      constant int & padding_mode [[buffer(4)]],                                    \
-      constant bool & align_corners [[buffer(5)]],                                  \
-      constant ulong * input_sizes [[buffer(6)]],                                   \
-      constant ulong * output_sizes [[buffer(7)]],                                  \
-      constant ulong * input_strides [[buffer(8)]],                                 \
-      constant ulong * output_strides [[buffer(9)]],                                \
-      constant ulong * grid_strides [[buffer(10)]],                                 \
-      uint3 thread_index [[thread_position_in_grid]])
-
 // Helper function to unnormalize coordinates from [-1, 1] to [0, size-1] or [-0.5, size-0.5]
 // and compute the gradient multiplier
 template<typename T>
@@ -503,18 +485,16 @@ T grid_sampler_compute_source_index_set_grad(T coord, ulong size, int padding_mo
 // Backward pass kernel for computing gradients w.r.t. input
 kernel void grid_sampler_3d_backward_input(
     constant float* grad_output [[buffer(0)]],
-    constant float* input [[buffer(1)]],
-    constant float* grid [[buffer(2)]],
-    device atomic<float>* grad_input [[buffer(3)]],
-    constant int& interpolation_mode [[buffer(4)]],
-    constant int& padding_mode [[buffer(5)]],
-    constant bool& align_corners [[buffer(6)]],
-    constant ulong* input_sizes [[buffer(7)]],     // [N, C, D, H, W]
-    constant ulong* output_sizes [[buffer(8)]],    // [N, C, D_out, H_out, W_out]
-    constant ulong* input_strides [[buffer(9)]],
-    constant ulong* grad_input_strides [[buffer(10)]],
-    constant ulong* grid_strides [[buffer(11)]],
-    constant ulong* grad_output_strides [[buffer(12)]],
+    constant float* grid [[buffer(1)]],
+    device atomic<float>* grad_input [[buffer(2)]],
+    constant int& interpolation_mode [[buffer(3)]],
+    constant int& padding_mode [[buffer(4)]],
+    constant bool& align_corners [[buffer(5)]],
+    constant ulong* input_sizes [[buffer(6)]],     // [N, C, D, H, W]
+    constant ulong* output_sizes [[buffer(7)]],    // [N, C, D_out, H_out, W_out]
+    constant ulong* grad_input_strides [[buffer(8)]],
+    constant ulong* grid_strides [[buffer(9)]],
+    constant ulong* grad_output_strides [[buffer(10)]],
     uint3 thread_index [[thread_position_in_grid]]) {
 
   // Thread indices map to output grid coordinates
@@ -611,66 +591,18 @@ kernel void grid_sampler_3d_backward_input(
                                     out_w * grad_output_strides[4];
        const float gOut = grad_output[grad_out_offset];
 
-       // Accumulate gradients to all 8 corner pixels using safe bounds checking
-       const auto base_grad_input_offset = n * grad_input_strides[0] + c * grad_input_strides[1];
+      // Accumulate gradients to all 8 corner pixels using safe bounds checking
+      const auto base_grad_input_offset = n * grad_input_strides[0] + c * grad_input_strides[1];
 
-       // CUDA safe_add_3d always checks bounds regardless of padding mode
-       if (within_bounds_3d(iz_tnw, iy_tnw, ix_tnw, inp_D, inp_H, inp_W)) {
-         const auto grad_input_offset = base_grad_input_offset +
-                                      iz_tnw * grad_input_strides[2] +
-                                      iy_tnw * grad_input_strides[3] +
-                                      ix_tnw * grad_input_strides[4];
-         atomic_fetch_add_explicit(&grad_input[grad_input_offset], tnw * gOut, memory_order_relaxed);
-       }
-       if (within_bounds_3d(iz_tne, iy_tne, ix_tne, inp_D, inp_H, inp_W)) {
-         const auto grad_input_offset = base_grad_input_offset +
-                                      iz_tne * grad_input_strides[2] +
-                                      iy_tne * grad_input_strides[3] +
-                                      ix_tne * grad_input_strides[4];
-         atomic_fetch_add_explicit(&grad_input[grad_input_offset], tne * gOut, memory_order_relaxed);
-       }
-       if (within_bounds_3d(iz_tsw, iy_tsw, ix_tsw, inp_D, inp_H, inp_W)) {
-         const auto grad_input_offset = base_grad_input_offset +
-                                      iz_tsw * grad_input_strides[2] +
-                                      iy_tsw * grad_input_strides[3] +
-                                      ix_tsw * grad_input_strides[4];
-         atomic_fetch_add_explicit(&grad_input[grad_input_offset], tsw * gOut, memory_order_relaxed);
-       }
-       if (within_bounds_3d(iz_tse, iy_tse, ix_tse, inp_D, inp_H, inp_W)) {
-         const auto grad_input_offset = base_grad_input_offset +
-                                      iz_tse * grad_input_strides[2] +
-                                      iy_tse * grad_input_strides[3] +
-                                      ix_tse * grad_input_strides[4];
-         atomic_fetch_add_explicit(&grad_input[grad_input_offset], tse * gOut, memory_order_relaxed);
-       }
-       if (within_bounds_3d(iz_bnw, iy_bnw, ix_bnw, inp_D, inp_H, inp_W)) {
-         const auto grad_input_offset = base_grad_input_offset +
-                                      iz_bnw * grad_input_strides[2] +
-                                      iy_bnw * grad_input_strides[3] +
-                                      ix_bnw * grad_input_strides[4];
-         atomic_fetch_add_explicit(&grad_input[grad_input_offset], bnw * gOut, memory_order_relaxed);
-       }
-       if (within_bounds_3d(iz_bne, iy_bne, ix_bne, inp_D, inp_H, inp_W)) {
-         const auto grad_input_offset = base_grad_input_offset +
-                                      iz_bne * grad_input_strides[2] +
-                                      iy_bne * grad_input_strides[3] +
-                                      ix_bne * grad_input_strides[4];
-         atomic_fetch_add_explicit(&grad_input[grad_input_offset], bne * gOut, memory_order_relaxed);
-       }
-       if (within_bounds_3d(iz_bsw, iy_bsw, ix_bsw, inp_D, inp_H, inp_W)) {
-         const auto grad_input_offset = base_grad_input_offset +
-                                      iz_bsw * grad_input_strides[2] +
-                                      iy_bsw * grad_input_strides[3] +
-                                      ix_bsw * grad_input_strides[4];
-         atomic_fetch_add_explicit(&grad_input[grad_input_offset], bsw * gOut, memory_order_relaxed);
-       }
-       if (within_bounds_3d(iz_bse, iy_bse, ix_bse, inp_D, inp_H, inp_W)) {
-         const auto grad_input_offset = base_grad_input_offset +
-                                      iz_bse * grad_input_strides[2] +
-                                      iy_bse * grad_input_strides[3] +
-                                      ix_bse * grad_input_strides[4];
-         atomic_fetch_add_explicit(&grad_input[grad_input_offset], bse * gOut, memory_order_relaxed);
-       }
+      // Safely add gradients to all 8 corners using atomic add
+      safe_add_3d(grad_input, iz_tnw, iy_tnw, ix_tnw, inp_D, inp_H, inp_W, base_grad_input_offset, grad_input_strides, tnw * gOut);
+      safe_add_3d(grad_input, iz_tne, iy_tne, ix_tne, inp_D, inp_H, inp_W, base_grad_input_offset, grad_input_strides, tne * gOut);
+      safe_add_3d(grad_input, iz_tsw, iy_tsw, ix_tsw, inp_D, inp_H, inp_W, base_grad_input_offset, grad_input_strides, tsw * gOut);
+      safe_add_3d(grad_input, iz_tse, iy_tse, ix_tse, inp_D, inp_H, inp_W, base_grad_input_offset, grad_input_strides, tse * gOut);
+      safe_add_3d(grad_input, iz_bnw, iy_bnw, ix_bnw, inp_D, inp_H, inp_W, base_grad_input_offset, grad_input_strides, bnw * gOut);
+      safe_add_3d(grad_input, iz_bne, iy_bne, ix_bne, inp_D, inp_H, inp_W, base_grad_input_offset, grad_input_strides, bne * gOut);
+      safe_add_3d(grad_input, iz_bsw, iy_bsw, ix_bsw, inp_D, inp_H, inp_W, base_grad_input_offset, grad_input_strides, bsw * gOut);
+      safe_add_3d(grad_input, iz_bse, iy_bse, ix_bse, inp_D, inp_H, inp_W, base_grad_input_offset, grad_input_strides, bse * gOut);
      }
 
   } else if (interpolation_mode == 1) { // nearest neighbor
@@ -689,13 +621,8 @@ kernel void grid_sampler_3d_backward_input(
                                    out_w * grad_output_strides[4];
       const float gOut = grad_output[grad_out_offset];
 
-      if (within_bounds_3d(iz_nearest, iy_nearest, ix_nearest, inp_D, inp_H, inp_W)) {
-        const auto grad_input_offset = n * grad_input_strides[0] + c * grad_input_strides[1] +
-                                     iz_nearest * grad_input_strides[2] +
-                                     iy_nearest * grad_input_strides[3] +
-                                     ix_nearest * grad_input_strides[4];
-        atomic_fetch_add_explicit(&grad_input[grad_input_offset], gOut, memory_order_relaxed);
-      }
+      const auto base_grad_input_offset = n * grad_input_strides[0] + c * grad_input_strides[1];
+      safe_add_3d(grad_input, iz_nearest, iy_nearest, ix_nearest, inp_D, inp_H, inp_W, base_grad_input_offset, grad_input_strides, gOut);
     }
   }
 }
@@ -871,6 +798,35 @@ kernel void grid_sampler_3d_backward_grid(
   }
 }
 
+#define INSTANTIATE_GRID_SAMPLER_3D(DTYPE)                                          \
+  template [[host_name("grid_sampler_3d_" #DTYPE)]] kernel void grid_sampler_3d<DTYPE>( \
+      constant DTYPE * inputData [[buffer(0)]],                                     \
+      device DTYPE * outputData [[buffer(1)]],                                      \
+      constant DTYPE * gridData [[buffer(2)]],                                      \
+      constant int & interpolation_mode [[buffer(3)]],                              \
+      constant int & padding_mode [[buffer(4)]],                                    \
+      constant bool & align_corners [[buffer(5)]],                                  \
+      constant ulong * input_sizes [[buffer(6)]],                                   \
+      constant ulong * output_sizes [[buffer(7)]],                                  \
+      constant ulong * input_strides [[buffer(8)]],                                 \
+      constant ulong * output_strides [[buffer(9)]],                                \
+      constant ulong * grid_strides [[buffer(10)]],                                 \
+      uint3 thread_index [[thread_position_in_grid]])
+
+#define INSTANTIATE_GRID_SAMPLER_3D_VECTORIZED(DTYPE)                               \
+  template [[host_name("grid_sampler_3d_vectorized_" #DTYPE)]] kernel void grid_sampler_3d_vectorized<DTYPE>( \
+      constant DTYPE * inputData [[buffer(0)]],                                     \
+      device DTYPE * outputData [[buffer(1)]],                                      \
+      constant DTYPE * gridData [[buffer(2)]],                                      \
+      constant int & interpolation_mode [[buffer(3)]],                              \
+      constant int & padding_mode [[buffer(4)]],                                    \
+      constant bool & align_corners [[buffer(5)]],                                  \
+      constant ulong * input_sizes [[buffer(6)]],                                   \
+      constant ulong * output_sizes [[buffer(7)]],                                  \
+      constant ulong * input_strides [[buffer(8)]],                                 \
+      constant ulong * output_strides [[buffer(9)]],                                \
+      constant ulong * grid_strides [[buffer(10)]],                                 \
+      uint3 thread_index [[thread_position_in_grid]])
 
 INSTANTIATE_GRID_SAMPLER_3D(float);
 INSTANTIATE_GRID_SAMPLER_3D(half);
