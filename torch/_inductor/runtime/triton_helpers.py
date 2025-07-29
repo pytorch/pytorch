@@ -581,9 +581,10 @@ def _compare_and_swap_with_index(
 
     if stable:
         # When stable sorting, tie break by index
-        cond = cond | (
-            ((left == right) | (left_isnan & right_isnan)) & (left_idx > right_idx)
-        )
+        eq = left == right
+        if is_floating(left):
+            eq = eq | (left_isnan & right_isnan)
+        cond = cond | (eq & (left_idx > right_idx))
 
     cond = (right_valid_mask > left_valid_mask) | (
         (right_valid_mask == left_valid_mask) & cond
