@@ -211,7 +211,7 @@ bool CUDAHooks::hasCuBLASLt() const {
 bool CUDAHooks::hasCKSDPA() const {
 #if !defined(USE_ROCM)
     return false;
-#elif defined(USE_ROCM) && (defined(USE_ROCM_CK_SDPA) || defined(USE_CK_FLASH_ATTENTION))
+#elif defined(USE_ROCM) && defined(USE_ROCM_CK_SDPA)
     return true;
 #else
     return false;
