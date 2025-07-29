@@ -260,7 +260,7 @@ struct CachingHostAllocatorImpl {
       } else {
         events = std::vector<E>();
         events->reserve(block->streams_.size());
-        block->event_count_ += events->size();
+        block->event_count_ += block->streams_.size();
         // Move out streams to avoid holding the mutex during event recording
         streams = std::move(block->streams_);
         block->streams_.clear();
