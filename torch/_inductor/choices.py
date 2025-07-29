@@ -17,6 +17,7 @@ from .template_heuristics import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    MTIAConfigHeuristic,
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
@@ -67,6 +68,8 @@ class InductorChoices:
             return XPUConfigHeuristic()
         elif device_type == "cpu":
             return CPUConfigHeuristic()
+        elif device_type == "mtia":
+            return MTIAConfigHeuristic()
         else:
             return BaseConfigHeuristic()
 
