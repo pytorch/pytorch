@@ -1735,7 +1735,9 @@ class AotCodeCompiler:
                 )
 
         # Log the AOTInductor wrapper and kernel code, if needed.
-        with tempfile.NamedTemporaryFile("w+") as t:
+        with tempfile.NamedTemporaryFile("w+", delete=not _IS_WINDOWS) as t:
+            # tempfile.NamedTemporaryFile must setup delete=False on Windows:
+            # https://stackoverflow.com/questions/66744497/python-tempfile-namedtemporaryfile-cant-use-generated-tempfile
             t.writelines((wrapper_code, "\n", kernel_code, "\n"))
             t.flush()
             V.debug.output_code(t.name, extension="cpp")
