@@ -705,7 +705,6 @@ class ConvertFrameAssert:
 
             # Record that the dynamo package has changed
             DynamoCache.record_package(self._package)
-
         return result
 
 
