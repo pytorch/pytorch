@@ -5,7 +5,6 @@
 
 #include <torch/headeronly/cpu/vec/vec_half.h>
 
-
 // ------------------------------------------------ //
 
 // namespace at::vec {
@@ -15,8 +14,8 @@
 // // Transpose a [2, 32] matrix to [32, 2]
 // // Note: the output leading dimension should be 2,
 // // that is, the output must be contiguous
-// template <typename scalar_t, typename = std::enable_if_t<sizeof(scalar_t) == 2>>
-// static inline void transpose_pad_2x32_block(
+// template <typename scalar_t, typename = std::enable_if_t<sizeof(scalar_t) ==
+// 2>> static inline void transpose_pad_2x32_block(
 //     const scalar_t* src,
 //     scalar_t* dst,
 //     int64_t ld_src,
@@ -38,7 +37,8 @@
 //   } else {
 //     r0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src));
 //     if (krem == 2) {
-//       r1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + ld_src));
+//       r1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src +
+//       ld_src));
 //     } else {
 //       r1 = _mm512_setzero_si512();
 //     }
@@ -77,8 +77,8 @@
 // // To use AMX to accelerate GEMM,
 // // reorder the memory format [K, N] -> [K/2, N, 2]
 // // Note: If K % 2 != 0, pad K implicitly
-// template <typename scalar_t, typename = std::enable_if_t<sizeof(scalar_t) == 2>>
-// static inline void pack_vnni2(
+// template <typename scalar_t, typename = std::enable_if_t<sizeof(scalar_t) ==
+// 2>> static inline void pack_vnni2(
 //     const scalar_t* src,
 //     scalar_t* dst,
 //     int64_t ld_src,

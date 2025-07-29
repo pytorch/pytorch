@@ -1956,7 +1956,7 @@ def get_all_device_types() -> list[str]:
 IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
     not torch.xpu.is_available()
     # and not torch.cuda.is_available()
-    and not IS_MACOS 
+    and not IS_MACOS
     and torch.cpu._is_avx2_supported()
     and os.getenv("ATEN_CPU_CAPABILITY") != "default"
 )

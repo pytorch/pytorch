@@ -41,8 +41,9 @@ else:
 index = torch.ops.aten.index
 Tensor = torch.Tensor
 
-TEST_ON_CUDA = ( False and
-    torch.cuda.is_available()
+TEST_ON_CUDA = (
+    False
+    and torch.cuda.is_available()
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0)
 )
