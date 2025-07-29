@@ -3518,7 +3518,7 @@ def strip_local_scope(s: str) -> str:
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
     f_locals: dict[str, object],
-    compile_id: Optional[CompileId],
+    compile_id: CompileId,
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
