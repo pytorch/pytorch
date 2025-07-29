@@ -32,16 +32,18 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec
+from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
+
+from . import version
 
 
 if TYPE_CHECKING:
     from .types import Device, IntLikeType
 
 
-# multipy/deploy is setting this import before importing torch, this is the most
+# multipy/deploy is setting this import before importing torch, this is the most  # codespell:ignore multipy
 # reliable way we have to detect if we're running within deploy.
-# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
+# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137  # codespell:ignore multipy # noqa: B950
 def _running_with_deploy() -> builtins.bool:
     return sys.modules.get("torch._meta_registrations", None) is object
 
@@ -63,15 +65,7 @@ from torch._utils_internal import (
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
-    # TODO: Remove this ugly hack when deploy typing extensions are updated to 4.10+
-    if not TYPE_CHECKING:
-        import typing_extensions
-
-        _TypeIs = typing_extensions.TypeGuard
-        typing_extensions.TypeIs = _TypeIs
 else:
-    from typing_extensions import TypeIs as _TypeIs
-
     from torch.torch_version import __version__ as __version__
 
 __all__ = [
@@ -373,14 +367,8 @@ def _load_global_deps() -> None:
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
             "nvshmem": "libnvshmem_host.so.*[0-9]",
+            "cufile": "libcufile.so.*[0-9]",
         }
-        # cufiile is only available on cuda 12+
-        # TODO: Remove once CUDA 11.8 binaries are deprecated
-        if cuda_version is not None:
-            t_version = cuda_version.split(".")
-            t_major = int(t_version[0])  # type: ignore[operator]
-            if t_major >= 12:
-                cuda_libs["cufile"] = "libcufile.so.*[0-9]"
 
         is_cuda_lib_err = [
             lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
@@ -1025,10 +1013,10 @@ except ImportError:
                     of the PyTorch repository rather than the C extensions which
                     are expected in the `torch._C` namespace. This can occur when
                     using the `install` workflow. e.g.
-                        $ python setup.py install && python -c "import torch"
+                        $ python -m pip install --no-build-isolation -v . && python -c "import torch"
 
                     This error can generally be solved using the `develop` workflow
-                        $ python setup.py develop && python -c "import torch"  # This should succeed
+                        $ python -m pip install --no-build-isolation -v -e . && python -c "import torch"  # This should succeed
                     or by running Python from a different directory.
                 """
             ).strip()
@@ -2154,7 +2142,7 @@ __all__.extend(
 )
 
 ################################################################################
-# Import TorchDynamo's lazy APIs to avoid circular dependenices
+# Import TorchDynamo's lazy APIs to avoid circular dependencies
 ################################################################################
 
 # needs to be before from torch.functional import * to avoid circular dependencies
@@ -2514,7 +2502,7 @@ def compile(
 
     Args:
        model (Callable or None): Module/function to optimize
-       fullgraph (bool): If False (default), torch.compile attempts to discover compileable regions
+       fullgraph (bool): If False (default), torch.compile attempts to discover compilable regions
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),
         then this will raise an error.
