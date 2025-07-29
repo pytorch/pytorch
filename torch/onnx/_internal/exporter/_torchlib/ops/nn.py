@@ -58,6 +58,57 @@ def aten_group_norm(
     )
 
 
+@onnx_impl(aten.rms_norm.default, trace_only=True, opset_introduced=23)
+def aten_rms_norm(
+    input: TFloat,
+    normalized_shape: list[int],
+    weight: Optional[TFloat] = None,
+    eps: Optional[float] = None,
+) -> TFloat:
+    """rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor"""
+    
+    # Default eps value if not provided
+    if eps is None:
+        eps = 1e-05
+    
+    # Calculate axis: the first normalization dimension
+    # For normalized_shape with D dimensions, normalize over last D dimensions
+    # The axis parameter for ONNX RMSNormalization indicates the first axis of normalization
+    # Since normalized_shape specifies the last len(normalized_shape) dimensions,
+    # we need to determine the axis dynamically based on input rank
+    
+    # Get input rank as a tensor
+    input_shape = op23.Shape(input)
+    input_rank = op23.Size(input_shape)
+    
+    # Calculate axis = rank - len(normalized_shape)
+    normalized_dims = len(normalized_shape)
+    axis_offset = op23.Constant(value_int=normalized_dims)
+    axis_tensor = op23.Sub(input_rank, axis_offset)
+    
+    # Create weight tensor if not provided
+    if weight is None:
+        # Create shape tensor for the normalized dimensions
+        normalized_shape_tensor = op23.Constant(value_ints=normalized_shape)
+        weight = op23.ConstantOfShape(
+            normalized_shape_tensor, 
+            value=ir.tensor(1.0, dtype=input.dtype)
+        )
+    
+    # Use axis as a tensor input since we can't determine it statically
+    # We need to use a different approach - let's calculate the axis dynamically
+    # and reshape operations to handle variable input ranks
+    
+    # For now, let's assume the common case where we know the input rank
+    # This is a limitation we'll need to address, but let's start with a simpler approach
+    
+    # Since we can't determine axis at compile time, we'll use a negative axis
+    # ONNX RMSNormalization supports negative axis values
+    axis = -normalized_dims
+    
+    return op23.RMSNormalization(input, weight, axis=axis, epsilon=eps)
+
+
 @onnx_impl(
     aten.scaled_dot_product_attention.default, trace_only=True, opset_introduced=23
 )

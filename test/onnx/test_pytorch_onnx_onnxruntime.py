@@ -4003,6 +4003,48 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 x = torch.randn(20, 5, 10, 10, 10)
                 self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(23)
+    def test_rms_norm(self):
+        """Test RMS normalization with various configurations"""
+        class RMSNormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [10])
+
+        x = torch.randn(20, 5, 10)
+        self.run_test(RMSNormModel(), x)
+
+        # Test with multi-dimensional normalized_shape
+        class RMSNormModel2D(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [10, 10])
+
+        x = torch.randn(20, 5, 10, 10)
+        self.run_test(RMSNormModel2D(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(23)
+    def test_rms_norm_with_weight(self):
+        """Test RMS normalization with weight parameter"""
+        class RMSNormWithWeight(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(10))
+                
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [10], weight=self.weight)
+
+        x = torch.randn(20, 5, 10)
+        self.run_test(RMSNormWithWeight(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(23)
+    def test_rms_norm_with_eps(self):
+        """Test RMS normalization with custom epsilon"""
+        class RMSNormWithEps(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [10], eps=1e-6)
+
+        x = torch.randn(20, 5, 10)
+        self.run_test(RMSNormWithEps(), x)
+
     def test_batchnorm1d(self):
         x = torch.randn(10, 10)
         model = torch.nn.BatchNorm1d(10, affine=True)
