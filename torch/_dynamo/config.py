@@ -326,6 +326,10 @@ dont_skip_tracing = False
 # No longer used
 optimize_ddp_lazy_compile = False
 
+# lambda guarding on object aliasing to improve opportunity for dict tag
+# optimization
+use_lamba_guard_for_object_aliasing = True
+
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 # Whether to apply torch._dynamo.disable() to FSDP2 hooks.

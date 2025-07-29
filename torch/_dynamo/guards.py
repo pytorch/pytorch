@@ -703,6 +703,7 @@ class GuardBuilder(GuardBuilderBase):
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
+        self.object_aliasing_guard_codes: list[tuple[str, str]] = []
         self.serialization_mode = serialization_mode
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
@@ -1992,11 +1993,19 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"{ref_b} is {ref_a}"]
         self._set_guard_export_info(guard, code)
 
-        install_object_aliasing_guard(
-            self.get_guard_manager(guard),
-            self.get_guard_manager_from_source(source_b),
-            get_verbose_code_parts(code, guard),
-        )
+        if config.use_lamba_guard_for_object_aliasing:
+            # Save the code part so that we can install a lambda guard at the
+            # end.  Read the Note - On Lambda guarding of object aliasing - to
+            # get more information.
+            code_part = code[0]
+            verbose_code_part = get_verbose_code_parts(code_part, guard)[0]
+            self.object_aliasing_guard_codes.append((code_part, verbose_code_part))
+        else:
+            install_object_aliasing_guard(
+                self.get_guard_manager(guard),
+                self.get_guard_manager_from_source(source_b),
+                get_verbose_code_parts(code, guard),
+            )
 
     def WEAKREF_ALIVE(self, guard):
         if self.serialization_mode == "save":
@@ -3259,6 +3268,26 @@ class CheckFunctionManager:
                 builder.no_tensor_aliasing_guard_managers,
                 no_tensor_aliasing_names,
                 ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
+            )
+
+        # Note - On Lambda guarding of object aliasing
+        # We previously installed object‑aliasing guards as relational guards,
+        # but that undermined the recursive‑dict guard optimization: placing the
+        # aliasing guard at a leaf prevented the parent dict node from
+        # qualifying as a recursive‑dict guard root. Because aliasing guards are
+        # rare, we now emit them as epilogue guards via a small Python lambda.
+        # This repeats the access in Python—adding a bit of work—but the
+        # overhead is outweighed by the gains from enabling recursive‑dict guard
+        # optimization.
+        if (
+            config.use_lamba_guard_for_object_aliasing
+            and builder.object_aliasing_guard_codes
+        ):
+            aliasing_code_parts, aliasing_verbose_code_parts = map(
+                list, zip(*builder.object_aliasing_guard_codes)
+            )
+            builder.add_python_lambda_leaf_guard_to_root(
+                aliasing_code_parts, aliasing_verbose_code_parts
             )
 
         aotautograd_guards: list[GuardEnvExpr] = (
