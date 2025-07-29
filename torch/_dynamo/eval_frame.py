@@ -227,6 +227,8 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
         ) -> ConvertFrameReturn:
             if trace_rules.check(frame.f_code):
                 return ConvertFrameReturn()
+            if not convert_frame.has_tensor_in_frame(frame):
+                return ConvertFrameReturn()
 
             from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 
@@ -679,8 +681,7 @@ class _TorchDynamoContext:
 
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
-            assert self._package is not None
-            if not self._package.is_initialized():
+            if self._package is not None and not self._package.is_initialized():
                 result = DynamoCache.load(fn)
                 if result is None:
                     # Create a fresh CompilePackage
@@ -2273,10 +2274,10 @@ class TorchPatcher:
         fn: Callable[..., Any],
     ) -> Callable[..., Any]:
         def inner_fn(*args: Any, **kwargs: Any) -> Any:
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, module="torch.distributed"
-            )
-            return fn(*args, **kwargs)
+            with torch._logging.hide_warnings(
+                torch._logging._internal.user_warning_filter
+            ):
+                return fn(*args, **kwargs)
 
         return inner_fn
 

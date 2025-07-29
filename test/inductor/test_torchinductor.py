@@ -432,6 +432,8 @@ def check_model(
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
+    # TODO: enable this for all tests
+    exact_stride=False,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -465,7 +467,12 @@ def check_model(
                 x.dtype == torch.float16 or x.dtype == torch.bfloat16
             ):
                 has_lowp_args = True
-                return x.float()
+                # Preserve strides when casting
+                result = torch.empty_strided(
+                    x.size(), x.stride(), device=x.device, dtype=torch.float
+                )
+                result.copy_(x)
+                return result
             else:
                 return x
 
@@ -536,16 +543,29 @@ def check_model(
         correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
+    # Allow assert_equal to be a custom function, instead of True or False, for
+    # cases where differences may not indicate incorrectness.
     if assert_equal:
-        self.assertEqual(
+        if callable(assert_equal):
+
+            def custom_assert_with_self(*args, **kwargs):
+                assert_equal(self, *args, **kwargs)
+
+            assert_equal_fn = custom_assert_with_self
+        else:
+            assert_equal_fn = self.assertEqual
+
+        assert_equal_fn(
             actual,
             correct,
             atol=atol,
             rtol=rtol,
             equal_nan=True,
             exact_dtype=exact_dtype,
+            exact_stride=exact_stride,
         )
         # In case of input mutations, check that inputs are the same
+        # (This never uses a custom assert_equal fn.)
         self.assertEqual(
             ref_inputs,
             example_inputs,
@@ -554,6 +574,7 @@ def check_model(
             equal_nan=True,
             # our testing sometimes uses higher precision inputs for the reference
             exact_dtype=False,
+            exact_stride=exact_stride,
         )
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
@@ -567,6 +588,8 @@ def check_model(
                 assert correct_val.layout == actual_val.layout
                 if exact_dtype:
                     assert correct_val.dtype == actual_val.dtype
+                if exact_stride:
+                    assert correct_val.stride() == actual_val.stride()
 
     if check_gradient:
         actual = output_process_fn_grad(actual)
@@ -620,6 +643,7 @@ def check_model(
                 rtol=grad_rtol or rtol,
                 equal_nan=True,
                 exact_dtype=exact_dtype,
+                exact_stride=exact_stride,
             )
 
     torch._dynamo.reset()
@@ -645,6 +669,8 @@ def check_model_gpu(
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
+    # TODO: enable this for all tests
+    exact_stride=False,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -671,6 +697,7 @@ def check_model_gpu(
         check_gradient=check_gradient,
         check_has_compiled=check_has_compiled,
         output_process_fn_grad=output_process_fn_grad,
+        exact_stride=exact_stride,
     )
 
     if check_lowp:
@@ -703,6 +730,7 @@ def check_model_gpu(
             check_gradient=check_gradient,
             check_has_compiled=check_has_compiled,
             output_process_fn_grad=output_process_fn_grad,
+            exact_stride=exact_stride,
         )
 
 
@@ -3396,6 +3424,15 @@ class CommonTemplate:
         cf = torch.compile(forward, dynamic=True)
         cf(x, 1e-5)
         cf(x, 1e-6)
+
+    def test_div_presicion_accuracy(self):
+        # fix https://github.com/pytorch/pytorch/issues/157959
+        def forward(x, y):
+            return (x / y).sum()
+
+        x = torch.rand((5, 5))
+        y = 101
+        self.common(forward, (x, y))
 
     def test_mul_softmax_symfloat(self):
         def forward(x, y):
@@ -6958,6 +6995,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(8),))
 
+    def test_full_like_transposed(self):
+        def fn(a):
+            return torch.full_like(a, 3)
+
+        self.common(fn, (torch.randn(4, 5, 6).transpose(1, -1),), exact_stride=True)
+
+    def test_full_like_sliced(self):
+        def fn(a):
+            return torch.full_like(a, 3)
+
+        self.common(fn, (torch.rand(3, 4)[:, ::2],), exact_stride=True)
+
     def test_full_truncation(self):
         def fn(a):
             return a + torch.full_like(a, 7.777)
@@ -7343,6 +7392,37 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inp = torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32)
         self.common(fn, (inp, False))
         self.common(fn, (inp, True))
+
+    @parametrize("stable", (True, False))
+    @parametrize("descending", (True, False))
+    def test_nan_sort(self, descending, stable):
+        def test_sort(x, descending, stable):
+            out = torch.sort(x, descending=descending, stable=stable)
+            if stable:
+                return out
+            else:
+                # non stable idx may not be equal
+                return out[0]
+
+        tensor = torch.tensor(
+            [
+                0.7308,
+                0.7053,
+                0.3349,
+                -0.7158,
+                torch.nan,
+                0.1234,
+                1.0284,
+                torch.nan,
+                -1.8767,
+                -0.4369,
+            ],
+            device=self.device,
+        )
+        inps = (tensor, descending, stable)
+        a = torch.compile(test_sort)(*inps)
+        b = test_sort(*inps)
+        self.assertEqual(a, b, equal_nan=True)
 
     def test_sort_stable(self):
         def fn(a, descending):
@@ -8851,7 +8931,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                (a.add_(b[0] * c * e),)
+                a.add_(b[0] * c * e)
                 if d is not None:
                     d.add_(b[1])
 
@@ -8924,7 +9004,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                (a.add_(b[0] * c * e),)
+                a.add_(b[0] * c * e)
                 if d is not None:
                     d.add_(b[1])
                 return b[0] + b[1]
@@ -9177,7 +9257,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         model = Model()
         x = torch.rand(10, 3, 0)
 
-        self.common(model, (x,))
+        self.common(model, (x,), exact_stride=True)
 
     def test_randint(self):
         @torch.compile(fullgraph=True)
@@ -9233,9 +9313,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @xfail_if_mps  # 100% are not close
     def test_like_rands(self):
         def fn(x):
-            return torch.rand_like(x), torch.randn_like(x)
+            return torch.rand_like(x), torch.randn_like(x), torch.randint_like(x, 1, 11)
 
-        self.common(fn, [torch.zeros([20, 20])])
+        self.common(fn, [torch.zeros([20, 20])], exact_stride=True)
+
+    @config.patch(fallback_random=True)
+    @xfail_if_mps  # 100% are not close
+    def test_like_rands_sliced(self):
+        def fn(x):
+            return (
+                torch.randn_like(x),
+                torch.randn_like(x),
+                torch.randint_like(x, 1, 11),
+            )
+
+        self.common(fn, (torch.zeros([3, 4])[:, ::2].permute(1, 0),), exact_stride=True)
 
     @config.patch(check_stack_no_cycles_TESTING_ONLY=True)
     def test_check_stack_no_cycles(self):
@@ -9268,6 +9360,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         a0 = fn(x).clone()
         a1 = fn(x).clone()
         self.assertFalse(torch.allclose(a0, a1))
+        self.assertEqual(a0.shape, a1.shape)
+        self.assertEqual(a0.stride(), a1.stride())
 
     @requires_gpu()
     @skip_if_triton_cpu("Flaky on Triton CPU")
@@ -9285,6 +9379,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         a1 = test_like_rands_on_different_device(GPU_TYPE, "cpu")
         self.assertTrue(a0.device.type == GPU_TYPE)
         self.assertTrue(a1.device.type == "cpu")
+        self.assertEqual(a0.shape, a1.shape)
+        self.assertEqual(a0.stride(), a1.stride())
 
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
@@ -10504,8 +10600,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
     def test_inductor_multiple_specializations(self):
-        from triton.testing import do_bench
-
         @torch.compile(
             options={
                 "max_autotune": True,
@@ -10520,7 +10614,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         m = 16
         k = 1280
         dynamic_a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        dynamic_specialized_a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        dynamic_specialized_a = dynamic_a.clone()
         b = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16)
         torch._dynamo.decorators.mark_dynamic(
             dynamic_a,
@@ -10535,12 +10629,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             b,
             1,
         )
-        dynamic = do_bench(lambda: inductor_matmul(dynamic_a, b))
+        dynamic = inductor_matmul(dynamic_a, b)
         torch._dynamo.reset()
-        dynamic_specialized = do_bench(
-            lambda: inductor_matmul(dynamic_specialized_a, b)
-        )
-        self.assertGreaterEqual(dynamic, dynamic_specialized)
+        dynamic_specialized = inductor_matmul(dynamic_specialized_a, b)
+        self.assertEqual(dynamic, dynamic_specialized)
 
     @requires_gpu()
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
@@ -13625,6 +13717,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             else:
                 FileCheck().check("cpp_fused_add_0").run(code)
             self.assertEqual(refe_out, test_out)
+
+    def test_triton_kernel_bool_param(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        from torch.testing._internal.triton_utils import add_kernel_with_boolean_param
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                out = torch.zeros_like(x)
+                add_kernel_with_boolean_param[1,](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    out_ptr=out,
+                    n_elements=x.numel(),
+                    add_xy=True,
+                    BLOCK_SIZE=1,
+                )
+                return out
+
+        inputs = (torch.randn(4, device=self.device),)
+        self.common(Model(), inputs)
 
 
 @dataclasses.dataclass
