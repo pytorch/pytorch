@@ -15,7 +15,6 @@
 #include <torch/nativert/executor/ExecutionPlanner.h>
 #include <torch/nativert/executor/ExecutorConfig.h>
 #include <torch/nativert/executor/GraphExecutorBase.h>
-#include <torch/nativert/executor/Placement.h>
 #include <torch/nativert/executor/memory/FunctionSchema.h>
 #include <torch/nativert/executor/memory/LayoutPlanner.h>
 #include <torch/nativert/graph/Graph.h>
@@ -80,10 +79,8 @@ class Executor {
       torch::nativert::ExecutorConfig executorConfig,
       std::shared_ptr<Graph> graph,
       const std::shared_ptr<Weights>& weights,
-      Placement placement = Placement(),
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
-          pytorchStreamReader = nullptr,
-      MakeProxyExecutorFn makeProxyExecutorFunc = nullptr);
+          pytorchStreamReader = nullptr);
 
   std::shared_ptr<Weights> getWeights() {
     std::shared_ptr<Weights> ret;
@@ -181,16 +178,12 @@ class Executor {
 
   std::unique_ptr<GraphExecutorBase> graphExecutor_;
 
-  const Placement placement_;
-
   // NOTE: delegateExecutors_ is used by nodeKernels_ inside graphExecutor_.
   std::vector<std::unique_ptr<DelegateExecutor>> delegateExecutors_;
 
   std::vector<ConstFoldingExecution> constFoldingExecutions_;
 
   std::optional<ConstantFolder> constantFolder_;
-
-  MakeProxyExecutorFn makeProxyExecutorFunc_;
 
   c10::Semaphore sem_;
   torch::nativert::detail::MPMCQueue<std::unique_ptr<ExecutionFrame>>

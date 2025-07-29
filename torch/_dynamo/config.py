@@ -347,6 +347,9 @@ skip_no_tensor_aliasing_guards_on_parameters = True
 # the dictionary tag is same across invocation calls.
 skip_tensor_guards_with_matching_dict_tags = True
 
+# Skips guards on func.__defaults__ if the element to be guarded is a constant
+skip_guards_on_constant_func_defaults = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -542,7 +545,7 @@ fake_tensor_disable_inference_mode = True
 
 # Experimental feature for running automatic caching precompile.
 # Enables automatic DynamoCache save/load
-caching_precompile = False
+caching_precompile = os.environ.get("TORCH_CACHING_PRECOMPILE", "0") == "1"
 
 # Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
 # Note: AOTAutograd will still trace and partition an AOT backward graph local to that
@@ -605,6 +608,9 @@ automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
 _unsafe_skip_fsdp_module_guards = (
     os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
 )
+
+# Common prefix to append to the id of each compile run to filter out data
+pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", None)
 
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
