@@ -1330,7 +1330,7 @@ class TestCompileTorchbind(TestCase):
             return tq
 
         with self.assertRaisesRegex(
-            RuntimeError, "call method __setattr__ on script object is not safe"
+            RuntimeError, "Calling method on script object is not safe"
         ):
             torch.compile(setattr_f, backend=backend)(_empty_tensor_queue())
 
@@ -1343,7 +1343,7 @@ class TestCompileTorchbind(TestCase):
             return tq._not_defined_attr
 
         with self.assertRaisesRegex(
-            RuntimeError, "doesn't define method _not_defined_attr"
+            RuntimeError, "FakeScriptObject missing method implementation"
         ):
             torch.compile(setattr_f, backend=backend)(_empty_tensor_queue())
 
