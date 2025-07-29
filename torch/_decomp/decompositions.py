@@ -1182,23 +1182,11 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-
-    # Use torch.where to handle both empty and non-empty tensors
-    # Create a condition tensor that's True if the dimension has elements
-    has_elements = x.shape[dim] > 0
-
-    # For empty tensors, use zeros as x_max (so x - x_max = x)
-    # For non-empty tensors, use torch.amax for numerical stability
-    if has_elements:
-        x_max = torch.amax(x, dim, keepdim=True)
+    if x.numel() == 0:
+        unnormalized = torch.exp(x)
     else:
-        # Create a tensor of zeros with the right shape for empty dimensions
-        output_shape = list(x.shape)
-        output_shape[dim] = 1  # keepdim=True for softmax
-        x_max = torch.zeros(output_shape, dtype=x.dtype, device=x.device)
-
-    # This works for both empty and non-empty tensors
-    unnormalized = torch.exp(x - x_max)
+        x_max = torch.amax(x, dim, keepdim=True)
+        unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
