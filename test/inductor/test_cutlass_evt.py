@@ -382,7 +382,7 @@ return tmp_1, D""",
                 epilogue_functor,
                 _create_mock_buffer_name_map(EXAMPLE_TENSORS),
                 lambda x: int(x),
-            ),
+            )[0],
             """\
 { /* thread */
         { /* F */
@@ -439,7 +439,7 @@ def fn(accum, bias):
                 epilogue_functor,
                 _create_mock_buffer_name_map(example_tensors),
                 lambda x: int(x),
-            ),
+            )[0],
             """\
 { /* thread */
         { /* E */
