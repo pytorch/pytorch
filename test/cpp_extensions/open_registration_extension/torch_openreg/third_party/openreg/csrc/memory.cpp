@@ -26,7 +26,7 @@ class MemoryManager {
       orGetDevice(&current_device);
 
       mem = openreg::mmap(aligned_size);
-      if (mem == MAP_FAILED)
+      if (mem == nullptr)
         return orErrorUnknown;
       if (openreg::mprotect(mem, aligned_size, F_PROT_NONE) != 0) {
         openreg::munmap(mem, aligned_size);
@@ -52,6 +52,7 @@ class MemoryManager {
     if (it == m_registry.end())
       return orErrorUnknown;
     const auto& info = it->second;
+    
     if (info.type == orMemoryType::orMemoryTypeDevice) {
       openreg::mprotect(info.pointer, info.size, F_PROT_READ | F_PROT_WRITE);
       openreg::munmap(info.pointer, info.size);

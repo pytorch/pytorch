@@ -30,7 +30,7 @@ int device_count_impl() {
   return count;
 }
 
-c10::DeviceIndex device_count() noexcept {
+OPENREG_API c10::DeviceIndex device_count() noexcept {
   // initialize number of devices only once
   static int count = []() {
     try {
@@ -49,17 +49,17 @@ c10::DeviceIndex device_count() noexcept {
   return static_cast<c10::DeviceIndex>(count);
 }
 
-c10::DeviceIndex current_device() {
+OPENREG_API c10::DeviceIndex current_device() {
   c10::DeviceIndex cur_device = -1;
   GetDevice(&cur_device);
   return cur_device;
 }
 
-void set_device(c10::DeviceIndex device) {
+OPENREG_API void set_device(c10::DeviceIndex device) {
   SetDevice(device);
 }
 
-DeviceIndex ExchangeDevice(DeviceIndex device) {
+OPENREG_API DeviceIndex ExchangeDevice(DeviceIndex device) {
   int current_device = -1;
   orGetDevice(&current_device);
 
