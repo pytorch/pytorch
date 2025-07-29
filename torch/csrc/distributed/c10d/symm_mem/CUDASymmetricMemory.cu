@@ -643,14 +643,14 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
     void* ptr,
     c10::intrusive_ptr<Block> block,
     const GroupInfo& group_info) {
-  using BlockHandleType =
-      std::conditional_t<use_fabric_handle, CUmemFabricHandle, int>;
 
 #if defined(USE_ROCM)
-  int block_handle;
+  using BlockHandleType = int;
 #else
-  BlockHandleType block_handle;
+  using BlockHandleType =
+      std::conditional_t<use_fabric_handle, CUmemFabricHandle, int>;
 #endif
+  BlockHandleType block_handle;
   c10::cuda::CUDAGuard guard(block->device_idx);
   if constexpr (!use_fabric_handle) {
     LOG(INFO) << "using posix fd to import symmetric memory handles.";
@@ -740,7 +740,7 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
 #elif defined(USE_ROCM)
     C10_HIP_CHECK(hipMemImportFromShareableHandle(
         &handles[r],
-        (void*)(uintptr_t) & (imported_fds[r]),
+        (void*)(uintptr_t) & (imported_handles[r]),
         hipMemHandleTypePosixFileDescriptor));
 #else
     TORCH_CHECK(
