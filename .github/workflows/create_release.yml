@@ -59,6 +59,8 @@ jobs:
         run: python3 tools/optional_submodules.py
       - name: Copy docs requirements for inclusion
         run: |
+          # Replace symlink with actual file
+          rm docs/requirements.txt || true
           cp .ci/docker/requirements-docs.txt docs/requirements.txt
       - name: Create source distribution
         run: |
