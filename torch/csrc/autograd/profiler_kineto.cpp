@@ -8,7 +8,6 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
-
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
@@ -20,8 +19,6 @@
 #include <torch/csrc/profiler/standalone/nvtx_observer.h>
 #include <torch/csrc/profiler/standalone/privateuse1_observer.h>
 #include <torch/csrc/profiler/util.h>
-
-#include <ATen/Context.h>
 
 #include <stdexcept>
 #include <utility>
@@ -625,7 +622,7 @@ void prepareProfiler(
     /*
      * Sending a warning and passing the non-standard event to the backend
      * Backend can abort if the event is not supported.
-     * TODO Should we gracefully drop the invalid event if we have atleast one
+     * TODO Should we gracefully drop the invalid event if we have at least one
      * valid?
      */
     auto is_standard_event = [](const std::string& event) -> bool {
@@ -693,17 +690,20 @@ void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
   if (activities.count(torch::autograd::profiler::ActivityType::CPU) > 0 &&
-      activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0) {
+      (activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0 ||
+       activities.count(torch::autograd::profiler::ActivityType::XPU) == 0)) {
     LOG(WARNING)
-        << "Toggling CPU activity with CUDA activity on may result in traces with CUDA events on artibrary tracks";
+        << "Toggling CPU activity with GPU activity on may result in traces with GPU events on artibrary tracks";
   } else if (
-      activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 &&
+      (activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 ||
+       activities.count(torch::autograd::profiler::ActivityType::XPU) > 0) &&
       activities.count(torch::autograd::profiler::ActivityType::CPU) == 0) {
     LOG(WARNING)
-        << "Toggling CUDA activity with CPU activity on may result in traces with incorrect correlation between CPU and CUDA events";
+        << "Toggling GPU activity with CPU activity on may result in traces with incorrect correlation between CPU and GPU events";
   }
   for (auto act : activities) {
-    if (act == torch::autograd::profiler::ActivityType::CUDA) {
+    if (act == torch::autograd::profiler::ActivityType::CUDA ||
+        act == torch::autograd::profiler::ActivityType::XPU) {
       torch::profiler::impl::kineto::toggleCollectionDynamic(enable);
     } else if (act == torch::autograd::profiler::ActivityType::CPU) {
       toggleCPUCollectionDynamic(enable);
@@ -860,6 +860,22 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 
   return result;
 }
+namespace tracer = torch::profiler::impl::python_tracer;
+static std::unique_ptr<tracer::PythonMemoryTracerBase> memory_tracer;
+void startMemoryProfile() {
+  if (memory_tracer == nullptr) {
+    memory_tracer = tracer::PythonMemoryTracerBase::make();
+  }
+  memory_tracer->start();
+}
+
+void stopMemoryProfile() {
+  memory_tracer->stop();
+}
+
+void exportMemoryProfile(const std::string& filename) {
+  memory_tracer->export_memory_history(filename);
+}
 
 KinetoEvent::KinetoEvent(
     const std::shared_ptr<const torch::profiler::impl::Result>& result,
@@ -918,6 +934,10 @@ const c10::ArrayRef<c10::IValue> KinetoEvent::concreteInputs() const {
 
 bool KinetoEvent::hasKwinputs() const {
   return !kwinputs_.empty();
+}
+
+bool KinetoEvent::isHiddenEvent() const {
+  return result_ && result_->hidden_;
 }
 
 const std::unordered_map<std::string, c10::IValue> KinetoEvent::kwinputs()

@@ -227,7 +227,10 @@ def compare_pypi_to_torch_versions(
 
 
 def smoke_test_cuda(
-    package: str, runtime_error_check: str, torch_compile_check: str
+    package: str,
+    runtime_error_check: str,
+    torch_compile_check: str,
+    pypi_pkg_check: str,
 ) -> None:
     if not torch.cuda.is_available() and is_cuda_system:
         raise RuntimeError(f"Expected CUDA {gpu_arch_ver}. However CUDA is not loaded.")
@@ -269,12 +272,15 @@ def smoke_test_cuda(
         torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
         print(f"Torch cuDNN version: {torch_cudnn_version}")
 
-        # Pypi dependencies are installed on linux ony and nccl is availbale only on Linux.
         if sys.platform in ["linux", "linux2"]:
+            torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
+            print(f"Torch nccl; version: {torch_nccl_version}")
+
+        # Pypi dependencies are installed on linux only and nccl is available only on Linux.
+        if pypi_pkg_check == "enabled" and sys.platform in ["linux", "linux2"]:
             compare_pypi_to_torch_versions(
                 "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
             )
-            torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
             compare_pypi_to_torch_versions(
                 "nccl", find_pypi_package_version("nvidia-nccl"), torch_nccl_version
             )
@@ -379,6 +385,29 @@ def smoke_test_compile(device: str = "cpu") -> None:
     x_pt2 = torch.compile(model, mode="max-autotune")(x)
 
 
+def smoke_test_nvshmem() -> None:
+    if not torch.cuda.is_available():
+        print("CUDA is not available, skipping NVSHMEM test")
+        return
+
+    # Check if NVSHMEM is compiled in current build
+    try:
+        from torch._C._distributed_c10d import _is_nvshmem_available
+    except ImportError:
+        # Not built with NVSHMEM support.
+        # torch is not compiled with NVSHMEM prior to 2.9
+        if torch.__version__ < "2.9":
+            return
+        else:
+            # After 2.9: NVSHMEM is expected to be compiled in current build
+            raise RuntimeError("torch not compiled with NVSHMEM") from None
+
+    print("torch compiled with NVSHMEM")
+
+    # Check if NVSHMEM is available on current system.
+    print(f"NVSHMEM available at run time: {_is_nvshmem_available()}")
+
+
 def smoke_test_modules():
     cwd = os.getcwd()
     for module in MODULES:
@@ -436,6 +465,13 @@ def parse_args():
         choices=["enabled", "disabled"],
         default="enabled",
     )
+    parser.add_argument(
+        "--pypi-pkg-check",
+        help="Check pypi package versions cudnn and nccl",
+        type=str,
+        choices=["enabled", "disabled"],
+        default="enabled",
+    )
     return parser.parse_args()
 
 
@@ -460,8 +496,13 @@ def main() -> None:
         smoke_test_modules()
 
     smoke_test_cuda(
-        options.package, options.runtime_error_check, options.torch_compile_check
+        options.package,
+        options.runtime_error_check,
+        options.torch_compile_check,
+        options.pypi_pkg_check,
     )
+
+    smoke_test_nvshmem()
 
 
 if __name__ == "__main__":

@@ -92,11 +92,10 @@ class _MaskPartial(Partial):
         assert self.offset_shape is not None, (
             "offset_shape needs to be set for _MaskPartial"
         )
-        local_shard_size, local_offset_on_dim = Shard._local_shard_size_on_dim(
+        local_shard_size, local_offset_on_dim = Shard._local_shard_size_and_offset(
             self.offset_shape[self.offset_dim],
             num_chunks,
             mesh.get_local_rank(mesh_dim),
-            return_offset=True,
         )
         # Build the input mask and save it for the current partial placement
         # this is so that the output of embedding op can reuse the same partial
@@ -114,7 +113,7 @@ class _MaskPartial(Partial):
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        # by the time we ned reduction, we should have already saved the mask
+        # by the time we need reduction, we should have already saved the mask
         assert self.mask_buffer.data is not None
 
         # apply the mask to the tensor that pending reduction
@@ -135,7 +134,7 @@ class _MaskPartial(Partial):
         mesh_dim: int,
         shard_spec: Placement,
     ) -> torch.Tensor:
-        # by the time we ned reduction, we should have already saved the mask
+        # by the time we need reduction, we should have already saved the mask
         assert self.mask_buffer.data is not None
 
         # apply the mask to the tensor that pending reduction

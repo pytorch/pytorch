@@ -12,8 +12,8 @@ from torch.testing import make_tensor, FileCheck
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
-     run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo, skipIfRocm, IS_FBCODE, IS_REMOTE_GPU,
-     suppress_warnings)
+     run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo, skipIfRocm,
+     skipIfRocmVersionLessThan, IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan,
@@ -1495,7 +1495,8 @@ class TestSparseCSR(TestCase):
             res = csr.matmul(vec)
             expected = csr.to_dense().matmul(vec)
 
-            self.assertEqual(res, expected)
+            atol, rtol = (2e-3, 1e-3) if dtype == torch.half else (None, None)
+            self.assertEqual(res, expected, atol=atol, rtol=rtol)
 
             bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
             err_msg = "size mismatch, got"
@@ -1545,8 +1546,8 @@ class TestSparseCSR(TestCase):
                     run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
     @onlyCUDA
-    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
     @skipCUDAIfNoSparseGeneric
+    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_bmm(self, device, dtype):
         def run_test(a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
@@ -1834,7 +1835,7 @@ class TestSparseCSR(TestCase):
                 run_test(a, b, upper, unitriangular, transpose, op_out)
 
     @skipCPUIfNoMklSparse
-    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
+    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(torch.double)
     def test_mm(self, device, dtype):
         def test_shape(di, dj, dk, nnz0=None, nnz1=None):
@@ -1984,18 +1985,17 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
 
     @skipCPUIfNoMklSparse
+    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
-                                      *[torch.bfloat16] if SM80OrLater else [],
-                                      *[torch.half] if SM53OrLater else [],
-                                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
+                                      *[torch.bfloat16] if (SM80OrLater and not TEST_WITH_ROCM) else [],
+                                      *[torch.half] if (SM53OrLater and not TEST_WITH_ROCM) else [],
+                                      *[torch.complex128]
+                                      if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
+                                      else []))
     @sparse_compressed_nonblock_layouts()
-    @skipCUDAIf(
-        not _check_cusparse_spgemm_available(),
-        "cuSparse Generic API SpGEMM is not available"
-    )
     def test_addmm_all_sparse_csr(self, device, dtype, layout):
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
@@ -2066,16 +2066,14 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
-                                      *[torch.bfloat16] if SM80OrLater else [],
-                                      *[torch.half] if SM53OrLater else [],
+                                      *[torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [],
+                                      *[torch.half] if SM53OrLater and not TEST_WITH_ROCM else [],
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     def test_addmm_sizes_all_sparse_csr(self, device, dtype, m, n, k):
-        if (TEST_WITH_ROCM and k != 0 and n != 0 and m != 0):
-            self.skipTest("Skipped on ROCm")
         M = torch.randn(n, m, device=device).to(dtype)
         m1 = torch.randn(n, k, device=device).to(dtype)
         m2 = torch.randn(k, m, device=device).to(dtype)
@@ -2793,7 +2791,7 @@ class TestSparseCSR(TestCase):
             raise ValueError("Expected at least one 2D tensor in samples.")
 
         for sample in samples:
-            # We must skip samples of low dimensionality, we can't covert them to sparsed compressed layouts
+            # We must skip samples of low dimensionality, we can't convert them to sparsed compressed layouts
             if sample.input.ndim < 2:
                 continue
             sparse_input = sample.input.to_sparse_csr().requires_grad_(True)
@@ -3257,7 +3255,7 @@ class TestSparseCSR(TestCase):
         # helpers
 
         def _check_against_scipy_matrix(pt_matrix, dense, blocksize, **kwargs):
-            # scipy has no bsc layout, so we check against the bsr layout of the tranposed dense
+            # scipy has no bsc layout, so we check against the bsr layout of the transposed dense
             if layout == torch.sparse_bsc:
                 sp_matrix = self._construct_sp_matrix(dense.t(), layout=torch.sparse_bsr, blocksize=blocksize[::-1])
             else:
@@ -3274,7 +3272,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
             if layout == torch.sparse_bsc:
-                # we must tranpose the blocks before comparing
+                # we must transpose the blocks before comparing
                 self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values().transpose(-2, -1))
             else:
                 self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
@@ -3373,7 +3371,7 @@ class TestSparseCSR(TestCase):
 
         # special cases for batched tensors
         if batched:
-            # batched sparse tensors need only have the same number of non-zeros in each batch not nessesarily the
+            # batched sparse tensors need only have the same number of non-zeros in each batch not necessarily the
             # same sparsity pattern in each batch
             sparse_shape = sparse_sizes[0]
             hybrid_shape = hybrid_sizes[0]
@@ -3384,7 +3382,7 @@ class TestSparseCSR(TestCase):
             # number of elements/blocks in each batch (total not nnz)
             batch_mask_shape = sparse_shape
             if layout in blocked_layouts:
-                # if we are blocked the mask is genereated for the block valued elemetns
+                # if we are blocked the mask is generated for the block valued elements
                 batch_mask_shape = sparse_shape[0] // blocksize[0], sparse_shape[1] // blocksize[1]
 
             # random bool vector w/ length equal to max possible nnz for the sparse_shape
@@ -3817,7 +3815,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                 input_broadcasted_clone.col_indices(),
                 # For testing `out=` let's make values to have "weird" strides
                 # so that if the kernel modifies values to it's needs, the result
-                # is being compied into out.values.
+                # is being copied into out.values.
                 input_broadcasted_clone.values().transpose(-3, -2).contiguous().transpose(-3, -2),
                 layout=input_broadcasted_clone.layout,
                 size=input_broadcasted_clone.shape
@@ -3932,7 +3930,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                     try:
                         result = bsr_scatter_mm(bsr, dense, indices_data=indices_data)
                     except triton.compiler.OutOfResources:
-                        # ensure that there was at least one succesful test:
+                        # ensure that there was at least one successful test:
                         assert SPLIT_N < SPLIT_N_list[0]
                         break
 

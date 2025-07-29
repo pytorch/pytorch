@@ -582,7 +582,7 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, elem: torch.Tensor):
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             elem.size(),
             strides=elem.stride(),
@@ -635,7 +635,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return self.elem
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         if func == torch.ops.aten.view.default:
             # Fast handle aten.view as a lot of view related op goes to aten.view
             # eventually, this avoids pytree slowdown
@@ -731,8 +731,10 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
             "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         )
         # TODO: it should run collective in the whole mesh instead of dim 0
-        tag, rankset, _ = group._dim_group_infos[0]
+        pg = group.get_group()
+        rankset = dist.get_process_group_ranks(pg)
         group_size = len(rankset)
+        tag = tag or c10d._get_group_tag(pg)
     elif isinstance(group, tuple):
         if (
             len(group) == 2
@@ -741,8 +743,10 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
         ):
             dmesh = group[0]
             dim = group[1]
-            tag, rankset, _ = dmesh._dim_group_infos[dim]
+            pg = dmesh.get_group(dim)
+            rankset = dist.get_process_group_ranks(pg)
             group_size = len(rankset)
+            tag = tag or c10d._get_group_tag(pg)
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
@@ -767,7 +771,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         assert group.ndim == 1, (
             "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         )
-        return group._dim_group_infos[0][2]
+        return group._dim_group_names[0]
     elif isinstance(group, tuple):
         if (
             len(group) == 2
@@ -776,7 +780,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         ):
             dmesh = group[0]
             dim = group[1]
-            return dmesh._dim_group_infos[dim][2]
+            return dmesh._dim_group_names[dim]
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     elif isinstance(group, list):
@@ -817,6 +821,10 @@ def _are_we_tracing() -> bool:
     # If fake mode is turned on, we are almost definitely compiling/tracing.
     if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is not None:
         return True
+
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_initial_trace:
+        return True
+
     return get_proxy_mode() is not None
 
 
@@ -866,14 +874,18 @@ def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
         )
 
 
-def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
-    def mk_out_tensor(shard):
-        out_size = list(shard.size())
+def _make_all_gather_out_tensor(input, group_size):
+    out_size = list(input.size())
+    if len(out_size) == 0:
+        out_size.append(group_size)
+    else:
         out_size[0] *= group_size
-        out_tensor = shard.new_empty(out_size)
-        return out_tensor
+    out_tensor = input.new_empty(out_size)
+    return out_tensor
 
-    return [mk_out_tensor(t) for t in self]
+
+def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
+    return [_make_all_gather_out_tensor(t, group_size) for t in self]
 
 
 # We now register meta kernels to deal with tracing
@@ -890,9 +902,7 @@ def _wait_tensor_meta(self, *args):
 
 
 def _all_gather_into_tensor_meta(shard, tag, rankset, group_size):
-    out_size = list(shard.size())
-    out_size[0] *= group_size
-    return shard.new_empty(out_size)
+    return _make_all_gather_out_tensor(shard, group_size)
 
 
 def _reduce_scatter_tensor_meta(input, reduce_op, tag, rankset, group_size):
@@ -946,15 +956,11 @@ def _all_to_all_single_meta(
 
 
 def _all_gather_into_tensor_out_native_meta(input, group_size, group_name, *, out):
-    shape = list(input.size())
-    shape[0] *= group_size
-    return input.new_empty(shape)
+    return _make_all_gather_out_tensor(input, group_size)
 
 
 def _all_gather_into_tensor_native_meta(input, group_size, group_name):
-    shape = list(input.size())
-    shape[0] *= group_size
-    return input.new_empty(shape)
+    return _make_all_gather_out_tensor(input, group_size)
 
 
 def _all_gather_into_tensor_coalesced_native_meta(inputs, group_size, group_name):
@@ -1155,7 +1161,7 @@ def all_gather_inplace(
     assert not async_op, (
         "Can't remap async version of inplace op to functional collective"
     )
-    assert all(t.size(0) == tensor.size(0) for t in tensor_list), (
+    assert tensor.dim() == 0 or all(t.size(0) == tensor.size(0) for t in tensor_list), (
         "Remapping variable size all_gather is not yet supported"
     )
 
@@ -1169,8 +1175,11 @@ def all_gather_inplace(
     output_splits = []
     offset = 0
     for t in tensor_list:
-        output_splits.append(output[offset : offset + t.size(0)])
-        offset += t.size(0)
+        is_scalar = t.dim() == 0
+        t_offset = 1 if is_scalar else t.size(0)
+        out = output[offset] if is_scalar else output[offset : offset + t_offset]
+        output_splits.append(out)
+        offset += t_offset
     for dst, src in zip(tensor_list, output_splits):
         dst.copy_(src)
     return tensor_list

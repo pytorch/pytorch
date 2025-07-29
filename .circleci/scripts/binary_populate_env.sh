@@ -75,8 +75,8 @@ TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
 # Here PYTORCH_EXTRA_INSTALL_REQUIREMENTS is already set for the all the wheel builds hence append TRITON_CONSTRAINT
 TRITON_CONSTRAINT="platform_system == 'Linux' and platform_machine == 'x86_64'"
 
-# CUDA 12.8 builds have triton for Linux and Linux aarch64 binaries.
-if [[ "$DESIRED_CUDA" == cu128 ]]; then
+# CUDA 12.9 builds have triton for Linux and Linux aarch64 binaries.
+if [[ "$DESIRED_CUDA" == "cu129" ]]; then
   TRITON_CONSTRAINT="platform_system == 'Linux'"
 fi
 
@@ -105,6 +105,7 @@ fi
 
 # Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton xpu package
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*xpu.* ]]; then
+    TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_xpu_version.txt)
     TRITON_REQUIREMENT="pytorch-triton-xpu==${TRITON_VERSION}"
     if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
         TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton-xpu.txt)

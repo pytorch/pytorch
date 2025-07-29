@@ -83,7 +83,7 @@ using namespace torch::jit::tensorexpr;
 C10_DEFINE_bool(
     torch_jit_llvm_use_fast_intrinsics,
     false,
-    "Use fast (but slightly less accurate) implementations of tanh and sigmoid");
+    "Use fast (but slightly less accurate) implementations of tanh and sigmoid")
 
 namespace torch::jit::tensorexpr {
 
@@ -246,7 +246,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   std::string kernel_func_name_;
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE)
 #undef LLVM_TYPE_DECLARE
 
 #if LLVM_VERSION_MAJOR >= 15
@@ -780,7 +780,7 @@ void LLVMCodeGenImpl::emitKernel(
   GRAPH_DEBUG("\nLLVM generated assembly code\n\n", asmCode_, "\n");
 }
 
-// TODO: The binary ops are copypasta.
+// TODO: The binary ops are copypaste.
 
 void LLVMCodeGenImpl::visit(const AddPtr& v) {
   v->lhs()->accept(this);
@@ -878,7 +878,7 @@ void LLVMCodeGenImpl::visit(const OrPtr& v) {
   bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   if (!lfp && !rfp) {
-    value_ = irb_.CreateOr(lhs, rhs);
+    value_ = irb_.CreateOr(lhs, rhs); // codespell:ignore
   } else {
     throw malformed_input("llvm_codegen: bad type in Or", v);
   }
@@ -1101,7 +1101,7 @@ std::enable_if_t<std::is_floating_point_v<T>, llvm::Value*> getFromType(
   void LLVMCodeGenImpl::visit(const Name##ImmPtr& v) { \
     value_ = getFromType<Type>(Name##Ty_, v->value()); \
   }
-AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE);
+AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE)
 #undef IMM_VISIT_DECLARE
 
 void LLVMCodeGenImpl::visit(const HalfImmPtr& v) {
@@ -1225,7 +1225,7 @@ void LLVMCodeGenImpl::visit(const CastPtr& v) {
       }
       value_ = irb_.CreateFPCast(value_, dstType);
     } else if (dstType->isIntOrIntVectorTy()) {
-      // Strictly casting from Float -> i8 doesnt give correct results
+      // Strictly casting from Float -> i8 doesn't give correct results
       // set one bit true if the input float is not 0
       if (v->dtype().scalar_type() == ScalarType::Bool) {
         llvm::Value* zero =

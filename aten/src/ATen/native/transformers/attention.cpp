@@ -28,6 +28,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_fused_sdp_choice_native.h>
+#include <ATen/ops/_fused_sdp_choice_ops.h>
 #include <ATen/ops/_masked_softmax.h>
 #include <ATen/ops/_native_multi_head_attention_native.h>
 #include <ATen/ops/_nested_from_padded.h>
@@ -206,7 +207,7 @@ Tensor qkv_projection(
     } else {
       // encoder-decoder attention
       // TODO: is there a more efficient way to set this up?
-      // TODO: can we stay nested insted of using cat? Probably just make a
+      // TODO: can we stay nested instead of using cat? Probably just make a
       // NestedTensor out of the matmul results or something?
       auto q_kv_weight_s =
           at::native::split_with_sizes(qkv_weight, {embed_dim, embed_dim * 2}, 0);
@@ -448,6 +449,7 @@ REGISTER_AVX512_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
 REGISTER_VSX_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
 REGISTER_ZVECTOR_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
 REGISTER_SVE256_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
+REGISTER_HPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_meta)
 
 int64_t _fused_sdp_choice_meta(
     const Tensor& query_,
@@ -459,6 +461,20 @@ int64_t _fused_sdp_choice_meta(
     std::optional<double> scale,
     bool enable_gqa) {
   auto query_key_set = query_.key_set();
+  bool has_hpu = query_key_set.has(c10::DispatchKey::HPU);
+  if (has_hpu) {
+    auto choice_int = at::_ops::_fused_sdp_choice::redispatch(
+        c10::DispatchKeySet(DispatchKey::HPU),
+        query_,
+        key,
+        value,
+        attn_mask_,
+        dropout_p,
+        is_causal,
+        scale,
+        enable_gqa);
+    return choice_int;
+  }
 #if defined(USE_ROCM)
   bool has_rocm = query_key_set.has(c10::DispatchKey::HIP);
   if (has_rocm) {
@@ -556,7 +572,13 @@ std::optional<Tensor> convert_boolean_attn_mask_cudnn(const std::optional<Tensor
 template<int alignment>
 bool aligned_tensor(const at::Tensor& tensor){
   for(const auto i : c10::irange(tensor.dim() - 1)){
-    if(tensor.sym_stride(i) % alignment != 0){
+    auto stride = tensor.sym_stride(i).maybe_as_int();
+    // If the stride is unknown at compilation time, assume it is unaligned
+    // and always pad it. This is helpful to avoid unnecessary guards.
+    if (!stride)
+      return false;
+
+    if((*stride) % alignment != 0){
       return false;
     }
   }
@@ -754,7 +776,7 @@ Tensor scaled_dot_product_attention(
 #ifdef USE_MPS
       const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
-      const auto all_contiguous = query_.is_contiguous() && key.is_contiguous() && value.is_contiguous();
+      const auto all_contiguous = query_.is_contiguous_or_false() && key.is_contiguous_or_false() && value.is_contiguous_or_false();
       if (query_device_type == DeviceType::MPS && dropout_p == 0.0
           && !(GradMode::is_enabled() && any_inputs_require_grad)
           && (all_contiguous || mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS))

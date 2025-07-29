@@ -1,3 +1,5 @@
+import base64
+import zlib
 from collections.abc import Iterable
 from typing import Callable, Generic, TypeVar
 
@@ -13,16 +15,19 @@ __all__ = ["AppendingByteSerializer"]
 # Helper classes
 #######################################
 
+CHECKSUM_DIGEST_SIZE = 4
+
 
 class BytesWriter:
-    def __init__(self, preallocate_size: int) -> None:
-        self._data = bytearray(preallocate_size)
+    def __init__(self) -> None:
+        # Reserve CHECKSUM_DIGEST_SIZE bytes for checksum
+        self._data = bytearray(CHECKSUM_DIGEST_SIZE)
 
     def write_uint64(self, i: int) -> None:
         self._data.extend(i.to_bytes(8, byteorder="big", signed=False))
 
     def write_str(self, s: str) -> None:
-        payload = s.encode("utf-8")
+        payload = base64.b64encode(s.encode("utf-8"))
         self.write_bytes(payload)
 
     def write_bytes(self, b: bytes) -> None:
@@ -30,13 +35,30 @@ class BytesWriter:
         self._data.extend(b)
 
     def to_bytes(self) -> bytes:
+        digest = zlib.crc32(self._data[CHECKSUM_DIGEST_SIZE:]).to_bytes(
+            4, byteorder="big", signed=False
+        )
+        assert len(digest) == CHECKSUM_DIGEST_SIZE
+        self._data[0:CHECKSUM_DIGEST_SIZE] = digest
         return bytes(self._data)
 
 
 class BytesReader:
     def __init__(self, data: bytes) -> None:
+        # Check for data corruption
+        assert len(data) >= CHECKSUM_DIGEST_SIZE
+        digest = zlib.crc32(data[CHECKSUM_DIGEST_SIZE:]).to_bytes(
+            4, byteorder="big", signed=False
+        )
+        assert len(digest) == CHECKSUM_DIGEST_SIZE
+        if data[0:CHECKSUM_DIGEST_SIZE] != digest:
+            raise RuntimeError(
+                "Bytes object is corrupted, checksum does not match. "
+                f"Expected: {data[0:CHECKSUM_DIGEST_SIZE]!r}, Got: {digest!r}"
+            )
+
         self._data = data
-        self._i = 0
+        self._i = CHECKSUM_DIGEST_SIZE
 
     def is_finished(self) -> bool:
         return len(self._data) == self._i
@@ -49,7 +71,7 @@ class BytesReader:
         return result
 
     def read_str(self) -> str:
-        return self.read_bytes().decode("utf-8")
+        return base64.b64decode(self.read_bytes()).decode("utf-8")
 
     def read_bytes(self) -> bytes:
         size = self.read_uint64()
@@ -71,20 +93,17 @@ class AppendingByteSerializer(Generic[T]):
 
     _serialize_fn: Callable[[BytesWriter, T], None]
     _writer: BytesWriter
-    _preallocate_size: int
 
     def __init__(
         self,
         *,
         serialize_fn: Callable[[BytesWriter, T], None],
-        preallocate_size: int = 0,
     ) -> None:
         self._serialize_fn = serialize_fn
-        self._preallocate_size = preallocate_size
         self.clear()
 
     def clear(self) -> None:
-        self._writer = BytesWriter(preallocate_size=self._preallocate_size)
+        self._writer = BytesWriter()
         # First 8-bytes are for version
         self._writer.write_uint64(_ENCODING_VERSION)
 

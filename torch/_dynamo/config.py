@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """
 Configuration module for TorchDynamo compiler and optimization settings.
 
@@ -38,7 +36,7 @@ verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
 
-# need this many ops to create an FX graph
+# need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 
 # turn on/off DCE pass (deprecated: always true)
@@ -143,7 +141,7 @@ guard_nn_modules = True
 # guard_nn_modules_using_dict_tags, the guard_nn_modules is not really required
 # but kept around for debugging and discussing unspecializing nn module
 # variables.
-# TODO(janimesh, voz): Remove both of these flags (or atleast guard_nn_modules)
+# TODO(janimesh, voz): Remove both of these flags (or at least guard_nn_modules)
 # once we have reached stability for the guard_nn_modules_using_dict_tags.
 guard_nn_modules_using_dict_tags = True
 
@@ -152,25 +150,15 @@ guard_nn_modules_using_dict_tags = True
 # Non-Inductor backends can use this list for graph freezing.
 prepare_freezing = os.environ.get("TORCHDYNAMO_PREPARE_FREEZING", "0") == "1"
 
-
-# This feature doesn't really work.  We offer this flag for experimental
-# purposes / if you want to help us build out support.
-#
-# torchdynamo has limited support for tensor subclasses that implement
-# __torch_function__ see [Note: __torch_function__] in torch_function.py.
-# Our current support is limited to tensor subclasses
-# that DO NOT store metadata on the tensor (in general, dynamo does not
-# support Python code that stores extra attributes on tensors at present).
-# If your tensor subclass purely changes function call behavior via
-# __torch_function__, you can allow torchdynamo to trace into it by
-# adding it to traceable_tensor_subclasses.  We don't do any safety checks,
-# so it is up to you to ensure that your subclass is well behaved.  See also
-# https://github.com/pytorch/torchdynamo/issues/1948
-#
-# We do NOT currently support __torch_dispatch__.  The implementation is
-# currently buggy, the main show stopper for nontrivial use is
-# https://github.com/pytorch/torchdynamo/issues/1952
+# NOTE this has been deprecated, it does nothing now.
 traceable_tensor_subclasses: set[type[Any]] = set()
+
+# If a tensor subclass is put into this set, Dynamo will model its instasnces in
+# a very conservative and limited way (most likely causing lots of graph breaks
+# if one apply tensor ops on these instances). This is useful if you encounter
+# internal compiler errors from Dynamo which are caused by tensor subclasses,
+# and you are willing to tolerate potential graph breaks rather than hard error.
+nontraceable_tensor_subclasses: set[type[Any]] = set()
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
 # This is a good way to get your model to work one way or another, but you may
@@ -296,7 +284,7 @@ allow_unspec_int_on_nn_module = False
 
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 3 modes.
-# 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
+# 1. "ddp_optimizer" (or True): with "ddp_optimizer", Dynamo will automatically
 # split model graph into pieces to match DDP bucket sizes to allow DDP
 # comm/compute overlap.
 # 2. "python_reducer" (experimental): this optimization requires the usage
@@ -332,6 +320,8 @@ do_not_emit_runtime_asserts: bool = (
 # Skip tracing the torchrec files added to trace_rules.FBCODE_SKIP_DIRS
 skip_torchrec = True
 
+# Don't apply most trace_rules.py rules
+dont_skip_tracing = False
 
 # No longer used
 optimize_ddp_lazy_compile = False
@@ -356,6 +346,9 @@ skip_no_tensor_aliasing_guards_on_parameters = True
 # Considers a tensor immutable if it is one of the values of a dictionary, and
 # the dictionary tag is same across invocation calls.
 skip_tensor_guards_with_matching_dict_tags = True
+
+# Skips guards on func.__defaults__ if the element to be guarded is a constant
+skip_guards_on_constant_func_defaults = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
@@ -405,11 +398,14 @@ use_numpy_random_stream = False
 # Use C++ guard manager (deprecated: always true)
 enable_cpp_guard_manager = True
 
-# Use C++ guard manger for symbolic shapes
-enable_cpp_symbolic_shape_guards = False
+# Use C++ guard manager for symbolic shapes
+enable_cpp_symbolic_shape_guards = not is_fbcode()
 
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
+
+# Enable tracing through unittest
+enable_trace_unittest = False
 
 # Enable tracing generator functions lazily. If False, Dynamo will exhaust
 # generators upon first execution. And if True, the generator will be accessed lazily
@@ -421,7 +417,12 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
 )
 
-# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
+# Install "free" tensor variables (globals, non-locals, nn module attributes)
+# as graph attributes.  This is useful for export, as it
+# produces a consistent number of inputs to the graph.
+install_free_tensors = False
+
+# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True
 
 # Whether to automatically find and replace identical graph
@@ -450,7 +451,7 @@ allow_empty_graphs = False
 record_compile_time_instruction_count = False
 
 
-def default_debug_dir_root():
+def default_debug_dir_root() -> str:
     # [@compile_ignored: debug]
     DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
     if DEBUG_DIR_VAR_NAME in os.environ:
@@ -493,14 +494,14 @@ only_allow_pt2_compliant_ops = False
 # This flag is ignored and maintained for backwards compatibility.
 capture_autograd_function = True
 
-# This flag is ignored and maintained for backwards compatbility.
+# This flag is ignored and maintained for backwards compatibility.
 capture_func_transforms = True
 
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
 # A set of logging functions which will be reordered to the end of graph breaks,
-# allowing dynamo to construct larget graph. Note that there are some
+# allowing dynamo to construct large graph. Note that there are some
 # limitations to this, such as how it does not correctly print objects that were
 # mutated after the print statement.
 reorderable_logging_functions: set[Callable[[Any], None]] = set()
@@ -541,6 +542,10 @@ fake_tensor_cache_crosscheck_enabled = (
 # Disables inference mode for fake tensor prop during compilation. At runtime,
 # the inference_mode is still respected.
 fake_tensor_disable_inference_mode = True
+
+# Experimental feature for running automatic caching precompile.
+# Enables automatic DynamoCache save/load
+caching_precompile = os.environ.get("TORCH_CACHING_PRECOMPILE", "0") == "1"
 
 # Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
 # Note: AOTAutograd will still trace and partition an AOT backward graph local to that
@@ -604,6 +609,9 @@ _unsafe_skip_fsdp_module_guards = (
     os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
 )
 
+# Common prefix to append to the id of each compile run to filter out data
+pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", None)
+
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
     default=True,
@@ -615,13 +623,17 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
 wrap_top_frame = False
 
+# Flag to record runtime overhead in profile traces. Used for pre-graph bytecode
+# and AOTAutograd runtime wrapper.
+record_runtime_overhead = True
+
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-    def _make_closure_patcher(**changes): ...
+    def _make_closure_patcher(**changes: Any) -> Any: ...
 
 
 install_config_module(sys.modules[__name__])

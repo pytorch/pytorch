@@ -2,57 +2,32 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 
+#include <fmt/compile.h>
+#include <fmt/core.h>
+#include <fmt/ostream.h> // optional, for ostream fallback
+#include <fmt/ranges.h> // for fmt::join
+
 #include <sys/types.h>
 #include <cstdlib>
+#include <cstring>
+#include <iterator>
 #include <string>
 #include <vector>
 
 namespace c10d {
 
-// A struct to hold the latest status of the process group.
-struct ProcessGroupStatus {
-  // the sequential number of the last collective enqueued into workMetaList_
-  // This is useful for indentifying a rank that has not join a collective
-  // initialized to be -1 to indicate no collective has been enqueued
-  int64_t lastEnqueuedSeq{-1};
-  // the sequential number of the last collective started as the kernel
-  int64_t lastStartedSeq{-1};
-  // the sequential number of the last collective completed marked by
-  // the watchdog thread
-  // initialized to be -1 to indicate no collective has been completed
-  int64_t lastCompletedSeq{-1};
-
-  // the name of the last collective enqueued into workMetaList_
-  std::string lastEnqueuedWorkName;
-  // the name of the last collective started as the kernel
-  std::string lastStartedWorkName;
-  // the name of the last collective completed
-  std::string lastCompletedWorkName;
-
-  // the sizes of the last work enqueued
-  size_t lastEnqueuedNumelIn;
-  size_t lastEnqueuedNumelOut;
-  // the sizes of the last work completed
-  size_t lastCompletedNumelIn;
-  size_t lastCompletedNumelOut;
-  // the sizes of the last work started
-  size_t lastStartedNumelIn;
-  size_t lastStartedNumelOut;
-};
-
 inline std::string getTraceStartKey(const std::string& pgName, int rank) {
-  return pgName + "_" + std::to_string(rank) + "_trace_start";
+  return fmt::format(FMT_COMPILE("{}_{}_trace_start"), pgName, rank);
 }
 
 inline std::string getTraceEndKey(const std::string& pgName, int rank) {
-  return pgName + "_" + std::to_string(rank) + "_trace_end";
+  return fmt::format(FMT_COMPILE("{}_{}_trace_end"), pgName, rank);
 }
 
 inline bool traceUpdate(
@@ -61,8 +36,8 @@ inline bool traceUpdate(
     uint64_t seq,
     const std::string& col) {
   std::vector<uint8_t> value(col.size() + sizeof(seq) + 1);
-  memcpy(value.data(), &seq, sizeof(seq));
-  memcpy(value.data() + sizeof(seq), col.data(), col.size());
+  std::memcpy(value.data(), &seq, sizeof(seq));
+  std::memcpy(value.data() + sizeof(seq), col.data(), col.size());
   try {
     store->set(key, value);
     return true;
@@ -83,28 +58,21 @@ using TraceMap =
     std::map<uint64_t, std::map<int, std::pair<std::string, TraceDebugEvent>>>;
 
 inline std::string ranksToString(const std::vector<int>& ranks) {
-  std::string str;
-  for (int rank : ranks) {
-    if (str.empty()) {
-      str = std::to_string(rank);
-    } else {
-      str += ", " + std::to_string(rank);
-    }
-  }
-  return str;
+  return fmt::to_string(fmt::join(ranks, ", "));
 }
 
 inline std::string ranksFromTrace(
     const std::vector<std::pair<int, std::string>>& items) {
-  std::string ranks;
-  for (auto& p : items) {
-    if (ranks.empty()) {
-      ranks = std::to_string(p.first);
-    } else {
-      ranks += ", " + std::to_string(p.first);
+  fmt::memory_buffer buf;
+  bool first = true;
+  for (const auto& [rank, _] : items) {
+    if (!first) {
+      fmt::format_to(std::back_inserter(buf), ", ");
     }
+    fmt::format_to(std::back_inserter(buf), "{}", rank);
+    first = false;
   }
-  return ranks;
+  return fmt::to_string(buf);
 }
 
 inline std::string analyzeMissingRanks(const std::vector<int>& missingRanks) {
@@ -159,7 +127,7 @@ inline std::string dumpSnapshot(TraceMap& traceMap) {
 
     std::unordered_map<std::string, std::vector<int>> collectivesStart;
     std::unordered_map<std::string, std::vector<int>> collectivesEnd;
-    for (auto& p : subMap) {
+    for (const auto& p : subMap) {
       int rank = p.first;
       const std::string& col = p.second.first;
       if (p.second.second == kEventStart) {
@@ -200,7 +168,7 @@ inline bool parseTraceValue(
     std::string& col) {
   try {
     std::vector<uint8_t> traceValue = store->get(key);
-    memcpy(&seq, traceValue.data(), sizeof(seq));
+    std::memcpy(&seq, traceValue.data(), sizeof(seq));
     std::string colName((char*)traceValue.data() + sizeof(seq));
     col = colName;
     return true;
@@ -318,14 +286,21 @@ inline std::string get_python_cpp_trace() {
           /*python=*/true, /*script=*/true, /*cpp=*/true);
   torch::SymbolizedTracebacks s_tbs = torch::symbolize({tb.get()});
   const auto& s_tb = s_tbs.tracebacks.at(0);
-  std::stringstream oss;
+  constexpr auto TB_FMT_CSTR = FMT_COMPILE("#{} {} from {}:{}\n");
+  fmt::memory_buffer buf;
+  auto buf_iter = std::back_inserter(buf);
   for (auto idx : c10::irange(s_tb.size())) {
     auto frame_id = s_tb[idx];
     const auto& frame = s_tbs.all_frames.at(frame_id);
-    oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
-        << ":" << frame.lineno << '\n';
+    fmt::format_to(
+        buf_iter,
+        TB_FMT_CSTR,
+        idx,
+        frame.funcname,
+        frame.filename,
+        frame.lineno);
   }
-  return oss.str();
+  return fmt::to_string(buf);
 }
 
 inline c10::Dict<c10::IValue, c10::IValue> new_dict() {
@@ -338,15 +313,7 @@ inline c10::List<c10::IValue> new_list() {
 }
 
 inline std::string ranks_str(const std::vector<uint64_t>& ranks) {
-  std::string str;
-  for (const auto& rank : ranks) {
-    if (str.empty()) {
-      str = std::to_string(rank);
-    } else {
-      str += ", " + std::to_string(rank);
-    }
-  }
-  return c10::str("[", str, "]");
+  return fmt::format("[{}]", fmt::join(ranks, ", "));
 }
 
 } // namespace c10d

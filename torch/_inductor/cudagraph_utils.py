@@ -131,7 +131,7 @@ def check_for_mutation(
     inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> Optional[str]:
-    # doesnt work for non-trees because the warmup run would apply mutation twice
+    # doesn't work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
         # checking if mutation is only on parameters/static inputs
         mutation_indices: Sequence[int] = [
@@ -167,6 +167,9 @@ def _get_use_stack_trace(node: torch.fx.Node) -> Optional[str]:
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> Optional[str]:
+    # meta tensors are supported since there is no compute
+    device_node_mapping.pop(torch.device("meta"), None)
+
     if torch._inductor.config.graph_partition:
         # graph partition supports splitting on cpu op. So we can ignore cpu nodes.
         device_node_mapping.pop(torch.device("cpu"), None)
@@ -219,7 +222,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
 ) -> Optional[str]:
     default_msg = format_default_skip_message("mutated inputs")
 
-    # doesnt work for non-trees because the warmup run would apply mutation twice
+    # doesn't work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
         unique_idxs = OrderedSet(static_input_idxs)
         # checking if mutation is only on parameters/static inputs
