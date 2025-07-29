@@ -8,6 +8,7 @@
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
+#include <torch/headeronly/util/Float4_e2m1fn_x2.h>
 
 #include <torch/headeronly/util/bits.h>
 #include <torch/headeronly/util/qint32.h>
@@ -84,6 +85,11 @@ TEST(TestDtype, TestFloat8_e5m2fnuz) {
   EXPECT_EQ(a - b, sub);
   EXPECT_EQ(a * b, mul);
   EXPECT_EQ(a / b, div);
+}
+
+TEST(TestDtype, TestFloat4) {
+  // not much you can do with this type, just make sure it compiles
+  torch::headeronly::Float4_e2m1fn_x2 a(5);
 }
 
 TEST(TestDtype, TestHalf) {
