@@ -156,6 +156,12 @@
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
 #
+#   USE_ROCM_CK_GEMM=1
+#     Enable building CK GEMM backend in ROCm platform
+#
+#   USE_ROCM_CK_SDPA=1
+#     Enable building CK SDPA backend in ROCm platform
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
