@@ -486,17 +486,9 @@ class TestLiteScriptModule(TestCase):
                 "Traceback of TorchScript"
             ).check("self.b.forwardError").check_next(
                 "~~~~~~~~~~~~~~~~~~~ <--- HERE"
-            ).check(
-                "return self.call"
-            ).check_next(
-                "~~~~~~~~~ <--- HERE"
-            ).check(
+            ).check("return self.call").check_next("~~~~~~~~~ <--- HERE").check(
                 "return torch.ones"
-            ).check_next(
-                "~~~~~~~~~~ <--- HERE"
-            ).run(
-                str(exp)
-            )
+            ).check_next("~~~~~~~~~~ <--- HERE").run(str(exp))
 
 
 class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
