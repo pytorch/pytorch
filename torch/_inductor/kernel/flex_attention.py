@@ -12,6 +12,7 @@ from typing import Any, Optional, Union
 import sympy
 
 import torch
+from torch._inductor.utils import can_use_tma
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
@@ -98,11 +99,11 @@ def infer_dense_strides(size: Sequence[int], orig_strides: Sequence[int]):
 @SymbolicGridFn
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv):
     """How is this kernel parallelized?
-    We create a grid of (batch_size * num_heads, ceil_div(n_queries, query_block_size), 1)
+    We create a grid of (ceil_div(n_queries, query_block_size), batch_size, num_heads)
     Each block is responsible for iterating over blocks of keys and values calculating
     the final attention output.
     """
-    return (cdiv(num_queries, meta["BLOCK_M"]), batch_size * q_heads, 1)
+    return (cdiv(num_queries, meta["BLOCK_M"]), batch_size, q_heads)
 
 
 def create_placeholder(
@@ -138,7 +139,7 @@ def maybe_realize(args: list[Optional[IRNode]]):
 
 def get_float32_precision():
     if (
-        torch.get_float32_matmul_precision() == "highest"
+        torch.backends.cuda.matmul.fp32_precision == "ieee"
         or torch.version.hip
         or torch.mtia.is_available()
     ):
@@ -390,35 +391,8 @@ compute_flex_attention = r"""
     MATMUL_PRECISION = Q.dtype.element_ty
 
     q_start = tl.program_id(0)
-    off_zq = tl.program_id(1) // HQ
-    off_hq = tl.program_id(1) % HQ
-
-
-    # Setting up the TMA descriptors for Q, K, V
-    desc_q = None
-    desc_k = None
-    desc_v = None
-    {%- if USE_TMA %}
-    desc_q = tl.make_tensor_descriptor(
-        base=Q,
-        shape=[Q_LEN*HQ*ZQ, QK_HEAD_DIM],
-        strides=[QK_HEAD_DIM, 1],
-        block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
-    )
-    desc_v = tl.make_tensor_descriptor(
-        base=V,
-        shape=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
-        strides=[V_HEAD_DIM, 1],
-        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
-    )
-    desc_k = tl.make_tensor_descriptor(
-        base=V,
-        shape=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
-        strides=[V_HEAD_DIM, 1],
-        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
-    )
-    {%- endif %}
-
+    off_zq = tl.program_id(1)
+    off_hq = tl.program_id(2)
 
     # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
     # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
@@ -433,6 +407,33 @@ compute_flex_attention = r"""
     Q = Q + q_offset
     K = K + k_offset
     V = V + v_offset
+
+    # Setting up the TMA descriptors for Q, K, V
+    desc_q = None
+    desc_k = None
+    desc_v = None
+    {%- if USE_TMA %}
+    desc_q = tl.make_tensor_descriptor(
+        base=Q,
+        shape=[Q_LEN, QK_HEAD_DIM],
+        strides=[stride_qm, 1],
+        block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
+    )
+
+    desc_k = tl.make_tensor_descriptor(
+        base=K,
+        shape=[KV_LEN, QK_HEAD_DIM],
+        strides=[stride_kn, 1],
+        block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
+    )
+
+    desc_v = tl.make_tensor_descriptor(
+        base=V,
+        shape=[KV_LEN, V_HEAD_DIM],
+        strides=[stride_vn, 1],
+        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+    )
+    {%- endif %}
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
@@ -573,8 +574,8 @@ compute_flex_attention = r"""
     l_i = tl.where(l_i == 0.0, 1, l_i)
 
     acc = acc / l_i[:, None]
-    idx_zq = tl.program_id(1) // HQ
-    idx_hq = tl.program_id(1) % HQ
+    idx_zq = tl.program_id(1)
+    idx_hq = tl.program_id(2)
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :]
 
@@ -583,7 +584,7 @@ compute_flex_attention = r"""
     {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
 
     if OUTPUT_LOGSUMEXP:
-        off_hz = tl.program_id(1)
+        off_hz = off_zq * HQ + off_hq
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         if IS_DIVISIBLE:
@@ -622,6 +623,8 @@ def forward_inner(
     if PRESCALE_QK:
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
+    kv_offset = 0
+
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
         # Here IS_DIVISIBLE acts are the start_n = tl.multiple_of(start_n, BLOCK_N) from triton_fused_attention.
@@ -635,7 +638,7 @@ def forward_inner(
                 off_z, off_h, offs_m, offs_n,
                 # Offsets needed for TMA loads
                 kv_start,
-                start_n,
+                kv_offset,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS,
             )
@@ -653,7 +656,7 @@ def forward_inner(
                 off_z, off_h, offs_m, offs_n,
                 # Offsets needed for TMA loads
                 kv_start,
-                start_n,
+                kv_offset,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
             )
@@ -666,6 +669,7 @@ def forward_inner(
         )
 
         offs_n = offs_n + offset
+        kv_offset += offset
         if not USE_TMA:
             K_block_ptr = tl.advance(K_block_ptr, (0, offset))
             V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
@@ -687,7 +691,7 @@ def forward_block_mn(
     off_z, off_h, offs_m, offs_n,
     # Offsets needed for TMA loads
     kv_start,
-    start_n,
+    kv_offset,
     MATMUL_PRECISION, RCP_LN2,
     IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
 
@@ -698,9 +702,9 @@ def forward_block_mn(
     # -- load k --
     # NB reversed order to since K is transposed
     {%- if USE_TMA %}
-    k = tl.load_tensor_descriptor(  # load in row major
-            desc_k,
-            [start_n.to(tl.int32) , kv_start],
+    k = tl.load_tensor_descriptor(
+        desc_k,
+        [kv_start + kv_offset, 0],
     )
     {%- else %}
     k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
@@ -774,7 +778,7 @@ def forward_block_mn(
     {%- if USE_TMA %}
     v = tl.load_tensor_descriptor(
         desc_v,
-        [kv_start.to(tl.int32) + start_n.to(tl.int32),0],
+        [kv_start + kv_offset, 0],
     )
     {%- else %}
     v = load_checked_block(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
@@ -1455,17 +1459,6 @@ def flex_attention(
     num_consumer_groups, num_buffers_warp_spec = 0, 0
 
     for conf in configs:
-        if (
-            SPARSE_KV_BLOCK_SIZE % conf.block_n != 0
-            or SPARSE_Q_BLOCK_SIZE % conf.block_m != 0
-        ):
-            if len(configs) == 1:
-                raise ValueError(
-                    f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We "
-                    f"got Q_BLOCK_SIZE={SPARSE_Q_BLOCK_SIZE} and KV_BLOCK_SIZE={SPARSE_KV_BLOCK_SIZE}."
-                )
-            continue
-
         cur_kernel_options = original_kernel_options.copy()
         # Performance tuning
         # Triton parameters
@@ -1484,14 +1477,31 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Disabling TMA by default, only explicit kernel_options supported for now
+        # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", False)
+
+        if cur_kernel_options["USE_TMA"] and can_use_tma(query, key, value):
+            cur_kernel_options["USE_TMA"] = True
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        if (
+            cur_kernel_options["SPARSE_KV_BLOCK_SIZE"] % cur_kernel_options["BLOCK_N"]
+            != 0
+            or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"] % cur_kernel_options["BLOCK_M"]
+            != 0
+        ):
+            if len(configs) == 1:
+                raise ValueError(
+                    f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We "
+                    f"got Q_BLOCK_SIZE={cur_kernel_options['SPARSE_Q_BLOCK_SIZE']} and "
+                    f"KV_BLOCK_SIZE={cur_kernel_options['SPARSE_KV_BLOCK_SIZE']}."
+                )
+            continue
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
@@ -1572,6 +1582,7 @@ def flex_attention_backward_grid(
     batch_size, q_heads, num_queries, d_model, kv_heads, num_key_value, meta
 ):
     """How is this kernel parallelized?
+    We create a grid of (ceil_div(n_queries, query_block_size) * heads_ratio + ceil_div(n_kv, kv_block_size), batch_size, kv_heads)
     Currently this is only parallelizing over batch* kv_heads, but we can, and want to
     parallelize over ceil_div(q_heads//kv_heads * num_key_value, key_value_block_size).
     To do this will either require atomic updates to some grad values or to have a two pass kernel design.
@@ -1581,8 +1592,8 @@ def flex_attention_backward_grid(
     return (
         triton.cdiv(num_queries, meta["BLOCK_M2"]) * (q_heads // kv_heads)
         + triton.cdiv(num_key_value, meta["BLOCK_N1"]),
-        1,
-        batch_size * kv_heads,
+        batch_size,
+        kv_heads,
     )
 
 
@@ -1647,9 +1658,8 @@ flex_attention_backward_template = TritonTemplate(
     NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1)
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
 
-    off_hz = tl.program_id(2)
-    off_zq = off_hz // HKV # q batch idx
-    off_hkv = off_hz % HKV # kv head idx
+    off_zq = tl.program_id(1) # q batch idx
+    off_hkv = tl.program_id(2) # kv head idx
     off_zkv = off_zq % ZKV # kv batch idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}

@@ -7,7 +7,6 @@ on:
       - release/*
     tags:
       - ciflow/inductor-rocm/*
-      - ciflow/inductor/*
   workflow_dispatch:
 
 concurrency:
