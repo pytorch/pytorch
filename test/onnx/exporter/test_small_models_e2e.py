@@ -727,12 +727,12 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         x = torch.randn(1, 4, 4, 4, dtype=torch.float32)
         onnx_program = self.export(Model(), (x,), opset_version=21)
-        # TODO(after ort support): As of ONNX Runtime 1.22, the operator is not implemented yet.
-        # call assert_onnx_program after ort support
         self.assertIn(
             "GroupNormalization",
             [node.op_type for node in onnx_program.model.graph],
         )
+
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_graph_attention_opset_23(self):
         class Model(torch.nn.Module):
@@ -744,16 +744,16 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
-        expected = Model()(query, key, value)
 
         onnx_program = self.export(Model(), (query, key, value), opset_version=23)
         self.assertIn("Attention", [node.op_type for node in onnx_program.model.graph])
 
-        ref = onnx_ref.ReferenceEvaluator(onnx_program.model_proto)
-        got = ref.run(
-            None, dict(query=query.numpy(), key=key.numpy(), value=value.numpy())
-        )[0]
-        torch.testing.assert_close(torch.from_numpy(got), expected, atol=1e-2, rtol=1)
+        if has_onnxruntime_opset_23():
+            onnx_testing.assert_onnx_program(onnx_program, atol=1e-2, rtol=1)
+        else:
+            # Test with reference evaluator because ORT does not support the op as of version 1.22
+            onnx_testing.assert_onnx_program(onnx_program,  atol=1e-2, rtol=1, backend="reference")
+
 
     def test_graph_accuracy_attention_opset_23(self):
         class Model(torch.nn.Module):
@@ -770,9 +770,12 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
             Model(), (query, key, value), opset_version=23, optimize=True
         )
         self.assertEqual(["Attention"], [n.op_type for n in onnx_program.model.graph])
-        # onnxruntime inlines any op defined as a function and without any implemented kernel
+
         if has_onnxruntime_opset_23():
             onnx_testing.assert_onnx_program(onnx_program, atol=1e-2, rtol=1)
+        else:
+            # Test with reference evaluator because ORT does not support the op as of version 1.22
+            onnx_testing.assert_onnx_program(onnx_program,  atol=1e-2, rtol=1, backend="reference")
 
     def test_rms_norm(self):
         """Test RMS normalization with various configurations"""
@@ -782,7 +785,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         x = torch.randn(20, 5, 10)
         onnx_program = self.export(RMSNormModel(), (x,))
-        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
         # Test with multi-dimensional normalized_shape
         class RMSNormModel2D(torch.nn.Module):
@@ -791,7 +794,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         x = torch.randn(20, 5, 10, 10)
         onnx_program = self.export(RMSNormModel2D(), (x,))
-        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_rms_norm_with_weight(self):
         """Test RMS normalization with weight parameter"""
@@ -804,14 +807,11 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
                 return torch.nn.functional.rms_norm(x, [10], weight=self.weight)
 
         x = torch.randn(20, 5, 10)
-        expected = RMSNormWithWeight()(x)
 
         onnx_program = self.export(RMSNormWithWeight(), (x,))
 
-        # Test with reference evaluator for accuracy
-        ref = onnx_ref.ReferenceEvaluator(onnx_program.model_proto)
-        got = ref.run(None, {"x": x.numpy()})[0]
-        torch.testing.assert_close(torch.from_numpy(got), expected, atol=1e-5, rtol=1e-5)
+        # Test with reference evaluator because ORT does not support the op as of version 1.22
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_rms_norm_with_eps(self):
         """Test RMS normalization with custom epsilon"""
@@ -820,14 +820,12 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
                 return torch.nn.functional.rms_norm(x, [10], eps=1e-6)
 
         x = torch.randn(20, 5, 10)
-        expected = RMSNormWithEps()(x)
 
         onnx_program = self.export(RMSNormWithEps(), (x,))
 
-        # Test with reference evaluator for accuracy
-        ref = onnx_ref.ReferenceEvaluator(onnx_program.model_proto)
-        got = ref.run(None, {"x": x.numpy()})[0]
-        torch.testing.assert_close(torch.from_numpy(got), expected, atol=1e-5, rtol=1e-5)
+        # Test with reference evaluator because ORT does not support the op as of version 1.22
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

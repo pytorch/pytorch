@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import onnxruntime as ort
+    import numpy as np
 
 _LARGE_MODEL_THRESHOLD = 1536 * 1024 * 1024  # 1536MB
 _NP_UNSUPPORTED_DTYPES_8BIT = frozenset(
@@ -115,6 +116,32 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
                 continue
             values[value.name] = value
     return values
+
+
+def _to_numpy_array(input: torch.Tensor | int | float | str | bool) -> np.ndarray:
+    if isinstance(input, (int, float, str, bool)):
+        return ir.tensor(input).numpy()
+
+    from torch.onnx._internal.exporter import _core
+
+    return _core.TorchTensor(input).numpy()
+
+
+def _from_numpy_array(array: np.ndarray) -> torch.Tensor:
+    """Convert a NumPy array to a PyTorch tensor."""
+    import ml_dtypes
+
+    if array.dtype == ml_dtypes.bfloat16:
+        return torch.from_numpy(array.view(np.uint16)).view(torch.bfloat16)
+    if array.dtype == ml_dtypes.float8_e4m3fn:
+        return torch.from_numpy(array.view(np.uint8)).view(torch.float8_e4m3fn)
+    if array.dtype == ml_dtypes.float8_e4m3fnuz:
+        return torch.from_numpy(array.view(np.uint8)).view(torch.float8_e4m3fnuz)
+    if array.dtype == ml_dtypes.float8_e5m2:
+        return torch.from_numpy(array.view(np.uint8)).view(torch.float8_e5m2)
+    if array.dtype == ml_dtypes.float8_e5m2fnuz:
+        return torch.from_numpy(array.view(np.uint8)).view(torch.float8_e5m2fnuz)
+    return torch.from_numpy(array)
 
 
 def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValue:
@@ -230,6 +257,21 @@ ONNXProgram(
         )
         logger.debug("Inference session run completed.")
         return tuple(_from_ort_value(output) for output in outputs)
+
+    def call_reference(self, *args, **kwargs) -> Sequence[torch.Tensor]:
+        """Run the ONNX model using the reference backend."""
+        import onnx.reference
+
+        evaluator = onnx.reference.ReferenceEvaluator(self.model_proto)
+
+        flatten_args = _process_args(args, kwargs)
+        ref_input = {
+            k.name: _to_numpy_array(v)
+            for k, v in zip(self.model.graph.inputs, flatten_args)
+        }
+        outputs = evaluator.run(None, ref_input)  # type: ignore[arg-type]
+        assert isinstance(outputs, Sequence)
+        return tuple(_from_numpy_array(output) for output in outputs)
 
     def compute_values(
         self, value_names: Sequence[str], args=(), kwargs=None
