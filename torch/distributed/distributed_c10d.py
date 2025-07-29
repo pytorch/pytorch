@@ -2038,6 +2038,7 @@ def _new_process_group_helper(
             backend_options = ProcessGroupXCCL.Options()
             backend_options.global_ranks_in_group = global_ranks_in_group
             backend_options.group_name = group_name
+            backend_options._timeout = timeout
             backend_class = ProcessGroupXCCL(
                 backend_prefix_store, group_rank, group_size, backend_options
             )
