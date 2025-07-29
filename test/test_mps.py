@@ -7722,6 +7722,12 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(Exponential(0.2).sample((1,)).size(), (1,))
         self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_exponential_nonzero(self, dtype):
+        for _ in range(100):
+            a = torch.empty(32_000, device="mps", dtype=dtype).exponential_()
+            self.assertTrue((a != 0).all())
+
     # Test add
     def test_add_sub(self):
         def helper(shape, alpha, op_name, inplace):
