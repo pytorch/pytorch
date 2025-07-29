@@ -565,55 +565,6 @@ def replica_only_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 @register_op_strategy(
-    [aten.sort.stable, aten.sort.default],
-    schema_info=RuntimeSchemaInfo(
-        1,
-        static_kwargkey=["dim", "descending", "stable"],
-    ),
-)
-def sort_strategy(op_schema: OpSchema) -> OpStrategy:
-    self_strategy = op_schema.args_schema[0]
-    assert isinstance(self_strategy, OpStrategy)
-    dim = -1
-    if "dim" in op_schema.kwargs_schema:
-        dim = cast(int, op_schema.kwargs_schema["dim"])
-    elif len(op_schema.args_schema) > 1:
-        dim = cast(int, op_schema.args_schema[1])
-    dim = normalize_dim(dim, self_strategy.ndim)
-    assert isinstance(self_strategy, OpStrategy)
-    output_strategy = OpStrategy([])
-    for op_spec in self_strategy.strategies:
-        placements = op_spec.output_spec.placements
-        # sort dim must be replicated
-        new_placements = []
-        for p in placements:
-            if p.is_shard() and cast(Shard, p).dim != dim:
-                new_placements.append(p)
-            else:
-                new_placements.append(Replicate())
-        new_input_spec = DTensorSpec(
-            mesh=op_spec.output_spec.mesh,
-            placements=tuple(new_placements),
-            tensor_meta=op_spec.output_spec.tensor_meta,
-        )
-        out_spec = DTensorSpec(
-            mesh=op_spec.output_spec.mesh,
-            placements=tuple(new_placements),
-            tensor_meta=op_spec.output_spec.tensor_meta,  # be careful about the newly generated index output
-        )
-        output_strategy.strategies.append(
-            OpSpec(
-                output_specs=(out_spec, out_spec),
-                input_specs=(new_input_spec,),
-                redistribute_cost=[
-                    generate_redistribute_costs(self_strategy, new_input_spec)
-                ],
-            )
-        )
-    return output_strategy
-
-
-@register_op_strategy(
     [
         aten.scatter_.value,
         aten.scatter.value,

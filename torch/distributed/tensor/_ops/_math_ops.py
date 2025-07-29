@@ -1119,6 +1119,7 @@ def fused_rms_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
     schema_info=RuntimeSchemaInfo(2),
 )
 def topk_strategy(op_schema: OpSchema) -> OpStrategy:
+    torch.distributed.breakpoint()
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     topk_dim = (
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else -1
@@ -1139,6 +1140,35 @@ def topk_strategy(op_schema: OpSchema) -> OpStrategy:
             single_mesh_dim_strategies.append(dim_shardings)
     # TODO: topk on sharded dim requires non-trival reduction, address it later
 
+    return expand_to_full_mesh_op_strategy(
+        input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
+    )
+
+
+@register_op_strategy(
+    [aten.sort.stable, aten.sort.default],
+    schema_info=RuntimeSchemaInfo(
+        1,
+        static_kwargkey=["dim", "descending", "stable"],
+    ),
+)
+def sort_strategy(op_schema: OpSchema) -> OpStrategy:
+    # mostly copy past from topk_strategy
+    input_strategy = op_schema.args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+    dim = -1
+    if "dim" in op_schema.kwargs_schema:
+        dim = cast(int, op_schema.kwargs_schema["dim"])
+    elif len(op_schema.args_schema) > 1:
+        dim = cast(int, op_schema.args_schema[1])
+    dim = normalize_dim(dim, input_strategy.ndim)
+    single_mesh_dim_strategies = []
+    all_replicate: PlacementList = [Replicate()] * 3
+    single_mesh_dim_strategies.append(all_replicate)
+    for check_dim in range(input_strategy.ndim):
+        if check_dim != dim:
+            dim_shardings: PlacementList = [Shard(check_dim)] * 3
+            single_mesh_dim_strategies.append(dim_shardings)
     return expand_to_full_mesh_op_strategy(
         input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
     )
