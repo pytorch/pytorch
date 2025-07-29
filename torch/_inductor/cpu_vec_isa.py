@@ -11,6 +11,7 @@ from typing import Any, Callable, Union
 
 import torch
 from torch._inductor import config
+from torch._inductor.utils import python_subprocess_env
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -131,12 +132,7 @@ cdll.LoadLibrary("__lib_path__")
                     ],
                     cwd=output_dir,
                     stderr=subprocess.DEVNULL,
-                    env={
-                        **os.environ,
-                        "PYTHONPATH": os.environ.get(
-                            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
-                        ),
-                    },
+                    env=python_subprocess_env(),
                 )
             except Exception:
                 return False
