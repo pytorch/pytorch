@@ -185,7 +185,7 @@ def _prepare_standalone_module_fx(
               same as input_quantized_idxs configuration provided
               for the standalone module
             * `standalone_module_output_quantized_idxs(List[Int])`: a list of
-              indexs for the graph output that is quantized
+              indices for the graph output that is quantized
               same as input_quantized_idxs configuration provided
               for the standalone module
 

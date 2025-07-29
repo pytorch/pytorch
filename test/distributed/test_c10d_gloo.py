@@ -443,6 +443,34 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts = c10d.AllreduceOptions()
             pg.allreduce([t1, t3], opts)
 
+    @requires_gloo()
+    def test_allreduce_op_timeout(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+        opts = c10d.AllreduceOptions()
+        opts.timeout = timedelta(milliseconds=1)
+
+        if self.rank == 0:
+            t1 = torch.zeros([1], dtype=torch.float32)
+            with self.assertRaisesRegex(RuntimeError, "Timed out waiting 1ms"):
+                pg.allreduce([t1], opts).wait()
+
+    @requires_gloo()
+    def test_allreduce_overall_timeout(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        pg.set_timeout(timedelta(milliseconds=1))
+
+        if self.rank == 0:
+            t1 = torch.zeros([1], dtype=torch.float32)
+            with self.assertRaisesRegex(RuntimeError, "Timed out waiting 1ms"):
+                pg.allreduce([t1]).wait()
+
     def _test_allreduce_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
@@ -1562,6 +1590,21 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for i, tensor in enumerate(tensors):
             self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
 
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    @skipIfRocm
+    def test_block_current_stream_cuda(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+        t = torch.zeros(10, device="cuda")
+        work = pg.allreduce(t)
+        work.block_current_stream()
+        torch.cuda.current_stream().synchronize()
+
+        work.wait()
+
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
@@ -2406,7 +2449,7 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
 
     def _verify_trace(self, t, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.8")
+        self.assertEqual(ver, "2.9")
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
@@ -2705,8 +2748,8 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
+    assert not torch.cuda._initialized, (
+        "test_distributed must not have initialized CUDA context on main process"
+    )
 
     run_tests()

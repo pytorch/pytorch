@@ -77,7 +77,7 @@ _legal_ops = dict.fromkeys(
 # Dynamo is unable to trace global set[Callable].__contains__.
 # See https://github.com/pytorch/pytorch/issues/145761. Since we only have
 # a handful of ops so switch to list of callables.
-_side_effectful_need_to_be_preserved_pre_dispatch: list[Callable] = [
+_side_effectful_need_to_be_preserved_pre_dispatch: list[Callable[..., Any]] = [
     torch._C._set_grad_enabled,
     torch.amp._enter_autocast,
     torch.amp._exit_autocast,
@@ -85,7 +85,7 @@ _side_effectful_need_to_be_preserved_pre_dispatch: list[Callable] = [
 
 # TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
 # or add logic to correctly mark all inplace ops as side effectful.
-_side_effectful_functions: set[Callable] = {
+_side_effectful_functions: set[Callable[..., Any]] = {
     torch._assert,
     torch._assert_async,
     _ops.aten._assert_async.msg,
@@ -98,7 +98,8 @@ _side_effectful_functions: set[Callable] = {
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
     operator.setitem,
-} | set(_side_effectful_need_to_be_preserved_pre_dispatch)
+    *_side_effectful_need_to_be_preserved_pre_dispatch,
+}
 
 if hasattr(_ops.inductor, "resize_storage_bytes_"):
     _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
@@ -244,7 +245,7 @@ class Node(_NodeBase):
     # should not be accessed directly.
     _input_nodes: dict["Node", None]
     # All of the nodes that use the value produced by this Node
-    # Note one user may correspond to several uses, e.g. the node fo ``x + x``
+    # Note one user may correspond to several uses, e.g. the node for ``x + x``
     # would appear once here, but represents two uses.
     # Is a dict to act as an "ordered set". Keys are significant, value dont-care
     users: dict["Node", None]
@@ -742,6 +743,29 @@ class Node(_NodeBase):
                 if getattr(self.target, "_nondeterministic_seeded", False):
                     # impure since it mutates RNG state
                     return True
+
+            # Handle Python random functions that don't have _nondeterministic_seeded
+            # but still affect global RNG state (issue #151524)
+            # These should be impure regardless of impure_random setting to maintain
+            # consistency between eager and compiled execution
+            _random_functions = {
+                torch.rand,
+                torch.randn,
+                torch.randint,
+                torch.randperm,
+                torch.rand_like,
+                torch.randn_like,
+                torch.randint_like,
+                torch.normal,
+                torch.poisson,
+                torch.bernoulli,
+                torch.multinomial,
+            }
+
+            if self.target in _random_functions:
+                # All random operations are impure to ensure consistent behavior
+                # between eager and compiled execution, regardless of generator usage
+                return True
 
             return self.target in _side_effectful_functions
 

@@ -161,7 +161,7 @@ class LoopBody:
             **{k: v.clone(self) for k, v in submodules.items()},  # type: ignore[attr-defined]
         }
 
-    def has_op(self, name: str):
+    def has_op(self, name: str) -> bool:
         return self.op_counts.get(name, 0) > 0
 
     def merge_loops(self) -> LoopBody:

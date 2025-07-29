@@ -385,7 +385,7 @@ class CKGemmTemplate(CKTemplate):
         )
         return res
 
-    def _has_padding(self, dimension, gemm_specialization):
+    def _has_padding(self, dimension, gemm_specialization) -> bool:
         # Get the relevant padding map for the given dimension
         dimension_padding = padding_lookup.get(dimension, {})
 

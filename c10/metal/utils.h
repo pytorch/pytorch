@@ -85,6 +85,27 @@ struct OpMathType<bfloat> {
   using type = float;
 };
 #endif
+
+// Type promotion structure for higher precision accumulation
+template <typename T>
+struct AccumulationType {
+  using type = T;
+};
+
+// Specialization for half - promote to float for accumulation
+template <>
+struct AccumulationType<half> {
+  using type = float;
+};
+
+#if __METAL_VERSION__ >= 310
+// Specialization for bfloat - promote to float for accumulation
+template <>
+struct AccumulationType<bfloat> {
+  using type = float;
+};
+#endif
+
 } // namespace detail
 
 template <typename T>
@@ -131,6 +152,9 @@ using vec4type_t = typename detail::vectypes<T>::type4;
 
 template <typename T>
 using opmath_t = typename detail::OpMathType<T>::type;
+
+template <typename T>
+using accum_t = typename detail::AccumulationType<T>::type;
 
 // TODO: Move it to type_traits header may be
 template <typename F, typename... Args>

@@ -5,11 +5,6 @@ set -x
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
-if [[ -n "$CONDA_ENV" ]]; then
-  # Use binaries under conda environment
-  export PATH="$CONDA_ENV/bin":$PATH
-fi
-
 # Test that OpenMP is enabled
 pushd test
 if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available()))") == "1" ]]; then
@@ -190,7 +185,7 @@ torchbench_setup_macos() {
 }
 
 pip_benchmark_deps() {
-  python -mpip install --no-input astunparse requests cython scikit-learn
+  python -mpip install --no-input requests cython scikit-learn six
 }
 
 

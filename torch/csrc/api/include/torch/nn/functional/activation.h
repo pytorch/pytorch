@@ -344,7 +344,7 @@ namespace detail {
 inline Tensor glu(const Tensor& input, int64_t dim) {
   TORCH_CHECK(
       input.dim() != 0,
-      "glu does not suppport scalars because halving size must be even");
+      "glu does not support scalars because halving size must be even");
   return torch::glu(input, dim);
 }
 } // namespace detail

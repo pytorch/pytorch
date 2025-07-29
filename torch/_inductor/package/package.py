@@ -3,12 +3,17 @@ import json
 import logging
 import os
 import tempfile
-from typing import IO, Union
+from typing import IO
 
 import torch
 from torch._inductor import config
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
-from torch.export.pt2_archive._package import AOTICompiledModel, load_pt2, package_pt2
+from torch.export.pt2_archive._package import (
+    AOTI_FILES,
+    AOTICompiledModel,
+    load_pt2,
+    package_pt2,
+)
 from torch.types import FileLike
 
 
@@ -76,7 +81,7 @@ def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
 
 def package_aoti(
     archive_file: FileLike,
-    aoti_files: Union[list[str], dict[str, list[str]]],
+    aoti_files: AOTI_FILES,
 ) -> FileLike:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
@@ -88,7 +93,10 @@ def package_aoti(
         path to its AOTInductor generated files.
     """
 
-    return package_pt2(archive_file, aoti_files=aoti_files)
+    return package_pt2(
+        archive_file,
+        aoti_files=aoti_files,
+    )
 
 
 def load_package(
@@ -97,7 +105,7 @@ def load_package(
     run_single_threaded: bool = False,
     num_runners: int = 1,
     device_index: int = -1,
-) -> AOTICompiledModel:  # type: ignore[type-arg]
+) -> AOTICompiledModel:
     try:
         pt2_contents = load_pt2(
             path,

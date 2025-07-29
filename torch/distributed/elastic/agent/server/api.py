@@ -27,6 +27,7 @@ from torch.distributed.elastic.metrics import prof, put_metric
 from torch.distributed.elastic.multiprocessing import ProcessFailure, SignalException
 from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.distributed.numa.binding import NumaOptions
 
 
 __all__ = [
@@ -88,6 +89,7 @@ class WorkerSpec:
     master_addr: Optional[str] = None
     local_addr: Optional[str] = None
     event_log_handler: str = "null"
+    numa_options: Optional[NumaOptions] = None
 
     def __post_init__(self):
         assert self.local_world_size > 0
@@ -101,6 +103,13 @@ class WorkerSpec:
             )
             self.entrypoint = self.fn
         assert self.entrypoint
+
+        if (
+            self.numa_options is not None
+            and not self.numa_options.should_fall_back_if_binding_fails
+            and not isinstance(self.entrypoint, str)
+        ):
+            raise ValueError("numa_options is only supported for str entrypoints.")
 
     def get_entrypoint_name(self):
         """Get the entry point name.
@@ -426,7 +435,7 @@ class ElasticAgent(abc.ABC):
 
         Note that the worker group is a mutable object and hence in a
         multi-threaded/process environment it may change state.
-        Implementors are encouraged (but not required) to return
+        Implementers are encouraged (but not required) to return
         a defensive read-only copy.
         """
         raise NotImplementedError
@@ -462,7 +471,7 @@ class SimpleElasticAgent(ElasticAgent):
     def _stop_workers(self, worker_group: WorkerGroup) -> None:
         r"""Stop all workers in the given worker group.
 
-        Implementors must deal with workers in all states defined by
+        Implementers must deal with workers in all states defined by
         ``WorkerState``. That is, it must gracefully handle stopping
         non-existent workers, unhealthy (stuck) workers, etc.
         """
@@ -501,7 +510,7 @@ class SimpleElasticAgent(ElasticAgent):
         group_world_size = rdzv_info.world_size
 
         # master_addr/master_port could be explicitly overridden
-        # TODO: BC - specific to static rdzv and can be simplifed further
+        # TODO: BC - specific to static rdzv and can be simplified further
         master_addr = spec.master_addr or rdzv_info.bootstrap_store_info.master_addr
         master_port = spec.master_port or rdzv_info.bootstrap_store_info.master_port
 
