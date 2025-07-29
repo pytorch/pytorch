@@ -955,11 +955,9 @@ static at::Tensor fp8_qlinear_onednn_ref(
   std::vector<int64_t> w_scales_new_shape(weight.dim(), 1);
   w_scales_new_shape[0] = -1;
   auto dqw = weight.to(at::kFloat) * weight_scales.reshape(w_scales_new_shape);
-  at::Tensor y_f32;
+  auto y_f32 = at::linear(dqx, dqw);
   if (bias.has_value()) {
-    y_f32 = at::linear(dqx, dqw, bias.value().to(at::kFloat));
-  } else {
-    y_f32 = at::linear(dqx, dqw);
+      y_f32 += bias.value().to(at::kFloat);
   }
   if (binary_post_op == "none") {
     if (unary_post_op == "relu") {
