@@ -88,7 +88,7 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
+from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
@@ -1989,7 +1989,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
-        self.mutation_type = AttributeMutationExisting()
+        self.mutation_type = AttributeMutationNew()
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # A common pattern in the init code of MutableMapping objects is to
@@ -2015,6 +2015,13 @@ class MutableMappingVariable(UserDefinedObjectVariable):
             return out
         else:
             return super().var_getattr(tx, name)
+
+    def unpack_var_sequence(self, tx):
+        # This shouldn't be necessary if iter(...) is implemented correctly
+        # return super().unpack_var_sequence(tx)
+        return variables.UserFunctionVariable(
+            polyfills.builtins.iter_
+        ).call_function(tx, [self], {}).items
 
 
 class RandomVariable(UserDefinedObjectVariable):
