@@ -434,6 +434,11 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items.update(temp_dict_vt.items)
             return ConstantVariable.create(None)
+        elif name == "__iter__":
+            return variables.ListIteratorVariable(
+                self.unpack_var_sequence(tx),
+                mutation_type=ValueMutationNew(),
+            )
         elif name == "__getitem__":
             # Key guarding - Nothing to do. LazyVT for value will take care.
             if len(args) != 1:
