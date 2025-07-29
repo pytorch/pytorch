@@ -18,5 +18,5 @@ struct alignas(4) qint32 {
 } // namespace c10
 
 namespace torch::headeronly {
-  using c10::qint32;
+using c10::qint32;
 } // namespace torch::headeronly

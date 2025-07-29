@@ -62,10 +62,10 @@ struct alignas(2) bits16 {
 
 namespace torch::headeronly {
 
+using c10::bits16;
 using c10::bits1x8;
 using c10::bits2x4;
 using c10::bits4x2;
 using c10::bits8;
-using c10::bits16;
 
 } // namespace torch::headeronly

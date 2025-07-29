@@ -18,5 +18,5 @@ struct alignas(1) quint8 {
 } // namespace c10
 
 namespace torch::headeronly {
-  using c10::quint8;
+using c10::quint8;
 } // namespace torch::headeronly

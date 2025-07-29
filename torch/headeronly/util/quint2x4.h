@@ -18,7 +18,6 @@ struct alignas(1) quint2x4 {
 
 } // namespace c10
 
-
 namespace torch::headeronly {
-  using c10::quint2x4;
+using c10::quint2x4;
 } // namespace torch::headeronly
