@@ -30,6 +30,7 @@ jobs:
           whoami
           nvidia-smi
           nvidia-smi --query-gpu=compute_cap --format=csv
+          sleep 3600
   quick-test2:
     runs-on: [self-hosted, linux.dgx.b200.8]
     steps:
@@ -38,6 +39,7 @@ jobs:
           whoami
           nvidia-smi
           nvidia-smi --query-gpu=compute_cap --format=csv
+          sleep 3600
   quick-test3:
     runs-on: [self-hosted, linux.dgx.b200.8]
     steps:
