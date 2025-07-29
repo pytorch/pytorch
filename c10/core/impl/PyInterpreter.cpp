@@ -60,6 +60,10 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override {
     PANIC(is_contiguous);
   }
+  c10::SymBool sym_is_contiguous(const TensorImpl* self, at::MemoryFormat)
+      const override {
+    PANIC(sym_is_contiguous);
+  }
   bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
       const override {
     PANIC(is_strides_like);

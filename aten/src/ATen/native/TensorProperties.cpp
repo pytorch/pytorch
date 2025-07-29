@@ -57,6 +57,12 @@ c10::SymInt sym_size(const Tensor& self, int64_t dim) {
   return self.sym_size(dim);
 }
 
+c10::SymBool sym_is_contiguous(
+    const Tensor& self,
+    c10::MemoryFormat memory_format) {
+  return self.sym_is_contiguous(memory_format);
+}
+
 c10::SymInt sym_stride(const Tensor& self, int64_t dim) {
   return self.sym_stride(dim);
 }

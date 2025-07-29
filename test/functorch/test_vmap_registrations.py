@@ -209,6 +209,7 @@ xfail_not_implemented = {
     "aten::subtract_.Tensor",
     "aten::svd.U",
     "aten::sym_size.int",
+    "aten::sym_is_contiguous",
     "aten::sym_stride.int",
     "aten::sym_numel",
     "aten::sym_storage_offset",
