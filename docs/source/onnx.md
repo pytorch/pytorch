@@ -1,6 +1,5 @@
 # torch.onnx
 
-
 ## Overview
 
 [Open Neural Network eXchange (ONNX)](https://onnx.ai/) is an open standard
@@ -51,7 +50,7 @@ translated into an ONNX graph.
 
 {doc}`Learn more about the torch.export-based ONNX Exporter <onnx_export>`
 
-## Frequently Asked Questions
+### Frequently Asked Questions
 
 Q: I have exported my LLM model, but its input size seems to be fixed?
 
@@ -69,7 +68,7 @@ The ONNX exporter is a community project and we welcome contributions. We follow
 also be interested in reading our [development wiki](https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter).
 
 
-### torch.onnx API
+## torch.onnx APIs
 
 ```{eval-rst}
 .. automodule:: torch.onnx
@@ -104,7 +103,7 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     onnx_verification
 ```
 
-### Deprecated API
+### Deprecated APIs
 
 ```{eval-rst}
 .. deprecated:: 2.6
