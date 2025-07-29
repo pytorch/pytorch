@@ -388,9 +388,9 @@ class Op:
         self, event: dict[Any, Any], memberships: dict[str, set[Any]], pg_name: str
     ):
         self.profiling_name = event["profiling_name"]
-        nccl, name = self.profiling_name.split(":")
-        assert nccl in ["nccl", "xccl"], (
-            f"name formatting error? {nccl} != 'nccl' or 'xccl'"
+        ccl_backend, name = self.profiling_name.split(":")
+        assert ccl_backend in ["nccl", "xccl"], (
+            f"name formatting error? {ccl_backend} != 'nccl' or 'xccl'"
         )
         parts = name.split(" ")
         type = parts[0]
