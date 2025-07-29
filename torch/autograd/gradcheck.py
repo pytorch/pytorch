@@ -1947,7 +1947,7 @@ def _fast_gradcheck(
 
 # Note [VarArg of Tensors]
 # ~~~~~~~~~~~~~~~~~~~~~~~~
-# 'func' accepts a vararg of tensors, which isn't expressable in the type system at the moment.
+# 'func' accepts a vararg of tensors, which isn't expressible in the type system at the moment.
 # If https://mypy.readthedocs.io/en/latest/additional_features.html?highlight=callable#extended-callable-types is accepted,
 # the '...' first argument of Callable can be replaced with VarArg(Tensor).
 # For now, we permit any input.

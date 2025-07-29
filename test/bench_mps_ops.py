@@ -158,6 +158,17 @@ def main() -> None:
     if torch.backends.mps.is_macos_or_newer(14, 0):
         dtypes.append(torch.bfloat16)
 
+    # Profile index ops
+    B = 11
+    rc = []
+    for dtype, N in itertools.product(
+        [torch.int8, torch.float16, torch.float32], [50, 100, 500, 1000, 2000]
+    ):
+        x = torch.testing.make_tensor((B, N, N), device="mps", dtype=dtype)
+        y = torch.randint(0, B, (3,))
+        rc.append(bench_binary_op(torch.Tensor.__getitem__, x, y, f"{B}x{N}x{N}"))
+    Compare(rc).print()
+
     # Profile unary ops
     rc = []
     for op, dtype in itertools.product([torch.sqrt, torch.sin], dtypes):

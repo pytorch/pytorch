@@ -17,6 +17,7 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
+    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -107,9 +108,9 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
         - body_fn and cond_fn must not in-place mutate the carried_inputs. A clone before the mutation is required.
 
-        - body_fn and cond_fn must not mutate python varialbles (e.g. list/dict) created outside of the body_fn.
+        - body_fn and cond_fn must not mutate python variables (e.g. list/dict) created outside of the body_fn.
 
-        - body_fn and cond_fn's output cannot aliase any of the inputs. A clone is required.
+        - body_fn and cond_fn's output cannot alias any of the inputs. A clone is required.
 
     .. warning::
         Temporal Limitations:
@@ -279,27 +280,50 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         #   For this reason, we treat int, symint outputs in the same way:
         #   - they can match against any of int, symint carry
         #   - we unspecialize them with new unbacked symints in fake while_loop
-        #   Similarly, we could do some analysis to refine the output ranges but it's eaiser to start with
-        #   fresh unbacked symints. One suprising case can be: an input unbacked symint is constrained by
+        #   Similarly, we could do some analysis to refine the output ranges but it's easier to start with
+        #   fresh unbacked symints. One surprising case can be: an input unbacked symint is constrained by
         #   users to be >= 0 (either before while_loop or inside body_fn) and it increments by 1 in each
         #   iteration. Ideally, we should know that the final output is >= 0 but we didn't constrain the
         #   unbacked symint output of subgraph as of today because this requires a smart range analysis.
         fake_mode: FakeTensorMode = _find_or_create_fake_mode()
-        unspecialized_carried_inputs = pytree.tree_map_only(
-            (int, torch.SymInt),
-            # For temporarily created unbacked symints, we don't need to bind them to any proxy
-            lambda _: _create_unbacked_symint(
-                fake_mode, ignore_fresh_unbacked_symbols=True
-            ),
-            carried_inputs,
-        )
 
-        cond_graph = reenter_make_fx(cond_fn)(
-            *unspecialized_carried_inputs, *additional_inputs
-        )
-        body_graph = reenter_make_fx(body_fn)(
-            *unspecialized_carried_inputs, *additional_inputs
-        )
+        def _unspecialize_carried_inputs(x):
+            if isinstance(x, (int, torch.SymInt)):
+                return _create_unbacked_symint(
+                    fake_mode, ignore_fresh_unbacked_symbols=True
+                )
+            # Note: [unspecialize constant tensor carry]
+            # We need to disable constant specialization for tensor inputs that become loop carries.
+            # Here's the problem: when a user creates a constant tensor e.g. torch.tensor(0), PyTorch calls aten.lift_fresh_copy
+            # to create a safe copy (avoiding aliasing issues), which creates a FakeTensor with constant=True.
+            # But when this FakeTensor becomes a loop carry, we have a problem:
+            # - Operations like .item() will read the constant value and bake it into the traced code
+            # - This is incorrect because carry variables change between loop iterations
+            # - The traced code would use the wrong constant value for all iterations
+            # Solution: We clone the constant tensors and mark the cloned tensor as non-constant so they won't
+            # be specialized to fixed values during tracing body_fn or cond_fn.
+            elif isinstance(x, torch.Tensor):
+                x = x.clone()
+                if hasattr(x, "constant") and x.constant is not None:
+                    x.constant = None
+            return x
+
+        with disable_proxy_modes_tracing():
+            unspecialized_carried_inputs = pytree.tree_map_only(
+                (int, torch.SymInt, torch.Tensor),
+                # For temporarily created unbacked symints, we don't need to bind them to any proxy
+                lambda x: _unspecialize_carried_inputs(x),
+                carried_inputs,
+            )
+
+            def produce_graph(fn):
+                cloned_carried_inputs = pytree.tree_map_only(
+                    torch.Tensor, lambda x: x.clone(), unspecialized_carried_inputs
+                )
+                return reenter_make_fx(fn)(*cloned_carried_inputs, *additional_inputs)
+
+            cond_graph = produce_graph(cond_fn)
+            body_graph = produce_graph(body_fn)
 
         next_name = None
         i = 0
