@@ -3472,4 +3472,5 @@ def maybe_log_cudagraph_partition(
     log partition reasons to help users understand the overhead.
     """
     if config.triton.cudagraphs:
-        perf_hint_log.warning(f"{prefix}{msg}")
+        warning_msg = f"{prefix}{msg}"
+        perf_hint_log.warning(warning_msg)
