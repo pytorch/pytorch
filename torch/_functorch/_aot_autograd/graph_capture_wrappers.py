@@ -12,7 +12,7 @@ It does so by:
 """
 
 import warnings
-from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
+from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, cast, Optional, TypeVar, Union
 from unittest.mock import patch
@@ -441,10 +441,9 @@ def create_functionalized_rng_ops_wrapper(
     # It goes from (primals, tangents) to (seed, offset, primals, tangents)
     # At runtime, we pass on the current seed and offset. This is hidden from
     # the user.
-    fake_mode_det = detect_fake_mode()
-    fake_mode: AbstractContextManager[Any] = nullcontext()
-    if fake_mode_det is not None:
-        fake_mode = fake_mode_det
+    fake_mode = detect_fake_mode()
+    if fake_mode is None:
+        fake_mode = nullcontext()
 
     def override_get_rng_state(device: Union[int, str, torch.device] = "cuda"):
         out = PhiloxStateTracker.get_state_as_tensor()
@@ -1344,9 +1343,7 @@ def create_functional_call(
                         "ignore", "Anomaly Detection has been enabled."
                     )
                     with torch.autograd.detect_anomaly(check_nan=False):
-                        fake_mode = detect_fake_mode()
-                        assert fake_mode is not None
-                        fake_mode.epoch += 1
+                        detect_fake_mode().epoch += 1
                         out = PropagateUnbackedSymInts(mod).run(
                             *args[params_len:], **kwargs
                         )
