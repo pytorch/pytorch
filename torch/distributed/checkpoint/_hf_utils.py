@@ -22,18 +22,6 @@ DATA_KEY = "data"
 DTYPE_KEY = "dtype"
 DATA_OFFSETS_KEY = "data_offsets"
 
-DTYPE_MAP = {
-    "F16": torch.float16,
-    "F32": torch.float32,
-    "F64": torch.float64,
-    "I8": torch.int8,
-    "U8": torch.uint8,
-    "I16": torch.int16,
-    "I32": torch.int32,
-    "I64": torch.int64,
-    "BF16": torch.bfloat16,
-}
-
 HF_DCP_VERSION: float = 1.0
 DCP_VERSION_KEY = "DCP_VERSION"
 DCP_SHARDING_INFO_KEY = "DCP_SHARDING_INFO"
@@ -89,15 +77,6 @@ def _get_safetensors_file_metadata(file_bytes: io.IOBase) -> tuple[Any, int]:
     header_json = file_bytes.read(header_len)
     metadata = json.loads(header_json)
     return (metadata, header_len + NUM_BYTES_FOR_HEADER_LEN)
-
-
-def _get_dtype(dtype_str: str) -> torch.dtype:
-    try:
-        dtype = DTYPE_MAP[dtype_str]
-    except KeyError:
-        dtype = torch.get_default_dtype()
-
-    return dtype
 
 
 def _get_dcp_custom_metadata(metadata: Any) -> Optional[Any]:

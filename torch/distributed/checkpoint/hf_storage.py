@@ -13,7 +13,6 @@ from torch.distributed.checkpoint._consolidate_hf_safetensors import (
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
-    _get_dtype,
     _get_safetensors_file_metadata,
     _HFStorageInfo,
     _metadata_fn,
@@ -45,6 +44,7 @@ from torch.distributed.checkpoint.planner import (
 )
 from torch.distributed.checkpoint.storage import WriteResult
 from torch.futures import Future
+from safetensors.torch import  _getdtype
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -310,7 +310,7 @@ class HuggingFaceStorageReader(FsspecReader):
                     if key not in state_dict_metadata:
                         state_dict_metadata[key] = TensorStorageMetadata(
                             properties=TensorProperties(
-                                dtype=_get_dtype(val[DTYPE_KEY])
+                                dtype=_getdtype(val[DTYPE_KEY])
                             ),
                             size=torch.Size(
                                 [
@@ -350,7 +350,7 @@ class HuggingFaceStorageReader(FsspecReader):
                         offset=val[DATA_OFFSETS_KEY][0] + metadata_size,
                         length=val[DATA_OFFSETS_KEY][1] - val[DATA_OFFSETS_KEY][0],
                         shape=torch.Size(val[SHAPE_KEY]),
-                        dtype=_get_dtype(val[DTYPE_KEY]),
+                        dtype=_getdtype(val[DTYPE_KEY]),
                     )
 
         metadata = Metadata(

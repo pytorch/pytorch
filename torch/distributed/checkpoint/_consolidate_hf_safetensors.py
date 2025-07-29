@@ -4,7 +4,6 @@ import concurrent.futures
 import json
 import logging
 import math
-import mmap
 import os
 import struct
 import time
@@ -16,7 +15,6 @@ from torch import distributed as dist
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
     _get_dcp_custom_metadata,
-    _get_dtype,
     _get_safetensors_file_metadata,
     _metadata_fn,
     DATA_OFFSETS_KEY,
@@ -26,6 +24,7 @@ from torch.distributed.checkpoint._hf_utils import (
     SHAPE_KEY,
     SUFFIX,
 )
+from safetensors.torch import _getdtype
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -132,7 +131,7 @@ def _parse_input_metadata(
             if fqn in output_data.fqn_data:
                 output_data.fqn_data[fqn] = _FqnData(
                     shape_in_file=tensor_size,
-                    dtype_size=torch.finfo(_get_dtype(dtype_str)).bits
+                    dtype_size=torch.finfo(_getdtype(dtype_str)).bits
                     // 8,  # Convert bits to bytes
                     dtype_str=dtype_str,
                 )
@@ -196,11 +195,9 @@ def _write_metadata(
             output_data.metadata_size = f.tell()
 
 
-def _read_tensor_data_mmap(
+def _read_tensor_data(
     file_path: str,
-    start_offset: int,
-    end_offset: int,
-    metadata_size: int,
+    fqn: str
 ) -> bytes:
     """
     Read tensor data from a safetensors file using memory mapping for efficiency.
@@ -215,11 +212,11 @@ def _read_tensor_data_mmap(
         Raw tensor data as bytes
     """
     # Use mmap for efficient access
-    with open(file_path, "rb") as f:
-        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-            absolute_start = metadata_size + start_offset
-            absolute_end = metadata_size + end_offset
-            return bytes(mm[absolute_start:absolute_end])
+    from safetensors import safe_open
+    from safetensors.torch import _tobytes
+
+    with safe_open(file_path, framework="pt") as f:
+        return _tobytes(f.get_tensor(fqn), fqn)
 
 
 def _process_output_file(
@@ -262,11 +259,9 @@ def _process_output_file(
                 data_offsets = metadata[DATA_OFFSETS_KEY]
 
                 # Use memory mapping to read tensor data efficiently
-                data_to_write = _read_tensor_data_mmap(
+                data_to_write = _read_tensor_data(
                     safetensors_file,
-                    data_offsets[0],
-                    data_offsets[1],
-                    input_metadata_size,
+                    tensor_fqn,
                 )
 
                 # Get the offsets of this tensor shard within the full tensor
