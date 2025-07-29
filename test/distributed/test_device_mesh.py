@@ -578,6 +578,65 @@ class InitDeviceMeshTest(DTensorTestBase):
                 mesh_dim_names=["dp", "tp"],
             )
 
+    @with_comms
+    def test_pg_options_argument_dict_by_idx(self):
+        mesh = init_device_mesh(
+            self.device_type,
+            (2, 4),
+            mesh_dim_names=("dp", "tp"),
+            pg_backend_and_options={0: ("fake", None)},
+        )
+
+        # Fake pg only have BackendType as BackendType::CUSTOM.
+        self.assertEqual(mesh.get_group(0)._get_backend_name(), "custom")
+
+    @with_comms
+    def test_pg_options_argument_dict_by_name(self):
+        mesh = init_device_mesh(
+            self.device_type,
+            (2, 4),
+            mesh_dim_names=("dp", "tp"),
+            pg_backend_and_options={"tp": ("fake", None)},
+        )
+
+        # Fake pg only have BackendType as BackendType::CUSTOM.
+        self.assertEqual(mesh.get_group(1)._get_backend_name(), "custom")
+
+    @with_comms
+    def test_pg_options_argument_errors(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Found redundant dim index 0 and name dp in pg_backend_and_options",
+        ):
+            init_device_mesh(
+                self.device_type,
+                (2, 4),
+                mesh_dim_names=("dp", "tp"),
+                pg_backend_and_options={"dp": ("foo", None), 0: ("bar", None)},
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Found invalid keys in pg_backend_and_options: got \['cp'\]",
+        ):
+            init_device_mesh(
+                self.device_type,
+                (2, 4),
+                mesh_dim_names=("dp", "tp"),
+                pg_backend_and_options={"cp": ("foo", None)},
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Found invalid keys in pg_backend_and_options: got \[42\]",
+        ):
+            init_device_mesh(
+                self.device_type,
+                (2, 4),
+                mesh_dim_names=("dp", "tp"),
+                pg_backend_and_options={42: ("bar", None)},
+            )
+
 
 class TestDeviceMeshGetItem(DTensorTestBase):
     @property
