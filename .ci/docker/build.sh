@@ -78,7 +78,7 @@ elif [[ "$image" == *linter* ]]; then
   DOCKERFILE="linter/Dockerfile"
 elif [[ "$image" == *riscv* ]]; then
   # Use RISC-V specific Dockerfile
-  DOCKERFILE="ubuntu-riscv/Dockerfile"
+  DOCKERFILE="ubuntu-cross-riscv/Dockerfile"
 fi
 
 _UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
@@ -361,7 +361,7 @@ case "$tag" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14)
-    # Since riscv64 is a cross-compilation build, add here if necessary.
+    GCC_VERSION=14
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
