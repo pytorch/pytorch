@@ -295,14 +295,6 @@ def is_contiguous(func, *args, **kwargs):
     return func(data, *args[1:], **kwargs)
 
 
-# @register_dispatch_func([])
-# def sym_is_contiguous(func, *args, **kwargs):
-#     data = _get_data(args[0])
-#     if data.is_sparse:
-#         raise ValueError("MaskedTensors with sparse data do not have sym_is_contiguous")
-#     return func(data, *args[1:], **kwargs)
-
-
 @register_dispatch_func([torch.ops.aten.is_strides_like_format])
 def is_strides_like_format(func, *args, **kwargs):
     data = _get_data(args[0])
