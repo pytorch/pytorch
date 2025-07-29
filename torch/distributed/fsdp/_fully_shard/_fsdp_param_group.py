@@ -371,10 +371,16 @@ class FSDPParamGroup:
                         )
                     ]
 
-                # Make sure the storage is properly allocated and copy the tensor
-                for tensor in fsdp_param.all_gather_outputs:
-                    alloc_storage(tensor)
+                tensor = fsdp_param.all_gather_outputs[0]
+                alloc_storage(tensor)
+
+                # Only preserve version counter if not an inference tensor
+                if not tensor.is_inference():
+                    with torch.autograd._unsafe_preserve_version_counter(tensor):
+                        tensor.copy_(sharded_data)
+                else:
                     tensor.copy_(sharded_data)
+
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
                 foreach_all_gather_copy_out(
