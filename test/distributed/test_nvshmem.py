@@ -514,5 +514,114 @@ class NVSHMEMAll2AllTest(MultiProcContinousTest):
         torch.testing.assert_close(combine_out_splits_offsets[1], inp_offsets)
 
 
+@instantiate_parametrized_tests
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class NVSHMEMAutogradTest(MultiProcContinousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        # NOTE: required for nvshmem allocation
+        torch.empty(1, device=self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    @skipIfRocm
+    def test_autograd_AllToAllVDev2d(self) -> None:
+        from torch.distributed._symmetric_memory._autograd import AllToAllVDev2d
+
+        # Mimics Group GEMM alignment
+        align = 8
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        # Number of experts per rank
+        ne = 8
+        nsplits = ne * self.world_size
+
+        # Number of elements for an expert is random between [0, k)
+        k = 10
+        inp_splits = torch.randint(k, (nsplits,), dtype=torch.int64, device=self.device)
+
+        # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
+        max_inp_numel = k * nsplits
+        # Max number of output elements (must be a constant across ranks for symmetric memory allocation)
+        overflow_factor = self.world_size  # worst case: one rank receives all data
+        max_out_numel = max_inp_numel * overflow_factor
+
+        inp = (
+            symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device)
+            .copy_(torch.randn(max_inp_numel, dtype=dtype, device=self.device))
+            .requires_grad_(True)
+        )
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device)
+
+        in_splits = symm_mem.empty(
+            nsplits, dtype=torch.int64, device=self.device
+        ).copy_(inp_splits)
+        # 2 rows: output splits, output offsets
+        out_splits_offsets = symm_mem.empty(
+            (2, nsplits), dtype=torch.int64, device=self.device
+        )
+
+        class TokenDispatcher(torch.nn.Module):
+            def __init__(self, group_name: str, align: int, in_len, out_len, token_shape, nsplits, dtype, device) -> None:
+                super().__init__()
+                self.group_name = group_name
+                self.align = align
+                self.grad_out_buf = symm_mem.empty(out_len, *token_shape, dtype=dtype, device=device)
+                self.grad_in_buf = symm_mem.empty(in_len, *token_shape, dtype=dtype, device=device)
+                self.grad_in_splits_offsets = symm_mem.empty((2, nsplits), dtype=torch.int64, device=device)
+
+            def forward(
+                self,
+                inp: torch.Tensor,
+                out: torch.Tensor,
+                in_splits: torch.Tensor,
+                out_splits_offsets: torch.Tensor,
+            ) -> torch.Tensor:
+                return AllToAllVDev2d.apply(
+                    inp, out, in_splits, out_splits_offsets, self.group_name, self.align,
+                    self.grad_out_buf, self.grad_in_buf, self.grad_in_splits_offsets,
+                )
+
+        dispatcher = TokenDispatcher(group_name, align, max_inp_numel, max_out_numel, inp.shape[1:], nsplits, dtype, self.device)
+
+        # dispatcher = torch.compile(
+        #     dispatcher,
+        #     # backend="aot_eager",
+        # )
+
+        # Perform a Dot product with output, these are the weights
+        weight = torch.empty(max_out_numel, dtype=dtype, device=self.device).fill_(self.rank + 1)
+
+        # Run a few iterations
+        iters = 2
+        for i in range(iters):
+            inp.grad = None
+            output = dispatcher(inp, out, in_splits, out_splits_offsets)
+            p = torch.dot(output, weight)
+            p.backward()
+
+        # Check gradients
+        start = 0
+        for i, split in enumerate(in_splits.tolist()):
+            grad_chunk = inp.grad[start : start + split]
+            dst_rank = i // ne
+            torch.testing.assert_close(
+                grad_chunk,
+                torch.empty(split, device=self.device).fill_(dst_rank + 1),
+            )
+            start += split
+
+
 if __name__ == "__main__":
     run_tests()
