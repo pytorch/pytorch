@@ -164,3 +164,33 @@ def fill_infinity(t) -> Tensor:
     Returns: The modified tensor (same as input)
     """
     return torch.ops.libtorch_agnostic.fill_infinity.default(t)
+
+
+def my_pad(t, pad, mode="constant", value=0.0) -> Tensor:
+    """
+    Pads the input tensor according to the specified padding, mode, and value.
+
+    Args:
+        t: Input tensor
+        pad: List of padding values for each dimension [left, right, top, bottom, ...]
+        mode: Padding mode ('constant', 'reflect', 'replicate')
+        value: Fill value for 'constant' padding
+
+    Returns: Padded tensor
+    """
+    return torch.ops.libtorch_agnostic.my_pad.default(t, pad, mode, value)
+
+
+def my_narrow(t, dim, start, length) -> Tensor:
+    """
+    Returns a new tensor that is a narrowed version of the input tensor.
+
+    Args:
+        t: Input tensor
+        dim: Dimension along which to narrow
+        start: Starting position
+        length: Length of the narrowed section
+
+    Returns: Narrowed tensor
+    """
+    return torch.ops.libtorch_agnostic.my_narrow.default(t, dim, start, length)

@@ -183,4 +183,6 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
 # The same BC rules apply as inductor_fallback_ops.
 aten_shimified_ops: dict[str, dict[str, list[str]]] = {
     "aten.fill_.Scalar": {},
+    "aten.pad.default": {},
+    "aten.narrow.default": {},
 }

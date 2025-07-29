@@ -1182,8 +1182,7 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   if (msg) {
     std::cout << "  " << msg;
   }
-  std::cout << "  "
-            << "]:" << '\n';
+  std::cout << "  " << "]:" << '\n';
 
   // Print exact tensor values for small size tensors
   const int64_t numel = t->numel();
@@ -1375,6 +1374,30 @@ static StableIValue from_ivalue(
       StableIValue* sivp = new StableIValue(from_ivalue(inner_type, ivalue));
       return from(sivp);
     }
+    case c10::TypeKind::StringType: {
+      auto str = ivalue.toStringRef();
+      return from(str);
+    }
+    case c10::TypeKind::ListType: {
+      auto inner_type = type->castRaw<c10::ListType>()->getElementType();
+      auto list = ivalue.toList();
+      auto vec = list.vec();
+
+      if (inner_type->kind() == c10::TypeKind::IntType) {
+        std::vector<int64_t>* int_vec = new std::vector<int64_t>();
+        int_vec->reserve(vec.size());
+        for (const auto& iv : vec) {
+          int_vec->push_back(iv.toInt());
+        }
+        return from(int_vec);
+      } else {
+        TORCH_CHECK(
+            false,
+            inner_type->str(),
+            "lists are not yet supported in conversion from IValue to StableIValue for ListType. Got: ",
+            inner_type->str());
+      }
+    }
     default: {
       TORCH_CHECK(
           false,
@@ -1437,6 +1460,23 @@ static c10::IValue to_ivalue(
       delete sivp;
       return ival;
     }
+    case c10::TypeKind::StringType: {
+      return c10::IValue(to<std::string>(stable_ivalue));
+    }
+    case c10::TypeKind::ListType: {
+      auto inner_type = type->castRaw<c10::ListType>()->getElementType();
+      if (inner_type->kind() == c10::TypeKind::IntType) {
+        auto vec = to<std::vector<int64_t>>(stable_ivalue);
+        c10::List<int64_t> list(vec);
+        return c10::IValue(list);
+      } else {
+        TORCH_CHECK(
+            false,
+            inner_type->str(),
+            " lists are not yet supported in conversion from IValue to StableIValue for ListType. Got: ",
+            inner_type->str());
+      }
+    }
     default: {
       TORCH_CHECK(
           false,
@@ -1469,7 +1509,8 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     }
 
     // boxed function is going to take a stack of StableIValues, cast them to
-    // our schema values, and run the function and modify the StableIValue stack
+    // our schema values, and run the function and modify the StableIValue
+    // stack
     fn_(ministack.get(), num_arguments, num_returns);
 
     // read the output from the end of the stack and wrap that back into
