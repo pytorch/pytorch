@@ -5,7 +5,7 @@ from __future__ import annotations
 
 __all__ = ["assert_onnx_program"]
 
-from typing import Any, TYPE_CHECKING, Literal
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 from torch.utils import _pytree

@@ -13,6 +13,7 @@ import os
 import tempfile
 import textwrap
 import warnings
+from collections.abc import Sequence
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
@@ -25,10 +26,8 @@ from torch.utils import _pytree
 # because ONNXProgram is exposed to the public API
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    import onnxruntime as ort
     import numpy as np
+    import onnxruntime as ort
 
 _LARGE_MODEL_THRESHOLD = 1536 * 1024 * 1024  # 1536MB
 _NP_UNSUPPORTED_DTYPES_8BIT = frozenset(
@@ -130,6 +129,7 @@ def _to_numpy_array(input: torch.Tensor | int | float | str | bool) -> np.ndarra
 def _from_numpy_array(array: np.ndarray) -> torch.Tensor:
     """Convert a NumPy array to a PyTorch tensor."""
     import ml_dtypes
+    import numpy as np
 
     if array.dtype == ml_dtypes.bfloat16:
         return torch.from_numpy(array.view(np.uint16)).view(torch.bfloat16)

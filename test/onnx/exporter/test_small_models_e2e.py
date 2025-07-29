@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import logging
 
-import onnx.reference as onnx_ref
-
 import onnxruntime
 import pytest
 import transformers
@@ -752,8 +750,9 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
             onnx_testing.assert_onnx_program(onnx_program, atol=1e-2, rtol=1)
         else:
             # Test with reference evaluator because ORT does not support the op as of version 1.22
-            onnx_testing.assert_onnx_program(onnx_program,  atol=1e-2, rtol=1, backend="reference")
-
+            onnx_testing.assert_onnx_program(
+                onnx_program, atol=1e-2, rtol=1, backend="reference"
+            )
 
     def test_graph_accuracy_attention_opset_23(self):
         class Model(torch.nn.Module):
@@ -775,10 +774,13 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
             onnx_testing.assert_onnx_program(onnx_program, atol=1e-2, rtol=1)
         else:
             # Test with reference evaluator because ORT does not support the op as of version 1.22
-            onnx_testing.assert_onnx_program(onnx_program,  atol=1e-2, rtol=1, backend="reference")
+            onnx_testing.assert_onnx_program(
+                onnx_program, atol=1e-2, rtol=1, backend="reference"
+            )
 
     def test_rms_norm(self):
         """Test RMS normalization with various configurations"""
+
         class RMSNormModel(torch.nn.Module):
             def forward(self, x):
                 return torch.nn.functional.rms_norm(x, [10])
@@ -798,6 +800,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
     def test_rms_norm_with_weight(self):
         """Test RMS normalization with weight parameter"""
+
         class RMSNormWithWeight(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -815,6 +818,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
     def test_rms_norm_with_eps(self):
         """Test RMS normalization with custom epsilon"""
+
         class RMSNormWithEps(torch.nn.Module):
             def forward(self, x):
                 return torch.nn.functional.rms_norm(x, [10], eps=1e-6)
