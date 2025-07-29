@@ -20,18 +20,14 @@ Executor::Executor(
     torch::nativert::ExecutorConfig executorConfig,
     std::shared_ptr<Graph> graph,
     const std::shared_ptr<Weights>& weights,
-    Placement placement,
     const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
-        pytorchStreamReader,
-    MakeProxyExecutorFn makeProxyExecutorFunc)
+        pytorchStreamReader)
     : executorConfig_(std::move(executorConfig)),
       graph_(std::move(graph)),
-      placement_(std::move(placement)),
       constantFolder_(
           executorConfig_.runConstFolding
               ? std::optional<ConstantFolder>(*graph_)
               : std::nullopt),
-      makeProxyExecutorFunc_(std::move(makeProxyExecutorFunc)),
       executionFrames_(executorConfig_.maxNumConcurrentThreads),
       clearedExecutionFrames_(executorConfig_.maxNumConcurrentThreads),
       numExecutionFrames_(0),
@@ -48,12 +44,7 @@ void Executor::initialize(
   auto start = std::chrono::high_resolution_clock::now();
 
   auto executionKernels = KernelFactory().initializeNodeKernels(
-      *graph_,
-      weights,
-      executorConfig_,
-      placement_,
-      pytorchStreamReader,
-      makeProxyExecutorFunc_);
+      *graph_, weights, executorConfig_, pytorchStreamReader);
 
   if (constantFolder_.has_value()) {
     constantFolder_->unlinkConstants(executionKernels.nodeKernels);

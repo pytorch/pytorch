@@ -8,7 +8,9 @@
 
 #include <fmt/format.h>
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <tensorpipe/tensorpipe.h>
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
 #include <torch/csrc/distributed/rpc/agent_utils.h>
