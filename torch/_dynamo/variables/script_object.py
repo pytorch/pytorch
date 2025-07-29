@@ -25,7 +25,8 @@ import functools
 
 import torch
 
-from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
+from .. import graph_break_hints
+from ..exc import unimplemented_v2, UnsafeScriptObjectError, Unsupported
 from .base import VariableTracker
 from .user_defined import UserDefinedObjectVariable
 
@@ -75,14 +76,25 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         method = getattr(self.value, name, None)
         if method is None:
-            unimplemented(
-                f"FakeScriptObject doesn't define method {name}. Did you forget to implement it in the fake class?"
+            unimplemented_v2(
+                gb_type="FakeScriptObject missing method implementation",
+                context=f"method={name}",
+                explanation="FakeScriptObject doesn't define the specified method.",
+                hints=[
+                    "Implement the method in the fake class.",
+                    *graph_break_hints.USER_ERROR,
+                ],
             )
 
         if not callable(method):
-            unimplemented(
-                "Only method calls on TorchScript objects can be supported safely."
-                " Please use method calls instead of attribute access."
+            unimplemented_v2(
+                gb_type="Unsupported attribute access on TorchScript objects",
+                context=f"method={name}",
+                explanation="Only method calls on TorchScript objects can be supported safely.",
+                hints=[
+                    "Use method calls instead of attribute access.",
+                    *graph_break_hints.USER_ERROR,
+                ],
             )
 
         return TorchHigherOrderOperatorVariable.make(
@@ -100,4 +112,11 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         "Dynamo cannot safely trace script object due to graph break."
     )
     def call_method(self, tx, name, args, kwargs):
-        unimplemented(f"call method {name} on script object is not safe.")
+        unimplemented_v2(
+            gb_type="Calling method on script object is not safe",
+            context=f"method={name}",
+            explanation="",
+            hints=[
+                *graph_break_hints.USER_ERROR,
+            ],
+        )

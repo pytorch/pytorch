@@ -2652,5 +2652,46 @@
         "Try to construct nn.Parameter() outside the compiled region.  If this is not possible, turn `graph_break_on_nn_param_ctor` off"
       ]
     }
+  ],
+  "GB0265": [
+    {
+      "Gb_type": "Calling method on script object is not safe",
+      "Context": "method={name}",
+      "Explanation": "",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0266": [
+    {
+      "Gb_type": "FakeScriptObject missing method implementation",
+      "Context": "method={name}",
+      "Explanation": "FakeScriptObject doesn't define the specified method.",
+      "Hints": [
+        "Implement the method in the fake class.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0267": [
+    {
+      "Gb_type": "Unsupported attribute access on TorchScript objects",
+      "Context": "method={name}",
+      "Explanation": "Only method calls on TorchScript objects can be supported safely.",
+      "Hints": [
+        "Use method calls instead of attribute access.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported attribute access on TorchScript objects",
+      "Context": "method={method}",
+      "Explanation": "Only method calls on TorchScript objects can be supported safely.",
+      "Hints": [
+        "Use method calls instead of attribute access.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
   ]
 }

@@ -1434,7 +1434,7 @@ def forward(self, token, obj, x):
 
         x = torch.randn(2, 3)
         with self.assertRaisesRegex(
-            RuntimeError, "FakeScriptObject doesn't define method"
+            RuntimeError, "FakeScriptObject missing method implementation"
         ):
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x)
 
