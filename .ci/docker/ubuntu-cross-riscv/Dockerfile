@@ -1,13 +1,14 @@
+# Cross-compilation Docker container for RISC-V architecture
 ARG UBUNTU_VERSION
 FROM --platform=linux/amd64 ubuntu:${UBUNTU_VERSION} as base
 
 ARG UBUNTU_VERSION
 
-ENV RISCV_GCC_VERSION=14
+ENV GCC_VERSION=14
 ENV PYTHON_VERSION=3.12.3
 ENV DEBIAN_FRONTEND=noninteractive
-ENV CC=riscv64-linux-gnu-gcc-${RISCV_GCC_VERSION}
-ENV CXX=riscv64-linux-gnu-g++-${RISCV_GCC_VERSION}
+ENV CC=riscv64-linux-gnu-gcc-${GCC_VERSION}
+ENV CXX=riscv64-linux-gnu-g++-${GCC_VERSION}
 ENV QEMU_LD_PREFIX=/usr/riscv64-linux-gnu/
 ENV SYSROOT=/opt/sysroot
 
@@ -27,8 +28,8 @@ RUN apt-get update && apt-get install -y \
     cmake \
     sudo \
     lsb-release \
-    gcc-${RISCV_GCC_VERSION}-riscv64-linux-gnu \
-    g++-${RISCV_GCC_VERSION}-riscv64-linux-gnu \
+    gcc-${GCC_VERSION}-riscv64-linux-gnu \
+    g++-${GCC_VERSION}-riscv64-linux-gnu \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
@@ -74,8 +75,8 @@ RUN echo "--- Building bzip2 ---" \
     && wget -c https://sourceware.org/pub/bzip2/bzip2-${BZ2_VERSION}.tar.gz \
     && tar -xf bzip2-${BZ2_VERSION}.tar.gz --no-same-permissions --no-same-owner \
     && cd bzip2-${BZ2_VERSION}/ \
-    && make CC=riscv64-linux-gnu-gcc-${RISCV_GCC_VERSION} bzip2 bzip2recover libbz2.a \
-    && make CC=riscv64-linux-gnu-gcc-${RISCV_GCC_VERSION} -f Makefile-libbz2_so \
+    && make CC=riscv64-linux-gnu-gcc-${GCC_VERSION} bzip2 bzip2recover libbz2.a \
+    && make CC=riscv64-linux-gnu-gcc-${GCC_VERSION} -f Makefile-libbz2_so \
     && make install PREFIX=${SYSROOT} \
     && cp libbz2.so.${BZ2_VERSION} ${SYSROOT}/lib/ \
     && cd ${SYSROOT}/lib/ \

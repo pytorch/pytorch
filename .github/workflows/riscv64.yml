@@ -1,7 +1,6 @@
 name: riscv64
 
 on:
-  pull_request:
   push:
     tags:
       - ciflow/riscv64/*
