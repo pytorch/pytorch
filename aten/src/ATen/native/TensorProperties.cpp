@@ -10,7 +10,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_nested_tensor_size_native.h>
-#include <ATen/ops/sym_is_contiguous_native.h>
 #include <ATen/ops/contiguous_native.h>
 #include <ATen/ops/cudnn_is_acceptable_native.h>
 #include <ATen/ops/detach_native.h>
@@ -19,6 +18,7 @@
 #include <ATen/ops/is_set_to_native.h>
 #include <ATen/ops/size_native.h>
 #include <ATen/ops/stride_native.h>
+#include <ATen/ops/sym_is_contiguous_native.h>
 #include <ATen/ops/sym_numel_native.h>
 #include <ATen/ops/sym_size_native.h>
 #include <ATen/ops/sym_storage_offset_native.h>
