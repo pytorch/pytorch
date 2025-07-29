@@ -167,11 +167,13 @@ class HuggingFaceStorageWriter(FsspecWriter):
             logger.info("Not consolidating sharded checkpoint in finish step.")
             return
         if self.save_distributed:
+            fqn_to_index_mapping = self.fqn_to_index_mapping if self.fqn_to_index_mapping is not None else {fqn: 1 for fqn, _ in metadata.state_dict_metadata.keys()}
+        
             return consolidate_safetensors_files(
                 input_dir=str(self.path),
                 output_dir=self.consolidated_output_path,  # type: ignore[arg-type]
                 num_threads=self.thread_count_consolidation,
-                fqn_to_index_mapping=self.fqn_to_index_mapping,
+                fqn_to_index_mapping=fqn_to_index_mapping,
             )
 
         # writing a model.index.safetensors.json file with fqn to file mapping
