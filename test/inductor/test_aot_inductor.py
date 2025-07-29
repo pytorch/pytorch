@@ -150,7 +150,8 @@ except (unittest.SkipTest, ImportError):
 
 
 class AOTInductorTestsTemplate:
-    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
+    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
+    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
     @skipIfRocmArch(MI300_ARCH)
@@ -4841,7 +4842,8 @@ class AOTInductorTestsTemplate:
             )
             self.assertTrue(same(model(*example_input), actual))
 
-    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
+    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
+    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("max_autotune", [True, False])
     @skipIfRocmArch(MI300_ARCH)
     def test_misc_1(self, max_autotune):
