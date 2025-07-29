@@ -469,11 +469,13 @@ def op_strategy_context(op_overload, strategy_func, schema_info=None):
     finally:
         # clear this op strategy cache
         if _origin_op_strategy_funcs is None:
-            del propagator.op_strategy_funcs[op_overload]
+            if op_overload in propagator.op_strategy_funcs:
+                del propagator.op_strategy_funcs[op_overload]
         else:
             propagator.op_strategy_funcs[op_overload] = _origin_op_strategy_funcs
         if _origin_op_strategy_schema is None:
-            del propagator.op_to_schema_info[op_overload]
+            if op_overload in propagator.op_to_schema_info:
+                del propagator.op_to_schema_info[op_overload]
         else:
             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
         propagator.propagate_op_sharding.cache.cache_clear()
