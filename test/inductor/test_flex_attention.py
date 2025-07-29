@@ -5,6 +5,7 @@ import functools
 import random
 import string
 import unittest
+import warnings
 from collections import namedtuple
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -122,12 +123,13 @@ def rmse(ref, res):
     return torch.sqrt(torch.mean(torch.square(ref - res)))
 
 
-def create_attention(score_mod, block_mask, enable_gqa=False):
+def create_attention(score_mod, block_mask, enable_gqa=False, kernel_options=None):
     return functools.partial(
         flex_attention,
         score_mod=score_mod,
         block_mask=block_mask,
         enable_gqa=enable_gqa,
+        kernel_options=kernel_options,
     )
 
 
@@ -670,6 +672,7 @@ class TestFlexAttention(InductorTestCase):
         dtype: torch.dtype,
         device: str,
         block_mask: Optional[BlockMask] = None,
+        kernel_options: Optional[dict] = None,
     ) -> tuple[Tensor, Tensor]:
         B, Q_H, Q_S, KV_H, KV_S = (
             q.shape[0],
@@ -705,6 +708,7 @@ class TestFlexAttention(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(not Q_H == KV_H),
+                kernel_options=kernel_options,
             )
         else:
             return_lse = False
@@ -717,6 +721,7 @@ class TestFlexAttention(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(not Q_H == KV_H),
+                kernel_options=kernel_options,
             )
         return compiled_out, compiled_lse
 
@@ -1470,9 +1475,13 @@ class TestFlexAttention(InductorTestCase):
         v = coerce_to_strides(v1, v_shape, v_s)
         do = coerce_to_strides(do1, do_shape, do_s)
 
+        kernel_options = {"USE_TMA": True}
+
         block_mask = _create_empty_block_mask(q, k)
         score_mod = _generate_alibi_bias(8)
-        sdpa_partial = create_attention(score_mod=score_mod, block_mask=block_mask)
+        sdpa_partial = create_attention(
+            score_mod=score_mod, block_mask=block_mask, kernel_options=kernel_options
+        )
         compiled_sdpa = torch.compile(sdpa_partial, fullgraph=True)
         ref_out = sdpa_partial(q, k, v)
         compiled_out = compiled_sdpa(q, k, v)
@@ -1515,7 +1524,7 @@ class TestFlexAttention(InductorTestCase):
         # test paged attention which does not support backward
         q.requires_grad, k.requires_grad, v.requires_grad = False, False, False
         paged_compiled_out, _ = self.run_paged_attention(
-            score_mod, q, k, v, dtype, device=device
+            score_mod, q, k, v, dtype, device=device, kernel_options=kernel_options
         )
         torch.testing.assert_close(
             ref_out, paged_compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
@@ -4234,6 +4243,52 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(query.grad.shape, query.shape)
         self.assertEqual(key.grad.shape, key.shape)
         self.assertEqual(value.grad.shape, value.shape)
+
+    @supported_platform
+    def test_debug_flag_disables_internal_compilation(self, device):
+        """Test that _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG flag bypasses internal compilation."""
+        import torch.nn.attention.flex_attention as fa
+
+        original_flag = fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG
+        original_warnings_shown = fa._WARNINGS_SHOWN.copy()
+
+        try:
+            B, H, S, D = 1, 1, 128, 64
+            query = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+            key = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+            value = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+
+            def simple_score_mod(score, b, h, q_idx, kv_idx):
+                return score
+
+            # Test with debug flag False - should warn
+            fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
+            fa._WARNINGS_SHOWN.clear()
+
+            with self.assertWarns(UserWarning) as cm:
+                out_compiled = fa.flex_attention(
+                    query, key, value, score_mod=simple_score_mod
+                )
+
+            self.assertIn(
+                "flex_attention called without torch.compile", str(cm.warning)
+            )
+
+            # Test with debug flag True - should NOT warn
+            fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
+
+            # Should not error
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                out_debug = fa.flex_attention(
+                    query, key, value, score_mod=simple_score_mod
+                )
+
+            torch.testing.assert_close(out_compiled, out_debug, rtol=1e-4, atol=1e-4)
+
+        finally:
+            fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
+            fa._WARNINGS_SHOWN = original_warnings_shown
 
 
 class TestBlockMask(InductorTestCase):

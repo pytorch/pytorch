@@ -811,7 +811,7 @@ num_guards_executed=0)
         except ImportError:
             from utils import install_guard_manager_testing_hook
 
-        def hook(guard_wrapper, f_locals):
+        def hook(guard_wrapper, f_locals, builder):
             root = guard_wrapper.root
 
             # Check full cloning works as expected
@@ -851,7 +851,7 @@ num_guards_executed=0)
             from utils import install_guard_manager_testing_hook
         counter = 0
 
-        def hook(guard_wrapper, f_locals):
+        def hook(guard_wrapper, f_locals, builder):
             nonlocal counter
             root = guard_wrapper.root
             diff_guard_root = guard_wrapper.diff_guard_root
@@ -896,6 +896,65 @@ num_guards_executed=0)
 
             foo = (10.0, 11)
             opt_fn(x, foo, bar)
+
+
+class TypePropagationTests(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(skip_tensor_guards_with_matching_dict_tags=True)
+    def test_basic_types(self):
+        class Foo:
+            def __init__(self):
+                self.x = {"a": 2}
+                self.y = torch.randn(4)
+                self.z = {}
+
+        foo = Foo()
+
+        mod = torch.nn.Linear(4, 4)
+
+        def fn(x):
+            return x + foo.x["a"] + foo.y + mod(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import AttrSource, DictGetItemSource, LocalSource
+
+            foo_source = LocalSource("foo")
+            foo_x_source = AttrSource(foo_source, "x")
+
+            self.assertTrue(builder.get(foo_source.name()) is foo)
+            self.assertTrue(builder.get(foo_x_source.name()) is foo.x)
+
+            # Check types of foo.x
+            foo_x_mgr = builder.get_guard_manager_from_source(foo_x_source)
+            self.assertTrue(foo_x_mgr.is_guarded_value_dict())
+
+            # Check types of foo.x["a"]
+            foo_x_a_source = DictGetItemSource(foo_x_source, "a")
+            foo_x_a_mgr = builder.get_guard_manager_from_source(foo_x_a_source)
+            self.assertTrue(foo_x_a_mgr.is_guarded_value_immutable())
+
+            # Check types of foo.y
+            foo_y_source = AttrSource(foo_source, "y")
+            foo_y_mgr = builder.get_guard_manager_from_source(foo_y_source)
+            self.assertTrue(foo_y_mgr.is_guarded_value_immutable())
+
+            # Check types of foo.z
+            foo_z_source = AttrSource(foo_source, "z")
+            foo_z_mgr = builder.get_guard_manager_from_source(foo_z_source)
+            self.assertTrue(foo_z_mgr.is_guarded_value_empty_dict())
+
+            # Check types of mod
+            mod_source = LocalSource("mod")
+            mod_mgr = builder.get_guard_manager_from_source(mod_source)
+            self.assertTrue(mod_mgr.is_guarded_value_nn_module())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(torch.randn(4, 4))
 
 
 if __name__ == "__main__":
