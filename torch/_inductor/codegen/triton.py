@@ -1288,7 +1288,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def tanh(x):
-        return f"libdevice.tanh({x})"
+        return "(tl.math.exp2(2*x)-1)/(tl.math.exp2(2*x)+1)"
 
     @staticmethod
     @maybe_upcast_float32()
