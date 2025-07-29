@@ -132,8 +132,7 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
         echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
         torch_whl=$(find /tmp/torch_wheels -name 'torch*.whl' | head -n1 | xargs); \
         vision_whl=$(find /tmp/torch_wheels/vision -name 'torchvision*.whl' | head -n1 | xargs); \
-        audio_whl=$(find /tmp/torch_wheels/vision -name 'torchaudio*.whl' | head -n1 | xargs); \
-        
+        audio_whl=$(find /tmp/torch_wheels/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
         echo "Found: '${torch_whl}'"; \
         uv pip install --system "${torch_whl}[opt-einsum]"; \
         uv pip install --system "${vision_whl}"; \
