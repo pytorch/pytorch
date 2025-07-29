@@ -13708,6 +13708,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         f_compiled = torch.compile(f)
         output, (code,) = run_and_get_code(f_compiled, input, repeat)
         reference = f(input, repeat)
+        print(output, reference)
         torch.testing.assert_close(output, reference)
         # we don't lower when the cpp_wrapper is used because it cannot generate
         # proper examples during autotune
