@@ -406,7 +406,24 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # the exported module will store constants & non-persistent buffers such that
         # retracing treats them as persistent buffers, so we inform the constants lifting pass
         # and overwrite the new graph signature using the previous program.
-        _collect_and_set_constant_attrs(ep.graph_signature, ep.constants, mod)
+        for fqn in ep.graph_signature.lifted_symbolic_attrs:
+            setattr(
+                mod,
+                fqn,
+                torch._export.non_strict_utils.create_symint(
+                    fake_mode,
+                    ep.constants[fqn],
+                    True,
+                    torch._dynamo.source.LocalSource("self." + fqn),
+                ),
+            )
+
+        non_symbolic_attr_constants = {
+            fqn: v
+            for fqn, v in ep.constants.items()
+            if not fqn in ep.graph_signature.lifted_symbolic_attrs
+        }
+        _collect_and_set_constant_attrs(ep.graph_signature, non_symbolic_attr_constants, mod)
 
         # When we have a module with constant attributes, AotDispatcher doesn't actually
         # wrap them as functional tensors, because dynamo would have already made it buffer.
@@ -479,6 +496,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     new_fake_kwargs,
                     fake_params_buffers,
                     new_fake_constant_attrs,
+                    preserve_module_attributes=ep.graph_signature.lifted_symbolic_attrs,
                     decomp_table=python_decomp_table,
                     _prettify_placeholder_names=False,
                     decompose_custom_triton_ops=decompose_custom_triton_ops,

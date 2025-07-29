@@ -339,8 +339,8 @@ def insert_deferred_runtime_asserts(
             ):
                 if (
                     node.args[0] == True  # noqa: E712
-                    or (assert_expr := _get_sym_val(node.args[0])) in expr_to_proxy
-                    and assert_expr in added_asserts
+                    or (assert_expr := _get_sym_val(node.args[0])) == True  # noqa: E712
+                    or (assert_expr in expr_to_proxy and assert_expr in added_asserts)
                 ):
                     arg = node.args[0]
                     gm.graph.erase_node(node)

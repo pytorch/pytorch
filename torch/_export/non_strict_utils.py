@@ -156,6 +156,21 @@ def _is_constant_argument(t):
     return t is None or isinstance(t, (float, bool, str))
 
 
+def create_symint(mode, val, is_marked_dynamic, source):
+    symint = mode.shape_env.create_unspecified_symint_and_symbol(  # type: ignore[union-attr]
+        val, source, DimDynamic.DYNAMIC
+    )
+    context = (
+        SymIntSymbolicContext(constraint=RelaxedUnspecConstraint(warn_only=False))
+        if is_marked_dynamic
+        else None
+    )
+    mode.shape_env.tracked_fakes.append(  # type: ignore[union-attr]
+        TrackedFake(symint, source, context)
+    )
+    return symint
+
+
 def fakify(
     mode: FakeTensorMode,
     kp: KeyPath,
@@ -173,20 +188,12 @@ def fakify(
             _DimHintType.DYNAMIC,
             _DimHintType.AUTO,
         ):
-            symint = mode.shape_env.create_unspecified_symint_and_symbol(  # type: ignore[union-attr]
-                t.val, source, DimDynamic.DYNAMIC
+            return create_symint(
+                mode,
+                t.val,
+                t.dynamism.type == _DimHintType.DYNAMIC,
+                source,
             )
-            context = (
-                SymIntSymbolicContext(
-                    constraint=RelaxedUnspecConstraint(warn_only=False)
-                )
-                if t.dynamism.type == _DimHintType.DYNAMIC  # type: ignore[union-attr]
-                else None
-            )
-            mode.shape_env.tracked_fakes.append(  # type: ignore[union-attr]
-                TrackedFake(symint, source, context)
-            )
-            return symint
         else:
             return t.val
 

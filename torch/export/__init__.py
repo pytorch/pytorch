@@ -66,6 +66,7 @@ def export_for_training(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
+    preserve_module_attributes: tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     :func:`export_for_training` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -154,6 +155,7 @@ def export_for_training(
         dynamic_shapes,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
+        preserve_module_attributes=preserve_module_attributes,
     )
 
 
@@ -165,6 +167,7 @@ def export(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
+    preserve_module_attributes: tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     :func:`export` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -275,6 +278,7 @@ def export(
             dynamic_shapes,
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
+            preserve_module_attributes=preserve_module_attributes,
             pre_dispatch=True,
         )
     except Exception as e:

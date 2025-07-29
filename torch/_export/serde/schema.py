@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 9)
+SCHEMA_VERSION = (8, 10)
 TREESPEC_VERSION = 1
 
 
@@ -300,6 +300,12 @@ class InputTokenSpec:
     arg: Annotated[TokenArgument, 10]
 
 
+@dataclass
+class InputToSymbolicAttrSpec:
+    arg: Annotated[SymIntArgument, 10]
+    symbolic_attr_name: Annotated[str, 20]
+
+
 @_union_dataclass
 class InputSpec(_Union):
     user_input: Annotated[UserInputSpec, 10]
@@ -309,6 +315,7 @@ class InputSpec(_Union):
     custom_obj: Annotated[InputToCustomObjSpec, 50]
     token: Annotated[InputTokenSpec, 70]
     constant_input: Annotated[InputToConstantInputSpec, 60]
+    symbolic_attr: Annotated[InputToSymbolicAttrSpec, 80]
 
 
 @dataclass

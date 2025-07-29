@@ -11215,6 +11215,169 @@ graph():
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
 
+    @testing.expectedFailureCppRuntimeNonStrict
+    def test_sym_attrs(self):
+        class Example1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.trigger = 0
+
+            def forward(self, x):
+                return torch.cond(
+                    self.trigger == 1,
+                    lambda: x + 1,
+                    lambda: x * 2,
+                    (),
+                )
+
+        m = Example1()
+        inp = (torch.randn(2),)
+        ep = export(m, inp, preserve_module_attributes=("trigger",))
+        em = ep.module()
+        self.assertTrue(torch.allclose(em(*inp), inp[0] * 2))
+        em.trigger = 1
+        self.assertTrue(torch.allclose(em(*inp), inp[0] + 1))
+        em.trigger = 0
+        self.assertTrue(torch.allclose(em(*inp), inp[0] * 2))
+
+        class Example2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.trigger = 0
+                self.target = 1 if self.trigger else 2
+
+            def forward(self, x):
+                return torch.cond(
+                    self.trigger == 1,
+                    lambda: x + self.target,
+                    lambda: x * self.target,
+                    (),
+                )
+
+        m = Example2()
+        inp = (torch.randn(2),)
+        ep = export(m, inp, preserve_module_attributes=("trigger", "target"))
+        em = ep.module()
+        self.assertTrue(torch.allclose(em(*inp), inp[0] * 2))
+        em.trigger = 1
+        em.target = 1
+        self.assertTrue(torch.allclose(em(*inp), inp[0] + 1))
+        em.trigger = 0
+        em.target = 2
+        self.assertTrue(torch.allclose(em(*inp), inp[0] * 2))
+
+        class Example3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.trigger = 0
+                self.target = None
+
+            def forward(self, x):
+                self.target = torch.cond(
+                    self.trigger == 1,
+                    lambda: 1,
+                    lambda: 2,
+                    (),
+                )
+
+                return torch.cond(
+                    self.trigger == 1,
+                    lambda: x + self.target,
+                    lambda: x * self.target,
+                    (),
+                )
+
+        m = Example3()
+        inp = (torch.randn(2),)
+        if is_non_strict_test(self._testMethodName) or is_inline_and_install_strict_test(self._testMethodName):
+            ep = export(m, inp, preserve_module_attributes=("trigger",))
+            em = ep.module()
+            self.assertTrue(torch.allclose(em(*inp), inp[0] * 2))
+            em.trigger = 1
+            self.assertTrue(torch.allclose(em(*inp), inp[0] + 1))
+            em.trigger = 0
+            self.assertTrue(torch.allclose(em(*inp), inp[0] * 2))
+        else:
+            with self.assertRaisesRegex(
+                AssertionError,
+                r"Mutating module attribute target during export",
+            ):
+                export(m, inp, preserve_module_attributes=("trigger",))
+
+    @testing.expectedFailureCppRuntimeNonStrict
+    def test_symint_inputs_with_cond(self):
+        class Example1(torch.nn.Module):
+            def forward(self, x, trigger):
+                return torch.cond(
+                    trigger == 1,
+                    lambda: x + 1,
+                    lambda: x * 2,
+                    (),
+                )
+
+        m = Example1()
+        x = torch.randn(2)
+        trigger = 0
+        ep = export(m, (x, trigger), dynamic_shapes=(None, Dim.DYNAMIC))
+        em = ep.module()
+        self.assertTrue(torch.allclose(em(x, trigger), x * 2))
+        trigger = 1
+        self.assertTrue(torch.allclose(em(x, trigger), x + 1))
+        trigger = 0
+        self.assertTrue(torch.allclose(em(x, trigger), x * 2))
+
+        class Example2(torch.nn.Module):
+            def forward(self, x, trigger, target):
+                return torch.cond(
+                    trigger == 1,
+                    lambda: x + target,
+                    lambda: x * target,
+                    (),
+                )
+
+        m = Example2()
+        x = torch.randn(2)
+        trigger = 0
+        target = 2
+        ep = export(
+            m, (x, trigger, target), dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC)
+        )
+        em = ep.module()
+        self.assertTrue(torch.allclose(em(x, trigger, target), x * 2))
+        trigger = 1
+        target = 1
+        self.assertTrue(torch.allclose(em(x, trigger, target), x + 1))
+        trigger = 0
+        target = 2
+        self.assertTrue(torch.allclose(em(x, trigger, target), x * 2))
+
+        class Example3(torch.nn.Module):
+            def forward(self, x, trigger):
+                target = torch.cond(
+                    trigger == 1,
+                    lambda: 1,
+                    lambda: 2,
+                    (),
+                )
+
+                return torch.cond(
+                    trigger == 1,
+                    lambda: x + target,
+                    lambda: x * target,
+                    (),
+                )
+
+        m = Example3()
+        x = torch.randn(2)
+        trigger = 0
+        ep = export(m, (x, trigger), dynamic_shapes=(None, Dim.DYNAMIC))
+        em = ep.module()
+        self.assertTrue(torch.allclose(em(x, trigger), x * 2))
+        trigger = 1
+        self.assertTrue(torch.allclose(em(x, trigger), x + 1))
+        trigger = 0
+        self.assertTrue(torch.allclose(em(x, trigger), x * 2))
+
     def test_dynamic_shapes_bounds(self):
         class M(torch.nn.Module):
             """

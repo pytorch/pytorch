@@ -1333,6 +1333,7 @@ def create_functional_call(
         else:
             assert isinstance(params_spec, list)
             params = dict(zip(params_spec, flat_params))
+        params = {k: v for k, v in params.items() if isinstance(v, torch.Tensor)}
         with (
             stateless._reparametrize_module(mod, params),
             maybe_disable_thunkify(),
