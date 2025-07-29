@@ -746,7 +746,7 @@ class SerializationMixin:
                                           'readinto() stress test')
 
     def test_serialization_filelike_uses_readinto(self):
-        # For maximum effiency, when reading a file-like object,
+        # For maximum efficiency, when reading a file-like object,
         # ensure the C API calls readinto instead of read.
         a = torch.randn(5, 4)
 
