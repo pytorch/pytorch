@@ -514,6 +514,19 @@ def create_aot_state(
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
 
+    # If this config is set, we treat collectives as safe to e.g. dead-code-eliminate.
+    # This can have downstream consequences.
+    # See https://github.com/pytorch/pytorch/issues/146693#issuecomment-2766508450
+    from torch.distributed._functional_collectives import (
+        treat_collectives_as_safe_to_dce,
+    )
+
+    collectives_ctx = (
+        treat_collectives_as_safe_to_dce()
+        if config.unsafe_allow_optimization_of_collectives
+        else nullcontext()
+    )
+
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     # If any saved tensor hooks are active, we **don't** want to trace them.
     # Instead, we'll let them run at runtime, around the custom autograd.Function
@@ -526,6 +539,7 @@ def create_aot_state(
     stack.enter_context(
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
     )
+    stack.enter_context(collectives_ctx)
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 
