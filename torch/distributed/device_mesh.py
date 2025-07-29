@@ -577,7 +577,8 @@ else:
                     if dim in _mesh_resources.mesh_dim_group_options:
                         if pg_backend_and_options[dim] != (None, None):
                             raise RuntimeError(
-                                f"Found dimension {dim} specified both via _mesh_resources._set_mesh_dim_group_options and in the pg_backend_and_options argument"
+                                "Dimension {dim} present both in the pg_backend_and_options argument "
+                                "and via _mesh_resources._set_mesh_dim_group_options"
                             )
                         (
                             backend,
@@ -1010,7 +1011,7 @@ else:
         *,
         mesh_dim_names: Optional[tuple[str, ...]] = None,
         pg_backend_and_options: Optional[
-            dict[int | str, tuple[str, Optional[C10dBackend.Options]]]
+            dict[Union[int, str], tuple[str, Optional[C10dBackend.Options]]]
         ] = None,
     ) -> DeviceMesh:
         """
@@ -1067,7 +1068,8 @@ else:
                     if mesh_dim_name in pg_backend_and_options:
                         if mesh_dim_idx in pg_backend_and_options:
                             raise RuntimeError(
-                                f"Found redundant dim index {mesh_dim_idx} and name {mesh_dim_name} in pg_backend_and_options"
+                                f"Found redundant dim index {mesh_dim_idx} and "
+                                f"name {mesh_dim_name} in pg_backend_and_options"
                             )
                         pg_backend_and_options[mesh_dim_idx] = (
                             pg_backend_and_options.pop(mesh_dim_name)
@@ -1080,7 +1082,8 @@ else:
             )
             if pg_backend_and_options:
                 raise RuntimeError(
-                    f"Found invalid keys in pg_backend_and_options: got {list(pg_backend_and_options.keys())}, expected integers in range [0, {len(mesh_shape)}) or one of {mesh_dim_names or []}"
+                    f"Found invalid keys in pg_backend_and_options: got {list(pg_backend_and_options.keys())}, "
+                    f"expected integers in range [0, {len(mesh_shape)}) or one of {mesh_dim_names or []}"
                 )
         else:
             pg_backend_and_options_tuple = None
