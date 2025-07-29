@@ -1,7 +1,13 @@
 #include <include/openreg.h>
 
-#include <sys/mman.h>
-#include <unistd.h>
+#ifdef _WIN32
+  #include <windows.h>
+  #include <memoryapi.h>
+#else
+    #include <sys/mman.h>
+    #include <unistd.h>
+#endif
+
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -15,15 +21,27 @@ class ScopedMemoryProtector {
   ScopedMemoryProtector(const orPointerAttributes& info)
       : m_info(info), m_protected(false) {
     if (m_info.type == orMemoryType::orMemoryTypeDevice) {
-      if (mprotect(m_info.pointer, m_info.size, PROT_READ | PROT_WRITE) ==
-          0) {
+#ifdef _WIN32
+      DWORD oldProtect;
+      if (VirtualProtect(m_info.pointer, m_info.size, PAGE_READWRITE, &oldProtect)) {
+        m_protected = true;
+        m_oldProtect = oldProtect;
+      }
+#else
+      if (mprotect(m_info.pointer, m_info.size, PROT_READ | PROT_WRITE) == 0) {
         m_protected = true;
       }
+#endif
     }
   }
   ~ScopedMemoryProtector() {
     if (m_protected) {
+#ifdef _WIN32
+      DWORD oldProtect;
+      VirtualProtect(m_info.pointer, m_info.size, PAGE_NOACCESS, &oldProtect);
+#else
       mprotect(m_info.pointer, m_info.size, PROT_NONE);
+#endif
     }
   }
   ScopedMemoryProtector(const ScopedMemoryProtector&) = delete;
@@ -32,6 +50,9 @@ class ScopedMemoryProtector {
  private:
   orPointerAttributes m_info;
   bool m_protected;
+#ifdef _WIN32
+  DWORD m_oldProtect;
+#endif
 };
 
 class MemoryManager {
@@ -46,7 +67,15 @@ class MemoryManager {
       return orErrorUnknown;
 
     std::lock_guard<std::mutex> lock(m_mutex);
+    
+#ifdef _WIN32
+    SYSTEM_INFO sysInfo;
+    GetSystemInfo(&sysInfo);
+    size_t page_size = sysInfo.dwPageSize;
+#else
     long page_size = sysconf(_SC_PAGESIZE);
+#endif
+    
     size_t aligned_size = ((size - 1) / page_size + 1) * page_size;
     void* mem = nullptr;
     int current_device = -1;
@@ -54,6 +83,24 @@ class MemoryManager {
     if (type == orMemoryType::orMemoryTypeDevice) {
       orGetDevice(&current_device);
 
+#ifdef _WIN32
+      // Windows implementation using VirtualAlloc
+      mem = VirtualAlloc(
+          nullptr,
+          aligned_size,
+          MEM_COMMIT | MEM_RESERVE,
+          PAGE_READWRITE);
+      if (mem == nullptr)
+        return orErrorUnknown;
+      
+      // Protect memory (make it inaccessible)
+      DWORD oldProtect;
+      if (!VirtualProtect(mem, aligned_size, PAGE_NOACCESS, &oldProtect)) {
+        VirtualFree(mem, 0, MEM_RELEASE);
+        return orErrorUnknown;
+      }
+#else
+      // Unix implementation using mmap
       mem = mmap(
           nullptr,
           aligned_size,
@@ -67,10 +114,20 @@ class MemoryManager {
         munmap(mem, aligned_size);
         return orErrorUnknown;
       }
+#endif
     } else {
+#ifdef _WIN32
+      // Windows aligned allocation
+      mem = _aligned_malloc(aligned_size, page_size);
+      if (mem == nullptr) {
+        return orErrorUnknown;
+      }
+#else
+      // Unix aligned allocation
       if (posix_memalign(&mem, page_size, aligned_size) != 0) {
         return orErrorUnknown;
       }
+#endif
     }
 
     m_registry[mem] = {type, current_device, mem, aligned_size};
@@ -87,11 +144,24 @@ class MemoryManager {
     if (it == m_registry.end())
       return orErrorUnknown;
     const auto& info = it->second;
+    
     if (info.type == orMemoryType::orMemoryTypeDevice) {
+#ifdef _WIN32
+      // Windows: Unprotect then free
+      DWORD oldProtect;
+      VirtualProtect(info.pointer, info.size, PAGE_READWRITE, &oldProtect);
+      VirtualFree(info.pointer, 0, MEM_RELEASE);
+#else
+      // Unix: Unprotect then unmap
       mprotect(info.pointer, info.size, PROT_READ | PROT_WRITE);
       munmap(info.pointer, info.size);
+#endif
     } else {
+#ifdef _WIN32
+      _aligned_free(info.pointer);
+#else
       ::free(info.pointer);
+#endif
     }
     m_registry.erase(it);
     return orSuccess;
@@ -167,9 +237,16 @@ class MemoryManager {
     if (info.type != orMemoryType::orMemoryTypeDevice) {
       return orErrorUnknown;
     }
+#ifdef _WIN32
+    DWORD oldProtect;
+    if (!VirtualProtect(info.pointer, info.size, PAGE_READWRITE, &oldProtect)) {
+      return orErrorUnknown;
+    }
+#else
     if (mprotect(info.pointer, info.size, PROT_READ | PROT_WRITE) != 0) {
       return orErrorUnknown;
     }
+#endif
     return orSuccess;
   }
 
@@ -179,9 +256,16 @@ class MemoryManager {
     if (info.type != orMemoryType::orMemoryTypeDevice) {
       return orErrorUnknown;
     }
+#ifdef _WIN32
+    DWORD oldProtect;
+    if (!VirtualProtect(info.pointer, info.size, PAGE_NOACCESS, &oldProtect)) {
+      return orErrorUnknown;
+    }
+#else
     if (mprotect(info.pointer, info.size, PROT_NONE) != 0) {
       return orErrorUnknown;
     }
+#endif
     return orSuccess;
   }
 
