@@ -29,7 +29,7 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build:
+  linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80:
     name: cuda12.8-py3.12-gcc11-sm80
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -44,12 +44,27 @@ jobs:
         ]}
     secrets: inherit
 
+  linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-90:
+    name: cuda12.8-py3.12-gcc11-sm90
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-additional-packages: "vision audio torchao xformers"
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm90
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
+      cuda-arch-list: '9.0'
+      test-matrix: |
+        { include: [
+          { config: "vllm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+        ]}
+    secrets: inherit
+
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build:
     name: build-vllm-wheels
     uses: ./.github/workflows/_linux-vllm-build-main.yml
     needs: [
       get-label-type,
-      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build
+      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80
     ]
     with:
       build-additional-packages: "vision audio torchao xformers"
