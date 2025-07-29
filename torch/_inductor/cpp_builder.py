@@ -594,11 +594,14 @@ def _get_optimization_cflags() -> list[str]:
         cflags.extend(
             (
                 f"ffp-contract={config.cpp.enable_floating_point_contract_flag}",
-                "fno-trapping-math",
-                "fno-signed-zeros",
+                # Selection of safer flags from -ffast-math
                 "fno-math-errno",
+                "fno-rounding-math",
+                "fno-signaling-nans",
             )
         )
+        if config.cpp.enable_unsafe_math_opt_flag:
+            cflags.append("funsafe-math-optimizations")
 
         if is_gcc():
             cflags.extend(("fexcess-precision=fast", "fno-tree-loop-vectorize"))

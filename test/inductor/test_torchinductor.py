@@ -10553,8 +10553,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
     def test_inductor_multiple_specializations(self):
-        from triton.testing import do_bench
-
         @torch.compile(
             options={
                 "max_autotune": True,
@@ -10569,7 +10567,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         m = 16
         k = 1280
         dynamic_a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        dynamic_specialized_a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        dynamic_specialized_a = dynamic_a.clone()
         b = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16)
         torch._dynamo.decorators.mark_dynamic(
             dynamic_a,
@@ -10584,12 +10582,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             b,
             1,
         )
-        dynamic = do_bench(lambda: inductor_matmul(dynamic_a, b))
+        dynamic = inductor_matmul(dynamic_a, b)
         torch._dynamo.reset()
-        dynamic_specialized = do_bench(
-            lambda: inductor_matmul(dynamic_specialized_a, b)
-        )
-        self.assertGreaterEqual(dynamic, dynamic_specialized)
+        dynamic_specialized = inductor_matmul(dynamic_specialized_a, b)
+        self.assertEqual(dynamic, dynamic_specialized)
 
     @requires_gpu()
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
