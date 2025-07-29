@@ -1527,7 +1527,6 @@ class CatchErrorsWrapper:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
-
         input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)

@@ -2002,6 +2002,8 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.is_contiguous:
                         return contiguous_data.is_contiguous()
+                    if func.overloadpacket == torch.ops.aten.sym_is_contiguous:
+                        return torch.ops.aten.sym_is_contiguous(contiguous_data)
                     return NotImplemented
 
             class ExampleTensor3(torch.Tensor):
@@ -2015,6 +2017,8 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.is_contiguous:
                         return not_contiguous_data.is_contiguous()
+                    if func.overloadpacket == torch.ops.aten.sym_is_contiguous:
+                        return torch.ops.aten.sym_is_contiguous(not_contiguous_data)
                     return NotImplemented
 
             err_msg = "Multiple dispatch failed for 'torch.ops.aten.is_contiguous'"
@@ -2047,6 +2051,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             @classmethod
             def __torch_dispatch__(cls, func, types, args, kwargs):
                 if func in [
+                    torch.ops.aten.sym_is_contiguous.default,
                     torch.ops.aten.is_contiguous.default,
                     torch.ops.aten.is_contiguous.memory_format,
                     torch.ops.aten.is_strides_like_format.default,
@@ -2061,7 +2066,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         e = ExampleTensor(torch.randn(2, 2))
         self.assertFalse(e.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(
-            calls, [(torch.ops.aten.is_contiguous.memory_format, [torch.channels_last])]
+            calls, [(torch.ops.aten.sym_is_contiguous.default, [torch.channels_last])]
         )
         calls.clear()
         self.assertFalse(

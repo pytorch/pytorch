@@ -82,6 +82,8 @@ struct ConcretePyInterpreterVTable final
 
   bool is_contiguous(const c10::TensorImpl* self, at::MemoryFormat)
       const override;
+  c10::SymBool sym_is_contiguous(const c10::TensorImpl* self, at::MemoryFormat)
+      const override;
   bool is_strides_like(const c10::TensorImpl* self, at::MemoryFormat)
       const override;
   bool is_non_overlapping_and_dense(const c10::TensorImpl* self) const override;
@@ -474,6 +476,33 @@ bool ConcretePyInterpreterVTable::is_contiguous(
       ", expected bool");
 
   return PyObject_IsTrue(out.ptr());
+}
+
+c10::SymBool ConcretePyInterpreterVTable::sym_is_contiguous(
+    const c10::TensorImpl* self,
+    at::MemoryFormat memory_format) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  py::object out;
+  out = torchDispatchFromTensorImpl(
+      self,
+      "is_contiguous",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_is_contiguous")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten",
+      {py::cast(memory_format)});
+
+  if (out.is_none()) {
+    return self->sym_is_contiguous_default(memory_format);
+  }
+
+  return torch::is_symbool(out) ? out.cast<c10::SymBool>()
+                                : c10::SymBool{py::cast<bool>(out)};
 }
 
 bool ConcretePyInterpreterVTable::is_strides_like(

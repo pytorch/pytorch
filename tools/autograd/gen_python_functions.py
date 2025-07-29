@@ -100,6 +100,7 @@ _SKIP_PYTHON_BINDINGS = [
     "sym_size",
     "sym_stride",
     "sym_storage_offset",
+    "sym_is_contiguous",
     "sym_numel",
     ".*_backward",
     ".*_backward_(out|input|weight|bias)",

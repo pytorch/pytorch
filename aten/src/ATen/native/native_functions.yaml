@@ -5496,6 +5496,13 @@
   tags: core
   manual_cpp_binding: True
 
+- func: sym_is_contiguous(Tensor self, MemoryFormat memory_format=contiguous_format) -> SymBool
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+  manual_cpp_binding: True
+
 - func: sym_numel(Tensor self) -> SymInt
   variants: function
   device_check: NoCheck

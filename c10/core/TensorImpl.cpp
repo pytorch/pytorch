@@ -313,7 +313,7 @@ void TensorImpl::throw_data_ptr_access_error() const {
 c10::SymBool TensorImpl::sym_is_contiguous_custom(
     at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
+    return pyobj_slot_.load_pyobj_interpreter()->sym_is_contiguous(
         this, memory_format);
   }
 
