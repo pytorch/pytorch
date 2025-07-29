@@ -135,9 +135,6 @@ using std::hardware_destructive_interference_size;
 static constexpr std::size_t hardware_destructive_interference_size = 64;
 #endif
 
-TORCH_SDT_DEFINE_SEMAPHORE(malloc)
-TORCH_SDT_DEFINE_SEMAPHORE(free)
-
 template <
     typename ImplT,
     typename BlockT,
@@ -167,10 +164,6 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
       this->malloc(&devPtr, device.index(), size, stream);
     }
 
-    if (size && TORCH_SDT_IS_ENABLED(malloc)) {
-      TORCH_SDT_WITH_SEMAPHORE(malloc, devPtr, device, size, stream.id());
-    }
-
     return {devPtr, devPtr, deleteFunc, device};
   }
 
@@ -192,10 +185,6 @@ struct CachingDeviceAllocatorInterface : public BaseDeviceAllocator {
   }
 
   void free(void* ptr) {
-    if (TORCH_SDT_IS_ENABLED(free)) {
-      TORCH_SDT_WITH_SEMAPHORE(free, ptr);
-    }
-
     if (!ptr) {
       return;
     }
