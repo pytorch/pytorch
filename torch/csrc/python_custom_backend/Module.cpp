@@ -6,7 +6,6 @@
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <pybind11/trampoline_self_life_support.h>
 
 
 namespace py = pybind11;
@@ -14,7 +13,9 @@ namespace py = pybind11;
 namespace torch::python_custom_backend {
 
 // python hook interface
-struct PythonHooks final : public at::PrivateUse1HooksInterface, py::trampoline_self_life_support {
+struct PythonHooks final : public at::PrivateUse1HooksInterface {
+
+  using at::PrivateUse1HooksInterface::PrivateUse1HooksInterface;
   bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
     PYBIND11_OVERRIDE_PURE_NAME(
       bool, 
@@ -68,7 +69,9 @@ struct PythonHooks final : public at::PrivateUse1HooksInterface, py::trampoline_
 
 
 struct PythonDeviceGuard final : 
-  public c10::impl::DeviceGuardImplInterface, public py::trampoline_self_life_support {
+  public c10::impl::DeviceGuardImplInterface {
+
+    using c10::impl::DeviceGuardImplInterface::DeviceGuardImplInterface;
 
   c10::DeviceType type() const override {
     PYBIND11_OVERRIDE_PURE_NAME(
@@ -133,20 +136,22 @@ struct PythonDeviceGuard final :
 };
 
 
-bool registerPythonPrivateUse1Hook(std::unique_ptr<at::PrivateUse1HooksInterface> hook) {
+bool registerPythonPrivateUse1Hook(py::object hook) {
   if (at::isPrivateUse1HooksRegistered()) {
     return false;
   }
-  at::RegisterPrivateUse1HooksInterface(hook.release());
+  hook.inc_ref();
+  at::RegisterPrivateUse1HooksInterface(hook.cast<PrivateUse1HooksInterface*>());
   return true;
 }
-
 bool registerPythonPrivateUse1DeviceGuard(
-  std::unique_ptr<c10::impl::DeviceGuardImplInterface> guard) {
+  py::object guard) {
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     return false;
   }
-  c10::impl::registerDeviceGuard(c10::DeviceType::PrivateUse1, guard.release());
+  guard.inc_ref();
+  c10::impl::registerDeviceGuard(c10::DeviceType::PrivateUse1, 
+    guard.cast<c10::impl::DeviceGuardImplInterface*>());
   return true;
 }
 
@@ -184,13 +189,13 @@ at::Tensor createEmptyTensor(
 void initModule(PyObject* module) {
   auto py_module = py::reinterpret_borrow<py::module>(module);
 
-  py::class_<at::PrivateUse1HooksInterface, PythonHooks, py::smart_holder>(module, "PrivateUse1Hooks")
+  py::class_<at::PrivateUse1HooksInterface, PythonHooks>(module, "PrivateUse1Hooks")
     .def(py::init<>())
     .def("has_primary_context", &at::PrivateUse1HooksInterface::hasPrimaryContext)
     .def("is_built", &at::PrivateUse1HooksInterface::isBuilt)
     .def("is_available", &at::PrivateUse1HooksInterface::isAvailable);
 
-  py::class_<c10::impl::DeviceGuardImplInterface, PythonDeviceGuard, py::smart_holder>(module, "DeviceGuard")
+  py::class_<c10::impl::DeviceGuardImplInterface, PythonDeviceGuard>(module, "DeviceGuard")
     .def(py::init<>())
     .def("type_", &c10::impl::DeviceGuardImplInterface::type);
 

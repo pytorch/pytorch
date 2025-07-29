@@ -88,6 +88,7 @@
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
+#include <torch/csrc/python_custom_backend/Module.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
@@ -1987,6 +1988,7 @@ PyObject* initModule() {
   torch::cpu::initModule(module);
   torch::accelerator::initModule(module);
   torch::instruction_counter::initModule(module);
+  torch::python_custom_backend::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 
