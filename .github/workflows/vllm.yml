@@ -42,14 +42,13 @@ jobs:
         { include: [
           { config: "vllm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
-
     secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build:
     name: build-vllm-wheels
     uses: ./.github/workflows/_linux-vllm-build-main.yml
     needs: [
-      get-label-type,
+      get-label-type,git
       linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build
     ]
     with:

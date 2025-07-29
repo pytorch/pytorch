@@ -54,7 +54,6 @@ def build_vllm(
     sccache_bucket_name = get_env("SCCACHE_BUCKET", "")
     sccache_region_name = get_env("SCCACHE_REGION", "")
     torch_cuda_arch_list = get_env("TORCH_CUDA_ARCH_LIST", "8.0;9.0")
-
     use_sccache = "0"
     if sccache_bucket_name and sccache_region_name:
         use_sccache = "1"

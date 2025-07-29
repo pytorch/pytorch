@@ -131,17 +131,21 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/torch*.whl >/dev/null 2>&1; then \
         echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
         torch_whl=$(find /tmp/torch_wheels -name 'torch*.whl' | head -n1 | xargs); \
+        vision_whl=$(find /tmp/torch_wheels/vision -name 'torchvision*.whl' | head -n1 | xargs); \
+        audio_whl=$(find /tmp/torch_wheels/vision -name 'torchaudio*.whl' | head -n1 | xargs); \
+        
         echo "Found: '${torch_whl}'"; \
         uv pip install --system "${torch_whl}[opt-einsum]"; \
+        uv pip install --system "${vision_whl}"; \
+        uv pip install --system "${audio_whl}"; \
     elif [ -n "$PINNED_TORCH_VERSION" ]; then \
         echo "[INFO] Installing pinned torch nightly version: $PINNED_TORCH_VERSION"; \
         uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
     else \
         echo "[INFO] Installing torch nightly with latest one"; \
-        uv pip install --system torch --index-url https://download.pytorch.org/whl/nightly/cu128; \
+        uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128; \
     fi && \
-    echo "[INFO] Installing torchvision and torchaudio from nightly" && \
-    uv pip install --system torchvision torchaudio --no-deps --index-url https://download.pytorch.org/whl/nightly/cu128
+
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system numba==0.61.2
@@ -280,6 +284,7 @@ RUN echo "VLLM INSTALLED IMAGE"
 # get the nightly torch version used in the build to make sure the version is the same
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 COPY --from=build /workspace/dist ./tmp/vllm-dist
+
 RUN echo "[DEBUG] Listing current directory before torch install step:" && \
     ls -al && \
     echo "[DEBUG] Showing torch_build_versions.txt content:" && \
