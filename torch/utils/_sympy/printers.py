@@ -20,6 +20,9 @@ class ExprPrinter(StrPrinter):
     def _print_Mul(self, expr: sympy.Expr) -> str:
         return self.stringify(expr.args, "*", precedence(expr))
 
+    def _print_Not(self, expr: sympy.Expr) -> str:
+        return f"not ({self._print(expr.args[0])})"
+
     def _print_Add(self, expr: sympy.Expr, order: Optional[str] = None) -> str:
         return self.stringify(expr.args, " + ", precedence(expr))
 
@@ -264,6 +267,10 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"math.atan({self._print(expr.args[0])})"
 
+    def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
+        assert len(expr.args) == 1
+        return f"math.log2({self._print(expr.args[0])})"
+
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         return f"round({self._print(expr.args[0])})"
@@ -351,6 +358,10 @@ class CppPrinter(ExprPrinter):
     # TODO: PowByNatural: we need to implement our own int-int pow.  Do NOT
     # use std::pow, that operates on floats
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
+        # Implement the special-case of 2**x for now
+        base, exp = expr.args
+        if base == 2:
+            return f"(1 << ({self._print(exp)}))"
         raise NotImplementedError(
             f"_print_PowByNatural not implemented for {type(self)}"
         )
@@ -411,7 +422,7 @@ class CppPrinter(ExprPrinter):
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
-            return f"std::min({il})"
+            return f"std::min<{INDEX_TYPE}>({il})"
 
     def _print_Max(self, expr: sympy.Expr) -> str:
         args = [self._print(a) for a in expr.args]
@@ -420,7 +431,7 @@ class CppPrinter(ExprPrinter):
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
-            return f"std::max({il})"
+            return f"std::max<{INDEX_TYPE}>({il})"
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -464,6 +475,9 @@ class CppPrinter(ExprPrinter):
 
     def _print_OpaqueUnaryFn_sqrt(self, expr: sympy.Expr) -> str:
         return f"std::sqrt({self._print(expr.args[0])})"
+
+    def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
+        return f"std::log2({self._print(expr.args[0])})"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1

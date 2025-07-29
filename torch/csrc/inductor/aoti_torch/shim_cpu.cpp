@@ -1,4 +1,7 @@
 
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/c10d/Functional.hpp>
+#endif
 #include <torch/csrc/inductor/aoti_torch/c/shim_cpu.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
@@ -17,7 +20,7 @@ using namespace torch::aot_inductor;
 #if AT_MKLDNN_ENABLED()
 
 template <typename T>
-c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
+static c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
   c10::List<T> scalars_list;
   scalars_list.reserve(len);
   for (int64_t i = 0; i < len; i++) {
@@ -372,7 +375,7 @@ AOTITorchError aoti_torch_cpu__qlinear_pointwise_binary_tensor(
   });
 }
 
-AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
+AOTITorchError aoti_torch_cpu__qconv_pointwise_tensor(
     AtenTensorHandle X,
     AtenTensorHandle act_scale,
     AtenTensorHandle act_zero_point,
@@ -539,3 +542,38 @@ AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
+
+#ifdef USE_DISTRIBUTED
+AOTITorchError aoti_torch_cpu__c10d_functional_all_reduce_(
+    AtenTensorHandle inp,
+    const char* reduce_op,
+    const char* group_name,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto tmp_result = c10d::all_reduce_(
+        *tensor_handle_to_tensor_pointer(inp), reduce_op, group_name);
+    *ret0 = new_tensor_handle(std::move(tmp_result));
+  });
+}
+
+AOTITorchError aoti_torch_cpu__c10d_functional_all_reduce(
+    AtenTensorHandle inp,
+    const char* reduce_op,
+    const char* group_name,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto tmp_result = c10d::all_reduce(
+        *tensor_handle_to_tensor_pointer(inp), reduce_op, group_name);
+    *ret0 = new_tensor_handle(std::move(tmp_result));
+  });
+}
+
+AOTITorchError aoti_torch_cpu__c10d_functional_wait_tensor(
+    AtenTensorHandle inp,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto tmp_result = c10d::wait_tensor(*tensor_handle_to_tensor_pointer(inp));
+    *ret0 = new_tensor_handle(std::move(tmp_result));
+  });
+}
+#endif

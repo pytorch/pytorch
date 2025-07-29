@@ -60,7 +60,7 @@ static std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
 }
 
 template <typename T>
-std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
+static std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
     std::vector<T>& objects,
     int n,
     std::default_random_engine& random_engine) {
@@ -100,7 +100,7 @@ static void printHistory(int index, std::string message) {
 }
 
 template <typename T>
-std::string join(std::vector<T> indices, char sep = ',') {
+static std::string join(std::vector<T> indices, char sep = ',') {
   std::string s;
   for (const auto& index : indices) {
     s += std::to_string(index) + sep;
@@ -118,7 +118,7 @@ static std::string join(
   return s;
 }
 template <typename T>
-std::string indexOf(const std::vector<T>& objects, const T& object) {
+static std::string indexOf(const std::vector<T>& objects, const T& object) {
   return std::to_string(std::distance(
       objects.begin(), std::find(objects.begin(), objects.end(), object)));
 }

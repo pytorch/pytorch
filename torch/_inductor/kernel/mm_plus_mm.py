@@ -53,6 +53,8 @@ mm_plus_mm_template = TritonTemplate(
     group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
     pid_m = group_id * GROUP_M + (pid % group_size)
     pid_n = (pid % width) // (group_size)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -109,6 +111,7 @@ mm_plus_mm_template = TritonTemplate(
     # inductor generates a suffix
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """,
+    cache_codegen_enabled_for_template=True,
 )
 
 
@@ -132,7 +135,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         )
     ):
         # TODO(jansel): support different K values when this is fixed:
-        # https://github.com/openai/triton/issues/967
+        # https://github.com/triton-lang/triton/issues/967
         return lowerings[aten.add](
             lowerings[aten.mm](mat1, mat2), lowerings[aten.mm](mat3, mat4)
         )
@@ -146,10 +149,9 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     )
 
     mm_configs = V.choices.get_mm_plus_mm_configs(device_type)
-
     if use_triton_template(layout1):
         for config in mm_configs():
-            # see https://github.com/openai/triton/issues/1298
+            # see https://github.com/triton-lang/triton/issues/1298
             # BLOCK_K = K causes llvm error
             if V.graph.sizevars.statically_known_lt(config.kwargs["BLOCK_K"], k1):
                 mm_plus_mm_template.maybe_append_choice(

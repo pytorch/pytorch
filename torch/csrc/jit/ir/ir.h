@@ -616,7 +616,7 @@ struct TORCH_API Node {
   // as the equivalents phi-nodes in standard SSA form,
   // defining a new Value to represent any term that has multiple
   // definitions depending on how control flowed. Outputs of the node containing
-  // control flow serve a similiar purpose defining new values for variables
+  // control flow serve a similar purpose defining new values for variables
   // that would have different definitions depending on which way control
   // flowed.
 
@@ -1374,7 +1374,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // kwargs using Python argument matching rules, and checks that the op matches
   // a known schema.
   //
-  // If this node successfully completes, it guarentees the node
+  // If this node successfully completes, it guarantees the node
   // is a correctly-formed invocation of opname
   TORCH_API Value* insert(
       Symbol opname,
@@ -1490,7 +1490,6 @@ struct WithCurrentScope {
   ScopePtr prev_scope_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 inline Value::Value(Node* node_, size_t offset_)
     : node_(node_),
       offset_(offset_),
@@ -1651,7 +1650,6 @@ struct TORCH_API OperatorSet {
 };
 
 template <typename T>
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct OperatorMap {
   // Type aliasing
   using OpMapType = typename std::pair<std::shared_ptr<Operator>, T>;
@@ -1659,12 +1657,10 @@ struct OperatorMap {
   using MapType = std::unordered_map<Symbol, ValueType>;
 
   OperatorMap() = default;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit OperatorMap(
       std::initializer_list<std::pair<std::shared_ptr<Operator>, T>> init) {
     insert(init);
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit OperatorMap(std::initializer_list<std::pair<const char*, T>> init) {
     insert(init);
   }
@@ -1760,7 +1756,6 @@ struct OperatorMap {
 };
 
 template <typename T>
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct FunctionSchemaMap {
   // Type aliasing
   using FuncSchemaMapType = typename std::pair<FunctionSchema, T>;

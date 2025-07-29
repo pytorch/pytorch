@@ -1,0 +1,165 @@
+diff --git a/test/dynamo/cpython/3_13/test_sys.py b/test/dynamo/cpython/3_13/test_sys.py
+index 6b37094ed5f..c5e96a6a3dd 100644
+--- a/test/dynamo/cpython/3_13/test_sys.py
++++ b/test/dynamo/cpython/3_13/test_sys.py
+@@ -1,3 +1,58 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_sys.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import (
++    run_tests,
++)
++
++__TestCase = CPythonTestCase
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import builtins
+ import codecs
+ import _datetime
+@@ -35,7 +90,7 @@ def requires_subinterpreters(meth):
+ 
+ DICT_KEY_STRUCT_FORMAT = 'n2BI2n'
+ 
+-class DisplayHookTest(unittest.TestCase):
++class DisplayHookTest(__TestCase):
+ 
+     def test_original_displayhook(self):
+         dh = sys.__displayhook__
+@@ -81,19 +136,8 @@ class DisplayHookTest(unittest.TestCase):
+             code = compile("42", "<string>", "single")
+             self.assertRaises(ValueError, eval, code)
+ 
+-    def test_gh130163(self):
+-        class X:
+-            def __repr__(self):
+-                sys.stdout = io.StringIO()
+-                support.gc_collect()
+-                return 'foo'
+ 
+-        with support.swap_attr(sys, 'stdout', None):
+-            sys.stdout = io.StringIO()  # the only reference
+-            sys.displayhook(X())  # should not crash
+-
+-
+-class ActiveExceptionTests(unittest.TestCase):
++class ActiveExceptionTests(__TestCase):
+     def test_exc_info_no_exception(self):
+         self.assertEqual(sys.exc_info(), (None, None, None))
+ 
+@@ -157,7 +201,7 @@ class ActiveExceptionTests(unittest.TestCase):
+         self.assertIs(exc, e)
+ 
+ 
+-class ExceptHookTest(unittest.TestCase):
++class ExceptHookTest(__TestCase):
+ 
+     @force_not_colorized
+     def test_original_excepthook(self):
+@@ -200,7 +244,7 @@ class ExceptHookTest(unittest.TestCase):
+     # Python/pythonrun.c::PyErr_PrintEx() is tricky.
+ 
+ 
+-class SysModuleTest(unittest.TestCase):
++class SysModuleTest(__TestCase):
+ 
+     def tearDown(self):
+         test.support.reap_children()
+@@ -500,6 +544,7 @@ class SysModuleTest(unittest.TestCase):
+             is sys._getframe().f_code
+         )
+ 
++    @unittest.expectedFailure
+     def test_getframemodulename(self):
+         # Default depth gets ourselves
+         self.assertEqual(__name__, sys._getframemodulename())
+@@ -894,7 +939,12 @@ class SysModuleTest(unittest.TestCase):
+     def assert_raise_on_new_sys_type(self, sys_attr):
+         # Users are intentionally prevented from creating new instances of
+         # sys.flags, sys.version_info, and sys.getwindowsversion.
+-        support.check_disallow_instantiation(self, type(sys_attr), sys_attr)
++        arg = sys_attr
++        attr_type = type(sys_attr)
++        with self.assertRaises(TypeError):
++            attr_type(arg)
++        with self.assertRaises(TypeError):
++            attr_type.__new__(attr_type, arg)
+ 
+     def test_sys_flags_no_instantiation(self):
+         self.assert_raise_on_new_sys_type(sys.flags)
+@@ -1354,7 +1404,7 @@ class SysModuleTest(unittest.TestCase):
+ 
+ 
+ @test.support.cpython_only
+-class UnraisableHookTest(unittest.TestCase):
++class UnraisableHookTest(__TestCase):
+     def test_original_unraisablehook(self):
+         _testcapi = import_helper.import_module('_testcapi')
+         from _testcapi import err_writeunraisable, err_formatunraisable
+@@ -1511,7 +1561,7 @@ class UnraisableHookTest(unittest.TestCase):
+ 
+ 
+ @test.support.cpython_only
+-class SizeofTest(unittest.TestCase):
++class SizeofTest(__TestCase):
+ 
+     def setUp(self):
+         self.P = struct.calcsize('P')
+@@ -1519,6 +1569,7 @@ class SizeofTest(unittest.TestCase):
+         _testinternalcapi = import_helper.import_module("_testinternalcapi")
+         self.gc_headsize = _testinternalcapi.SIZEOF_PYGC_HEAD
+         self.managed_pre_header_size = _testinternalcapi.SIZEOF_MANAGED_PRE_HEADER
++        super().setUp()
+ 
+     check_sizeof = test.support.check_sizeof
+ 
+@@ -1955,4 +2006,4 @@ class SizeofTest(unittest.TestCase):
+         self.assertEqual(err, b"")
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

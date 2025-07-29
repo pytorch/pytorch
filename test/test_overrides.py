@@ -9,10 +9,9 @@ import pprint
 import pickle
 import collections
 import unittest
-import contextlib
 import os
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_CROSSREF
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -78,7 +77,7 @@ def quux(a):
 # dictionary are function names in the torch API and the values are
 # function implementations. Implementations are added to
 # HANDLED_FUNCTION_DIAGONAL by decorating a python function with
-# implements_diagonal. See the overrides immediately below the defintion
+# implements_diagonal. See the overrides immediately below the definition
 # of DiagonalTensor for usage examples.
 HANDLED_FUNCTIONS_DIAGONAL = {}
 
@@ -134,7 +133,7 @@ class DiagonalTensor:
         https://numpy.org/devdocs/user/basics.dispatch.html
     """
     # This is defined as a class attribute so that SubDiagonalTensor
-    # below which subclasses DiagonalTensor can re-use DiagonalTensor's
+    # below which subclasses DiagonalTensor can reuse DiagonalTensor's
     # __torch_function__ implementation.
     handled_functions = HANDLED_FUNCTIONS_DIAGONAL
 
@@ -369,7 +368,7 @@ class TensorLike:
     """A class that overrides the full torch API
 
     This class is used to explicitly test that the full torch.tensor API
-    can be overriden with a class that defines __torch_function__.
+    can be overridden with a class that defines __torch_function__.
     """
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -382,27 +381,6 @@ class TensorLike:
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
 
 class TestTorchFunctionOverride(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls._stack = contextlib.ExitStack()
-        if TEST_WITH_TORCHDYNAMO:
-            # Add classes to the wrapped tensor subclasses
-            @contextlib.contextmanager
-            def setup_subclasses():
-                old = set(torch._dynamo.config.traceable_tensor_subclasses)
-                torch._dynamo.config.traceable_tensor_subclasses.add(DiagonalTensor)
-                try:
-                    yield
-                finally:
-                    torch._dynamo.config.traceable_tensor_subclasses.clear()
-                    torch._dynamo.config.traceable_tensor_subclasses.update(old)
-
-            cls._stack.enter_context(setup_subclasses())
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._stack.close()
-
     def test_dtype_override(self):
         class MyDtype:
             def __torch_function__(self, *args, **kwargs):

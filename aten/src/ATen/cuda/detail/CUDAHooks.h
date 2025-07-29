@@ -46,6 +46,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasCUDART() const override;
   long versionCUDART() const override;
   long versionCuDNN() const override;
+  long versionMIOpen() const override;
   std::string showConfig() const override;
   double batchnormMinEpsilonCuDNN() const override;
   int64_t cuFFTGetPlanCacheMaxSize(DeviceIndex device_index) const override;
@@ -57,7 +58,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   DeviceIndex getCurrentDevice() const override;
 
 #ifdef USE_ROCM
-  bool isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const override;
+  bool isGPUArch(const std::vector<std::string>& archs, DeviceIndex device_index = -1) const override;
 #endif
   void deviceSynchronize(DeviceIndex device_index) const override;
 };

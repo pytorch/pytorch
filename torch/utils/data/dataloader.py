@@ -5,6 +5,7 @@ To support these two classes, in `./_utils` we define many utility methods and
 functions to be run in multiprocessing. E.g., the data loading worker loop is
 in `./_utils/worker.py`.
 """
+from __future__ import annotations
 
 import functools
 import itertools
@@ -14,8 +15,8 @@ import os
 import queue
 import threading
 import warnings
-from collections.abc import Iterable
-from typing import Any, Callable, Generic, Optional, TypeVar, Union
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
@@ -36,6 +37,9 @@ from torch.utils.data.sampler import (
     SequentialSampler,
 )
 
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 __all__ = [
     "DataLoader",
@@ -171,7 +175,9 @@ class DataLoader(Generic[_T_co]):
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
         multiprocessing_context (str or multiprocessing.context.BaseContext, optional): If
-            ``None``, the default `multiprocessing context`_ of your operating system will
+            ``None``, the default
+            `multiprocessing context <https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods>`_ # noqa: D401
+            of your operating system will
             be used. (default: ``None``)
         generator (torch.Generator, optional): If not ``None``, this RNG will be used
             by RandomSampler to generate random indexes and multiprocessing to generate
@@ -219,9 +225,6 @@ class DataLoader(Generic[_T_co]):
 
     .. warning:: Setting `in_order` to `False` can harm reproducibility and may lead to a skewed data
                  distribution being fed to the trainer in cases with imbalanced data.
-
-    .. _multiprocessing context:
-        https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
     """
 
     dataset: Dataset[_T_co]
@@ -233,7 +236,7 @@ class DataLoader(Generic[_T_co]):
     sampler: Union[Sampler, Iterable]
     pin_memory_device: str
     prefetch_factor: Optional[int]
-    _iterator: Optional["_BaseDataLoaderIter"]
+    _iterator: Optional[_BaseDataLoaderIter]
     __initialized = False
 
     def __init__(
@@ -256,7 +259,7 @@ class DataLoader(Generic[_T_co]):
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
-    ):
+    ) -> None:
         torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
@@ -416,7 +419,7 @@ class DataLoader(Generic[_T_co]):
 
         torch.set_vital("Dataloader", "enabled", "True")  # type: ignore[attr-defined]
 
-    def _get_iterator(self) -> "_BaseDataLoaderIter":
+    def _get_iterator(self) -> _BaseDataLoaderIter:
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
         else:
@@ -475,11 +478,9 @@ class DataLoader(Generic[_T_co]):
 
         super().__setattr__(attr, val)
 
-    # We quote '_BaseDataLoaderIter' since it isn't defined yet and the definition can't be moved up
-    # since '_BaseDataLoaderIter' references 'DataLoader'.
-    def __iter__(self) -> "_BaseDataLoaderIter":
+    def __iter__(self) -> _BaseDataLoaderIter:
         # When using a single worker the returned iterator should be
-        # created everytime to avoid resetting its state
+        # created every time to avoid resetting its state
         # However, in the case of a multiple workers iterator
         # the iterator is only created once in the lifetime of the
         # DataLoader object so that workers can be reused
@@ -555,10 +556,10 @@ class DataLoader(Generic[_T_co]):
         #     necessary.
         #
         #
-        # [Note] Please note that this function repects `cpuset` only when os.sched_getaffinity is
+        # [Note] Please note that this function respects `cpuset` only when os.sched_getaffinity is
         #        available (available in most of Linux system, but not OSX and Windows).
         #        When os.sched_getaffinity is not available, os.cpu_count() is called instead, but
-        #        it doesn't repect cpuset.
+        #        it doesn't respect cpuset.
         #        We don't take threading into account since each worker process is single threaded
         #        at this time.
         #
@@ -704,7 +705,7 @@ class _BaseDataLoaderIter:
         self._num_yielded = 0
         self._profile_name = f"enumerate(DataLoader)#{self.__class__.__name__}.__next__"
 
-    def __iter__(self) -> "_BaseDataLoaderIter":
+    def __iter__(self) -> Self:
         return self
 
     def _reset(self, loader, first_iter=False):
@@ -885,7 +886,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #        2. A similar issue araises when a `DataLoader` is used in a subprocess.
     #           When a process ends, it shuts the all its daemonic children
     #           down with a SIGTERM (instead of joining them without a timeout).
-    #           Simiarly for threads, but by a different mechanism. This fact,
+    #           Similarly for threads, but by a different mechanism. This fact,
     #           together with a few implementation details of multiprocessing, forces
     #           us to make workers daemonic. All of our problems arise when a
     #           DataLoader is used in a subprocess, and are caused by multiprocessing
@@ -1016,7 +1017,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #   `cancel_join_thread` on that queue if its `IterableDataset` iterator
     #   happens to exhaust coincidentally, which is out of the control of the
     #   main process). Thus, since we will exit `pin_memory_thread` before the
-    #   workers (see below), two separete events are used.
+    #   workers (see below), two separate events are used.
     #
     # NOTE: In short, the protocol is that the main process will set these
     #       `done_event`s and then the corresponding processes/threads a `None`,
@@ -1570,7 +1571,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # (2) since we don't join, the worker may still raise error, and we
         # prefer capturing those, rather than ignoring them, even though they
         # are raised after the worker has finished its job.
-        # Joinning is deferred to `_shutdown_workers`, which it is called when
+        # Joining is deferred to `_shutdown_workers`, which it is called when
         # all workers finish their jobs (e.g., `IterableDataset` replicas) or
         # when this iterator is garbage collected.
 

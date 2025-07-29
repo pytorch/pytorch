@@ -35,7 +35,7 @@ def time_and_count(
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         fn_qual_name = f"{self.__class__.__name__}.{fn.__name__}"
         counters["inductor"][f"benchmarking.{fn_qual_name}"] += 1
-        with dynamo_timed(fn_qual_name, log_pt2_compile_event=True):
+        with dynamo_timed(fn_qual_name, log_pt2_compile_event=False):
             return fn(self, *args, **kwargs)
 
     return wrapper
@@ -230,7 +230,7 @@ class InductorBenchmarker(TritonBenchmarker):
         in milliseconds. An estimated duration is calculated based on the values
         of `memory_warmup_iters` and `benchmark_iters`, along with the estimated
         runtime of `_callable` and various other factors, and we then shrink
-        `benchmark_iters` to fit in the alloted maximum duration.
+        `benchmark_iters` to fit in the allotted maximum duration.
         - **kwargs: Additional kwargs that may be passed to the fallback.
 
         Returns:

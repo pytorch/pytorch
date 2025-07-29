@@ -5,6 +5,7 @@ Most commonly used methods are already supported, and the interface is general
 enough, so that more sophisticated ones can be also easily integrated in the
 future.
 """
+
 from functools import partialmethod
 
 from torch import optim
