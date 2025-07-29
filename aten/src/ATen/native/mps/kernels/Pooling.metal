@@ -169,6 +169,7 @@ PoolOffsets find_pool_offsets(
           return_indices,
           tid);
   }
+  return PoolOffsets();
 }
 
 // Kernel computes one element of the output per kernel call.

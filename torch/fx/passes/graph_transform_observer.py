@@ -31,18 +31,20 @@ class GraphTransformObserver:
         """
         log_url is inferred to be torch._inductor.config.trace.log_url_for_graph_xform unless otherwise specified
         """
-        from torch._inductor.config import trace
+        from torch._inductor import config as inductor_config
 
         self.gm = gm
         self.passname = passname
         self.subsystem = subsystem
 
         if log_url is None:
-            log_url = trace.log_url_for_graph_xform
+            log_url = inductor_config.trace.log_url_for_graph_xform
 
         self.log_url = log_url
 
-        self.active = trace.provenance_tracking or self.log_url is not None
+        self.active = (
+            self.log_url is not None or inductor_config.trace.provenance_tracking
+        )
 
         if self.active:
             self.erased_nodes: set[str] = set()

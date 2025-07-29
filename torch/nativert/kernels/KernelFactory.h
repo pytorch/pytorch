@@ -70,16 +70,14 @@ class KernelFactoryHandler {
 
 class KernelFactory {
  public:
-  explicit KernelFactory() {}
+  KernelFactory() = default;
 
   ExecutionKernels initializeNodeKernels(
       const Graph& graph,
       const std::shared_ptr<Weights>& weights,
       const torch::nativert::ExecutorConfig& executorConfig,
-      const Placement& placement,
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
-          pytorchStreamReader = nullptr,
-      const MakeProxyExecutorFn& makeProxyExecutorFunc = nullptr);
+          pytorchStreamReader = nullptr);
 
   static void registerHandler(
       const std::string& name,
