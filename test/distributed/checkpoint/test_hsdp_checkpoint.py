@@ -74,10 +74,11 @@ class SimpleModelUneven(torch.nn.Module):
 class TestHSDPCheckpoint(DTensorTestBase):
     @property
     def backend(self):
-        return dist.get_default_backend_for_device(device_type)
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
+        return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     @parametrize("is_even_sharded_model", [True, False])
     def test_hsdp_checkpoint(self, is_even_sharded_model) -> None:
@@ -134,8 +135,8 @@ class TestHSDPCheckpoint(DTensorTestBase):
             self.assertEqual(v1.placements, v2.placements)
             self.assertEqual(v1.to_local(), v2.to_local())
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     @parametrize("is_even_sharded_model", [True, False])
     def test_hsdp_fsdp_checkpoint_conversion(self, is_even_sharded_model) -> None:

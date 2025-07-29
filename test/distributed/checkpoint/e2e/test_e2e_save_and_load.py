@@ -211,8 +211,8 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def _optim(self, model):
         return torch.optim.Adam(model.parameters(), lr=0.1)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     @parametrize("compile", [True, False])
     # TODO: Previously PairwiseParallel does not shard properly, passing ModelType.FSDP_TP test where it
@@ -221,8 +221,8 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def test_e2e(self, compile, model_type):
         self._run_e2e_test(compile, model_type)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     @parametrize(
         "cache_staged_state_dict, async_checkpointer_type, zoc",
@@ -382,9 +382,9 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         # Validate that the non-stateful state dict was replaced with the loaded state dict
         self.assertTrue(sd.set_sd_item_called)
 
+    @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(4)
     def test_different_ordered_state_dict_keys(self):
         """Tests that the order of keys in the state dict does not matter when loading
         If order was not accounted for, the following test would cause a deadlock.
@@ -441,8 +441,8 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         DCP.save({}, checkpoint_id=self.temp_dir)
         DCP.load({}, checkpoint_id=self.temp_dir)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     def test_partial_load(self):
         model, optim = self._create_model(compile=False, model_type=ModelType.NONE)
@@ -480,8 +480,8 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                     loaded_optim_state[k][optim_key], v[optim_key], offload_to_cpu=True
                 )
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     def test_overwrite(self):
         t1, t2 = torch.randn(10), torch.randn(10)
