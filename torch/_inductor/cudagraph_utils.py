@@ -10,6 +10,8 @@ from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
 from torch.utils._ordered_set import OrderedSet
 
+from .utils import is_using_cudagraph_partition
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -171,10 +173,7 @@ def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping.pop(torch.device("meta"), None)
 
     # dynamo cudagraph does not support graph partition
-    if (
-        torch._inductor.config.triton.cudagraphs
-        and torch._inductor.config.graph_partition
-    ):
+    if is_using_cudagraph_partition():
         # graph partition supports splitting on cpu op. So we can ignore cpu nodes.
         device_node_mapping.pop(torch.device("cpu"), None)
 
