@@ -752,6 +752,22 @@ class TupleIteratorGetItemSource(GetItemSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class DataclassFieldsSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "dataclass_fields")
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"___dataclass_fields({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class TypeSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None
