@@ -50,7 +50,9 @@ from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
     dict_version,
+    DictGetItemGuardAccessor,
     DictGuardManager,
+    GetGenericDictGuardAccessor,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
     install_storage_overlapping_guard,
@@ -277,8 +279,158 @@ class GuardManagerWrapper:
         return self.diff_guard_sources
 
     def finalize(self):
+        if config.use_recursive_dict_tags_for_guards and justknobs_check(
+            "pytorch/compiler:use_recursive_dict_tags_for_guards"
+        ):
+            self.find_tag_safe_roots()
+        self.prepare_diff_guard_manager()
+
+    def prepare_diff_guard_manager(self):
         self.collect_diff_guard_sources()
         self.populate_diff_guard_manager()
+
+    def find_tag_safe_roots(self):
+        """
+        Identify ``tag safe nodes`` and ``tag safe roots`` within a guard tree.
+
+        -----------------------------------------------------------------------
+        tag safe node
+        -----------------------------------------------------------------------
+        A *tag safe node* is a ``GuardManager`` whose guarded value satisfies one
+        of the following conditions:
+
+        1. Immutable value - The value is intrinsically immutable according to
+        ``is_immutable_object``. Tensors are considered immutable. To ensure
+        that symbolic guards run, we also check that the GuardManager has no
+        accessors.
+
+        2. Nested tag safe dictionary - The value is a ``dict`` whose keys and
+        values are all tag safe nodes  (checked recursively).  Such dictionaries
+        allow entire nested structures to be skipped once their identity tag
+        matches.
+
+        3. Pure ``nn.Module`` - The value is an ``nn.Module`` whose sole
+        accessor is ``GetGenericDictGuardAccessor``—i.e., it only exposes its
+        ``__dict__`` and nothing else that could mutate between runs.
+
+        For every tag safe node, verifying the identity/tag of just the top-level
+        dictionary is enough to guarantee the entire subtree is unchanged, enabling
+        a *fast-path* guard check.
+
+        -----------------------------------------------------------------------
+        tag safe root
+        -----------------------------------------------------------------------
+        A ``tag safe root`` is a tag safe node whose parent is not tag safe.
+        These boundary nodes mark the points where guard evaluation can safely
+        prune traversal: if a tag-safe root’s dictionary tag matches, the entire
+        subtree beneath it is skipped.
+
+        One strong requirement for tag safe root is for the guarded object to
+        support weakref. Refer to more details in the Recursive dict tag
+        matching note. In short, we need to save the weakref of the object on
+        first invocation, and check if it is still valid in later iterations, to
+        apply recursive dict tag optimizations. `dict` objects do NOT support
+        weakref. Therefore, as of now, we only mark nn module related guard
+        managers as tag safe roots.
+
+        Algorithm
+        ---------
+        The search runs in post-order traversal
+
+        1. Visit leaves and classify them as tag safe or not.
+        2. Propagate tag-safety upward: a parent dictionary becomes tag safe only if
+        all of its children are already tag-safe.
+        3. Propagate tag-safe-rootness upward: if the whole subtree is tag safe,
+        the current node becomes the new tag safe root, otherwise propagate the
+        subtree tag safe roots.
+        4. Collect every tag safe node and, by inspecting parent tags, label the
+        subset that are tag safe roots.
+        """
+
+        def visit_dict_manager(node):
+            # Just recurse through the key and value dict managers and check if
+            # all of them are tag safe nodes.
+            assert node.is_guarded_value_dict()
+
+            tag_safe_roots = []
+            is_subtree_tag_safe = True
+
+            # Recurse to get the tag safe roots from subtree.
+            for idx, (key_mgr, val_mgr) in sorted(
+                node.get_key_value_managers().items()
+            ):
+                if key_mgr is not None:
+                    visit(key_mgr)
+                if val_mgr is not None:
+                    tag_safe_roots.extend(visit(val_mgr))
+
+            for idx, (key_mgr, val_mgr) in sorted(
+                node.get_key_value_managers().items()
+            ):
+                if key_mgr:
+                    is_subtree_tag_safe &= key_mgr.is_tag_safe()
+
+                if val_mgr:
+                    is_subtree_tag_safe &= val_mgr.is_tag_safe()
+
+            if is_subtree_tag_safe:
+                node.mark_tag_safe()
+            return tag_safe_roots
+
+        def visit_manager(node):
+            assert not isinstance(node, DictGuardManager)
+
+            # Collect the subtree tag safe roots
+            tag_safe_roots = []
+            for child_mgr in node.get_child_managers():
+                tag_safe_roots.extend(visit(child_mgr))
+
+            if node.is_guarded_value_immutable():
+                # If the node guards a tensor, mark it tag safe only if there
+                # are no accessors. Presence of accessors means presence of
+                # symbolic shape guards.
+                if node.is_guarded_value_tensor():
+                    if node.has_no_accessors() and not node.has_object_aliasing_guard():
+                        node.mark_tag_safe()
+                else:
+                    node.mark_tag_safe()
+            elif node.is_guarded_value_dict():
+                accessors = node.get_accessors()
+                child_mgrs = node.get_child_managers()
+                is_subtree_tag_safe = all(
+                    isinstance(accessor, DictGetItemGuardAccessor) and mgr.is_tag_safe()
+                    for accessor, mgr in zip(accessors, child_mgrs)
+                )
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+            elif node.is_guarded_value_nn_module():
+                accessors = node.get_accessors()
+                child_mgrs = node.get_child_managers()
+                is_subtree_tag_safe = all(
+                    isinstance(accessor, GetGenericDictGuardAccessor)
+                    and mgr.is_tag_safe()
+                    for accessor, mgr in zip(accessors, child_mgrs)
+                )
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+                    # Return the current node as tag safe root, discarding the
+                    # subtree tag safe roots.
+                    return [
+                        node,
+                    ]
+            return tag_safe_roots
+
+        def visit(node):
+            if node is None:
+                return []
+            if isinstance(node, DictGuardManager):
+                return visit_dict_manager(node)
+            return visit_manager(node)
+
+        tag_safe_roots = visit(self.root)
+        for node in tag_safe_roots:
+            if node.is_guarded_value_nn_module():
+                node.mark_tag_safe_root()
 
     def populate_diff_guard_manager(self):
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
@@ -312,6 +464,7 @@ class GuardManagerWrapper:
         if accessor_str:
             s += ", " + accessor_str
         s += f", type={guard_manager.type_of_guarded_value()}"
+        s += f", tag_safe=({guard_manager.is_tag_safe()}, {guard_manager.is_tag_safe_root()})"
         return s
 
     def construct_dict_manager_string(self, mgr, body):
@@ -3191,6 +3344,11 @@ class CheckFunctionManager:
 
         torch_function_mode_stack_check_fn = make_torch_function_mode_stack_guard(
             self.torch_function_mode_stack
+        )
+
+        # Add compile id info in the guard manager for debugging purpose
+        self.guard_manager.root.attach_compile_id(
+            str(CompileContext.current_compile_id())
         )
 
         # Insert the global_state guard
