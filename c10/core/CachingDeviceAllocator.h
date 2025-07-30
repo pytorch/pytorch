@@ -8,9 +8,11 @@
 #include <c10/util/hash.h>
 #include <c10/util/static_tracepoint.h>
 
+#include <deque>
 #include <mutex>
 #include <new>
 #include <set>
+#include <stack>
 
 namespace c10::CachingDeviceAllocator {
 
@@ -77,6 +79,21 @@ using CaptureId_t = unsigned long long;
 // first is set if the instance is created by Graph mode capture_begin.
 // second is set if the instance is created by Graph mode graph_pool_handle.
 using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
+
+using OutOfMemoryObserver = std::function<void(
+  int64_t device,
+  size_t allocated,
+  size_t device_total,
+  size_t device_free)>;
+
+enum struct RecordContext {
+  NEVER = 0,
+  STATE = 1, // only keep stacks for active allocations
+  ALLOC = 2, // additionally keep stacks for allocations in the trace history
+  ALL = 3, // additionally record stacks for when something is freed
+};
+
+typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
 
 struct MempoolIdHash {
   std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
@@ -703,6 +720,126 @@ struct AllocParams {
   Status status{Status::Ok};
 };
 
+union trace_time_ {
+  time_t t_;
+  approx_time_t approx_t_;
+};
+
+template <typename StreamT>
+struct TraceEntry {
+  enum Action {
+    ALLOC, // API made to the caching allocator for new memory
+    FREE_REQUESTED, // API call made to the caching allocator to free memory
+    FREE_COMPLETED, // The allocator might have to delay a free because
+                    // it is still in use on another stream via record_stream
+                    // This event is generated when a free actually completes.
+    SEGMENT_ALLOC, // a call to device allocation like `cudaMalloc` to get more memory from the OS
+    SEGMENT_FREE, // a call to device deallocation like `cudaFree` to return memory to the OS (e.g. to
+                  // defragment or empty_caches)
+    SEGMENT_MAP, // a call to virtual memory map like `cuMemMap` (used with expandable_segments)
+    SEGMENT_UNMAP, // a call to virtual memory unmap like `cuMemUnmap` (used with expandable segments)
+    SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
+              // events
+    OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
+        // bytes reported by cuda)
+  };
+  TraceEntry(
+      Action action,
+      c10::DeviceIndex device,
+      size_t addr,
+      size_t size,
+      StreamT stream,
+      MempoolId_t mempool,
+      approx_time_t time,
+      std::shared_ptr<GatheredContext> context = nullptr,
+      std::string compile_context = "")
+      : action_(action),
+        device_(device),
+        addr_(addr),
+        context_(std::move(context)),
+        stream_(stream),
+        size_(size),
+        mempool_(std::move(mempool)),
+        compile_context_(std::move(compile_context)) {
+    time_.approx_t_ = time;
+  }
+  Action action_;
+  c10::DeviceIndex device_;
+  size_t addr_; // for OOM, this is the amount of free bytes reported by cuda
+  std::shared_ptr<GatheredContext> context_;
+  StreamT stream_{};
+  size_t size_;
+  MempoolId_t mempool_;
+  trace_time_ time_{};
+  std::string compile_context_{};
+};
+
+using AllocatorTraceTracker = std::function<void(const TraceEntry<StreamT>&)>;
+
+template <class T>
+class RingBuffer {
+ public:
+  RingBuffer() {
+    // alloc_trace is a pointer because we need to intentionally
+    // leak this on deallocation it can hold references to Python
+    // state which will already be destroyed when we are in exit handlers
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+    alloc_trace = new std::vector<T>();
+  }
+
+  void setMaxEntries(size_t size) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    alloc_trace_max_entries_ = std::max(size_t(1), size);
+  }
+
+  void insertEntries(const T& entry) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    if (alloc_trace->size() < alloc_trace_max_entries_) {
+      alloc_trace->emplace_back(entry);
+    } else {
+      (*alloc_trace)[alloc_trace_next++] = entry;
+      if (alloc_trace_next == alloc_trace_max_entries_) {
+        alloc_trace_next = 0;
+      }
+    }
+  }
+
+  void getEntries(std::vector<T>& result) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    result.reserve(alloc_trace->size());
+    result.insert(
+        result.end(),
+        alloc_trace->begin() +
+            static_cast<typename std::vector<T>::difference_type>(
+                alloc_trace_next),
+        alloc_trace->end());
+    result.insert(
+        result.end(),
+        alloc_trace->begin(),
+        alloc_trace->begin() +
+            static_cast<typename std::vector<T>::difference_type>(
+                alloc_trace_next));
+  }
+
+  void clear() {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    alloc_trace_next = 0;
+    alloc_trace->clear();
+  }
+
+ private:
+  size_t alloc_trace_max_entries_ = 1;
+
+  // Both alloc_trace and alloc_trace_next needs to be used
+  // under alloc_trace_lock.
+  std::mutex alloc_trace_lock;
+  size_t alloc_trace_next = 0;
+  std::vector<T>*
+      alloc_trace; // pointer because we need to intentionally leak this on
+                   // deallocation it can hold references to Python state which
+                   // will already be destroyed when we are in exit handlers
+};
+
 template <
     typename StreamT,
     typename EventT,
@@ -743,16 +880,17 @@ struct CachingDeviceAllocatorImpl {
 
   // Deferring event recording on blocks until Graph Capture Mode has completed.
   std::vector<BlockT*> needs_events_deferred_until_no_capture;
-  
+
   // outstanding cuda events
   ska::flat_hash_map<
       StreamT,
       std::deque<std::pair<EventT, BlockT*>>>
       block_events;
 
-  // record used memory.
+  // Tracks memory usage during garbage collection.
   size_t total_allocated_memory = 0;
 
+  // Upper limit of memory allowed during garbage collection.
   size_t allowed_memory_maximum = 0;
 
   // all live expandable segments
@@ -767,7 +905,7 @@ struct CachingDeviceAllocatorImpl {
   RecordContext record_context_ = RecordContext::NEVER;
 
   // Ring buffer for memory snapshot TraceEntry's
-  RingBuffer<TraceEntry> alloc_buffer;
+  RingBuffer<TraceEntry<StreamT>> alloc_buffer;
 
   // Members specific to CUDA graphs
 
@@ -781,7 +919,7 @@ struct CachingDeviceAllocatorImpl {
   ska::flat_hash_map<MempoolId_t, PrivatePool<BlockT>*, MempoolIdHash>
       graph_pools_freeable;
 
-  // XXX - maybe we should generalize and have multiple events
+  // OOM callback when OOM happens.
   std::vector<OutOfMemoryObserver> oom_observers_;
 
   std::vector<AllocatorTraceTracker> trace_trackers_;
@@ -794,7 +932,6 @@ struct CachingDeviceAllocatorImpl {
   static thread_local std::stack<std::string> compile_context;
 
  public:
- private:
  protected:
 };
 
