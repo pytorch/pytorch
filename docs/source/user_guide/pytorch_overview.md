@@ -56,11 +56,30 @@ PyTorch's autograd engine automatically computes the gradients needed for neural
 For a quick tutorial on PyTorch, see the [Learn the Basics tutorial](https://pytorch.org/tutorials/beginner/basics/intro.html).
 
 PyTorch can do so much more beyond the basic alarithmetic operations. It supports complex neural network architectures through
-its {mod}`torch.nn` module, provides efficient data loading utilities with {mod}
-`torch.utils.data`, and offers a suite of optimization algorithms in {mod}`torch.
-optim`. PyTorch also facilitates distributed training across multiple GPUs and
-nodes, making it suitable for large-scale machine learning tasks. For performance optimization, PyTorch provides {func}`torch.compile`, which allows for compiling PyTorch models to improve execution speed and efficiency, and {func}`torch.export`, which enables exporting models for deployment in various environments.
+its {mod}`torch.nn` module, provides efficient data loading utilities with 
+{mod}`torch.utils.data`, and offers a suite of optimization algorithms in
+{mod}`torch.optim`. PyTorch also facilitates distributed training across multiple GPUs and
+nodes, making it suitable for large-scale machine learning tasks. For performance optimization,
+PyTorch provides {func}`torch.compile`, which allows for compiling PyTorch models to improve execution
+speed and efficiency, and {func}`torch.export`, which enables exporting models for deployment in various environments.
 compiling PyTorch models to improve execution speed and efficiency.
+
+## GPU Acceleration
+
+PyTorch can run on GPUs for accelerated computation and training.
+Herer is a quick example of using GPU acceleration:
+
+```python
+# Check if GPU is available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+# Run on GPU
+torch.randn(1000, 1000, device=device)
+
+# Operations run on GPU
+y = x @ x  # Matrix multiplication
+```
 
 ## Optimizing with `torch.compile`
 
@@ -80,24 +99,6 @@ print(x.grad)
 ```
 
 Learn more about torch.compile in the {ref}`torch.compiler_overview` section.
-
-## GPU Acceleration
-
-PyTorch can run on GPUs for accelerated computation and training.
-Herer is a quick example of using GPU acceleration:
-
-```{code-cell}
-# Check if GPU is available
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
-
-# Move tensors to GPU
-x = torch.randn(1000, 1000)
-x = x.to(device)
-
-# Operations run on GPU
-y = x @ x  # Matrix multiplication
-```
 
 ```{seealso}
 * {ref}`torch.compiler_overview`
