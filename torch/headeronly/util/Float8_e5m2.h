@@ -305,56 +305,72 @@ inline C10_HOST_DEVICE double operator/(double a, Float8_e5m2 b)
 /// Arithmetic with ints
 
 inline C10_HOST_DEVICE Float8_e5m2 operator+(Float8_e5m2 a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a + static_cast<Float8_e5m2>(b);
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator-(Float8_e5m2 a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a - static_cast<Float8_e5m2>(b);
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator*(Float8_e5m2 a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a * static_cast<Float8_e5m2>(b);
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator/(Float8_e5m2 a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a / static_cast<Float8_e5m2>(b);
 }
 
 inline C10_HOST_DEVICE Float8_e5m2 operator+(int a, Float8_e5m2 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e5m2>(a) + b;
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator-(int a, Float8_e5m2 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e5m2>(a) - b;
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator*(int a, Float8_e5m2 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e5m2>(a) * b;
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator/(int a, Float8_e5m2 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e5m2>(a) / b;
 }
 
 //// Arithmetic with int64_t
 
 inline C10_HOST_DEVICE Float8_e5m2 operator+(Float8_e5m2 a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a + static_cast<Float8_e5m2>(b);
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator-(Float8_e5m2 a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a - static_cast<Float8_e5m2>(b);
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator*(Float8_e5m2 a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a * static_cast<Float8_e5m2>(b);
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator/(Float8_e5m2 a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a / static_cast<Float8_e5m2>(b);
 }
 
 inline C10_HOST_DEVICE Float8_e5m2 operator+(int64_t a, Float8_e5m2 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e5m2>(a) + b;
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator-(int64_t a, Float8_e5m2 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e5m2>(a) - b;
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator*(int64_t a, Float8_e5m2 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e5m2>(a) * b;
 }
 inline C10_HOST_DEVICE Float8_e5m2 operator/(int64_t a, Float8_e5m2 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e5m2>(a) / b;
 }
 
@@ -378,7 +394,7 @@ using c10::operator/=;
 namespace detail {
 using c10::detail::fp8e5m2_from_fp32_value;
 using c10::detail::fp8e5m2_to_fp32_value;
-}
+} // namespace detail
 } // namespace torch::headeronly
 
 namespace std {
