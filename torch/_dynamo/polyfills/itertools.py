@@ -18,9 +18,11 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "accumulate",
     "chain",
     "chain_from_iterable",
     "compress",
+    "cycle",
     "dropwhile",
     "islice",
     "tee",
