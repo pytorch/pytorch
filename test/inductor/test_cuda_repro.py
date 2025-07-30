@@ -26,7 +26,6 @@ from torch._inductor.utils import (
     run_fw_bw_and_get_code,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -178,10 +177,9 @@ class CudaReproTests(TestCase):
             inputs = [q, k, v, mask]
 
             def f(q, k, v, mask):
-                with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
-                    return F.scaled_dot_product_attention(
-                        q, k, v, attn_mask=mask, dropout_p=0.0
-                    )
+                return F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=mask, dropout_p=0.0
+                )
 
             f_compiled = torch.compile(f)
 
@@ -1845,6 +1843,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(graph.disable_cudagraphs_reason, None)
         self.assertEqual(graph.device_types, {"cuda"})
 
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
     def test_triton_interpret(self):
         import subprocess
 
@@ -2098,6 +2097,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertIn("znumel", code)
 
     @xfailIfPy312Plus  # https://github.com/pytorch/pytorch/issues/142032
+    @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         target_size = (8, 2)
         mem_eff_temporal_upsampling_interp_chunks = 2
