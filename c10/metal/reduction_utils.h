@@ -303,30 +303,58 @@ float3 threadgroup_welford_combine(threadgroup T* data, unsigned size) {
   return rc;
 }
 
-template <typename T>
-int threadgroup_argmax(threadgroup T* data, unsigned size) {
-  // TODO: This should be moved to the callee
-  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  int rc = 0;
-  for (unsigned idx = 1; idx < size; ++idx) {
-    if (data[idx] > data[rc]) {
-      rc = idx;
+template <typename ARG_T, typename IDX_T>
+IDX_T threadgroup_argmax(
+    threadgroup ARG_T* arg_data,
+    threadgroup IDX_T* idx_data,
+    ARG_T val,
+    IDX_T idx_val,
+    unsigned idx,
+    unsigned size) {
+  auto rc = simd_argmax(val, idx_val);
+  if (idx % simdgroup_size == 0) {
+    arg_data[idx / simdgroup_size] = rc.first;
+    idx_data[idx / simdgroup_size] = rc.second;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1 = simd_argmax(arg_data[idx], idx_data[idx]);
+      if (idx == 0) {
+        arg_data[idx / simdgroup_size] = rc1.first;
+        idx_data[idx / simdgroup_size] = rc1.second;
+      }
     }
   }
-  return rc;
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return idx_data[0];
 }
 
-template <typename T>
-int threadgroup_argmin(threadgroup T* data, unsigned size) {
-  // TODO: This should be moved to the callee
-  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  int rc = 0;
-  for (unsigned idx = 1; idx < size; ++idx) {
-    if (data[idx] < data[rc]) {
-      rc = idx;
+template <typename ARG_T, typename IDX_T>
+IDX_T threadgroup_argmin(
+    threadgroup ARG_T* arg_data,
+    threadgroup IDX_T* idx_data,
+    ARG_T val,
+    IDX_T idx_val,
+    unsigned idx,
+    unsigned size) {
+  auto rc = simd_argmin(val, idx_val);
+  if (idx % simdgroup_size == 0) {
+    arg_data[idx / simdgroup_size] = rc.first;
+    idx_data[idx / simdgroup_size] = rc.second;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1 = simd_argmin(arg_data[idx], idx_data[idx]);
+      if (idx == 0) {
+        arg_data[idx / simdgroup_size] = rc1.first;
+        idx_data[idx / simdgroup_size] = rc1.second;
+      }
     }
   }
-  return rc;
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return idx_data[0];
 }
 
 } // namespace metal
