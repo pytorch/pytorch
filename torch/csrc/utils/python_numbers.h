@@ -199,13 +199,11 @@ inline c10::DeviceIndex THPUtils_unpackDeviceIndex(PyObject* obj) {
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  if (overflow != 0) {
-    TORCH_CHECK(false, "Overflow when unpacking DeviceIndex");
-  }
-  if (value > std::numeric_limits<c10::DeviceIndex>::max() ||
-      value < std::numeric_limits<c10::DeviceIndex>::min()) {
-    TORCH_CHECK(false, "Overflow when unpacking DeviceIndex");
-  }
+  TORCH_CHECK(overflow == 0, "Overflow when unpacking DeviceIndex");
+  TORCH_CHECK(
+      value <= std::numeric_limits<c10::DeviceIndex>::max() &&
+          value >= std::numeric_limits<c10::DeviceIndex>::min(),
+      "Overflow when unpacking DeviceIndex");
   return (c10::DeviceIndex)value;
 }
 

@@ -131,9 +131,8 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
       size(0),
       default_scalar(0) {
   auto space = fmt.find(' ');
-  if (space == std::string::npos) {
-    TORCH_CHECK(false, "FunctionParameter(): missing type: " + fmt);
-  }
+  TORCH_CHECK(
+      space != std::string::npos, "FunctionParameter(): missing type: " + fmt);
 
   auto type_str = fmt.substr(0, space);
 
@@ -154,9 +153,9 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 
   auto name_str = fmt.substr(space + 1);
   auto it = type_map.find(type_str);
-  if (it == type_map.end()) {
-    TORCH_CHECK(false, "FunctionParameter(): invalid type string: " + type_str);
-  }
+  TORCH_CHECK(
+      it != type_map.end(),
+      "FunctionParameter(): invalid type string: " + type_str);
   type_ = it->second;
 
   auto eq = name_str.find('=');
@@ -1323,9 +1322,8 @@ void FunctionParameter::set_default_str(const std::string& str) {
   }
   if (type_ == ParameterType::TENSOR ||
       type_ == ParameterType::DISPATCH_KEY_SET) {
-    if (str != "None") {
-      TORCH_CHECK(false, "default value for Tensor must be none, got: " + str);
-    }
+    TORCH_CHECK(
+        str == "None", "default value for Tensor must be none, got: " + str);
   } else if (type_ == ParameterType::INT64 || type_ == ParameterType::SYM_INT) {
     default_int = atol(str.c_str());
   } else if (type_ == ParameterType::BOOL) {
@@ -1349,9 +1347,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
       default_intlist = parse_intlist_args(str, size);
     }
   } else if (type_ == ParameterType::FLOAT_LIST) {
-    if (str != "None") {
-      TORCH_CHECK(false, "Defaults not supported for float[]");
-    }
+    TORCH_CHECK(str == "None", "Defaults not supported for float[]");
   } else if (type_ == ParameterType::SCALARTYPE) {
     if (str == "None") {
       default_scalartype = at::ScalarType::Undefined;
@@ -1371,13 +1367,9 @@ void FunctionParameter::set_default_str(const std::string& str) {
       TORCH_CHECK(false, "invalid default value for layout: " + str);
     }
   } else if (type_ == ParameterType::DEVICE) {
-    if (str != "None") {
-      TORCH_CHECK(false, "invalid device: " + str);
-    }
+    TORCH_CHECK(str == "None", "invalid device: " + str);
   } else if (type_ == ParameterType::STREAM) {
-    if (str != "None") {
-      TORCH_CHECK(false, "invalid stream: " + str);
-    }
+    TORCH_CHECK(str == "None", "invalid stream: " + str);
   } else if (type_ == ParameterType::STRING) {
     if (str != "None") {
       default_string = parse_string_literal(str);
@@ -1443,12 +1435,9 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
         break;
       }
     }
-    if (offset == std::string::npos) {
-      TORCH_CHECK(false, "missing closing parenthesis: " + fmt);
-    }
-    if (offset == last_offset) {
-      TORCH_CHECK(false, "malformed signature: " + fmt);
-    }
+    TORCH_CHECK(
+        offset != std::string::npos, "missing closing parenthesis: " + fmt);
+    TORCH_CHECK(offset != last_offset, "malformed signature: " + fmt);
 
     auto param_str = fmt.substr(last_offset, offset - last_offset);
     last_offset = next_offset;
