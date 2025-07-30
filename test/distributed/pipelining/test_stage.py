@@ -419,6 +419,7 @@ class StageNegativeTest(MultiProcessTestCase):
             self.device,
             dw_builder=lambda: None,
         )
+        stage_with_dw_builder._has_backward = True
         with self.assertRaisesRegex(AssertionError, "backward_one_chunk"):
             stage_with_dw_builder.backward_weight_one_chunk(bwd_chunk_id=0)
 
