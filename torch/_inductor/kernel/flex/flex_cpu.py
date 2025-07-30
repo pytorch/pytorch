@@ -12,20 +12,18 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
 
+from ...codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
 from ...ir import Buffer, FixedLayout, TensorBox
 from ...select_algorithm import autotune_select_algorithm
-
 from .common import (
     build_subgraph_buffer,
     build_subgraph_module_buffer,
+    contiguous_last_dim,
     create_placeholder,
+    get_fwd_subgraph_outputs,
     infer_dense_strides,
     maybe_realize,
-    contiguous_last_dim,
-    get_fwd_subgraph_outputs
 )
-
-from ...codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
 
 
 def check_cpu_supported():
@@ -54,6 +52,7 @@ def lower_cpu(
     score_mod_other_buffers,
     mask_mod_other_buffers,
 ):
+    """CPP based template for flex attention for x86 CPUs"""
     (
         _,  # q_length
         _,  # kv_length

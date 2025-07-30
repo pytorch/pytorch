@@ -1352,7 +1352,6 @@ class TritonTemplate(KernelTemplate):
         self.grid = grid
         self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"
-        log.debug("Registering template {}", name)
         TritonTemplate.all_templates[name] = self
         self.debug = debug
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template

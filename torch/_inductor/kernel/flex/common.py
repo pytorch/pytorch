@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 """Common utilities and functions for flex attention kernels"""
 
+import math
 from collections.abc import Sequence
 from typing import Optional, Union
-import math
 
 import sympy
 
@@ -14,6 +14,7 @@ from torch.utils._pytree import tree_map
 
 from ...ir import (
     ComputedBuffer,
+    ExternKernel,
     FixedLayout,
     FlexibleLayout,
     get_fill_order,
@@ -25,7 +26,6 @@ from ...ir import (
     StorageBox,
     Subgraph,
     TensorBox,
-    ExternKernel
 )
 from ...lowering import (
     _full,
@@ -34,15 +34,14 @@ from ...lowering import (
     index_output_size_and_inner_fn,
     to_dtype,
 )
-from ...select_algorithm import SymbolicGridFn, realize_inputs
-
+from ...select_algorithm import realize_inputs
 
 
 SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
 
 
 def zeros_and_scatter_lowering(shape: list[int], indices, values):
-    """ To support backwards on captured buffers we register a specific lowering for our specific custom up"""
+    """To support backwards on captured buffers we register a specific lowering for our specific custom up"""
     # Always accumulate into fp32 then cast
     grad = _full(0, values.get_device(), torch.float32, shape)
     assert isinstance(grad, TensorBox)
@@ -98,6 +97,7 @@ def get_fwd_subgraph_outputs(
         else [mask_graph_buffer]
     )
     return [*subgraph_buffer, *mask_graph_buffer]
+
 
 def build_subgraph_module_buffer(
     args: list[Union[TensorBox, ShapeAsConstantBuffer]],
@@ -158,6 +158,7 @@ def build_subgraph_module_buffer(
 
     return tree_map(convert_output_node_to_buffer, pw_subgraph.graph_outputs)
 
+
 def build_subgraph_buffer(
     args: list[Union[TensorBox, ShapeAsConstantBuffer]], subgraph: Subgraph
 ) -> SubgraphResults:
@@ -174,6 +175,7 @@ def maybe_realize(args: list[Optional[IRNode]]):
         ),
         args,
     )
+
 
 def create_placeholder(
     name: str,
@@ -240,7 +242,7 @@ def create_indices_fake(x) -> torch.Tensor:
 
 
 def create_num_blocks_fake_generator(sparse_indices):
-    """ Create a fake num_blocks that is used for autotuning.
+    """Create a fake num_blocks that is used for autotuning.
 
     The idea here is that we need to create a real tensor with real data
     that's representative for benchmarking.
@@ -253,6 +255,7 @@ def create_num_blocks_fake_generator(sparse_indices):
     If it's too short then prefetching won't help. If it's too long then
     autotuning will take longer for no good reason.
     """
+
     def create_num_blocks_fake(x) -> torch.Tensor:
         num_blocks_for_autotuning = V.graph.sizevars.size_hint(sparse_indices.shape[-1])
         size = [V.graph.sizevars.size_hint(i) for i in x.get_size()]
@@ -265,6 +268,7 @@ def create_num_blocks_fake_generator(sparse_indices):
 
     return create_num_blocks_fake
 
+
 def contiguous_last_dim(x):
     """Ensure that realized IR node has a contiguous stride in the last dimension."""
     strides = x.maybe_get_stride()
@@ -273,13 +277,16 @@ def contiguous_last_dim(x):
         return ExternKernel.require_stride_order(x, contiguous_stride_order)
     return x
 
+
 def is_power_of_2(n):
     return n != 0 and ((n & (n - 1)) == 0)
+
 
 def next_power_of_two(n):
     if n <= 0:
         return 1
     return 2 ** math.ceil(math.log2(n))
+
 
 # ---- Common Template Strings ----
 compute_forward_block_mn = r"""

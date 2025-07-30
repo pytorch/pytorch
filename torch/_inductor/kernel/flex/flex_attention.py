@@ -1,12 +1,10 @@
 # mypy: allow-untyped-defs
 """Triton Implementation of the flex_attention Kernel"""
 
-import copy
 import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import auto, Enum
 from typing import Any, Optional, Union
 
 import sympy
@@ -14,67 +12,35 @@ import sympy
 import torch
 from torch._inductor.utils import can_use_tma
 from torch._inductor.virtualized import V
-from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map
-from torch.utils._sympy.numbers import int_oo
-from torch.utils._sympy.value_ranges import ValueRanges
 
-from ...ir import (
-    Buffer,
-    ComputedBuffer,
-    ExternKernel,
-    FixedLayout,
-    FlexibleLayout,
-    get_fill_order,
-    InputBuffer,
-    IRNode,
-    MutationLayoutSHOULDREMOVE,
-    Scatter,
-    ShapeAsConstantBuffer,
-    StorageBox,
-    Subgraph,
-    TensorBox,
-)
-from ...lowering import (
-    _full,
-    check_and_broadcast_indices,
-    empty,
-    empty_strided,
-    expand,
-    index_output_size_and_inner_fn,
-    lowerings,
-    register_lowering,
-    to_dtype,
-)
+from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
+from ...lowering import empty, empty_strided, lowerings, register_lowering
 from ...select_algorithm import (
     autotune_select_algorithm,
     SymbolicGridFn,
     TritonTemplate,
 )
 from .common import (
+    build_subgraph_buffer,
     compute_forward_block_mn,
     compute_forward_inner,
     compute_next_offset_func,
     create_indices_fake,
     create_num_blocks_fake_generator,
+    create_placeholder,
     get_bounded_indices_func,
     get_fwd_subgraph_outputs,
+    infer_dense_strides,
+    is_power_of_2,
     load_checked_2d,
     load_checked_block,
     maybe_realize,
+    next_power_of_two,
     SubgraphResults,
-    construct_strides,
-    infer_dense_strides,
-    create_placeholder,
-    build_subgraph_buffer,
-    contiguous_last_dim,
-    is_power_of_2,
-    next_power_of_two
-
 )
-
-from .flex_decoding import create_flex_decoding_kernel, _use_flex_decoding
 from .flex_cpu import lower_cpu
+from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -100,7 +66,6 @@ def get_float32_precision():
         return "'ieee'"
     else:
         return "'tf32'"
-
 
 
 compute_flex_attention = r"""
@@ -366,6 +331,7 @@ flex_attention_template = TritonTemplate(
     + get_bounded_indices_func,
 )
 
+
 def set_head_dim_values(
     kernel_options: dict[str, Any], qk_head_dim, v_head_dim, graph_sizevars
 ):
@@ -412,6 +378,12 @@ def flex_attention(
     score_mod_other_buffers,
     mask_mod_other_buffers,
 ):
+    """The main lowering for the flex_attention hop
+    This can currently lower to one of 3 templates:
+    1. Base Triton Template
+    2. Flex Decode Triton Template
+    3. Cpu specific CPP template
+    """
     if query.get_device().type == "cpu":
         return lower_cpu(
             query,
@@ -1520,6 +1492,7 @@ def process_joint_outputs(
     torch.ops.higher_order.flex_attention_backward, type_promotion_kind=None
 )
 def flex_attention_backward(*args, **kwargs):
+    """Lowering for the flex_attention_backward op in triton"""
     (
         query,
         key,

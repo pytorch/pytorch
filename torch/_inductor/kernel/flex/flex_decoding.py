@@ -34,6 +34,7 @@ from .common import (
 aten = torch.ops.aten
 prims = torch.ops.prims
 
+
 def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa) -> bool:
     """Decide which kernel to use, return true if use flex decoding kernel.
     Note:
@@ -364,6 +365,7 @@ def get_split_k(B: int, H: int, Mk: int) -> int:
 
 
 def create_flex_decoding_kernel(*args, **kwargs):
+    """Flex decode lowering that is optimized for small Q_LEN and GQA packing"""
     from .flex_attention import set_head_dim_values
 
     (
