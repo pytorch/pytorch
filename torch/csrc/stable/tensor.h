@@ -31,7 +31,13 @@ class Tensor {
   std::shared_ptr<AtenTensorOpaque> ath_;
 
  public:
-  Tensor() = delete;
+  Tensor() {
+    AtenTensorHandle ret;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&ret));
+    ath_ = std::shared_ptr<AtenTensorOpaque>(ret, [](AtenTensorHandle ath) {
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ath));
+    });
+  }
 
   // Construct a stable::Tensor from an AtenTensorHandle (ATH)
   // Steals ownership from the ATH
