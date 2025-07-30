@@ -25,7 +25,6 @@ namespace torch::distributed::rpc {
 namespace {
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
-constexpr auto kDefaultNumWorkerThreads = 16;
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -80,6 +79,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   module.attr("_DEFAULT_RPC_TIMEOUT_SEC") = py::cast(kDefaultRpcTimeoutSeconds);
   module.attr("_UNSET_RPC_TIMEOUT") = py::cast(kUnsetRpcTimeout);
   module.attr("_DEFAULT_INIT_METHOD") = py::cast(kDefaultInitMethod);
+  module.attr("_DEFAULT_NUM_WORKER_THREADS") =
+      py::cast(kDefaultNumWorkerThreads);
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
@@ -645,9 +646,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def_property_readonly("store", &TensorPipeAgent::getStore);
 
 #endif // USE_TENSORPIPE
-
-  module.attr("_DEFAULT_NUM_WORKER_THREADS") =
-      py::cast(kDefaultNumWorkerThreads);
 
   module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);
 
