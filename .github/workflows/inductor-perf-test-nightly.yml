@@ -114,7 +114,8 @@ jobs:
           { config: "cachebench", shard: 2, num_shards: 2, runner: "linux.aws.a100" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
-      build-additional-packages: "vision audio fbgemm torchao"
+      # Add torchao when cudagraphs_low_precision is ready
+      build-additional-packages: "vision audio fbgemm"
     secrets: inherit
 
   test-nightly:
