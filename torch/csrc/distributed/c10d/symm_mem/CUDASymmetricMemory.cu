@@ -381,6 +381,11 @@ Block::Block(
       signal_pad_offset(signal_pad_offset),
       default_group_name(std::move(group_name)) {}
 
+namespace {
+using Expandable_Segments_Handle_Type =
+    c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type;
+}
+
 void* CUDASymmetricMemoryAllocator::alloc(
     size_t size,
     int device_idx,
@@ -395,9 +400,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   prop.location.id = device_idx;
-  if (handle_type_ ==
-      c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type::
-          POSIX_FD) {
+  if (handle_type_ == Expandable_Segments_Handle_Type::POSIX_FD) {
     prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
   } else {
     prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
@@ -411,17 +414,13 @@ void* CUDASymmetricMemoryAllocator::alloc(
 
   HandleType handle;
   auto status = driver_api->cuMemCreate_(&handle, block_size, &prop, 0);
-  if (handle_type_ ==
-      c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type::
-          UNSPECIFIED) {
+  if (handle_type_ == Expandable_Segments_Handle_Type::UNSPECIFIED) {
     if (status != CUDA_SUCCESS) {
       prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-      handle_type_ = c10::cuda::CUDACachingAllocator::
-          Expandable_Segments_Handle_Type::POSIX_FD;
+      handle_type_ = Expandable_Segments_Handle_Type::POSIX_FD;
       status = driver_api->cuMemCreate_(&handle, block_size, &prop, 0);
     } else {
-      handle_type_ = c10::cuda::CUDACachingAllocator::
-          Expandable_Segments_Handle_Type::FABRIC_HANDLE;
+      handle_type_ = Expandable_Segments_Handle_Type::FABRIC_HANDLE;
     }
   }
   C10_CUDA_DRIVER_CHECK(status);
@@ -617,7 +616,8 @@ static void init_multicast_for_block(
       close(mc_fd);
     } else {
       CUmemFabricHandle null_handle{};
-      auto mc_handles = storeExchange.all_gather(store, rank, world_size, null_handle);
+      auto mc_handles =
+          storeExchange.all_gather(store, rank, world_size, null_handle);
       C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
           &mc_handle, (void*)&(mc_handles[0]), CU_MEM_HANDLE_TYPE_FABRIC));
     }
@@ -640,7 +640,6 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
     void* ptr,
     c10::intrusive_ptr<Block> block,
     const GroupInfo& group_info) {
-
 #if defined(USE_ROCM)
   using BlockHandleType = int;
 #else
@@ -666,7 +665,6 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
   // and this barrier is provided when we are exchanging rendezvous requests
   using IpcChannelType = std::conditional_t<use_fabric_handle, int, IpcChannel>;
   IpcChannelType ipc_channel;
-
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
@@ -826,12 +824,9 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   auto group_info = get_group_info(group_name_);
 
   TORCH_INTERNAL_ASSERT(
-      handle_type_ !=
-      c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type::
-          UNSPECIFIED)
-  bool use_fabric = handle_type_ ==
-      c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type::
-          FABRIC_HANDLE;
+      handle_type_ != Expandable_Segments_Handle_Type::UNSPECIFIED)
+  bool use_fabric =
+      handle_type_ == Expandable_Segments_Handle_Type::FABRIC_HANDLE;
   auto symm_mem = use_fabric ? make_symm_mem<true>(ptr, block, group_info)
                              : make_symm_mem<false>(ptr, block, group_info);
   block->symm_mems[group_name_] = symm_mem;
