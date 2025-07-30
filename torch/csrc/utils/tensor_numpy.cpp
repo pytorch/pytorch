@@ -215,9 +215,7 @@ void warn_numpy_not_writeable() {
 at::Tensor tensor_from_numpy(
     PyObject* obj,
     bool warn_if_not_writeable /*=true*/) {
-  if (!is_numpy_available()) {
-    TORCH_CHECK(false, "Numpy is not available");
-  }
+  TORCH_CHECK(is_numpy_available(), "Numpy is not available");
   TORCH_CHECK_TYPE(
       PyArray_Check(obj),
       "expected np.ndarray (got ",
@@ -385,9 +383,7 @@ bool is_numpy_scalar(PyObject* obj) {
 at::Tensor tensor_from_cuda_array_interface(
     PyObject* obj,
     std::optional<c10::Device> device_opt) {
-  if (!is_numpy_available()) {
-    TORCH_CHECK(false, "Numpy is not available");
-  }
+  TORCH_CHECK(is_numpy_available(), "Numpy is not available");
   auto cuda_dict =
       THPObjectPtr(PyObject_GetAttrString(obj, "__cuda_array_interface__"));
   TORCH_INTERNAL_ASSERT(cuda_dict);
