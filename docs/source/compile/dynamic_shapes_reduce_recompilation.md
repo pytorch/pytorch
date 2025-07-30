@@ -44,7 +44,7 @@ f(torch.rand(40))
 
 In the produced output, you can see that four graphs were generated.
 See the corresponding
-<a href="/_static/img/dynamic_shapes/tlparse1_dynamic_shapes_false.png" target="_blank">tlparse output</a>.
+<a href="../_static/img/dynamic_shapes/tlparse1_dynamic_shapes_false.png" target="_blank">tlparse output</a>.
 
 
 By making the size dynamic, the function can handle various sizes without recompilation:
@@ -63,7 +63,7 @@ f(torch.rand(40))
 
 With dynamic shapes enabled, only one graph is created. See the
 corresponding
-<a href="/_static/img/dynamic_shapes/tlparse2_dynamic_shapes_true.png" target="_blank">tlparse output</a>.
+<a href="../_static/img/dynamic_shapes/tlparse2_dynamic_shapes_true.png" target="_blank">tlparse output</a>.
 
 While compilation time differences
 are minimal for this small example, more complex use cases would show significant
@@ -106,7 +106,7 @@ case it will return `x * 10`. If the input size is less than 30, it will return 
 In the output, you can see that this creates three graphs.
 
 See the corresponding
-<a href="/_static/img/dynamic_shapes/tlparse3_specialization.png" target="_blank">tlparse output</a>.
+<a href="../_static/img/dynamic_shapes/tlparse3_specialization.png" target="_blank">tlparse output</a>.
 
 This is how graphs created for the above function:
 
