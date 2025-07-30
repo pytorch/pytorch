@@ -1509,36 +1509,27 @@ class TestFullyShardWorldSize1(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
-        with torch.profiler.profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA,
-            ],
-            record_shapes=True,
-            schedule=torch.profiler.schedule(wait=1, warmup=1, active=2),
-            on_trace_ready=torch.profiler.tensorboard_trace_handler("execution_trace"),
-        ) as prof:
-            for iter_idx in range(10):
-                losses: list[torch.Tensor] = []
 
-                ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                losses.append(ref_model(*inp).sum())
+        for iter_idx in range(10):
+            losses: list[torch.Tensor] = []
+
+            ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            losses.append(ref_model(*inp).sum())
+            losses[-1].backward()
+            ref_optim.step()
+
+            optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                losses.append(model(*inp).sum())
                 losses[-1].backward()
-                ref_optim.step()
 
-                optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                comm_mode = CommDebugMode()
-                with comm_mode:
-                    losses.append(model(*inp).sum())
-                    losses[-1].backward()
+            # Before there was 1 all-gather and 1 reduce-scatter
+            # Now therre is 1 reduce-scatter
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+            optim.step()
 
-                # Before there was 1 all-gather and 1 reduce-scatter
-                # Now therre is 1 reduce-scatter
-                self.assertEqual(comm_mode.get_total_counts(), 1)
-                optim.step()
-
-                self.assertEqual(losses[0], losses[1])
-                prof.step()
+            self.assertEqual(losses[0], losses[1])
 
 
 if __name__ == "__main__":

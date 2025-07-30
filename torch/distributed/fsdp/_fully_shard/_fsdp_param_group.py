@@ -323,18 +323,18 @@ class FSDPParamGroup:
                 param_all_gather_input_numels=[],
                 all_gather_input_split_sizes=[],
             )
-        else:
-            with record_function(self._with_fqn("FSDP::all_gather")):
-                self._all_gather_result = foreach_all_gather(
-                    self.fsdp_params,
-                    self._all_gather_process_group,
-                    async_op,
-                    *self.comm_ctx.get_all_gather_streams(
-                        async_op, self._training_state
-                    ),
-                    self.device,
-                    self._all_gather_comm,
-                )
+
+            return
+
+        with record_function(self._with_fqn("FSDP::all_gather")):
+            self._all_gather_result = foreach_all_gather(
+                self.fsdp_params,
+                self._all_gather_process_group,
+                async_op,
+                *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
+                self.device,
+                self._all_gather_comm,
+            )
 
     def wait_for_unshard(self):
         """
@@ -374,11 +374,8 @@ class FSDPParamGroup:
                 tensor = fsdp_param.all_gather_outputs[0]
                 alloc_storage(tensor)
 
-                # Only preserve version counter if not an inference tensor
-                if not tensor.is_inference():
-                    with torch.autograd._unsafe_preserve_version_counter(tensor):
-                        tensor.copy_(sharded_data)
-                else:
+                # find alternative way to check if tensor.is_inference
+                with torch.autograd._unsafe_preserve_version_counter(tensor):
                     tensor.copy_(sharded_data)
 
         else:
