@@ -1144,12 +1144,39 @@ class _AttentionContextParallel(ParallelStyle):
 
 def create_cp_block_mask(
     mask_mod: _mask_mod_signature,
-    B: Optional[int],
-    H: Optional[int],
+    B: int,
+    H: int,
     Q_LEN: int,
     KV_LEN: int,
     device_mesh: DeviceMesh,
 ) -> BlockMask:
+    """
+    This API creates a special BlockMask for Context Parallel FlexAttention:
+    1. This BlockMask is masking on the attention of Q shard and KV global views, by
+    mapping the local q_idx to the global q_idx before sending to mask_mod.
+    2. The kv_seq_length (i.e. seq_lengths[1]) of this blockMask is tailored to match
+    the sequence length of KV shard instead of KV global. This is to pass the shape check
+    in flex_atttention(). The correct value (i.e. the sequence length of KV global) will be
+    used in flex_attention once the shape check passes.
+
+    Args:
+        mask_mod (Callable): Function to modify the mask over the global attention result.
+        B (int): Batch size.
+        H (int): Number of query heads.
+        Q_LEN (int): Sequence length of query (global view).
+        KV_LEN (int): Sequence length of key/value (global view).
+        device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
+
+    Return:
+        :class:`BlockMask`: the block_mask to be used in flex_attention() within the
+        context_parallel() context.
+
+    .. warning::
+        This function cannot generate correct block_mask if the BLOCK_SIZE is not
+        ``_DEFAULT_SPARSE_BLOCK_SIZE`` which usually happens when the attention
+        size is smaller than 128. Please do not use context_parallel() when the
+        FlexAttention size is small.
+    """
     from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
 
     def _rewrite_mask_mod(
@@ -1234,47 +1261,6 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
         ft_c.all_gather_inplace(all_xs, x, mesh)
         return torch.cat(all_xs, dim=shard_dim)
 
-    class CPFlexAttentionPreOp(torch.autograd.Function):
-        @staticmethod
-        def forward(
-            ctx: Any,
-            query: torch.Tensor,
-            key: torch.Tensor,
-            value: torch.Tensor,
-            device_mesh: DeviceMesh,
-            shard_dim: int,
-        ) -> tuple[Any, ...]:
-            ctx.device_mesh = device_mesh
-            ctx.shard_dim = shard_dim
-
-            # all-gather KV
-            global_key = unshard(
-                key, device_mesh, shard_dim
-            )  # TODO: change the shard_dim
-            global_value = unshard(value, device_mesh, shard_dim)
-
-            return query, global_key, global_value
-
-        @staticmethod
-        def backward(
-            ctx: Any,
-            grad_query: torch.Tensor,
-            grad_key: torch.Tensor,
-            grad_value: torch.Tensor,
-        ) -> tuple[Optional[torch.Tensor], ...]:
-            device_mesh = ctx.device_mesh
-            shard_dim = ctx.shard_dim
-
-            # reduce-scatter KV grads
-            grad_key = ft_c.reduce_scatter_tensor(
-                grad_key, reduceOp="sum", scatter_dim=shard_dim, group=device_mesh
-            )
-            grad_value = ft_c.reduce_scatter_tensor(
-                grad_value, reduceOp="sum", scatter_dim=shard_dim, group=device_mesh
-            )
-
-            return grad_query, grad_key, grad_value, None, None
-
     class DistributeFunction(TorchFunctionMode):
         def __init__(
             self,
@@ -1305,16 +1291,6 @@ def _context_parallel(seq_dim: int, mesh: DeviceMesh) -> Generator[None, None, N
                 assert isinstance(value, torch.Tensor)
                 assert isinstance(block_mask, tuple)
 
-                """
-                # TODO: use all_gather_autograd() instead
-                query, global_key, global_value = CPFlexAttentionPreOp.apply(
-                    query,
-                    key,
-                    value,
-                    self._device_mesh,
-                    _cp_global_vars.cp_shard_dim,
-                )
-                """
                 global_key = ft_c.all_gather_tensor_autograd(
                     key, _cp_global_vars.cp_shard_dim, self._device_mesh
                 )

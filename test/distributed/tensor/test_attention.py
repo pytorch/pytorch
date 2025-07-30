@@ -600,7 +600,7 @@ class RingFlexAttentionTest(DTensorTestBase):
             self._test_ring_flex_attention,
         )
 
-        # TODO: the current CP impl doesn't support small attentions (block_size < 128)
+        # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
         with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
             self.run_subtests(
                 {"qkv_size": [64 * self.world_size]},
