@@ -192,19 +192,6 @@ class FakeTensorUpdater:
 
             return False
 
-        def should_process_node(node):
-            # node.target for nodes returning true from this function
-            # are called under fake mode and does not work for inductor
-            # lowerings. We check if the node.target is an aten operator
-            # or operator.getitem which is used when returning multiple
-            # tensors from an op.
-            return node.op == "call_function" and (
-                isinstance(node.target, torch._ops.OpOverload)
-                or node.target == operator.getitem
-                or node.target
-                == torch._inductor.fx_passes.reinplace._generalized_scatter
-            )
-
         to_process = OrderedSet[int]()
         for node in self.graph.nodes:
             # NB: Be very careful about skipping nodes (via continues) here
@@ -217,12 +204,11 @@ class FakeTensorUpdater:
             ):
                 continue
 
-            if not should_process_node(node):
-                continue
-
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
+
+            assert not isinstance(node.target, str)
             with V.fake_mode, enable_python_dispatcher():
                 new_fake_tensor = node.target(*args, **kwargs)
 
