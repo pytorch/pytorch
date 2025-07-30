@@ -5,6 +5,7 @@ def define_targets(rules):
         hdrs = [
             # Following the example from c10
             "Export.h",
+            "Macros.h",
         ],
         linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],

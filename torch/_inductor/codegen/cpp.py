@@ -24,6 +24,7 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
 from .. import config, cpp_builder, cpu_vec_isa, ir, metrics
+from ..debug import set_kernel_post_grad_provenance_tracing
 from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
@@ -43,7 +44,6 @@ from ..utils import (
     is_welford_reduction,
     parallel_num_threads,
     Placeholder,
-    set_kernel_post_grad_provenance_tracing,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
     sympy_product,
@@ -5191,7 +5191,7 @@ class CppScheduling(BaseScheduling):
         )
         kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
         # below add provenance tracing info for cpu CppKernel types
-        if config.trace.enabled:
+        if config.trace.provenance_tracking:
             set_kernel_post_grad_provenance_tracing(nodes, kernel_name)
 
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"

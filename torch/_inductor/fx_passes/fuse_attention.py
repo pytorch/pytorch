@@ -584,7 +584,7 @@ def _sfdp_replacement_20(query, key, value, attn_mask, dropout_p):
 def _sfdp_pattern_24(query, key, value, attention_mask):
     """
     this pattern is for MBartForCausalLM/PLBartForCausalLM.
-    attn_mask has a differnt dtype with QKV.
+    attn_mask has a different dtype with QKV.
     there is no scale in sdpa.
     """
     bs = query.size(0)
