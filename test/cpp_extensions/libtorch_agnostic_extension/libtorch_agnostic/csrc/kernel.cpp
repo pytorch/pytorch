@@ -291,16 +291,59 @@ void boxed_fill_infinity(
   stack[0] = from(res);
 }
 
+Tensor my_pad(
+    Tensor t,
+    std::vector<int64_t> padding,
+    std::string mode,
+    double value) {
+  return pad(t, padding, mode, value);
+}
+
+void boxed_my_pad(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  auto res = my_pad(
+      to<Tensor>(stack[0]),
+      to<std::vector<int64_t>>(stack[1]),
+      to<std::string>(stack[2]),
+      to<double>(stack[3]));
+  stack[0] = from(res);
+}
+
+Tensor my_narrow(Tensor t, int64_t dim, int64_t start, int64_t length) {
+  return narrow(t, dim, start, length);
+}
+
+void boxed_my_narrow(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  auto res = my_narrow(
+      to<Tensor>(stack[0]),
+      to<int64_t>(stack[1]),
+      to<int64_t>(stack[2]),
+      to<int64_t>(stack[3]));
+  stack[0] = from(res);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
   m.def("my_empty_like(Tensor t) -> Tensor");
   m.def("fill_infinity(Tensor(a!) t) -> Tensor(a!)");
+  m.def("my_pad(Tensor t, int[] pad, str mode, float value) -> Tensor");
+  m.def("my_narrow(Tensor t, int dim, int start, int length) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_transpose", &boxed_my_transpose);
   m.impl("my_empty_like", &boxed_empty_like);
   m.impl("fill_infinity", &boxed_fill_infinity);
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeImplicitAutograd, m) {
+  m.impl("my_pad", &boxed_my_pad);
+  m.impl("my_narrow", &boxed_my_narrow);
 }
 
 
