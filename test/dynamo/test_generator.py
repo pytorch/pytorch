@@ -355,8 +355,7 @@ class GraphModule(torch.nn.Module):
         ctx = whoo()
         next(ctx)
         with self.assertRaisesRegex(
-            Unsupported,
-            "Generator as graph argument is not supported",
+            Unsupported, "Detected a method call to a user-defined generator object."
         ):
             fn(t, ctx)
 
@@ -375,8 +374,7 @@ class GraphModule(torch.nn.Module):
         ctx = whoo(t)
         next(ctx)
         with self.assertRaisesRegex(
-            Unsupported,
-            "Generator as graph argument is not supported",
+            Unsupported, "Detected a method call to a user-defined generator object."
         ):
             fn(t, ctx)
 
@@ -397,8 +395,7 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo()
         with self.assertRaisesRegex(
-            Unsupported,
-            "Generator as graph argument is not supported",
+            Unsupported, "Detected a method call to a user-defined generator object."
         ):
             fn(t, ctx)
 
@@ -417,7 +414,7 @@ class GraphModule(torch.nn.Module):
         ctx = whoo(t)
         with self.assertRaisesRegex(
             Unsupported,
-            "Generator as graph argument is not supported",
+            "Detected a method call to a user-defined generator object.",
         ):
             fn(t, ctx)
 

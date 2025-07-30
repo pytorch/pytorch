@@ -203,7 +203,6 @@ def standalone_compile(
         # Reuse fake_mode from the TracingContext.
         # NB: The TracingContext only exists if we're currently in a torch.compile backend.
         context = torch._guards.TracingContext.get()
-        assert context.fake_mode is not None
         fake_mode = context.fake_mode
     elif dynamic_shapes == "from_graph":
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())

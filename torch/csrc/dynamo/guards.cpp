@@ -31,6 +31,10 @@
 #include <ATen/xpu/EmptyTensor.h>
 #endif
 
+#ifdef USE_MTIA
+#include <ATen/native/mtia/EmptyTensor.h>
+#endif
+
 #include <chrono>
 #include <sstream>
 #include <tuple>
@@ -1060,6 +1064,12 @@ static PyObject* _empty_strided_device(
         sizes, strides, dtype, c10::DeviceType::XPU));
   }
 #endif
+#ifdef USE_MTIA
+  else if (device_type == c10::DeviceType::MTIA) {
+    return THPVariable_Wrap(at::detail::empty_strided_mtia(
+        sizes, strides, dtype, c10::DeviceType::MTIA));
+  }
+#endif
   else {
     TORCH_CHECK(
         false, "PyTorch compiled without support for the specified device.");
@@ -1082,6 +1092,10 @@ static PyObject* _empty_strided_cuda(PyObject* dummy, PyObject* args) {
 static PyObject* _empty_strided_xpu(PyObject* dummy, PyObject* args) {
   // at::empty_strided is surprising slow.  This is lower-overhead.
   return _empty_strided_device(dummy, args, c10::DeviceType::XPU);
+}
+
+static PyObject* _empty_strided_mtia(PyObject* dummy, PyObject* args) {
+  return _empty_strided_device(dummy, args, c10::DeviceType::MTIA);
 }
 
 static PyObject* _reinterpret_tensor(PyObject* dummy, PyObject* args) {
@@ -1115,6 +1129,7 @@ static PyMethodDef _methods[] = {
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
     {"_empty_strided_xpu", _empty_strided_xpu, METH_VARARGS, nullptr},
+    {"_empty_strided_mtia", _empty_strided_mtia, METH_VARARGS, nullptr},
     {"_reinterpret_tensor", _reinterpret_tensor, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
@@ -1173,9 +1188,12 @@ bool is_immutable_object(py::handle example_value) {
     return true;
   }
 
-  return PyLong_Check(example_value.ptr()) ||
-      PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
+  return (example_value.ptr() == Py_None) ||
+      PyLong_Check(example_value.ptr()) || PyFloat_Check(example_value.ptr()) ||
+      PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
+      PyCode_Check(example_value.ptr()) ||
+      (Py_TYPE(example_value.ptr()) == &PyCFunction_Type) ||
       (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
 }
 
@@ -2597,6 +2615,24 @@ class GuardManager {
   }
 
  public:
+  // relational guard helpers
+  void set_has_object_aliasing_guard() {
+    _has_object_aliasing_guard = true;
+  }
+
+  void set_has_no_tensor_aliasing_guard() {
+    _has_no_tensor_aliasing_guard = true;
+  }
+
+  bool has_object_aliasing_guard() {
+    return _has_object_aliasing_guard;
+  }
+
+  bool has_no_tensor_aliasing_guard() {
+    return _has_no_tensor_aliasing_guard;
+  }
+
+ public:
   // type related helpers
   bool is_guarded_value_immutable() {
     return _is_immutable;
@@ -2952,6 +2988,10 @@ class GuardManager {
   // to enable fail fast for the next check.
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
+  // relational guard helpers
+  bool _has_object_aliasing_guard = false;
+  bool _has_no_tensor_aliasing_guard = false;
+
   bool _is_dict = false;
   bool _is_empty_dict = false;
   bool _is_immutable = false;
@@ -3003,6 +3043,17 @@ class RootGuardManager : public GuardManager {
  public:
   // This is the root node, set its _root member to nullptr
   RootGuardManager() : GuardManager(this, "L") {}
+
+  void add_no_tensor_aliasing_guard(
+      std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard) {
+    // stash a pointer to the _no_tensor_alising_guard
+    _no_tensor_aliasing_guard = no_tensor_aliasing_guard;
+    this->add_relational_guard_resetter(std::move(no_tensor_aliasing_guard));
+  }
+
+  std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard() {
+    return _no_tensor_aliasing_guard;
+  }
 
   // Adds the relational guard resetter
   void add_relational_guard_resetter(
@@ -3224,6 +3275,9 @@ class RootGuardManager : public GuardManager {
   // We init LocalState only when this flag it set. This flag is set during
   // TENSOR_MATCH guard init.
   bool _init_local_state = false;
+
+  // Pointer to the no tensor relational guard
+  std::shared_ptr<RelationalGuard> _no_tensor_aliasing_guard;
 };
 
 /*
@@ -5499,6 +5553,9 @@ void install_object_aliasing_guard(
   // the newly added relational guard when the guard eval fails.
   x->get_root()->add_relational_guard_resetter(guard);
 
+  x->set_has_object_aliasing_guard();
+  y->set_has_object_aliasing_guard();
+
   // In case the guard is a DictGuardManager, OBJECT_ALIASING guard is a
   // permitted guard.
   x->add_permitted_leaf_guard(guard);
@@ -5521,9 +5578,10 @@ void install_no_tensor_aliasing_guard(
   // the newly added relational guard when the guard eval fails.
   py::cast<GuardManager*>(guard_managers[0])
       ->get_root()
-      ->add_relational_guard_resetter(guard);
+      ->add_no_tensor_aliasing_guard(guard);
   for (const auto& guard_manager : guard_managers) {
     py::cast<GuardManager*>(guard_manager)->add_leaf_guard(guard);
+    py::cast<GuardManager*>(guard_manager)->set_has_no_tensor_aliasing_guard();
   }
 }
 
@@ -6002,6 +6060,8 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
       .def("fail_count", &GuardManager::fail_count)
+      .def(
+          "has_object_aliasing_guard", &GuardManager::has_object_aliasing_guard)
       .def(
           "is_guarded_value_immutable",
           &GuardManager::is_guarded_value_immutable)
