@@ -13697,8 +13697,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
 
-    @unittest.skipIf(not HAS_GPU or not SM90OrLater, "grouped mm needs H100")
-    def test_respect_op_layout_tag(self):
+    @skipCUDAIf(not SM90OrLater, "Requires sm90")
+    @requires_cuda
+    @unittest.skipIf(TEST_WITH_ROCM, "no scaled_grouped_mm support")
+    def test_respect_scaled_grouped_mm_layout_tag(self):
         # scaled_grouped_mm needs `mat2` to be column-major
         M, K, N = 128, 64, 32  # K and N must be divisible by 16
         num_groups = 2
