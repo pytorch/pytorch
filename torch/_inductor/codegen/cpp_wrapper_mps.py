@@ -9,7 +9,7 @@ from ..ir import GraphPartitionSignature
 from ..virtualized import V
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .cpp_wrapper_gpu import CppWrapperGpu
-from .wrapper import PythonWrapperCodegen, SymbolicCallArg
+from .wrapper import PythonWrapperCodegen
 
 
 class CppWrapperMps(CppWrapperGpu):
@@ -86,10 +86,6 @@ class CppWrapperMps(CppWrapperGpu):
             elif arg_type in (int, sympy.core.symbol.Symbol):
                 new_args.append(
                     f"aoti_torch_mps_set_arg_int({kernel_name}_handle, {idx}, {arg});"
-                )
-            elif arg_type == SymbolicCallArg:
-                new_args.append(
-                    f"aoti_torch_mps_set_arg_int({kernel_name}_handle, {idx}, {arg.inner_expr});"  # type: ignore[attr-defined]
                 )
             else:
                 raise NotImplementedError(

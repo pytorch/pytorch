@@ -931,17 +931,19 @@ class MetalKernel(SIMDKernel):
         args += [str(v) for v in self.args.sizevars.keys()]
         arg_types = [arg_name_to_type[arg] for arg in args]
 
+        # Add any dynamic ints as inputs
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, int)):
+                # Don't need to pass in integers as inputs
                 continue
             elif isinstance(tree.numel, sympy.Symbol):
                 expr = tree.numel
             else:
-                expr = V.graph.wrapper_code.generate_numel_expr(name, tree)
+                expr = V.graph.wrapper_code.generate_numel_expr(name, tree).inner
 
             if not tree.is_reduction or self.inside_reduction:
-                args.append(expr)
-                arg_types.append(type(expr))
+                args.append(str(expr))
+                arg_types.append(int)
 
         expr_printer = self.cexpr if V.graph.cpp_wrapper else self.pexpr
 
@@ -1038,7 +1040,7 @@ class MetalScheduling(SIMDScheduling):
             if V.graph.cpp_wrapper:
                 kernel_name = f"{mps_lib_name}_func"
             else:
-                kernel_name = f"{mps_lib_name}.generated_kernel"
+                kernel_name = f"{mps_lib_name}"
 
             wrapper.src_to_kernel[src_code] = kernel_name
 
