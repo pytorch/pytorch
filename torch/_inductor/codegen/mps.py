@@ -915,7 +915,9 @@ class MetalKernel(SIMDKernel):
         return code.getvalue()
 
     def call_kernel(self, name: str, node: Any = None) -> None:
-        """Codegen a call to this kernel"""
+        """
+        Codegens a call to this kernel
+        """
         wrapper = V.graph.wrapper_code
         # Make sure sizevars has been computed
         for v in self.args.sizevars.keys():
