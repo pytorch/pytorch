@@ -92,18 +92,18 @@ RUN python3 use_existing_torch.py
 ARG TORCH_WHEELS_PATH="./requirements"
 ARG PINNED_TORCH_VERSION
 
-RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
+RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     --mount=type=cache,target=/root/.cache/uv \
-    echo "[INFO] Listing /tmp/torch_wheels content:" && \
-    ls -al /tmp/torch_wheels && \
+    echo "[INFO] Listing /dist content:" && \
+    ls -al /dist && \
     echo "[INFO] Done listing" && \
-    if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/torch*.whl >/dev/null 2>&1; then \
-        echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
-        torch_whl=$(find /tmp/torch_wheels -maxdepth 1 -name 'torch-*.whl' -print -quit); \
+    if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
+        echo "[INFO] Installing torch from host wheel path: /dist"; \
+        torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
         echo "Found: '${torch_whl}'"; \
-        vision_whl=$(find /tmp/torch_wheels/vision -name 'torchvision*.whl' | head -n1 | xargs); \
+        vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
         echo "Found: '${vision_whl}'"; \
-        audio_whl=$(find /tmp/torch_wheels/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
+        audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
         echo "Found: '${audio_whl}'"; \
         uv pip install --system "${torch_whl}[opt-einsum]"; \
         uv pip install --system "${vision_whl}"; \
@@ -215,7 +215,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         && export SCCACHE_IDLE_TIMEOUT=0 \
         && export CMAKE_BUILD_TYPE=Release \
         && sccache --show-stats \
-        && python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38 \
+        && python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38 \
         && sccache --show-stats; \
     fi
 
@@ -237,13 +237,14 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
 FROM ${BASE_IMAGE} AS vllm-base
 USER root
 # prepare for environment starts
-WORKDIR /vllm-workspace
-
-RUN echo "VLLM INSTALLED IMAGE"
+WORKDIR /workspace
 
 # get the nightly torch version used in the build to make sure the version is the same
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
-COPY --from=build /workspace/dist ./tmp/vllm-dist
+COPY --from=base /workspace/xformers-dist /wheels/xformers
+COPY --from=build /workspace/vllm-dist /wheels/vllm
+
+RUN echo "VLLM INSTALLED IMAGE"
 
 RUN echo "[DEBUG] Listing current directory before torch install step:" && \
     ls -al && \
@@ -264,18 +265,15 @@ ENV UV_HTTP_TIMEOUT=500
 # change to a different vllm folder if this does not exist anymore
 ARG TORCH_WHEELS_PATH="./requirements"
 
-
-# install whls
-RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
+# install torch, torchaudio and torchvision
+RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     --mount=type=cache,target=/root/.cache/uv \
-    if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/tmp/torch_wheels" ] && ls /tmp/torch_wheels/torch*.whl >/dev/null 2>&1; then \
-        echo "[INFO] Installing torch from host wheel path: /tmp/torch_wheels"; \
-        torch_whl=$(find /tmp/torch_wheels -maxdepth 1 -name 'torch-*.whl' -print -quit); \
-        echo "Found: '${torch_whl}'"; \
-        vision_whl=$(find /tmp/torch_wheels/vision -name 'torchvision*.whl' | head -n1 | xargs); \
-        echo "Found: '${vision_whl}'"; \
-        audio_whl=$(find /tmp/torch_wheels/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
-        echo "Found: '${audio_whl}'"; \
+    if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
+        echo "[INFO] Installing torch from host wheel path: /dist"; \
+        torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
+        vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
+        audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
+        echo "Found: '${torch_whl}' '${audio_whl}' '${vision_whl}'"; \
         uv pip install --system "${torch_whl}[opt-einsum]"; \
         uv pip install --system "${vision_whl}"; \
         uv pip install --system "${audio_whl}"; \
@@ -285,14 +283,12 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/tmp/torch_wheels \
     fi
 
 # install the vllm wheel
-RUN --mount=type=bind,from=build,src=/workspace/dist,target=/vllm-workspace/vllm-dist \
-    --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system vllm-dist/*.whl --verbose
+RUN  --mount=type=cache,target=/root/.cache/uv \
+    RUN uv pip install --system /wheels/vllm/*.whl --verbose
 
 # install xformers again for the new environment
-RUN --mount=type=bind,from=base,src=/workspace/xformers-dist,target=/vllm-workspace/xformers-dist \
-    --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system /vllm-workspace/xformers-dist/*.whl --verbose
+RUN --mount=type=cache,target=/root/.cache/uv \
+    RUN uv pip install --system /wheels/xformers/*.whl --verbose
 
 ARG torch_cuda_arch_list='8.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
@@ -303,7 +299,6 @@ RUN pip install setuptools==75.6.0 packaging==23.2 ninja==1.11.1.3 build==1.2.2.
 
 # build flashinfer for torch nightly from source around 10 mins
 # release version: v0.2.2.post1
-# todo(elainewy): cache flashinfer build result for faster build
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/uv \
@@ -373,5 +368,5 @@ FROM scratch as export-wheels
 
 # Just copy the wheels we prepared in previous stages
 COPY --from=base /workspace/xformers-dist /wheels/xformers
-COPY --from=build /workspace/dist /wheels/vllm
+COPY --from=build /workspace/vllm-dist /wheels/vllm
 COPY --from=vllm-base /vllm-workspace/flashinfer-dist /wheels/flashinfer-python
