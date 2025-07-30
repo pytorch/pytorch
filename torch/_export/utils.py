@@ -1101,7 +1101,7 @@ def outputs_naming_pass(
         if all_fields:
             for spec, field_name in zip(export_graph_signature.output_specs, all_fields):
                 old = spec.arg.name
-                base = field_name or old or spec.target
+                base: str = (field_name or old or spec.target or "")
                 prefix = placeholder_prefixes.get(spec.kind, "o_")
                 sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
                 candidate = f"{prefix}{sanitized}"
@@ -1110,7 +1110,7 @@ def outputs_naming_pass(
             # fallback to one‐to‐one if we couldn't extract any field names
             for spec in export_graph_signature.output_specs:
                 old = spec.arg.name
-                base = old or spec.target
+                base: str = (old or spec.target or "")
                 prefix = placeholder_prefixes.get(spec.kind, "o_")
                 sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
                 candidate = f"{prefix}{sanitized}"
@@ -1119,7 +1119,7 @@ def outputs_naming_pass(
         # fallback: one output_spec per leaf → simple one‐to‐one
         for spec in export_graph_signature.output_specs:
             old = spec.arg.name
-            base = old or spec.target
+            base: str = (old or spec.target or "")
             prefix = placeholder_prefixes.get(spec.kind, "o_")
             sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
             candidate = f"{prefix}{sanitized}"
