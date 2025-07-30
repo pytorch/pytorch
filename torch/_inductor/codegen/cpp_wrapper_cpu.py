@@ -1276,6 +1276,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
         if extern_kernel.op_overload == torch.ops._c10d_functional.wait_tensor.default:
+            # wait_tensor returns its input, and the returned tensor is not used anywhere,
+            # so we can delete the returned AtenTensorHandle to reduce its lifetime.
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object({output_handle_name}));"
             )
