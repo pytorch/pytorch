@@ -7,6 +7,10 @@ on:
         required: true
         type: string
         description: Top-level label for what's being built/tested.
+      build-target:
+        required: true
+        type: string
+        description: target library to build
       use-gha:
         required: false
         type: string
@@ -224,12 +228,13 @@ jobs:
           STAGE: ${{inputs.target-stage || ''}}
           MAX_JOBS: 64
           DOCKER_IMAGE: ${{ inputs.docker-image }}
+          BUILD_TARGET: ${{ inputs.build-target }}
         run: |
           python3 --version
           python3 -m pip install cement==3.0.14
           docker images
           START_TIME=$(date +%s)
-          python3 .github/scripts/cli/main.py vllm --artifact-dir shared --torch-whl-dir "./dist" --base-image "$DOCKER_IMAGE" run
+          python3 .github/scripts/cli/main.py "$BUILD_TARGET" --artifact-dir shared --torch-whl-dir "./dist" --base-image "$DOCKER_IMAGE" run
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 

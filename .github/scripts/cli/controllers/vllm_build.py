@@ -55,6 +55,7 @@ def build_vllm(artifact_dir: str, torch_whl_dir: str, base_image: str):
     # replace dockerfile
     # todo: remove this once the dockerfile is updated in vllm
     run(f"cp .github/docker/vllm/Dockerfile.base ./vllm/docker/Dockerfile.nightly_torch", logging=True)
+    run(f"cp .github/scripts/vllm/clean_testin.py  ./vllm/clean_testin.py", logging=True)
 
     torch_arg, _ = _prepare_torch_wheels(torch_whl_dir)
     base_arg, pull_flag = _get_base_image_args(base_image)

@@ -330,6 +330,9 @@ RUN python3 use_existing_torch.py
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/common.txt
 
+RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'
+
+
 #################### UNITTEST IMAGE #############################
 FROM vllm-base as test
 COPY tests/ tests/
