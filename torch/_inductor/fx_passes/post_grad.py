@@ -1452,6 +1452,12 @@ def is_valid_addmm_fusion(match):
     if not matched:
         return False  # Shape mismatch
 
+    inp_dtype = inp.meta["val"].dtype
+
+    # aten cublas integration assumes equal dtypes
+    if inp_dtype != mat1.meta["val"].dtype or inp_dtype != mat2.meta["val"].dtype:
+        return False
+
     return not should_prefer_unfused_addmm(match)
 
 
