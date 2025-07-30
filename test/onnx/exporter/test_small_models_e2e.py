@@ -771,7 +771,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
                 return torch.nn.functional.rms_norm(x, [10, 10])
 
         x = torch.randn(20, 5, 10, 10)
-        onnx_program = self.export(RMSNormModel2D(), (x,))
+        onnx_program = self.export(RMSNormModel2D(), (x,), opset_version=23)
         onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_rms_norm_with_weight(self):
