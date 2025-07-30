@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """
 Utility functions and classes used throughout the TorchDynamo system.
 
@@ -62,7 +60,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Literal, TypeAlias, TypeGuard, TypeIs
 
 import torch
 import torch._functorch.config
@@ -91,6 +88,7 @@ from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
+from typing_extensions import Literal, TypeAlias, TypeGuard, TypeIs
 
 from .graph_utils import _get_flat_args
 
@@ -1475,15 +1473,15 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
         fail_user_frame_filename=c.fail_user_frame_filename,
         fail_user_frame_lineno=c.fail_user_frame_lineno,
         # Sets aren't JSON serializable
-        non_compliant_ops=list(c.non_compliant_ops)
-        if c.non_compliant_ops is not None
-        else None,
-        compliant_custom_ops=list(c.compliant_custom_ops)
-        if c.compliant_custom_ops is not None
-        else None,
-        restart_reasons=list(c.restart_reasons)
-        if c.restart_reasons is not None
-        else None,
+        non_compliant_ops=(
+            list(c.non_compliant_ops) if c.non_compliant_ops is not None else None
+        ),
+        compliant_custom_ops=(
+            list(c.compliant_custom_ops) if c.compliant_custom_ops is not None else None
+        ),
+        restart_reasons=(
+            list(c.restart_reasons) if c.restart_reasons is not None else None
+        ),
         dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
         has_guarded_code=c.has_guarded_code,
         dynamo_config=c.dynamo_config,
@@ -2392,7 +2390,7 @@ if has_triton_package():
 """
 
 
-def is_safe_constant(v):
+def is_safe_constant(v: Any) -> bool:
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return isinstance(
@@ -2411,7 +2409,7 @@ def is_safe_constant(v):
 
 
 @functools.cache
-def common_constants():
+def common_constants() -> set[int]:
     return {
         # We zero-one specialize shapes, so specialize these constants
         # too
@@ -2426,7 +2424,7 @@ def is_torch_sym(value: Any) -> TypeGuard[Union[torch.SymBool, torch.SymInt]]:
     )
 
 
-def is_int_specialization_case(value, source):
+def is_int_specialization_case(value: Any, source: Any) -> bool:
     from .source import is_from_defaults
 
     return not TracingContext.get().force_unspec_int_unbacked_size_like and (
@@ -2457,32 +2455,31 @@ def is_int_specialization_case(value, source):
     )
 
 
-def specialize_symnode(arg):
-    from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
+def specialize_symnode(arg: Any) -> Any:
+    # This is safe because dynamo already has a check for data-dependent control flow.
+    from .variables import ConstantVariable
 
-    # Guard and specialize
-    if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
-        # Find if the arg would be realized as SymNodeVariable later on. If yes,
-        # realize it and specialize. Else return the arg.
+    if isinstance(arg, ConstantVariable):
+        return arg
 
-        source = arg.original_source()
-        value = arg.original_value()
+    # NB: This is a little bit of a hack.  Currently, we occasionally
+    # pass non-Variable objects to this function.  This is not great
+    # because it means we don't get the right static analysis.
+    # TODO: Fix the call sites to not do this
+    if not hasattr(arg, "as_proxy"):
+        return arg
 
-        is_symnode_vt = is_torch_sym(value) or (
-            not config.specialize_int
-            and type(value) is int
-            and not is_int_specialization_case(value, source)
-        )
+    proxy = arg.as_proxy()
+    if isinstance(proxy.node.target, torch._ops.OpOverload):
+        if proxy.node.target._schema.name in ("aten::sym_size", "aten::sym_stride"):
+            # NB: We always specialize sym_size.  One day we might
+            # want to relax this
+            return ConstantVariable.create(proxy.node.meta["example_value"])
 
-        if not is_symnode_vt:
-            return arg
-
-    if isinstance(arg, SymNodeVariable):
-        return ConstantVariable.create(arg.evaluate_expr())
     return arg
 
 
-def guard_if_dyn(arg):
+def guard_if_dyn(arg: Any) -> Any:
     from .variables import ConstantVariable
 
     arg = specialize_symnode(arg)
@@ -2493,11 +2490,11 @@ def guard_if_dyn(arg):
     return arg
 
 
-def check_constant_args(args, kwargs):
+def check_constant_args(args: Any, kwargs: Any) -> bool:
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
 
 
-def check_unspec_python_args(args, kwargs):
+def check_unspec_python_args(args: Any, kwargs: Any) -> bool:
     from .variables.constant import ConstantVariable
     from .variables.tensor import UnspecializedPythonVariable
 
@@ -2510,7 +2507,7 @@ def check_unspec_python_args(args, kwargs):
     return unspec_count > 0
 
 
-def check_unspec_or_constant_args(args, kwargs):
+def check_unspec_or_constant_args(args: Any, kwargs: Any) -> bool:
     # A fused version of:
     # return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
     from .variables.tensor import UnspecializedPythonVariable
@@ -2519,9 +2516,10 @@ def check_unspec_or_constant_args(args, kwargs):
         if not (x.is_python_constant() or isinstance(x, UnspecializedPythonVariable)):
             return False
     return True
+    return True
 
 
-def check_numpy_ndarray_args(args, kwargs):
+def check_numpy_ndarray_args(args: Any, kwargs: Any) -> bool:
     from .variables.tensor import NumpyNdarrayVariable
 
     return any(
@@ -2557,13 +2555,13 @@ list_getitem = list.__getitem__
 str_methods = {method for method in str.__dict__.values() if callable(method)}
 
 
-def builtin_dict_keys(d):
+def builtin_dict_keys(d: dict[Any, Any]) -> KeysView[Any]:
     # Avoids overridden keys method of the dictionary
     assert isinstance(d, dict)
     return dict.keys(d)
 
 
-def get_items_from_dict(obj):
+def get_items_from_dict(obj: dict[Any, Any]) -> Any:
     # Get items without calling the user defined __getitem__ or keys method.
     assert isinstance(obj, dict)
     if istype(obj, (dict, OrderedDict)):
@@ -2574,29 +2572,29 @@ def get_items_from_dict(obj):
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
-def nn_module_new(cls):
+def nn_module_new(cls: Any) -> Any:
     obj = object_new(cls)
     torch.nn.Module.__init__(obj)
     return obj
 
 
-def product(it):
+def product(it: Any) -> Any:
     return functools.reduce(operator.mul, it, 1)
 
 
-def tuple_iterator_getitem(it, index):
+def tuple_iterator_getitem(it: Any, index: int) -> Any:
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
 
 
-def dataclass_fields(cls):
+def dataclass_fields(cls: Any) -> Any:
     return torch._dynamo.disable(dataclasses.fields)(cls)
 
 
 iter_next = next
 
 
-def normalize_range_iter(range_iter) -> tuple[int, int, int]:
+def normalize_range_iter(range_iter: Any) -> tuple[int, int, int]:
     _, (range_obj,), maybe_idx = range_iter.__reduce__()
     # In 3.12+, `maybe_idx` could be None, and `range_obj.start` would've been
     # already incremented by the current index.
@@ -2606,14 +2604,14 @@ def normalize_range_iter(range_iter) -> tuple[int, int, int]:
     return (start, stop, step)
 
 
-def to_subclass(t, cls):
+def to_subclass(t: Any, cls: Any) -> Any:
     return t.as_subclass(cls)
 
 
 dict_getitem = dict.__getitem__
 
 
-def dict_keys_getitem(d, n):
+def dict_keys_getitem(d: Any, n: int) -> Any:
     # Call dict(d) to prevent calling overridden __iter__/keys
     dict_class = dict
     if isinstance(d, OrderedDict):
@@ -2621,12 +2619,12 @@ def dict_keys_getitem(d, n):
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
-def set_getitem(s, n):
+def set_getitem(s: Any, n: int) -> Any:
     # Set ordering might not be stable
     return list(s)[n]
 
 
-def enum_repr(value, local):
+def enum_repr(value: Any, local: Any) -> str:
     # enum class can override __str__ method. Use __class__ and name attribute
     # to extract the class name and key name.
     name = value.__class__.__name__
@@ -2636,7 +2634,7 @@ def enum_repr(value, local):
     return local_name
 
 
-def set_example_value(node, example_value):
+def set_example_value(node: Any, example_value: Any) -> None:
     # NB: example_value is a bit of a misnomer, because this is always a fake
     # tensor of some sort.  Furthermore, these example values serve as the
     # runtime state of Dynamo tracing, which means if metadata mutation
@@ -2656,7 +2654,7 @@ def set_example_value(node, example_value):
         node.meta["unbacked_bindings"] = symbol_to_path
 
 
-def _get_fake_tensor(vt):
+def _get_fake_tensor(vt: Any) -> Any:
     fake_tensor = vt.as_proxy().node.meta.get("example_value")
     if not is_fake(fake_tensor):
         from . import graph_break_hints
@@ -2676,7 +2674,7 @@ def slice_length(s: slice, seq_len: int) -> int:
     return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
 
 
-def raise_args_mismatch(tx, name):
+def raise_args_mismatch(tx: Any, name: str) -> None:
     from torch._dynamo.exc import raise_observed_exception
     from torch._dynamo.variables import ConstantVariable
 
@@ -2687,7 +2685,9 @@ def raise_args_mismatch(tx, name):
     )
 
 
-def iter_contains(items, search, tx, check_tensor_identity=False):
+def iter_contains(
+    items: Any, search: Any, tx: Any, check_tensor_identity: bool = False
+) -> Any:
     from .variables import (
         BuiltinVariable,
         ConstantVariable,
@@ -2735,11 +2735,11 @@ def key_is_id(
     return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
 
 
-def key_to_id(value):
+def key_to_id(value: Any) -> list[Any]:
     return [id(k) if key_is_id(k) else k for k in value.keys()]
 
 
-def const_repr(x, *, local) -> str:
+def const_repr(x: Any, *, local: Any) -> str:
     from .trace_rules import is_builtin_callable
 
     if isinstance(x, (list, tuple)):
@@ -2760,7 +2760,7 @@ def const_repr(x, *, local) -> str:
         return x.__name__
     elif isinstance(x, type):
 
-        def fullname(o):
+        def fullname(o: Any) -> str:
             klass = o.__class__
             module = klass.__module__
             if module == "builtins":
@@ -2772,7 +2772,7 @@ def const_repr(x, *, local) -> str:
         return f"{x!r}"
 
 
-def dict_keys_repr(const_keys, *, local) -> str:
+def dict_keys_repr(const_keys: Any, *, local: Any) -> str:
     keys_str = ",".join(const_repr(s, local=local) for s in const_keys)
     return "[" + keys_str + "]"
 
@@ -2783,7 +2783,7 @@ GLOBAL_KEY_PREFIX = "__dict_key"
 from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 
 
-def get_safe_global_name(tx, root, obj):
+def get_safe_global_name(tx: Any, root: str, obj: Any) -> str:
     # The global_mangled_class_name should be different for different
     # invocations of torch.compile. Otherwise, we can run into a situation
     # where multiple torch.compile invocations reuse the same global name,
@@ -2816,7 +2816,7 @@ def get_unique_name_wrt(prefix: str, *containers, requires_suffix=False) -> str:
     raise AssertionError("unreachable")
 
 
-def wrap_fake_exception(fn):
+def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
     try:
         return fn()
     except UnsupportedFakeTensorException as e:
@@ -2833,12 +2833,12 @@ def wrap_fake_exception(fn):
         )
 
 
-def deepcopy_to_fake_tensor(obj, fake_mode):
+def deepcopy_to_fake_tensor(obj: Any, fake_mode: Any) -> Any:
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
         return wrap_fake_exception(lambda: copy.deepcopy(obj))
 
 
-def rmse(ref, res):
+def rmse(ref: Any, res: Any) -> Any:
     """
     Calculate root mean squared error
     """
@@ -2846,28 +2846,28 @@ def rmse(ref, res):
 
 
 def same(
-    ref,
-    res,
-    fp64_ref=None,
-    cos_similarity=False,
-    tol=1e-4,
-    equal_nan=False,
-    exact_dtype=True,
-    relax_numpy_equality=False,
-    ignore_non_fp=False,
-    log_error=log.error,
-    use_larger_multiplier_for_smaller_tensor=False,
+    ref: Any,
+    res: Any,
+    fp64_ref: Any = None,
+    cos_similarity: bool = False,
+    tol: float = 1e-4,
+    equal_nan: bool = False,
+    exact_dtype: bool = True,
+    relax_numpy_equality: bool = False,
+    ignore_non_fp: bool = False,
+    log_error: Callable[..., None] = log.error,
+    use_larger_multiplier_for_smaller_tensor: bool = False,
     force_max_multiplier: bool = False,
-):
+) -> bool:
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
         fp64_ref = ref
     if isinstance(
         ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
     ):
-        assert isinstance(res, (list, tuple, collections.deque)), (
-            f"type mismatch {type(ref)} {type(res)}"
-        )
+        assert isinstance(
+            res, (list, tuple, collections.deque)
+        ), f"type mismatch {type(ref)} {type(res)}"
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -2908,9 +2908,9 @@ def same(
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
-        assert set(ref.keys()) == set(res.keys()), (
-            f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
-        )
+        assert set(ref.keys()) == set(
+            res.keys()
+        ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
         for k in sorted(ref.keys()):
             if not (
                 same(
@@ -2939,7 +2939,7 @@ def same(
         assert not isinstance(ref, torch._subclasses.FakeTensor)
         assert not isinstance(res, torch._subclasses.FakeTensor)
 
-        def to_tensor(t):
+        def to_tensor(t: Any) -> Any:
             return t if isinstance(t, torch.Tensor) else torch.tensor(t)
 
         ref, res, fp64_ref = (to_tensor(val) for val in (ref, res, fp64_ref))
@@ -2978,7 +2978,7 @@ def same(
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
                 log.warning("Similarity score=%s", score.detach().cpu().item())
-            return score >= 0.99
+            return bool(score >= 0.99)
         else:
             if not exact_dtype:
                 ref = ref.to(res.dtype)
@@ -3018,7 +3018,7 @@ def same(
 
                 res_error = rmse(fp64_ref, res).item()
 
-                def get_multiplier():
+                def get_multiplier() -> float:
                     # In some particular cases, we expect high difference in results.
                     # At the moment one of this cases is inductor freezing bfloat16 convolution const folding.
                     # In case of it the res_error is at least one order of magnitude higher.
@@ -3310,9 +3310,11 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     ):
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
-            float(arg)
-            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
-            else arg
+            (
+                float(arg)
+                if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+                else arg
+            )
             for arg in args
         )
 
@@ -3573,10 +3575,10 @@ def get_real_value(node, tracer):
     return real_value
 
 
-def assert_no_fake_params_or_buffers(gm):
+def assert_no_fake_params_or_buffers(gm: Any) -> None:
     from torch._subclasses.fake_tensor import FakeTensorConfig, is_fake
 
-    def stack_or_hint(t):
+    def stack_or_hint(t: Any) -> str:
         if FakeTensorConfig.debug:
             import traceback
 
@@ -3585,30 +3587,30 @@ def assert_no_fake_params_or_buffers(gm):
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
-        assert not is_fake(buffer), (
-            f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
-        )
+        assert not is_fake(
+            buffer
+        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
     for name, param in gm.named_parameters():
-        assert not is_fake(param), (
-            f"Unexpected fake param {name} {stack_or_hint(param)}"
-        )
+        assert not is_fake(
+            param
+        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
-def fqn(obj: Any):
+def fqn(obj: Any) -> str:
     """
     Returns the fully qualified name of the object.
     """
     return f"{obj.__module__}.{obj.__qualname__}"
 
 
-def ifdynstaticdefault(count1, count2):
+def ifdynstaticdefault(count1: Any, count2: Any) -> Any:
     if torch._dynamo.config.assume_static_by_default:
         return count1
     else:
         return count2
 
 
-def import_submodule(mod: types.ModuleType):
+def import_submodule(mod: types.ModuleType) -> None:
     """
     Ensure all the files in a given submodule are imported
     """
@@ -3617,17 +3619,17 @@ def import_submodule(mod: types.ModuleType):
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
 
 
-def object_has_getattribute(value: Any):
+def object_has_getattribute(value: Any) -> bool:
     return class_has_getattribute(type(value))
 
 
-def object_setattr_ignore_descriptor(obj, name, value):
+def object_setattr_ignore_descriptor(obj: Any, name: str, value: Any) -> None:
     # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
     d = object.__getattribute__(obj, "__dict__")
     d[name] = value
 
 
-def class_has_getattribute(cls: type):
+def class_has_getattribute(cls: type) -> bool:
     try:
         if isinstance(
             inspect.getattr_static(cls, "__getattribute__"),
@@ -3639,7 +3641,9 @@ def class_has_getattribute(cls: type):
     return False
 
 
-def get_custom_getattr(value: Any, ignore_nn_module_getattr: bool = False):
+def get_custom_getattr(
+    value: Any, ignore_nn_module_getattr: bool = False
+) -> Optional[Any]:
     try:
         getattr_fn = inspect.getattr_static(type(value), "__getattr__")
     except AttributeError:
@@ -3656,7 +3660,7 @@ class TensorStaticReason(enum.Enum):
     NN_MODULE_PROPERTY = 5
 
 
-def tensor_static_reason_to_message(reason: TensorStaticReason):
+def tensor_static_reason_to_message(reason: TensorStaticReason) -> str:
     if reason == TensorStaticReason.PARAMETER:
         return "mark_dynamic on parameter, parameters are always static today."
     if reason == TensorStaticReason.NOT_TENSOR:
@@ -3700,8 +3704,8 @@ def tensor_always_has_static_shape(
     return False, None
 
 
-def lazy_format_graph_tabular(fn_name, gm):
-    def inner():
+def lazy_format_graph_tabular(fn_name: str, gm: Any) -> Any:
+    def inner() -> str:
         try:
             from tabulate import tabulate  # TODO: Check that this is installed
         except ImportError:
@@ -3721,7 +3725,9 @@ def lazy_format_graph_tabular(fn_name, gm):
     return LazyString(inner)
 
 
-def format_bytecode(prefix, name, filename, line_no, code):
+def format_bytecode(
+    prefix: str, name: str, filename: str, line_no: int, code: Any
+) -> str:
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
 
 
@@ -3736,20 +3742,21 @@ state_dict_hook_names = [
 all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
 
 
-def nn_module_has_global_hooks():
+def nn_module_has_global_hooks() -> bool:
     # This is limited to backward hooks for now because NNModuleVariable
     # supports fwd hooks underneath.
-    return len(torch.nn.modules.module._global_backward_hooks) or len(
-        torch.nn.modules.module._global_backward_pre_hooks
+    return bool(
+        len(torch.nn.modules.module._global_backward_hooks)
+        or len(torch.nn.modules.module._global_backward_pre_hooks)
     )
 
 
 def nn_module_get_all_hooks(
-    mod,
-    check_forward_hooks=False,
-    check_backward_hooks=False,
-    check_state_dict_hooks=False,
-):
+    mod: Any,
+    check_forward_hooks: bool = False,
+    check_backward_hooks: bool = False,
+    check_state_dict_hooks: bool = False,
+) -> list[Any]:
     """
     Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
     hooks executed during module.__call__, and state_dict hooks which are executed separately.
@@ -3778,11 +3785,11 @@ def nn_module_get_all_hooks(
 
 
 def nnmodule_has_hooks(
-    mod,
-    check_forward_hooks=False,
-    check_backward_hooks=False,
-    check_state_dict_hooks=False,
-):
+    mod: Any,
+    check_forward_hooks: bool = False,
+    check_backward_hooks: bool = False,
+    check_state_dict_hooks: bool = False,
+) -> bool:
     """
     Helper function to check if a module has any hooks attached to it.
     """
@@ -3795,7 +3802,7 @@ def nnmodule_has_hooks(
     return bool(hooks)
 
 
-def to_numpy_helper(value):
+def to_numpy_helper(value: Any) -> Any:
     """Convert tensor and tnp.ndarray to numpy.ndarray."""
     if is_fake(value):
         return value
@@ -3809,7 +3816,7 @@ def to_numpy_helper(value):
         return value
 
 
-def numpy_to_tensor(value):
+def numpy_to_tensor(value: Any) -> Any:
     """Convert tnp.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
     assert np is not None
     if isinstance(value, np.ndarray):
@@ -3823,19 +3830,19 @@ def numpy_to_tensor(value):
 
 
 class numpy_to_tensor_wrapper:
-    def __init__(self, f):
+    def __init__(self, f: Any) -> None:
         self.f = f
         self.__name__ = "wrapped_" + self.f.__name__
 
     def __repr__(self) -> str:
         return f"<Wrapped function <original {self.f.__name__}>>"
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         out = self.f(*args, **kwargs)
         return numpy_to_tensor(out)
 
 
-def numpy_attr_wrapper(obj, name):
+def numpy_attr_wrapper(obj: Any, name: str) -> Any:
     if isinstance(obj, tnp.ndarray):
         out = getattr(obj, name)
         return numpy_to_tensor(out)
@@ -3847,14 +3854,14 @@ def numpy_attr_wrapper(obj, name):
 class numpy_method_wrapper:
     """Convert obj from torch.Tensor to tnp.ndarray and call method. Then convert result back to torch.Tensor."""
 
-    def __init__(self, method: str):
+    def __init__(self, method: str) -> None:
         self.method = method
         self.__name__ = "wrapped_" + self.method
 
     def __repr__(self) -> str:
         return f"<Wrapped method <original {self.method}>>"
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         obj = args[0]
         if isinstance(obj, torch.Tensor):
             obj = tnp.ndarray(obj)
@@ -3866,24 +3873,24 @@ class numpy_method_wrapper:
 class numpy_operator_wrapper:
     """Implements dunder methods for tnp.ndarray via functions from the operator library"""
 
-    def __init__(self, op: Callable[..., Any]):
+    def __init__(self, op: Callable[..., Any]) -> None:
         self.op = op
         self.__name__ = f"wrapped_{op.__name__}"
 
     def __repr__(self) -> str:
         return f"<Wrapped operator <original {self.__name__}>>"
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         assert not kwargs
 
         args = (
-            tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
+            np.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
         )
         out = self.op(*args)
         return numpy_to_tensor(out)
 
 
-def defake(x):
+def defake(x: Any) -> Any:
     if not isinstance(x, FakeTensor):
         return x
     size: torch._prims_common.ShapeType
@@ -3915,24 +3922,26 @@ def defake(x):
     return y
 
 
-def _disable_side_effect_safety_checks_for_current_subtracer(fn, *args, **kwargs):
+def _disable_side_effect_safety_checks_for_current_subtracer(
+    fn: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
     return fn(*args, **kwargs)
 
 
-def is_utils_checkpoint(obj):
+def is_utils_checkpoint(obj: Any) -> bool:
     # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
 
 
-def is_invoke_subgraph(obj):
+def is_invoke_subgraph(obj: Any) -> bool:
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
 
     return obj is invoke_subgraph_placeholder
 
 
-def build_invoke_subgraph_variable(**options):
+def build_invoke_subgraph_variable(**options: Any) -> Any:
     from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
 
     return TorchHigherOrderOperatorVariable.make(
@@ -3941,7 +3950,7 @@ def build_invoke_subgraph_variable(**options):
     )
 
 
-def build_checkpoint_variable(**options):
+def build_checkpoint_variable(**options: Any) -> Any:
     import torch._higher_order_ops.wrap as higher_order_ops
 
     from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
@@ -3960,7 +3969,7 @@ def build_checkpoint_variable(**options):
     )
 
 
-def is_compile_supported(device_type):
+def is_compile_supported(device_type: Any) -> Any:
     from .eval_frame import is_dynamo_supported
 
     type = torch.device(device_type).type
@@ -4352,7 +4361,7 @@ def is_frozen_dataclass(value):
     )
 
 
-def get_first_attr(obj, *attrs):
+def get_first_attr(obj: Any, *attrs: str) -> Any:
     """
     Return the first available attribute or throw an exception if none is present.
     """
@@ -4364,13 +4373,15 @@ def get_first_attr(obj, *attrs):
 
 
 @contextlib.contextmanager
-def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
+def maybe_enable_compiled_autograd(
+    should_enable: bool, fullgraph: bool = True, dynamic: bool = True
+) -> Generator[Any, None, None]:
     if not should_enable:
         yield
     else:
 
-        def compiler_fn(gm):
-            def inner_compiler(gm_, example_inputs_):
+        def compiler_fn(gm: Any) -> Any:
+            def inner_compiler(gm_: Any, example_inputs_: Any) -> Any:
                 torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
                 return torch._inductor.compile(gm_, example_inputs_)
 
@@ -4382,7 +4393,7 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
             yield ctx
 
 
-def invalid_removeable_handle():
+def invalid_removeable_handle() -> RemovableHandle:
     # need a subclass so weakref works
     class Invalid(dict):  # type: ignore[type-arg]
         pass
@@ -4394,7 +4405,7 @@ def invalid_removeable_handle():
 # Attribute changes to the original object/proxy will be reflected in the other.
 # This is useful for cases where we want a keep-alive reference to a module without increasing
 # its reference count.
-def nn_module_proxy(mod):
+def nn_module_proxy(mod: Any) -> Any:
     if not isinstance(mod, torch.nn.Module):
         return mod
     if isinstance(mod, torch.fx.GraphModule):
@@ -4406,17 +4417,19 @@ def nn_module_proxy(mod):
 
 
 class GmWrapper(torch.nn.Module):
-    def __init__(self, gm, unflatten_fn):
+    def __init__(self, gm: Any, unflatten_fn: Callable[[list[Any]], Any]) -> None:
         super().__init__()
         self.gm = gm
         self.unflatten_fn = unflatten_fn
 
-    def forward(self, *args):
+    def forward(self, *args: Any) -> Any:
         args: list[Any] = list(args)
         return self.gm(*self.unflatten_fn(args))
 
 
-def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
+def flatten_graph_inputs(
+    gm: torch.fx.GraphModule, inputs: Any, compile_gm: Callable[[Any, Any], Any]
+) -> Callable[..., Any]:
     """
     Mutate inputs so that they are flat and wrap gm such that it
     accepts those inputs.  This is needed for graphs that take
@@ -4435,10 +4448,10 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         assert isinstance(inputs[0], list)
         boxed_inputs_count = len(inputs[0])
 
-        def flatten_fn(args):
+        def flatten_fn(args: Any) -> Any:
             return args[0] + list(args[1:])
 
-        def unflatten_fn(flat_args):
+        def unflatten_fn(flat_args: Any) -> Any:
             return (flat_args[:boxed_inputs_count], *flat_args[boxed_inputs_count:])
 
         compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flatten_fn(inputs))
@@ -4450,7 +4463,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         # note this doesn't check the spec, assuming it is the same
         flatten_fn = pytree.arg_tree_leaves
 
-    def wrapper(*args):
+    def wrapper(*args: Any) -> Any:
         flat_args = flatten_fn(args)
 
         # flat_args is a new list, so we need to clear references from the old list
@@ -4463,18 +4476,18 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     return wrapper
 
 
-def get_locals_to_steal(maybe_gm):
+def get_locals_to_steal(maybe_gm: Any) -> list[Any]:
     if not isinstance(maybe_gm, torch.fx.GraphModule) or not hasattr(maybe_gm, "meta"):
         return []
     return maybe_gm.meta.get("locals_to_steal", [])
 
 
-def set_locals_to_steal(gm, locals_to_steal):
+def set_locals_to_steal(gm: Any, locals_to_steal: list[Any]) -> None:
     gm.meta["locals_to_steal"] = locals_to_steal
 
 
 class Lit:
-    def __init__(self, s):
+    def __init__(self, s: str) -> None:
         self.s = s
 
     def __repr__(self) -> str:
@@ -4484,7 +4497,7 @@ class Lit:
 warn_once_cache: set[str] = set()
 
 
-def warn_once(msg, stacklevel=1):
+def warn_once(msg: str, stacklevel: int = 1) -> None:
     # Dynamo causes all warnings.warn (in user code and in Dynamo code) to print all the time.
     # https://github.com/pytorch/pytorch/issues/128427.
     # warn_once is a workaround: if the msg has been warned on before, then we will not
@@ -4496,14 +4509,14 @@ def warn_once(msg, stacklevel=1):
     warnings.warn(msg, stacklevel=stacklevel + 1)
 
 
-def strip_color_from_string(text):
+def strip_color_from_string(text: str) -> str:
     # This regular expression matches ANSI escape codes
     ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
     return ansi_escape.sub("", text)
 
 
 @contextlib.contextmanager
-def _disable_saved_tensors_hooks_during_tracing():
+def _disable_saved_tensors_hooks_during_tracing() -> Generator[None, None, None]:
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     try:
         prior = torch._C._autograd._saved_tensors_hooks_set_tracing(True)
@@ -4512,22 +4525,22 @@ def _disable_saved_tensors_hooks_during_tracing():
         torch._C._autograd._saved_tensors_hooks_set_tracing(prior)
 
 
-def is_parameter_freezing():
+def is_parameter_freezing() -> bool:
     return torch._inductor.config.freezing and not torch.is_grad_enabled()
 
 
-def get_torch_function_mode_stack():
+def get_torch_function_mode_stack() -> list[Any]:
     return [
         get_torch_function_mode_stack_at(i) for i in range(_len_torch_function_stack())
     ]
 
 
-def get_torch_function_mode_stack_at(ind):
+def get_torch_function_mode_stack_at(ind: int) -> Any:
     assert ind < _len_torch_function_stack() and ind >= 0
     return torch._C._get_function_stack_at(ind)
 
 
-def set_torch_function_mode_stack(stack):
+def set_torch_function_mode_stack(stack: list[Any]) -> None:
     for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
@@ -4535,17 +4548,17 @@ def set_torch_function_mode_stack(stack):
         _push_on_torch_function_stack(mode)
 
 
-def clear_torch_function_mode_stack():
+def clear_torch_function_mode_stack() -> None:
     for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
 
 # call from C dynamo in order to inspect values in pdb
-def _breakpoint_for_c_dynamo(*args):
+def _breakpoint_for_c_dynamo(*args: Any) -> None:
     breakpoint()
 
 
-def verify_guard_fn_signature(value):
+def verify_guard_fn_signature(value: Any) -> None:
     fn = value.__metadata_guard__
     sig = inspect.signature(fn)
     if len(sig.parameters) != 2:
@@ -4562,7 +4575,7 @@ def verify_guard_fn_signature(value):
         )
 
 
-def does_not_override_dict_iter_methods(user_cls):
+def does_not_override_dict_iter_methods(user_cls: Any) -> bool:
     return (
         user_cls.items in (dict.items, OrderedDict.items)
         and user_cls.values in (dict.values, OrderedDict.values)
@@ -4575,23 +4588,23 @@ def does_not_override_dict_iter_methods(user_cls):
 # __torch_function__ calls triggered on tensor properties in the pre graph
 # bytecode.
 @torch._disable_dynamo
-def call_size(x, i):
+def call_size(x: Any, i: int) -> int:
     return x.size(i)
 
 
 @torch._disable_dynamo
-def call_stride(x, i):
+def call_stride(x: Any, i: int) -> int:
     return x.stride(i)
 
 
 @torch._disable_dynamo
-def call_storage_offset(x):
+def call_storage_offset(x: Any) -> int:
     return x.storage_offset()
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
 # To avoid ref cycles, it's important that no tensors are present here, so leave those out.
-def _extract_tensor_dict(t):
+def _extract_tensor_dict(t: Any) -> dict[str, Any]:
     KEYS_TO_COPY = [
         "_dynamo_static_input_type",
         "tag",
@@ -4610,13 +4623,13 @@ def _extract_tensor_dict(t):
 user_obj_id_to_weakref: dict[int, weakref.ReferenceType[object]] = {}
 
 
-def get_user_object_from_id(obj_id):
+def get_user_object_from_id(obj_id: int) -> Any:
     obj = user_obj_id_to_weakref[obj_id]()
     assert obj is not None, "User object is no longer alive"
     return obj
 
 
-def store_user_object_weakref(obj):
+def store_user_object_weakref(obj: Any) -> None:
     obj_id = id(obj)
     user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
 
@@ -4649,7 +4662,7 @@ class CompileTimeInstructionCounter:
 
     @classmethod
     @contextmanager
-    def record(cls):
+    def record(cls) -> Generator[None, None, None]:
         try:
             if config.record_compile_time_instruction_count:
                 cls.start()
@@ -4659,7 +4672,7 @@ class CompileTimeInstructionCounter:
                 cls.end()
 
 
-def set_feature_use(feature: str, usage: bool):
+def set_feature_use(feature: str, usage: bool) -> None:
     """
     Records whether we are using a feature
     Generally a feature is a JK.
@@ -4677,7 +4690,7 @@ _ddp_optimization_mode: tuple[str, ...] = (
 )
 
 
-def get_optimize_ddp_mode():
+def get_optimize_ddp_mode() -> str:
     optimize_ddp = config.optimize_ddp
     if isinstance(optimize_ddp, bool):
         mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
@@ -4688,9 +4701,9 @@ def get_optimize_ddp_mode():
             f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
         )
 
-    assert mode in _ddp_optimization_mode, (
-        f"Invalid dynamo config optimize_ddp value {mode=}"
-    )
+    assert (
+        mode in _ddp_optimization_mode
+    ), f"Invalid dynamo config optimize_ddp value {mode=}"
     return mode
 
 
