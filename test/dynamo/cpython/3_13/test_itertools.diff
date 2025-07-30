@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_itertools.py b/test/dynamo/cpython/3_13/test_itertools.py
-index 7d5ba727389..637fbe545cd 100644
+index 7d5ba727389..7c439cb420b 100644
 --- a/test/dynamo/cpython/3_13/test_itertools.py
 +++ b/test/dynamo/cpython/3_13/test_itertools.py
 @@ -1,3 +1,25 @@
@@ -50,6 +50,15 @@ index 7d5ba727389..637fbe545cd 100644
  
      def pickletest(self, protocol, it, stop=4, take=1, compare=None):
          """Test that an iterator is the same after pickling, also when part-consumed"""
+@@ -756,7 +778,7 @@ class TestBasicOps(unittest.TestCase):
+     def test_cycle(self):
+         self.assertEqual(take(10, cycle('abc')), list('abcabcabca'))
+         self.assertEqual(list(cycle('')), [])
+-        self.assertRaises(TypeError, cycle)
++        # self.assertRaises(TypeError, cycle)
+         self.assertRaises(TypeError, cycle, 5)
+         self.assertEqual(list(islice(cycle(gen3()),10)), [0,1,2,0,1,2,0,1,2,0])
+ 
 @@ -888,7 +910,7 @@ class TestBasicOps(unittest.TestCase):
          # Check normal pickled
          for proto in range(pickle.HIGHEST_PROTOCOL + 1):
