@@ -39,6 +39,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     SM80OrLater,
+    tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
@@ -745,6 +746,7 @@ class AOTInductorTestsTemplate:
         IS_FBCODE,
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
+    @tf32_on_and_off(0.005)
     def test_deconv_freezing(self):
         dtypes = [torch.float]
         if torch._C._has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported():

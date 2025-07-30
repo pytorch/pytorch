@@ -7872,9 +7872,7 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         from torch._guards import detect_fake_mode
 
         result = super().run_node(n)
-        fake_mode = detect_fake_mode()
-        assert fake_mode is not None
-        rebind_unbacked(fake_mode.shape_env, n, result)
+        rebind_unbacked(detect_fake_mode().shape_env, n, result)
         return result
 
 
