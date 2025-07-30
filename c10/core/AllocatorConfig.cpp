@@ -220,6 +220,15 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
     } else if (key == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(tokenizer, i);
     } else {
+      // If a device-specific configuration parser hook is registered, it will
+      // check if the key is unrecognized.
+      if (device_config_parser_hook_) {
+        TORCH_CHECK(
+            keys_.find(key) != keys_.end(),
+            "Unrecognized key '",
+            key,
+            "' in Accelerator allocator config.");
+      }
       i = tokenizer.skipKey(i);
     }
 
