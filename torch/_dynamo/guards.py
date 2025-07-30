@@ -2854,16 +2854,18 @@ class GuardsStatePickler(pickle.Pickler):
         return mod
 
     @classmethod
-    def _unpickle_tensor(cls, meta_tensor, device, pytype, dispatch_keys_raw):
+    def _unpickle_tensor(cls, meta_tensor, device, pytype, dispatch_keys_raw, grad):
         fake_mode = torch._subclasses.FakeTensorMode()
         tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
-        return tensor_converter.from_meta_and_device(
+        ret = tensor_converter.from_meta_and_device(
             fake_mode,
             meta_tensor,
             device,
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
+        ret.grad = grad
+        return ret
 
     @classmethod
     def _unpickle_traceable_wrapper_subclass(
@@ -2930,6 +2932,7 @@ class GuardsStatePickler(pickle.Pickler):
                 obj.device,
                 type(obj),
                 torch._C._dispatch_keys(obj).raw_repr(),
+                obj.grad,
             )
 
         elif isinstance(obj, torch.nn.Module):
