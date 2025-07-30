@@ -67,6 +67,7 @@ from torch._dynamo.source import (
     is_from_flatten_script_object_source,
     is_from_local_source,
     is_from_optimizer_source,
+    is_from_unspecialized_builtin_nn_module_source,
     TensorProperty,
     TensorPropertySource,
 )
@@ -2558,7 +2559,12 @@ class GuardBuilder(GuardBuilderBase):
                 # insert aliasing guards on them
                 if not (
                     config.skip_no_tensor_aliasing_guards_on_parameters
-                    and istype(value, torch.nn.Parameter)
+                    and (
+                        istype(value, torch.nn.Parameter)
+                        or is_from_unspecialized_builtin_nn_module_source(
+                            guard.originating_source
+                        )
+                    )
                 ) and not isinstance(guard.originating_source, NumpyTensorSource):
                     # Keep track of all the tensor guard managers to insert
                     # NoAliasing check at the end.
