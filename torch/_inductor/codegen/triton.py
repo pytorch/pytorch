@@ -1119,7 +1119,7 @@ class TritonOverrides(OpOverrides):
         dense_sizes = V.kernel.dense_size_list()
         allow_tf32 = torch.backends.cuda.matmul.allow_tf32
         assert torch._inductor.config.triton.enable_native_matmul
-
+        
         # mm case
         if len(dense_sizes) == 3:
             Y = dense_sizes[0]
