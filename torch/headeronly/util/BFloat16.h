@@ -311,56 +311,72 @@ inline C10_HOST_DEVICE double operator/(double a, BFloat16 b) {
 /// Arithmetic with ints
 
 inline C10_HOST_DEVICE BFloat16 operator+(BFloat16 a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a + static_cast<BFloat16>(b);
 }
 inline C10_HOST_DEVICE BFloat16 operator-(BFloat16 a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a - static_cast<BFloat16>(b);
 }
 inline C10_HOST_DEVICE BFloat16 operator*(BFloat16 a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a * static_cast<BFloat16>(b);
 }
 inline C10_HOST_DEVICE BFloat16 operator/(BFloat16 a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a / static_cast<BFloat16>(b);
 }
 
 inline C10_HOST_DEVICE BFloat16 operator+(int a, BFloat16 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<BFloat16>(a) + b;
 }
 inline C10_HOST_DEVICE BFloat16 operator-(int a, BFloat16 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<BFloat16>(a) - b;
 }
 inline C10_HOST_DEVICE BFloat16 operator*(int a, BFloat16 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<BFloat16>(a) * b;
 }
 inline C10_HOST_DEVICE BFloat16 operator/(int a, BFloat16 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<BFloat16>(a) / b;
 }
 
 //// Arithmetic with int64_t
 
 inline C10_HOST_DEVICE BFloat16 operator+(BFloat16 a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a + static_cast<BFloat16>(b);
 }
 inline C10_HOST_DEVICE BFloat16 operator-(BFloat16 a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a - static_cast<BFloat16>(b);
 }
 inline C10_HOST_DEVICE BFloat16 operator*(BFloat16 a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a * static_cast<BFloat16>(b);
 }
 inline C10_HOST_DEVICE BFloat16 operator/(BFloat16 a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a / static_cast<BFloat16>(b);
 }
 
 inline C10_HOST_DEVICE BFloat16 operator+(int64_t a, BFloat16 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<BFloat16>(a) + b;
 }
 inline C10_HOST_DEVICE BFloat16 operator-(int64_t a, BFloat16 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<BFloat16>(a) - b;
 }
 inline C10_HOST_DEVICE BFloat16 operator*(int64_t a, BFloat16 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<BFloat16>(a) * b;
 }
 inline C10_HOST_DEVICE BFloat16 operator/(int64_t a, BFloat16 b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<BFloat16>(a) / b;
 }
 
@@ -380,25 +396,24 @@ C10_CLANG_DIAGNOSTIC_POP()
 namespace torch::headeronly {
 
 namespace detail {
-  using c10::detail::f32_from_bits;
-  using c10::detail::bits_from_f32;
-  using c10::detail::round_to_nearest_even;
+using c10::detail::bits_from_f32;
+using c10::detail::f32_from_bits;
+using c10::detail::round_to_nearest_even;
 } // namespace detail
 
-  using c10::BFloat16;
-  using c10::operator+;
-  using c10::operator-;
-  using c10::operator*;
-  using c10::operator/;
-  using c10::operator+=;
-  using c10::operator-=;
-  using c10::operator*=;
-  using c10::operator/=;
-  using c10::operator<;
-  using c10::operator>;
-  using c10::operator<<;
+using c10::BFloat16;
+using c10::operator+;
+using c10::operator-;
+using c10::operator*;
+using c10::operator/;
+using c10::operator+=;
+using c10::operator-=;
+using c10::operator*=;
+using c10::operator/=;
+using c10::operator<;
+using c10::operator>;
+using c10::operator<<;
 } // namespace torch::headeronly
-
 
 namespace std {
 
