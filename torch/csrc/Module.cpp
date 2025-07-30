@@ -138,6 +138,8 @@
 #include <torch/csrc/itt.h>
 #endif
 
+#include <torch/nativert/python/Bindings.h>
+
 namespace py = pybind11;
 
 static PyObject* module;
@@ -2780,6 +2782,8 @@ Call this whenever a new thread is created in order to propagate values from
 #ifdef USE_KINETO
   torch::global_kineto_init();
 #endif
+  auto nativert_module = py_module.def_submodule("_nativert");
+  torch::nativert::initModelRunnerPybind(nativert_module);
   return module;
   END_HANDLE_TH_ERRORS
 }
