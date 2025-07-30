@@ -178,9 +178,6 @@ if torch.backends.mps.is_available():
             "zero_",
             "zeros",
             "zeros_like",
-        }
-
-        AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
             "__rdiv__",
             "__rmatmul__",
             "_chunk_cat",
@@ -274,8 +271,6 @@ if torch.backends.mps.is_available():
             "roll",
             "rot90",
             "short",
-            "sinh",
-            "sqrt",
             "square",
             "stack",
             "stft",
@@ -432,7 +427,6 @@ if torch.backends.mps.is_available():
             "nn.functional.max_unpool1dgrad": None,
             "nn.functional.max_unpool2dgrad": None,
             "nn.functional.max_unpool3dgrad": None,
-            "nn.functional.avg_pool3d": None,
             "nn.functional.ctc_loss": None,
             "nn.functional.embedding_bag": None,
             "nn.functional.max_unpool1d": None,
@@ -543,43 +537,6 @@ if torch.backends.mps.is_available():
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
         }
-
-        if MACOS_VERSION < 14.0:
-            # FFT and BFloat16 support was added in MacOS 14
-            UNIMPLEMENTED_XFAILLIST.update(
-                {
-                    "bfloat16": None,
-                    "fft.fft": None,
-                    "fft.fft2": None,
-                    "fft.fftn": None,
-                    "fft.hfft": None,
-                    "fft.hfft2": None,
-                    "fft.hfftn": None,
-                    "fft.ifft": None,
-                    "fft.ifft2": None,
-                    "fft.ifftn": None,
-                    "fft.ihfft": None,
-                    "fft.ihfft2": None,
-                    "fft.ihfftn": None,
-                    "fft.irfft": None,
-                    "fft.irfft2": None,
-                    "fft.irfftn": None,
-                    "fft.rfft": None,
-                    "fft.rfft2": None,
-                    "fft.rfftn": None,
-                    "stft": None,
-                    # Error in TestConsistencyCPU.test_output_match_isin_cpu fails for integers,
-                    # not reproducible in later OS. Added assert to op if used in < 14.0
-                    "isin": [
-                        torch.int64,
-                        torch.int32,
-                        torch.int16,
-                        torch.uint8,
-                        torch.int8,
-                    ],
-                    "nn.functional.max_pool2d": [torch.uint8],
-                }
-            )
 
         if MACOS_VERSION < 15.0:
             UNIMPLEMENTED_XFAILLIST.update(
@@ -777,10 +734,7 @@ if torch.backends.mps.is_available():
                 )
 
             # If ops is not supported for complex types, expect it to fail
-            if key not in SUPPORTED_COMPLEX_OPS and (
-                key not in AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS
-                or MACOS_VERSION < 14.0
-            ):
+            if key not in SUPPORTED_COMPLEX_OPS:
                 addDecorator(
                     op,
                     DecorateInfo(
@@ -824,6 +778,11 @@ if torch.backends.mps.is_available():
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
             # Correctness issues
             "atanh": [torch.float32],
+            # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
+            # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
+            # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
+            # Running `msort` with stable `sort` passes.
+            "msort": [torch.float16],
             # Random output
             "exponential": [torch.float16, torch.float32],
             # CPU errors
@@ -864,22 +823,7 @@ if torch.backends.mps.is_available():
             "round": [torch.float16],
             # topk fails with duplicate indices
             "topk": [torch.float16],
-        }
-
-        MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
-            # Failures due to precision issues (may be fast-math). These has been fixed in MacOS 14
-            "masked.softmin": [torch.float32, torch.float16],
-            "masked.softmax": [torch.float32, torch.float16],
-            "masked.log_softmax": [torch.float32, torch.float16],
-            "atanh": [torch.float16],
-            "triangular_solve": [torch.float32],
-            # Unsupported Border padding mode, forward pass success as fallback to cpu
-            "grid_sampler_2d": [torch.float32, torch.float16, torch.bfloat16],
-            # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
-            # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
-            # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
-            # Running `msort` with stable `sort` passes.
-            "msort": [torch.float16],
+            "nn.functional.avg_pool3d": [torch.float32],
         }
 
         SKIPLIST_GRAD = {
@@ -891,14 +835,6 @@ if torch.backends.mps.is_available():
             "nn.functional.conv_transpose1d": [torch.float16],
             "nn.functional.conv_transpose2d": [torch.float16],
             "nn.functional.conv_transpose3d": [torch.float16],
-        }
-
-        MACOS_13_3_XFAILLIST_GRAD = {
-            # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
-            # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
-            # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
-            # Running `msort` with stable `sort` passes.
-            "msort": [torch.float16],
         }
 
         ON_MPS_XFAILLIST = {
@@ -931,24 +867,6 @@ if torch.backends.mps.is_available():
                     ),
                 )
 
-            if key in MACOS_BEFORE_13_3_XFAILLIST_GRAD and (
-                torch.backends.mps.is_macos13_or_newer() and MACOS_VERSION < 13.3
-            ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure,
-                        dtypes=MACOS_BEFORE_13_3_XFAILLIST_GRAD[key],
-                    ),
-                )
-
-            if key in MACOS_13_3_XFAILLIST_GRAD and (MACOS_VERSION >= 13.3):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure, dtypes=MACOS_13_3_XFAILLIST_GRAD[key]
-                    ),
-                )
         return ops
 
     def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
