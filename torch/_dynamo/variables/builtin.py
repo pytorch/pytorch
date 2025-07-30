@@ -1989,9 +1989,7 @@ class BuiltinVariable(VariableTracker):
         if kwargs:
             assert len(kwargs) == 1 and "strict" in kwargs
         strict = kwargs.pop("strict", False)
-        args = [
-            BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args
-        ]
+        args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
         return variables.ZipVariable(
             args, strict=strict, mutation_type=ValueMutationNew()
         )
