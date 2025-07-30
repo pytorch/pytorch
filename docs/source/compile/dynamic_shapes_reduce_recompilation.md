@@ -178,7 +178,7 @@ follow these steps using `tlparse`:
    For instance, the following output shows that the input `L['m']` has been seen with
    multiple sizes at `size[0]`, but the stride has consistently been 1:
 
-   ```bash
+   ```
    /data/users/bobren/a/pytorch/r2.py:2:func:
    L['m']: fully dynamic scalar or tensor
    L['x']: tensor size=[?] stride=[1]
@@ -369,20 +369,20 @@ identify this by:
 
     * Checking the Dynamo graph - look for `Sym(number)`. For example:
 
-      ```bash
+      ```
       Sym(256) vs Sym(s0)
       ```
 
     * Using dynamic logs:
 
-      ```bash
+      ```
       +launcher.additional_environ=["TORCH_LOGS=+dynamic"]
       create_symbol s2 = 2 for L['self']._modules['cle ...
       ```
 
     * Reviewing guards files. If a tensor size is dynamic, it will be indicated as `None`:
 
-      ```bash
+      ```
       | | | | | | | | | | | +- TENSOR_MATCH:check_tensor(L['self']._modules['cle']._modules['compress']._parameters['weight'], Parameter, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=True, size=[None, None], stride=[None, 1])
       ```
 
@@ -415,7 +415,7 @@ call  to a Triton kernel. To identify the reason for specialization:
 
     The log above indicates that `s0` is specialized to `33` due to the following code:
 
-    ```bash
+    ```
     `if self.x ==33` at example4.py line 16.
     ```
 
@@ -423,13 +423,14 @@ call  to a Triton kernel. To identify the reason for specialization:
 
     Example log:
 
-    ```bash
+    ```
     torch/fx/experimental/symbolic_shapes.py:6557] [0/2] eval Eq(s0, 33) [guard added] if self.x ==33:  # example4.py:16 in forward (_dynamo/variables/tensor.py:1242 in evaluate_expr), for more info run with TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED="Eq(s0, 33)"
     V0228 12:04:24.190000 2990033 torch/fx/experimental/symbolic_shapes.py:6000] [0/2] _update_var_to_range s0 = VR[33, 33] (update)
     ```
 
     The log above indicates that `s0` is specialized to `33` due to the following code:
-    ```bash
+    
+    ```
     if self.x ==33. At example4.py like 16.
     ```
 
