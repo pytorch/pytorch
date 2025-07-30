@@ -64,7 +64,7 @@ fn(x, y)
 
 To identify where dynamic shape guards originate, use `tlparse`. Here is an example tlparse output:
 
-```{image} _static/img/dynamic_shapes/tlparse9_debugging_guards.png
+```{image} ../_static/img/dynamic_shapes/tlparse9_debugging_guards.png
 ```
 
 By clicking on the `dynamo_cpp_guards` link, you can view all guards from the compilation, including the symbolic shape guard `L['x'].size()[0] <= 9`.
@@ -91,7 +91,7 @@ fn(x, y)
 
 Now, this compiled region can be used for inputs of size 0 and 1:
 
-```{image} _static/img/dynamic_shapes/tlparse10_debugging_guards_unbacked.png
+```{image} ../_static/img/dynamic_shapes/tlparse10_debugging_guards_unbacked.png
 ```
 
 ```{seealso}
