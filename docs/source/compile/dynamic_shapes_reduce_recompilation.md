@@ -178,7 +178,7 @@ follow these steps using `tlparse`:
    For instance, the following output shows that the input `L['m']` has been seen with
    multiple sizes at `size[0]`, but the stride has consistently been 1:
 
-   ```python
+   ```bash
    /data/users/bobren/a/pytorch/r2.py:2:func:
    L['m']: fully dynamic scalar or tensor
    L['x']: tensor size=[?] stride=[1]
@@ -369,7 +369,7 @@ identify this by:
 
     * Checking the Dynamo graph - look for `Sym(number)`. For example:
 
-      ```sh
+      ```bash
       Sym(256) vs Sym(s0)
       ```
 
