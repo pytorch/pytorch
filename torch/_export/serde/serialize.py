@@ -2108,11 +2108,12 @@ class GraphModuleDeserializer(metaclass=Final):
 
         # handle ShapeEnv asserts
         if target == torch.ops.aten._assert_scalar.default:
-            expr = fx_node.args[0].meta["val"]  # type: ignore[union-attr]
-            if isinstance(expr, torch.SymBool):
-                self.shape_env.guard_or_defer_runtime_assert(
-                    expr.node.expr, "", fx_node
-                )
+            if not isinstance((arg := fx_node.args[0]), bool):
+                expr = arg.meta["val"]  # type: ignore[union-attr]
+                if isinstance(expr, torch.SymBool):
+                    self.shape_env.guard_or_defer_runtime_assert(
+                        expr.node.expr, "", fx_node
+                    )
         elif target == torch.ops.aten.sym_constrain_range_for_size.default:
             sym = fx_node.args[0].meta["val"]  # type: ignore[union-attr]
             if isinstance(sym, torch.SymInt):
