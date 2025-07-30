@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import os
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -25,13 +26,17 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfXpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._typing_utils import not_none
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_count = torch.accelerator.device_count()
 
 
 def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_rank=-1):
@@ -43,6 +48,7 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_ran
         os.environ["LOCAL_RANK"] = f"{local_rank}"
 
 
+@skipIfXpu
 class DeviceMeshTestGlooBackend(DTensorTestBase):
     @property
     def backend(self):
@@ -53,7 +59,7 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         mesh_group = mesh.get_group()
         default_group = _get_default_group()
-        if torch.cuda.is_available():
+        if torch.accelerator.is_available():
             self.assertNotEqual(mesh_group, default_group)
             self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
         else:
@@ -72,14 +78,16 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
 
         # Set the device on each process before DeviceMesh constructor,
         # and device to be different than the default world rank
-        torch.cuda.set_device((self.rank + 2) % self.world_size)
+        torch.accelerator.set_device_idx((self.rank + 2) % self.world_size)
         _set_env_var(world_size=self.world_size, rank=self.rank)
         DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
         # and respect the previous set_device calls
-        self.assertEqual(torch.cuda.current_device(), (self.rank + 2) % self.world_size)
+        self.assertEqual(
+            torch.accelerator.current_device_idx(), (self.rank + 2) % self.world_size
+        )
         self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
@@ -100,7 +108,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
 
         # check that the device is set to the correct device
         # and respect the LOCAL_RANK env var
-        self.assertEqual(torch.cuda.current_device(), local_rank)
+        self.assertEqual(torch.accelerator.current_device_idx(), local_rank)
         self.destroy_pg()
 
     @skip_if_lt_x_gpu(4)
@@ -119,7 +127,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
         self.assertTrue(is_initialized())
 
         # check that the device is set to the correct device
-        self.assertEqual(torch.cuda.current_device(), self.rank)
+        self.assertEqual(torch.accelerator.current_device_idx(), self.rank)
         self.destroy_pg()
 
 
@@ -161,8 +169,8 @@ class DeviceMeshTest(DTensorTestBase):
 
         # when eager init is used, the subgroup is created from nccl comm split and
         # there would be bound_device_id immediately assigned for the subgroup.
-        if self.backend == "nccl":
-            curr_device = torch.cuda.current_device()
+        if self.backend == "nccl" or self.backend == "xccl":
+            curr_device = torch.accelerator.current_accelerator()
             self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
             self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
 
@@ -221,7 +229,7 @@ class DeviceMeshTest(DTensorTestBase):
     @with_comms
     def test_device_mesh_2d(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        # construct a cuda device mesh
+        # construct a device mesh for self.device_type
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
@@ -254,10 +262,10 @@ class DeviceMeshTest(DTensorTestBase):
         # we call init_backend we should make sure the default pg already created
         mesh.get_coordinate()
 
+    @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator available!")
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
         mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
         local_tensor = torch.randn(2, 8)
@@ -297,7 +305,7 @@ class DeviceMeshTest(DTensorTestBase):
         regex = r"Invalid mesh \[\[0, 1\], \[2, 3\]\] for ProcessGroup with ranks \[0, 1, 2, 3\]"
         with self.assertRaisesRegex(ValueError, regex):
             DeviceMesh.from_group(
-                global_pg, "cuda", invalid_mesh, mesh_dim_names=("dim0", "dim1")
+                global_pg, device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
             )
 
         device_mesh = init_device_mesh(self.device_type, (2, 2))
@@ -317,12 +325,11 @@ class DeviceMeshTest(DTensorTestBase):
             # test init_device_mesh with an invalid device type that contains a GPU index
             mesh_shape = (2, self.world_size // 2)
             init_device_mesh(
-                "cuda:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
+                f"{device_type}:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
             )
 
     @with_comms
     def test_set_mesh_dim_group_options(self):
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
         _mesh_resources._set_mesh_dim_group_options(1, "fake", None)
 
         mesh_tensor = torch.arange(4).reshape(2, 2)
@@ -334,11 +341,11 @@ class DeviceMeshTest(DTensorTestBase):
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return min(8, device_count)
 
     @with_comms
     def test_device_mesh_nd(self):
-        # construct a cuda device mesh
+        # construct a device mesh for self.device_type
         mesh_tensor = torch.arange(8).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
@@ -361,16 +368,19 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_hash(self):
-        mesh_tensor_2d = torch.arange(8).reshape(4, 2)
+        mesh_tensor_2d = torch.arange(self.world_size).reshape(self.world_size // 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
         self.assertEqual(hash(mesh), hash(mesh2))
-        mesh_tensor_3d = torch.arange(8).reshape(2, 2, 2)
+        mesh_tensor_3d = torch.arange(self.world_size).reshape(
+            2, 2, self.world_size // 4
+        )
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
         self.assertNotEqual(hash(mesh2), hash(mesh3))
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
     def test_get_local_rank_3d(self):
         """
         If we have a 3D mesh and we want to apply dp, pp, tp to it,
@@ -446,7 +456,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         """Tests ``from_group`` when passing ``mesh_shape`` as 3D."""
         # Consider the following 3D scenario and we need to create the 2D HSDP mesh from it.
         # - (2, 2, 2) ("dp_replicate", "dp_shard", "tp") mesh
-        mesh_shape = (2, 2, 2)
+        mesh_shape = (2, 2, self.world_size // 4)
         mesh_dim_names = ("dp_replicate", "dp_shard", "tp")
         ref_mesh = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
@@ -482,7 +492,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         """Tests ``from_group`` when passing ``mesh_shape`` as 2D."""
         # Consider the following scenario where the process group has been created,
         # but we need to create the 2D HSDP mesh from it later in the program.
-        mesh_shape = (2, 4)
+        mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("dp_replicate", "dp_shard")
         ref_mesh = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
@@ -535,15 +545,15 @@ class DeviceMeshTestNDim(DTensorTestBase):
 class InitDeviceMeshTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return min(8, device_count)
 
     @with_comms
     def test_init_device_mesh(self):
-        mesh_shape = (2, 4)
+        mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
         ref_mesh = DeviceMesh(
             self.device_type,
-            torch.arange(8).view(mesh_shape),
+            torch.arange(self.world_size).view(mesh_shape),
             mesh_dim_names=mesh_dim_names,
         )
 
@@ -562,7 +572,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         ):
             init_device_mesh(
                 self.device_type,
-                (2, 4),
+                (2, self.world_size // 2),
                 mesh_dim_names=["dp", "dp"],
             )
 
@@ -582,14 +592,14 @@ class InitDeviceMeshTest(DTensorTestBase):
 class TestDeviceMeshGetItem(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return min(8, device_count)
 
     @with_comms
     def test_raises_no_mesh_dim_found(self):
         with self.assertRaisesRegex(
             RuntimeError, "Cannot slice a DeviceMesh without mesh_dim_names!"
         ):
-            mesh = init_device_mesh(self.device_type, (2, 4))
+            mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
             mesh["DP"]
 
     @with_comms
@@ -598,13 +608,15 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         with self.assertRaisesRegex(KeyError, "Invalid mesh_dim_name"):
             mesh_dim_names = ("DP", "TP")
             mesh = init_device_mesh(
-                self.device_type, (2, 4), mesh_dim_names=mesh_dim_names
+                self.device_type,
+                (2, self.world_size // 2),
+                mesh_dim_names=mesh_dim_names,
             )
             mesh[child_mesh_dim_name]
 
     @with_comms
     def test_get_item_2d(self):
-        mesh_shape = (2, 4)
+        mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
@@ -618,15 +630,17 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             ).reshape(-1, mesh_2d.mesh.size(mesh_dim))
 
         tp_mesh = mesh_2d["TP"]
-        tp_group_idx = self.rank // 4
+        tp_group_idx = self.rank // (self.world_size // 2)
         self.assertEqual(tp_mesh.mesh, pg_ranks_by_dim_name["TP"][tp_group_idx])
 
-        dp_group_idx = self.rank % 4
+        dp_group_idx = self.rank % (self.world_size // 2)
         self.assertEqual(mesh_2d["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx])
 
     @with_comms
     def test_get_item_1d(self):
-        mesh = init_device_mesh(self.device_type, (8,), mesh_dim_names=("dp",))
+        mesh = init_device_mesh(
+            self.device_type, (self.world_size,), mesh_dim_names=("dp",)
+        )
         # Make sure slicing out 1D mesh from a 1D mesh works.
         dp_mesh = mesh["dp"]
         self.assertEqual(dp_mesh, mesh)
@@ -635,6 +649,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             dp_mesh = mesh["dim0"]
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
     def test_get_item_3d(self):
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("Replicate", "Shard", "TP")
@@ -672,7 +687,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
     @with_comms
     def test_cache_and_reuse_submesh_slice_result(self):
-        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
+        mesh = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
 
         ref_pg_count = _world.group_count
 
@@ -686,6 +703,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(_world.group_count, ref_pg_count)
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
     def test_get_item_3d_noncontiguous_slicing(self):
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("dp", "pp", "cp")
@@ -715,7 +733,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
     @with_comms
     def test_flatten_mesh_3d(self):
-        mesh_shape = (2, 2, 2)
+        mesh_shape = (2, 2, self.world_size // 4)
         mesh_dim_names = ("dp", "cp", "tp")
         mesh_3d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
@@ -757,6 +775,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(mesh_3d["dummy"].mesh_dim_names[0], "dummy")
 
     @with_comms(eager_init=True)
+    @skip_if_lt_x_gpu(8)
     def test_flatten_mesh_4d(self):
         mesh_shape = (2, 2, 2, 1)
         mesh_dim_names = ("dp_replicate", "dp_shard", "cp", "tp")
@@ -774,6 +793,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(_mesh_resources.get_root_mesh(dp_cp_mesh), mesh_4d)
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
     def test_reconstruct_mesh_with_flatten_dim(self):
         mesh_3d = init_device_mesh(
             self.device_type, (2, 2, 2), mesh_dim_names=("replicate", "shard", "cp")
@@ -805,12 +825,14 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 class TestMeshEnv(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return min(8, device_count)
 
     @with_comms
     def test_get_root_mesh(self):
         mesh_3d = init_device_mesh(
-            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "cp", "tp")
+            self.device_type,
+            (2, 2, self.world_size // 4),
+            mesh_dim_names=("dp", "cp", "tp"),
         )
 
         dp_cp_mesh = mesh_3d["dp", "cp"]
@@ -858,10 +880,12 @@ class TestMeshEnv(DTensorTestBase):
     @with_comms
     def test_get_all_submeshes(self):
         mesh_2d = init_device_mesh(
-            self.device_type, (2, 4), mesh_dim_names=("replicate", "shard")
+            self.device_type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("replicate", "shard"),
         )
         all_submeshes = _mesh_resources._get_all_submeshes(mesh_2d, "replicate")
-        self.assertEqual(len(all_submeshes), 4)
+        self.assertEqual(len(all_submeshes), self.world_size // 2)
         self.assertEqual(
             all(submesh.mesh.numel() == 2 for submesh in all_submeshes), True
         )
@@ -883,7 +907,7 @@ class TestMeshEnv(DTensorTestBase):
 class DeviceMeshCollectiveTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return min(8, device_count)
 
     @with_comms
     def test_broadcast_1d(self):
@@ -1099,7 +1123,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
     @with_comms
     def test_broadcast_nd(self):
-        mesh_tensor = torch.arange(8).reshape(2, 2, 2)
+        mesh_tensor = torch.arange(self.world_size).reshape(2, 2, self.world_size // 4)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
 
@@ -1117,7 +1141,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
     @with_comms
     def test_scatter_nd(self):
-        mesh_tensor = torch.arange(8).reshape(2, 2, 2)
+        mesh_tensor = torch.arange(self.world_size).reshape(2, 2, self.world_size // 4)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
