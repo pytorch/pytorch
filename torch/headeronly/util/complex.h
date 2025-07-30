@@ -588,7 +588,7 @@ struct alignas(4) complex<Half> {
   }
 };
 
-}  // namespace c10
+} // namespace c10
 
 namespace torch::headeronly {
 using c10::complex;
@@ -611,6 +611,6 @@ using c10::complex_literals::operator""_if;
 using c10::complex_literals::operator""_id;
 } // namespace complex_literals
 
-}  // namespace torch::headeronly
+} // namespace torch::headeronly
 
 C10_CLANG_DIAGNOSTIC_POP()

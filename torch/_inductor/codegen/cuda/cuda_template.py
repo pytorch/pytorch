@@ -3,7 +3,7 @@ import functools
 import hashlib
 import itertools
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Union
 from typing_extensions import override
 from unittest.mock import patch
 
@@ -11,7 +11,6 @@ import sympy
 
 import torch
 from torch._inductor import config
-from torch._inductor.select_algorithm import create_inputs_key
 from torch._inductor.utils import clear_on_fresh_cache, Placeholder
 from torch._logging import getArtifactLogger
 
@@ -80,7 +79,7 @@ class CUDATemplate(KernelTemplate):
     def supports_epilogue_fusion(op: GemmOperation) -> bool:
         return False
 
-    def make_key(self, op: "GemmOperation") -> str:
+    def make_key(self, name: str, input_key: str, layout_repr: str) -> str:
         """
         Make a key for the code cache. The idea of the method is to cache
         everything that matters but doesn't include runtime param values, i.e.,
@@ -92,26 +91,26 @@ class CUDATemplate(KernelTemplate):
         return hashlib.sha256(
             str(
                 (
-                    create_inputs_key(self.input_nodes),
+                    input_key,
                     self.input_reorder,
                     # output layout, same as self.output_node.get_layout()
-                    self.layout,
+                    layout_repr,
                     self.get_runtime_arg_info(),
-                    op.configuration_name(),
+                    name,
                 )
             ).encode("utf-8")
         ).hexdigest()
 
-    def generate_code_and_args(self, **kwargs) -> tuple[str, tuple[int, ...]]:
+    def generate_code_and_args(
+        self, name: str, input_key: str, layout_repr: str, **kwargs
+    ) -> tuple[str, tuple[int, ...]]:
         """
         Generate code and args with caching. We cache the code even if runtime
         args are different.
         """
         key: Optional[str] = None
         if config.cuda.enable_caching_codegen:
-            op = kwargs.get("op")
-            assert op is not None, "op is required for caching"
-            key = self.make_key(op)
+            key = self.make_key(name=name, input_key=input_key, layout_repr=layout_repr)
 
         if key is not None and key in self.code_cache:
             code, size_args = self.code_cache[key]
@@ -160,7 +159,12 @@ class CUDATemplate(KernelTemplate):
 
     def generate(  # type: ignore[override]
         self,
+        name: str,
         description: str,
+        input_key: str,
+        layout_repr: str,
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         **kwargs,
     ) -> CUDATemplateCaller:
         """
@@ -175,7 +179,12 @@ class CUDATemplate(KernelTemplate):
         Returns:
             A CUDATemplateCaller object representing the generated CUDA template caller.
         """
-        code, extra_args = self.generate_code_and_args(**kwargs)
+        code, extra_args = self.generate_code_and_args(
+            name=name,
+            input_key=input_key,
+            layout_repr=layout_repr,
+            **kwargs,
+        )
 
         # not caching since kernel name is needed below
         kernel_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:8]
@@ -185,8 +194,8 @@ class CUDATemplate(KernelTemplate):
         # create the BenchmarkRequest
         bmreq = CUDABenchmarkRequest(
             kernel_name=kernel_name,
-            input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
-            output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
+            input_tensor_meta=input_tensor_meta,
+            output_tensor_meta=output_tensor_meta,
             extra_args=extra_args,
             source_code=code,
         )

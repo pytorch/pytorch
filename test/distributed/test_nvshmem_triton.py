@@ -220,6 +220,17 @@ def alltoall_kernel(
     nvshmem.alltoall(team_handle, dest_ptr, src_ptr, nelems)
 
 
+@triton.jit
+def broadcast_kernel(
+    team_handle,
+    dest_ptr,
+    src_ptr,
+    nelems,
+    pe_root,
+):
+    nvshmem.broadcast(team_handle, dest_ptr, src_ptr, nelems, pe_root)
+
+
 @instantiate_parametrized_tests
 @requires_nvshmem()
 class NVSHMEMTritonTest(MultiProcContinousTest):
@@ -888,6 +899,53 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             expected = i * 100 + rank
             actual = dst[i * nelems_per_pe : (i + 1) * nelems_per_pe]
             torch.testing.assert_close(actual, torch.full_like(actual, expected))
+
+    @skipIfRocm
+    @requires_triton()
+    def test_triton_broadcast(self) -> None:
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        nvshmem_lib = nvshmem.enable_triton()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+        rank = self.rank
+        # Configuration
+        nelems = 4  # number of elements
+        dtype = torch.int64
+        # Source buffer - only root will have meaningful data
+        pe_root = 0  # PE 0 will be the root
+        src = symm_mem.empty(nelems, dtype=dtype, device=self.device)
+        if rank == pe_root:
+            # Root fills with specific pattern
+            for i in range(nelems):
+                src[i] = 100 + i
+        else:
+            # Non-root PEs have dummy data
+            src.fill_(-1)
+        # Destination buffer
+        dst = symm_mem.empty(nelems, dtype=dtype, device=self.device).fill_(-999)
+        src_hdl = symm_mem.rendezvous(src, group=group_name)
+        dst_hdl = symm_mem.rendezvous(dst, group=group_name)
+        # Synchronize before broadcast
+        dist.barrier()
+        # Execute broadcast
+        team_handle = 0  # NVSHMEM_TEAM_WORLD
+        broadcast_kernel[(1,)](
+            team_handle,
+            dst_hdl.buffer_ptrs[rank],
+            src_hdl.buffer_ptrs[rank],
+            nelems,
+            pe_root,
+            extern_libs=nvshmem_lib,
+            launch_cooperative_grid=True,
+        )
+        # Synchronize after broadcast
+        dist.barrier()
+        # Verify results - all ranks should have the root's data
+        expected = [100 + i for i in range(nelems)]
+        torch.testing.assert_close(
+            dst, torch.tensor(expected, device=self.device, dtype=dtype)
+        )
 
 
 if __name__ == "__main__":
