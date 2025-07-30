@@ -158,10 +158,7 @@ class PyInterpreterHolder {
             ConcretePyInterpreterVTable::instance())),
         is_main_interpreter_(
             at::impl::PythonOpRegistrationTrampoline::registerInterpreter(
-                impl_)) {
-    // Initialize the global function pointer for c10 PyObjectSlot
-    c10::impl::g_get_pyinterpreter_fn = &getPyInterpreter;
-  }
+                impl_)) {}
   PyInterpreterHolder(const PyInterpreterHolder&) = delete;
   PyInterpreterHolder(PyInterpreterHolder&&) = delete;
   PyInterpreterHolder& operator=(const PyInterpreterHolder&) = delete;
