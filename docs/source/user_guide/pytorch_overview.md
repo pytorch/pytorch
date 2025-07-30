@@ -10,7 +10,6 @@ mystnb:
 ```{code-cell}
 :tags: [remove-cell]
 import torch
-import header_code
 ```
 
 (what_is_pytorch)=

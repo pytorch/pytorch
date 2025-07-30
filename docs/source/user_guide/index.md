@@ -34,4 +34,5 @@ pytorch_main_components
 :maxdepth: 1
 :caption: Developer Notes
 
+../notes
 ```
