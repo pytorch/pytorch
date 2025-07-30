@@ -250,6 +250,7 @@ class Venv:
         self._env = {
             "PIP_EXTRA_INDEX_URL": self.pip_source.index_url,
             "UV_INDEX": self.pip_source.index_url,
+            "UV_PYTHON_DOWNLOADS": "never",
             "FORCE_COLOR": "1",
             "CLICOLOR_FORCE": "1",
         }
@@ -475,13 +476,12 @@ class Venv:
         cmd = [str(self.bindir / "uv"), *args]
         env = popen_kwargs.pop("env", None) or {}
         check = popen_kwargs.pop("check", True)
-        env["UV_PYTHON"] = str(python)
         return subprocess.run(
             cmd,
             check=check,
             text=True,
             encoding="utf-8",
-            env={**self._env, **env},
+            env={**self._env, **env, "UV_PYTHON": str(python)},
             **popen_kwargs,
         )
 
@@ -686,7 +686,7 @@ def logging_manager(*, debug: bool = False) -> Generator[logging.Logger, None, N
         logging_record_exception(e)
         print(f"log file: {log_file}")
         sys.exit(1)
-    except BaseException as e:
+    except BaseException as e:  # noqa: B036
         # You could logging.debug here to suppress the backtrace
         # entirely, but there is no reason to hide it from technically
         # savvy users.

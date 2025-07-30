@@ -27,6 +27,7 @@ from torch.distributed.tensor._ops.utils import (
     normalize_dim,
     register_op_strategy,
     register_prop_rule,
+    replicate_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -35,59 +36,78 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 
+from ._pointwise_ops import pointwise_strategy
+
 
 aten = torch.ops.aten
 
 
-def default_strategy(op_schema: OpSchema) -> StrategyType:
-    # Default strategy by default just propagate the first input strategy
-    select_strategy = op_schema.args_schema[0]
-    assert isinstance(select_strategy, OpStrategy)
-    # we create new DTensorSpecs even for default strategy to assure that
-    # the tensor metas are distinct between the arguments and outputs
-    input_specs = []
-    redistribute_cost = []
-    for i in op_schema.args_schema:
-        input_specs.append(
-            DTensorSpec(
-                mesh=select_strategy.mesh,
-                placements=select_strategy.strategies[0].output_spec.placements,
-                tensor_meta=select_strategy.strategies[0].output_spec.tensor_meta,
+def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
+    # For ops with a single tensor input, we perform a 1:1 mapping such that
+    # for each strategy that the input supports, we create a corresponding strategy.
+    # Note: this may be a complete waste of work, because it should be equivalent to
+    # `return first_input_strategy` (unless creating a deep copy is important for some reason)
+    assert len([s for s in op_schema.args_schema if isinstance(s, OpStrategy)]) == 1, (
+        "propagate_single_input_strategy only works for single-tensor-input ops"
+    )
+    first_input_strategy = op_schema.args_schema[0]
+    assert isinstance(first_input_strategy, OpStrategy)
+    return OpStrategy(
+        [
+            OpSpec(
+                output_specs=DTensorSpec(
+                    mesh=first_input_strategy.mesh,
+                    placements=strategy.output_spec.placements,
+                    tensor_meta=strategy.output_spec.tensor_meta,
+                ),
+                input_specs=[
+                    DTensorSpec(
+                        mesh=first_input_strategy.mesh,
+                        placements=strategy.output_spec.placements,
+                        tensor_meta=strategy.output_spec.tensor_meta,
+                    )
+                ],
+                redistribute_cost=[
+                    generate_redistribute_costs(
+                        first_input_strategy, strategy.output_spec
+                    )
+                ],
             )
-        )
-        redistribute_cost.append([0.0] * len(select_strategy.strategies))
-
-    default_strategy = [
-        OpSpec(
-            output_specs=DTensorSpec(
-                mesh=select_strategy.mesh,
-                placements=strategy.output_spec.placements,
-                tensor_meta=strategy.output_spec.tensor_meta,
-            ),
-            input_specs=input_specs,
-            redistribute_cost=redistribute_cost,
-        )
-        for strategy in select_strategy.strategies
-    ]
-    return OpStrategy(default_strategy)
+            for strategy in first_input_strategy.strategies
+        ]
+    )
 
 
 register_op_strategy(
     [
         aten.clone.default,
         aten.contiguous.default,
-        aten.copy_.default,
         aten.detach.default,
         aten.fill_.Scalar,
         aten.view.dtype,
         aten.zero_.default,
     ]
-)(default_strategy)
+)(propagate_single_input_strategy)
 
 
 register_op_strategy(
     aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
-)(default_strategy)
+)(propagate_single_input_strategy)
+
+# copy_ is actually a pointwise op with broadcasting, so reuse the pointwise strategy, which takes care of these
+# requirements.
+#
+# Following torch broadcasting semantics (https://docs.pytorch.org/docs/stable/notes/broadcasting.html)
+# - self can not change shape as a result of broadcasting since this is an inplace op
+# - src can broadcast, but when it does it always does so from the trailing end
+# e.g. the last dim of 'src' must match up with the last dim of 'self'
+#
+# DTensor semantics for inplace ops also dictates that we may NOT redistribute our 'self' input.
+# In practice, what this means is
+# - our output strategies should map 1:1 to our 'self' input strategies
+# - our 'src' input may be redistributed to match up with the 'self' input, with the caveat of adjusting for
+#   broadcasting dim
+register_op_strategy(aten.copy_.default)(pointwise_strategy)
 
 
 @register_op_strategy(
@@ -509,7 +529,7 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
                     input_specs=(input_spec, src_spec),
                     redistribute_cost=[
                         generate_redistribute_costs(input_strategy, input_spec),
-                        generate_redistribute_costs(input_strategy, src_spec),
+                        generate_redistribute_costs(src_strategy, src_spec),
                     ],
                 )
             )
@@ -528,7 +548,7 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
                     input_specs=(input_spec, src_spec),
                     redistribute_cost=[
                         generate_redistribute_costs(input_strategy, input_spec),
-                        generate_redistribute_costs(input_strategy, src_spec),
+                        generate_redistribute_costs(src_strategy, src_spec),
                     ],
                 )
             )
@@ -546,7 +566,20 @@ def replica_only_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 @register_op_strategy(
-    [aten.scatter_.value, aten.scatter.value, aten.scatter_.src, aten.scatter.src],
+    [aten.sort.stable, aten.sort.default], schema_info=RuntimeSchemaInfo(1)
+)
+def sort_strategy(op_schema: OpSchema):
+    return cast(TupleStrategy, replicate_op_strategy(op_schema))
+
+
+@register_op_strategy(
+    [
+        aten.scatter_.value,
+        aten.scatter.value,
+        aten.scatter_.src,
+        aten.scatter.src,
+        aten.scatter_add.default,
+    ],
     schema_info=RuntimeSchemaInfo(1),
 )
 def scatter_strategy(op_schema: OpSchema) -> StrategyType:

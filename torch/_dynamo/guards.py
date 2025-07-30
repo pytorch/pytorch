@@ -104,6 +104,7 @@ from .source import (
     ChainedSource,
     ConstantSource,
     ConstDictKeySource,
+    DataclassFieldsSource,
     DefaultsSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
@@ -146,6 +147,7 @@ from .types import (  # noqa: F401
 from .utils import (
     builtin_dict_keys,
     common_constant_types,
+    dataclass_fields,
     dict_keys,
     get_custom_getattr,
     get_torch_function_mode_stack,
@@ -164,7 +166,7 @@ from .utils import (
 )
 
 
-guard_manager_testing_hook_fn: Optional[Callable[[Any, Any], Any]] = None
+guard_manager_testing_hook_fn: Optional[Callable[[Any, Any, Any], Any]] = None
 
 try:
     import numpy as np
@@ -309,6 +311,7 @@ class GuardManagerWrapper:
         s = t + ": source=" + source
         if accessor_str:
             s += ", " + accessor_str
+        s += f", type={guard_manager.type_of_guarded_value()}"
         return s
 
     def construct_dict_manager_string(self, mgr, body):
@@ -451,6 +454,7 @@ def _get_closure_vars():
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
+            "___dataclass_fields": dataclass_fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
@@ -699,7 +703,11 @@ class GuardBuilder(GuardBuilderBase):
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
+        self.object_aliasing_guard_codes: list[tuple[str, str]] = []
         self.serialization_mode = serialization_mode
+        self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
+            "pytorch/compiler:guard_nn_modules"
+        )
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -1325,6 +1333,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, DataclassFieldsSource):
+            assert base_guard_manager
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: dataclass_fields(x),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         else:
             raise AssertionError(
                 f"missing guard manager builder {source} - {source.name()}"
@@ -1588,7 +1604,7 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         id_val = self.id_ref(val, guard.name)
         code = f"___check_obj_id({ref}, {id_val})"
-        self._set_guard_export_info(guard, [code])
+        self._set_guard_export_info(guard, [code], provided_func_name="ID_MATCH")
 
         self.get_guard_manager(guard).add_id_match_guard(
             id_val, get_verbose_code_parts(code, guard)
@@ -1841,7 +1857,9 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         if hasattr(val, "training"):
             assert istype(val.training, bool)
-            self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
+            if not self.guard_nn_modules:
+                # If guard_nn_modules is true, we will guard on the right set of guards
+                self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
         else:
             exc.unimplemented_v2(
                 gb_type="Attempted to guard on uninitialized nn.Module",
@@ -1953,6 +1971,8 @@ class GuardBuilder(GuardBuilderBase):
         if self.serialization_mode == "save":
             if name := get_local_source_name(source_b):
                 self.check_fn_manager.additional_used_local_vars.add(name)
+            if name := get_global_source_name(source_b):
+                self.check_fn_manager.additional_used_global_vars.add(name)
 
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
@@ -1973,11 +1993,19 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"{ref_b} is {ref_a}"]
         self._set_guard_export_info(guard, code)
 
-        install_object_aliasing_guard(
-            self.get_guard_manager(guard),
-            self.get_guard_manager_from_source(source_b),
-            get_verbose_code_parts(code, guard),
-        )
+        if config.use_lamba_guard_for_object_aliasing:
+            # Save the code part so that we can install a lambda guard at the
+            # end.  Read the Note - On Lambda guarding of object aliasing - to
+            # get more information.
+            code_part = code[0]
+            verbose_code_part = get_verbose_code_parts(code_part, guard)[0]
+            self.object_aliasing_guard_codes.append((code_part, verbose_code_part))
+        else:
+            install_object_aliasing_guard(
+                self.get_guard_manager(guard),
+                self.get_guard_manager_from_source(source_b),
+                get_verbose_code_parts(code, guard),
+            )
 
     def WEAKREF_ALIVE(self, guard):
         if self.serialization_mode == "save":
@@ -2468,7 +2496,9 @@ class GuardBuilder(GuardBuilderBase):
                 self._set_guard_export_info(guard, code)
 
     # A util that in the case of export, adds data onto guards
-    def _set_guard_export_info(self, guard, code_list, provided_guarded_object=None):
+    def _set_guard_export_info(
+        self, guard, code_list, provided_guarded_object=None, provided_func_name=None
+    ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
         # than they should.  See TestMisc.test_release_module_memory
@@ -2477,7 +2507,7 @@ class GuardBuilder(GuardBuilderBase):
         caller = cur_frame.f_back
         del cur_frame
         assert caller is not None
-        func_name = caller.f_code.co_name
+        func_name = provided_func_name or caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
         assert func_name in self.__class__.__dict__, (
@@ -2830,12 +2860,39 @@ class CheckFunctionManager:
         self.guards_serialization_mode = guards_serialization_mode
         self.used_builtin_vars: OrderedSet[str] = OrderedSet()
         self.additional_used_local_vars: OrderedSet[str] = OrderedSet()
+        self.additional_used_global_vars: OrderedSet[str] = OrderedSet()
         if runtime_global_scope:
             assert self.guards_serialization_mode == "load"
         self.runtime_global_scope = runtime_global_scope
 
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
+
+        # TODO Be more explicit about the behavior for the users.
+        if (
+            torch._dynamo.config.caching_precompile
+            and self.guards_serialization_mode != "load"
+        ):
+            _guard_filter_fn = guard_filter_fn or (lambda gs: [True for g in gs])
+
+            def guard_filter_fn(guards):
+                ret = []
+                for keep, g in zip(_guard_filter_fn(guards), guards):
+                    if not keep:
+                        ret.append(False)
+                    elif (
+                        g.guard_type in ("ID_MATCH", "CLOSURE_MATCH", "WEAKREF_ALIVE")
+                        or "ID_MATCH" in g.derived_guard_types
+                    ):
+                        log.warning(
+                            "%s guard on %s is dropped with caching_precompile=True.",
+                            g.guard_type,
+                            g.orig_guard.name,
+                        )
+                        ret.append(False)
+                    else:
+                        ret.append(True)
+                return ret
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
         builder, guard_manager = self.build_guards(
@@ -2855,8 +2912,16 @@ class CheckFunctionManager:
                     has_value = False
                     value = MISSING
                 else:
-                    has_value = True
-                    value = builder.get(guard.name)
+                    try:
+                        # Guard evaluation is expected to fail when we guard on
+                        # things like "not hasattr(x, 'foo')". In cases like this,
+                        # we don't have a well defined value because such thing
+                        # doesn't exist.
+                        value = builder.get(guard.name)
+                        has_value = True
+                    except:  # noqa: B001,E722
+                        value = MISSING
+                        has_value = False
                 is_global = get_global_source_name(guard.originating_source) is not None
                 guard_fn = guard.create_fn
                 if isinstance(guard_fn, functools.partial):
@@ -2922,7 +2987,7 @@ class CheckFunctionManager:
 
             if guard_manager_testing_hook_fn is not None:
                 guard_manager_testing_hook_fn(
-                    self.guard_manager, output_graph.local_scope
+                    self.guard_manager, output_graph.local_scope, builder
                 )
 
             # NB for developers: n_iters is chosen to be 1 to prevent excessive
@@ -2994,7 +3059,7 @@ class CheckFunctionManager:
             global_scope_state = {
                 k: v
                 for k, v in output_graph_guards_state.global_scope.items()
-                if k in used_global_vars
+                if k in used_global_vars or k in self.additional_used_global_vars
             }
             global_scope_state[builtins_dict_name] = {
                 k: v
@@ -3203,6 +3268,26 @@ class CheckFunctionManager:
                 builder.no_tensor_aliasing_guard_managers,
                 no_tensor_aliasing_names,
                 ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
+            )
+
+        # Note - On Lambda guarding of object aliasing
+        # We previously installed object‑aliasing guards as relational guards,
+        # but that undermined the recursive‑dict guard optimization: placing the
+        # aliasing guard at a leaf prevented the parent dict node from
+        # qualifying as a recursive‑dict guard root. Because aliasing guards are
+        # rare, we now emit them as epilogue guards via a small Python lambda.
+        # This repeats the access in Python—adding a bit of work—but the
+        # overhead is outweighed by the gains from enabling recursive‑dict guard
+        # optimization.
+        if (
+            config.use_lamba_guard_for_object_aliasing
+            and builder.object_aliasing_guard_codes
+        ):
+            aliasing_code_parts, aliasing_verbose_code_parts = map(
+                list, zip(*builder.object_aliasing_guard_codes)
+            )
+            builder.add_python_lambda_leaf_guard_to_root(
+                aliasing_code_parts, aliasing_verbose_code_parts
             )
 
         aotautograd_guards: list[GuardEnvExpr] = (
