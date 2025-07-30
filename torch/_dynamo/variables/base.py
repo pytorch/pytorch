@@ -375,9 +375,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError
         source = self.source and AttrSource(self.source, name)
-        if source and not isinstance(self, variables.ConstantVariable):
-            # The second condition is to avoid guards on const getattr objects
-            # like __code__.co_argcount
+        if source:
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return variables.ConstantVariable.create(value, source=source)
 

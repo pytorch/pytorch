@@ -102,6 +102,9 @@ class Library:
                 ns,
                 " is a reserved namespace. Please try creating a library with another name.",
             )
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
 
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
@@ -153,6 +156,9 @@ class Library:
             >>> my_lib = Library("mylib", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         """
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
 
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
@@ -185,6 +191,9 @@ class Library:
 
     def _register_fake(self, op_name, fn, _stacklevel=1, *, allow_override=False):
         r"""Registers the fake impl for an operator defined in the library."""
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
 
         source = torch._library.utils.get_source(_stacklevel + 1)
         frame = sys._getframe(_stacklevel)
@@ -228,6 +237,9 @@ class Library:
         If it is a TorchDispatchMode, we expect fn to have the following signature:
         (mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
         """
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
 
         qualname = f"{self.ns}::{op_name}"
         entry = torch._library.simple_registry.singleton.find(qualname)
@@ -247,6 +259,9 @@ class Library:
             >>> my_lib = Library("aten", "IMPL")
             >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
         """
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
 
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
@@ -309,6 +324,9 @@ class Library:
             >>>     return self * (1 / other)
             >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
         """
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
 
         if not callable(fn):
             raise TypeError(
@@ -391,6 +409,9 @@ class Library:
             >>>     # ...
             >>> my_lib.fallback(fallback_kernel, "Autocast")
         """
+        if torch._running_with_deploy():
+            _library.utils.warn_deploy()
+            return
 
         if dispatch_key == "":
             dispatch_key = self.dispatch_key

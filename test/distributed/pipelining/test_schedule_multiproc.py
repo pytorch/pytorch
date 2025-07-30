@@ -154,9 +154,7 @@ class ScheduleTest(MultiProcContinousTest):
                 stage_module.zero_grad()
 
             if self.rank == 0:
-                # Support with and without no_grad()
-                with torch.no_grad():
-                    schedule.eval(x)
+                schedule.eval(x)
             elif self.rank == self.world_size - 1:
                 losses = []
                 schedule.eval(target=target, losses=losses)
@@ -217,9 +215,7 @@ class ScheduleTest(MultiProcContinousTest):
             stage_module.zero_grad()
 
             if self.rank == 0:
-                # Support with and without no_grad()
-                with torch.no_grad():
-                    schedule.eval(x)
+                schedule.eval(x)
             elif self.rank == self.world_size - 1:
                 losses = []
                 schedule.eval(target=target, losses=losses)
