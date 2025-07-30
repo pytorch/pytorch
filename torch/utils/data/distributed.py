@@ -8,7 +8,7 @@ from torch.utils.data.dataset import Dataset
 from torch.utils.data.sampler import Sampler
 
 
-__all__ = ["DistributedSampler"]
+__all__ = ["DistributedSampler", "WeightedDistributedSampler"]
 
 
 _T_co = TypeVar("_T_co", covariant=True)
@@ -148,3 +148,68 @@ class DistributedSampler(Sampler[_T_co]):
             epoch (int): Epoch number.
         """
         self.epoch = epoch
+
+
+class WeightedDistributedSampler(DistributedSampler):
+    """
+    WeightedDistributedSampler that inherits Distributed Sampler and samples according to weights
+    Args:
+        dataset: Dataset used for sampling.
+        num_replicas (int, optional): Number of processes participating in
+            distributed training. By default, :attr:`world_size` is retrieved from the
+            current distributed group.
+        rank (int, optional): Rank of the current process within :attr:`num_replicas`.
+            By default, :attr:`rank` is retrieved from the current distributed
+            group.
+        drop_last (bool, optional): if ``True``, then the sampler will drop the
+            tail of the data to make it evenly divisible across the number of
+            replicas. If ``False``, the sampler will add extra indices to make
+            the data evenly divisible across the replicas. Default: ``False``.
+        weights: list of sample weights
+        replacement: Whether to sample with replacement
+        generator: Torch generator object
+    """
+    def __init__(
+        self,
+        dataset,
+        num_replicas=None,
+        rank=None,
+        seed=0,
+        drop_last=False,
+        weights=None,
+        replacement=True,
+        generator=torch.Generator(),
+    ):
+        super().__init__(
+            dataset, num_replicas, rank, shuffle=False, drop_last=drop_last
+        )
+        self.weights = weights
+        self.replacement = replacement
+        self.generator = generator
+
+    def __iter__(self) -> Iterator[_T_co]:
+        weights = self.weights
+
+        if not self.drop_last:
+            # add extra samples to make it evenly divisible
+            padding_size = self.total_size - len(weights)
+            if padding_size <= len(weights):
+                weights += weights[:padding_size]
+            else:
+                weights += (weights * math.ceil(padding_size / len(weights)))[
+                    :padding_size
+                ]
+        else:
+            # remove tail of data to make it evenly divisible.
+            weights = weights[: self.total_size]
+
+        assert len(weights) == self.total_size
+
+        # subsample
+        weights = weights[self.rank : self.total_size : self.num_replicas]
+        assert len(weights) == self.num_samples
+
+        rand_tensor = torch.multinomial(
+            weights, self.num_samples, self.replacement, generator=self.generator
+        )
+        yield from iter(rand_tensor.tolist())
