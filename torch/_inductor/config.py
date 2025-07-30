@@ -1797,11 +1797,7 @@ class trace:
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
     # Save mapping info from inductor generated triton kernel to post_grad fx nodes to pre_grad fx nodes
-    provenance_tracking = (
-        os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
-        or os.environ.get("INDUCTOR_PROVENANCE", "0") == "1"
-    )
-
+    provenance_tracking = True
 
 _save_config_ignore: list[str] = [
     # workaround: "Can't pickle <function ...>"

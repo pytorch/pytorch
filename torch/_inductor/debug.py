@@ -716,7 +716,8 @@ def create_mapping_pre_post_grad_nodes(
         "postToPre": {},
     }
 
-    log.info("Creating node mappings for provenance tracking")
+    # comment out to avoid breaking log unit tests
+    # log.info("Creating node mappings for provenance tracking")
 
     if not isinstance(post_to_pre_grad_nodes_json, dict):
         log.error("Provenance tacking error: post_to_pre_grad_nodes_json is not a dict")
@@ -807,7 +808,8 @@ def create_node_mapping_kernel_to_post_grad(
         "postToCppCode": {},
     }
 
-    log.info("Creating node mappings for provenance tracking")
+    # comment to avoid breaking log unit test
+    # log.info("Creating node mappings for provenance tracking")
 
     if not isinstance(triton_kernel_to_post_grad_json, dict):
         log.error(
@@ -857,7 +859,7 @@ def dump_inductor_provenance_info(
     global _inductor_triton_kernel_to_post_grad_node_info
     if config.trace.enabled:
         with V.debug.fopen(filename, "w") as fd:
-            log.info("Writing provenance tracing debugging info to %s", fd.name)
+            # log.info("Writing provenance tracing debugging info to %s", fd.name)
             json.dump(_inductor_triton_kernel_to_post_grad_node_info, fd)
     node_mapping = {}
     if _pre_grad_graph_id:

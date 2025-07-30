@@ -83,6 +83,7 @@ class inner_f(torch.nn.Module):
         mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
         broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
         add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+
         transpose_1: "f32[2, 4]" = torch.ops.prims.transpose.default(tangents_1, [1, 0])
         mm_1: "f32[2, 3]" = torch.ops.aten.mm.default(transpose_1, primals_3);  transpose_1 = primals_3 = None
         transpose_2: "f32[3, 2]" = torch.ops.prims.transpose.default(mm_1, [1, 0]);  mm_1 = None
@@ -171,7 +172,9 @@ class inner_f(torch.nn.Module):
         tangents_1: "f32[2, 3, 4, 4]"  # TangentAOTInput(output=PlainAOTOutput(idx=0))
         primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
         convolution: "f32[2, 3, 4, 4]" = torch.ops.aten.convolution.default(primals_8, primals_1, primals_2, [1, 1], [1, 1], [1, 1], False, [0, 0], 1);  primals_2 = None
+
         add: "i64[]" = torch.ops.prims.add.default(primals_7, 1);  primals_7 = None
+
         var: "f32[3]" = torch.ops.prims.var.default(convolution, [0, 2, 3], 0.0)
         broadcast_in_dim: "f32[1, 3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(var, [1, 3, 1, 1], [1]);  var = None
         sum_1: "f32[3]" = torch.ops.prims.sum.default(convolution, [0, 2, 3])
@@ -207,10 +210,12 @@ class inner_f(torch.nn.Module):
         broadcast_in_dim_8: "f32[3, 1, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_7, [3, 1, 1], [0, 1]);  broadcast_in_dim_7 = None
         broadcast_in_dim_9: "f32[2, 3, 4, 4]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_8, [2, 3, 4, 4], [1, 2, 3]);  broadcast_in_dim_8 = None
         add_4: "f32[2, 3, 4, 4]" = torch.ops.prims.add.default(mul_6, broadcast_in_dim_9);  mul_6 = broadcast_in_dim_9 = None
+
         le: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(add_4, 0.0)
         where: "f32[2, 3, 4, 4]" = torch.ops.prims.where.default(le, 0.0, add_4);  le = add_4 = None
         view_of: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(where)
         view_of_1: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of);  view_of = None
+
         view_of_2: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of_1);  view_of_1 = None
         view_of_3: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of_2);  view_of_2 = None
         le_1: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(view_of_3, 0.0);  view_of_3 = None
@@ -328,7 +333,9 @@ class inner_f(torch.nn.Module):
         mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
         broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
         add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+
         mul_2: "f32[4, 2]" = torch.ops.prims.mul.default(add, 2.0);  add = None
+
         mul_3: "f32[4, 2]" = torch.ops.prims.mul.default(tangents_1, 2.0);  tangents_1 = None
         transpose_1: "f32[2, 4]" = torch.ops.prims.transpose.default(mul_3, [1, 0])
         mm_1: "f32[2, 3]" = torch.ops.aten.mm.default(transpose_1, primals_3);  transpose_1 = primals_3 = None
@@ -411,12 +418,14 @@ class inner_f(torch.nn.Module):
         mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
         broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
         add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+
         transpose_1: "f32[3, 4]" = torch.ops.prims.transpose.default(primals_3, [1, 0]);  primals_3 = None
         mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(primals_5, transpose_1);  transpose_1 = None
         mul_2: "f32[4, 4]" = torch.ops.prims.mul.default(mm_1, 1.0);  mm_1 = None
         mul_3: "f32[4]" = torch.ops.prims.mul.default(primals_4, 1.0);  primals_4 = None
         broadcast_in_dim_1: "f32[4, 4]" = torch.ops.prims.broadcast_in_dim.default(mul_3, [4, 4], [1]);  mul_3 = None
         add_1: "f32[4, 4]" = torch.ops.prims.add.default(mul_2, broadcast_in_dim_1);  mul_2 = broadcast_in_dim_1 = None
+
         transpose_2: "f32[4, 4]" = torch.ops.prims.transpose.default(tangents_2, [1, 0])
         mm_2: "f32[4, 3]" = torch.ops.aten.mm.default(transpose_2, primals_5);  transpose_2 = None
         transpose_3: "f32[3, 4]" = torch.ops.prims.transpose.default(mm_2, [1, 0]);  mm_2 = None
