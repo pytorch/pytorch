@@ -56,7 +56,7 @@ PyTorch's autograd engine automatically computes the gradients needed for neural
 
 For a quick tutorial on PyTorch, see the [Learn the Basics tutorial](https://pytorch.org/tutorials/beginner/basics/intro.html).
 
-PyTorch can do so much more beyound the basic alarithmetic operations. It supports complex neural network architectures through
+PyTorch can do so much more beyond the basic alarithmetic operations. It supports complex neural network architectures through
 its {mod}`torch.nn` module, provides efficient data loading utilities with {mod}
 `torch.utils.data`, and offers a suite of optimization algorithms in {mod}`torch.
 optim`. PyTorch also facilitates distributed training across multiple GPUs and
