@@ -130,7 +130,7 @@ def make_test_case(
                 if code:
                     if test_build_separate:
                         self.assertIn("kernel_src", code)
-                    self.assertIn("async_compile.cpp_wrapper", code)
+                    self.assertIn("CppWrapperCodeCache", code)
                     self.assertTrue(
                         all(
                             code.count(string) == code_string_count[string]
