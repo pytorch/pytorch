@@ -1,13 +1,14 @@
 #!/bin/bash
 set -ex
-
+# for torch nightly
+# https://download.pytorch.org/whl/nightly/torch/
+# torch-2.9.0.dev20250729+cu128-cp312-cp312-manylinux_2_28_x86_64.whl
 pip install dist/torch-*.whl
 pip install vision/torchvision*.whl
 pip install audio/torchaudio*.whl
 pip install wheels/xformers-dist/xformers*.whl
 pip install wheels/vllm-dist/vllm*.whl
 pip install wheels/flashinfer-dist/flashinfer*.whl
-
 
 git clone https://github.com/vllm-project/vllm.git
 cd vllm
@@ -17,15 +18,16 @@ rm -rf vllm
 
 python3 -m pip install uv
 
+uv pip install --system -e tests/vllm_test_utils
+
+uv pip install --system hf_transfer
+export HF_HUB_ENABLE_HF_TRANSFER=1
+
 RUN python3 use_existing_torch.py
 
 # 安装 common 依赖
 pip install -r requirements/common.txt
 pip install -r requirements/build.txt
-
-
-export VLLM_WORKER_MULTIPROC_METHOD=spawn
-pytest -v -s basic_correctness/test_cumem.py
 
 pip freeze | grep -E 'torch|xformers|torchvision|torchaudio|flashinfer'
 

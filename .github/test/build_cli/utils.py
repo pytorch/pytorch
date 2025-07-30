@@ -14,7 +14,7 @@ def run(
     logging: bool = False,
 ):
     if logging:
-        print(f">>> {cmd}")
+        print(f">>> {cmd}",flush=True)
     subprocess.run(shlex.split(cmd), check=True, cwd=cwd, env=env)
 
 
@@ -43,10 +43,10 @@ def ensure_dir_exists(path: str):
     Ensure the directory exists. Create it if necessary.
     """
     if not os.path.exists(path):
-        print(f"[INFO] Creating directory: {path}")
+        print(f"[INFO] Creating directory: {path}", flush=True)
         os.makedirs(path, exist_ok=True)
     else:
-        print(f"[INFO] Directory already exists: {path}")
+        print(f"[INFO] Directory already exists: {path}", flush=True)
 
 
 def remove_dir(path: str):
@@ -54,10 +54,10 @@ def remove_dir(path: str):
     Remove a directory if it exists.
     """
     if os.path.exists(path):
-        print(f"[INFO] Removing directory: {path}")
+        print(f"[INFO] Removing directory: {path}", flush=True)
         shutil.rmtree(path)
     else:
-        print(f"[INFO] Directory not found (skipped): {path}")
+        print(f"[INFO] Directory not found (skipped): {path}", flush=True)
 
 
 def get_abs_path(path: str):
@@ -71,7 +71,7 @@ class Timer:
 
     def __exit__(self, *args):
         self.end = time.perf_counter()
-        print(f"Took {self.end - self.start:.3f} seconds")
+        print(f"Took {self.end - self.start:.3f} seconds", flush=True)
 
 
 def get_existing_abs_path(path: str) -> str:

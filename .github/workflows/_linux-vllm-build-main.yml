@@ -147,6 +147,27 @@ jobs:
         continue-on-error: true
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
 
+      - name: Start monitoring script
+        id: monitor-script
+        if: ${{ !inputs.disable-monitor }}
+        shell: bash
+        continue-on-error: true
+        env:
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          WORKFLOW_RUN_ID: ${{github.run_id}}
+          MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
+          MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
+        run: |
+          mkdir -p ../../usage_logs
+          python3 -m pip install psutil==5.9.8 dataclasses_json==0.6.7
+          python3 -m tools.stats.monitor \
+          --log-interval "$MONITOR_LOG_INTERVAL" \
+          --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" \
+          > "../../usage_logs/usage_log_build_${JOB_ID}.txt" 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -181,7 +202,7 @@ jobs:
         uses: ./.github/actions/download-td-artifacts
 
       - name: Build external project
-        id: build-wheels
+        id: build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -195,13 +216,16 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           STAGE: ${{inputs.target-stage || ''}}
-          MAX_JOBS: 32
+          MAX_JOBS: 64
           DOCKER_IMAGE: ${{ inputs.docker-image }}
         run: |
           python3 --version
           python3 -m pip install cement==3.0.14
           docker images
+          START_TIME=$(date +%s)
           python3 .github/test/build_cli/cli.py external --target vllm --artifact-dir shared --torch-whl-dir "./dist" --base-image "$DOCKER_IMAGE" run
+          END_TIME=$(date +%s)
+          echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
       - name: Archive artifacts into zip
         run: |
           zip -1 -r artifacts.zip shared/
@@ -216,3 +240,61 @@ jobs:
           if-no-files-found: error
           path: artifacts.zip
           s3-bucket: ${{ inputs.s3-bucket }}
+
+      - name: Stop monitoring script
+        if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
+        shell: bash
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
+      - name: copy logs
+        shell: bash
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
+        continue-on-error: true
+        run: |
+          rm -f ./usage_logs
+          mkdir -p ./usage_logs
+          cp ../../usage_logs/usage_log_build_*.txt ./usage_logs/
+
+      - name: Upload raw usage log to s3
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          s3-prefix: |
+            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+          retention-days: 14
+          if-no-files-found: warn
+          path: usage_logs/usage_log_build_*.txt
+
+      - name: Upload sccache stats
+        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/upload-sccache-stats
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          build-time: ${{ steps.build.outputs.build_time }}
+
+      - name: Upload utilization stats
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        continue-on-error: true
+        uses: ./.github/actions/upload-utilization-stats
+        with:
+          job_id: ${{ steps.get-job-id.outputs.job-id }}
+          job_name: ${{ steps.get-job-id.outputs.job-name }}
+          workflow_name: ${{ github.workflow }}
+          workflow_run_id: ${{github.run_id}}
+          workflow_attempt: ${{github.run_attempt}}
+          artifact_prefix: usage_log_build_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel'
+
+      - name: Cleanup docker
+        if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        shell: bash
+        run: |
+          # on s390x stop the container for clean worker stop
+          docker stop -a || true
+          docker kill -a || true
