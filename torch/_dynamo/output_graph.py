@@ -735,7 +735,7 @@ class OutputGraph(OutputGraphGuardsState):
     def current_tracer(self):
         return self.tracers[-1]
 
-    def is_root_tracer(self):
+    def is_root_tracer(self) -> bool:
         # Helper to tell if we are inside the higher order operator tracing.
         return len(self.tracers) == 1
 
@@ -872,7 +872,7 @@ class OutputGraph(OutputGraphGuardsState):
     def count_calls(self):
         return count_calls(self.graph)
 
-    def is_empty_graph(self):
+    def is_empty_graph(self) -> bool:
         return len(list(self.graph.nodes)) == 0
 
     def get_submodule(self, keys):
@@ -1938,7 +1938,7 @@ class OutputGraph(OutputGraphGuardsState):
         assert self.should_exit
 
         # Miniature DCE pass, but only for obviously trivial operations
-        def is_static_true(b_node: fx.node.Argument):
+        def is_static_true(b_node: fx.node.Argument) -> bool:
             if b_node is True:
                 return True
             if not isinstance(b_node, fx.Node):
@@ -1957,7 +1957,7 @@ class OutputGraph(OutputGraphGuardsState):
             # doesn't have unbacked inputs, since it's all in the ShapeEnv
             return False
 
-        def is_symnode_arg(a: fx.node.Argument):
+        def is_symnode_arg(a: fx.node.Argument) -> bool:
             from torch.fx.experimental.sym_node import SymTypes
 
             if isinstance(a, (int, float, bool)):
@@ -1969,7 +1969,7 @@ class OutputGraph(OutputGraphGuardsState):
         # NB: We assume that you cannot do mutations on int/float/bool,
         # because they are immutable types, and therefore is always safe to
         # DCE.
-        def is_symnode_compute_node(node):
+        def is_symnode_compute_node(node) -> bool:
             from torch.fx.experimental.sym_node import SymTypes
 
             if node.op != "call_function":
@@ -3052,7 +3052,7 @@ class SubgraphTracer(fx.Tracer):
         # Sort the symbols so that we can have a deterministic lifting order
         return sorted(to_be_bound, key=lambda s: s.name)
 
-    def has_input_mutation(self):
+    def has_input_mutation(self) -> MutationInfo:
         input_versions_at_beginning = self._input_versions_at_beginning
         input_nodes = []
 
@@ -3081,7 +3081,7 @@ class SubgraphTracer(fx.Tracer):
 
         return MutationInfo(False, "")
 
-    def has_aliasing(self):
+    def has_aliasing(self) -> AliasingInfo:
         from torch._higher_order_ops.utils import _collect_fake_inputs
 
         input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()

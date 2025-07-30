@@ -70,12 +70,12 @@ class DistributedVariable(VariableTracker):
         return type(self.value)
 
     @staticmethod
-    def is_available():
+    def is_available() -> bool:
         # check if the distributed package is available or not
         return torch.distributed.is_available()
 
 
-def is_from_local(value):
+def is_from_local(value) -> bool:
     if not DistributedVariable.is_available():
         return False
     from torch.distributed.tensor import DTensor
@@ -83,7 +83,7 @@ def is_from_local(value):
     return inspect.isfunction(value) and value is DTensor.from_local
 
 
-def is_constant_pg_functions(value):
+def is_constant_pg_functions(value) -> bool:
     if not DistributedVariable.is_available():
         return False
 
@@ -113,7 +113,7 @@ class WorldMetaClassVariable(DistributedVariable):
     """
 
     @classmethod
-    def is_group_member_type(cls, value):
+    def is_group_member_type(cls, value) -> bool:
         if not cls.is_available():
             return False
 
@@ -135,7 +135,7 @@ class WorldMetaClassVariable(DistributedVariable):
 
 class PlacementClassVariable(DistributedVariable):
     @staticmethod
-    def is_placement_type(value):
+    def is_placement_type(value) -> bool:
         # we can't rely on importing/accessing torch distributed, it is not always built.
         if not DistributedVariable.is_available():
             return False
@@ -170,7 +170,7 @@ class PlacementClassVariable(DistributedVariable):
 
 class PlacementVariable(DistributedVariable):
     @staticmethod
-    def is_placement(value):
+    def is_placement(value) -> bool:
         # we can't rely on importing/accessing torch distributed, it is not always built.
         if not DistributedVariable.is_available():
             return False
@@ -234,7 +234,7 @@ class PlacementVariable(DistributedVariable):
 
 class DeviceMeshVariable(DistributedVariable):
     @staticmethod
-    def is_device_mesh(value):
+    def is_device_mesh(value) -> bool:
         # we can't rely on importing/accessing torch distributed, it is not always built.
         if not DistributedVariable.is_available():
             return False
@@ -326,7 +326,7 @@ class ProcessGroupVariable(DistributedVariable):
         return super().var_getattr(tx, name)
 
     @staticmethod
-    def is_process_group(value):
+    def is_process_group(value) -> bool:
         # we can't rely on importing/accessing torch distributed, it is not always built.
         if not DistributedVariable.is_available():
             return False
