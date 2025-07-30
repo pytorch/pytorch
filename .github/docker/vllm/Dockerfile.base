@@ -260,7 +260,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     fi
 ENV UV_HTTP_TIMEOUT=500
 
-
 # default mount file as placeholder, this just avoid the mount error
 # change to a different vllm folder if this does not exist anymore
 ARG TORCH_WHEELS_PATH="./requirements"
@@ -310,13 +309,13 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     && echo "finish git clone flashinfer..." \
     && rm -rf build \
     && export TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list} \
-    && FLASHINFER_ENABLE_AOT=1 python3 setup.py bdist_wheel --dist-dir=../flashinfer-dist --verbose \
+    && FLASHINFER_ENABLE_AOT=1 python3 setup.py bdist_wheel --dist-dir=../wheels/flashinfer --verbose \
     && cd .. \
     && rm -rf flashinfer
 
-# install flashinfer
+# install flashinfer python
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system flashinfer-dist/*.whl --verbose
+    uv pip install --system wheels/flashinfer/*.whl --verbose
 
 # install common packages
 COPY requirements/common.txt requirements/common.txt
@@ -353,7 +352,6 @@ ENV HF_HUB_ENABLE_HF_TRANSFER 1
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/nightly_torch_test.txt
-
 
 # Logging to confirm the torch versions
 RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'

@@ -40,28 +40,13 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "vllm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-90:
-    name: cuda12.8-py3.12-gcc11-sm90
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      build-additional-packages: "vision audio"
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm90
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
-      cuda-arch-list: '9.0'
-      test-matrix: |
-        { include: [
-          { config: "vllm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "vllm-basic", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
     secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build:
     name: build-vllm-wheels
-    uses: ./.github/workflows/_linux-vllm-build-main.yml
+    uses: ./.github/workflows/_linux-external-build-main.yml
     needs: [
       get-label-type,
       linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80
@@ -69,21 +54,21 @@ jobs:
     with:
       build-additional-packages: "vision audio"
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm80
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       docker-image: ${{ needs.linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80.outputs.docker-image }}
       runner: linux.24xlarge.memory
     secrets: inherit
 
-
-#  linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-test:
-#    name: cuda12.8-py3.13-gcc9-sm86
-#    uses: ./.github/workflows/_linux-test.yml
-#    needs: [
-#      linux-jammy-cuda12.8-cudnn9-py3_12-gcc11-vllm-build,
-#      linux-jammy-cuda12.8-cudnn9-py3_12-gcc11-vllm-external-build
-#    ]
-#    with:
-#      build-environment:linux-jammy-cuda12.8-py3.12-gcc11-sm86
-#      docker-image: ${{ needs.linux-jammy-cuda12.8-cudnn9-py3_12-gcc11-vllm-build.outputs.docker-image }}
-#      test-matrix: ${{ needs.linux-jammy-cuda12.8-cudnn9-py3_12-gcc11-vllm-build.outputs.test-matrix }}
-#    secrets: inherit
+  linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-test:
+    name: cuda12.8-py3.12-gcc11-sm80
+    uses: ./.github/workflows/_linux-test.yml
+    needs: [
+      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80,
+      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build
+    ]
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm80
+      docker-image: ${{ needs.linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80.outputs.test-matrix }}
+      additional-artifact-name: linux-jammy-cuda12.8-py3.12-gcc11-sm80-additional-build
+    secrets: inherit

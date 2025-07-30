@@ -7,11 +7,21 @@ on:
         required: true
         type: string
         description: Top-level label for what's being built/tested.
+      use-gha:
+        required: false
+        type: string
+        default: ""
+        description: If set to any value, upload to GHA. Otherwise upload to S3.
       build-generates-artifacts:
         required: false
         type: boolean
         default: true
         description: If set, upload generated build artifacts.
+      artifacts-folder-name:
+        required: false
+        type: string
+        description: must be different from build-environment
+        default: ""
       docker-image:
         required: true
         type: string
@@ -30,7 +40,7 @@ on:
       cuda-arch-list:
         required: false
         type: string
-        default: "8.0;9.0"
+        default: "8.0"
         description: |
           List of CUDA architectures CI build should target.
       runner_prefix:
@@ -139,6 +149,10 @@ jobs:
         continue-on-error: true
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
 
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
       - name: Start monitoring script
         id: monitor-script
         if: ${{ !inputs.disable-monitor }}
@@ -218,19 +232,21 @@ jobs:
           python3 .github/scripts/cli/main.py vllm --artifact-dir shared --torch-whl-dir "./dist" --base-image "$DOCKER_IMAGE" run
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
-    
+
       - name: Archive artifacts into zip
+        if: ${{ inputs.build-generates-artifacts && steps.build.outcome && steps.build.outcome != 'skipped'}}
         run: |
           zip -1 -r artifacts.zip shared/
 
       # by default it will upload the artifacts to <github_org>/<github_repo>/<workflow_id>/<name>-vllm-build
       # to avoid override the pytorch build artifacts
       - name: Store Vllm Build Artifacts on S3
+        if: ${{ inputs.build-generates-artifacts }}
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         with:
-          name: ${{ inputs.build-environment }}-vllm-build-${{inputs.target-stage || 'default'}}
+          name: ${{ inputs.artifacts-folder-name || format('{0}-additional-build', inputs.build-environment) }}
           retention-days: 14
-          if-no-files-found: error
+          if-no-files-found: warn
           path: artifacts.zip
           s3-bucket: ${{ inputs.s3-bucket }}
 
@@ -243,7 +259,7 @@ jobs:
         run: |
           kill "$MONITOR_SCRIPT_PID"
 
-      - name: copy logs
+      - name: Copy logs
         shell: bash
         if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
         continue-on-error: true
