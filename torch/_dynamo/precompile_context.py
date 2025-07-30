@@ -1,6 +1,6 @@
 import copy
-import pickle
 import logging
+import pickle
 from abc import abstractmethod
 from collections import defaultdict
 from itertools import chain
@@ -229,9 +229,7 @@ class PrecompileContext(CacheArtifactManager):
             backends = cache_entry.backend_ids
             backend_content: dict[_BackendId, PrecompileCacheArtifact[Any]] = {}
             for id_ in backends:
-                assert id_ in artifacts_by_key, (
-                    f"Backend {id_} not found in artifacts"
-                )
+                assert id_ in artifacts_by_key, f"Backend {id_} not found in artifacts"
                 artifact = artifacts_by_key[id_]
                 assert isinstance(artifact, PrecompileCacheArtifact)
                 backend_content[id_] = artifact
