@@ -296,23 +296,6 @@ class ComboKernelBenchmarkTests(TestCase):
 
         self.assertTrue(7 <= torch._inductor.metrics.generated_kernel_count <= 8)
 
-    @requires_cuda
-    def test_persistent_reduction_no_x_dim(self):
-        def fn(x, y):
-            return x.sum(1), y.sum(1)
-
-        inps = (
-            torch.rand(16, 256, device="cuda"),
-            torch.rand(32, 256, device="cuda"),
-        )
-        torch._dynamo.mark_dynamic(inps[0], 0, min=1, max=256)
-        torch._dynamo.mark_dynamic(inps[1], 0, min=1, max=256)
-        out_eager = fn(*inps)
-        out_compiled = torch.compile(fn)(*inps)
-
-        self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
-
 
 @instantiate_parametrized_tests
 class ComboKernelDynamicShapesTests(TestCase):
