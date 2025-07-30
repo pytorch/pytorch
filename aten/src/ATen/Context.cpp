@@ -480,6 +480,9 @@ at::BlasBackend Context::blasPreferredBackend() {
   // call site for blasPreferredBackend(), we set it to an actual value.
   if (blas_preferred_backend == at::BlasBackend::Default) {
     blas_preferred_backend = at::BlasBackend::Cublas;
+    // This logic sits in the getter because it needs to validate
+    // values set via env vars such as TORCH_BLAS_PREFER_CUBLASLT
+    // which initialize the backend without calling the setter
 #ifdef USE_ROCM
     // AMD Instinct targets prefer hipblaslt
     static const bool hipblaslt_preferred = []() {
@@ -565,8 +568,14 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
 #else
   TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
       "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
-  TORCH_CHECK((b != at::BlasBackend::Ck) || (hasROCM() && ckSupported() && hasCKGEMM()),
-      "Cannot set preferred backend to Ck if PyTorch has not been compiled for ROCm.");
+#ifdef USE_ROCM
+  static const bool ckSupportedFlag = ckSupported();
+  static const bool hasCKGEMMFlag = hasCKGEMM();
+  TORCH_CHECK((b != at::BlasBackend::Ck) || (ckSupportedFlag && hasCKGEMMFlag),
+      "Cannot set preferred blas backend to CK since following conditions are not true: ",
+      "architecture supported for CK: ", ckSupportedFlag,
+      ", PyTorch built with CK GEMM support: ", hasCKGEMMFlag);
+#endif
   if (b != at::BlasBackend::Default && b != at::BlasBackend::Cublas) {
     TORCH_WARN_ONCE(
       "torch.backends.cuda.preferred_blas_library is an experimental feature. "
@@ -579,45 +588,41 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
 }
 
 at::ROCmFABackend Context::getROCmFAPreferredBackend() {
+#ifdef USE_ROCM
   // Set potential "Default" value so we don't have to interpret at call sites.
   // We use aotriton backend as the default, for now.
   if(rocm_fa_preferred_backend == at::ROCmFABackend::Default) {
-
     rocm_fa_preferred_backend = at::ROCmFABackend::AOTriton;
-
   } else if (rocm_fa_preferred_backend == at::ROCmFABackend::Ck) {
+    // This logic sits in the getter because it needs to validate
+    // values set via env vars such as TORCH_ROCM_FA_PREFER_CK
+    // which initialize the backend without calling the setter
     // Perform validity checking
-    if(!(hasCKSDPA() && ckSupported())){
-        TORCH_WARN_ONCE(
-          "CK has been set as the preferred SDPA backend in an environment that doesn't support"
-          " it. Backend being set to AOTriton!" );
-        rocm_fa_preferred_backend = at::ROCmFABackend::AOTriton;
+    static const bool hasCKSDPAFlag = hasCKSDPA();
+    static const bool ckSupportedFlag = ckSupported();
+    if(!(hasCKSDPAFlag && ckSupportedFlag)){
+      TORCH_WARN_ONCE(
+        "Cannot set preferred SDPA backend to CK since following conditions are not true: ",
+        "architecture supported for CK: ", ckSupportedFlag,
+        ", PyTorch built with CK SDPA support: ", hasCKSDPAFlag);
+      rocm_fa_preferred_backend = at::ROCmFABackend::AOTriton;
     }
   }
+#endif
 
   return rocm_fa_preferred_backend;
 }
 
-
 void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
-
-  TORCH_CHECK(hasROCM() == true, "Cannot set ROCm flash attention backend on non-ROCm Platform")
-  TORCH_CHECK((b != at::ROCmFABackend::Ck) || (hasROCM() && ckSupported() && hasCKSDPA()),
-      "Cannot set preferred flash attention backend to Ck if PyTorch has not been compiled for ROCm and built CK");
 #ifdef USE_ROCM
-  if(b == at::ROCmFABackend::Ck) {
-    if(ckSupported() && hasCKSDPA()){
-      rocm_fa_preferred_backend = b;
-    } else { // leave backend as is
-      return;
-    }
-  }
-  else if(b == at::ROCmFABackend::Default) {
-    rocm_fa_preferred_backend = at::ROCmFABackend::AOTriton;
-  } else {
-    rocm_fa_preferred_backend = b;
-  }
+  static const bool hasCKSDPAFlag = hasCKSDPA();
+  static const bool ckSupportedFlag = ckSupported();
+  TORCH_CHECK((b != at::ROCmFABackend::Ck) || (hasCKSDPAFlag && ckSupportedFlag),
+      "Cannot set preferred SDPA backend to CK since following conditions are not true: ",
+      "architecture supported for CK: ", ckSupportedFlag,
+      ", PyTorch built with CK SDPA support: ", hasCKSDPAFlag);
 #endif
+  rocm_fa_preferred_backend = b;
 }
 
 bool Context::allowFP16ReductionCuBLAS() const {
