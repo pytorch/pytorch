@@ -20,8 +20,8 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/jiterator.h>
 #include <ATen/cuda/tunable/Tunable.h>
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/StorageImpl.h>
-#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -418,16 +418,6 @@ PyObject* THCPModule_cudaCachingAllocator_enable(
       "cudaCachingAllocator_enable expects a bool, but got ",
       THPUtils_typename(arg));
   c10::cuda::CUDACachingAllocator::enable(THPUtils_unpackBool(arg));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
-    PyObject* _unused,
-    PyObject* env) {
-  HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::setAllocatorSettings(
-      THPUtils_unpackString(env));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -2051,10 +2041,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_cudaCachingAllocator_enable",
      THCPModule_cudaCachingAllocator_enable,
-     METH_O,
-     nullptr},
-    {"_cuda_cudaCachingAllocator_set_allocator_settings",
-     THCPModule_cudaCachingAllocator_set_allocator_settings,
      METH_O,
      nullptr},
     {"_cuda_getAllocatorBackend",
