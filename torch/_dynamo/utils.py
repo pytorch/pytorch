@@ -1714,9 +1714,15 @@ class ChromiumEventLogger:
 
     def __init__(self):
         self.tls = threading.local()
+
+        from . import config
+
         # Generate a unique id for this logger, which we can use in scuba to filter down
         # to a single python run.
-        self.id_ = str(uuid.uuid4())
+        if config.pt2_compile_id_prefix:
+            self.id_ = f"{config.pt2_compile_id_prefix}-{uuid.uuid4()}"
+        else:
+            self.id_ = str(uuid.uuid4())
 
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
@@ -2230,7 +2236,7 @@ def torchscript(model, example_inputs, verbose=False):
     return None
 
 
-def getfile(obj):
+def getfile(obj: Any) -> Optional[str]:
     try:
         return inspect.getfile(obj)
     except (TypeError, OSError):
@@ -3959,7 +3965,7 @@ def is_compile_supported(device_type):
     compile_supported = is_dynamo_supported()
     if type == "cpu":
         pass
-    elif type in ["cuda", "xpu"] and compile_supported:
+    elif type in ["cuda", "xpu", "mtia"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -4763,3 +4769,22 @@ def get_traced_code() -> list[CodeType]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()
+
+
+class CreateNestedFnCache:
+    cache: dict[str, types.FunctionType] = {}
+
+    @classmethod
+    def get(cls, key):
+        return cls.cache.get(key, None)
+
+    @classmethod
+    def set(cls, key, value):
+        cls.cache[key] = value
+
+    @classmethod
+    def clear(cls):
+        cls.cache.clear()
+
+
+create_nested_fn_cache: CreateNestedFnCache = CreateNestedFnCache()
