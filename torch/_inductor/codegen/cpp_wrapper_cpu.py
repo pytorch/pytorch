@@ -14,7 +14,7 @@ import sympy
 
 import torch
 import torch._higher_order_ops.torchbind
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch._ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
@@ -211,10 +211,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if not V.graph.aot_mode:
             self.header.splice(
-                """
+                f"""
                 import torch
-                from torch._inductor.codecache import CppWrapperCodeCache
+                from {torch._inductor.async_compile.__name__} import AsyncCompile
 
+                async_compile = AsyncCompile()
                 cpp_wrapper_src = (
                 r'''
                 """
@@ -1137,13 +1138,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
-            inductor_entry = CppWrapperCodeCache.load_pybinding(
+            inductor_entry = async_compile.cpp_wrapper(
                 argtypes=["std::vector<AtenTensorHandle>"],
                 main_code=cpp_wrapper_src,
                 device_type="{self.device}",
                 num_outputs={len(V.graph.graph_outputs)},
                 kernel_code={kernel_code},
             )
+            async_compile.wait(globals())
+            del async_compile
             """
         )
 

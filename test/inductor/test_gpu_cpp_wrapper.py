@@ -139,7 +139,7 @@ def make_test_case(
                     func, *func_inputs if func_inputs else []
                 )
                 if check_code:
-                    self.assertEqual("CppWrapperCodeCache" in code, True)
+                    self.assertIn("async_compile.cpp_wrapper", code)
                     self.assertTrue(
                         all(
                             code.count(string) == code_string_count[string]
