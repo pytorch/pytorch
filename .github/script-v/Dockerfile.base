@@ -5,101 +5,10 @@
 ARG CUDA_VERSION=12.8.1
 ARG BASE_IMAGE=default
 
-
-From nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 as default
-ARG CUDA_VERSION=12.8.1
-ARG PYTHON_VERSION=3.12
-ARG TARGETPLATFORM
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
-    echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
-
-
-# install Python and other dependencies if it does not existed
-RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
-      echo "Installing Python ${PYTHON_VERSION}..." && \
-      echo 'tzdata tzdata/Areas select America' | debconf-set-selections && \
-      echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections && \
-      apt-get update -y && \
-      apt-get install -y ccache software-properties-common git curl sudo && \
-      for i in 1 2 3; do \
-        add-apt-repository -y ppa:deadsnakes/ppa && break || \
-        { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
-      done && \
-      apt-get update -y && \
-      apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv && \
-      update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
-      update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} && \
-      ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config && \
-      curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}; \
-   else \
-      echo "Python ${PYTHON_VERSION} already present, skipping setup."; \
-   fi \
-   && python3 --version && python3 -m pip --version
-
-# Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
-# as it was causing spam when compiling the CUTLASS kernels
-# Ensure gcc >= 10 to avoid CUTLASS issues (bug 92519)
-RUN current_gcc_version=$(gcc -dumpversion | cut -f1 -d.) && \
-    if [ "$current_gcc_version" -lt 10 ]; then \
-      echo "GCC version is $current_gcc_version, installing gcc-10..."; \
-      apt-get update && \
-      apt-get install -y gcc-10 g++-10 && \
-      update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 && \
-      update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100; \
-    else \
-      echo "GCC version is $current_gcc_version, no need to install gcc-10."; \
-    fi && \
-    gcc --version && g++ --version
-
-# install uv for faster pip installs
-RUN --mount=type=cache,target=/root/.cache/uv \
-    python3 -m pip install uv
-
-# This timeout (in seconds) is necessary when installing some dependencies via uv since it's likely to time out
-# Reference: https://github.com/astral-sh/uv/pull/1694
-ENV UV_HTTP_TIMEOUT=500
-
-ARG TORCH_WHEELS_PATH="./requirements"
-
-RUN apt-get update && \
-    apt-get install -y libopenblas-base libopenmpi-dev libcudnn9-cuda-12
-
-RUN apt-get -y install libcusparselt0 libcusparselt-dev
-
-RUN apt-get install -y libnvshmem3-cuda-12 libnvshmem3-dev-cuda-12
-
-RUN uv pip install --system \
-  nvidia-cublas-cu12 \
-  nvidia-cudnn-cu12 \
-  nvidia-cusolver-cu12 \
-  nvidia-curand-cu12 \
-  nvidia-cufft-cu12 \
-  nvidia-cusparse-cu12 \
-  nvidia-cusparselt-cu12 \
-  nvidia-nccl-cu12 \
-  nvidia-nvjitlink-cu12 \
-  nvidia-nvshmem-cu12 \
-  nvidia-cuda-nvrtc-cu12 \
-  nvidia-cuda-cupti-cu12 \
-  nvidia-cufile-cu12
-
-RUN find /usr/local -name "libnccl.so*"
-ENV LD_LIBRARY_PATH="/usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib:/usr/lib/x86_64-linux-gnu/nvshmem/12:$LD_LIBRARY_PATH"
-
-# Workaround for https://github.com/openai/triton/issues/2507 and
-# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
-# this won't be needed for future versions of this docker image
-# or future versions of triton.
-RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
-
-
 #################### BASE BUILD IMAGE ####################
 # prepare basic build environment
 FROM ${BASE_IMAGE} AS base
 USER root
-
 
 # install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -157,7 +66,7 @@ uv pip install --system -r requirements/common.txt
 RUN python3 -c "import torch; print('Torch:', torch.__version__);"
 
 # must put before installing xformers, so it can install the correct version of xfomrers.
-ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
+ARG torch_cuda_arch_list='8.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 # Build xformers with cuda and torch nightly
