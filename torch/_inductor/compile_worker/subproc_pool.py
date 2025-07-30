@@ -134,6 +134,13 @@ class SubprocPool:
         self.read_pipe = os.fdopen(read_fd, "rb")
         torch_key_str = base64.b64encode(torch_key()).decode("utf-8")
 
+        mast_job_id = os.environ.get("MAST_HPC_JOB_NAME", None)
+        global_rank = os.environ.get("ROLE_RANK", "0")
+        log_file = None
+        if mast_job_id is not None:
+            log_loc = f"/logs/dedicated_log_rank{global_rank}"
+            log_file = open(log_loc, "w")
+
         cmd = [
             sys.executable,
             entry,
@@ -149,6 +156,31 @@ class SubprocPool:
         if config.worker_suppress_logging:
             log.info("Suppressing compile worker output due to config")
             local = True
+        try:
+            self.process = subprocess.Popen(
+                cmd,
+                env={
+                    **os.environ,
+                    # We need to set the PYTHONPATH so the subprocess can find torch.
+                    "PYTHONPATH": os.environ.get(
+                        "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+                    ),
+                    # Safeguard against creating a SubprocPool in the subprocess.
+                    "TORCH_WARM_POOL": "0",
+                    # Some internal usages need a modified LD_LIBRARY_PATH.
+                    "LD_LIBRARY_PATH": get_ld_library_path(),
+                },
+                pass_fds=(subproc_read_fd, subproc_write_fd),
+                stdout=log_file
+                if log_file
+                else (subprocess.DEVNULL if local else None),
+                stderr=log_file
+                if log_file
+                else (subprocess.DEVNULL if local else None),
+            )
+        finally:
+            if log_file:
+                log_file.close()
 
         self.process = subprocess.Popen(
             cmd,
