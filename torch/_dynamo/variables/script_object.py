@@ -79,7 +79,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             unimplemented_v2(
                 gb_type="FakeScriptObject missing method implementation",
                 context=f"method={name}",
-                explanation="FakeScriptObject doesn't define the specified method.",
+                explanation=f"TorchScript object {self.value} doesn't define the method {name}.",
                 hints=[
                     "Implement the method in the fake class.",
                     *graph_break_hints.USER_ERROR,
