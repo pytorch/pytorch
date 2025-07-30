@@ -1429,9 +1429,7 @@ def register_replacement(
         )
 
         sym_args: list[torch.SymInt] = []
-        fake_mode = torch._dynamo.utils.detect_fake_mode(args)
-        assert fake_mode is not None
-        with fake_mode:
+        with torch._dynamo.utils.detect_fake_mode(args):
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
                     if grad and is_integer_dtype(args[i].dtype):

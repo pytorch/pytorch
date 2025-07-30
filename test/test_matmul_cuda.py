@@ -543,7 +543,7 @@ class TestMatmulCuda(TestCase):
             else:
                 B = torch.randn(k, n_align, device=device, dtype=dtype_AB).t()[:n, :]
         elif op == "2d/3d":
-            n, k = 7, 13
+            n, k = 7, 259  # k is larger here, to validate iterating over k tiles on an op
             n_align = (n + align - 1) // align * align
             k_align = (k + align - 1) // align * align
             if a_row_major:

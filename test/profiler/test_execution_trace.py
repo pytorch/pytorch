@@ -404,6 +404,7 @@ class TestExecutionTrace(TestCase):
 
         nodes = self.get_execution_trace_root(fp.name)
         found_captured_triton_kernel_node = False
+        found_call_compiled_fx_graph = False
         for n in nodes:
             assert "name" in n
             if "triton_" in n["name"]:
@@ -412,7 +413,10 @@ class TestExecutionTrace(TestCase):
                         found_captured_triton_kernel_node = True
                         assert len(n["inputs"]["values"]) > 0
                         assert len(n["outputs"]["values"]) == 0
+            elif "Call CompiledFxGraph" in n["name"]:
+                found_call_compiled_fx_graph = True
         assert found_captured_triton_kernel_node
+        assert found_call_compiled_fx_graph
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
