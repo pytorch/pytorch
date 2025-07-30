@@ -593,6 +593,7 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 
 
 libtorch_nativert_sources = [
+    "torch/nativert/ModelRunner.cpp",
     "torch/nativert/graph/Graph.cpp",
     "torch/nativert/graph/GraphPasses.cpp",
     "torch/nativert/graph/GraphSignature.cpp",
@@ -986,6 +987,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/verbose.cpp",
     "torch/csrc/cpu/Module.cpp",
     "torch/csrc/instruction_counter/Module.cpp",
+    "torch/nativert/python/Bindings.cpp",
 ] + lazy_tensor_core_python_sources
 
 libtorch_python_distributed_core_sources = [
