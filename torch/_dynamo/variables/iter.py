@@ -533,17 +533,7 @@ class MapVariable(ZipVariable):
         return map
 
     def has_unpack_var_sequence(self, tx) -> bool:
-        return True
-
-    def unpack_var_sequence(self, tx):
-        result = []
-        while True:
-            try:
-                result.append(self.next_variable(tx))
-            except ObservedUserStopIteration:
-                handle_observed_exception(tx)
-                break
-        return result
+        return False
 
     def next_variable(self, tx):
         args = super().next_variable(tx)
