@@ -81,7 +81,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 context=f"value={self.value}, method={name}",
                 explanation=f"TorchScript object {self.value} doesn't define the method {name}.",
                 hints=[
-                    "Implement the method in the fake class.",
+                    f"Ensure the method {name} is implemented in {self.value}.",
                     *graph_break_hints.USER_ERROR,
                 ],
             )
