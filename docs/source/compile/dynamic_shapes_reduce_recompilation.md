@@ -375,14 +375,14 @@ identify this by:
 
     * Using dynamic logs:
 
-      ```sh
+      ```bash
       +launcher.additional_environ=["TORCH_LOGS=+dynamic"]
       create_symbol s2 = 2 for L['self']._modules['cle ...
       ```
 
     * Reviewing guards files. If a tensor size is dynamic, it will be indicated as `None`:
 
-      ```sh
+      ```bash
       | | | | | | | | | | | +- TENSOR_MATCH:check_tensor(L['self']._modules['cle']._modules['compress']._parameters['weight'], Parameter, DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU), torch.float32, device=None, requires_grad=True, size=[None, None], stride=[None, 1])
       ```
 
@@ -415,7 +415,7 @@ call  to a Triton kernel. To identify the reason for specialization:
 
     The log above indicates that `s0` is specialized to `33` due to the following code:
 
-    ```sh
+    ```bash
     `if self.x ==33` at example4.py line 16.
     ```
 
@@ -423,13 +423,13 @@ call  to a Triton kernel. To identify the reason for specialization:
 
     Example log:
 
-    ```sh
+    ```bash
     torch/fx/experimental/symbolic_shapes.py:6557] [0/2] eval Eq(s0, 33) [guard added] if self.x ==33:  # example4.py:16 in forward (_dynamo/variables/tensor.py:1242 in evaluate_expr), for more info run with TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED="Eq(s0, 33)"
     V0228 12:04:24.190000 2990033 torch/fx/experimental/symbolic_shapes.py:6000] [0/2] _update_var_to_range s0 = VR[33, 33] (update)
     ```
 
     The log above indicates that `s0` is specialized to `33` due to the following code:
-    ```sh
+    ```bash
     if self.x ==33. At example4.py like 16.
     ```
 
