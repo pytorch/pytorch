@@ -97,6 +97,24 @@ struct FromImpl<std::optional<T>> {
   }
 };
 
+// Specialization for std::vector<T> => StableIValue
+template <typename T>
+struct FromImpl<std::vector<T>> {
+  static StableIValue call(std::vector<T> val) {
+    std::vector<T>* heap_vec = new std::vector<T>(std::move(val));
+    return from(heap_vec);
+  }
+};
+
+// Specialization for std::string => StableIValue
+template <>
+struct FromImpl<std::string> {
+  static StableIValue call(std::string val) {
+    std::string* heap_str = new std::string(std::move(val));
+    return from(heap_str);
+  }
+};
+
 // Specialization for torch::stable::Tensor => StableIValue
 // Returns a new owning reference of the underlying Tensor.
 template <>
@@ -159,6 +177,20 @@ struct ToImpl<std::optional<T>> {
     delete sivp;
 
     return std::make_optional(inner_val);
+  }
+};
+
+template <typename T>
+struct ToImpl<std::vector<T>> {
+  static std::vector<T> call(StableIValue val) {
+    return *to<std::vector<T>*>(val);
+  }
+};
+
+template <>
+struct ToImpl<std::string> {
+  static std::string call(StableIValue val) {
+    return *to<std::string*>(val);
   }
 };
 
