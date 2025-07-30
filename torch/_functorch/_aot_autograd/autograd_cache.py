@@ -1350,10 +1350,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 # useful, remove it from the entry.
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(
-                    BundledAOTAutogradCacheArtifact.type(),
-                    precompile_key,
-                    entry,
-                    editable=True,
+                    BundledAOTAutogradCacheArtifact.type(), precompile_key, content
                 )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1

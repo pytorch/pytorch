@@ -1762,10 +1762,7 @@ def aot_stage2_autograd(
                     placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
             compiled_bw_func = None
-            if (
-                num_symints_saved_for_bw > 0
-                or aot_config.force_non_lazy_backward_lowering
-            ):
+            if num_symints_saved_for_bw > 0:
                 try:
                     # See Note: [Backward graph lazy lowering]
                     with torch._subclasses.fake_tensor.unset_fake_temporarily():
@@ -1778,8 +1775,6 @@ def aot_stage2_autograd(
                     )
                     del bw_module_copy
                 except Exception as e:
-                    if aot_config.force_non_lazy_backward_lowering:
-                        raise
                     exc = e
                     trace_structured(
                         "artifact",

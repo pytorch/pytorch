@@ -495,6 +495,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         if config.functionalize_rng_ops:
             # Update example inputs for the fw_compiler
             fake_mode = detect_fake_mode()
+            assert fake_mode is not None
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             flat_args.extend([seed, offset])
             # We are not clearing flat_args here because
@@ -1948,11 +1949,12 @@ class AOTDispatchAutograd:
             expected_meta = meta.meta
 
         runtime_type = type(x)
-        # When we're inside compiled autograd's AOTDispatcher step,
-        # regular Tensors look like FunctionalTensors.
-        # Tensor subclasses still look like Tensor subclasses though.
-        if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensor):
-            runtime_type = torch.Tensor
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            # When we're inside compiled autograd's AOTDispatcher step,
+            # regular Tensors look like FunctionalTensors.
+            # Tensor subclasses still look like Tensor subclasses though.
+            if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensor):
+                runtime_type = torch.Tensor
 
         runtime_meta = None
         runtime_subclass_keys: Sequence[str] = []

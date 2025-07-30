@@ -10,7 +10,4 @@ By understanding the `torch.compile` programming model, one can systematically u
 programming_model.dynamo_core_concepts
 programming_model.graph_breaks_index
 programming_model.non_strict_tracing_model
-programming_model.recompilation
-programming_model.observability
-programming_model.reporting_issues
 ```
