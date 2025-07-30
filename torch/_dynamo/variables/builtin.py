@@ -109,6 +109,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .user_defined import (
+    MutableMappingVariable,
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
     UserDefinedSetVariable,
@@ -1854,6 +1855,12 @@ class BuiltinVariable(VariableTracker):
             hints=["Ensure your call to cast() has exactly 2 arguments."],
         )
 
+    def call_dir(self, tx: "InstructionTranslator", arg):
+        if isinstance(arg, variables.UserDefinedClassVariable):
+            return VariableTracker.build(tx, dir(arg.value))
+        if isinstance(arg, BuiltinVariable):
+            return VariableTracker.build(tx, dir(arg.fn))
+
     def call_dict(self, tx: "InstructionTranslator", *args, **kwargs):
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
@@ -2244,7 +2251,6 @@ class BuiltinVariable(VariableTracker):
                     "assertRaisesRegex",
                     "assertNotWarns",
                     "assertWarnsRegex",
-                    "assertDictEqual",
                     "assertWarns",
                 )
             ):
@@ -2731,6 +2737,7 @@ class BuiltinVariable(VariableTracker):
             (
                 ConstDictVariable,
                 DictKeysVariable,
+                MutableMappingVariable,
                 SetVariable,
                 UserDefinedDictVariable,
                 UserDefinedSetVariable,
@@ -2759,7 +2766,13 @@ class BuiltinVariable(VariableTracker):
         # This call looks like `{"one": torch.ones(1)} |= {"two": torch.ones(2)}`.
         if isinstance(
             a,
-            (ConstDictVariable, DictKeysVariable, SetVariable, UserDefinedSetVariable),
+            (
+                ConstDictVariable,
+                DictKeysVariable,
+                MutableMappingVariable,
+                SetVariable,
+                UserDefinedSetVariable,
+            ),
         ):
             return a.call_method(tx, "__ior__", [b], {})
 
