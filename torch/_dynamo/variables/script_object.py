@@ -112,7 +112,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     )
     def call_method(self, tx, name, args, kwargs):
         unimplemented_v2(
-            gb_type="Calling method on script object is not safe",
+            gb_type="Weird method call on TorchScript object",
             context=f"method={name}",
             explanation="",
             hints=[
