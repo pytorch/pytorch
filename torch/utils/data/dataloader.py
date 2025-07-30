@@ -1175,13 +1175,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             # Queue is not type-annotated
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
-            current_device = torch.accelerator.current_device_index()
+            current_device_id = torch.accelerator.current_device_index()
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(
                     self._worker_result_queue,
                     self._data_queue,
-                    current_device,
+                    current_device_id,
                     self._pin_memory_thread_done_event,
                     self._pin_memory_device,
                 ),
