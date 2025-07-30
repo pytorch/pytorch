@@ -2771,7 +2771,7 @@ class BuiltinVariable(VariableTracker):
                 DictKeysVariable,
                 MutableMappingVariable,
                 SetVariable,
-                UserDefinedSetVariable
+                UserDefinedSetVariable,
             ),
         ):
             return a.call_method(tx, "__ior__", [b], {})
