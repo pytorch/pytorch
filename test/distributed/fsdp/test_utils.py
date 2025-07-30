@@ -87,6 +87,7 @@ class TestUtils(TestCase):
         od = OrderedDict()
         od["k"] = "value"
         data.append(od)
+        data.append([])
 
         total = 0
 
@@ -99,6 +100,12 @@ class TestUtils(TestCase):
         self.assertEqual(total, expected)
         for i, v in enumerate(data):
             self.assertEqual(type(new_data[i]), type(v))
+            if isinstance(v, list):
+                self.assertEqual(
+                    id(new_data[i]),
+                    id(v),
+                    f"expect the same list but got {id(new_data[i])=} and id(data[i])={id(v)}",
+                )
 
     @skip_if_lt_x_gpu(1)
     def test_replace_by_prefix(self):

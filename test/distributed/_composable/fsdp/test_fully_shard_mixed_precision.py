@@ -616,6 +616,50 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         loss = model(inp).sum()
         loss.backward()
 
+    @skip_if_lt_x_gpu(1)
+    def test_list_type_args_kwargs(self):
+        class Layer(nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.layer = nn.Linear(16, 16, device="cuda")
+
+            def forward(self, x: torch.Tensor, list_arg: list, list_kwarg: list):
+                out = self.layer(x)
+                list_arg.append(out)
+                list_kwarg.append(out)
+                return out + sum(list_arg) + sum(list_kwarg)
+
+        class Model(nn.Module):
+            def __init__(self, assert_equal) -> None:
+                super().__init__()
+                self.layers = nn.ModuleList([Layer() for _ in range(3)])
+                self.assert_equal = assert_equal
+
+            def forward(self, x: torch.Tensor):
+                list_arg = []
+                list_kwarg = []
+                out = x
+                for idx, layer in enumerate(self.layers):
+                    out = layer(out, list_arg, list_kwarg=list_kwarg)
+                    self.assert_equal(len(list_arg), idx + 1)
+                    self.assert_equal(len(list_kwarg), idx + 1)
+                return out
+
+        x = torch.randn(16, 16, device="cuda")
+        # support checkpoint eval first
+        # need to improve _register_post_backward_hook to support training
+        with torch.no_grad():
+            model = Model(self.assertEqual)
+            for layer in model.layers:
+                fully_shard(
+                    layer,
+                    mp_policy=MixedPrecisionPolicy(
+                        param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+                    ),
+                )
+            fully_shard(model)
+            model(x)
+
 
 if __name__ == "__main__":
     run_tests()

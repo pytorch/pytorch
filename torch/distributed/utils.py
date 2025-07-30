@@ -242,7 +242,10 @@ def _apply_to_tensors(fn, container):
         elif _is_namedtuple(x):
             res = (apply(el) for el in x)
             return type(x)(*res)
-        elif isinstance(x, (list, tuple, set)):
+        elif isinstance(x, list):
+            x[:] = map(apply, x)
+            return x
+        elif isinstance(x, (tuple, set)):
             return type(x)(apply(el) for el in x)
         else:
             return x
