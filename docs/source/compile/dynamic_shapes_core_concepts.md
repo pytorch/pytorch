@@ -15,7 +15,8 @@ y = torch.cat([x, x], dim=0) # this tensor has a shape [2*s0, 5]
 
 However, `z = x * y` would throw an error since we know that pointwise operation like multiply must
 operate on same sized tensors but we know statically `s0 != 2 * s0`. Astute readers may point out
-that this is not true when `s0 == 0` and the reason why that doesn't matter here is described in [0/1_specialization]().
+that this is not true when `s0 == 0` and the reason why that doesn't matter here is described in
+{ref}`zero-one-specialization`.
 
 ## Guards
 
@@ -28,9 +29,9 @@ def foo(x): return x / 2
 This works for any dynamic x. But if your code is:
 
 def foo(x)
-	if x > 5:
-		return x / 2
-	return x / 3
+    if x > 5:
+    	return x / 2
+    return x / 3
 ```
 If you call `foo(6)`, it returns `x / 2` and adds a guard `x > 5`. Calling `foo(4)` later will
 require recompilation because the guard is broken.
@@ -40,10 +41,10 @@ You can use runtime asserts to provide hints when you know certain facts, like b
 
 ```python
 def foo(batch_size):
-	torch._check(batch_size < 100)
-	if batch_size < 100:
-		return do_something
-	return do_something_else()
+    torch._check(batch_size < 100)
+    if batch_size < 100:
+    	return do_something
+    return do_something_else()
 ```
 
 ## "Hint" Value

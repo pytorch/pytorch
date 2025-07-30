@@ -43,7 +43,9 @@ f(torch.rand(40))
 ```
 
 In the produced output, you can see that four graphs were generated.
-See the corresponding [tlparse output](/_static/img/dynamic_shapes/tlparse1_dynamic_shapes_false.png)
+See the corresponding
+<a href="/_static/img/dynamic_shapes/tlparse1_dynamic_shapes_false.png" target="_blank">tlparse output</a>.
+
 
 By making the size dynamic, the function can handle various sizes without recompilation:
 
@@ -60,7 +62,8 @@ f(torch.rand(40))
 ```
 
 With dynamic shapes enabled, only one graph is created. See the
-corresponding [tlparse output](/_static/img/dynamic_shapes/tlparse2_dynamic_shapes_true.png)
+corresponding
+<a href="/_static/img/dynamic_shapes/tlparse2_dynamic_shapes_true.png" target="_blank">tlparse output</a>.
 
 While compilation time differences
 are minimal for this small example, more complex use cases would show significant
@@ -102,7 +105,8 @@ In the code above, we specialize that the graph requires an input size of 10, in
 case it will return `x * 10`. If the input size is less than 30, it will return `x * 200`.
 In the output, you can see that this creates three graphs.
 
-See the corresponding [tlparse output](_static/img/dynamic_shapes/tlparse3_specialization.png)
+See the corresponding
+<a href="/_static/img/dynamic_shapes/tlparse3_specialization.png" target="_blank">tlparse output</a>.
 
 This is how graphs created for the above function:
 
@@ -174,7 +178,7 @@ follow these steps using `tlparse`:
    For instance, the following output shows that the input `L['m']` has been seen with
    multiple sizes at `size[0]`, but the stride has consistently been 1:
 
-   ```sh
+   ```python
    /data/users/bobren/a/pytorch/r2.py:2:func:
    L['m']: fully dynamic scalar or tensor
    L['x']: tensor size=[?] stride=[1]
@@ -338,7 +342,7 @@ Check the following:
 1. **Check Recompile Reasons:** For graphs you believe are similar, click on
 `recompile_reason` in the `tlparse` output for the later graph. Ensure the
 reason is size-related and not due to other factors. For example, while
-in thise screenshot the recomplile reason is size-related:
+in these screenshot the recomplile reason is size-related:
 
 ```{image} ../_static/img/dynamic_shapes/tlparse6_size_related_recompilations.png
 ```

@@ -193,8 +193,9 @@ torch._check_is_size(u0)
 
 ```python
 if u0 < 0:
-    raise RuntimeError("u0 is not a size")`
+    raise RuntimeError("u0 is not a size")
 ```
+
 **Key Differences:**
 
 Like `torch._check`, this test will always succeed at compile time, and it will establish that `u0 >= 0`. This refines the value range of `u0` to `[0, Inf]` instead of `[-Inf, Inf]`.
