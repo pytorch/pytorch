@@ -93,7 +93,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 explanation="Only method calls on TorchScript objects can be supported safely.",
                 hints=[
                     "Use method calls instead of attribute access.",
-                    *graph_break_hints.USER_ERROR,
                 ],
             )
 
