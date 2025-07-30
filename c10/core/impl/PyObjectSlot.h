@@ -6,9 +6,16 @@
 #include <c10/util/python_stub.h>
 #include <optional>
 
-#include <atomic>
-
 namespace c10::impl {
+
+// Function pointer type for getting the global interpreter
+using GetPyInterpreterFn = PyInterpreter* (*)();
+
+// Global function pointer (set by csrc initialization)
+C10_API extern GetPyInterpreterFn g_get_pyinterpreter_fn;
+
+// Helper function to get the global interpreter
+C10_API PyInterpreter* getGlobalPyInterpreter();
 
 struct C10_API PyObjectSlot {
  public:
@@ -26,8 +33,6 @@ struct C10_API PyObjectSlot {
   // NB: THIS FUNCTION CAN RAISE AN EXCEPTION.  Make sure to clean up after
   // PyObject if necessary!
   void init_pyobj(PyObject* pyobj) {
-    pyobj_interpreter_.store(
-        getGlobalPyInterpreter(), std::memory_order_relaxed);
     pyobj_ = pyobj;
   }
 
@@ -55,18 +60,13 @@ struct C10_API PyObjectSlot {
 
   // @todo alban: I'm not too sure what's going on here, we can probably delete
   // it but it's worthwhile making sure
-  std::optional<PyObject*> check_pyobj(bool ignore_hermetic_tls = false) const {
-    impl::PyInterpreter* interpreter =
-        pyobj_interpreter_.load(std::memory_order_acquire);
+  std::optional<PyObject*> check_pyobj() const {
+    impl::PyInterpreter* interpreter = getGlobalPyInterpreter();
     if (interpreter == nullptr) {
       return std::nullopt;
     }
 
-    if (!ignore_hermetic_tls && c10::impl::HermeticPyObjectTLS::get_state()) {
-      return std::nullopt;
-    } else {
-      return _unchecked_untagged_pyobj();
-    }
+    return _unchecked_untagged_pyobj();
   }
 
   PyInterpreter& load_pyobj_interpreter() const;
@@ -76,30 +76,6 @@ struct C10_API PyObjectSlot {
   void set_owns_pyobj(bool b);
 
  private:
-  // This field contains the interpreter tag for this object.  See
-  // Note [Python interpreter tag] for general context
-  //
-  // Note [Memory ordering on Python interpreter tag]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // What memory_order do we need when accessing this atomic?  We don't
-  // need a single total modification order (as provided by
-  // memory_order_seq_cst) as pyobj_interpreter_ is monotonic: it can only
-  // transition from -1 to some positive integer and never changes afterwards.
-  // Because there is only one modification, it trivially already has a total
-  // modification order (e.g., we don't need fences or locked instructions on
-  // x86)
-  //
-  // In fact, one could make a reasonable argument that relaxed reads are OK,
-  // due to the presence of external locking (GIL) to ensure that interactions
-  // with other data structures are still correctly synchronized, so that
-  // we fall in the "Single-Location Data Structures" case as described in
-  // http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2020/p2055r0.pdf
-  // However, on x86, it doesn't matter if I use acquire or relaxed on the load
-  // as I get the same assembly in both cases.  So I just use the more
-  // conservative acquire (which will impede compiler optimizations but I don't
-  // care)
-  std::atomic<PyInterpreter*> pyobj_interpreter_;
-
   // This field contains a reference to a PyObject representing this Tensor.
   // If pyobj is nullptr, when we transfer Tensor to Python, we allocate a new
   // PyObject for it and set this field.  This field does not have to be
