@@ -23,6 +23,7 @@ class VllmBuildConfig:
     sccache_bucket: str = get_env("SCCACHE_BUCKET", "")
     sccache_region: str = get_env("SCCACHE_REGION", "")
     torch_cuda_arch_list: str = get_env("TORCH_CUDA_ARCH_LIST", "8.0")
+    vllm_fa_cmake_gpu_arches=get_env("VLLM_FA_CMAKE_GPU_ARCHES","80-real")
 
 _DEFAULT_RESULT_PATH = "./results"
 _VLLM_TEMP_FOLDER = "tmp"
@@ -49,9 +50,7 @@ def build_vllm(artifact_dir: str, torch_whl_dir: str, base_image: str):
     cfg = VllmBuildConfig()
     result_path = prepare_artifact_dir(artifact_dir)
     print(f"Target artifact dir path is {result_path}", flush=True)
-
     clone_vllm(get_post_build_pinned_commit("vllm"))
-
 
     # replace dockerfile
     # todo: remove this once the dockerfile is updated in vllm
@@ -127,6 +126,7 @@ def _generate_docker_build_cmd(
             --build-arg SCCACHE_BUCKET_NAME={cfg.sccache_bucket} \
             --build-arg SCCACHE_REGION_NAME={cfg.sccache_region} \
             --build-arg torch_cuda_arch_list={cfg.torch_cuda_arch_list} \
+            --build-arg vllm_fa_cmake_gpu_arches={cfg.vllm_fa_cmake_gpu_arches}\
             --target {cfg.target} \
             -t {cfg.tag_name} \
             --progress=plain .
