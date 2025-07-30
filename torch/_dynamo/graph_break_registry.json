@@ -851,7 +851,7 @@
   "GB0088": [
     {
       "Gb_type": "Observed exception",
-      "Context": "str(raised_exception)",
+      "Context": "raised exception {curr_exc.python_type_name()}({curr_exc.args})",
       "Explanation": "observed_exn_gb_explanation",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
@@ -2507,6 +2507,149 @@
       "Explanation": "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, list) are allowed as output. The result of this call contains an unsupported type.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0252": [
+    {
+      "Gb_type": "could not find name in object's mro",
+      "Context": "name={name}, object type={type(self.value)}, mro={type(self.value).__mro__}",
+      "Explanation": "Could not find name `{name}` in mro {type(self.value).__mro__}",
+      "Hints": [
+        "Ensure the name `{name}` is defined somewhere in {self.value}'s type hierarchy.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0253": [
+    {
+      "Gb_type": "call_method on generator",
+      "Context": "object={self.value}, method={name}, args={args}, kwargs={kwargs}",
+      "Explanation": "Detected a method call to a user-defined generator object. This is not fully supported.",
+      "Hints": [
+        "Set `torch._dynamo.config.enable_faithful_generator_behavior = False`. Note that this ",
+        "may cause silent incorrectness, since we will eagerly unpack generators instead of lazily ",
+        "evaluating them."
+      ]
+    }
+  ],
+  "GB0254": [
+    {
+      "Gb_type": "non-const setattr name on user-defined object",
+      "Context": "object={self}, name={name}, value={value}",
+      "Explanation": "Detected a call to `setattr` of a user-defined object with a non-constant name.",
+      "Hints": [
+        "Ensure that the name is a string."
+      ]
+    }
+  ],
+  "GB0255": [
+    {
+      "Gb_type": "attempted to call sourceless user-defined object as a method",
+      "Context": "object={self.value}, function={func}, args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Ensure the user-defined object {self.value} is constructed outside the compiled region."
+      ]
+    }
+  ],
+  "GB0256": [
+    {
+      "Gb_type": "User-defined object with non-function __getattr__",
+      "Context": "object={self.value}, name={name}, getattr_fn={getattr_fn}",
+      "Explanation": "Found a non-function __getattr__ {getattr_fn} from a user-defined object {self.value}  when attempting to getattr `{name}`",
+      "Hints": [
+        "Ensure the object's __getattr__ is a function type."
+      ]
+    }
+  ],
+  "GB0257": [
+    {
+      "Gb_type": "TypedDict with optional keys",
+      "Context": "str(self.value)",
+      "Explanation": "Dyanmo does not support tracing TypedDict with optional keys",
+      "Hints": [
+        "Avoid using TypedDict with optional keys",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0258": [
+    {
+      "Gb_type": "collections.deque() with bad arguments",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Detected call to collections.deque() with bad arguments.",
+      "Hints": [
+        "Fix the call to collections.deque().",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0259": [
+    {
+      "Gb_type": "collections.deque() with bad iterable argument",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Call to collections.deque() has an iterable argument that Dynamo cannot convert to a list.",
+      "Hints": [
+        "Use a simpler sequence type that Dynamo can convert to a list ",
+        "(e.g. list, tuple, list iterator, etc.)",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0260": [
+    {
+      "Gb_type": "missing args to functools.partial",
+      "Context": "",
+      "Explanation": "functools.partial requires at least one argument",
+      "Hints": [
+        "Fix the functools.partial call.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0261": [
+    {
+      "Gb_type": "User-defined object method with non-function __func__",
+      "Context": "object={self.value}, name={name}, method={dynamic_subobj}, method.__self__={dynamic_subobj.__self__}, method.__func__={dynamic_subobj.__func__}",
+      "Explanation": "Method {dynamic_subobj} (name={name}) of user-defined object {self.value} has a __func__ ({dynamic_subobj.__func__}) that is not a function type.",
+      "Hints": [
+        "Ensure that the method's __func__ is a function type."
+      ]
+    }
+  ],
+  "GB0262": [
+    {
+      "Gb_type": "unsupported contextlib.* API",
+      "Context": "{self.value}",
+      "Explanation": "{self.value} not supported. This may be due to its use of context-specific operations that are not supported in Dynamo yet (i.e. Exception handling)",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0263": [
+    {
+      "Gb_type": "attempted to trace contextlib.contextmanager",
+      "Context": "args={args}",
+      "Explanation": "Tracing contextlib.contextmanager is disabled.",
+      "Hints": [
+        "Set torch._dynamo.config.enable_trace_contextlib = True"
+      ]
+    }
+  ],
+  "GB0264": [
+    {
+      "Gb_type": "Attempted to use `torch.nn.Parameter()` constructor with Dynamo",
+      "Context": "",
+      "Explanation": "Dynamo does not support this",
+      "Hints": [
+        "Try to construct `torch.nn.Parameter()` outside the compiled region.",
+        "If this is not possible, turn `graph_break_on_nn_param_ctor` off",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ],
+      "Additional_Info": [
+        "Try to construct nn.Parameter() outside the compiled region.  If this is not possible, turn `graph_break_on_nn_param_ctor` off"
       ]
     }
   ]
