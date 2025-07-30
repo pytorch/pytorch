@@ -8,12 +8,16 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 
-from .. import ir
-from ..ir import FixedLayout, FlexibleLayout
-from ..lowering import empty, empty_strided, lowerings
-from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
-from ..select_algorithm import autotune_select_algorithm, SymbolicGridFn, TritonTemplate
-from .flex.common import (
+from ... import ir
+from ...ir import FixedLayout, FlexibleLayout
+from ...lowering import empty, empty_strided, lowerings
+from ...runtime.runtime_utils import is_power_of_2, next_power_of_2
+from ...select_algorithm import (
+    autotune_select_algorithm,
+    SymbolicGridFn,
+    TritonTemplate,
+)
+from .flex_attention import (
     compute_forward_block_mn,
     compute_forward_inner,
     compute_next_offset_func,
@@ -322,7 +326,7 @@ def get_split_k(B: int, H: int, Mk: int) -> int:
 
 
 def create_flex_decoding_kernel(*args, **kwargs):
-    from .flex.common import set_head_dim_values
+    from .flex_attention import set_head_dim_values
 
     (
         query,
