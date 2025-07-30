@@ -71,6 +71,21 @@ C10_EXPORT bool allow_inflight_collective_as_graph_input();
 //
 class TORCH_API ProcessGroup : public torch::CustomClassHolder {
  public:
+  struct TORCH_API MergeOptions : torch::CustomClassHolder {
+    explicit MergeOptions(
+        const std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
+        const std::optional<std::string> group_name = std::nullopt,
+        const std::optional<std::string> group_desc = std::nullopt)
+        : timeout(timeout), group_name(group_name), group_desc(group_desc) {}
+    ~MergeOptions() override = default;
+    MergeOptions(const MergeOptions&) = delete;
+    MergeOptions& operator=(const MergeOptions&) = delete;
+
+    std::chrono::milliseconds timeout;
+    std::optional<std::string> group_name;
+    std::optional<std::string> group_desc;
+  };
+
   enum BackendType : uint8_t {
     UNDEFINED = 0,
     GLOO = 1,
@@ -952,6 +967,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return bound_device_id_;
   }
 
+  c10::intrusive_ptr<c10d::Store> getStore() const {
+    return store_;
+  }
+
   void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
@@ -963,9 +982,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // The current rank must be included in the list of new_ranks.
   virtual c10::intrusive_ptr<ProcessGroup> splitGroup(
       const std::vector<int>& ranks,
-      const std::optional<std::chrono::milliseconds> timeout,
-      const std::optional<c10::intrusive_ptr<Backend::Options>> opts,
+      const std::optional<std::chrono::milliseconds>& timeout,
+      const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
+      const std::optional<std::string>& name,
       const std::optional<std::string>& groupDesc);
+
+  // This creates a new subgroup using the specified ranks.
+  // The current rank must be included in the list of new_ranks.
+  virtual c10::intrusive_ptr<ProcessGroup> mergeRemoteGroup(
+      const c10::intrusive_ptr<Store>& store,
+      const MergeOptions& opts,
+      const int& size);
 
  protected:
   // Implementations of this interface need to call this to setup

@@ -1040,10 +1040,10 @@ def forward(self, x_1: "f32[2][1]cpu"):
             '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 9, "frame_compile_id": 0, "attempt": 0}',
             '{"dynamo_start": {"stack": "STACK"}, "frame_id": 1, "frame_compile_id": 1, "attempt": 0}',
             '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 6, "frame_compile_id": 1, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 7, "frame_compile_id": 1, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 11, "frame_compile_id": 0, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 10, "frame_compile_id": 1, "attempt": 0}',
-            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 11, "frame_compile_id": 1, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 9, "frame_compile_id": 1, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 13, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 12, "frame_compile_id": 1, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 13, "frame_compile_id": 1, "attempt": 0}',
         ]
         logs = self.buffer.getvalue()
         self.assertTrue(all(event in logs for event in expected))
