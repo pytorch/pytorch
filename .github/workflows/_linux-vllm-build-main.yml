@@ -133,14 +133,6 @@ jobs:
         uses: ./.github/actions/setup-linux
         if: inputs.build-environment != 'linux-s390x-binary-manywheel' && matrix.runner != 'B200'
 
-      - name: configure aws credentials
-        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
-        with:
-          role-to-assume: ${{ inputs.aws-role-to-assume }}
-          role-session-name: gha-linux-test
-          aws-region: us-east-1
-
       - name: Login to Amazon ECR
         if: ${{ inputs.aws-role-to-assume != '' && matrix.runner == 'B200' }}
         id: login-ecr
@@ -249,6 +241,7 @@ jobs:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
         run: |
           kill "$MONITOR_SCRIPT_PID"
+
       - name: copy logs
         shell: bash
         if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
@@ -267,13 +260,6 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
           path: usage_logs/usage_log_build_*.txt
-
-      - name: Upload sccache stats
-        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
-        uses: ./.github/actions/upload-sccache-stats
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          build-time: ${{ steps.build.outputs.build_time }}
 
       - name: Upload utilization stats
         if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}

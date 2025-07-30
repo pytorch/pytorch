@@ -41,10 +41,10 @@ def build_vllm(
     artifact_dir: str = _DEFAULT_RESULT_PATH, torch_whl_dir="", base_image=""
 ) -> None:
     result_path = prepare_artifact_dir(artifact_dir)
-    print(f"Target artifact dir path is {result_path}")
+    print(f"Target artifact dir path is {result_path}",flush=True)
 
-    print("CWD:", os.getcwd())
-    print("List dir:", os.listdir("."))
+    print("CWD:", os.getcwd(),flush=True)
+    print("List dir:", os.listdir("."),flush=True)
 
     tag_name = get_env("TAG", "vllm-wheels-x")
     cuda = get_env("CUDA_VERSION", "12.8.1")
@@ -59,61 +59,63 @@ def build_vllm(
         use_sccache = "1"
 
     # tracking the time of build
-    with Timer():
-        commit = get_post_build_pinned_commit("vllm")
-        clone_vllm(commit)
-        run("cp .github/script-v/Dockerfile.base  vllm/docker/Dockerfile.nightly_torch",logging=True)
-        # run( "cp .github/script-v/Dockerfile.nightly_torch  vllm/docker/Dockerfile.nightly_torch",logging=True)
-        docker_torch_arg = ""
-        if torch_whl_dir:
-            run("pwd")
-            abs_whl_dir = get_existing_abs_path(torch_whl_dir)
-            # copy the torch wheel in tmp folder into the vllm's build context directory
-            tmp_file = f"./vllm/{_VLLM_TEMP_FOLDER}"
-            force_create_dir(tmp_file)
+    commit = get_post_build_pinned_commit("vllm")
+    clone_vllm(commit)
+    run("cp .github/script-v/Dockerfile.base  vllm/docker/Dockerfile.nightly_torch",logging=True)
+    # run( "cp .github/script-v/Dockerfile.nightly_torch  vllm/docker/Dockerfile.nightly_torch",logging=True)
+    docker_torch_arg = ""
+    if torch_whl_dir:
+        run("pwd")
+        abs_whl_dir = get_existing_abs_path(torch_whl_dir)
+        # copy the torch wheel in tmp folder into the vllm's build context directory
+        tmp_file = f"./vllm/{_VLLM_TEMP_FOLDER}"
+        force_create_dir(tmp_file)
 
-            run(f"cp -a {abs_whl_dir}/. {tmp_file}", logging=True)
-            print(f"constructing TORCH_WHEELS_PATH {_VLLM_TEMP_FOLDER}")
-            docker_torch_arg = f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"
+        run(f"cp -a {abs_whl_dir}/. {tmp_file}", logging=True)
+        print(f"constructing TORCH_WHEELS_PATH {_VLLM_TEMP_FOLDER}",flush=True)
+        docker_torch_arg = f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"
 
-        base_image_arg = ""
-        disable_pull = "--pull=true"
-        if base_image:
-            base_image_arg = f'--build-arg "BASE_IMAGE={base_image}"'
-            if local_image_exists(base_image):
-                print(f"[INFO] Found local image: {base_image_arg}")
-                disable_pull = "--pull=false"
+    base_image_arg = ""
+    disable_pull = "--pull=true"
+    if base_image:
+        base_image_arg = f'--build-arg "BASE_IMAGE={base_image}"'
+        if local_image_exists(base_image):
+            print(f"[INFO] Found local image: {base_image_arg}",flush=True)
+            disable_pull = "--pull=false"
 
-            else:
-                print(
-                    f"[INFO] Local image {base_image_arg} not found, using default remote behavior"
-                )
+        else:
+            print(
+                f"[INFO] Local image {base_image_arg} not found, using default remote behavior",flush=True
+            )
 
-            # Optional: you can still force remote buildx context if needed
-        env = os.environ.copy()
+        # Optional: you can still force remote buildx context if needed
+    env = os.environ.copy()
 
-        # run docker build for target stage `export-wheels` with output
-        # this mount the root directory of the stage to targeted shared folder
-        # in the host machine.
-        cmd = f"""
-        docker buildx build \
-        --output type=local,dest={result_path} \
-        -f docker/Dockerfile.nightly_torch \
-        {disable_pull} \
-        {docker_torch_arg} \
-        {base_image_arg} \
-        --build-arg max_jobs={max_jobs} \
-        --build-arg CUDA_VERSION={cuda} \
-        --build-arg PYTHON_VERSION={py} \
-        --build-arg USE_SCCACHE={use_sccache} \
-        --build-arg SCCACHE_BUCKET_NAME={sccache_bucket_name} \
-        --build-arg SCCACHE_REGION_NAME={sccache_region_name} \
-        --build-arg torch_cuda_arch_list={torch_cuda_arch_list} \
-        --target {target} \
-        -t {tag_name} \
-        --progress=plain .
-        """
-        run(cmd, cwd="vllm", logging=True, env=env)
+    # run docker build for target stage `export-wheels` with output
+    # this mount the root directory of the stage to targeted shared folder
+    # in the host machine.
+    cmd = f"""
+    docker buildx build \
+    --output type=local,dest={result_path} \
+    -f docker/Dockerfile.nightly_torch \
+    {disable_pull} \
+    {docker_torch_arg} \
+    {base_image_arg} \
+    --build-arg max_jobs={max_jobs} \
+    --build-arg CUDA_VERSION={cuda} \
+    --build-arg PYTHON_VERSION={py} \
+    --build-arg USE_SCCACHE={use_sccache} \
+    --build-arg SCCACHE_BUCKET_NAME={sccache_bucket_name} \
+    --build-arg SCCACHE_REGION_NAME={sccache_region_name} \
+    --build-arg torch_cuda_arch_list={torch_cuda_arch_list} \
+    --target {target} \
+    -t {tag_name} \
+    --progress=plain .
+    """
+
+    print("Running docker build", flush=True)
+    print(cmd,flush=True)
+    run(cmd, cwd="vllm", logging=True, env=env)
 
 
 def clone_vllm(commit: str):
