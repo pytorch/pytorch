@@ -56,7 +56,7 @@ def build_vllm(
     torch_cuda_arch_list = get_env("TORCH_CUDA_ARCH_LIST", "8.0")
     use_sccache = "0"
     if sccache_bucket_name and sccache_region_name:
-        use_sccache = "1"os.lseek
+        use_sccache = "1"
 
     # tracking the time of build
     with Timer():

@@ -17,6 +17,8 @@ rm -rf vllm
 
 python3 -m pip install uv
 
+RUN python3 use_existing_torch.py
+
 # 安装 common 依赖
 pip install -r requirements/common.txt
 pip install -r requirements/build.txt
@@ -24,3 +26,9 @@ pip install -r requirements/build.txt
 
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 pytest -v -s basic_correctness/test_cumem.py
+
+pip freeze | grep -E 'torch|xformers|torchvision|torchaudio|flashinfer'
+
+uv pip compile  test.in -o  test.txt --index-strategy unsafe-best-match
+
+uv pip install --system -r test.txt
