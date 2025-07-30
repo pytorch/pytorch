@@ -349,63 +349,6 @@ _scaled_dot_product_cudnn_attention_nestedtensor_cuda(
   return std::make_tuple(std::move(attention), std::move(log_sumexp), cumulative_sequence_length_q, cumulative_sequence_length_kv, max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
 }
 
-std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_nestedtensor_backward_cuda(
-    const Tensor& grad_out,
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    const Tensor& out,
-    const Tensor& logsumexp,
-    const Tensor& philox_seed,
-    const Tensor& philox_offset,
-    const Tensor& attn_bias,
-    const Tensor& cum_seq_q,
-    const Tensor& cum_seq_k,
-    const int64_t max_q,
-    const int64_t max_k,
-    double dropout_p,
-    bool is_causal,
-    std::optional<double> scale) {
-  if (!grad_out.defined()) {
-    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
-  }
-  auto [
-      grad_out_buffer_reshaped,
-      query_buffer_reshaped,
-      key_buffer_reshaped,
-      value_buffer_reshaped,
-      output_buffer_reshaped] =
-      preprocessing::sdpa_nested_preprocessing_backward(
-          grad_out,
-          query,
-          key,
-          value,
-          out,
-          cum_seq_q,
-          cum_seq_k,
-          max_q,
-          max_k);
-
-  auto [dq, dk, dv] = at::_cudnn_attention_backward(grad_out_buffer_reshaped,
-                                                    query_buffer_reshaped,
-                                                    key_buffer_reshaped,
-                                                    value_buffer_reshaped,
-                                                    output_buffer_reshaped,
-                                                    logsumexp,
-                                                    philox_seed,
-                                                    philox_offset,
-                                                    attn_bias,
-                                                    cum_seq_q,
-                                                    cum_seq_k,
-                                                    max_q,
-                                                    max_k,
-                                                    dropout_p,
-                                                    is_causal,
-                                                    scale);
-  return std::make_tuple(std::move(dq), std::move(dk), std::move(dv));
-}
-
-
 std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attention_backward_nested(
     const at::Tensor& grad_out_,
     const at::Tensor& query,
