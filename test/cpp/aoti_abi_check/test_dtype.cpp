@@ -8,13 +8,13 @@
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/complex.h>
 
+#include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/bits.h>
 #include <torch/headeronly/util/qint32.h>
 #include <torch/headeronly/util/qint8.h>
 #include <torch/headeronly/util/quint2x4.h>
 #include <torch/headeronly/util/quint4x2.h>
 #include <torch/headeronly/util/quint8.h>
-#include <torch/headeronly/util/Half.h>
 
 TEST(TestDtype, TestBFloat16) {
   c10::BFloat16 a = 1.0f;
