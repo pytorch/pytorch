@@ -89,7 +89,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         if not callable(method):
             unimplemented_v2(
                 gb_type="Attempted to access non-callable attribute of TorchScript object",
-                context=f"method={name}",
+                context=f"value={self.value}, method={name}",
                 explanation="Only method calls on TorchScript objects can be supported safely.",
                 hints=[
                     "Use method calls instead of attribute access.",
