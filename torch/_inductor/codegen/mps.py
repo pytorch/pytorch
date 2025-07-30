@@ -587,6 +587,7 @@ class MetalKernel(SIMDKernel):
             reduction_idx += f"{rd.name} * {acc_buf_size}"
             acc_buf_size *= rd.numel
         acc_buf_size = min(acc_buf_size, self.max_threadgroup_size)
+        shmem_buf_size = ceildiv(acc_buf_size, self.simd_group_size)
 
         if reduction_type == "any":
             acc = self._new_idxvar(dtype)
@@ -610,9 +611,7 @@ class MetalKernel(SIMDKernel):
 
         if reduction_type in ["prod", "sum"]:
             acc_dtype = DTYPE_TO_COMPUTATION_DTYPE[src_dtype]
-            acc_buf = self._new_idxvar(
-                acc_dtype, ceildiv(acc_buf_size, self.simd_group_size)
-            )
+            acc_buf = self._new_idxvar(acc_dtype, shmem_buf_size)
             if not self.multistage_reduction_entry:
                 val = value
             else:
@@ -629,9 +628,7 @@ class MetalKernel(SIMDKernel):
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["max", "min"]:
-            acc_buf = self._new_idxvar(
-                src_dtype, ceildiv(acc_buf_size, self.simd_group_size)
-            )
+            acc_buf = self._new_idxvar(src_dtype, shmem_buf_size)
             src_metal_type = DTYPE_TO_METAL[src_dtype]
             cast_value = f"static_cast<{src_metal_type}>({value})"
             if not self.multistage_reduction_entry:
