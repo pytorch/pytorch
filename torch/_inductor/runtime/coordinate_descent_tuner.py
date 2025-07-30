@@ -2,7 +2,6 @@
 import copy
 import itertools
 import logging
-from functools import cached_property
 from typing import Callable, Optional, TYPE_CHECKING
 
 from .hints import TRITON_MAX_BLOCK
@@ -61,15 +60,10 @@ class CoordescTuner:
         size_hint = self.size_hints.get(prefix) if self.size_hints is not None else None
         return min(max_block, size_hint) if size_hint is not None else max_block
 
-    @cached_property
     def get_warpsmax(self):
-        # CUDA/ROCm has a maximum of 1024 threads per block
-        from torch.cuda import current_device, get_device_properties, is_available
-
-        warp_size = (
-            get_device_properties(current_device()).warp_size if is_available() else 32
-        )
-        return 1024 // warp_size
+        # Currently, CUDA has a maximum of 1024 threads, so 32 is the max
+        # number of warps.
+        return 1024 // 32
 
     def cache_benchmark_result(self, config, timing):
         self.cached_benchmark_results[triton_config_to_hashable(config)] = timing
