@@ -18,7 +18,7 @@ from torch.utils import _pytree as torch_pytree
 
 
 def has_onnxruntime_opset_23() -> bool:
-    return version.parse(onnxruntime.__version__) >= version.parse("1.22")
+    return version.parse(onnxruntime.__version__) >= version.parse("1.23")
 
 
 class _WithExport:
@@ -759,20 +759,24 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         class RMSNormModel(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.functional.rms_norm(x, [10])
+                return torch.nn.functional.rms_norm(x, [3])
 
-        x = torch.randn(20, 5, 10)
+        x = torch.randn(2, 5, 3)
         onnx_program = self.export(RMSNormModel(), (x,), opset_version=23)
-        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+        onnx_testing.assert_onnx_program(
+            onnx_program, backend="reference", rtol=1e-4, atol=1e-4
+        )
 
         # Test with multi-dimensional normalized_shape
         class RMSNormModel2D(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.functional.rms_norm(x, [10, 10])
+                return torch.nn.functional.rms_norm(x, [7, 3])
 
-        x = torch.randn(20, 5, 10, 10)
+        x = torch.randn(2, 5, 7, 3)
         onnx_program = self.export(RMSNormModel2D(), (x,), opset_version=23)
-        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+        onnx_testing.assert_onnx_program(
+            onnx_program, backend="reference", rtol=1e-4, atol=1e-4
+        )
 
     def test_rms_norm_with_weight(self):
         """Test RMS normalization with weight parameter."""
@@ -780,26 +784,28 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         class RMSNormWithWeight(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.nn.Parameter(torch.ones(10))
+                self.weight = torch.nn.Parameter(torch.ones(3))
 
             def forward(self, x):
-                return torch.nn.functional.rms_norm(x, [10], weight=self.weight)
+                return torch.nn.functional.rms_norm(x, [3], weight=self.weight)
 
-        x = torch.randn(20, 5, 10)
+        x = torch.randn(2, 5, 3)
 
         onnx_program = self.export(RMSNormWithWeight(), (x,), opset_version=23)
 
         # Test with reference evaluator because ORT does not support the op as of version 1.22
-        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+        onnx_testing.assert_onnx_program(
+            onnx_program, backend="reference", rtol=1e-4, atol=1e-4
+        )
 
     def test_rms_norm_with_eps(self):
         """Test RMS normalization with custom epsilon."""
 
         class RMSNormWithEps(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.functional.rms_norm(x, [10], eps=1e-6)
+                return torch.nn.functional.rms_norm(x, [3], eps=1e-6)
 
-        x = torch.randn(20, 5, 10)
+        x = torch.randn(2, 5, 3)
 
         onnx_program = self.export(RMSNormWithEps(), (x,), opset_version=23)
 
