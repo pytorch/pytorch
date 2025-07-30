@@ -176,6 +176,7 @@ class OpDispatcher:
                 if op_info.args_tree_spec
                 else op_info.local_args
             )
+
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
