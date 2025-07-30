@@ -1291,22 +1291,22 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   }
 #endif
   if (bias) {
-    TORCH_CHECK(out.scalar_type() != kFloat, 
+    TORCH_CHECK(out.scalar_type() != kFloat,
         "Bias is not supported when out_dtype is set to Float32");
-    
-    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || 
+
+    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 ||
                 bias->scalar_type() == ScalarType::Half,
         "Bias must be BFloat16 or Half, but got ", bias->scalar_type());
-    
-    TORCH_CHECK((out.scalar_type() != kFloat && 
+
+    TORCH_CHECK((out.scalar_type() != kFloat &&
                  out.scalar_type() != ScalarType::BFloat16) ||
                 bias->scalar_type() == ScalarType::BFloat16,
-        "Bias must be BFloat16 to compute ", out.scalar_type(), 
+        "Bias must be BFloat16 to compute ", out.scalar_type(),
         " output, but got ", bias->scalar_type());
-    
-    TORCH_CHECK(out.scalar_type() != ScalarType::Half || 
+
+    TORCH_CHECK(out.scalar_type() != ScalarType::Half ||
                 bias->scalar_type() == ScalarType::Half,
-        "Bias must be Float16 to compute ", out.scalar_type(), 
+        "Bias must be Float16 to compute ", out.scalar_type(),
         " output, but got ", bias->scalar_type());
   }
   {
