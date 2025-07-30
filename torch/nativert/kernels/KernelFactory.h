@@ -24,10 +24,8 @@ class KernelFactoryHandler {
  public:
   using OpKernelPtr = std::unique_ptr<OpKernel>;
   using DelegateExecutorPtr = std::unique_ptr<DelegateExecutor>;
-  using Matcher = c10::function_ref<bool(
-      const Node& node,
-      const torch::nativert::ExecutorConfig&,
-      c10::Device)>;
+  using Matcher = c10::function_ref<
+      bool(const Node& node, const torch::nativert::ExecutorConfig&)>;
   using Callback =
       c10::function_ref<std::pair<OpKernelPtr, DelegateExecutorPtr>(
           const Node&,
@@ -46,11 +44,9 @@ class KernelFactoryHandler {
   KernelFactoryHandler& operator=(KernelFactoryHandler&&) = default;
   ~KernelFactoryHandler() = default;
 
-  bool match(
-      const Node& node,
-      const torch::nativert::ExecutorConfig& config,
-      c10::Device device) const {
-    return matcher_(node, config, device);
+  bool match(const Node& node, const torch::nativert::ExecutorConfig& config)
+      const {
+    return matcher_(node, config);
   }
 
   std::pair<OpKernelPtr, DelegateExecutorPtr> operator()(

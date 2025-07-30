@@ -633,11 +633,13 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         self.pop()
 
         if_next = self.create_call_resume_at(
-            self.next_instruction, int(push), all_stack_locals_metadata
+            self.next_instruction, 0, all_stack_locals_metadata
         )
         if push:
             self.push(value)
-        if_jump = self.create_call_resume_at(inst.target, 0, all_stack_locals_metadata)
+        if_jump = self.create_call_resume_at(
+            inst.target, int(push), all_stack_locals_metadata
+        )
 
         if sys.version_info >= (3, 13):
             # 3.13 requires stack[-1] to be bool type
