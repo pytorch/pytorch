@@ -48,6 +48,7 @@ from ..utils import (
     cache_on_self,
     DelayReplaceLine,
     get_benchmark_name,
+    get_dtype_size,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
     LineContext,
@@ -586,9 +587,35 @@ class MemoryPlanningLine(WrapperLine):
         return f"{type(self).__name__}({', '.join(args)})"
 
 
+def get_scheduler_node_index(node: BufferLike) -> Optional[int]:
+    for idx, scheduler_node in enumerate(V.graph.scheduler.nodes):
+        if node in [e.node for e in scheduler_node.get_outputs()]:
+            return idx
+    return None
+
+
 @dataclasses.dataclass
 class AllocateLine(MemoryPlanningLine):
     node: BufferLike
+
+    def should_reuse_buffer(self, free_line: FreeIfNotReusedLine) -> bool:
+        (overall_peak_memory, peak_memory_per_scheduler_node) = (
+            self.wrapper.estimated_peak
+        )
+        free_line_scheduler_node = get_scheduler_node_index(free_line.node)
+        self_scheduler_node = get_scheduler_node_index(self.node)
+        if free_line_scheduler_node is None or self_scheduler_node is None:
+            return False
+        size = V.graph.sizevars.size_hint(
+            V.graph.get_allocation_storage_size(self.node), fallback=0
+        ) * get_dtype_size(self.node.get_dtype())
+        if free_line_scheduler_node >= self_scheduler_node:
+            return False
+        peak_memory_in_range = max(
+            peak_memory_per_scheduler_node[free_line_scheduler_node:self_scheduler_node]
+        )
+        new_peak_memory = size + peak_memory_in_range
+        return new_peak_memory <= overall_peak_memory
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if self.node.get_name() in V.graph.removed_buffers:
@@ -598,8 +625,12 @@ class AllocateLine(MemoryPlanningLine):
         key = buffer_reuse_key(self.node)
         if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
-            free_line.is_reused = True
-            return ReuseLine(self.wrapper, free_line.node, self.node)
+            if self.should_reuse_buffer(free_line):
+                free_line.is_reused = True
+                return ReuseLine(self.wrapper, free_line.node, self.node)
+            else:
+                state.push(key, free_line)
+                return self
 
         if self.node.get_device_or_error().type == "cpu":
             static_shape = self.wrapper.static_shape_for_buffer_or_none(self.node)
@@ -1595,6 +1626,14 @@ class PythonWrapperCodegen(CodeGen):
         self.lines = MemoryPlanner(self).plan(self.lines)
 
     def memory_plan_reuse(self):
+        from ..memory import estimate_peak_memory
+
+        self.estimated_peak = estimate_peak_memory(
+            V.graph.scheduler.nodes,
+            {},
+            OrderedSet(V.graph.get_output_names()),
+        )
+
         out_names = V.graph.get_output_names()
 
         while (
