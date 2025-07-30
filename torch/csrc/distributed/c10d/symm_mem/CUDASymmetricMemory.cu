@@ -561,7 +561,6 @@ static void init_multicast_for_block(
       : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
   using McHandleType =
       std::conditional_t<use_fabric_handle, CUmemFabricHandle, int>;
-  std::vector<McHandleType> mc_handles;
 
   if (rank == 0) {
     CUmulticastObjectProp mc_prop{};
@@ -601,8 +600,7 @@ static void init_multicast_for_block(
       close(mc_exported_handle);
     } else {
       // TODO implement storeExchange.broadcast
-      mc_handles =
-          storeExchange.all_gather(store, rank, world_size, mc_exported_handle);
+      storeExchange.all_gather(store, rank, world_size, mc_exported_handle);
     }
 
   } else {
@@ -619,8 +617,7 @@ static void init_multicast_for_block(
       close(mc_fd);
     } else {
       CUmemFabricHandle null_handle{};
-      mc_handles =
-          storeExchange.all_gather(store, rank, world_size, null_handle);
+      auto mc_handles = storeExchange.all_gather(store, rank, world_size, null_handle);
       C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
           &mc_handle, (void*)&(mc_handles[0]), CU_MEM_HANDLE_TYPE_FABRIC));
     }
