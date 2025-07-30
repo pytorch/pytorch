@@ -346,6 +346,7 @@ in thise screenshot the recomplile reason is size-related:
 In the one below it is not, which indicates that dynamic shapes won't resolve it:
 
 ```{image} ../_static/img/dynamic_shapes/tlparse7_not_size_related_recompilations.png
+```
 
 2. **Compare Guards Files:** Ensure there are no guards on non-size-related
 elementsthat exist in one graph but not the others.

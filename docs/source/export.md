@@ -656,7 +656,7 @@ torch.compiler_ir
 :caption: Deep Dive for PyTorch Developers
 :maxdepth: 1
 
-torch.compiler_dynamic_shapes
+compile/torch.compiler_dynamic_shapes
 torch.compiler_fake_tensor
 torch.compiler_transformations
 ```

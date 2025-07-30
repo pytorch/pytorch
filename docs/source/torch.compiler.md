@@ -101,7 +101,7 @@ torch.compiler_inductor_provenance
 ```
 
 ```{toctree}
-:caption: `torch.compile` Programming Model
+:caption: torch.compile Programming Model
 
 compile/programming_model
 ```
