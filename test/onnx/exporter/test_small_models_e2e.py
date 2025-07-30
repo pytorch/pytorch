@@ -732,7 +732,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
             [node.op_type for node in onnx_program.model.graph],
         )
 
-    def test_graph_attention_opset_23(self):
+    def test_attention_opset_23(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
                 return torch.nn.functional.scaled_dot_product_attention(
@@ -744,30 +744,6 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
 
         onnx_program = self.export(Model(), (query, key, value), opset_version=23)
-        self.assertIn("Attention", [node.op_type for node in onnx_program.model.graph])
-
-        if has_onnxruntime_opset_23():
-            onnx_testing.assert_onnx_program(onnx_program, atol=1e-2, rtol=1)
-        else:
-            # Test with reference evaluator because ORT does not support the op as of version 1.22
-            onnx_testing.assert_onnx_program(
-                onnx_program, atol=1e-2, rtol=1, backend="reference"
-            )
-
-    def test_graph_accuracy_attention_opset_23(self):
-        class Model(torch.nn.Module):
-            def forward(self, query, key, value):
-                return torch.nn.functional.scaled_dot_product_attention(
-                    query, key, value
-                )
-
-        query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
-        key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
-        value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
-
-        onnx_program = self.export(
-            Model(), (query, key, value), opset_version=23, optimize=True
-        )
         self.assertEqual(["Attention"], [n.op_type for n in onnx_program.model.graph])
 
         if has_onnxruntime_opset_23():
@@ -779,14 +755,14 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
             )
 
     def test_rms_norm(self):
-        """Test RMS normalization with various configurations"""
+        """Test RMS normalization with various configurations."""
 
         class RMSNormModel(torch.nn.Module):
             def forward(self, x):
                 return torch.nn.functional.rms_norm(x, [10])
 
         x = torch.randn(20, 5, 10)
-        onnx_program = self.export(RMSNormModel(), (x,))
+        onnx_program = self.export(RMSNormModel(), (x,), opset_version=23)
         onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
         # Test with multi-dimensional normalized_shape
@@ -799,7 +775,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_rms_norm_with_weight(self):
-        """Test RMS normalization with weight parameter"""
+        """Test RMS normalization with weight parameter."""
 
         class RMSNormWithWeight(torch.nn.Module):
             def __init__(self):
@@ -811,13 +787,13 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         x = torch.randn(20, 5, 10)
 
-        onnx_program = self.export(RMSNormWithWeight(), (x,))
+        onnx_program = self.export(RMSNormWithWeight(), (x,), opset_version=23)
 
         # Test with reference evaluator because ORT does not support the op as of version 1.22
         onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_rms_norm_with_eps(self):
-        """Test RMS normalization with custom epsilon"""
+        """Test RMS normalization with custom epsilon."""
 
         class RMSNormWithEps(torch.nn.Module):
             def forward(self, x):
@@ -825,7 +801,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         x = torch.randn(20, 5, 10)
 
-        onnx_program = self.export(RMSNormWithEps(), (x,))
+        onnx_program = self.export(RMSNormWithEps(), (x,), opset_version=23)
 
         # Test with reference evaluator because ORT does not support the op as of version 1.22
         onnx_testing.assert_onnx_program(onnx_program, backend="reference")
