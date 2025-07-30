@@ -647,7 +647,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   constexpr int max_threads_ = std::is_same_v<scalar_t, float> ? 1024 : 896; // we need 72 or so 32 bit registers for double
   int max_threads = max_threads_;
   // RTX Blackwell launch bounds
-  if (at::cuda::getCurrentDeviceProperties()->major == 12) {
+  if (at::cuda::getCurrentDeviceProperties()->major >= 10) {
     max_threads = 512;
   }
   int threads_target = max_threads;
