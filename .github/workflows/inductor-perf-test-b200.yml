@@ -94,9 +94,9 @@ jobs:
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf_cuda_b200", shard: 1, num_shards: 1, runner: "B200" },
-          { config: "inductor_timm_perf_cuda_b200", shard: 1, num_shards: 1, runner: "B200" },
-          { config: "inductor_torchbench_perf_cuda_b200", shard: 1, num_shards: 1, runner: "B200" },
+          { config: "inductor_huggingface_perf_cuda_b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "inductor_timm_perf_cuda_b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "inductor_torchbench_perf_cuda_b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
       build-additional-packages: "vision audio fbgemm torchao"
