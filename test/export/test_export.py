@@ -1543,6 +1543,9 @@ graph():
         torch.export.export(M(), (torch.randn(7),), strict=strict)
 
     def test_cond_branches_return_constant_int(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class M(torch.nn.Module):
             def forward(self, x):
                 idx = torch.cond(x.sum() > 3, lambda: 0, lambda: 1, tuple())
@@ -1588,6 +1591,7 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(m(*args), ep.module()(*args))
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_cond_access_identical_symint_closure(self):
         class Example2(torch.nn.Module):
             def forward(self, x, trigger, target):
@@ -1903,6 +1907,54 @@ class GraphModule(torch.nn.Module):
             annotate_split_points(m, {"blocks.1": 1, "blocks.3": 1})
             gm = export(m, (torch.rand(64, 64),))
             torch.export.unflatten(gm)
+
+    def test_unflatten_closure(self):
+        class Dummy(torch.nn.Module):
+            def forward(self, fn, x):
+                y = x + 2
+                z = fn(y)
+                return z + 4
+
+        class N(torch.nn.Module):
+            def forward(self, x):
+                return x + 3
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dummy = Dummy()
+                self.n = N()
+
+            def forward(self, x):
+                y = x + 1
+                z = self.dummy(lambda k: self.n(y + k) + y, y)
+                return z + 5
+
+        m = M()
+        x = torch.randn(3)
+        ep = export(m, (x,))
+        print(ep)
+        ufm = torch.export.unflatten(ep)
+        self.assertExpectedInline(
+            str(ufm.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    dummy = self.dummy(add);  add = None
+    add_6 = torch.ops.aten.add.Tensor(dummy, 5);  dummy = None
+    return (add_6,)""",
+        )
+        self.assertExpectedInline(
+            str(ufm.dummy.graph_module.code).strip(),
+            """\
+def forward(self, add):
+    add_1 = torch.ops.aten.add.Tensor(add, 2)
+    add_2 = torch.ops.aten.add.Tensor(add, add_1);  add_1 = None
+    add_3 = torch.ops.aten.add.Tensor(add_2, 3);  add_2 = None
+    add_4 = torch.ops.aten.add.Tensor(add_3, add);  add_3 = add = None
+    add_5 = torch.ops.aten.add.Tensor(add_4, 4);  add_4 = None
+    return add_5""",
+        )
 
     def test_state_primitives(self):
         class M(torch.nn.Module):
@@ -2278,6 +2330,9 @@ def forward(self, x, y):
                 ep = export(model, inputs)
 
     def test_subclasses_parameterization(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2330,6 +2385,7 @@ graph():
 
         self.assertEqual(res, ref_out)
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_subclasses_parameterization_nested(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -4355,6 +4411,20 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(ref[0], actual[0]))
         self.assertTrue(torch.allclose(ref[1], actual[1]))
 
+    def test_unbacked_3d_matmul(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, repeat):
+                u0 = repeat.item()
+                t1 = x.unsqueeze(1).expand(x.size(0), u0 // 2, x.size(-1))
+                t2 = torch.ones(3)
+                return torch.matmul(t1, t2)
+
+        model = Model()
+        inputs = (torch.randn(4, 3), torch.scalar_tensor(2, dtype=torch.int))
+
+        exported = export(model, inputs).module()
+        self.assertEqual(model(*inputs), exported(*inputs))
+
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -4970,6 +5040,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         )
 
     def test_simple_unbacked_view(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class Foo(torch.nn.Module):
             def forward(self, x):
                 u0 = x.item()
@@ -5301,6 +5374,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
     def test_map(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
                 def body(x, y, z):
@@ -7947,6 +8023,9 @@ def forward(self, x):
         self.assertEqual(ref_out, ep.module()(ref_x, mod))
 
     def test_unbacked_noncontig_lin(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -8011,6 +8090,9 @@ def forward(self, x):
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
     def test_sym_or_sym_and(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
 
         class Foo(torch.nn.Module):
@@ -8326,6 +8408,9 @@ def forward(self, b_a_buffer, x):
 
     @requires_cuda
     def test_export_associative_scan_lifted_buffers(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         device = torch.device("cuda")
         combine_mode = "pointwise"
 
@@ -13242,6 +13327,9 @@ def forward(self, x, y):
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
     def test_unbacked_expand(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class Foo(torch.nn.Module):
             def forward(self, xs):
                 u0, u1, u2 = xs.tolist()
