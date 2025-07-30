@@ -23,7 +23,7 @@ The APIs and performance characteristics of these features may change.
 :glob:
 :maxdepth: 2
 
-Get Started <https://pytorch.org/get-started/locally/>
+Install PyTorch <https://pytorch.org/get-started/locally/>
 user_guide/index
 pytorch-api
 community/index
