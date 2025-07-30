@@ -1176,8 +1176,7 @@ def sort_strategy(op_schema: OpSchema) -> OpStrategy:
 @register_op_strategy(
     [aten.histc.default],
     # strategy choice depends on the value of 'min' and 'max' kwargs, which are position 2 and 3
-    # result depends on the value of 'bins', 'min' and 'max' kwargs, which is from position 1
-    schema_info=RuntimeSchemaInfo(1),
+    schema_info=RuntimeSchemaInfo(2),
 )
 def histc_strategy(op_schema: OpSchema) -> OpStrategy:
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
