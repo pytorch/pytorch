@@ -4,16 +4,18 @@ set -ex
 # https://download.pytorch.org/whl/nightly/torch/
 # torch-2.9.0.dev20250729+cu128-cp312-cp312-manylinux_2_28_x86_64.whl
 pip install dist/torch-*.whl
-pip install vision/torchvision*.whl
-pip install audio/torchaudio*.whl
-pip install wheels/xformers-dist/xformers*.whl
-pip install wheels/vllm-dist/vllm*.whl
-pip install wheels/flashinfer-dist/flashinfer*.whl
+pip install dist/vision/torchvision*.whl
+pip install dist/audio/torchaudio*.whl
+pip install wheels/xformers/xformers*.whl
+pip install wheels/vllm/vllm*.whl
+pip install wheels/flashinfer-python/flashinfer*.whl
 
 git clone https://github.com/vllm-project/vllm.git
 cd vllm
 git checkout 29d1ffc5b4c763ef76aff9e3f617fa60dd292418
 git submodule update --init --recursive
+
+# must remove otherwise 
 rm -rf vllm
 
 python3 -m pip install uv

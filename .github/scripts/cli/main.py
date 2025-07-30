@@ -13,7 +13,6 @@ class BuildApp(App):
         base_controller = "base"
         handlers = [MainController] + ALL_CONTROLLERS
 
-
 def main():
     with BuildApp() as app:
         app.run()

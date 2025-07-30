@@ -60,26 +60,8 @@ def remove_dir(path: str):
     else:
         print(f"[INFO] Directory not found (skipped): {path}", flush=True)
 
-
 def get_abs_path(path: str):
     return os.path.abspath(path)
-
-
-class Timer:
-    def __enter__(self):
-        self.start = time.perf_counter()
-        return self
-
-    def __exit__(self, *args):
-        self.end = time.perf_counter()
-        print(f"Took {self.end - self.start:.3f} seconds", flush=True)
-
-
-def get_existing_abs_path(path: str) -> str:
-    path = os.path.abspath(path)
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Path does not exist: {path}")
-    return path
 
 def generate_dataclass_help(cls) -> str:
     """Auto-generate help text for dataclass default values."""
@@ -91,3 +73,9 @@ def generate_dataclass_help(cls) -> str:
         else:
             lines.append(f"{field.name:<22} = ''")
     return indent("\n".join(lines), "    ")
+
+def get_existing_abs_path(path: str) -> str:
+    path = os.path.abspath(path)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Path does not exist: {path}")
+    return path

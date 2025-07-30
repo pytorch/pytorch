@@ -5,8 +5,8 @@ from utils import (
     ensure_dir_exists,
     force_create_dir,
     get_abs_path,
-    get_env,
     get_existing_abs_path,
+    get_env,
     get_post_build_pinned_commit,
     remove_dir,
     run,
@@ -18,7 +18,7 @@ class VllmBuildConfig:
     tag_name: str = get_env("TAG", "vllm-wheels")
     cuda: str = get_env("CUDA_VERSION", "12.8.1")
     py: str = get_env("PYTHON_VERSION", "3.12")
-    max_jobs: str = get_env("MAX_JOBS", "32")
+    max_jobs: str = get_env("MAX_JOBS", "64")
     target: str = get_env("TARGET", "export-wheels")
     sccache_bucket: str = get_env("SCCACHE_BUCKET", "")
     sccache_region: str = get_env("SCCACHE_REGION", "")
@@ -52,30 +52,32 @@ def build_vllm(artifact_dir: str, torch_whl_dir: str, base_image: str):
 
     clone_vllm(get_post_build_pinned_commit("vllm"))
 
-    run("cp .github/script-v/Dockerfile.base vllm/docker/Dockerfile.nightly_torch", logging=True)
 
-    torch_arg, tmp_dir = _prepare_torch_wheels_context(torch_whl_dir)
+    # replace dockerfile
+    # todo: remove this once the dockerfile is updated in vllm
+    run(f"cp .github/docker/vllm/Dockerfile.base ./vllm/docker/Dockerfile.nightly_torch", logging=True)
+
+    torch_arg, _ = _prepare_torch_wheels(torch_whl_dir)
     base_arg, pull_flag = _get_base_image_args(base_image)
-
     cmd = _generate_docker_build_cmd(cfg, result_path, torch_arg, base_arg, pull_flag)
     print("Running docker build", flush=True)
     print(cmd,flush=True)
     run(cmd, cwd="vllm", logging=True, env=os.environ.copy())
 
 def clone_vllm(commit: str):
+    """
+    cloning vllm and checkout pinned commmit
+    """
     print(f"clonening vllm....", flush=True)
     cwd = "vllm"
-
     # delete the directory if it exists
     remove_dir(cwd)
-
     # Clone the repo & checkout commit
     run("git clone https://github.com/vllm-project/vllm.git")
     run(f"git checkout {commit}", cwd)
     run("git submodule update --init --recursive", cwd)
 
-
-def _prepare_torch_wheels_context(torch_whl_dir: str) -> tuple[str, str]:
+def _prepare_torch_wheels(torch_whl_dir: str) -> tuple[str, str]:
     if not torch_whl_dir:
         return "", ""
     abs_whl_dir = get_existing_abs_path(torch_whl_dir)
@@ -90,18 +92,19 @@ def _get_base_image_args(base_image: str) -> tuple[str, str]:
         - base_image_arg: docker buildx arg string for base image
         - pull_flag: --pull=true or --pull=false depending on whether the image exists locally
     """
+    pull_flag = ""
     if not base_image:
-        return "", "--pull=true"
+        return "", ""
 
     base_image_arg = f'--build-arg BASE_IMAGE={base_image}'
     if local_image_exists(base_image):
         print(f"[INFO] Found local image: {base_image}", flush=True)
         pull_flag = "--pull=false"
-    else:
-        print(f"[INFO] Local image not found: {base_image}, will pull from remote", flush=True)
-        pull_flag = "--pull=true"
+        return base_image_arg, pull_flag
+    print(f"[INFO] Local image not found: {base_image}, will try to pull from remote", flush=True)
+    return base_image_arg,""
 
-    return base_image_arg, pull_flag
+
 
 def _generate_docker_build_cmd(
     cfg: VllmBuildConfig,

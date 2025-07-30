@@ -131,10 +131,10 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && matrix.runner != 'B200'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
 
       - name: Login to Amazon ECR
-        if: ${{ inputs.aws-role-to-assume != '' && matrix.runner == 'B200' }}
+        if: ${{ inputs.aws-role-to-assume != ''}}
         id: login-ecr
         continue-on-error: true
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
