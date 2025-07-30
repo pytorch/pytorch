@@ -10573,8 +10573,8 @@ def ___make_guard_fn():
         class TestDataClass:
             x: torch.Tensor
             y: torch.Tensor
-            z: int = dataclasses.field(kw_only=True)
-            a: int = dataclasses.field(kw_only=True)
+            z: int
+            a: int
 
         def inner_fn(dc):
             return dc.x + dc.y + dc.a + dc.z
