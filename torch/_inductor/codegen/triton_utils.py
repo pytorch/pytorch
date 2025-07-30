@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any, Optional, Union
+from typing_extensions import TypeIs
 
 import sympy
 
@@ -18,6 +19,10 @@ from .common import (
     TMADescriptorArg,
     WorkspaceArg,
 )
+
+
+def is_static_int(expr: sympy.Expr) -> TypeIs[Union[sympy.Integer, int]]:
+    return isinstance(expr, (sympy.Integer, int))
 
 
 def should_unwrap_unspec_arg(name: str):
@@ -153,7 +158,7 @@ def signature_to_meta(
     }
 
 
-def is_unaligned_buffer(arg: TensorArg):
+def is_unaligned_buffer(arg: TensorArg) -> bool:
     buf_name = arg.buffer
     if buf_name in V.graph.unaligned_buffers:
         return True

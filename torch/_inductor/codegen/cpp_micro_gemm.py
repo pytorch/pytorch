@@ -219,7 +219,7 @@ inline void {{kernel_name}}(
             }
         )
 
-    def is_woq_int4(self):
+    def is_woq_int4(self) -> bool:
         return False
 
 
@@ -319,7 +319,7 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
-def is_int8_woq_gemm_small_m_dim_corner_case(config, m, n, k):
+def is_int8_woq_gemm_small_m_dim_corner_case(config, m, n, k) -> bool:
     return (
         k % config.register_blocking.block_k == 0
         and n % config.register_blocking.block_n == 0
@@ -1621,7 +1621,7 @@ inline void {{kernel_name}}_kernel(
             "k_start,",
         ]
 
-    def is_woq_int4(self):
+    def is_woq_int4(self) -> bool:
         return True
 
 
@@ -1870,7 +1870,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
             "k_start,",
         ]
 
-    def is_woq_int4(self):
+    def is_woq_int4(self) -> bool:
         return True
 
 
