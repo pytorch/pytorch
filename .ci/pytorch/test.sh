@@ -323,7 +323,7 @@ test_python() {
 }
 
 test_python_smoke() {
-  # Smoke tests for H100
+  # Smoke tests for H100/B200
   time python test/run_test.py --include test_matmul_cuda inductor/test_fp8 inductor/test_max_autotune $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }

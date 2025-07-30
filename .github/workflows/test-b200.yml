@@ -1,4 +1,19 @@
-name: Limited CI on B200
+# B200 Smoke Tests CI Workflow
+#
+# This workflow runs smoke tests on B200 hardware
+#
+# Flow:
+# 1. Builds PyTorch with CUDA 12.8+ and sm100 architecture for B200
+# 2. Runs smoke tests on linux.dgx.b200 runner
+# 3. Tests executed are defined in .ci/pytorch/test.sh -> test_python_smoke() function
+#
+# Triggered by:
+# - Pull requests modifying this workflow file
+# - Manual dispatch
+# - Schedule (every 6 hours)
+# - Adding ciflow/b200 label to a PR (creates ciflow/b200/* tag)
+
+name: B200 Smoke Tests
 
 on:
   pull_request:
@@ -45,6 +60,7 @@ jobs:
         { include: [
           { config: "smoke", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
+      # config: "smoke" maps to test_python_smoke() in .ci/pytorch/test.sh
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc11-sm100-test:
