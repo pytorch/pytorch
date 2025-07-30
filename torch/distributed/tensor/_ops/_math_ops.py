@@ -1119,7 +1119,6 @@ def fused_rms_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
     schema_info=RuntimeSchemaInfo(2),
 )
 def topk_strategy(op_schema: OpSchema) -> OpStrategy:
-    torch.distributed.breakpoint()
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     topk_dim = (
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else -1
