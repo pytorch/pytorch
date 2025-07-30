@@ -7,7 +7,6 @@ class MainController(Controller):
         label = "base"
         help = "base for build CLI"
 
-
 class BuildApp(App):
     class Meta:
         label = "build"
@@ -18,7 +17,6 @@ class BuildApp(App):
 def main():
     with BuildApp() as app:
         app.run()
-
 
 if __name__ == "__main__":
     main()

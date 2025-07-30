@@ -5,7 +5,8 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Optional
-import sys
+from dataclasses import fields
+from textwrap import indent
 
 def run(
     cmd: str,
@@ -79,3 +80,14 @@ def get_existing_abs_path(path: str) -> str:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Path does not exist: {path}")
     return path
+
+def generate_dataclass_help(cls) -> str:
+    """Auto-generate help text for dataclass default values."""
+    lines = []
+    for field in fields(cls):
+        default = field.default
+        if default is not None and default != "":
+            lines.append(f"{field.name:<22} = {repr(default)}")
+        else:
+            lines.append(f"{field.name:<22} = ''")
+    return indent("\n".join(lines), "    ")

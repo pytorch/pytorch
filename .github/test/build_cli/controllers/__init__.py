@@ -1,3 +1,3 @@
-from .external import ExternalBuildController
+from .vllm_build_controller import VllmBuildController
 
-ALL_CONTROLLERS = [ExternalBuildController]
+ALL_CONTROLLERS = [VllmBuildController]
