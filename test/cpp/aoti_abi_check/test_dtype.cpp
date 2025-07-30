@@ -7,6 +7,13 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/complex.h>
+
+#include <torch/headeronly/util/bits.h>
+#include <torch/headeronly/util/qint32.h>
+#include <torch/headeronly/util/qint8.h>
+#include <torch/headeronly/util/quint2x4.h>
+#include <torch/headeronly/util/quint4x2.h>
+#include <torch/headeronly/util/quint8.h>
 #include <torch/headeronly/util/Half.h>
 
 TEST(TestDtype, TestBFloat16) {
@@ -116,4 +123,19 @@ TEST(TestDtype, TestComplexFloat) {
   EXPECT_EQ(a - b, sub);
   EXPECT_EQ(a * b, mul);
   EXPECT_EQ(a / b, div);
+}
+
+TEST(TestDtype, TestQuintsQintsAndBits) {
+  // There's not much you can do with these dtypes...
+  // so we'll just check that it compiles
+  auto a = torch::headeronly::quint8(0);
+  auto b = torch::headeronly::quint4x2(5);
+  auto c = torch::headeronly::quint2x4(1);
+  auto d = torch::headeronly::qint32(5);
+  auto e = torch::headeronly::qint8(1);
+  auto f = torch::headeronly::bits1x8(9);
+  auto g = torch::headeronly::bits2x4(9);
+  auto h = torch::headeronly::bits4x2(9);
+  auto i = torch::headeronly::bits8(2);
+  auto j = torch::headeronly::bits16(6);
 }
