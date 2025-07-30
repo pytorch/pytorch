@@ -2659,18 +2659,18 @@
       "Context": "method={name}",
       "Explanation": "",
       "Hints": [
+        "Ensure the method {name} is implemented in {self.value}.",
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
     }
   ],
   "GB0266": [
     {
-      "Gb_type": "FakeScriptObject missing method implementation",
-      "Context": "method={name}",
-      "Explanation": "FakeScriptObject doesn't define the specified method.",
+      "Gb_type": "Weird method call on TorchScript object",
+      "Context": "value={self.value}, method={name}",
+      "Explanation": "This particular method call ({name}) is not supported (e.g. calling `__setattr__`). Most method calls to TorchScript objects should be supported.",
       "Hints": [
-        "Implement the method in the fake class.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Avoid calling this method."
       ]
     }
   ],
@@ -2685,12 +2685,11 @@
       ]
     },
     {
-      "Gb_type": "Unsupported attribute access on TorchScript objects",
-      "Context": "method={method}",
-      "Explanation": "Only method calls on TorchScript objects can be supported safely.",
+      "Gb_type": "Attempted to access non-callable attribute of TorchScript object",
+      "Context": "value={self.value}, method={name}",
+      "Explanation": "Attribute accesses of TorchScript objects to non-callable attributes are not supported.",
       "Hints": [
-        "Use method calls instead of attribute access.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Use method calls instead of attribute access."
       ]
     }
   ]

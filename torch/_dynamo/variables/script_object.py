@@ -114,7 +114,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         unimplemented_v2(
             gb_type="Weird method call on TorchScript object",
             context=f"value={self.value}, method={name}",
-            explanation=f"This particular method call ({name}) is not supported (e.g. calling `__setattr__`). Most method calls to TorchScript objects should be supported.",
+            explanation=(
+                f"This particular method call ({name}) is not supported (e.g. calling `__setattr__`). "
+                "Most method calls to TorchScript objects should be supported."
+            ),
             hints=[
                 "Avoid calling this method.",
             ],

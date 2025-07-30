@@ -1330,7 +1330,7 @@ class TestCompileTorchbind(TestCase):
             return tq
 
         with self.assertRaisesRegex(
-            RuntimeError, "Calling method on script object is not safe"
+            RuntimeError, "Weird method call on TorchScript object"
         ):
             torch.compile(setattr_f, backend=backend)(_empty_tensor_queue())
 
