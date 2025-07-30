@@ -123,7 +123,7 @@ There are the following ways to make things dynamic:
 * Compiler Collective
 * Users annotations
 
-Read bellow about each of this options.
+Read below about each of this options.
 
 ### Automatic dynamic
 

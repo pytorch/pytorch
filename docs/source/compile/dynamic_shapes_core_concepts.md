@@ -30,7 +30,7 @@ This works for any dynamic x. But if your code is:
 
 def foo(x)
     if x > 5:
-    	return x / 2
+        return x / 2
     return x / 3
 ```
 If you call `foo(6)`, it returns `x / 2` and adds a guard `x > 5`. Calling `foo(4)` later will
@@ -43,7 +43,7 @@ You can use runtime asserts to provide hints when you know certain facts, like b
 def foo(batch_size):
     torch._check(batch_size < 100)
     if batch_size < 100:
-    	return do_something
+        return do_something
     return do_something_else()
 ```
 
