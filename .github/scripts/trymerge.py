@@ -1892,7 +1892,7 @@ def validate_revert(
     )
     if comment.editor_login is not None:
         raise PostCommentError(
-            "Halting the revert as the revert command has been edited."
+            "Halting the revert as the revert comment has been edited."
         )
     author_association = comment.author_association
     author_login = comment.author_login
