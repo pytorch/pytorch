@@ -581,59 +581,38 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
     return cflags
 
 
-def _get_ffast_math_flags() -> list[str]:
-    # ffast-math is equivalent to these flags as in
-    # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
-    # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
-    # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
-    # are added by linking in crtfastmath.o. This is done by the spec file which
-    # only does globbing for -ffast-math.
-    flags = [
-        "fno-trapping-math",
-        "funsafe-math-optimizations",
-        "ffinite-math-only",
-        "fno-signed-zeros",
-        "fno-math-errno",
-    ]
-
-    if is_gcc():
-        flags.append("fexcess-precision=fast")
-
-    return flags
-
-
-def _get_optimization_cflags(
-    cpp_compiler: str, min_optimize: bool = False
-) -> list[str]:
+def _get_optimization_cflags(min_optimize: bool = False) -> list[str]:
+    wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level or (
+        "O2" if min_optimize else "O3"
+    )
     if _IS_WINDOWS:
-        return ["O1" if min_optimize else "O2"]
+        return [wrapper_opt_level]
     else:
-        wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
         cflags = (
             ["O0", "g"]
             if config.aot_inductor.debug_compile
-            else [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
+            else [wrapper_opt_level, "DNDEBUG"]
         )
-        cflags += _get_ffast_math_flags()
-        cflags.append("fno-finite-math-only")
-        if not config.cpp.enable_unsafe_math_opt_flag:
-            cflags.append("fno-unsafe-math-optimizations")
-        cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
+        cflags.extend(
+            (
+                f"ffp-contract={config.cpp.enable_floating_point_contract_flag}",
+                # Selection of safer flags from -ffast-math
+                "fno-math-errno",
+                "fno-rounding-math",
+                "fno-signaling-nans",
+            )
+        )
+        if config.cpp.enable_unsafe_math_opt_flag:
+            cflags.append("funsafe-math-optimizations")
 
-        if sys.platform != "darwin":
-            # on macos, unknown argument: '-fno-tree-loop-vectorize'
-            if _is_gcc(cpp_compiler):
-                cflags.append("fno-tree-loop-vectorize")
-            # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
-            # `-march=native` is unrecognized option on M1
-            if not config.is_fbcode():
-                if platform.machine() == "ppc64le":
-                    cflags.append("mcpu=native")
-                else:
-                    cflags.append("march=native")
+        if is_gcc():
+            cflags.extend(("fexcess-precision=fast", "fno-tree-loop-vectorize"))
 
-        if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
-            cflags.append("flto=thin")
+        if not config.is_fbcode():
+            if platform.machine() == "ppc64le":
+                cflags.append("mcpu=native")
+            else:
+                cflags.append("march=native")
 
         return cflags
 
@@ -670,15 +649,14 @@ def get_cpp_options(
 
     cflags = (
         _get_shared_cflag(do_link)
-        + _get_optimization_cflags(cpp_compiler, min_optimize)
+        + _get_optimization_cflags(min_optimize)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
 
-    if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+    if _is_clang(cpp_compiler):
         ldflags.append("fuse-ld=lld")
-        ldflags.append("flto=thin")
 
     passthrough_args.append(" ".join(extra_flags))
 
@@ -1497,15 +1475,32 @@ class CppBuilder:
     """
 
     @staticmethod
-    def __get_python_module_flags() -> tuple[str, str]:
-        extension = ".pyd" if _IS_WINDOWS else ".so"
-        output_flags = "/Fe" if _IS_WINDOWS else "-o"
-        return extension, output_flags
+    def __get_lto_flags(is_link: bool) -> str:
+        if not config.aot_inductor.enable_lto:
+            return ""
+
+        if _IS_WINDOWS:
+            # MSVC uses different flags for linking vs. compiling
+            return "/LTCG" if is_link else "/GL"
+        if is_gcc():
+            return "-flto"
+        if is_clang() or is_intel_compiler():
+            return "-flto=thin"
+
+        # If it's not one of these compilers, fall back to no LTO.
+        return ""
 
     @staticmethod
-    def __get_object_flags() -> tuple[str, str]:
+    def __get_python_module_flags() -> tuple[str, str]:
+        extension = ".pyd" if _IS_WINDOWS else ".so"
+        output_flags = (
+            f"{CppBuilder.__get_lto_flags(True)} {'/Fe' if _IS_WINDOWS else '-o'}"
+        )
+        return extension, output_flags
+
+    def __get_object_flags(self) -> tuple[str, str]:
         extension = ".obj" if _IS_WINDOWS else ".o"
-        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"  # codespell:ignore
+        output_flags = f"{CppBuilder.__get_lto_flags(False)} {'/c /Fo' if _IS_WINDOWS else '-c -o'}"  # codespell:ignore
         return extension, output_flags
 
     @staticmethod
@@ -1660,50 +1655,32 @@ class CppBuilder:
             self._passthrough_parameters_args += f"{passthrough_arg} "
 
     def get_command_line(self) -> str:
-        def format_build_command(
-            compiler: str,
-            sources: str,
-            include_dirs_args: str,
-            definitions_args: str,
-            cflags_args: str,
-            ldflags_args: str,
-            libraries_args: str,
-            libraries_dirs_args: str,
-            passthrough_args: str,
-            output: str,
-        ) -> str:
-            if _IS_WINDOWS:
-                # https://learn.microsoft.com/en-us/cpp/build/walkthrough-compile-a-c-program-on-the-command-line?view=msvc-1704
-                # https://stackoverflow.com/a/31566153
-                cmd = (
-                    f"{compiler} {include_dirs_args} {definitions_args} {cflags_args} "
-                    f"{sources} {passthrough_args} {output}"
+        if _IS_WINDOWS:
+            # https://learn.microsoft.com/en-us/cpp/build/walkthrough-compile-a-c-program-on-the-command-line?view=msvc-1704
+            # https://stackoverflow.com/a/31566153
+            cmd = (
+                f"{self._compiler} {self._include_dirs_args} {self._definitions_args} "
+                f"{self._cflags_args} {self._sources_args} "
+                f"{self._passthrough_parameters_args} {self._output}"
+            )
+            if self._do_link:
+                cmd += (
+                    f" /LD /link {self._libraries_dirs_args} {self._libraries_args} "
+                    f"{self._ldflags_args}"
                 )
-                if self._do_link:
-                    cmd += f" /LD /link {libraries_dirs_args} {libraries_args} {ldflags_args}"
-                cmd = normalize_path_separator(cmd)
-            else:
-                cmd = (
-                    f"{compiler} {sources} {definitions_args} {cflags_args} "
-                    f"{include_dirs_args} {passthrough_args} {output}"
-                )
-                if self._do_link:
-                    cmd += f" {ldflags_args} {libraries_args} {libraries_dirs_args}"
-            return cmd
+            return normalize_path_separator(cmd)
 
-        command_line = format_build_command(
-            compiler=self._compiler,
-            sources=self._sources_args,
-            include_dirs_args=self._include_dirs_args,
-            definitions_args=self._definitions_args,
-            cflags_args=self._cflags_args,
-            ldflags_args=self._ldflags_args,
-            libraries_args=self._libraries_args,
-            libraries_dirs_args=self._libraries_dirs_args,
-            passthrough_args=self._passthrough_parameters_args,
-            output=self._output,
+        cmd = (
+            f"{self._compiler} {self._sources_args} {self._definitions_args} "
+            f"{self._cflags_args} {self._include_dirs_args} "
+            f"{self._passthrough_parameters_args} {self._output}"
         )
-        return command_line
+        if self._do_link:
+            cmd += (
+                f" {self._ldflags_args} {self._libraries_args} "
+                f"{self._libraries_dirs_args}"
+            )
+        return cmd
 
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
