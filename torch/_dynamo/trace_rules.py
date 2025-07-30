@@ -21,7 +21,6 @@ compilation boundaries and optimize PyTorch programs effectively.
 
 import abc
 import builtins
-import collections
 import copy
 import dataclasses
 import functools
@@ -3293,7 +3292,6 @@ def is_numpy_type_info(obj: Any) -> bool:
 
 BUILTIN_SKIPLIST = (
     abc,
-    collections,
     copy,
     random,
     traceback,
