@@ -763,9 +763,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         x = torch.randn(2, 5, 3)
         onnx_program = self.export(RMSNormModel(), (x,), opset_version=23)
-        onnx_testing.assert_onnx_program(
-            onnx_program, backend="reference", rtol=1e-4, atol=1e-4
-        )
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
         # Test with multi-dimensional normalized_shape
         class RMSNormModel2D(torch.nn.Module):
@@ -773,10 +771,11 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
                 return torch.nn.functional.rms_norm(x, [7, 3])
 
         x = torch.randn(2, 5, 7, 3)
-        onnx_program = self.export(RMSNormModel2D(), (x,), opset_version=23)
-        onnx_testing.assert_onnx_program(
-            onnx_program, backend="reference", rtol=1e-4, atol=1e-4
+        onnx_program = self.export(
+            RMSNormModel2D(), (x,), opset_version=23, report=True
         )
+        onnx_program = self.export(RMSNormModel2D(), (x,), report=True)
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_rms_norm_with_weight(self):
         """Test RMS normalization with weight parameter."""
@@ -794,16 +793,14 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         onnx_program = self.export(RMSNormWithWeight(), (x,), opset_version=23)
 
         # Test with reference evaluator because ORT does not support the op as of version 1.22
-        onnx_testing.assert_onnx_program(
-            onnx_program, backend="reference", rtol=1e-4, atol=1e-4
-        )
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
     def test_rms_norm_with_eps(self):
         """Test RMS normalization with custom epsilon."""
 
         class RMSNormWithEps(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.functional.rms_norm(x, [3], eps=1e-6)
+                return torch.nn.functional.rms_norm(x, [3], eps=1e-5)
 
         x = torch.randn(2, 5, 3)
 
