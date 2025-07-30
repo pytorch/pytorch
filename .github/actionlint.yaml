@@ -59,7 +59,6 @@ self-hosted-runner:
     - rocm-docker
     # Org wise AWS `mac2.metal` runners (2020 Mac mini hardware powered by Apple silicon M1 processors)
     - macos-m1-stable
-    - macos-m1-13
     - macos-m1-14
     # GitHub-hosted MacOS runners
     - macos-latest-xlarge
