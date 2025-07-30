@@ -286,7 +286,7 @@ class TestCutlassBackend(TestCase):
     )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_cutlass_backend_subproc_addmm(self, shape_combo):
+    def test_cutlass_backend_subproc_addmm(self):
         """
         Test autotune_in_subproc works for addmm.
         """
@@ -602,13 +602,20 @@ class TestCutlassBackend(TestCase):
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @parametrize("x_shape_fn", [
+        lambda M, N: (M, N),
+        lambda M, N: (M, 1),
+        lambda M, N: (1, N),
+        lambda M, N: (N,),
+    ])
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
         self,
         dynamic: bool,
+        use_aoti: bool,
+        dtype: torch.dtype,
+        x_shape_fn: Callable[[int, int], tuple[int, ...]],
         max_autotune_gemm_backends: str = "CUTLASS",
-        use_aoti: bool = False,
-        dtype: torch.dtype = torch.float16,
     ):
         """
         Main test for addmm.
@@ -626,57 +633,47 @@ class TestCutlassBackend(TestCase):
         ]
         shapes = shapes[0:1] if not dynamic else shapes
 
-        x_shapes = [
-            lambda M, N: (M, N),
-            lambda M, N: (M, 1),
-            lambda M, N: (1, N),
-            lambda M, N: (N,),
-        ]
-        for x_shape in x_shapes:
-            torch._dynamo.reset()
-            clear_caches()
-
-            inputs = [
-                (
-                    torch.randn(x_shape(M, N)).cuda().to(dtype),
-                    torch.randn(M, K).cuda().to(dtype),
-                    torch.randn(N, K).cuda().to(dtype).t(),
-                )
-                for (M, N, K) in shapes
-            ]
-            dynamic_shapes = (
-                {
-                    "x": {
-                        i: v
-                        for i, v in enumerate(x_shape(Dim.DYNAMIC, Dim.DYNAMIC))
-                        if v != 1
-                    },
-                    "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                    "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                }
-                if dynamic
-                else None
+        inputs = [
+            (
+                torch.randn(x_shape_fn(M, N)).cuda().to(dtype),
+                torch.randn(M, K).cuda().to(dtype),
+                torch.randn(N, K).cuda().to(dtype).t(),
             )
-            with (
-                config.patch(
-                    {
-                        "max_autotune": True,
-                        "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                        "cuda.cutlass_max_profiling_configs": 2,
-                    }
-                ),
-                dynamo_config.patch({"error_on_recompile": dynamic}),
-            ):
-                expected = [model(*input) for input in inputs]
-                if use_aoti:
-                    actual = AOTIRunnerUtil.run_multiple(
-                        model, inputs, dynamic_shapes=dynamic_shapes
-                    )
-                else:
-                    compiled_model = torch.compile(model, dynamic=dynamic)
-                    actual = [compiled_model(*input) for input in inputs]
+            for (M, N, K) in shapes
+        ]
+        dynamic_shapes = (
+            {
+                "x": {
+                    i: v
+                    for i, v in enumerate(x_shape_fn(Dim.DYNAMIC, Dim.DYNAMIC))
+                    if v != 1
+                },
+                "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+            }
+            if dynamic
+            else None
+        )
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                    "cuda.cutlass_max_profiling_configs": 2,
+                }
+            ),
+            dynamo_config.patch({"error_on_recompile": dynamic}),
+        ):
+            expected = [model(*input) for input in inputs]
+            if use_aoti:
+                actual = AOTIRunnerUtil.run_multiple(
+                    model, inputs, dynamic_shapes=dynamic_shapes
+                )
+            else:
+                compiled_model = torch.compile(model, dynamic=dynamic)
+                actual = [compiled_model(*input) for input in inputs]
 
-                torch.testing.assert_close(actual, expected)
+            torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
