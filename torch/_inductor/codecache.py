@@ -1067,7 +1067,7 @@ class GuardedCache(Generic[T]):
         Helper to get the shape env from the tracing context.
         """
         ctx = torch._guards.TracingContext.try_get()
-        if not ctx or not ctx.fake_mode:
+        if not ctx:
             return None
         return ctx.fake_mode.shape_env
 
@@ -2049,6 +2049,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
             # If we're packaging via CMake, we build the whole code at max optimization.
             wrapper_build_options = CppTorchDeviceOptions(
                 compile_only=True,
+                min_optimize=not config.aot_inductor.package_cpp_only,
                 **compile_command,
             )
             kernel_build_options = CppTorchDeviceOptions(
@@ -2064,6 +2065,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 wrapper_build_options.precompiled_header = _precompile_header(
                     header_file,
                     cpp_command,
+                    min_optimize=not config.aot_inductor.package_cpp_only,
                     **compile_command,
                 )
                 if cpp_prefix := _get_cpp_prefix_header(device_type):
@@ -2526,10 +2528,14 @@ class CppCodeCache:
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
-        # Do compilation and linking in one step if the optimized_code argument is empty
-        # (as a micro-optimization).
+        # Note the distinction between the two booleans.  We do minimal optimization if
+        # the optimized_code argument is present at all, since that's how the user of
+        # this function opts in, but we do compilation and linking in one step if the
+        # optimized_code argument is empty (as a micro-optimization).
         main_build_option = CppTorchDeviceOptions(
-            compile_only=bool(optimized_code), **compile_command
+            compile_only=bool(optimized_code),
+            min_optimize=optimized_code is not None,
+            **compile_command,
         )
         optimized_build_option = CppTorchDeviceOptions(
             compile_only=True, **compile_command
@@ -2560,6 +2566,7 @@ class CppCodeCache:
                     main_build_option.precompiled_header = _precompile_header(
                         header,
                         main_cmd_line,
+                        min_optimize=optimized_code is not None,
                         **compile_command,
                     )
 
@@ -2608,7 +2615,9 @@ class CppCodeCache:
                     CppBuilder(
                         name=main_name,
                         sources=[b.get_target_file_path() for b in builders],
-                        BuildOption=CppTorchDeviceOptions(**compile_command),
+                        BuildOption=CppTorchDeviceOptions(
+                            min_optimize=True, **compile_command
+                        ),
                         output_dir=main_output_dir,
                     )
                 )

@@ -540,6 +540,7 @@ class AsyncCompile:
 
         if get_compile_threads() <= 1:
             return task()
+
         return self.submit(task)
 
     def rocm(
@@ -560,6 +561,7 @@ class AsyncCompile:
 
         if get_compile_threads() <= 1:
             return task()
+
         return self.submit(task)
 
     def halide(self, meta: HalideMeta, source_code: str):
