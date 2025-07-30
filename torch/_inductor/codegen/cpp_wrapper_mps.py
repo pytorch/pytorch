@@ -101,7 +101,16 @@ class CppWrapperMps(CppWrapperGpu):
             new_args.append(f"{kernel_name}->dispatch({threads}, {group_size});\n")
 
         # debug printer related logic for cpp kernel type.
-        self.write_mps_kernel_call(kernel_name, new_args)
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            call_args[:-2],
+            kernel_name,
+            None,
+            None,
+            "cpp",
+        )
+        with debug_printer_manager:
+            self.write_mps_kernel_call(kernel_name, new_args)
 
     def write_mps_kernel_call(self, name: str, call_args: list[str]) -> None:
         # Only add handle definition if the kernel is not already used

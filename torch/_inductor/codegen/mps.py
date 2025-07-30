@@ -594,6 +594,7 @@ class MetalKernel(SIMDKernel):
                 )
 
         acc_buf_size = sympy.Min(acc_buf_size, self.max_threadgroup_size)
+        acc_buf_size_str = self.sexpr(acc_buf_size)
 
         if reduction_type == "any":
             acc = self._new_idxvar(dtype)
@@ -638,7 +639,7 @@ class MetalKernel(SIMDKernel):
 
             return self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {self.sexpr(acc_buf_size)})",
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size_str})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["max", "min", "argmin", "argmax"]:
@@ -732,11 +733,9 @@ class MetalKernel(SIMDKernel):
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
 
-        numel_hint = V.graph.sizevars.symbolic_hint(entry.root.numel)
-
         if not entry.is_reduction or (
             isinstance(entry.root.numel, sympy.Integer)
-            and numel_hint <= self.max_threadgroup_size
+            and entry.root.numel <= self.max_threadgroup_size
         ):
             self.indexing_code.writeline(
                 f"{self.index_dtype} {entry.name} = {index_str};"
@@ -754,6 +753,7 @@ class MetalKernel(SIMDKernel):
         # loop over extra indices per reduction thread and perform part of the operation
         # using values in the shared memory
 
+        # Use floats so that it doesn't do integer division
         loop_size = (acc_size + float(self.max_threadgroup_size - 1)) // float(
             self.max_threadgroup_size
         )
@@ -846,6 +846,8 @@ class MetalKernel(SIMDKernel):
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
                 )
+                # If using dynamic shapes, set the threadgroup size to be the
+                # max possible size
                 threadgroup_size = (
                     min(total_reduction_size, self.max_threadgroup_size)
                     if isinstance(total_reduction_size, sympy.Integer)
@@ -875,10 +877,11 @@ class MetalKernel(SIMDKernel):
                 for outer, inner in self.args.sizevars.items():
                     code.writeline(f"constant long& {inner},")
 
+                # Write dynamic values as inputs
                 for idx_var in idx_vars:
                     if isinstance(idx_var.numel, sympy.Integer):
                         pass
-                    elif isinstance(idx_var.numel, sympy.Expr):
+                    else:
                         code.writeline(f"constant long& {idx_var.prefix}numel,")
 
                 assert len(idx_vars) < 4, "Up to 3 index variables are supported"
