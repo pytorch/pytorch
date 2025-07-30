@@ -17,7 +17,7 @@ using GetPyInterpreterFn = PyInterpreter* (*)();
 C10_API extern GetPyInterpreterFn g_get_pyinterpreter_fn;
 
 // Helper function to get the global interpreter
-C10_API PyInterpreter* getGlobalPyInterpreter();
+C10_API PyInterpreter* getPyInterpreter();
 
 struct C10_API PyObjectSlot {
  public:
@@ -35,8 +35,7 @@ struct C10_API PyObjectSlot {
   // NB: THIS FUNCTION CAN RAISE AN EXCEPTION.  Make sure to clean up after
   // PyObject if necessary!
   void init_pyobj(PyObject* pyobj) {
-    pyobj_interpreter_.store(
-        getGlobalPyInterpreter(), std::memory_order_relaxed);
+    pyobj_interpreter_.store(getPyInterpreter(), std::memory_order_relaxed);
     pyobj_ = pyobj;
   }
 
@@ -72,7 +71,6 @@ struct C10_API PyObjectSlot {
     }
 
     return _unchecked_untagged_pyobj();
-    
   }
 
   PyInterpreter& load_pyobj_interpreter() const;

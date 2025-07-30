@@ -41,7 +41,8 @@ PyObject* THPStorage_NewWithStorage(
       "Creating a Storage subclass from a class that does not inherit from ",
       "Storage is not possible. Make sure your class inherits from Storage.");
 
-  auto maybe_pyobj = _storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj();
+  auto maybe_pyobj =
+      _storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj();
   if (maybe_pyobj.has_value() && maybe_pyobj.value()) {
     TORCH_CHECK(
         allow_preexisting_pyobj,
@@ -125,7 +126,8 @@ static bool THPStorage_isPreservable(THPStorage* self) {
     return false;
   }
 
-  if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj() != (PyObject*)self) {
+  if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj() !=
+      (PyObject*)self) {
     return false;
   }
   if (storage.use_count() <= 1) {

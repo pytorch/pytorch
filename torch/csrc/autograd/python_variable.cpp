@@ -327,7 +327,8 @@ static bool isResurrectable(THPVariable* self) {
     return false;
   }
   // Check if this is hermetic. If it is, no resurrection.
-  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj() != (PyObject*)self) {
+  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj() !=
+      (PyObject*)self) {
     return false;
   }
   return true;
@@ -1843,7 +1844,8 @@ static int THPVariable_subclass_clear(THPVariable* self) {
     //        because Tensor asked us to (it's already destructing).
 
     if (!self->cdata.unsafeIsBorrowed() &&
-        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj() == (PyObject*)self) {
+        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj() ==
+            (PyObject*)self) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
