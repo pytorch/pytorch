@@ -1950,8 +1950,9 @@ void scaled_gemm(
   // hipblaslt supported row-wise before cublas, and did so their own way (via
   // the SCALE_POINTERSs), but then migrated to match how cublas does it (via
   // the SCALE_MODEs). Here we check for this early custom mode.
+  bool use_rowwise = (mat1_scaling_type == ScalingType::RowWise && mat2_scaling_type == ScalingType::RowWise);
 #if defined(USE_ROCM) && !defined(HIPBLASLT_OUTER_VEC) && defined(HIPBLASLT_VEC_EXT)
-  if (mat1_scaling_type == ScalingType::RowWise && mat2_scaling_type == ScalingType::RowWise) {
+  if (use_rowwise) {
     matmulDescA = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
     matmulDescB = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
   }
@@ -1968,7 +1969,7 @@ void scaled_gemm(
 #else
   // rowwise isn't supported using cublaslt or older hipblaslt
   TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with blaslt");
-#endif  // if defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT)
+#endif  // if defined(USE_ROCM) && !defined(HIPBLASLT_OUTER_VEC) && defined(HIPBLASLT_VEC_EXT)
   computeDesc.setAttribute(matmulDescA, mat1_scale_ptr);
   computeDesc.setAttribute(matmulDescB, mat2_scale_ptr);
   if (result_scale_ptr != nullptr) {
