@@ -87,8 +87,8 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   // Get ideal kernel ordering
   const std::array<sdp::SDPBackend, 3> priority_order{
       sdp::SDPBackend::overrideable,
-      sdp::SDPBackend::math,
       sdp::SDPBackend::flash_attention,
+      sdp::SDPBackend::math,
   };
 
   // Because TORCHCHECK checks if condition is true we negate debug so that
