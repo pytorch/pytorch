@@ -66,8 +66,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
     TestCase,
-    is_arch,
-    NAVI_ARCH,
 )
 
 
@@ -624,15 +622,17 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         """
         device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((1,), device=device)
+
+        # We need this barrier to ensure that all nodes have completed init_process_group
+        # If rank=0 gets a mem snapshot before other nodes have finished init_process_group,
+        # then we artificially see a bump in memory usage. As per the following comment,
+        # we are going to be moving away from this function:
+        # https://github.com/pytorch/pytorch/pull/154174#discussion_r2105065931
+        c10d.barrier()
+
         # Rank 0 takes a snapshot before collective -- this snapshot should have
         # included rank 0's own context.
         if self.rank == 0:
-            # We need this extra sleep for NAVI_ARCH because rccl_init inside init_process_group
-            # is happening in a separate process and it is taking longer to finish on NAVI_ARCH.
-            # Sleeping here ensures that the init is competed successfully and mem_get_info can
-            # get stable numbers.
-            if is_arch(NAVI_ARCH):
-                time.sleep(5)
             free, total = torch.cuda.mem_get_info(device)
             used_before = float(total - free)
 
