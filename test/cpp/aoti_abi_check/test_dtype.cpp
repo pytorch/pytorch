@@ -6,7 +6,6 @@
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
-#include <c10/util/Half.h>
 #include <c10/util/complex.h>
 
 #include <torch/headeronly/util/bits.h>
@@ -15,6 +14,7 @@
 #include <torch/headeronly/util/quint2x4.h>
 #include <torch/headeronly/util/quint4x2.h>
 #include <torch/headeronly/util/quint8.h>
+#include <torch/headeronly/util/Half.h>
 
 TEST(TestDtype, TestBFloat16) {
   c10::BFloat16 a = 1.0f;
@@ -87,17 +87,28 @@ TEST(TestDtype, TestFloat8_e5m2fnuz) {
 }
 
 TEST(TestDtype, TestHalf) {
-  c10::Half a = 1.0f;
-  c10::Half b = 2.0f;
-  c10::Half add = 3.0f;
-  c10::Half sub = -1.0f;
-  c10::Half mul = 2.0f;
-  c10::Half div = 0.5f;
+  torch::headeronly::Half a = 1.0f;
+  torch::headeronly::Half b = 2.0f;
+  torch::headeronly::Half add = 3.0f;
+  torch::headeronly::Half sub = -1.0f;
+  torch::headeronly::Half mul = 2.0f;
+  torch::headeronly::Half div = 0.5f;
 
   EXPECT_EQ(a + b, add);
   EXPECT_EQ(a - b, sub);
   EXPECT_EQ(a * b, mul);
   EXPECT_EQ(a / b, div);
+  EXPECT_EQ(a += b, add);
+  EXPECT_EQ(a -= b, add - b);
+  EXPECT_EQ(a *= b, b);
+  EXPECT_EQ(a /= b, mul * div);
+
+#if defined(__aarch64__) && !defined(__CUDACC__)
+  EXPECT_EQ(
+      torch::headeronly::detail::fp16_to_bits(
+          torch::headeronly::detail::fp16_from_bits(32)),
+      32);
+#endif
 }
 
 TEST(TestDtype, TestComplexFloat) {
