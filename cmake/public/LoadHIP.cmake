@@ -93,19 +93,16 @@ if(HIP_FOUND)
   # hip (lower-case) package. Both are probed above and will be in
   # ROCM_INCLUDE_DIRS if available.
   find_file(ROCM_VERSION_HEADER_PATH
-    NAMES rocm-core/rocm_version.h
+    NAMES rocm-core/rocm_version.h hip/hip_version.h
     NO_DEFAULT_PATH
     PATHS ${ROCM_INCLUDE_DIRS}
   )
-  set(ROCM_LIB_NAME "ROCM")
-  if(NOT ROCM_VERSION_HEADER_PATH)
-    find_file(ROCM_VERSION_HEADER_PATH
-      NAMES hip/hip_version.h
-      NO_DEFAULT_PATH
-      PATHS ${ROCM_INCLUDE_DIRS}
-    )
+  if(ROCM_VERSION_HEADER_PATH MATCHES "rocm-core/rocm_version.h$")
+    set(ROCM_LIB_NAME "ROCM")
+  else()
     set(ROCM_LIB_NAME "HIP")
   endif()
+
   if(NOT ROCM_VERSION_HEADER_PATH)
     message(FATAL_ERROR "Could not find hip/hip_version.h or rocm-core/rocm_version.h in ${ROCM_INCLUDE_DIRS}")
   endif()
