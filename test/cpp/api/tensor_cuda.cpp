@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
-#include <torch/torch.h>
 #include <ATen/Context.h>
+#include <torch/torch.h>
 
 #include <cmath>
 
