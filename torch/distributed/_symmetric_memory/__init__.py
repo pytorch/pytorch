@@ -1620,6 +1620,7 @@ def _all_to_all_vdev_2d_meta(
 ) -> None:
     return None
 
+
 @torch.library.impl(lib, "all_to_all_vdev_2d_offset", "Meta")
 def _all_to_all_vdev_2d_offset_meta(
     input: torch.Tensor,
