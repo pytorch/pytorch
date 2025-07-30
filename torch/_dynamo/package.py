@@ -199,9 +199,16 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             toplevel = getattr(toplevel, part)
             if inspect.isfunction(toplevel):
                 break
+    seen = set()
 
     def _find_code_source(obj: Any) -> Optional[str]:
         nonlocal toplevel
+        nonlocal seen
+        if obj in seen:
+            return None
+
+        seen.add(obj)
+
         if inspect.iscode(obj):
             if obj is code:
                 return ""
@@ -239,13 +246,13 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
 
             if inspect.isclass(obj):
                 for name, value in obj.__dict__.items():
+                    value = getattr(obj, name)
                     if not (inspect.isfunction(value) or inspect.isclass(value)):
                         continue
                     if (res := _find_code_source(value)) is not None:
-                        if not value.__name__ != name:
+                        if value.__name__ != name:
                             _raise_resolution_error(code, toplevel)
                         return res
-
         return None
 
     code_source = _find_code_source(toplevel)

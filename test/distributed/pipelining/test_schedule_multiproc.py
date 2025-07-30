@@ -114,10 +114,20 @@ class ScheduleTest(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize(
         "ScheduleClass",
-        [ScheduleGPipe, Schedule1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS],
+        [
+            ScheduleGPipe,
+            Schedule1F1B,
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleInterleavedZeroBubble,
+        ],
     )
     def test_eval_inference_mode(self, ScheduleClass):
-        if ScheduleClass in [ScheduleInterleaved1F1B, ScheduleLoopedBFS]:
+        if ScheduleClass in [
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleInterleavedZeroBubble,
+        ]:
             # Multi-stage schedules
             stages_per_rank = 2
             n_stages = stages_per_rank * self.world_size

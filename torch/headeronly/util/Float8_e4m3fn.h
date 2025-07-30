@@ -387,56 +387,72 @@ inline C10_HOST_DEVICE double operator/(double a, Float8_e4m3fn b)
 /// Arithmetic with ints
 
 inline C10_HOST_DEVICE Float8_e4m3fn operator+(Float8_e4m3fn a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a + static_cast<Float8_e4m3fn>(b);
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator-(Float8_e4m3fn a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a - static_cast<Float8_e4m3fn>(b);
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator*(Float8_e4m3fn a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a * static_cast<Float8_e4m3fn>(b);
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator/(Float8_e4m3fn a, int b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a / static_cast<Float8_e4m3fn>(b);
 }
 
 inline C10_HOST_DEVICE Float8_e4m3fn operator+(int a, Float8_e4m3fn b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e4m3fn>(a) + b;
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator-(int a, Float8_e4m3fn b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e4m3fn>(a) - b;
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator*(int a, Float8_e4m3fn b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e4m3fn>(a) * b;
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator/(int a, Float8_e4m3fn b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e4m3fn>(a) / b;
 }
 
 //// Arithmetic with int64_t
 
 inline C10_HOST_DEVICE Float8_e4m3fn operator+(Float8_e4m3fn a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a + static_cast<Float8_e4m3fn>(b);
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator-(Float8_e4m3fn a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a - static_cast<Float8_e4m3fn>(b);
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator*(Float8_e4m3fn a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a * static_cast<Float8_e4m3fn>(b);
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator/(Float8_e4m3fn a, int64_t b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return a / static_cast<Float8_e4m3fn>(b);
 }
 
 inline C10_HOST_DEVICE Float8_e4m3fn operator+(int64_t a, Float8_e4m3fn b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e4m3fn>(a) + b;
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator-(int64_t a, Float8_e4m3fn b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e4m3fn>(a) - b;
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator*(int64_t a, Float8_e4m3fn b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e4m3fn>(a) * b;
 }
 inline C10_HOST_DEVICE Float8_e4m3fn operator/(int64_t a, Float8_e4m3fn b) {
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return static_cast<Float8_e4m3fn>(a) / b;
 }
 
@@ -448,16 +464,16 @@ C10_CLANG_DIAGNOSTIC_POP()
 } // namespace c10
 
 namespace torch::headeronly {
-  using c10::Float8_e4m3fn;
-  using c10::operator<<;
-  using c10::operator+;
-  using c10::operator-;
-  using c10::operator*;
-  using c10::operator/;
-  using c10::operator+=;
-  using c10::operator-=;
-  using c10::operator*=;
-  using c10::operator/=;
+using c10::Float8_e4m3fn;
+using c10::operator<<;
+using c10::operator+;
+using c10::operator-;
+using c10::operator*;
+using c10::operator/;
+using c10::operator+=;
+using c10::operator-=;
+using c10::operator*=;
+using c10::operator/=;
 } // namespace torch::headeronly
 
 namespace std {
