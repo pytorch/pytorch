@@ -15,6 +15,8 @@ This guide is a work in progress.
 :caption: Introduction
 
 pytorch_overview
+Get Started <https://pytorch.org/get-started/locally/>
+Learn the Basics <https://docs.pytorch.org/tutorials/beginner/basics/intro.html>
 ```
 
 ```{toctree}
