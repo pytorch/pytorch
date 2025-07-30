@@ -4228,7 +4228,7 @@ class Scheduler:
 
         # avoid duplicating logs when should_partition is called multiple times
         # on the same node
-        def noop_log(msg: str) -> None:
+        def noop_log(msg: str, node: Optional[BaseSchedulerNode]) -> None:
             return
 
         log_partition_reason = maybe_log_cudagraph_partition if should_log else noop_log
@@ -4236,29 +4236,27 @@ class Scheduler:
         if isinstance(node, FusedSchedulerNode):
             return any(self.should_partition(snode) for snode in node.snodes)
 
+        assert node.node is not None
+
         if not node.is_gpu():
-            log_partition_reason("non gpu ops")
+            log_partition_reason("non gpu ops", node=node)
 
-            return True
-
-        if node.node is None:
-            log_partition_reason("None ops")
             return True
 
         if isinstance(node.node, ir.DeviceCopy):
-            log_partition_reason("DeviceCopy ops")
+            log_partition_reason("DeviceCopy ops", node=node)
             return True
 
         if isinstance(node.node, ir.Conditional):
-            log_partition_reason("Conditional ops")
+            log_partition_reason("Conditional ops", node=node)
             return True
 
         if getattr(node.node, "unbacked_bindings", None):
-            log_partition_reason("unbacked binding ops")
+            log_partition_reason("unbacked binding ops", node=node)
             return True
 
         if is_cudagraph_unsafe_op(node.node):
-            log_partition_reason("CUDAGraph-unsafe custom ops")
+            log_partition_reason("CUDAGraph-unsafe custom ops", node=node)
             return True
 
         return False

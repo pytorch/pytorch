@@ -2720,7 +2720,9 @@ if HAS_CUDA:
             with capture_stderr() as captured_output:
                 foo(torch.ones([10], device="cuda"), torch.ones([20]))
 
-            FileCheck().check("cudagraph partition due to non gpu ops").check(
+            FileCheck().check_count(
+                "cudagraph partition due to non gpu ops. Found from", 1, exactly=True
+            ).check_count("return (x + 1, y + 2)", 1, exactly=True).check(
                 "cudagraph partition into 2 partitions"
             ).run(captured_output[0])
 
