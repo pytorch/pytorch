@@ -9,7 +9,7 @@ convert
 # c10/util/bit_cast.h, torch/headeronly/util/bit_cast.h
 bit_cast
 
-# c10/util/BFloat16-math.h, c10/util/BFloat16.h
+# torch/headeronly/util/BFloat16.h
 BFloat16
 
 # torch/headeronly/util/Float4_e2m1fn_x2.h
