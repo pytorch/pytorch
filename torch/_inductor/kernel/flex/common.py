@@ -35,7 +35,6 @@ from ...lowering import (
     to_dtype,
 )
 from ...select_algorithm import realize_inputs
-from ...subgraph_lowering import PointwiseSubgraphLowering
 
 
 SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
@@ -111,6 +110,9 @@ def build_subgraph_module_buffer(
         args: The args that are passed into the subgraph. Contains both fixed and lifted inputs.
         subgraph: The Subgraph ir for which to produce the output node
     """
+    # This one we gotta keep lazy
+    from ...subgraph_lowering import PointwiseSubgraphLowering
+
     pw_subgraph = PointwiseSubgraphLowering(
         graph_module,
         root_graph_lowering=V.graph,

@@ -664,6 +664,7 @@ def flex_attention(
 # ---------------------------- Backward HOP Implementation ----------------------------
 
 
+@SymbolicGridFn
 def flex_attention_backward_grid(
     batch_size, q_heads, num_queries, d_model, kv_heads, num_key_value, meta, *, cdiv
 ):
