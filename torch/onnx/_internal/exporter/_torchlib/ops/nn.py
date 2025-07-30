@@ -69,7 +69,7 @@ def aten_rms_norm(
 
     # Default eps value if not provided
     if eps is None:
-        eps = 1e-07  # Observed from decomp
+        eps = torch.finfo(torch.float).eps  # Observed from decomp
 
     # Calculate axis: the first normalization dimension
     # For normalized_shape with D dimensions, normalize over last D dimensions
