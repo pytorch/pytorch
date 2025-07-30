@@ -31,11 +31,10 @@ from .common import (
     get_bounded_indices_func,
     get_fwd_subgraph_outputs,
     infer_dense_strides,
-    is_power_of_2,
     load_checked_2d,
     load_checked_block,
     maybe_realize,
-    next_power_of_two,
+    set_head_dim_values,
     SubgraphResults,
 )
 from .flex_cpu import lower_cpu
@@ -330,40 +329,6 @@ flex_attention_template = TritonTemplate(
     + load_checked_block
     + get_bounded_indices_func,
 )
-
-
-def set_head_dim_values(
-    kernel_options: dict[str, Any], qk_head_dim, v_head_dim, graph_sizevars
-):
-    """
-    Mutates kernel options, adding head dimension calculations.
-
-    Args:
-        kernel_options: Dictionary to populate with options
-        qk_head_dim: Query/Key head dimension
-        v_head_dim: Value head dimension
-        graph_sizevars: Graph size variables object with guard_int method
-
-    """
-    # QK dimensions
-    qk_head_dim_static = graph_sizevars.guard_int(qk_head_dim)
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim_static)
-    kernel_options.setdefault(
-        "QK_HEAD_DIM_ROUNDED", next_power_of_two(qk_head_dim_static)
-    )
-
-    # V dimensions
-    v_head_dim_static = graph_sizevars.guard_int(v_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim_static)
-    kernel_options.setdefault(
-        "V_HEAD_DIM_ROUNDED", next_power_of_two(v_head_dim_static)
-    )
-
-    # Safety flag
-    kernel_options.setdefault(
-        "SAFE_HEAD_DIM",
-        is_power_of_2(qk_head_dim_static) and is_power_of_2(v_head_dim_static),
-    )
 
 
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
@@ -700,7 +665,7 @@ def flex_attention(
 
 
 def flex_attention_backward_grid(
-    batch_size, q_heads, num_queries, d_model, kv_heads, num_key_value, meta
+    batch_size, q_heads, num_queries, d_model, kv_heads, num_key_value, meta, *, cdiv
 ):
     """How is this kernel parallelized?
     We create a grid of (ceil_div(n_queries, query_block_size) * heads_ratio + ceil_div(n_kv, kv_block_size), batch_size, kv_heads)
@@ -708,11 +673,9 @@ def flex_attention_backward_grid(
     parallelize over ceil_div(q_heads//kv_heads * num_key_value, key_value_block_size).
     To do this will either require atomic updates to some grad values or to have a two pass kernel design.
     """
-    import triton
-
     return (
-        triton.cdiv(num_queries, meta["BLOCK_M2"]) * (q_heads // kv_heads)
-        + triton.cdiv(num_key_value, meta["BLOCK_N1"]),
+        cdiv(num_queries, meta["BLOCK_M2"]) * (q_heads // kv_heads)
+        + cdiv(num_key_value, meta["BLOCK_N1"]),
         batch_size,
         kv_heads,
     )

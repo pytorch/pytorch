@@ -2,6 +2,8 @@
 """CPU-specific implementations for flex attention"""
 
 import copy
+import os
+import sys
 from typing import Any
 
 import sympy
@@ -27,9 +29,6 @@ from .common import (
 
 
 def check_cpu_supported():
-    import os
-    import sys
-
     requires_avx2_on_cpu = (
         torch.cpu._is_avx2_supported() and os.getenv("ATEN_CPU_CAPABILITY") != "default"
     )

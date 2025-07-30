@@ -28,6 +28,7 @@ from .common import (
     load_checked_2d,
     load_checked_block,
     maybe_realize,
+    set_head_dim_values,
 )
 
 
@@ -366,8 +367,6 @@ def get_split_k(B: int, H: int, Mk: int) -> int:
 
 def create_flex_decoding_kernel(*args, **kwargs):
     """Flex decode lowering that is optimized for small Q_LEN and GQA packing"""
-    from .flex_attention import set_head_dim_values
-
     (
         query,
         key,
