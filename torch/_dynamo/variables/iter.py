@@ -514,7 +514,10 @@ class FilterVariable(IteratorVariable):
         while True:
             item = _next()
             self.index += 1
-            res = self.fn.call_function(tx, [item], {})
+            if isinstance(self.fn, ConstantVariable) and self.fn.value is None:
+                res = item
+            else:
+                res = self.fn.call_function(tx, [item], {})
             pred_res = variables.UserFunctionVariable(
                 polyfills.predicate
             ).call_function(tx, [res], {})
