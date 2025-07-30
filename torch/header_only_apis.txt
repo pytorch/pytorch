@@ -65,3 +65,25 @@ C10_API
 
 # torch/headeronly/util/Exception.h
 STD_TORCH_CHECK
+
+# torch/headeronly/util/quint8.h
+quint8
+
+# torch/headeronly/util/quint4x2.h
+quint4x2
+
+# torch/headeronly/util/quint2x4.h
+quint2x4
+
+# torch/headeronly/util/qint8.h
+qint8
+
+# torch/headeronly/util/qint32.h
+qint32
+
+# torch/headeronly/util/bits.h
+bits1x8
+bits2x4
+bits4x2
+bits8
+bits16
