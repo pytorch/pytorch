@@ -57,12 +57,8 @@ self-hosted-runner:
     - linux.rocm.gpu.mi300.2
     - linux.rocm.gpu.mi300.4
     - rocm-docker
-    # Repo-specific Apple hosted  runners
-    - macos-m1-ultra
-    - macos-m2-14
     # Org wise AWS `mac2.metal` runners (2020 Mac mini hardware powered by Apple silicon M1 processors)
     - macos-m1-stable
-    - macos-m1-13
     - macos-m1-14
     # GitHub-hosted MacOS runners
     - macos-latest-xlarge
