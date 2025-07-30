@@ -326,6 +326,10 @@ dont_skip_tracing = False
 # No longer used
 optimize_ddp_lazy_compile = False
 
+# lambda guarding on object aliasing to improve opportunity for dict tag
+# optimization
+use_lamba_guard_for_object_aliasing = True
+
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 # Whether to apply torch._dynamo.disable() to FSDP2 hooks.
@@ -557,6 +561,13 @@ caching_precompile = os.environ.get("TORCH_CACHING_PRECOMPILE", "0") == "1"
 # This flag will also lift certain restrictions during the forward trace such as
 # registering backward hooks on tensors contained within the compiled region.
 compiled_autograd = False
+
+
+# Checks if we should graph break when seeing nn parameter constructors
+# in dynamo; this is so that we clearly fail and ask users to move outside
+# the function as opposed to trying to support the ctor with unclear semantics
+# See https://github.com/pytorch/pytorch/issues/157452 for more context
+graph_break_on_nn_param_ctor = True
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: dict[str, Any] = {}
