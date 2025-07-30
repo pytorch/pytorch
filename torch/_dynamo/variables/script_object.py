@@ -78,7 +78,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         if method is None:
             unimplemented_v2(
                 gb_type="FakeScriptObject missing method implementation",
-                context=f"method={name}",
+                context=f"value={self.value}, method={name}",
                 explanation=f"TorchScript object {self.value} doesn't define the method {name}.",
                 hints=[
                     "Implement the method in the fake class.",
