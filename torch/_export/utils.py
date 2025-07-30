@@ -1129,7 +1129,7 @@ def remove_proxy_from_state_dict(state_dict: dict, in_place: bool) -> dict:
 
 def _detect_fake_mode_from_gm(
     gm: torch.fx.GraphModule,
-) -> Optional[torch._subclasses.fake_tensor.FakeTensorMode]:
+) -> torch._subclasses.fake_tensor.FakeTensorMode:
     """
     For a given graph module, we look at the "val" of placeholder nodes to find the fake inputs.
     Additionally, if gm doesn't have placeholders, we further look at the "example_value" or "val" of other nodes.
