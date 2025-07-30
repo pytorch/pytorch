@@ -20,6 +20,7 @@ from torch.optim import (
     AdamW,
     ASGD,
     LBFGS,
+    Muon,
     NAdam,
     Optimizer,
     RAdam,
@@ -830,6 +831,100 @@ def optim_inputs_func_lbfgs(device, dtype=None):
 
 def optim_error_inputs_func_lbfgs(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    return error_inputs
+
+
+def optim_inputs_func_muon(device, dtype=None):
+    return [
+        OptimizerInput(params=None, kwargs={}, desc="default"),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "adjust_lr_fn": lambda lr, param_shape: lr,
+            },
+            desc="passing alternative adjust_lr_fn",
+        ),
+    ]
+
+
+def optim_error_inputs_func_muon(device, dtype):
+    error_inputs = []
+    sample_param = Parameter(torch.randn(1, device=device, dtype=dtype))
+    if _get_device_type(device) == "cpu":
+        complex_param = torch.rand(2, 3, device=device, dtype=torch.complex64)
+        complex_param.grad = torch.rand_like(complex_param)
+        regular_param = torch.rand(2, 3, device=device, dtype=dtype)
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=("sp", sample_param),
+                    kwargs={},
+                    desc="invalid param type",
+                ),
+                error_type=RuntimeError,
+                # note other optimizers raise TypeError in the base
+                # optimizer class. Muon raises the error earlier.
+                error_regex="Expected params to be named parameters",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[("sp", sample_param), ("sp", sample_param)],
+                    kwargs={},
+                    desc="a param group cannot have duplicate parameters",
+                ),
+                error_type=UserWarning,
+                error_regex=".*a parameter group with duplicate parameters.*",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[
+                        {"params": [("sp", sample_param)]},
+                        {"params": [("sp", sample_param)]},
+                    ],
+                    kwargs={},
+                    desc="duplicate parameters should not occur across param groups either",
+                ),
+                error_type=ValueError,
+                error_regex="some parameters appear in more than one parameter group",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=torch.tensor([0.001, 0.001])),
+                    desc="Tensor lr must be 1-element",
+                ),
+                error_type=ValueError,
+                error_regex="Tensor lr must be 1-element",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(adamw_eps=-1e-30),
+                    desc="epsilon should be >= 0",
+                ),
+                error_type=ValueError,
+                error_regex="epsilon should be >= 0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[regular_param],
+                    kwargs=dict(),
+                    desc="must input named parameters",
+                ),
+                error_type=RuntimeError,
+                error_regex="Expected params to be named parameters",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[("complexp", complex_param)],
+                    kwargs=dict(),
+                    desc="does not support complex parameters",
+                ),
+                error_type=RuntimeError,
+                error_regex="Muon does not support complex parameters",
+                error_on=OptimizerErrorEnum.STEP_ERROR,
+            ),
+        ]
     return error_inputs
 
 
@@ -1868,6 +1963,15 @@ optim_db: list[OptimizerInfo] = [
                 and kwargs["use_closure"],
             ),
         ),
+    ),
+    OptimizerInfo(
+        Muon,
+        optim_inputs_func=optim_inputs_func_muon,
+        optim_error_inputs_func=optim_error_inputs_func_muon,
+        supported_impls=(),
+        not_og_supported_flags=(),
+        supports_complex=False,
+        skips=(),
     ),
     OptimizerInfo(
         NAdam,
