@@ -9,9 +9,28 @@
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 
-#include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
+#include <c10/core/ScalarType.h>
 
 using torch::stable::Tensor;
+
+namespace torch::stable {
+
+inline Tensor new_empty(
+    const Tensor& self,
+    std::vector<int64_t> size,
+    std::optional<c10::ScalarType> dtype = std::nullopt) {
+  const auto num_args = 6;
+  std::array<StableIValue, num_args> stack{
+      from(self),
+      from(size),
+      from(dtype),
+      from(std::nullopt),
+      from(std::nullopt),
+      from(std::nullopt)};
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::new_empty", "", stack.data()));
+  return to<Tensor>(stack[0]);
+}
 
 // We expect this to be the stable version of the empty_like op that takes in
 // no kwargs (device, dtype, layout, memory_format). We will add kwargs
@@ -88,3 +107,5 @@ inline Tensor zero_(Tensor& self) {
       aoti_torch_call_dispatcher("aten::zero_", "", stack.data()));
   return to<Tensor>(stack[0]);
 }
+
+} // namespace torch::stable
