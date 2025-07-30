@@ -1422,7 +1422,7 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32) -> Callable[[Match]
             )
 
         if (
-            dequant_node.target  # type: ignore[union-attr]
+            dequant_node.target  # type: ignore[operator, union-attr]
             in [
                 quantized_decomposed.dequantize_per_tensor.default,
                 quantized_decomposed.dequantize_per_tensor.tensor,
