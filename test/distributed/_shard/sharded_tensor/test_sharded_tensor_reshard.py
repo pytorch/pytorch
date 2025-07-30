@@ -6,7 +6,10 @@ from itertools import product
 import torch
 from torch.distributed._shard import _shard_tensor, sharded_tensor
 from torch.distributed._shard.sharding_spec import EnumerableShardingSpec, ShardMetadata
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -16,6 +19,13 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common i
     _chunk_sharding_specs_list_for_test,
 )
 
+
+if torch.accelerator.is_available():
+    DEVICE_TYPE = torch.accelerator.current_accelerator().type
+else:
+    # use cuda as default device type for testing when accelerator is not available
+    DEVICE_TYPE = "cuda" 
+BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -28,7 +38,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 class TestReshard(ShardedTensorTestBase):
     def _run_sharded_tensor_reshard(self, sharding_spec, reshard_spec, input_size):
         torch.manual_seed(0)
-        local_tensor = torch.rand(*input_size).cuda(self.rank)
+        local_tensor = torch.rand(*input_size).to(torch.device(self.rank))
         st = _shard_tensor(local_tensor, sharding_spec)
         st_compare = _shard_tensor(local_tensor, reshard_spec)
         st.reshard(reshard_spec)
@@ -43,9 +53,9 @@ class TestReshard(ShardedTensorTestBase):
             st.local_shards()[0].metadata, st_compare.local_shards()[0].metadata
         )
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharded_tensor_reshard(self):
         dims = [0, 1]
         for sharding_dim, reshard_dim in product(dims, dims):
@@ -58,9 +68,9 @@ class TestReshard(ShardedTensorTestBase):
             self._run_sharded_tensor_reshard(spec, reshard_spec, [15, 26])
             self._run_sharded_tensor_reshard(spec, reshard_spec, [12, 24])
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_sharded_tensor_reshard_errors(self):
         specs = _chunk_sharding_specs_list_for_test([0, 1], seed=6)
         spec, reshard_spec = specs[0], specs[1]
@@ -69,12 +79,12 @@ class TestReshard(ShardedTensorTestBase):
                 ShardMetadata(
                     shard_offsets=[0, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:0/cuda:0",
+                    placement=f"rank:0/{DEVICE_TYPE}:0",
                 ),
                 ShardMetadata(
                     shard_offsets=[5, 0],
                     shard_sizes=[5, 5],
-                    placement="rank:1/cuda:1",
+                    placement=f"rank:1/{DEVICE_TYPE}:1",
                 ),
             ]
         )
