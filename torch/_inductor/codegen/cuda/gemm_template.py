@@ -923,7 +923,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         # only use stream k for static shape
         if op.tile_scheduler.name == "StreamK":
             static_shape = PythonWrapperCodegen.statically_known_list_of_ints_or_none(
-                X.get_size() + W.get_size()
+                tuple(X.get_size()) + tuple(W.get_size())
             )
             if not static_shape:
                 return None
