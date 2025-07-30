@@ -2655,9 +2655,9 @@
   ],
   "GB0265": [
     {
-      "Gb_type": "Calling method on script object is not safe",
-      "Context": "method={name}",
-      "Explanation": "",
+      "Gb_type": "FakeScriptObject missing method implementation",
+      "Context": "value={self.value}, method={name}",
+      "Explanation": "TorchScript object {self.value} doesn't define the method {name}.",
       "Hints": [
         "Ensure the method {name} is implemented in {self.value}.",
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
@@ -2675,15 +2675,6 @@
     }
   ],
   "GB0267": [
-    {
-      "Gb_type": "Unsupported attribute access on TorchScript objects",
-      "Context": "method={name}",
-      "Explanation": "Only method calls on TorchScript objects can be supported safely.",
-      "Hints": [
-        "Use method calls instead of attribute access.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
-      ]
-    },
     {
       "Gb_type": "Attempted to access non-callable attribute of TorchScript object",
       "Context": "value={self.value}, method={name}",
