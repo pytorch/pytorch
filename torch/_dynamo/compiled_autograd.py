@@ -1615,7 +1615,7 @@ def copy_slices_epilogue(
                 continue
             if i == 0:
                 to_copy = res[i]
-                assert to_copy
+                assert to_copy is not None
                 grad_slice.copy_(to_copy)
                 grad_inputs[i] = result
             else:
