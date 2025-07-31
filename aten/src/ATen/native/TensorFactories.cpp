@@ -696,7 +696,7 @@ TensorOptions infer_full_options(
       return options.dtype(at::kBool);
     } else if (fill_value.isIntegral(false)) {
       double value = fill_value.toDouble();
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           value > static_cast<double>(std::numeric_limits<int64_t>::max()),
           "Overflow for int64");
       return options.dtype(at::kLong);
