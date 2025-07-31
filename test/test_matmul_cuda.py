@@ -1290,7 +1290,7 @@ class TestFP8Matmul(TestCase):
                 x_fp8,
                 y_fp8,
                 scale_a=torch.ones((M), device="cuda"),
-                scale_b=torch.ones((N, N, 1), device="cuda"),
+                scale_b=torch.ones((N, 1), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
 

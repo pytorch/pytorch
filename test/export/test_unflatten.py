@@ -631,8 +631,6 @@ class TestUnflatten(TestCase):
             export_module.module(), unflattened, (torch.randn((2, 3)),)
         )
 
-    # skip connection is not supported yet
-    @unittest.expectedFailure
     def test_unflatten_skipped_call_module(self):
         class C(torch.nn.Module):
             def __init__(self):
@@ -670,7 +668,30 @@ class TestUnflatten(TestCase):
         # The call chain looks like this:
         # A -> B -> C -> A.d
         ep = torch.export.export(a, (torch.randn(3),), strict=False)
-        unflatten(ep)
+        ufm = unflatten(ep)
+        self.assertExpectedInline(
+            str(ufm.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    b = self.b(x);  x = None
+    return (b,)""",
+        )
+        self.assertExpectedInline(
+            str(ufm.b.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    c = self.c(x)
+    add = torch.ops.aten.add.Tensor(c, x);  c = x = None
+    return add""",
+        )
+        self.assertExpectedInline(
+            str(ufm.b.c.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    cos = torch.ops.aten.cos.default(x);  x = None
+    sin = torch.ops.aten.sin.default(cos);  cos = None
+    return sin""",
+        )
 
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):
