@@ -245,8 +245,7 @@ function install_torchrec_and_fbgemm() {
     if [ "${found_whl}" == "0" ]; then
       git clone --recursive https://github.com/pytorch/fbgemm
       pushd fbgemm/fbgemm_gpu
-      git checkout "${fbgemm_commit}"
-      git submodule sync && git submodule update --init --recursive
+      git checkout "${fbgemm_commit}" --recurse-submodules
       python setup.py bdist_wheel \
         --build-variant=rocm \
         -DHIP_ROOT_DIR="${ROCM_PATH}" \
