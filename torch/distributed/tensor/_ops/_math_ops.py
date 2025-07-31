@@ -1145,28 +1145,52 @@ def topk_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
-    [aten.sort.stable, aten.sort.default],
+    aten.sort.default,
+    schema_info=RuntimeSchemaInfo(
+        1,
+    ),
+)
+def sort_strategy(op_schema: OpSchema) -> OpStrategy:
+    # mostly copy paste from topk_strategy
+    input_strategy = op_schema.args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+    sort_dim = -1
+    if len(op_schema.args_schema) > 1:
+        sort_dim = cast(int, op_schema.args_schema[1])
+    sort_dim = normalize_dim(sort_dim, input_strategy.ndim)
+    single_mesh_dim_strategies = []
+    all_replicate: PlacementList = [Replicate()] * 3
+    single_mesh_dim_strategies.append(all_replicate)
+    for dim in range(input_strategy.ndim):
+        if dim != sort_dim:
+            dim_shardings: PlacementList = [Shard(dim)] * 3
+            single_mesh_dim_strategies.append(dim_shardings)
+    return expand_to_full_mesh_op_strategy(
+        input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
+    )
+
+
+@register_op_strategy(
+    aten.sort.stable,
     schema_info=RuntimeSchemaInfo(
         1,
         static_kwargkey=["dim", "descending", "stable"],
     ),
 )
-def sort_strategy(op_schema: OpSchema) -> OpStrategy:
-    # mostly copy past from topk_strategy
+def sort_stable_strategy(op_schema: OpSchema) -> OpStrategy:
+    # mostly copy paste from topk_strategy
     input_strategy = op_schema.args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
-    dim = -1
+    sort_dim = -1
     if "dim" in op_schema.kwargs_schema:
-        dim = cast(int, op_schema.kwargs_schema["dim"])
-    elif len(op_schema.args_schema) > 1:
-        dim = cast(int, op_schema.args_schema[1])
-    dim = normalize_dim(dim, input_strategy.ndim)
+        sort_dim = cast(int, op_schema.kwargs_schema["dim"])
+    sort_dim = normalize_dim(sort_dim, input_strategy.ndim)
     single_mesh_dim_strategies = []
     all_replicate: PlacementList = [Replicate()] * 3
     single_mesh_dim_strategies.append(all_replicate)
-    for check_dim in range(input_strategy.ndim):
-        if check_dim != dim:
-            dim_shardings: PlacementList = [Shard(check_dim)] * 3
+    for dim in range(input_strategy.ndim):
+        if dim != sort_dim:
+            dim_shardings: PlacementList = [Shard(dim)] * 3
             single_mesh_dim_strategies.append(dim_shardings)
     return expand_to_full_mesh_op_strategy(
         input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
