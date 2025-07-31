@@ -1655,6 +1655,9 @@ def _copy_graph_module_and_signature(
 
     # iterate over old/new graph modules
     for old_gm, new_gm in zip(ep.graph_module.modules(), gm.modules()):  # type: ignore[union-attr]
+        # Skip modules that don't have a graph attribute (e.g., LoweredBackendModule)
+        if not hasattr(old_gm, 'graph') or not hasattr(new_gm, 'graph'):
+            continue
         old_phs = [node for node in old_gm.graph.nodes if node.op == "placeholder"]
         new_phs = [node for node in new_gm.graph.nodes if node.op == "placeholder"]
         # iterate over placeholders
