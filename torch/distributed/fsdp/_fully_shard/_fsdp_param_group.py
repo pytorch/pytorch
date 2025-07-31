@@ -363,7 +363,9 @@ class FSDPParamGroup:
                 # First ensure we have at least one tensor in all_gather_outputs
                 if not fsdp_param.all_gather_outputs:
                     # Create a new tensor with the same size as sharded_data
-                    fsdp_param.all_gather_outputs = [torch.empty_like(sharded_data)]
+                    fsdp_param.all_gather_outputs = [
+                        torch.empty_like(sharded_data, device=self.device)
+                    ]
 
                 tensor = fsdp_param.all_gather_outputs[0]
                 alloc_storage(tensor)
