@@ -164,7 +164,7 @@ RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
 # see https://github.com/pytorch/pytorch/pull/123243
 
 # Override the arch list for flash-attn to reduce the binary size
-ARG vllm_fa_cmake_gpu_arches='80-real'
+ARG vllm_fa_cmake_gpu_arches='80-real;90-real'
 ENV VLLM_FA_CMAKE_GPU_ARCHES=${vllm_fa_cmake_gpu_arches}
 
 #################### BASE BUILD IMAGE ####################
@@ -192,7 +192,7 @@ ENV MAX_JOBS=${max_jobs}
 ARG nvcc_threads=2
 ENV NVCC_THREADS=$nvcc_threads
 
-ARG torch_cuda_arch_list='8.0'
+ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 ARG USE_SCCACHE
@@ -289,7 +289,7 @@ RUN  --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     RUN uv pip install --system /wheels/xformers/*.whl --verbose
 
-ARG torch_cuda_arch_list='8.0'
+ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 # install package for build flashinfer
