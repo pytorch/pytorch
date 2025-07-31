@@ -210,6 +210,6 @@ class WeightedDistributedSampler(DistributedSampler):
         assert len(weights) == self.num_samples
 
         rand_tensor = torch.multinomial(
-            weights, self.num_samples, self.replacement, generator=self.generator
+            torch.FloatTensor(weights), self.num_samples, self.replacement, generator=self.generator
         )
         yield from iter(rand_tensor.tolist())
