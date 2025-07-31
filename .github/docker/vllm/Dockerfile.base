@@ -302,7 +302,7 @@ ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 RUN pip install setuptools==75.6.0 packaging==23.2 ninja==1.11.1.3 build==1.2.2.post1
 
 # build flashinfer for torch nightly from source around 10 mins
-# release version: v0.2.2.post1
+# git clone a specific release version: v0.2.2.post1
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/uv \
@@ -375,4 +375,4 @@ FROM scratch as export-wheels
 # Just copy the wheels we prepared in previous stages
 COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
-COPY --from=vllm-base /vllm-workspace/wheels/flashinfer-dist /wheels/flashinfer-python
+COPY --from=vllm-base /vllm-workspace/wheels/flashinfer /wheels/flashinfer-python
