@@ -240,9 +240,7 @@ jobs:
             cd .ci/pytorch/cli
             python3 -m pip install -e .
           )
-          export PATH=$HOME/.local/bin:$PATH
-          ~/.local/bin/build-cli --help
-          build-cli "$BUILD_TARGET" --artifact-dir shared --torch-whl-dir "./dist" --base-image "$DOCKER_IMAGE" run
+          python3 -m build_cli.cli "$BUILD_TARGET" --artifact-dir shared --torch-whl-dir "./dist" --base-image "$DOCKER_IMAGE" run
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 
