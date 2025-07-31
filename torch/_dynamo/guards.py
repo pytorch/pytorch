@@ -1033,7 +1033,6 @@ class GuardBuilder(GuardBuilderBase):
         if not accessor_info.present_in_generic_dict:
             # The attribute can be accessed by __getattribute__ call, so rely on
             # PyObject_GetAttr
-            breakpoint()
             return base_guard_manager.getattr_manager(
                 attr=source.member,
                 source=source_name,
