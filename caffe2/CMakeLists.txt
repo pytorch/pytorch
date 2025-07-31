@@ -1346,6 +1346,10 @@ if(BUILD_TEST)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
     add_subdirectory(${TORCH_ROOT}/test/cpp/nativert ${CMAKE_BINARY_DIR}/test_nativert)
     add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
+    add_subdirectory(
+      ${TORCH_ROOT}/test/cpp/tensorexpr
+      ${CMAKE_BINARY_DIR}/test_tensorexpr
+    )
     if(USE_DISTRIBUTED)
       add_subdirectory(${TORCH_ROOT}/test/cpp/c10d ${CMAKE_BINARY_DIR}/test_cpp_c10d)
       if(NOT WIN32)
@@ -1766,6 +1770,10 @@ if(USE_ROCM)
   endif()
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
+
+  if(USE_FBGEMM_GENAI)
+    target_link_libraries(torch_hip PRIVATE fbgemm_genai)
+  endif()
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
