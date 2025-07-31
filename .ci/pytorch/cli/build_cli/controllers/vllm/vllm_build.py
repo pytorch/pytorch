@@ -2,6 +2,7 @@ import os
 import subprocess
 import textwrap
 from dataclasses import dataclass
+from typing import Any, final
 
 from lib.utils import (
     clone_vllm,
@@ -65,8 +66,8 @@ def build_vllm(artifact_dir: str, torch_whl_dir: str, base_image: str):
     run("cp .github/scripts/vllm/clean_testin.py  ./vllm/clean_testin.py", logging=True)
 
     torch_arg, _ = _prepare_torch_wheels(torch_whl_dir)
-    base_arg, pull_flag = _get_base_image_args(base_image)
-    cmd = _generate_docker_build_cmd(cfg, result_path, torch_arg, base_arg, pull_flag)
+    base_arg, final_base_img,pull_flag = _get_base_image_args(base_image)
+    cmd = _generate_docker_build_cmd(cfg, result_path, torch_arg, base_arg,final_base_img, pull_flag)
     print("Running docker build", flush=True)
     print(cmd, flush=True)
     run(cmd, cwd="vllm", logging=True, env=os.environ.copy())
@@ -82,7 +83,7 @@ def _prepare_torch_wheels(torch_whl_dir: str) -> tuple[str, str]:
     return f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}", tmp_dir
 
 
-def _get_base_image_args(base_image: str) -> tuple[str, str]:
+def _get_base_image_args(base_image: str) -> tuple[str, str, str]:
     """
     Returns:
         - base_image_arg: docker buildx arg string for base image
@@ -90,18 +91,19 @@ def _get_base_image_args(base_image: str) -> tuple[str, str]:
     """
     pull_flag = ""
     if not base_image:
-        return "", ""
+        return "","",""
 
-    base_image_arg = f"--build-arg BASE_IMAGE={base_image}"
+    base_image_arg = f"--build-arg BUILD_BASE_IMAGE={base_image}"
+    final_base_image_arg = f"--build-arg FINAL_BASE_IMAGE={base_image}"
     if local_image_exists(base_image):
         print(f"[INFO] Found local image: {base_image}", flush=True)
         pull_flag = "--pull=false"
-        return base_image_arg, pull_flag
+        return base_image_arg,final_base_image_arg, pull_flag
     print(
         f"[INFO] Local image not found: {base_image}, will try to pull from remote",
         flush=True,
     )
-    return base_image_arg, ""
+    return base_image_arg,final_base_image_arg, ""
 
 
 def _generate_docker_build_cmd(
@@ -109,6 +111,7 @@ def _generate_docker_build_cmd(
     result_path: str,
     torch_arg: str,
     base_image_arg: str,
+    final_base_image_arg: str,
     pull_flag: str,
 ) -> str:
     return textwrap.dedent(f"""
@@ -118,6 +121,7 @@ def _generate_docker_build_cmd(
             {pull_flag} \
             {torch_arg} \
             {base_image_arg} \
+            {final_base_image_arg} \
             --build-arg max_jobs={cfg.max_jobs} \
             --build-arg CUDA_VERSION={cfg.cuda} \
             --build-arg PYTHON_VERSION={cfg.py} \

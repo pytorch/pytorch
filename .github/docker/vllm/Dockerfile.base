@@ -6,7 +6,6 @@ ARG PYTHON_VERSION=3.12
 ARG BUILD_BASE_IMAGE=torch-nightly-base
 ARG FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 
-
 From nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 as torch-nightly-base
 ARG CUDA_VERSION=12.8.1
 ARG PYTHON_VERSION=3.12
@@ -77,7 +76,7 @@ ENV UV_INDEX_STRATEGY="unsafe-best-match"
 # install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
     if ! python3 -m uv --version >/dev/null 2>&1; then \
-        python3 -m pip install uv; \
+        python3 -m pip install uv==0.8.4; \
     fi
 
 WORKDIR /workspace
@@ -234,10 +233,35 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
 
 ################### VLLM INSTALLED IMAGE ####################
 # Setup clean environment for vLLM and its dependencies for test and api server using ubuntu22.04 with AOT flashinfer
-FROM ${BUILD_BASE_IMAGE} AS vllm-base
+FROM ${FINAL_BASE_IMAGE} AS vllm-base
 USER root
 # prepare for environment starts
 WORKDIR /workspace
+
+RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
+    echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
+
+# Install Python and other dependencies if it does not existed
+RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
+      echo "Installing Python ${PYTHON_VERSION}..." && \
+      echo 'tzdata tzdata/Areas select America' | debconf-set-selections && \
+      echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections && \
+      apt-get update -y && \
+      apt-get install -y ccache software-properties-common git curl sudo && \
+      for i in 1 2 3; do \
+        add-apt-repository -y ppa:deadsnakes/ppa && break || \
+        { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
+      done && \
+      apt-get update -y && \
+      apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv && \
+      update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
+      update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} && \
+      ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config && \
+      curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}; \
+   else \
+      echo "Python ${PYTHON_VERSION} already present, skipping setup."; \
+   fi \
+   && python3 --version && python3 -m pip --version
 
 # get the nightly torch version used in the build to make sure the version is the same
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
@@ -261,6 +285,13 @@ ENV UV_INDEX_STRATEGY="unsafe-best-match"
 # default mount file as placeholder, this just avoid the mount error
 # change to a different vllm folder if this does not exist anymore
 ARG TORCH_WHEELS_PATH="./requirements"
+
+
+# Workaround for https://github.com/openai/triton/issues/2507 and
+# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
+# this won't be needed for future versions of this docker image
+# or future versions of triton.
+RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 
 # Install torch, torchaudio and torchvision
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
@@ -286,29 +317,33 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /wheels/xformers/*.whl --verbose
 
-ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
-ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
+ARG torch_cuda_arch_list='8.0;8.9;9.0a'
 # install package for build flashinfer
 # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
 RUN pip install setuptools==75.6.0 packaging==23.2 ninja==1.11.1.3 build==1.2.2.post1
 
-# build flashinfer for torch nightly from source around 10 mins
-# git clone a specific release version: v0.2.2.post1
+# Build flashinfer for torch nightly from source around 10 mins
+ARG FLASHINFER_GIT_REPO="https://github.com/flashinfer-ai/flashinfer.git"
+# Keep this in sync with https://github.com/vllm-project/vllm/blob/main/requirements/cuda.txt
+# We use `--force-reinstall --no-deps` to avoid issues with the existing FlashInfer wheel.
+ARG FLASHINFER_GIT_REF="v0.2.9rc2"
 ENV CCACHE_DIR=/root/.cache/ccache
-RUN --mount=type=cache,target=/root/.cache/ccache \
-    --mount=type=cache,target=/root/.cache/uv \
-    echo "git clone flashinfer..." \
-    && git clone --recursive https://github.com/flashinfer-ai/flashinfer.git \
-    && cd flashinfer \
-    && git checkout v0.2.2.post1 \
-    && git submodule update --init --recursive \
-    && echo "finish git clone flashinfer..." \
-    && rm -rf build \
-    && export TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list} \
-    && FLASHINFER_ENABLE_AOT=1 python3 setup.py bdist_wheel --dist-dir=../wheels/flashinfer --verbose \
-    && cd .. \
-    && rm -rf flashinfer
+RUN --mount=type=cache,target=/root/.cache/uv bash - <<'BASH'
+  . /etc/environment
+    git clone --depth 1 --recursive --shallow-submodules \
+        --branch ${FLASHINFER_GIT_REF} \
+        ${FLASHINFER_GIT_REPO} flashinfer
+    echo "Building FlashInfer for arches: ${torch_cuda_arch_list}"
+    # Needed to build AOT kernels
+    pushd flashinfer
+        TORCH_CUDA_ARCH_LIST="${torch_cuda_arch_list}" \
+            python3 -m flashinfer.aot
+        TORCH_CUDA_ARCH_LIST="${torch_cuda_arch_list}" \
+            uv pip install --system --no-build-isolation --force-reinstall --no-deps .
+    popd
+    rm -rf flashinfer
+BASH
 
 # install flashinfer python
 RUN --mount=type=cache,target=/root/.cache/uv \
