@@ -73,12 +73,12 @@ class VllmTestRunner:
         self.generated_test_txt()
         run("uv pip install --system -r test.txt")
         run("cat test.txt")
+        run ("uv pip install --system --no-build-isolation "git+https://github.com/state-spaces/mamba@v2.2.4"")
         run("pip freeze | grep -E 'torch|xformers|torchvision|torchaudio|flashinfer'")
         os.chdir("..")
 
     def install_local_whls(self):
         torch = "dist/torch-*.whl"
-
         local_whls = [
             "dist/vision/torchvision*.whl",
             "dist/audio/torchaudio*.whl",
@@ -109,6 +109,7 @@ class VllmTestRunner:
         # remove torch dependencies
         clean_torch_dependecies()
         pkgs = ["torch", "torchvision", "torchaudio", "xformers", "flashinfer-python"]
+
         tmp_head_path = Path(tempfile.mkstemp()[1])
         with tmp_head_path.open("w") as tmp_head:
             for pkg in pkgs:
@@ -137,7 +138,7 @@ class VllmTestRunner:
 
 def clean_torch_dependecies(requires_files=["requirements/test.in"]):
     # Keywords to match exactly
-    keywords_to_remove = ["torch==", "torchaudio==", "torchvision=="]
+    keywords_to_remove = ["torch==", "torchaudio==", "torchvision==", "mamba_ssm"]
     for file in requires_files:
         print(f">>> cleaning {file}")
         with open(file) as f:
