@@ -3473,15 +3473,17 @@ def maybe_log_cudagraph_partition(
     Cudagraph partition may lead to extra memory overhead so we
     log partition reasons to help users understand the overhead.
     """
-    if config.triton.cudagraphs:
-        warning_msg = f"{prefix}{msg}"
+    if not config.triton.cudagraphs:
+        return
 
-        if (
-            node
-            and (ir_node := node.node)
-            and (fx_node := ir_node.get_origin_node())
-            and (stack_trace := fx_node.meta.get("stack_trace", None))
-        ):
-            warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
+    warning_msg = f"{prefix}{msg}"
 
-        perf_hint_log.warning(warning_msg)
+    if (
+        node
+        and (ir_node := node.node)
+        and (fx_node := ir_node.get_origin_node())
+        and (stack_trace := fx_node.meta.get("stack_trace", None))
+    ):
+        warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
+
+    perf_hint_log.warning(warning_msg)
