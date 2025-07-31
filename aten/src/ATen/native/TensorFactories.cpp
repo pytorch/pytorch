@@ -695,6 +695,10 @@ TensorOptions infer_full_options(
     if (fill_value.isBoolean()) {
       return options.dtype(at::kBool);
     } else if (fill_value.isIntegral(false)) {
+      double value = fill_value.toDouble();
+      TORCH_CHECK(
+          value > static_cast<double>(std::numeric_limits<int64_t>::max()),
+          "Overflow for int64");
       return options.dtype(at::kLong);
     } else if (fill_value.isComplex()) {
       auto scalar_type = (get_default_dtype() == ScalarType::Double)

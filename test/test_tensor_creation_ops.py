@@ -3178,6 +3178,10 @@ class TestTensorCreation(TestCase):
             ctype = torch.complex128 if dtype is torch.double else torch.complex64
             self.assertEqual(t.dtype, ctype)
 
+            # Tests int64 overflow
+            with self.assertRaisesRegex(RuntimeError, "Overflow for int64"):
+                torch.full((2, 2), torch.iinfo(torch.int64).max - 1)
+
     def test_full_out(self, device):
         size = (5,)
         o = torch.empty(size, device=device, dtype=torch.long)
