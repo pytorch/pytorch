@@ -687,6 +687,16 @@ static void avg_pool_out_mps_template(const Tensor& output,
 
 } // namespace mps
 
+// TODO: The MPS graph impl can sometimes give significantly better performance
+// than the Metal impl for cases where the stride is 1 in all dimensions. There
+// may be a code path in the graph kernel that specifically optimizes for that
+// case. We should look into implementing a specialized case in Metal so we can
+// avoid using the graph impl.
+static bool use_graph_for_max_pool2d(IntArrayRef kernel_size, IntArrayRef stride_) {
+  IntArrayRef stride = stride_.empty() ? kernel_size : stride_;
+  return (stride[0] == 1) && (stride.size() == 1 || stride[1] == 1);
+}
+
 Tensor mps_max_pool2d(const Tensor& input,
                       IntArrayRef kernel_size,
                       IntArrayRef stride,
@@ -694,8 +704,26 @@ Tensor mps_max_pool2d(const Tensor& input,
                       IntArrayRef dilation,
                       bool ceil_mode) {
   Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
-#if !defined(__MAC_14_0) && (!defined(MAC_OS_X_VERSION_14_0) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_14_0))
-  if (input.scalar_type() == c10::kByte) {
+  bool use_graph = use_graph_for_max_pool2d(kernel_size, stride);
+  if (use_graph) {
+    mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
+      MPSGraph* mpsGraph = cachedGraph.graph();
+      return [mpsGraph maxPooling2DWithSourceTensor:cachedGraph.inputTensor descriptor:desc name:nil];
+    };
+    mps::pool2d_template(input,
+                         output,
+                         std::nullopt,
+                         std::nullopt,
+                         kernel_size,
+                         stride,
+                         padding,
+                         dilation,
+                         ceil_mode,
+                         false,
+                         std::nullopt,
+                         pooling_op_block,
+                         "max_pool2d");
+  } else {
     mps::max_pool_with_indices_out_mps_template(output,
                                                 std::nullopt,
                                                 input,
@@ -706,26 +734,7 @@ Tensor mps_max_pool2d(const Tensor& input,
                                                 ceil_mode,
                                                 /*pooling_dims=*/2,
                                                 "max_pool2d");
-    return output;
   }
-#endif
-  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
-    MPSGraph* mpsGraph = cachedGraph.graph();
-    return [mpsGraph maxPooling2DWithSourceTensor:cachedGraph.inputTensor descriptor:desc name:nil];
-  };
-  mps::pool2d_template(input,
-                       output,
-                       std::nullopt,
-                       std::nullopt,
-                       kernel_size,
-                       stride,
-                       padding,
-                       dilation,
-                       ceil_mode,
-                       false,
-                       std::nullopt,
-                       pooling_op_block,
-                       "max_pool2d");
   return output;
 }
 
@@ -770,8 +779,35 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)
  bool ceil_mode,
  const Tensor& output,
  const Tensor& indices) {
-#if !defined(__MAC_14_0) && (!defined(MAC_OS_X_VERSION_14_0) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_14_0))
-  if (input.scalar_type() == at::kByte) {
+  bool use_graph = use_graph_for_max_pool2d(kernel_size, stride);
+  if (use_graph) {
+    auto indices_memory_format = indices.suggest_memory_format();
+
+    mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
+      MPSGraph* mpsGraph = cachedGraph.graph();
+      NSArray<MPSGraphTensor*>* poolOutputs =
+          [mpsGraph maxPooling2DReturnIndicesWithSourceTensor:cachedGraph.inputTensor descriptor:desc name:nil];
+      cachedGraph.indicesTensor = mps::castMPSTensor(mpsGraph, poolOutputs[1], ScalarType::Long);
+      return poolOutputs[0];
+    };
+    mps::pool2d_template(input,
+                         output,
+                         indices,
+                         std::nullopt,
+                         kernel_size,
+                         stride,
+                         padding,
+                         dilation,
+                         ceil_mode,
+                         false,
+                         std::nullopt,
+                         pooling_op_block,
+                         "max_pool2d_indices");
+    if (indices_memory_format == MemoryFormat::ChannelsLast) {
+      const_cast<Tensor&>(indices) = indices.to(MemoryFormat::ChannelsLast);
+    }
+
+  } else {
     mps::max_pool_with_indices_out_mps_template(output,
                                                 indices,
                                                 input,
@@ -782,36 +818,6 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)
                                                 ceil_mode,
                                                 /*pooling_dims=*/2,
                                                 "max_pool2d");
-
-    return;
-  }
-#endif
-  auto indices_memory_format = indices.suggest_memory_format();
-
-  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
-    MPSGraph* mpsGraph = cachedGraph.graph();
-    NSArray<MPSGraphTensor*>* poolOutputs = [mpsGraph maxPooling2DReturnIndicesWithSourceTensor:cachedGraph.inputTensor
-                                                                                     descriptor:desc
-                                                                                           name:nil];
-    cachedGraph.indicesTensor = mps::castMPSTensor(mpsGraph, poolOutputs[1], ScalarType::Long);
-    return poolOutputs[0];
-  };
-  mps::pool2d_template(input,
-                       output,
-                       indices,
-                       std::nullopt,
-                       kernel_size,
-                       stride,
-                       padding,
-                       dilation,
-                       ceil_mode,
-                       false,
-                       std::nullopt,
-                       pooling_op_block,
-                       "max_pool2d_indices");
-
-  if (indices_memory_format == MemoryFormat::ChannelsLast) {
-    const_cast<Tensor&>(indices) = indices.to(MemoryFormat::ChannelsLast);
   }
 }
 

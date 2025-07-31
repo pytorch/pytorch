@@ -88,7 +88,7 @@ void max_pool_3d_input_iter(
   }
 }
 
-template <typename T>
+template <typename T, bool return_indices>
 void max_pool_2d_input_iter(
     constant T* input,
     device T* output,
@@ -99,8 +99,7 @@ void max_pool_2d_input_iter(
     constant int32_t* kernel_size,
     constant int32_t* stride,
     constant int32_t* padding,
-    constant int32_t* dilation,
-    bool return_indices) {
+    constant int32_t* dilation) {
   auto bounds0 = get_input_iter_bounds<0>(
       input_sizes, pooling_dim_indices, kernel_size, stride, padding, dilation);
   auto bounds1 = get_input_iter_bounds<1>(
@@ -260,7 +259,7 @@ kernel void max_pool(
   PoolOffsets offsets = find_pool_offsets(
       output_sizes,
       output_strides,
-      indices_strides,
+      return_indices ? indices_strides : nullptr,
       input_strides,
       pooling_dim_indices,
       dims,
@@ -272,32 +271,46 @@ kernel void max_pool(
   indices += offsets.indices;
   input += offsets.input_leading;
 
-  if (pooling_dims == 3) {
-    max_pool_3d_input_iter<T>(
-        input,
-        output,
-        indices,
-        input_sizes + leading_dims,
-        input_strides + leading_dims,
-        pooling_dim_indices,
-        kernel_size,
-        stride,
-        padding,
-        dilation,
-        return_indices);
-  } else if (pooling_dims == 2) {
-    max_pool_2d_input_iter<T>(
-        input,
-        output,
-        indices,
-        input_sizes + leading_dims,
-        input_strides + leading_dims,
-        pooling_dim_indices,
-        kernel_size,
-        stride,
-        padding,
-        dilation,
-        return_indices);
+  switch (pooling_dims) {
+    case 2:
+      if (return_indices) {
+        return max_pool_2d_input_iter<T, /*return_indices=*/true>(
+            input,
+            output,
+            indices,
+            input_sizes + leading_dims,
+            input_strides + leading_dims,
+            pooling_dim_indices,
+            kernel_size,
+            stride,
+            padding,
+            dilation);
+      } else {
+        return max_pool_2d_input_iter<T, /*return_indices=*/false>(
+            input,
+            output,
+            indices,
+            input_sizes + leading_dims,
+            input_strides + leading_dims,
+            pooling_dim_indices,
+            kernel_size,
+            stride,
+            padding,
+            dilation);
+      }
+    case 3:
+      return max_pool_3d_input_iter<T>(
+          input,
+          output,
+          indices,
+          input_sizes + leading_dims,
+          input_strides + leading_dims,
+          pooling_dim_indices,
+          kernel_size,
+          stride,
+          padding,
+          dilation,
+          return_indices);
   }
 }
 
