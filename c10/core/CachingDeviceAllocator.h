@@ -859,7 +859,7 @@ struct CachingDeviceAllocatorImpl {
     context_recorder_.store(nullptr);
   }
 
-  BlockT* malloc(c10::DeviceIndex device, size_t size, c10::Stream stream) {
+  BlockT* malloc(c10::DeviceIndex device, size_t orig_size, c10::Stream c10_stream) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
@@ -879,13 +879,56 @@ struct CachingDeviceAllocatorImpl {
       //    effect on memory use during capture should be small.
       process_events(context);
     }
+    StreamT stream = StreamT(c10_stream);
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
+    const size_t alloc_size = get_allocation_size(size);
+  }
+
+   /** Returns a copy of the memory allocator stats **/
+   DeviceStats getStats() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    return stats;
   }
 
  private:
 
   /* internal functions */
+
+  BlockPool<BlockT>& get_pool(size_t size, StreamT stream) {
+    // captures_underway is a conservative guess that the current stream may be
+    // capturing. It's only non-empty if some thread has begun and not yet ended
+    // a capture, so it's usually 0, and we can short-circuit
+    // cudaStreamCaptureStatus (which does a TLS lookup).
+    if (C10_UNLIKELY(!captures_underway.empty())) {
+      for (auto& entry : captures_underway) {
+        if (entry.second(stream)) {
+          auto it1 = graph_pools.find(entry.first);
+          TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
+          if (size <= kSmallSize) {
+            return it1->second->small_blocks;
+          } else {
+            return it1->second->large_blocks;
+          }
+        }
+      }
+    }
+    if (size <= kSmallSize) {
+      return small_blocks;
+    } else {
+      return large_blocks;
+    }
+  }
+
+  static size_t get_allocation_size(size_t size) {
+    if (size <= kSmallSize) {
+      return kSmallBuffer;
+    } else if (size < kMinLargeAlloc) {
+      return kLargeBuffer;
+    } else {
+      return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
+    }
+  }
 
   // This function takes the size and number of divisions argument and rounds
   // up the size argument for the nearest power-of-2 division.
