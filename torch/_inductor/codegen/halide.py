@@ -275,10 +275,6 @@ class HalideOverrides(OpOverrides):
         return f"hl.fast_exp(hl.cast(hl.Float(32), {x})) if {x.name}.type().bits() <= 32 else hl.exp({x})"
 
     @staticmethod
-    def libdevice_exp(x):
-        return f"hl.exp({x})"  # higher precision that ops.exp
-
-    @staticmethod
     def sqrt(x):
         return f"hl.sqrt({x})"
 
@@ -647,12 +643,12 @@ def eq(left, right):
     if V.graph.sizevars.statically_known_equals(left, right):
         return True
     try:
-        a = V.graph.sizevars.size_hint(left)
-        b = V.graph.sizevars.size_hint(right)
+        a = V.graph.sizevars.size_hint_or_throw(left)
+        b = V.graph.sizevars.size_hint_or_throw(right)
     except TypeError:  # unbacked symints
         return False
     if a == b:
-        V.graph.sizevars.guard_equals(left, right)
+        V.graph.sizevars.check_equals(left, right)
     return a == b
 
 
@@ -660,15 +656,15 @@ def lt(left, right):
     if V.graph.sizevars.statically_known_lt(left, right):
         return True
     try:
-        a = V.graph.sizevars.size_hint(left)
-        b = V.graph.sizevars.size_hint(right)
+        a = V.graph.sizevars.size_hint_or_throw(left)
+        b = V.graph.sizevars.size_hint_or_throw(right)
     except TypeError:  # unbacked symints
         gcd = sympy.gcd(left, right)
         if gcd == left:
             return left != right
         return False
     if a < b:
-        V.graph.sizevars.guard_lt(left, right)
+        V.graph.sizevars.check_lt(left, right)
     return a < b
 
 
@@ -943,7 +939,7 @@ class HalideKernel(SIMDKernel):
 
         # group the expression by variables used
         offset = sympy.S.Zero
-        split_expr = {s: sympy.S.Zero for s in symbols}
+        split_expr = dict.fromkeys(symbols, sympy.S.Zero)
         split_failed: list[tuple[list[sympy.Symbol], sympy.Expr]] = []
         index = sympy.expand(self.rename_indexing(index))
         for part in index.args if isinstance(index, sympy.Add) else [index]:
@@ -1451,7 +1447,7 @@ class HalideKernel(SIMDKernel):
         current_device = V.graph.get_current_device_or_throw()
         if current_device.type == "cpu":
             target = [config.halide.cpu_target]
-            schduler = config.halide.scheduler_cpu
+            scheduler = config.halide.scheduler_cpu
             scheduler_flags = {
                 "parallelism": parallel_num_threads(),
             }
@@ -1460,7 +1456,7 @@ class HalideKernel(SIMDKernel):
             assert current_device.type == "cuda", "only cpu/cuda supported"
             assert current_device.index <= 0, "only default device supported"
             target = [config.halide.gpu_target]
-            schduler = config.halide.scheduler_cuda
+            scheduler = config.halide.scheduler_cuda
             capability = torch.cuda.get_device_properties(current_device)
             if "cuda_capability" not in target[0]:
                 for major, minor in [(8, 6), (8, 0), (7, 5), (7, 0), (6, 1)]:
@@ -1494,7 +1490,7 @@ class HalideKernel(SIMDKernel):
         return HalideMeta(
             argtypes,
             target="-".join(target),
-            scheduler=schduler,
+            scheduler=scheduler,
             scheduler_flags=scheduler_flags,  # type: ignore[arg-type]
             cuda_device=cuda_device,
         )
@@ -1637,7 +1633,9 @@ class HalideKernel(SIMDKernel):
         call_args = [f"{n}" for n, arg in self.halide_argdefs() if arg.alias_of is None]
         current_device = V.graph.get_current_device_or_throw()
         if current_device.type == "cuda":
-            stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
+            stream_name = wrapper.write_get_raw_stream(
+                current_device.index, V.graph.name
+            )
             call_args.append(stream_name)
         wrapper.generate_kernel_call(
             name,

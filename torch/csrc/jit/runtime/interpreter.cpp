@@ -55,7 +55,7 @@ C10_DEFINE_bool(
 C10_DEFINE_bool(
     torch_jit_enable_expanded_stacks,
     false,
-    "When true we will attemps to pre-expand node stacks and cache expanded stacks.")
+    "When true we will attempts to pre-expand node stacks and cache expanded stacks.")
 
 C10_DEFINE_bool(
     torch_jit_expanded_stacks_mangled,
@@ -106,7 +106,7 @@ inline int64_t getDistAutogradContextId() {
 }
 } // namespace
 
-thread_local InterpreterStateImpl* tls_int_state_ptr_ = nullptr;
+static thread_local InterpreterStateImpl* tls_int_state_ptr_ = nullptr;
 struct TLSCurrentInterpreterGuard {
   TLSCurrentInterpreterGuard(InterpreterStateImpl* state)
       : prev_state_(tls_int_state_ptr_) {

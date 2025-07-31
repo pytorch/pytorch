@@ -6,8 +6,9 @@ import re
 from dataclasses import dataclass
 from enum import auto, Enum
 from typing import Callable, Optional, TYPE_CHECKING
+from typing_extensions import assert_never
 
-from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
+from torchgen.utils import NamespaceHelper, OrderedSet
 
 
 if TYPE_CHECKING:
@@ -270,6 +271,7 @@ STRUCTURED_DISPATCH_KEYS = {
     DispatchKey.CUDA,
     DispatchKey.CPU,
     DispatchKey.XPU,
+    DispatchKey.MTIA,
 }
 UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
@@ -286,6 +288,8 @@ dispatch_keys = [
     DispatchKey.SparseCsrXPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
+    DispatchKey.SparseMPS,
+    DispatchKey.SparseCsrMPS,
     DispatchKey.QuantizedCPU,
     DispatchKey.QuantizedCUDA,
     DispatchKey.CompositeImplicitAutograd,
@@ -295,6 +299,7 @@ dispatch_keys = [
     DispatchKey.NestedTensorCPU,
     DispatchKey.NestedTensorCUDA,
     DispatchKey.NestedTensorXPU,
+    DispatchKey.NestedTensorHPU,
     # Meta is a magic key: it is automatically generated for structured
     # kernels
     DispatchKey.Meta,
@@ -303,6 +308,7 @@ dispatch_keys = [
     DispatchKey.QuantizedMeta,
     DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,
+    DispatchKey.MTIA,
 ]
 
 
@@ -589,7 +595,7 @@ class NativeFunction:
     has_composite_explicit_autograd_non_functional_kernel: bool
 
     # Tags are used to describe semantic information about (groups of) operators,
-    # That aren't easily inferrable directly from the operator's schema.
+    # That aren't easily inferable directly from the operator's schema.
     tags: set[str]
 
     # NB: The benefit of defining a dataclass is that we automatically get

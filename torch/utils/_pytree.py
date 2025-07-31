@@ -43,6 +43,8 @@ from typing import (
 )
 from typing_extensions import deprecated, NamedTuple, Self
 
+from torch.torch_version import TorchVersion as _TorchVersion
+
 
 __all__ = [
     "PyTree",
@@ -111,10 +113,14 @@ class KeyEntry(Protocol):
 
 
 class EnumEncoder(json.JSONEncoder):
-    def default(self, obj: object) -> str:
+    def default(self, obj: object) -> Union[str, dict[str, Any]]:
         if isinstance(obj, Enum):
-            return obj.value  # type: ignore[no-any-return]
-        return super().default(obj)  # type: ignore[no-any-return]
+            return {
+                "__enum__": True,
+                "fqn": f"{obj.__class__.__module__}:{obj.__class__.__qualname__}",
+                "name": obj.name,
+            }
+        return cast(str, super().default(obj))
 
 
 Context = Any
@@ -170,24 +176,23 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 # NB: we try really hard to not import _cxx_pytree (which depends on optree)
 # as much as possible. This is for isolation: a user who is not using C++ pytree
 # shouldn't pay for it, and it helps makes things like cpython upgrades easier.
+_optree_minimum_version = _TorchVersion("0.13.0")
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
+    # No optree package found
     _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
+    _optree_version = _TorchVersion("0.0.0a0")
 else:
-    _cxx_pytree_exists = True
-    from torch._vendor.packaging.version import Version
-
-    _cxx_pytree_dynamo_traceable = Version(_optree_version) >= Version("0.13.0")
-    if not _cxx_pytree_dynamo_traceable:
-        warnings.warn(
-            "optree is installed but the version is too old to support PyTorch Dynamo in C++ pytree. "
-            "C++ pytree support is disabled. "
-            "Please consider upgrading optree using `python3 -m pip install --upgrade 'optree>=0.13.0'`.",
-            FutureWarning,
-        )
-
-    del Version
+    _optree_version = _TorchVersion(_optree_version)
+    if _optree_version < _optree_minimum_version:
+        # optree package less than our required minimum version.
+        # Pretend the optree package doesn't exist.
+        # NB: We will raise ImportError if the user directly tries to
+        # `import torch.utils._cxx_pytree` (look in that file for the check).
+        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
+    else:
+        _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = True
 
 _cxx_pytree_imported = False
 _cxx_pytree_pending_imports: list[Any] = []
@@ -1212,6 +1217,26 @@ class TreeSpec:
 
         return unflatten_fn(child_pytrees, self.context)
 
+    def __hash__(self) -> int:
+        node_type = self.type
+        if node_type is defaultdict:
+            default_factory, dict_context = self.context
+            hashable_context = (default_factory, tuple(dict_context))
+        elif node_type in (dict, OrderedDict):
+            hashable_context = tuple(self.context)
+        elif node_type is None or node_type in BUILTIN_TYPES:
+            hashable_context = self.context
+        elif isinstance(self.context, ConstantNode):
+            hashable_context = self.context.value
+        else:
+            # The context for user-defined node types might not be hashable.
+            # Ignore it for hashing.
+            # This does not break the correctness that equal objects imply the
+            # same hash. This might increase the hash collision rate, but we
+            # don't care about that.
+            hashable_context = None
+        return hash((node_type, hashable_context, tuple(self.children_specs)))
+
 
 # NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
 # this class with `dataclasses.fields`, etc., while having a simplified
@@ -1815,6 +1840,18 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
     return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
 
 
+def enum_object_hook(obj: dict[str, Any]) -> Union[Enum, dict[str, Any]]:
+    if "__enum__" in obj:
+        modname, _, classname = obj["fqn"].partition(":")
+        mod = importlib.import_module(modname)
+        enum_cls = mod
+        for attr in classname.split("."):
+            enum_cls = getattr(enum_cls, attr)
+        enum_cls = cast(type[Enum], enum_cls)
+        return enum_cls[obj["name"]]
+    return obj
+
+
 def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
     if (
         json_schema["type"] is None
@@ -1833,7 +1870,7 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
 
     if serialize_node_def.from_dumpable_context is None:
         try:
-            context = json.loads(json_schema["context"])
+            context = json.loads(json_schema["context"], object_hook=enum_object_hook)
         except TypeError as ex:
             raise TypeError(
                 "Unable to deserialize context. "

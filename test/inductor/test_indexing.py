@@ -55,7 +55,7 @@ class TestIndexingSimplification(InductorTestCase):
             sizevars.simplify_with_ranges(expr, var_ranges),
             i1 + 128 * i2 + 64 * ModularIndexing(r3, 1, 2),
         )
-        # all the modular indexing should be removed when the body cant be larger than the modulus
+        # all the modular indexing should be removed when the body can't be larger than the modulus
         var_ranges[r3] = 2
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
@@ -95,7 +95,7 @@ class TestIndexingSimplification(InductorTestCase):
             ModularIndexing(i0 + i1 * i2 * r3, i2, r3), ModularIndexing(i0, i2, r3)
         )
 
-        # if there are negative terms, we cannot optimize away zero terms due to https://github.com/openai/triton/issues/619
+        # if there are negative terms, we cannot optimize away zero terms due to https://github.com/triton-lang/triton/issues/619
         self.assertEqual(
             ModularIndexing(-i0 + i1 * 20, 2, 10), ModularIndexing(-i0 + i1 * 20, 2, 10)
         )
@@ -205,6 +205,13 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(expr2, actual)
         self.assertNotEqual(ModularIndexing(x, 1, b), actual)
 
+    def test_modular_indexing_positive(self):
+        x = sympy.Symbol("x", integer=True, positive=True)
+        expr = ModularIndexing(x, 1, 1024) - 1
+        expr2 = abs(expr)
+
+        self.assertNotEqual(expr2, expr)
+
     def test_expand_floor_div_skipped(self):
         sizevars = SizeVarAllocator()
         x = sympy.Symbol("x", integer=True, positive=True)
@@ -240,7 +247,7 @@ class TestIndexingSimplification(InductorTestCase):
         x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device=GPU_TYPE)
 
         triton_code = run_and_get_triton_code(f, x)
-        # Make sure the 2 load uses simpified indexing rather than something like
+        # Make sure the 2 load uses simplified indexing rather than something like
         # tl.load(in_ptr0 + ((5504*x1) + (x0 // 2)),
         self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
         if DO_PERF_TEST:
@@ -432,9 +439,9 @@ class ExprPrinterTests(InductorTestCase):
             )
             self.assertEqual(
                 cexpr(expr),
-                f"std::{s}({{x, 2LL*x, 3LL*x}})"
+                f"std::{s}<int64_t>({{x, 2LL*x, 3LL*x}})"
                 if sys.platform in ["darwin", "win32"]
-                else f"std::{s}({{x, 2L*x, 3L*x}})",
+                else f"std::{s}<int64_t>({{x, 2L*x, 3L*x}})",
             )
 
 

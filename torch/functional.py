@@ -412,7 +412,7 @@ def einsum(*args: Any) -> Tensor:
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         _operands = operands[0]
-        # recurse incase operands contains value that has torch function
+        # recurse in case operands contains value that has torch function
         # in the original implementation this line is omitted
         return einsum(equation, *_operands)
 
@@ -1460,8 +1460,13 @@ def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
 
     Args:
-        x1 (Tensor): input tensor of shape :math:`B \times P \times M`.
-        x2 (Tensor): input tensor of shape :math:`B \times R \times M`.
+        x1 (Tensor): input tensor where the last two dimensions represent the points and the feature dimension respectively.
+            The shape can be :math:`D_1 \times D_2 \times \cdots \times D_n \times P \times M`,
+            where :math:`P` is the number of points and :math:`M` is the feature dimension.
+        x2 (Tensor): input tensor where the last two dimensions also represent the points and the feature dimension respectively.
+            The shape can be :math:`D_1' \times D_2' \times \cdots \times D_m' \times R \times M`,
+            where :math:`R` is the number of points and :math:`M` is the feature dimension,
+            which should match the feature dimension of `x1`.
         p: p value for the p-norm distance to calculate between each vector pair
             :math:`\in [0, \infty]`.
         compute_mode:
@@ -1517,7 +1522,7 @@ def atleast_1d(*tensors):
     Input tensors with one or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 1-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1538,6 +1543,8 @@ def atleast_1d(*tensors):
         >>> y = torch.tensor(1.)
         >>> torch.atleast_1d((x, y))
         (tensor([0.5000]), tensor([1.]))
+        >>> torch.atleast_1d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
@@ -1553,7 +1560,7 @@ def atleast_2d(*tensors):
     Input tensors with two or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 2-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1576,6 +1583,8 @@ def atleast_2d(*tensors):
         >>> y = torch.tensor(1.)
         >>> torch.atleast_2d((x, y))
         (tensor([[0.5000]]), tensor([[1.]]))
+        >>> torch.atleast_2d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
@@ -1591,7 +1600,7 @@ def atleast_3d(*tensors):
     Input tensors with three or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 3-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1622,6 +1631,8 @@ def atleast_3d(*tensors):
         >>> y = torch.tensor(1.0)
         >>> torch.atleast_3d((x, y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
+        >>> torch.atleast_3d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
@@ -1808,6 +1819,7 @@ def norm(  # noqa: F811
     if input.layout == torch.strided and input.device.type in (
         "cpu",
         "cuda",
+        "xpu",
         "meta",
         torch.utils.backend_registration._privateuse1_backend_name,
     ):

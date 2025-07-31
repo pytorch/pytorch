@@ -474,6 +474,54 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.frame_count, 2)
 
+    def test_dunder_call_recompile(self):
+        class Foo:
+            def __call__(self, x):
+                return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter)
+        def f(x, foo):
+            return foo(x)
+
+        x = torch.ones(2)
+        foo1 = Foo()
+        foo2 = Foo()
+
+        # no recompilation
+        f(x, foo1)
+        f(x, foo2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # one recompilation
+        Foo.__call__ = lambda self, x: x + 2
+        f(x, foo1)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_no_recompile_over_unused_objects(self):
+        # This is a regression test case that imitates
+        # https://github.com/city96/ComfyUI-GGUF/blob/47bec6147569a138dd30ad3e14f190a36a3be456/ops.py#L169-L182
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def f(x, key, patches):
+            return x * x + 1
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def apply_patches(f, x, keys):
+            patches = []
+            for key, patch in keys:  # noqa: F402
+                patches.append(patch)
+            x = f(x, key, patches)
+            return x
+
+        # no recompilation
+        x = torch.rand(10)
+        apply_patches(f, x, [("a", 1), ("b", 2)])
+        self.assertEqual(counter.frame_count, 1)
+        apply_patches(f, x, [("c", 3), ("d", 4)])
+        self.assertEqual(counter.frame_count, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

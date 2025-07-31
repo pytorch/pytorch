@@ -15,34 +15,28 @@ from torch._C._functorch import (
     is_batchedtensor,
     maybe_get_bdim,
 )
-from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
-    _maybe_reenter_make_fx,
     _maybe_run_with_interpreter,
     _set_compilation_env,
+    materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     unique_graph_id,
-    UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
-    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
-from .utils import _from_fun
+from .utils import clone_outputs_aliasing_inputs
 
 
 log = logging.getLogger(__name__)
@@ -102,7 +96,9 @@ def cond(
         false_fn (Callable): A callable function (a -> b) that is within the
           scope that is being traced. The true branch and false branch must
           have consistent input and outputs, meaning the inputs have to be
-          the same, and the outputs have to be the same type and shape.
+          the same, and the outputs have to be the same type and shape. Int
+          output is also allowed. We'll make the output dynamic by turning it
+          into a symint.
 
         operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the
           true/false functions. It can be empty if true_fn/false_fn doesn't require input. Defaults to ().
@@ -111,8 +107,12 @@ def cond(
 
         def true_fn(x: torch.Tensor):
             return x.cos()
+
+
         def false_fn(x: torch.Tensor):
             return x.sin()
+
+
         return cond(x.shape[0] > 4, true_fn, false_fn, (x,))
 
     Restrictions:
@@ -186,7 +186,11 @@ def cond(
     def _cond_op_wrapper(*args, **kwargs):
         return cond_op(*args, **kwargs)
 
-    with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit(), _temp_remove_pre_dispatch_torch_function_mode():
+    with (
+        _set_compilation_env(),
+        torch._dynamo.utils.disable_cache_limit(),
+        _temp_remove_pre_dispatch_torch_function_mode(),
+    ):
         with _temp_remove_metadata_torch_function_mode() as metadata_mode:
             if metadata_mode:
                 backend = make_eager_backend_with_torch_function_mode(metadata_mode)
@@ -195,31 +199,6 @@ def cond(
             return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
                 pred, true_fn, false_fn, operands
             )
-
-
-def materialize_as_graph(
-    fn: Callable,
-    args: tuple[Any],
-    include_key_set: torch._C.DispatchKeySet,
-    exclude_key_set: torch._C.DispatchKeySet,
-    force_enable_grad=False,
-) -> torch.fx.GraphModule:
-    @torch._dynamo.disable(recursive=True, reason=None)
-    def _materialize_as_graph_inner():
-        with suspend_functionalization(), disable_functional_mode():
-            with disable_proxy_modes_tracing():
-                unfunc_t = [_from_fun(arg) for arg in args]
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(
-                torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
-            )
-            if force_enable_grad:
-                stack.enter_context(torch.enable_grad())
-            return _maybe_reenter_make_fx(fn)(*unfunc_t)
-
-    gm = _materialize_as_graph_inner()
-    assert gm is not None
-    return gm
 
 
 def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
@@ -258,11 +237,17 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
         tangents = args_and_grad_outs[n_primals:]
         grad_args = bw_fn(primals, tangents)[1]
         assert len(args) == len(grad_args)
+        # In order to keep HOPs functional where the backward graph,
+        # would have outputs that are aliasing inputs.
+        # For example in cases where the backward of the function is simply
+        # passing the upstream gradients through.
+        maybe_clone = clone_outputs_aliasing_inputs(args_and_grad_outs)
+
         return [
             (
                 torch.zeros_like(arg)
                 if isinstance(arg, torch.Tensor) and grad is None
-                else grad
+                else maybe_clone(grad)
             )
             for grad, arg in zip(grad_args, primals)
         ]
@@ -271,9 +256,9 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
-    assert isinstance(
-        operands, (list, tuple)
-    ), f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
+    assert isinstance(operands, (list, tuple)), (
+        f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
+    )
 
     true_graph = reenter_make_fx(true_fn)(*operands)
     false_graph = reenter_make_fx(false_fn)(*operands)
@@ -320,9 +305,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def cond_op_dense(pred, true_fn, false_fn, operands):
-    assert all(
-        isinstance(o, (torch.Tensor, int)) for o in operands
-    ), f"Dense implementation operands must be a list of tensors and ints {operands}"
+    assert all(isinstance(o, (torch.Tensor, int)) for o in operands), (
+        f"Dense implementation operands must be a list of tensors and ints {operands}"
+    )
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     if pred:
@@ -363,7 +348,7 @@ class CondAutogradOp(torch.autograd.Function):
         operands = saved_tensors_and_symints(ctx)
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
-        # trace through the joint funcion when torch.compile torch.autograd.grad.
+        # trace through the joint function when torch.compile torch.autograd.grad.
         true_bw_gm = materialize_as_graph(
             ctx._true_bw_fn,
             args,
@@ -391,7 +376,7 @@ class CondAutogradOp(torch.autograd.Function):
 # As long as one of the tensors in pred or operands requires grad,
 # all the output would require grad with backward fn set to be the CondAutogradOp.
 # This is consistent with autograd.Function's semantic.
-@cond_op.py_impl(DispatchKey.Autograd)
+@cond_op.py_autograd_impl
 def cond_autograd(pred, true_fn, false_fn, operands):
     return CondAutogradOp.apply(
         pred,
@@ -427,7 +412,7 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
 
     merged_outs = []
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
-        merged_outs.append(_merge_tensors(true_out, false_out, mode))
+        merged_outs.append(_merge_output(true_out, false_out, mode))
     return pytree.tree_unflatten(merged_outs, true_out_spec)
 
 
@@ -449,14 +434,41 @@ def check_tensor_meta_match(
         )
 
 
-def _merge_tensors(
-    a: Optional[torch.Tensor], b: Optional[torch.Tensor], mode: FakeTensorMode
+def _merge_output(
+    a: Optional[Union[torch.Tensor, int]],
+    b: Optional[Union[torch.Tensor, int]],
+    mode: FakeTensorMode,
 ):
-    from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
+    from torch.fx.experimental.symbolic_shapes import (
+        has_free_unbacked_symbols,
+        SymIntEqByExpr,
+    )
 
     if a is None or b is None:
         assert a is None and b is None, (a, b)
         return None
+
+    def min_max(s0, s1):
+        def _bound(s0, lower_bound: bool):
+            if isinstance(s0, int):
+                return s0
+            r = mode.shape_env.var_to_range.get(  # type: ignore[union-attr]
+                s0.node.expr,
+                torch.utils._sympy.value_ranges.ValueRanges.unknown(),
+            )
+            return r.lower if lower_bound else r.upper
+
+        return min(_bound(s0, True), _bound(s1, True)), max(
+            _bound(s0, False), _bound(s1, False)
+        )
+
+    if type(a) is int and type(b) is int:
+        if a == b:
+            return a
+        assert mode.shape_env is not None
+        merged_out = mode.shape_env.create_unbacked_symint()
+        mode.shape_env.constrain_symbol_range(merged_out.node.expr, *min_max(a, b))
+        return merged_out
 
     assert type(a) is FakeTensor and type(b) is FakeTensor, (a, type(a), b, type(b))
 
@@ -495,25 +507,23 @@ def _merge_tensors(
         u3 has range [5, 7]
     """
     merged_size: list[Union[int, torch.SymInt]] = []
+
+    def _has_unbacked_symbols(s: Union[int, torch.SymInt]) -> bool:
+        if isinstance(s, int):
+            return False
+        else:
+            return has_free_unbacked_symbols(s.node.expr)
+
     for s0, s1 in zip(a.size(), b.size()):
-        if SymIntEqByExpr(s0) == SymIntEqByExpr(s1):
+        # If there are unbacked symbols leaked out of true_branch or false_branch
+        # we need to merge them with a new unbacked symbol and track in parent graph.
+        if (
+            not _has_unbacked_symbols(s0)
+            and not _has_unbacked_symbols(s1)
+            and SymIntEqByExpr(s0) == SymIntEqByExpr(s1)
+        ):
             merged_size.append(s0)
         else:
-
-            def min_max(s0, s1):
-                def _bound(s0, lower_bound: bool):
-                    if isinstance(s0, int):
-                        return s0
-                    r = mode.shape_env.var_to_range.get(  # type: ignore[union-attr]
-                        s0.node.expr,
-                        torch.utils._sympy.value_ranges.ValueRanges.unknown(),
-                    )
-                    return r.lower if lower_bound else r.upper
-
-                return min(_bound(s0, True), _bound(s1, True)), max(
-                    _bound(s0, False), _bound(s1, False)
-                )
-
             assert mode.shape_env is not None
             new_size = mode.shape_env.create_unbacked_symint()
             mode.shape_env.constrain_symbol_range(new_size.node.expr, *min_max(s0, s1))
@@ -521,11 +531,11 @@ def _merge_tensors(
 
     """
     This follows the logic in symbolic_shapes._compute_symbolic_stride
-    Step 2: Since tensor stride is an accumulative muliplication of the sizes, which is a permutated
-        (due to view ops) non-decending sequence.
+    Step 2: Since tensor stride is an accumulative multiplication of the sizes, which is a permutated
+        (due to view ops) non-descending sequence.
 
         Case 1: No size is 1. In this case, strides have unique values.
-            For example, suppose we have a tenosr with:
+            For example, suppose we have a tensor with:
             size [3, 4, 3, 5, 4, 5],
             stride (1200, 300, 1, 12, 3, 60),
             merged_size [u0, u1, u2, u3, u4, u5].
@@ -542,7 +552,7 @@ def _merge_tensors(
                 ...
 
         Case 2: At least one dimension has size 1, which can produce duplicates in strides.
-            In this case, theorectically, we cannot uniquely determine the expr of strides because
+            In this case, theoretically, we cannot uniquely determine the expr of strides because
             the accessing stride_expr with same key in different order causes the final stride expression
             to be different.
 
@@ -552,7 +562,7 @@ def _merge_tensors(
                 merged_size: (u0, u1)
 
             The stride expr could either be (u1, 1) or (1, u0) depending on whether we start with u1 or u0.
-            For this reason, we try to break tie by sorting via decending index so we always get (u1, 1).
+            For this reason, we try to break tie by sorting via descending index so we always get (u1, 1).
 
             Note that backend might optimize the strides anyway so this is usually not a problem as long
             as two branches matches. See relevant discussions in https://github.com/pytorch/pytorch/issues/142024.
@@ -625,9 +635,9 @@ def _merge_tensors(
 
             if _maybe_expr(a_val) in a_stride_expr:
                 a_expr = a_stride_expr[_maybe_expr(a_val)]
-                assert (
-                    b_stride_expr[_maybe_expr(b_val)] == a_expr
-                ), f"a_stride_expr:{a_stride_expr}, b_stride_expr:{b_stride_expr}"
+                assert b_stride_expr[_maybe_expr(b_val)] == a_expr, (
+                    f"a_stride_expr:{a_stride_expr}, b_stride_expr:{b_stride_expr}"
+                )
                 merged_strides[i] = a_expr
             else:
                 if a_val == 1:
@@ -663,29 +673,18 @@ def _merge_tensors(
 
 @cond_op.py_functionalize_impl
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
+    from torch._higher_order_ops.utils import _check_alias_and_mutation
+
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
     with ctx.redispatch_to_next():
         functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
         functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        for branch in [true_fn, false_fn]:
-            if _has_potential_branch_input_mutation(
-                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be modifying the input! "
-                    "Consider cloning the input before modifying it. "
-                )
-        for branch in [true_fn, false_fn]:
-            if _has_potential_branch_input_alias(
-                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
-            ):
-                raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be aliasing the input! "
-                    "If you are returning a view of the input, please make sure "
-                    "to clone it. "
-                )
+        for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
+            _check_alias_and_mutation(
+                branch, unwrapped_inputs, branch_name, pre_dispatch
+            )
 
         cond_return = cond_op(
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
@@ -695,12 +694,12 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
 
 @cond_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
-    assert isinstance(
-        inputs, (list, tuple)
-    ), "Cond inputs must be a list or tuple of tensors"
-    assert all(
-        isinstance(i, torch.Tensor) for i in inputs
-    ), "Cond inputs must be a list of tensors"
+    assert isinstance(inputs, (list, tuple)), (
+        "Cond inputs must be a list or tuple of tensors"
+    )
+    assert all(isinstance(i, torch.Tensor) for i in inputs), (
+        "Cond inputs must be a list of tensors"
+    )
 
     pred_is_batched = isinstance(pred, torch.Tensor) and is_batchedtensor(pred)
     pred_ = get_unwrapped(pred) if pred_is_batched else pred

@@ -10,7 +10,9 @@ The key classes are:
   attribute access, and other Python object behaviors.
 - Specialized subclasses for common patterns:
   - UserDefinedDictVariable: For dict subclasses
+  - UserDefinedSetVariable: For set subclasses
   - UserDefinedTupleVariable: For tuple subclasses
+  - UserDefinedExceptionObjectVariable: For exception subclasses
   - FrozenDataClassVariable: Special handling of frozen dataclasses
   - MutableMappingVariable: For collections.abc.MutableMapping subclasses
 
@@ -21,6 +23,7 @@ These classes help Dynamo track and handle arbitrary Python objects during traci
 maintaining proper semantics while enabling optimizations where possible.
 """
 
+import _collections
 import builtins
 import collections
 import contextlib
@@ -28,6 +31,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import itertools
 import random
 import sys
 import threading
@@ -42,19 +46,20 @@ import torch.nn
 from torch._guards import TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
-from .. import polyfills, variables
+from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
     raise_observed_exception,
-    unimplemented,
+    unimplemented_v2,
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
+    DataclassFieldsSource,
     GetItemSource,
     RandomValueSource,
     TypeSource,
@@ -65,9 +70,11 @@ from ..utils import (
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
+    frozenset_methods,
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
+    is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -76,12 +83,14 @@ from ..utils import (
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
+    set_methods,
     tensortype_to_dtype,
     tuple_methods,
     unpatched_nn_module_getattr,
 )
 from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
+from .lists import SizeVariable
 
 
 try:
@@ -96,11 +105,16 @@ except ImportError:
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 def is_standard_setattr(val):
     return val in (object.__setattr__, BaseException.__setattr__)
+
+
+def is_standard_delattr(val):
+    return val in (object.__delattr__, BaseException.__delattr__)
 
 
 def is_forbidden_context_manager(ctx):
@@ -142,7 +156,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return f"{self.__class__.__name__}({self.value})"
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _constant_fold_classes():
         return {
             torch.device,
@@ -152,12 +166,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
         }
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _in_graph_classes():
         _in_graph_class_list = {
             torch.Tensor,
+            torch.cuda.FloatTensor,
+            torch.cuda.DoubleTensor,
+            torch.cuda.HalfTensor,
+            torch.cuda.BFloat16Tensor,
+            torch.cuda.ByteTensor,
+            torch.cuda.CharTensor,
+            torch.cuda.IntTensor,
+            torch.cuda.ShortTensor,
+            torch.cuda.LongTensor,
+            torch.Stream,
+            torch.Event,
             torch.cuda.Stream,
             torch.cuda.Event,
+            torch.xpu.Stream,
+            torch.xpu.Event,
         }
         if hasattr(torch, "hpu"):
             _in_graph_class_list.update(
@@ -170,7 +197,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return set(tensortype_to_dtype.keys()) | _in_graph_class_list
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def supported_c_new_functions():
         exceptions = [
             getattr(builtins, name).__new__
@@ -181,6 +208,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return {
             object.__new__,
             dict.__new__,
+            set.__new__,
+            frozenset.__new__,
             tuple.__new__,
             list.__new__,
         }.union(exceptions)
@@ -265,6 +294,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(obj)
         elif isinstance(obj, enum.Enum):
             return EnumVariable(obj)
+        elif self.value is collections.OrderedDict:
+            return variables.GetAttrVariable(self, name)
         elif name in getattr(self.value, "__dict__", {}) or (
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
@@ -376,6 +407,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
+        elif issubclass(self.value, dict) and name != "__new__":
+            # __new__ is handled below
+            return variables.BuiltinVariable(dict).call_method(tx, name, args, kwargs)
+        elif issubclass(self.value, (set, frozenset)) and name != "__new__":
+            # __new__ is handled below
+            return variables.BuiltinVariable(set).call_method(tx, name, args, kwargs)
         elif (
             name == "__new__"
             and self.value is collections.OrderedDict
@@ -442,38 +479,78 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:
-                unimplemented("TypedDict with optional keys not supported")
+                unimplemented_v2(
+                    gb_type="TypedDict with optional keys",
+                    context=str(self.value),
+                    explanation="Dyanmo does not support tracing TypedDict with optional keys",
+                    hints=[
+                        "Avoid using TypedDict with optional keys",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
             return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
         elif self.value is collections.deque:
             maxlen = variables.ConstantVariable.create(None)
-            if not kwargs:
-                if len(args) == 0:
-                    items = []
-                elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
-                    items = args[0].force_unpack_var_sequence(tx)
-                elif len(args) == 2 and args[0].has_force_unpack_var_sequence(tx):
-                    items = args[0].force_unpack_var_sequence(tx)
-                    maxlen = args[1]
-                else:
-                    unimplemented("deque() with more than 2 arg not supported")
-            elif tuple(kwargs) == ("maxlen",):
-                maxlen = kwargs["maxlen"]
-                if len(args) == 0:
-                    items = []
-                if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
-                    items = args[0].force_unpack_var_sequence(tx)
-                else:
-                    unimplemented("deque() with more than 1 arg not supported")
+
+            def deque_signature(iterable=None, maxlen=None):
+                pass
+
+            try:
+                bound_args = inspect.signature(deque_signature).bind(*args, **kwargs)
+            except TypeError as e:
+                unimplemented_v2(
+                    gb_type="collections.deque() with bad arguments",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="Detected call to collections.deque() with bad arguments.",
+                    hints=[
+                        "Fix the call to collections.deque().",
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                    from_exc=e,
+                )
+
+            if "iterable" in bound_args.arguments:
+                if not bound_args.arguments["iterable"].has_force_unpack_var_sequence(
+                    tx
+                ):
+                    unimplemented_v2(
+                        gb_type="collections.deque() with bad iterable argument",
+                        context=f"args={args}, kwargs={kwargs}",
+                        explanation="Call to collections.deque() has an iterable argument that Dynamo cannot "
+                        "convert to a list.",
+                        hints=[
+                            "Use a simpler sequence type that Dynamo can convert to a list "
+                            "(e.g. list, tuple, list iterator, etc.)",
+                            *graph_break_hints.USER_ERROR,
+                        ],
+                    )
+                items = bound_args.arguments["iterable"].force_unpack_var_sequence(tx)
             else:
-                unimplemented("deque() with invalid kwargs not supported")
+                items = []
+
+            if "maxlen" in bound_args.arguments:
+                maxlen = bound_args.arguments["maxlen"]
+
             return variables.lists.DequeVariable(
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
         elif self.value is weakref.ref:
-            return variables.WeakRefVariable(args[0])
+            if len(args) > 1:
+                callback = args[1]
+            else:
+                callback = variables.ConstantVariable.create(None)
+            return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
-                unimplemented("functools.partial malformed")
+                unimplemented_v2(
+                    gb_type="missing args to functools.partial",
+                    context="",
+                    explanation="functools.partial requires at least one argument",
+                    hints=[
+                        "Fix the functools.partial call.",
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
             # The first arg, a callable (the ctor below will assert on types)
             fn = args[0]
             rest_args = args[1:]
@@ -519,17 +596,29 @@ class UserDefinedClassVariable(UserDefinedVariable):
             ):
                 # We are not changing the behavior of Dynamo as these function were
                 # already ignored on trace_rules.py before #136033 landed
-                unimplemented(
-                    f"{self.value} not supported. This may be due to its use of "
+                unimplemented_v2(
+                    gb_type="unsupported contextlib.* API",
+                    context=f"{self.value}",
+                    explanation=f"{self.value} not supported. This may be due to its use of "
                     "context-specific operations that are not supported in "
-                    "Dynamo yet (i.e. Exception handling)"
+                    "Dynamo yet (i.e. Exception handling)",
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
             if self.value is contextlib._GeneratorContextManager and isinstance(
                 args[0], BaseUserFunctionVariable
             ):
                 if not torch._dynamo.config.enable_trace_contextlib:
-                    unimplemented("contextlib.contextmanager")
+                    unimplemented_v2(
+                        gb_type="attempted to trace contextlib.contextmanager",
+                        context=f"args={args}",
+                        explanation="Tracing contextlib.contextmanager is disabled.",
+                        hints=[
+                            "Set torch._dynamo.config.enable_trace_contextlib = True",
+                        ],
+                    )
                 # Wrap UserFunctionVariable in FunctionDecoratedByContextlibContextManagerVariable
                 # if the function is annotated with @contextlib.contextmanager
                 # This shouldn't be necessary once generator functions are fully
@@ -579,13 +668,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 assert all(x is not None for x in items)
 
             return variables.NamedTupleVariable(items, self.value)
+        elif self.value is torch.Size:
+            # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
+            tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
+            return SizeVariable(tup.items)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)
+            fields_source = DataclassFieldsSource(self.source)
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
 
             default_kwargs = {}
-            for field, var_tracker in zip(fields, items):
+            for ind, field, var_tracker in zip(itertools.count(), fields, items):
                 if var_tracker is None:
                     if field.name in kwargs:
                         var_tracker = kwargs[field.name]
@@ -594,7 +688,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             continue
 
                         if field.default is not dataclasses.MISSING:
-                            var_tracker = VariableTracker.build(tx, field.default)
+                            var_tracker = VariableTracker.build(
+                                tx,
+                                field.default,
+                                source=AttrSource(
+                                    GetItemSource(fields_source, ind), "default"
+                                ),
+                            )
                         elif field.default_factory is not dataclasses.MISSING:
                             factory_fn = VariableTracker.build(
                                 tx, field.default_factory
@@ -701,7 +801,6 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     def fn(self):
         return self.value
 
-    @property
     def python_type(self):
         return self.value
 
@@ -730,7 +829,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
 
-    _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
+    _nonvar_fields = {
+        "value",
+        "value_type",
+        "attrs_directly_modifed_on_dict",
+        *UserDefinedVariable._nonvar_fields,
+    }
 
     def __init__(
         self,
@@ -757,6 +861,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         #   obj = base_cls.__new__(user_cls, *args)
         self.base_cls_vt = base_cls_vt
         self.init_args = init_args
+
+        # This records names of the attributes that were modified via instance
+        # `__dict__` directly, rather than the normal setattr path.
+        #
+        # TODO consider emulating `obj.__dict__` as a `ConstDictVariable` to get
+        # rid of these workarounds here and in `GetAttrVariable`.
+        self.attrs_directly_modifed_on_dict = set()
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -802,18 +913,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def get_torch_fn(self, tx):
         self.torch_function_check()
-        from .torch_function import build_torch_function_fn
+        from .torch_function import get_torch_function_fn
 
-        return build_torch_function_fn(tx, self.value, self.source)
+        return get_torch_function_fn(tx, self)
 
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         self.torch_function_check()
 
-        from .torch_function import _get_subclass_type_var, call_torch_function
+        from .torch_function import call_torch_function
 
         return call_torch_function(
             tx,
-            _get_subclass_type_var(tx, self),
             self.get_torch_fn(tx),
             fn,
             types,
@@ -822,7 +932,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _supported_random_functions():
         fns = {
             random.random,
@@ -857,6 +967,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
+            if is_standard_delattr(method):
+                return self.method_setattr_standard(
+                    tx, args[0], variables.DeletedVariable()
+                )
+
             if method is object.__eq__ and len(args) == 1 and not kwargs:
                 other = args[0]
                 if not isinstance(other, UserDefinedObjectVariable):
@@ -869,7 +984,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if torch._dynamo.config.enable_faithful_generator_behavior and isinstance(
                 self.value, types.GeneratorType
             ):
-                unimplemented("Generator as graph argument is not supported")
+                unimplemented_v2(
+                    gb_type="call_method on generator",
+                    context=f"object={self.value}, method={name}, args={args}, kwargs={kwargs}",
+                    explanation="Detected a method call to a user-defined generator object. "
+                    "This is not fully supported.",
+                    hints=[
+                        "Set `torch._dynamo.config.enable_faithful_generator_behavior = False`. Note that this "
+                        "may cause silent incorrectness, since we will eagerly unpack generators instead of lazily "
+                        "evaluating them.",
+                    ],
+                )
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
@@ -893,14 +1018,45 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def method_setattr_standard(self, tx: "InstructionTranslator", name, value):
+    def method_setattr_standard(
+        self, tx: "InstructionTranslator", name, value, directly_update_dict=False
+    ):
         try:
             name = name.as_python_constant()
         except NotImplementedError:
-            unimplemented(f"non-const setattr name: {name}")
-        if not tx.output.side_effects.is_attribute_mutation(self):
-            unimplemented(f"setattr({self}, {name}, ...)")
+            unimplemented_v2(
+                gb_type="non-const setattr name on user-defined object",
+                context=f"object={self}, name={name}, value={value}",
+                explanation="Detected a call to `setattr` of a user-defined object with a non-constant name.",
+                hints=["Ensure that the name is a string."],
+            )
+        assert tx.output.side_effects.is_attribute_mutation(self), (
+            "Attempted setattr on a user-defined object that does not have "
+            "an AttributeMutation mutation_type"
+        )
 
+        if directly_update_dict:
+            self.attrs_directly_modifed_on_dict.add(name)
+        else:
+            tmp = self.try_get_descritor_and_setter_py_func(name)
+            if tmp:
+                descriptor, setter = tmp
+                # Emulate
+                # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1371-L1452
+                desc_source = None
+                func_source = None
+                if self.cls_source:
+                    desc_source = self.get_source_by_walking_mro(name)
+                    # use `type(...)` to ignore instance attrs.
+                    func_source = AttrSource(TypeSource(desc_source), "__set__")
+                desc_var = VariableTracker.build(tx, descriptor, desc_source)
+                func_var = VariableTracker.build(tx, setter, func_source)
+                args = [desc_var, self, value]
+                return func_var.call_function(tx, args, {})
+            # NOTE: else we assume the descriptor (if any) has a
+            # side-effect-free `__set__` as far as Dynamo tracing is concerned.
+
+        # Emulate the standard setattr on instance dict.
         tx.output.side_effects.store_attr(self, name, value)
         return variables.ConstantVariable(None)
 
@@ -973,8 +1129,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [var], kwargs)
 
             if self.source is None:
-                unimplemented(
-                    "Sourceless UserDefinedObjectVariable method not supported"
+                unimplemented_v2(
+                    gb_type="attempted to call sourceless user-defined object as a method",
+                    context=f"object={self.value}, function={func}, args={args}, kwargs={kwargs}",
+                    explanation="Dynamo does not support this.",
+                    hints=[
+                        f"Ensure the user-defined object {self.value} is constructed outside the compiled region.",
+                    ],
                 )
             func_src = AttrSource(self.source, "__func__")
             func_var = VariableTracker.build(tx, func, func_src)
@@ -983,7 +1144,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif callable(self.value):
             if self.source:
-                install_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                source = AttrSource(self.cls_source, "__call__")
+                install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
@@ -1005,26 +1167,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
-        import _collections
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
+        # NOTE we assume the following descriptors are side-effect-free as far
+        # as Dynamo tracing is concerned.
         if not object_has_getattribute(self.value) and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
-            or isinstance(
-                subobj, _collections._tuplegetter
-            )  # namedtuple fields are represented by _tuplegetter
-            or (
-                inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
-            )  # handle memberdecriptor and slots
+            or inspect.ismemberdescriptor(subobj)  # e.g., __slots__
+            or inspect.isgetsetdescriptor(subobj)  # e.g., __dict__
             or self._is_c_defined_property(subobj)
-            or inspect.isgetsetdescriptor(
-                subobj
-            )  # handle getsetdescriptor like __dict__
         ):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
-            subobj = self.value.__getattribute__(name)
+            subobj = type(self.value).__getattribute__(self.value, name)
         elif object_has_getattribute(self.value) and subobj is NO_SUCH_SUBOBJ:
             # If the object has an overridden getattribute method, Dynamo has
             # already tried tracing it, and encountered an AttributeError. We
@@ -1034,6 +1190,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             raise AttributeError
 
         return subobj
+
+    def should_skip_descriptor_setter(self, attr_name):
+        # Check if `attr_name` corresponds to a descriptor.
+        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
+        setter = inspect.getattr_static(type(descriptor), "__set__", None)
+        if setter:
+            # Skip if `__set__` was traceable (no need to redo the side effect).
+            if inspect.isfunction(setter):
+                return True
+            # For untraceable `__set__` we should still skip if the attribute
+            # was mutated via instance `__dict__`.
+            elif attr_name in self.attrs_directly_modifed_on_dict:
+                return True
+        return False
+
+    def try_get_descritor_and_setter_py_func(self, attr_name):
+        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
+        setter = inspect.getattr_static(type(descriptor), "__set__", None)
+        if inspect.isfunction(setter):
+            return (descriptor, setter)
+        return None
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
@@ -1054,7 +1231,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # should use DictGetItemSource here.
                 return GetItemSource(dict_source, name)
 
-        unimplemented(f"Could not find {name} in {type(self.value).__mro__}")
+        unimplemented_v2(
+            gb_type="could not find name in object's mro",
+            context=f"name={name}, object type={type(self.value)}, mro={type(self.value).__mro__}",
+            explanation=f"Could not find name `{name}` in mro {type(self.value).__mro__}",
+            hints=[
+                f"Ensure the name `{name}` is defined somewhere in {self.value}'s type hierarchy.",
+                *graph_break_hints.USER_ERROR,
+            ],
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         from .. import trace_rules
@@ -1139,7 +1324,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return out
 
             elif getattr_fn is not None:
-                unimplemented("UserDefined with non-function __getattr__")
+                unimplemented_v2(
+                    gb_type="User-defined object with non-function __getattr__",
+                    context=f"object={self.value}, name={name}, getattr_fn={getattr_fn}",
+                    explanation=f"Found a non-function __getattr__ {getattr_fn} from a user-defined object {self.value} "
+                    f" when attempting to getattr `{name}`",
+                    hints=[
+                        "Ensure the object's __getattr__ is a function type.",
+                    ],
+                )
 
         from ..mutation_guard import unpatched_nn_module_init
 
@@ -1155,12 +1348,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
+        elif isinstance(subobj, _collections._tuplegetter):
+            # namedtuple fields are represented by _tuplegetter, and here we
+            # emulate its `__get__`, which is implemented in C.
+            _, (idx, _) = subobj.__reduce__()
+            # Don't go through the `__getitem__` method anymore, see
+            # https://github.com/python/cpython/blob/470941782f74288823b445120f6383914b659f23/Modules/_collectionsmodule.c#L2690
+            assert isinstance(self, UserDefinedTupleVariable)
+            return self._tuple_vt.items[idx]
         elif isinstance(subobj, staticmethod):
+            # Safe because `staticmethod.__get__` basically won't trigger user
+            # code and just returns the underlying `__func__`:
+            # https://github.com/python/cpython/blob/3.11/Objects/funcobject.c#L1088-L1100
             func = subobj.__get__(self.value)
-            if source is not None:
-                return trace_rules.lookup(func).create_with_source(func, source=source)
-            else:
-                return trace_rules.lookup(func)(func)
+            return VariableTracker.build(tx, func, source)
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
@@ -1169,9 +1370,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # e.g.: inspect.getattr_static({}, "fromkeys")
             func = subobj.__get__(self.value, None)
             return VariableTracker.build(tx, func, source)
-        elif inspect.ismethoddescriptor(subobj) and not is_wrapper_or_member_descriptor(
-            subobj.__get__
+        elif is_lru_cache_wrapped_function(subobj):
+            # getattr_static returns the lru_wrapped function, and we cannot
+            # extract the underlying method from the wrapped function. To handle
+            # it, manually create a wrapped user method vt.
+            return variables.WrapperUserMethodVariable(
+                subobj, "__wrapped__", self, source=source
+            )
+        elif inspect.getattr_static(
+            type(subobj), "__get__", NO_SUCH_SUBOBJ
+        ) is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(
+            type(subobj).__get__
         ):
+            # Emulate https://github.com/python/cpython/blob/3.11/Objects/object.c#L1271-L1285
+            #
             # Attribute has a __get__ method. Create a user defined object vt
             # for the subobj, and then trace the __get__ method.
             descriptor_source = None
@@ -1180,7 +1392,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # To access the method descriptor from the udf object w/o using
                 # inspect.getattr_static, we can look into the class mro
                 descriptor_source = self.get_source_by_walking_mro(name)
-                descriptor_get_source = AttrSource(descriptor_source, "__get__")
+                descriptor_get_source = AttrSource(
+                    TypeSource(descriptor_source), "__get__"
+                )
                 descriptor_var = VariableTracker.build(tx, subobj, descriptor_source)
             else:
                 # Sourceless Builder does not support user defined objects
@@ -1211,16 +1425,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(subobj, types.MethodType):
                 if dynamic_subobj.__self__ is not self.value:
                     if not isinstance(dynamic_subobj.__func__, types.FunctionType):
-                        unimplemented(
-                            f"Found a method whose __func__ is not of FunctionType - {dynamic_subobj}"
+                        unimplemented_v2(
+                            gb_type="User-defined object method with non-function __func__",
+                            context=f"object={self.value}, name={name}, method={dynamic_subobj}, "
+                            f"method.__self__={dynamic_subobj.__self__}, method.__func__={dynamic_subobj.__func__}",
+                            explanation=f"Method {dynamic_subobj} (name={name}) of user-defined object {self.value} has a "
+                            f"__func__ ({dynamic_subobj.__func__}) that is not a function type.",
+                            hints=[
+                                "Ensure that the method's __func__ is a function type.",
+                            ],
                         )
 
-                    from .builder import SourcelessUserDefinedObjectBuilder
-
-                    # This means that we are calling a method of some other object here.
-                    object_vt = SourcelessUserDefinedObjectBuilder.create(
-                        tx, dynamic_subobj.__self__
+                    # Use the __self__ attribute of the method to find the
+                    # source of the new self object.
+                    self_source = None
+                    if source is not None:
+                        self_source = AttrSource(source, "__self__")
+                    object_vt = VariableTracker.build(
+                        tx, dynamic_subobj.__self__, self_source
                     )
+
                     return variables.UserMethodVariable(
                         dynamic_subobj.__func__, object_vt
                     )
@@ -1253,7 +1477,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and isinstance(self, variables.UnspecializedNNModuleVariable)
             # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
             # usecase for now.
-            and not tx.output.export
+            and (not tx.output.export or torch._dynamo.config.install_free_tensors)
         ):
             # Recalculate source for params/buffers
             if name in ("_buffers", "_parameters"):
@@ -1303,6 +1527,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
+    class HashWrapper:
+        """This class is hashed if a dataclass is used as a key in a dict.
+        It's necessary to avoid side effects from calling the __init__ of the dataclass class when hashing"""
+
+        def __init__(self, c, fields):
+            self.cls = c
+            self.fields = tuple(fields.items())
+
+        def __eq__(self, other):
+            return (
+                type(self) == type(other)
+                and self.cls == other.cls
+                and self.fields == other.fields
+            )
+
+        def __hash__(self):
+            return hash((self.cls, self.fields))
+
     @staticmethod
     def create(tx, value, source):
         from dataclasses import fields
@@ -1429,7 +1671,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             self.exc_vt.args = args
             self.value.args = args
             return variables.ConstantVariable(None)
-        if (
+        elif (
             name == "__setattr__"
             and len(args) == 2
             and isinstance(args[0], variables.ConstantVariable)
@@ -1437,11 +1679,17 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             in ("__cause__", "__context__", "__suppress_context__", "__traceback__")
         ):
             self.exc_vt.call_setattr(tx, args[0], args[1])
+        elif name == "with_traceback":
+            return self.exc_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     @property
     def __context__(self):
         return self.exc_vt.__context__
+
+    @property
+    def args(self):
+        return self.exc_vt.args
 
     def set_context(self, context: "variables.ExceptionVariable"):
         return self.exc_vt.set_context(context)
@@ -1474,6 +1722,15 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         return super().var_getattr(tx, name)
 
 
+class IntWrapperVariable(UserDefinedObjectVariable):
+    # Dummy class to check if the object is an IntWrapper, and turn it into a
+    # symint
+    @staticmethod
+    def is_matching_object(obj):
+        mod = sys.modules.get("torch.export.dynamic_shapes")
+        return mod is not None and type(obj) is mod._IntWrapper
+
+
 class RemovableHandleClass:
     # Dummy class to pass to python_type of RemovableHandleVariable
     # Useful for isinstance check on hooks
@@ -1502,7 +1759,7 @@ class RemovableHandleVariable(VariableTracker):
             return variables.ConstantVariable.create(None)
         super().call_method(tx, method_name, args, kwargs)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen"):
         if self.idx == self.REMOVED:
             # Hook has already been removed, return a dummy handle
             codegen.add_push_null(
@@ -1565,6 +1822,91 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._dict_vt)
 
+    @property
+    def items(self):
+        return self._dict_vt.items
+
+    def install_dict_keys_match_guard(self):
+        return self._dict_vt.install_dict_keys_match_guard()
+
+    def install_dict_contains_guard(self):
+        return self._dict_vt.install_dict_contains_guard()
+
+
+class UserDefinedSetVariable(UserDefinedObjectVariable):
+    """
+    Represents user defined objects that are subclasses of set.
+
+    Internally, it uses a SetVariable to represent the set part of the
+    variable tracker. For everything else, it falls back to
+    UserDefinedObjectVariable.
+    """
+
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, set_vt=None, **kwargs):
+        super().__init__(value, **kwargs)
+        self._set_vt = set_vt
+
+        python_type = set if isinstance(value, set) else frozenset
+        self._set_methods = set_methods if python_type is set else frozenset_methods
+
+        if self._set_vt is None:
+            assert self.source is None, (
+                "set_vt must be constructed by builder.py when source is present"
+            )
+            if python_type is set:
+                # set is initialized later
+                self._set_vt = variables.SetVariable(
+                    {}, mutation_type=ValueMutationNew()
+                )
+            else:
+                init_args = kwargs.get("init_args", {})
+                tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+                self._set_vt = variables.BuiltinVariable(python_type).call_function(
+                    tx, init_args, {}
+                )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        method = self._maybe_get_baseclass_method(name)
+        if method in self._set_methods:
+            return self._set_vt.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def as_python_constant(self):
+        return self._set_vt.as_python_constant()
+
+    def unpack_var_sequence(self, tx):
+        if inspect.getattr_static(self.value, "__iter__") in (
+            set.__iter__,
+            frozenset.__iter__,
+        ):
+            return self._set_vt.unpack_var_sequence(tx)
+        raise NotImplementedError
+
+    @property
+    def set_items(self):
+        return self._set_vt.set_items
+
+    @property
+    def items(self):
+        return self._set_vt.items
+
+    def is_underlying_vt_modified(self, side_effects):
+        return side_effects.is_modified(self._set_vt)
+
+    def install_dict_keys_match_guard(self):
+        return self._set_vt.install_dict_keys_match_guard()
+
+    def install_dict_contains_guard(self):
+        return self._set_vt.install_dict_contains_guard()
+
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
     """
@@ -1620,18 +1962,24 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
-    def __init__(self, value, **kwargs):
-        super().__init__(value, **kwargs)
-        self._tuple_vt = None
-
-    def set_underlying_tuple_vt(self, tuple_vt):
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
+        super().__init__(value, init_args=init_args, **kwargs)
         self._tuple_vt = tuple_vt
+        if self._tuple_vt is None:
+            assert self.source is None, (
+                "tuple_vt must be constructed by builder.py when source is present"
+            )
+            # Emulate `tuple.__new__`
+            # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
+            #
+            # TODO this duplicates the logic in `BuiltinVariable(tuple)`
+            from torch._dynamo.symbolic_convert import InstructionTranslator
 
-    @staticmethod
-    def create(value, tuple_vt, **kwargs):
-        result = UserDefinedTupleVariable(value, **kwargs)
-        result.set_underlying_tuple_vt(tuple_vt)
-        return result
+            tx = InstructionTranslator.current_tx()
+            elems = init_args[0].unpack_var_sequence(tx)
+            self._tuple_vt = variables.TupleVariable(
+                elems, mutation_type=ValueMutationNew()
+            )
 
     def call_method(
         self,

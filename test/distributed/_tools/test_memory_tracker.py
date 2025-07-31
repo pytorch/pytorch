@@ -6,17 +6,18 @@ import torch
 import torch.nn as nn
 from torch.distributed._tools import MemoryTracker
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 
 
 class TestMemoryTracker(TestCase):
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda/xpu")
     def test_local_model(self):
         """
         Minimal test case to check the memory tracker can collect the expected
         memory stats at operator level, as well as can print the summary result
         without crash.
         """
+        device = "cuda" if TEST_CUDA else "xpu"
         # Create a model with a hierarchy of modules
         torch.manual_seed(0)
         model = nn.Sequential(
@@ -28,16 +29,16 @@ class TestMemoryTracker(TestCase):
             ),
             nn.Flatten(start_dim=1),
             nn.Sequential(nn.Linear(64, 2), nn.ReLU(inplace=True)),
-        ).cuda()
+        ).to(device)
 
         # Run one iteration of forward and backward pass
         tracker = MemoryTracker()
         tracker.start_monitor(model)
 
-        x = torch.randn(size=(2, 3, 224, 224), device=torch.device("cuda"))
-        # torch.LongTensor expects cpu device type, not cuda device type in
-        # constructor, so calling .cuda() outside constructor here.
-        target = torch.LongTensor([0, 1]).cuda()
+        x = torch.randn(size=(2, 3, 224, 224), device=torch.device(device))
+        # torch.LongTensor expects cpu device type, not device type in
+        # constructor, so calling .to(device) outside constructor here.
+        target = torch.LongTensor([0, 1]).to(device)
         criterion = nn.CrossEntropyLoss()
         criterion(model(x), target).backward()
 
@@ -61,7 +62,7 @@ class TestMemoryTracker(TestCase):
         self.assertEqual(len(tracker.memories_reserved), tracker._op_index)
         self.assertTrue(len(tracker._markers) == 2)
         self.assertTrue(tracker._cur_module_name != "")
-        self.assertTrue(hasattr(tracker, "_num_cuda_retries"))
+        self.assertTrue(hasattr(tracker, "_num_alloc_retries"))
 
 
 if __name__ == "__main__":

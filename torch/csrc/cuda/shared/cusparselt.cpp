@@ -9,7 +9,7 @@ size_t getVersionInt() {
   return CUSPARSELT_VERSION;
 }
 
-std::tuple<int64_t, int64_t, bool, int64_t> mmSearch(
+std::tuple<int64_t, int64_t, int64_t, int64_t> mmSearch(
     const at::Tensor& compressed_A,
     const at::Tensor& dense_B,
     const std::optional<at::Tensor>& bias_opt,
@@ -18,7 +18,7 @@ std::tuple<int64_t, int64_t, bool, int64_t> mmSearch(
     bool transpose_result) {
   int alg_id_int = 0;
   int split_k = 1;
-  bool split_k_one_kernel = true;
+  int split_k_mode = -1;
   auto result = at::native::_cslt_sparse_mm_impl(
       compressed_A,
       dense_B,
@@ -28,12 +28,12 @@ std::tuple<int64_t, int64_t, bool, int64_t> mmSearch(
       transpose_result,
       alg_id_int,
       split_k,
-      split_k_one_kernel,
+      split_k_mode,
       true);
   return {
       (int64_t)std::get<1>(result),
       (int64_t)std::get<2>(result),
-      (bool)std::get<3>(result),
+      (int64_t)std::get<3>(result),
       (int64_t)std::get<4>(result)};
 }
 

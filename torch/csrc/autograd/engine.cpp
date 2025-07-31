@@ -75,17 +75,17 @@ inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
 std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
 #define COMPILED_AUTOGRAD_POISON \
   reinterpret_cast<Engine::compiled_autograd_fn>(1)
-std::atomic<int32_t> num_threads_in_backwards;
+std::atomic<int32_t> num_threads_in_compiled_autograd;
 struct CompiledAutogradThreadingDebugCheck {
   CompiledAutogradThreadingDebugCheck() {
-    num_threads_in_backwards++;
+    num_threads_in_compiled_autograd++;
   }
   ~CompiledAutogradThreadingDebugCheck() {
     release();
   }
   void release() {
     if (std::exchange(incremented, false)) {
-      num_threads_in_backwards--;
+      num_threads_in_compiled_autograd--;
     }
   }
 
@@ -289,8 +289,10 @@ void Engine::stop() {
   stopped_ = true;
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
-  auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
-  auto wait_duration = wait_duration_str ? std::atof(wait_duration_str) : 10.0;
+  auto wait_duration_str =
+      c10::utils::get_env("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
+  auto wait_duration =
+      wait_duration_str ? std::atof(wait_duration_str->c_str()) : 10.0;
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
     noBackward = noBackward && queue->empty();
@@ -609,7 +611,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
   }
 }
 
-// Reentrant call will re-use the graph_task's owner thread ready_queue for
+// Reentrant call will reuse the graph_task's owner thread ready_queue for
 // queueing tasks (NOTE: this is not true in the async_mode of the engine).
 // While we can create separate ready queue for each new reentrant
 // thread, but sharing the same cpu_ready_queue with parent thread is a
@@ -1063,12 +1065,28 @@ void Engine::evaluate_function(
     Node* func,
     InputBuffer& inputs,
     const std::shared_ptr<ReadyQueue>& cpu_ready_queue) {
-  // The InputBuffer::adds that supplied incoming grads took pains to
-  // ensure they're safe to consume in the context of the present
-  // func's stream (if applicable). So we guard onto that stream
-  // before working with the grads in any capacity.
+  // Locally set the current stream to func's associated stream
   auto opt_parent_stream = (*func).stream();
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
+
+  // Ensure that the incoming gradients are ready
+  for (size_t pos = 0; pos < inputs.ready_events.size(); ++pos) {
+    if (!inputs.buffer[pos].defined()) {
+      continue;
+    }
+    const auto device = inputs.buffer[pos].device();
+    bool is_accelerator = at::accelerator::isAccelerator(device.type());
+    if (!is_accelerator) {
+      continue;
+    }
+    auto& opt_ready_stream = inputs.ready_streams[pos];
+    auto& opt_ready_event = inputs.ready_events[pos];
+    TORCH_INTERNAL_ASSERT(opt_ready_stream && opt_parent_stream);
+    if (*opt_parent_stream != *opt_ready_stream) {
+      TORCH_INTERNAL_ASSERT(opt_ready_event);
+      opt_parent_stream->wait(opt_ready_event.value());
+    }
+  }
 
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
@@ -1207,7 +1225,7 @@ void Engine::evaluate_function(
 }
 
 static uint64_t compute_min_topological_nr(const edge_list& outputs) {
-  // Computes the mininum topological number among all the outputs
+  // Computes the minimum topological number among all the outputs
   if (outputs.empty()) {
     return 0;
   }
@@ -1278,8 +1296,6 @@ auto Engine::execute(
         "your parameters to None after use to break the cycle and avoid the leak.");
   }
 
-  // Allows us to assert no other threads are in backwards
-  CompiledAutogradThreadingDebugCheck _thread_check;
   auto compiled_autograd = the_compiled_autograd.load();
   TORCH_INTERNAL_ASSERT(compiled_autograd != COMPILED_AUTOGRAD_POISON);
 
@@ -1305,8 +1321,8 @@ auto Engine::execute(
 
   auto graph_task = std::make_shared<GraphTask>(
       /* keep_graph */ keep_graph,
-      /* create_graph */ create_graph,
-      /* depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
+      /* grad_mode */ create_graph,
+      /* reentrant_depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
       /* cpu_ready_queue */ local_ready_queue,
       /* graph_roots */ std::move(temp_roots));
 
@@ -1326,9 +1342,12 @@ auto Engine::execute(
   }
 
   if (compiled_autograd != nullptr) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        num_threads_in_compiled_autograd.load() == 0,
+        "Re-entrant into Compiled Autograd from a parent Compiled Autograd call is not yet supported. Consider disabling Compiled Autograd on the re-entrant call.");
+    // Allows us to assert no other threads are in backwards
+    CompiledAutogradThreadingDebugCheck _thread_check;
     // see [Note: Compiled Autograd]
-    TORCH_CHECK(
-        !create_graph, "compiled_autograd does not support create_graph");
     _thread_check.release();
     GraphTaskGuard guard(graph_task);
     CheckpointValidGuard cpvguard(graph_task);
@@ -1452,7 +1471,7 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   return graph_task->future_result_;
 }
 
-// note that when python is present, this base engine will be overriden
+// note that when python is present, this base engine will be overridden
 // with a PythonEngine. Because this typically happens before get_default_engine
 // is called, this base engine will never be created.
 Engine& Engine::get_base_engine() {
@@ -1476,8 +1495,8 @@ void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
   }
   auto prior = the_compiled_autograd.exchange(COMPILED_AUTOGRAD_POISON);
   TORCH_CHECK(
-      num_threads_in_backwards.load() == 0 && prior != COMPILED_AUTOGRAD_POISON,
-      "compiled_autograd._enable() requires no threads in backwards()");
+      prior != COMPILED_AUTOGRAD_POISON,
+      "compiled_autograd._enable() does not support multiple Python threads");
   the_compiled_autograd.store(fn);
 }
 

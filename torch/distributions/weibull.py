@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Optional, Union
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -26,6 +28,7 @@ class Weibull(TransformedDistribution):
     Args:
         scale (float or Tensor): Scale parameter of distribution (lambda).
         concentration (float or Tensor): Concentration parameter of distribution (k/shape).
+        validate_args (bool, optional): Whether to validate arguments. Default: None.
     """
 
     arg_constraints = {
@@ -34,7 +37,12 @@ class Weibull(TransformedDistribution):
     }
     support = constraints.positive
 
-    def __init__(self, scale, concentration, validate_args=None):
+    def __init__(
+        self,
+        scale: Union[Tensor, float],
+        concentration: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.scale, self.concentration = broadcast_all(scale, concentration)
         self.concentration_reciprocal = self.concentration.reciprocal()
         base_dist = Exponential(
