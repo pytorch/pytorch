@@ -105,6 +105,12 @@ if typing.TYPE_CHECKING:
     )
 
     from torch._dynamo.replay_record import ExecutionRecord
+    from torch._dynamo.symbolic_convert import (
+        InstructionTranslator,
+        InstructionTranslatorBase,
+    )
+    from torch._dynamo.variables.base import VariableTracker
+    from torch._prims_common import DeviceLikeType
 
 
 try:
@@ -2464,26 +2470,27 @@ def is_int_specialization_case(value: Any, source: Any) -> bool:
 
 
 def specialize_symnode(arg: Any) -> Any:
-    # This is safe because dynamo already has a check for data-dependent control flow.
-    from .variables import ConstantVariable
+    from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
 
-    if isinstance(arg, ConstantVariable):
-        return arg
+    # Guard and specialize
+    if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
+        # Find if the arg would be realized as SymNodeVariable later on. If yes,
+        # realize it and specialize. Else return the arg.
 
-    # NB: This is a little bit of a hack.  Currently, we occasionally
-    # pass non-Variable objects to this function.  This is not great
-    # because it means we don't get the right static analysis.
-    # TODO: Fix the call sites to not do this
-    if not hasattr(arg, "as_proxy"):
-        return arg
+        source = arg.original_source()
+        value = arg.original_value()
 
-    proxy = arg.as_proxy()
-    if isinstance(proxy.node.target, torch._ops.OpOverload):
-        if proxy.node.target._schema.name in ("aten::sym_size", "aten::sym_stride"):
-            # NB: We always specialize sym_size.  One day we might
-            # want to relax this
-            return ConstantVariable.create(proxy.node.meta["example_value"])
+        is_symnode_vt = is_torch_sym(value) or (
+            not config.specialize_int
+            and type(value) is int
+            and not is_int_specialization_case(value, source)
+        )
 
+        if not is_symnode_vt:
+            return arg
+
+    if isinstance(arg, SymNodeVariable):
+        return ConstantVariable.create(arg.evaluate_expr())
     return arg
 
 
@@ -2523,7 +2530,6 @@ def check_unspec_or_constant_args(args: Any, kwargs: Any) -> bool:
     for x in itertools.chain(args, kwargs.values()):
         if not (x.is_python_constant() or isinstance(x, UnspecializedPythonVariable)):
             return False
-    return True
     return True
 
 
@@ -2586,7 +2592,7 @@ def nn_module_new(cls: Any) -> Any:
     return obj
 
 
-def product(it: Any) -> Any:
+def product(it: Iterable[Any]) -> Any:
     return functools.reduce(operator.mul, it, 1)
 
 
@@ -2612,14 +2618,14 @@ def normalize_range_iter(range_iter: Any) -> tuple[int, int, int]:
     return (start, stop, step)
 
 
-def to_subclass(t: Any, cls: Any) -> Any:
+def to_subclass(t: Any, cls: type) -> Any:
     return t.as_subclass(cls)
 
 
 dict_getitem = dict.__getitem__
 
 
-def dict_keys_getitem(d: Any, n: int) -> Any:
+def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     # Call dict(d) to prevent calling overridden __iter__/keys
     dict_class = dict
     if isinstance(d, OrderedDict):
@@ -2627,12 +2633,12 @@ def dict_keys_getitem(d: Any, n: int) -> Any:
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
-def set_getitem(s: Any, n: int) -> Any:
+def set_getitem(s: set[Any], n: int) -> Any:
     # Set ordering might not be stable
     return list(s)[n]
 
 
-def enum_repr(value: Any, local: Any) -> str:
+def enum_repr(value: Any, local: bool) -> str:
     # enum class can override __str__ method. Use __class__ and name attribute
     # to extract the class name and key name.
     name = value.__class__.__name__
@@ -2642,7 +2648,7 @@ def enum_repr(value: Any, local: Any) -> str:
     return local_name
 
 
-def set_example_value(node: Any, example_value: Any) -> None:
+def set_example_value(node: torch.fx.Node, example_value: Any) -> None:
     # NB: example_value is a bit of a misnomer, because this is always a fake
     # tensor of some sort.  Furthermore, these example values serve as the
     # runtime state of Dynamo tracing, which means if metadata mutation
@@ -2662,7 +2668,7 @@ def set_example_value(node: Any, example_value: Any) -> None:
         node.meta["unbacked_bindings"] = symbol_to_path
 
 
-def _get_fake_tensor(vt: Any) -> Any:
+def _get_fake_tensor(vt: VariableTracker) -> Any:
     fake_tensor = vt.as_proxy().node.meta.get("example_value")
     if not is_fake(fake_tensor):
         from . import graph_break_hints
@@ -2682,7 +2688,7 @@ def slice_length(s: slice, seq_len: int) -> int:
     return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
 
 
-def raise_args_mismatch(tx: Any, name: str) -> None:
+def raise_args_mismatch(tx: InstructionTranslatorBase, name: str) -> None:
     from torch._dynamo.exc import raise_observed_exception
     from torch._dynamo.variables import ConstantVariable
 
@@ -2694,14 +2700,12 @@ def raise_args_mismatch(tx: Any, name: str) -> None:
 
 
 def iter_contains(
-    items: Any, search: Any, tx: Any, check_tensor_identity: bool = False
+    items: Any,
+    search: Any,
+    tx: InstructionTranslator,
+    check_tensor_identity: bool = False,
 ) -> Any:
-    from .variables import (
-        BuiltinVariable,
-        ConstantVariable,
-        TensorVariable,
-        VariableTracker,
-    )
+    from .variables import BuiltinVariable, ConstantVariable, TensorVariable
 
     if search.is_python_constant():
         found_const = any(
@@ -2791,7 +2795,7 @@ GLOBAL_KEY_PREFIX = "__dict_key"
 from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 
 
-def get_safe_global_name(tx: Any, root: str, obj: Any) -> str:
+def get_safe_global_name(tx: InstructionTranslatorBase, root: str, obj: Any) -> str:
     # The global_mangled_class_name should be different for different
     # invocations of torch.compile. Otherwise, we can run into a situation
     # where multiple torch.compile invocations reuse the same global name,
@@ -2801,7 +2805,7 @@ def get_safe_global_name(tx: Any, root: str, obj: Any) -> str:
     return f"{root}_{id(obj)}_c{tx.output.compile_id}"
 
 
-def is_in(item: Any, *containers: Any) -> bool:
+def is_in(item: str, *containers: Any) -> bool:
     for container in containers:
         if item in container:
             return True
@@ -2843,12 +2847,14 @@ def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
         )
 
 
-def deepcopy_to_fake_tensor(obj: Any, fake_mode: Any) -> Any:
+def deepcopy_to_fake_tensor(
+    obj: Any, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+) -> Any:
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
         return wrap_fake_exception(lambda: copy.deepcopy(obj))
 
 
-def rmse(ref: Any, res: Any) -> Any:
+def rmse(ref: torch.Tensor, res: torch.Tensor) -> torch.Tensor:
     """
     Calculate root mean squared error
     """
@@ -3210,7 +3216,7 @@ def get_debug_dir() -> str:
     return _get_debug_dir(debug_root)
 
 
-def extract_fake_example_value(node: Any, required: bool = True) -> Any:
+def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> Any:
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
     elif required:
@@ -3228,12 +3234,14 @@ def extract_fake_example_value(node: Any, required: bool = True) -> Any:
         return None
 
 
-def ensure_graph_fake(e: Any, tx: Any) -> Any:
+def ensure_graph_fake(e: Any, tx: InstructionTranslatorBase) -> Any:
     assert maybe_get_fake_mode(e) is tx.fake_mode
     return e
 
 
-def get_fake_values_from_nodes(tx: Any, nodes: Any, allow_non_graph_fake: bool) -> Any:
+def get_fake_values_from_nodes(
+    tx: InstructionTranslatorBase, nodes: Any, allow_non_graph_fake: bool
+) -> Any:
     def visit(n: torch.fx.Node) -> Any:
         if n.op == "call_function" and "example_value" not in n.meta:
             # fake tensor validity is checked inside get_fake_value using
@@ -3242,7 +3250,7 @@ def get_fake_values_from_nodes(tx: Any, nodes: Any, allow_non_graph_fake: bool) 
 
         elif n.op == "get_attr" and "example_value" not in n.meta:
             assert n.target in tx.output.nn_modules
-            gm = tx.output.nn_modules[n.target]
+            gm = tx.output.nn_modules[n.target]  # type: ignore[index]
             assert isinstance(gm, torch.fx.GraphModule)
             return gm
 
@@ -3254,7 +3262,11 @@ def get_fake_values_from_nodes(tx: Any, nodes: Any, allow_non_graph_fake: bool) 
     return torch.fx.node.map_arg(nodes, visit)
 
 
-def get_fake_value(node: Any, tx: Any, allow_non_graph_fake: bool = False) -> Any:
+def get_fake_value(
+    node: torch.fx.Node,
+    tx: InstructionTranslatorBase,
+    allow_non_graph_fake: bool = False,
+) -> Any:
     """
     Run the computation represented by `node` using fake tensors and return the result.
 
@@ -3303,7 +3315,7 @@ def get_fake_value(node: Any, tx: Any, allow_non_graph_fake: bool = False) -> An
         args = (deepcopy_to_fake_tensor(args[0], tx.fake_mode),) + tuple(args[1:])
 
     if op == "call_module":
-        nnmodule = tx.output.nn_modules[node.target]
+        nnmodule = tx.output.nn_modules[node.target]  # type: ignore[index]
 
         if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
             # In the case of a lazy module, we want to run
@@ -3391,7 +3403,7 @@ def get_fake_value(node: Any, tx: Any, allow_non_graph_fake: bool = False) -> An
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):
-            op = cause.func
+            op = cause.func  # type: ignore[assignment]
             import_suggestion = ""
             if isinstance(op, torch._ops.OpOverload):
                 maybe_pystub = torch._C._dispatch_pystub(
@@ -3455,12 +3467,12 @@ def get_fake_value(node: Any, tx: Any, allow_non_graph_fake: bool = False) -> An
 _current_node = threading.local()
 
 
-def get_current_node() -> Any:
+def get_current_node() -> Optional[torch.fx.Node]:
     return getattr(_current_node, "value", None)
 
 
 @contextmanager
-def set_current_node(node: Any) -> Generator[None, None, None]:
+def set_current_node(node: torch.fx.Node) -> Generator[None, None, None]:
     old = get_current_node()
     _current_node.value = node
     try:
@@ -3469,7 +3481,9 @@ def set_current_node(node: Any) -> Generator[None, None, None]:
         _current_node.value = old
 
 
-def run_node(tracer: Any, node: Any, args: Any, kwargs: Any, nnmodule: Any) -> Any:
+def run_node(
+    tracer: Any, node: torch.fx.Node, args: Any, kwargs: Any, nnmodule: Any
+) -> Any:
     """
     Runs a given node, with the given args and kwargs.
 
@@ -3498,9 +3512,9 @@ def run_node(tracer: Any, node: Any, args: Any, kwargs: Any, nnmodule: Any) -> A
 
         try:
             if op == "call_function":
-                return node.target(*args, **kwargs)
+                return node.target(*args, **kwargs)  # type: ignore[operator]
             elif op == "call_method":
-                if not hasattr(args[0], node.target):
+                if not hasattr(args[0], node.target):  # type: ignore[arg-type]
                     from .exc import unimplemented_v2
 
                     unimplemented_v2(
@@ -3509,7 +3523,7 @@ def run_node(tracer: Any, node: Any, args: Any, kwargs: Any, nnmodule: Any) -> A
                         explanation=make_error_message("attribute not defined"),
                         hints=[],
                     )
-                return getattr(args[0], node.target)(*args[1:], **kwargs)
+                return getattr(args[0], node.target)(*args[1:], **kwargs)  # type: ignore[arg-type]
             elif op == "call_module":
                 assert nnmodule is not None
                 return nnmodule(*args, **kwargs)
@@ -3546,7 +3560,7 @@ def run_node(tracer: Any, node: Any, args: Any, kwargs: Any, nnmodule: Any) -> A
     raise AssertionError(op)
 
 
-def get_real_value(node: Any, tracer: Any) -> Any:
+def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
     """
     Run the actual computation represented by `node` and return the result.
     This will execute any dependent nodes in the graph as well.
@@ -3585,7 +3599,7 @@ def get_real_value(node: Any, tracer: Any) -> Any:
     return real_value
 
 
-def assert_no_fake_params_or_buffers(gm: Any) -> None:
+def assert_no_fake_params_or_buffers(gm: torch.fx.GraphModule) -> None:
     from torch._subclasses.fake_tensor import FakeTensorConfig, is_fake
 
     def stack_or_hint(t: Any) -> str:
@@ -3714,7 +3728,7 @@ def tensor_always_has_static_shape(
     return False, None
 
 
-def lazy_format_graph_tabular(fn_name: str, gm: Any) -> Any:
+def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
     def inner() -> str:
         try:
             from tabulate import tabulate  # TODO: Check that this is installed
@@ -3762,7 +3776,7 @@ def nn_module_has_global_hooks() -> bool:
 
 
 def nn_module_get_all_hooks(
-    mod: Any,
+    mod: torch.nn.Module,
     check_forward_hooks: bool = False,
     check_backward_hooks: bool = False,
     check_state_dict_hooks: bool = False,
@@ -3795,7 +3809,7 @@ def nn_module_get_all_hooks(
 
 
 def nnmodule_has_hooks(
-    mod: Any,
+    mod: torch.nn.Module,
     check_forward_hooks: bool = False,
     check_backward_hooks: bool = False,
     check_state_dict_hooks: bool = False,
@@ -3979,7 +3993,7 @@ def build_checkpoint_variable(**options: Any) -> Any:
     )
 
 
-def is_compile_supported(device_type: Any) -> Any:
+def is_compile_supported(device_type: DeviceLikeType) -> Any:
     from .eval_frame import is_dynamo_supported
 
     type = torch.device(device_type).type
@@ -4321,7 +4335,7 @@ def is_torch_function_object(value: Any) -> bool:
     return hasattr(value, "__torch_function__")
 
 
-def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
+def has_torch_function(vt: VariableTracker) -> bool:
     # This emulates
     # https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/disable_torch_function.cpp#L315-L323
     from torch._dynamo.variables import UserDefinedObjectVariable
@@ -4351,7 +4365,9 @@ def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool
 
 
 # see note [Tensor Fakification and Symbol Caching]
-def to_fake_tensor(t: Any, fake_mode: Any) -> Any:
+def to_fake_tensor(
+    t: torch.Tensor, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+) -> Any:
     symbolic_context = None
     source = None
     if tracing_context := torch._guards.TracingContext.try_get():
@@ -4432,7 +4448,9 @@ def nn_module_proxy(mod: Any) -> Any:
 
 
 class GmWrapper(torch.nn.Module):
-    def __init__(self, gm: Any, unflatten_fn: Callable[[list[Any]], Any]) -> None:
+    def __init__(
+        self, gm: torch.fx.GraphModule, unflatten_fn: Callable[[list[Any]], Any]
+    ) -> None:
         super().__init__()
         self.gm = gm
         self.unflatten_fn = unflatten_fn
@@ -4497,7 +4515,7 @@ def get_locals_to_steal(maybe_gm: Any) -> list[Any]:
     return maybe_gm.meta.get("locals_to_steal", [])
 
 
-def set_locals_to_steal(gm: Any, locals_to_steal: list[Any]) -> None:
+def set_locals_to_steal(gm: torch.fx.GraphModule, locals_to_steal: list[Any]) -> None:
     gm.meta["locals_to_steal"] = locals_to_steal
 
 
@@ -4619,7 +4637,7 @@ def call_storage_offset(x: Any) -> int:
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
 # To avoid ref cycles, it's important that no tensors are present here, so leave those out.
-def _extract_tensor_dict(t: Any) -> dict[str, Any]:
+def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     KEYS_TO_COPY = [
         "_dynamo_static_input_type",
         "tag",
@@ -4644,7 +4662,7 @@ def get_user_object_from_id(obj_id: int) -> Any:
     return obj
 
 
-def store_user_object_weakref(obj: Any) -> None:
+def store_user_object_weakref(obj: object) -> None:
     obj_id = id(obj)
     user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
 
