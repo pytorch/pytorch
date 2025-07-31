@@ -60,7 +60,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Literal, TypeAlias, TypeGuard, TypeIs
+from typing_extensions import Literal, ParamSpec, TypeAlias, TypeGuard, TypeIs
 
 import torch
 import torch._functorch.config
@@ -151,6 +151,7 @@ except ImportError:
 
 
 T = TypeVar("T")
+_P = ParamSpec("_P")
 
 unpatched_nn_module_getattr = torch.nn.Module.__getattr__
 unpatched_nn_module_call = torch.nn.Module.__call__
@@ -626,7 +627,7 @@ class CompileEventLogger:
         chromium_log.try_add_event_data(event_name, **metadata)
 
     @staticmethod
-    def try_(method_fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+    def try_(method_fn: Callable[_P, Any], *args: _P.args, **kwargs: _P.kwargs) -> None:
         """
         Special function that quietly runs a given method, returning if CHROMIUM_EVENT_LOG is None or metrics context is not set
         """
@@ -813,9 +814,7 @@ def compile_times(  # type: ignore[misc]
     per metric.
     """
 
-    def fmt_fn(
-        values: list[float], item_fn: Callable[[float], str] = lambda x: str(x)
-    ) -> str:
+    def fmt_fn(values: list[float], item_fn: Callable[[float], str] = str) -> str:
         if aggregate:
             return item_fn(sum(values))
         return ", ".join(map(item_fn, values))
@@ -1191,7 +1190,7 @@ def unwrap_with_attr_name_if_wrapper(fn: Any) -> tuple[Any, Optional[str]]:
     return fn, attr_name
 
 
-def is_numpy_ndarray(value: Any) -> bool:
+def is_numpy_ndarray(value: Any) -> TypeGuard[np.ndarray]:  # type: ignore[type-arg]
     if not np:
         return False
 
@@ -3947,7 +3946,7 @@ def defake(x: Any) -> Any:
 
 
 def _disable_side_effect_safety_checks_for_current_subtracer(
-    fn: Callable[..., Any], *args: Any, **kwargs: Any
+    fn: Callable[_P, Any], *args: _P.args, **kwargs: _P.kwargs
 ) -> Any:
     return fn(*args, **kwargs)
 
