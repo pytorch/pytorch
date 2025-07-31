@@ -74,7 +74,8 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
   return sdp::check_tensor_dtype(params, supported_dtypes, debug);
 }
 
-std::array<sdp::SDPBackend, sdp::num_backends> priority_order(sdp::sdp_params const& params) {
+std::array<sdp::SDPBackend, sdp::num_backends> priority_order(
+    sdp::sdp_params const& params) {
   return at::globalContext().sDPPriorityOrder();
 }
 
