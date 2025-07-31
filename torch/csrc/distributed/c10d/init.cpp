@@ -2063,22 +2063,24 @@ communication mechanism.
           .def("rank", &::c10d::ProcessGroup::getRank, R"(Get the rank of this process group.)")
           .def("size", &::c10d::ProcessGroup::getSize, R"(Get the size of this process group.)")
           .def("name", &::c10d::ProcessGroup::getBackendName, R"(Get the name of this process group.)")
+          .def("get_group_store", &::c10d::ProcessGroup::getStore, R"(Get the store of this process group.)")
           .def(
               "split_group",
               &::c10d::ProcessGroup::splitGroup,
               py::arg("ranks"),
               py::arg("timeout") = std::nullopt,
               py::arg("opts") = std::nullopt,
-              py::arg("groupDesc") = std::nullopt,
+              py::arg("group_name") = std::nullopt,
+              py::arg("group_desc") = std::nullopt,
               py::call_guard<py::gil_scoped_release>())
            .def(
               "merge_remote_group",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const c10::intrusive_ptr<::c10d::Store>& store,
-                 int size,
-                 std::chrono::milliseconds timeout,
-                 std::optional<std::string> groupName,
-                 std::optional<std::string> groupDesc) {
+                 const int& size,
+                 const std::chrono::milliseconds& timeout,
+                 const std::optional<std::string>& groupName,
+                 const std::optional<std::string>& groupDesc) {
                 ::c10d::ProcessGroup::MergeOptions opts;
                 opts.timeout = timeout;
                 opts.group_name = groupName;

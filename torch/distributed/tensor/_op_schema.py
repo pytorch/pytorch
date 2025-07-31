@@ -559,9 +559,14 @@ class OutputSharding:
     exactly the same as the operator OpSchema, except the DTensorSpecs
     """
 
+    # specifies the output sharding pattern
     output_spec: OutputSpecType
+    # schema for redistribution if needed
     redistribute_schema: Optional[OpSchema] = None
+    # flag indicating if inputs need redistribution
     needs_redistribute: bool = False
+    # flag to use values from `redistribute_schema`
+    use_val_from_redistribute_schema: bool = False
 
     @cached_property
     def mesh(self):
