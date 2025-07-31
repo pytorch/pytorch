@@ -1,3 +1,4 @@
+#include <ATen/Context.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils.h>
@@ -49,7 +50,7 @@ bool check_no_grad(sdp::sdp_params const& params, bool debug) {
   return !any_inputs_require_grad || !gradmode_enabled;
 }
 
-bool use_overrideable_xpu(sdp::sdp_params const& params, bool debug) {
+bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
   constexpr auto supported_dtypes = c10::array_of<at::ScalarType>(
       at::kFloat, at::kBFloat16, at::kHalf); // double is not supported
 
@@ -73,6 +74,10 @@ bool use_overrideable_xpu(sdp::sdp_params const& params, bool debug) {
   return sdp::check_tensor_dtype(params, supported_dtypes, debug);
 }
 
+std::array<sdp::SDPBackend, sdp::num_backends> priority_order(sdp::sdp_params const& params) {
+  return at::globalContext().sDPPriorityOrder();
+}
+
 sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   // This function defines the priority order of the different sdp backends
   // 1. Flash Attention
@@ -85,20 +90,16 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   }
 
   // Get ideal kernel ordering
-  const std::array<sdp::SDPBackend, 3> priority_order{
-      sdp::SDPBackend::overrideable,
-      sdp::SDPBackend::flash_attention,
-      sdp::SDPBackend::math,
-  };
+  const auto ordering = priority_order(kernel_params);
 
   // Because TORCHCHECK checks if condition is true we negate debug so that
   // The statements will be printed when debug is true
   bool print_debug = false;
-  for (auto& backend : priority_order) {
+  for (auto& backend : ordering) {
     switch (backend) {
       case sdp::SDPBackend::overrideable:
         if (ctx.userEnabledOverrideableSDP() &&
-            use_overrideable_xpu(kernel_params, print_debug)) {
+            can_use_overrideable_attention(kernel_params, print_debug)) {
           return sdp::SDPBackend::overrideable;
         }
         break;
@@ -109,25 +110,28 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
         break;
       case sdp::SDPBackend::flash_attention:
         if (ctx.userEnabledFlashSDP() &&
-            use_overrideable_xpu(kernel_params, print_debug)) {
-          TORCH_WARN(
-              "Flash Attention is not supported on XPU, falling back to overrideable kernel.");
+            can_use_overrideable_attention(kernel_params, print_debug)) {
+          TORCH_WARN_ONCE(
+              "SDPA Flash Attention backend is not supported on XPU, falling back to OVERRIDEABLE backend.");
           return sdp::SDPBackend::overrideable;
         }
+        break;
+      case sdp::SDPBackend::cudnn_attention:
+      case sdp::SDPBackend::efficient_attention:
         break;
       default:
         TORCH_CHECK(false, "Invalid backend");
     }
   }
   // If we have gotten to this point then two things have happened:
-  // 1. use_overrideable_xpu did not satisfy the constraints to be ran
+  // 1. can_use_overrideable_attention did not satisfy the constraints to be ran
   // 2. The user has explicitly disabled the math kernel
   // We then re-run the kernel checks with debug enabled to print out the
   // reason why the kernel was not selected
 
   print_debug = true;
-  TORCH_WARN("OneDNN kernel not used because:");
-  use_overrideable_xpu(kernel_params, print_debug);
+  TORCH_WARN("Overrideable attention kernel not used because:");
+  can_use_overrideable_attention(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel. Aborting execution.")
   return sdp::SDPBackend::error;
 }

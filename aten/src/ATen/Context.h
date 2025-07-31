@@ -439,9 +439,9 @@ class TORCH_API Context {
   std::array<at::SDPBackend, at::num_sdp_backends> sdp_priority_order = {
       at::SDPBackend::flash_attention,
       at::SDPBackend::efficient_attention,
-      at::SDPBackend::math,
       at::SDPBackend::cudnn_attention,
-      at::SDPBackend::overrideable};
+      at::SDPBackend::overrideable,
+      at::SDPBackend::math};
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
