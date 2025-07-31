@@ -346,9 +346,6 @@ class C10_API DeviceGuardImplRegistrar {
   DeviceGuardImplRegistrar(DeviceType, const DeviceGuardImplInterface*);
 };
 
-void C10_API
-registerDeviceGuard(DeviceType type, const DeviceGuardImplInterface* impl);
-
 #define C10_REGISTER_GUARD_IMPL(DevType, DeviceGuardImpl)              \
   static ::c10::impl::DeviceGuardImplRegistrar C10_ANONYMOUS_VARIABLE( \
       g_##DeviceType)(::c10::DeviceType::DevType, new DeviceGuardImpl());
@@ -369,6 +366,9 @@ inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   TORCH_CHECK(p, "PyTorch is not linked with support for ", type, " devices");
   return p;
 }
+
+void C10_API
+registerDeviceGuard(DeviceType type, const DeviceGuardImplInterface* impl);
 
 inline bool hasDeviceGuardImpl(DeviceType type) {
   return device_guard_impl_registry[static_cast<size_t>(type)].load();

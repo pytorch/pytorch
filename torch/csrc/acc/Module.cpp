@@ -1,4 +1,4 @@
-#include <torch/csrc/python_custom_backend/Module.h>
+#include <torch/csrc/acc/Module.h>
 
 #include <torch/extension.h>
 #include <ATen/ATen.h>
@@ -10,7 +10,7 @@
 
 namespace py = pybind11;
 
-namespace torch::python_custom_backend {
+namespace torch::acc {
 
 // python hook interface
 struct PythonHooks final : public at::PrivateUse1HooksInterface {
@@ -204,4 +204,4 @@ void initModule(PyObject* module) {
   py_module.def("create_empty_tensor", &createEmptyTensor);
 }
 
-} // namespace torch::python_custom_backend
+} // namespace torch::acc
