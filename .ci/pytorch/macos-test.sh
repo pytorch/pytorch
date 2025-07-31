@@ -21,8 +21,14 @@ setup_test_python() {
   # This environment variable makes ProcessGroupGloo default to
   # using the address associated with the loopback interface.
   export GLOO_SOCKET_IFNAME=lo0
-  echo "Ninja version: $(ninja --version)"
   echo "Python version: $(which python) ($(python --version))"
+  python -m pip install -qr requirements-build.txt
+
+  echo "CMake version: $(cmake --version)"
+  echo "Ninja version: $(ninja --version)"
+
+  echo "Python packages:"
+  python -m pip freeze
 
   # Set the limit on open file handles to 16384
   # might help with intermittent compiler test failures
@@ -311,6 +317,8 @@ test_timm_perf() {
 
   echo "timm benchmark on mps device completed"
 }
+
+setup_test_python
 
 if [[ $TEST_CONFIG == *"perf_all"* ]]; then
   test_torchbench_perf
