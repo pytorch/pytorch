@@ -1176,7 +1176,9 @@ class TestClientProtocol(TestCase):
 
 
 if __name__ == "__main__":
-    assert not torch.get_device_module(device_type)._initialized, (
+    assert (
+        device_type != "cpu" and not torch.get_device_module(device_type)._initialized
+    ), (
         f"test_distributed must not have initialized {device_type} context on main process"
     )
 
