@@ -389,12 +389,11 @@ class FSDPParamGroup:
         all_gather_copy_out_event = self.device_handle.Event()
         all_gather_copy_out_event.record()
 
-        if world_size == 1:
-            # For world_size=1, we don't need to save the all_gather_result in all_gather_state
-            # Just wait on the event and clear the all_gather_result
-            self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
-
-        elif not async_op and self._training_state == TrainingState.FORWARD:
+        if (
+            not async_op
+            and self._training_state == TrainingState.FORWARD
+            and world_size > 1
+        ):
             # Defer free to allow for overlap of this copy-out with next
             # all-gather collective
             self.comm_ctx.all_gather_state = AllGatherState(
