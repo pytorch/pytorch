@@ -39,7 +39,7 @@ fp16_ieee_to_fp32_value
 # fp32_from_bits called from fp16_ieee_to_fp32_value
 # fp32_to_bits called from fp16_ieee_from_fp32_value
 
-# c10/util/complex.h
+# c10/util/complex.h, torch/headeronly/util/complex.h
 complex
 
 # ATen/NumericUtils.h, c10/util/generic_math.h
