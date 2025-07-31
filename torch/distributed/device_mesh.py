@@ -5,6 +5,7 @@ import math
 import os
 import threading
 import warnings
+from collections.abc import Iterator
 from functools import reduce
 from itertools import chain
 from typing import Optional, TYPE_CHECKING, Union
@@ -439,7 +440,7 @@ else:
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
             mesh_dim_names: Optional[tuple[str, ...]] = None,
-            pg_backend_and_options: Optional[
+            pg_override: Optional[
                 tuple[tuple[Optional[str], Optional[C10dBackend.Options]], ...]
             ] = None,
             _init_backend: bool = True,
@@ -453,8 +454,8 @@ else:
                 else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
             self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
-            if pg_backend_and_options is None:
-                pg_backend_and_options = ((None, None),) * self.mesh.ndim
+            if pg_override is None:
+                pg_override = ((None, None),) * self.mesh.ndim
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
@@ -468,7 +469,7 @@ else:
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
                     self._setup_world_group_and_device()
-                    self._init_process_groups(pg_backend_and_options)
+                    self._init_process_groups(pg_override)
 
                 if is_initialized() and get_backend() == "threaded":
                     self._thread_id = threading.get_ident()
@@ -532,7 +533,7 @@ else:
 
         def _init_process_groups(
             self,
-            pg_backend_and_options: tuple[
+            pg_override: tuple[
                 tuple[Optional[str], Optional[C10dBackend.Options]], ...
             ],
         ):
@@ -547,7 +548,7 @@ else:
                 and self.mesh.numel() == get_world_size()
                 and _mesh_resources.mesh_dim_group_options.get(0, (None, None))
                 == (None, None)
-                and pg_backend_and_options[0] == (None, None)
+                and pg_override[0] == (None, None)
             ):
                 # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
                 # Otherwise, create new pg.
@@ -575,9 +576,9 @@ else:
                     # Respect dim group options specified via _MeshEnv.set_dim_group_options().
                     # Inherit from the parent group if no options are specified for the group.
                     if dim in _mesh_resources.mesh_dim_group_options:
-                        if pg_backend_and_options[dim] != (None, None):
+                        if pg_override[dim] != (None, None):
                             raise RuntimeError(
-                                "Dimension {dim} present both in the pg_backend_and_options argument "
+                                f"Dimension {dim} present both in the pg_override argument "
                                 "and via _mesh_resources._set_mesh_dim_group_options"
                             )
                         (
@@ -585,7 +586,7 @@ else:
                             pg_options,
                         ) = _mesh_resources.mesh_dim_group_options[dim]
                     else:
-                        backend, pg_options = pg_backend_and_options[dim]
+                        backend, pg_options = pg_override[dim]
 
                     # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
                     # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
@@ -1005,13 +1006,51 @@ else:
 
             return _mesh_resources.create_flatten_mesh(self, mesh_dim_name)
 
+    def _normalize_pg_override(
+        pg_override: dict[
+            Union[int, str],
+            Union[str, C10dBackend.Options, tuple[str, C10dBackend.Options]],
+        ],
+        mesh_dim_names: tuple[Optional[str], ...],
+    ) -> Iterator[tuple[Optional[str], Optional[C10dBackend.Options]]]:
+        for dim_idx, dim_name in enumerate(mesh_dim_names):
+            if dim_name is not None and dim_name in pg_override:
+                if dim_idx in pg_override:
+                    raise RuntimeError(
+                        f"Found redundant dim index {dim_idx} and "
+                        f"name {dim_name} in pg_override"
+                    )
+                val = pg_override.pop(dim_name)
+            elif dim_idx in pg_override:
+                val = pg_override.pop(dim_idx)
+            else:
+                yield (None, None)
+                continue
+
+            if isinstance(val, str):
+                yield (val, None)
+            elif isinstance(val, C10dBackend.Options):
+                yield (None, val)
+            else:
+                yield val
+
+        if pg_override:
+            raise RuntimeError(
+                f"Found invalid keys in pg_override: got {list(pg_override.keys())}, "
+                f"expected integers in range [0, {len(mesh_dim_names)}) "
+                f"or one of {[n for n in mesh_dim_names if n is not None]}"
+            )
+
     def init_device_mesh(
         device_type: str,
         mesh_shape: tuple[int, ...],
         *,
         mesh_dim_names: Optional[tuple[str, ...]] = None,
-        pg_backend_and_options: Optional[
-            dict[Union[int, str], tuple[str, Optional[C10dBackend.Options]]]
+        pg_override: Optional[
+            dict[
+                Union[int, str],
+                Union[str, C10dBackend.Options, tuple[str, C10dBackend.Options]],
+            ]
         ] = None,
     ) -> DeviceMesh:
         """
@@ -1063,30 +1102,15 @@ else:
                     f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
                 )
 
-            if pg_backend_and_options is not None:
-                for mesh_dim_idx, mesh_dim_name in enumerate(mesh_dim_names):
-                    if mesh_dim_name in pg_backend_and_options:
-                        if mesh_dim_idx in pg_backend_and_options:
-                            raise RuntimeError(
-                                f"Found redundant dim index {mesh_dim_idx} and "
-                                f"name {mesh_dim_name} in pg_backend_and_options"
-                            )
-                        pg_backend_and_options[mesh_dim_idx] = (
-                            pg_backend_and_options.pop(mesh_dim_name)
-                        )
-
-        if pg_backend_and_options is not None:
-            pg_backend_and_options_tuple = tuple(
-                pg_backend_and_options.pop(i, (None, None))
-                for i in range(len(mesh_shape))
-            )
-            if pg_backend_and_options:
-                raise RuntimeError(
-                    f"Found invalid keys in pg_backend_and_options: got {list(pg_backend_and_options.keys())}, "
-                    f"expected integers in range [0, {len(mesh_shape)}) or one of {mesh_dim_names or []}"
+        pg_override_tuple = (
+            tuple(
+                _normalize_pg_override(
+                    pg_override, mesh_dim_names or (None,) * len(mesh_shape)
                 )
-        else:
-            pg_backend_and_options_tuple = None
+            )
+            if pg_override is not None
+            else None
+        )
 
         # assume valid device types are all letters
         if device_type and not device_type.isalpha():
@@ -1103,7 +1127,7 @@ else:
             device_type=device_type,
             mesh=mesh,
             mesh_dim_names=mesh_dim_names,
-            pg_backend_and_options=pg_backend_and_options_tuple,
+            pg_override=pg_override_tuple,
         )
 
         return device_mesh

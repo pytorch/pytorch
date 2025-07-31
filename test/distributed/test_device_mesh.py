@@ -30,7 +30,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.testing._internal.distributed.fake_pg import FakeProcessGroup, FakeStore
 from torch.utils._typing_utils import not_none
 
 
@@ -579,62 +579,69 @@ class InitDeviceMeshTest(DTensorTestBase):
             )
 
     @with_comms
-    def test_pg_options_argument_dict_by_idx(self):
+    def test_pg_override_argument_dict_with_idx_and_backend(self):
         mesh = init_device_mesh(
             self.device_type,
             (2, 4),
             mesh_dim_names=("dp", "tp"),
-            pg_backend_and_options={0: ("fake", None)},
+            pg_override={0: "fake"},
         )
 
         # Fake pg only have BackendType as BackendType::CUSTOM.
         self.assertEqual(mesh.get_group(0)._get_backend_name(), "custom")
 
-    @with_comms
-    def test_pg_options_argument_dict_by_name(self):
+    @with_comms(backend="fake")
+    def test_pg_override_argument_dict_with_name_and_options(self):
+        opts = FakeProcessGroup.Options()
+        opts.fake_option = 42
+
         mesh = init_device_mesh(
             self.device_type,
             (2, 4),
             mesh_dim_names=("dp", "tp"),
-            pg_backend_and_options={"tp": ("fake", None)},
+            pg_override={"tp": opts},
         )
 
-        # Fake pg only have BackendType as BackendType::CUSTOM.
-        self.assertEqual(mesh.get_group(1)._get_backend_name(), "custom")
+        self.assertEqual(
+            mesh.get_group(1)
+            ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
+            .options.fake_option,
+            42,
+        )
 
     @with_comms
-    def test_pg_options_argument_errors(self):
+    def test_pg_override_argument_errors(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Found redundant dim index 0 and name dp in pg_backend_and_options",
+            "Found redundant dim index 0 and name dp in pg_override",
         ):
             init_device_mesh(
                 self.device_type,
                 (2, 4),
                 mesh_dim_names=("dp", "tp"),
-                pg_backend_and_options={"dp": ("foo", None), 0: ("bar", None)},
+                pg_override={"dp": "foo", 0: "bar"},
             )
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Found invalid keys in pg_backend_and_options: got \['cp'\]",
+            r"Found invalid keys in pg_override: got \['cp'\]",
         ):
             init_device_mesh(
                 self.device_type,
                 (2, 4),
                 mesh_dim_names=("dp", "tp"),
-                pg_backend_and_options={"cp": ("foo", None)},
+                pg_override={"cp": "foo"},
             )
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Found invalid keys in pg_backend_and_options: got \[42\]",
+            r"Found invalid keys in pg_override: got \[42\]",
         ):
             init_device_mesh(
                 self.device_type,
                 (2, 4),
                 mesh_dim_names=("dp", "tp"),
-                pg_backend_and_options={42: ("bar", None)},
+                pg_override={42: "bar"},
             )
 
 

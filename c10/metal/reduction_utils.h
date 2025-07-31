@@ -5,15 +5,86 @@
 
 namespace c10 {
 namespace metal {
+namespace detail {
+template <typename T>
+struct simd_type {
+  using t = T;
+};
+
+// Helper that allows one to run simd ops over bfl16 by upcasting them to fp32
+template <typename T>
+using simd_type_t = typename simd_type<T>::t;
+
+#if __METAL_VERSION__ >= 310
+template <>
+struct simd_type<bfloat> {
+  using t = float;
+};
+#endif
+} // namespace detail
 
 template <typename T>
 inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_sum(T val) {
-  return ::metal::simd_sum(val);
+  return T(::metal::simd_sum(detail::simd_type_t<T>(val)));
 }
 
 template <typename T>
 inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_prod(T val) {
-  return ::metal::simd_product(val);
+  return T(::metal::simd_product(detail::simd_type_t<T>(val)));
+}
+
+// Extend simd_broadcast to 64-bit integral types using int2 trick
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T> && sizeof(T) == 8, bool> =
+        true>
+inline T simd_broadcast(T val, ushort lane_id) {
+  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), lane_id));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<!::metal::is_integral_v<T> || sizeof(T) != 8, bool> =
+        true>
+inline T simd_broadcast(T val, ushort lane_id) {
+  return ::metal::simd_broadcast(val, lane_id);
+}
+
+// Floating simd_min/max with nan propagation
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline T simd_max(T val) {
+  if (::metal::simd_any(::metal::isnan(val))) {
+    return ::metal::numeric_limits<T>::quiet_NaN();
+  }
+  return T(::metal::simd_max(detail::simd_type_t<T>(val)));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline T simd_min(T val) {
+  if (::metal::simd_any(::metal::isnan(val))) {
+    return ::metal::numeric_limits<T>::quiet_NaN();
+  }
+  return T(::metal::simd_min(detail::simd_type_t<T>(val)));
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T> && sizeof(T) != 8, bool> =
+        true>
+inline T simd_max(T val) {
+  return ::metal::simd_max(val);
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T> && sizeof(T) != 8, bool> =
+        true>
+inline T simd_min(T val) {
+  return ::metal::simd_min(val);
 }
 
 // Metal does not support SIMD reductions over 64-bit types, but it could be
@@ -28,7 +99,7 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_sum(T val) {
     val += as_type<T>(
         ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
   }
-  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
+  return simd_broadcast(val, 0);
 }
 
 template <typename T>
@@ -37,7 +108,78 @@ inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_prod(T val) {
     val *= as_type<T>(
         ::metal::simd_shuffle_and_fill_down(as_type<int2>(val), int2(0), i));
   }
-  return as_type<T>(::metal::simd_broadcast(as_type<int2>(val), 0));
+  return simd_broadcast(val, 0);
+}
+
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_max(T val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val = ::metal::max(
+        val,
+        as_type<T>(::metal::simd_shuffle_and_fill_down(
+            as_type<int2>(val), int2(0), i)));
+  }
+  return simd_broadcast(val, 0);
+}
+
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_same_v<T, long>, T> simd_min(T val) {
+  for (ushort i = simdgroup_size / 2; i > 0; i /= 2) {
+    val = ::metal::min(
+        val,
+        as_type<T>(::metal::simd_shuffle_and_fill_down(
+            as_type<int2>(val), int2(0), i)));
+  }
+  return simd_broadcast(val, 0);
+}
+
+// argmin/argmax helpers using simd_ballot
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T>, bool> = true>
+inline ::c10::metal::pair<T, ushort> simd_argmin(T val) {
+  const auto rc = simd_min(val);
+  const auto vote = ::metal::simd_ballot(val == rc);
+  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline ::c10::metal::pair<T, ushort> simd_argmin(T val) {
+  const auto rc = simd_min(val);
+  const auto vote = ::metal::simd_ballot(val == rc || ::metal::isnan(val));
+  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_integral_v<T>, bool> = true>
+inline ::c10::metal::pair<T, ushort> simd_argmax(T val) {
+  const auto rc = simd_max(val);
+  const auto vote = ::metal::simd_ballot(val == rc);
+  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
+}
+
+template <
+    typename T,
+    ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> = true>
+inline ::c10::metal::pair<T, ushort> simd_argmax(T val) {
+  const auto rc = simd_max(val);
+  const auto vote = ::metal::simd_ballot(val == rc || ::metal::isnan(val));
+  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
+}
+
+template <typename ARG_T, typename IDX_T>
+inline c10::metal::pair<ARG_T, IDX_T> simd_argmin(ARG_T val, IDX_T idx_val) {
+  auto rc = simd_argmin(val);
+  return {rc.first, simd_broadcast(idx_val, rc.second)};
+}
+
+template <typename ARG_T, typename IDX_T>
+inline c10::metal::pair<ARG_T, IDX_T> simd_argmax(ARG_T val, IDX_T idx_val) {
+  auto rc = simd_argmax(val);
+  return {rc.first, simd_broadcast(idx_val, rc.second)};
 }
 
 // Below algorithms are  written with hardcoded assumption that simdgroup is 32
@@ -89,6 +231,44 @@ opmath_t<T> threadgroup_prod(
 }
 
 template <typename T>
+T threadgroup_max(threadgroup T* data, T val, unsigned idx, unsigned size) {
+  auto rc = simd_max(val);
+  if (idx % simdgroup_size == 0) {
+    data[idx / simdgroup_size] = rc;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1 = simd_max(data[idx]);
+      if (idx == 0) {
+        data[0] = rc1;
+      }
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return data[0];
+}
+
+template <typename T>
+T threadgroup_min(threadgroup T* data, T val, unsigned idx, unsigned size) {
+  auto rc = simd_min(val);
+  if (idx % simdgroup_size == 0) {
+    data[idx / simdgroup_size] = rc;
+  }
+  if (size > simdgroup_size) {
+    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+      auto rc1 = simd_min(data[idx]);
+      if (idx == 0) {
+        data[0] = rc1;
+      }
+    }
+  }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  return data[0];
+}
+
+template <typename T>
 float3 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
   float m = data[0];
@@ -119,28 +299,6 @@ float3 threadgroup_welford_combine(threadgroup T* data, unsigned size) {
   float3 rc = data[0];
   for (unsigned idx = 1; idx < size; ++idx) {
     rc = welford_combine(rc, data[idx]);
-  }
-  return rc;
-}
-
-template <typename T>
-T threadgroup_max(threadgroup T* data, unsigned size) {
-  // TODO: This should be moved to the callee
-  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  T rc = data[0];
-  for (unsigned idx = 1; idx < size; ++idx) {
-    rc = ::c10::metal::max(rc, data[idx]);
-  }
-  return rc;
-}
-
-template <typename T>
-T threadgroup_min(threadgroup T* data, unsigned size) {
-  // TODO: This should be moved to the callee
-  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  T rc = data[0];
-  for (unsigned idx = 1; idx < size; ++idx) {
-    rc = ::c10::metal::min(rc, data[idx]);
   }
   return rc;
 }
