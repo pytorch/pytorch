@@ -695,18 +695,55 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(
-            m,
-            n,
-            k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
-        ):
-            mm_template.maybe_append_choice(
-                choices,
-                input_nodes=(mat1, mat2),
-                layout=layout,
-                **mm_options(config, m, n, k, layout),
+        # Once we support more types of configs in the model and LUT, move this to the end near Autoherustic
+        dims = get_size_hints(mat1, mat2, m, n, k)
+        if not dims_are_int(dims):
+            log.debug("mm_autoheuristic: not all dims are int, skipping")
+        else:
+            new_m, new_n, new_k = dims
+            search_space = V.choices.get_mm_configs_search_space(device_type)
+            preliminary_choices = list(
+                search_space(
+                    new_m,
+                    new_n,
+                    new_k,
+                    **mm_config_kwargs(
+                        device_type, _is_large_block_for_cpu, dtype.itemsize
+                    ),
+                )
             )
+            mm_heuristics = V.choices.get_config_heuristics(device_type)
+            mm_configs = mm_heuristics.get_mm_configs()
+            default_topk = len(
+                list(
+                    mm_configs(
+                        new_m,
+                        new_n,
+                        new_k,
+                        **mm_config_kwargs(
+                            device_type, _is_large_block_for_cpu, dtype.itemsize
+                        ),
+                    )
+                )
+            )
+            # applies ml filtering/ranking
+            preliminary_choices = V.choices.filter_triton_mm_choices(
+                new_m,
+                new_n,
+                new_k,
+                mat1,
+                mat2,
+                layout,
+                preliminary_choices,
+                default_topk,
+            )
+            for config in preliminary_choices:
+                mm_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(mat1, mat2),
+                    layout=layout,
+                    **mm_options(config, m, n, k, layout),
+                )
 
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
@@ -802,7 +839,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
         for config in extra_mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -869,6 +909,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     )
+    dtype = mat1.get_dtype()
 
     if use_cutlass and _use_cutlass_for_op("int_mm"):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
@@ -879,7 +920,10 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_triton_template(layout, enable_int32=True):
         for config in int8_mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -1294,6 +1338,7 @@ def mm_autoheuristic(
 ):
     m, n, k = get_size_hints(mat1, mat2, m, n, k)
     if not dims_are_int([m, n, k]):
+        log.debug("mm_autoheuristic: not all dims are int, skipping")
         return None
     mat1_stride, mat2_stride = get_size_hints_strides(mat1, mat2)
 
@@ -1341,16 +1386,10 @@ def mm_autoheuristic(
 
 def get_size_hints(mat1, mat2, m, n, k):
     if not isinstance(m, int) or not isinstance(k, int):
-        (m, k) = V.graph.sizevars.size_hints(
-            mat1.get_size(),
-            fallback=torch._inductor.config.unbacked_symint_fallback,
-        )
+        (m, k) = V.graph.sizevars.size_hints( mat1.get_size(), fallback=torch._inductor.config.unbacked_symint_fallback,)
 
     if not isinstance(n, int) or not isinstance(k, int):
-        (k, n) = V.graph.sizevars.size_hints(
-            mat2.get_size(),
-            fallback=torch._inductor.config.unbacked_symint_fallback,
-        )
+        (k, n) = V.graph.sizevars.size_hints( mat2.get_size(), fallback=torch._inductor.config.unbacked_symint_fallback,)
     return m, n, k
 
 
