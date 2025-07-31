@@ -406,7 +406,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
             }
         ):
             code = run_and_get_triton_code(foo, inp, inp2)
-            FileCheck().check("check_memory_step").check_same("buf0").run(code)
+            FileCheck().check("allocated=['buf0']").run(code)
 
 
 if __name__ == "__main__":

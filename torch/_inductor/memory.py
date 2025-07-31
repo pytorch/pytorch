@@ -242,31 +242,43 @@ def assign_memory_planning_info_for_scheduler_nodes(
     """
     Assign to each scheduler node its predecessor and successor nodes.
     """
-    from .scheduler import SchedulerBuffer
 
-    for index, node in enumerate(nodes):
-        size_alloc = sum(buffer.mpi_buffer.size_alloc for buffer in node.get_outputs())
-        pred_buffers = OrderedSet[Union[SchedulerBuffer, FreeableInputBuffer]]()
-        for dep in node.read_writes.reads:
-            if dep.name in name_to_buf and dep in node.unmet_dependencies:
-                pred_buffers.add(name_to_buf[dep.name])
-            elif dep.name in name_to_freeable_input_buf:
-                pred_buffers.add(name_to_freeable_input_buf[dep.name])
-        pred_nodes = OrderedSet(
-            name_to_fused_node[pred_buffer.defining_op_name()]
-            for pred_buffer in pred_buffers
-            if (isinstance(pred_buffer, SchedulerBuffer))
-        )
+    node_to_pred_nodes = collections.defaultdict(OrderedSet)
+    node_to_pred_buffers = collections.defaultdict(OrderedSet)
+
+    # collect all predecessors using existing successor mappings
+    for node in nodes:
         succ_nodes = OrderedSet(
             succ_node
             for buffer in node.get_outputs()
             for succ_node in buffer.mpi_buffer.succ_nodes
         )
+
+        # For each successor, add current node as its predecessor
+        for succ_node in succ_nodes:
+            node_to_pred_nodes[succ_node].add(node)
+
+        # For each output buffer, add it as predecessor to its successor nodes
+        # TODO - is pred buffers needed ?
+        for buffer in node.get_outputs():
+            for succ_node in buffer.mpi_buffer.succ_nodes:
+                node_to_pred_buffers[succ_node].add(buffer)
+
+    # Second pass: assign memory planning info using completed predecessor mappings
+    for index, node in enumerate(nodes):
+        size_alloc = sum(buffer.mpi_buffer.size_alloc for buffer in node.get_outputs())
+
+        succ_nodes = OrderedSet(
+            succ_node
+            for buffer in node.get_outputs()
+            for succ_node in buffer.mpi_buffer.succ_nodes
+        )
+
         node.mpi_node = MemoryPlanningInfoForNode(
             index=index,
             size=size_alloc,
-            pred_buffers=pred_buffers,
-            pred_nodes=pred_nodes,
+            pred_buffers=node_to_pred_buffers[node],
+            pred_nodes=node_to_pred_nodes[node],
             succ_nodes=succ_nodes,
         )
 
