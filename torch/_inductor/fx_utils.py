@@ -192,6 +192,13 @@ class FakeTensorUpdater:
 
             return False
 
+        def should_process_node(node: torch.fx.Node) -> bool:
+            # node.target will called with FakeTensor arguments, which is not supported
+            # by Inductor lowerings
+            return callable(node.target) and not getattr(
+                node.target, "_inductor_lowering_function", False
+            )
+
         to_process = OrderedSet[int]()
         for node in self.graph.nodes:
             # NB: Be very careful about skipping nodes (via continues) here
@@ -204,11 +211,13 @@ class FakeTensorUpdater:
             ):
                 continue
 
+            if not should_process_node(node):
+                continue
+
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
 
-            assert not isinstance(node.target, str)
             with V.fake_mode, enable_python_dispatcher():
                 new_fake_tensor = node.target(*args, **kwargs)
 

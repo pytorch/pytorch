@@ -11,7 +11,7 @@ struct ExecutorConfig {
   bool debugNan = false;
   bool enableStaticCPUKernels = false;
   bool runConstFolding = false;
-  bool doExecutionFrameCleanup = true;
+  bool doExecutionFrameCleanup = false;
   bool tryFreeUnmanagedValuesAfterUse = true;
   // allows up to max number of concurrent threads.
   int64_t maxNumConcurrentThreads = 8;
