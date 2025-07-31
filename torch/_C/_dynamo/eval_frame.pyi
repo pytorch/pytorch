@@ -1,12 +1,10 @@
 import enum
 import types
-from typing import Optional, overload, TYPE_CHECKING
+from typing import Optional, overload
 
+from torch._dynamo.guards import GuardManagerWrapper
 from torch._dynamo.types import DynamoCallback, DynamoGuardCompleteHook, DynamoGuardHook
-
-if TYPE_CHECKING:
-    from torch._dynamo.guards import GuardManagerWrapper
-    from torch._guards import CompileId
+from torch._guards import CompileId
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def set_skip_guard_eval_unsafe(value: bool) -> bool: ...
