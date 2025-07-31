@@ -2439,15 +2439,6 @@ def is_int_specialization_case(value, source):
             source.guard_source().is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
-        # integers coming from FSDP modules are considered static. This is
-        # purely empirical and perhaps we should have a better heuristic.
-        or (
-            source.guard_source().is_fsdp_module()
-            and not (
-                config.allow_unspec_int_on_nn_module
-                or config.allow_unspec_int_on_fsdp_module
-            )
-        )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()
             and not config.allow_unspec_int_on_nn_module
@@ -2653,7 +2644,9 @@ def set_example_value(node, example_value):
     # this to accurately reflect what the state of the value was at the time
     # the program was traced).
     node.meta["example_value"] = example_value
-    shape_env = TracingContext.get().fake_mode.shape_env
+    fake_mode = TracingContext.get().fake_mode
+    assert fake_mode is not None
+    shape_env = fake_mode.shape_env
     if (
         symbol_to_path
         := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
@@ -3974,7 +3967,7 @@ def is_compile_supported(device_type):
     compile_supported = is_dynamo_supported()
     if type == "cpu":
         pass
-    elif type in ["cuda", "xpu"] and compile_supported:
+    elif type in ["cuda", "xpu", "mtia"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -4774,7 +4767,26 @@ def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
 
 # Returns a set of code objects present traced in the current TracingContext, or None
 # if there is no current TracingContext.
-def get_traced_code() -> list[CodeType]:
+def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()
+
+
+class CreateNestedFnCache:
+    cache: dict[str, types.FunctionType] = {}
+
+    @classmethod
+    def get(cls, key):
+        return cls.cache.get(key, None)
+
+    @classmethod
+    def set(cls, key, value):
+        cls.cache[key] = value
+
+    @classmethod
+    def clear(cls):
+        cls.cache.clear()
+
+
+create_nested_fn_cache: CreateNestedFnCache = CreateNestedFnCache()

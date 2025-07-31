@@ -93,7 +93,6 @@ tag=$(echo $image | awk -F':' '{print $2}')
 case "$tag" in
   pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11)
     CUDA_VERSION=12.4
-    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
@@ -104,7 +103,6 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11)
     CUDA_VERSION=12.8.1
-    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
@@ -115,7 +113,6 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.8.1
-    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     VISION=yes
@@ -127,7 +124,6 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.8.1
-    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     VISION=yes
@@ -139,7 +135,6 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3.13-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.8.1
-    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
     VISION=yes
@@ -151,7 +146,6 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc9)
     CUDA_VERSION=12.6.3
-    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     VISION=yes
@@ -160,9 +154,18 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     ;;
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm)
+    CUDA_VERSION=12.8.1
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    TRITON=yes
+    ;;
   pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.6
-    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     VISION=yes
@@ -174,7 +177,6 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.6
-    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     VISION=yes
@@ -186,7 +188,6 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.6-cudnn9-py3.13-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.6
-    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
     VISION=yes
@@ -198,7 +199,6 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9)
     CUDA_VERSION=12.8.1
-    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     VISION=yes
@@ -276,7 +276,7 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-    pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
+  pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     VISION=yes
@@ -288,7 +288,6 @@ case "$tag" in
   pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-clang12)
     ANACONDA_PYTHON_VERSION=3.9
     CUDA_VERSION=12.8.1
-    CUDNN_VERSION=9
     CLANG_VERSION=12
     VISION=yes
     TRITON=yes
@@ -367,7 +366,6 @@ case "$tag" in
     fi
     if [[ "$image" == *cuda* ]]; then
       extract_version_from_image_name cuda CUDA_VERSION
-      extract_version_from_image_name cudnn CUDNN_VERSION
     fi
     if [[ "$image" == *rocm* ]]; then
       extract_version_from_image_name rocm ROCM_VERSION
@@ -419,9 +417,6 @@ docker build \
        --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
-       --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
-       --build-arg "TENSORRT_VERSION=${TENSORRT_VERSION}" \
-       --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
