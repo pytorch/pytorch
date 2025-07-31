@@ -219,6 +219,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         && sccache --show-stats; \
     fi
 
+RUN echo "[DEBUG] Listing  current directory:" && \
+    ls -al && \
+    echo "[DEBUG] Showing torch_build_versions.txt content:" && \
+    cat torch_build_versions.txt
+
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/uv \
@@ -282,12 +287,12 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     fi
 
 # install the vllm wheel
-RUN  --mount=type=cache,target=/root/.cache/uv \
-    RUN uv pip install --system /wheels/vllm/*.whl --verbose
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system /wheels/vllm/*.whl --verbose
 
 # install xformers again for the new environment
 RUN --mount=type=cache,target=/root/.cache/uv \
-    RUN uv pip install --system /wheels/xformers/*.whl --verbose
+    uv pip install --system /wheels/xformers/*.whl --verbose
 
 ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
