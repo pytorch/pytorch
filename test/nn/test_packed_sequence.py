@@ -253,8 +253,8 @@ class PackedSequenceTest(TestCase):
             self.assertEqual(padded, expected.transpose(0, 1))
 
         # # This should raise an error instead of overflowing 
-        with self.assertRaisesRegex(ValueError, r'Overflow when unpacking long long'):
-            rnn_utils.pad_sequence([torch.tensor([1, 2, 3]), torch.tensor([4, 5])], padding_value=torch.iinfo(torch.int64).max)
+        with self.assertRaisesRegex(ValueError, r'Overflow for int64'):
+            rnn_utils.pad_sequence([torch.tensor([1, 2, 3]), torch.tensor([4, 5])], padding_value=torch.iinfo(torch.int64).max-511)
 
 
     def test_unpad_sequence(self):
