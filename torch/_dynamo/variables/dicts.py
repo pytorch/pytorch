@@ -176,7 +176,9 @@ class ConstDictVariable(VariableTracker):
                 fields_values = {
                     k: Hashable(v).underlying_value for k, v in self.vt.fields.items()
                 }
-                return self.vt.python_type()(**fields_values)
+                return variables.FrozenDataClassVariable.HashWrapper(
+                    self.vt.python_type(), fields_values
+                )
             elif isinstance(self.vt, variables.UserDefinedObjectVariable):
                 # The re module in Python 3.13+ has a dictionary (_cache2) with
                 # an object as key (`class _ZeroSentinel(int): ...`):
