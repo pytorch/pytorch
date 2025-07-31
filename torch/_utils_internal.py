@@ -117,6 +117,10 @@ def signpost_event(category: str, name: str, parameters: dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
+def add_mlhub_insight(category: str, insight: str, insight_description: str):
+    pass
+
+
 def log_compilation_event(metrics):
     log.info("%s", metrics)
 
