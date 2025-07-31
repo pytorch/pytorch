@@ -1467,7 +1467,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         index_compute_str = (
             f"{index_cpp_str} < 0 ? {index_cpp_str} + "
-            f"{self.val_to_arg_str_for_prim_type(node.size, int)} : {index_cpp_str}"
+            f"{self.val_to_arg_str_for_prim_type(node.size, int)}: {index_cpp_str}"
         )
         if clamp:
             index_compute_str = f"std::max(0L, std::min({size_cpp_str}, {index_compute_str}))"
