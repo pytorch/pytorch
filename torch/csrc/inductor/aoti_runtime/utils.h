@@ -12,6 +12,7 @@
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/headeronly/util/shim_utils.h>
 
 #if defined(__GNUC__) || defined(__clang__)
 #define AOTI_NOINLINE __attribute__((noinline))
@@ -20,15 +21,6 @@
 #else
 #define AOTI_NOINLINE
 #endif
-
-AOTI_NOINLINE static void throw_exception(
-    const char* call,
-    const char* file,
-    int64_t line) {
-  std::stringstream ss;
-  ss << call << " API call failed at " << file << ", line " << line;
-  throw std::runtime_error(ss.str());
-}
 
 #define AOTI_TORCH_ERROR_CODE_CHECK(call)       \
   if ((call) != AOTI_TORCH_SUCCESS) {           \
