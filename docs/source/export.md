@@ -654,9 +654,8 @@ torch.compiler_ir
 
 ```{toctree}
 :caption: Deep Dive for PyTorch Developers
-:maxdepth: 1
+:maxdepth: 2
 
-compile/torch.compiler_dynamic_shapes
 torch.compiler_fake_tensor
 torch.compiler_transformations
 ```

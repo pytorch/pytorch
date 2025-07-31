@@ -42,8 +42,8 @@ recompilation will be skipped and only one graph will be created, significantly
 decreasing compilation time and the use of resources.
 
 ```{toctree}
-:titlesonly:
-dynamic_shapes_core_concepts
-dynamic_shapes_beyond_the_basics
-dynamic_shapes_troubleshooting
+:maxdepth: 2
+compile/dynamic_shapes_core_concepts
+compile/dynamic_shapes_beyond_the_basics
+compile/dynamic_shapes_troubleshooting
 ```
