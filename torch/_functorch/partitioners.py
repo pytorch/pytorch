@@ -178,6 +178,8 @@ def _extract_graph_with_inputs_outputs(
     outputs: list[fx.Node],
     outputs_descs: list[AOTOutput],
     subgraph: Optional[str] = None,
+    *,
+    exact: bool = False
 ) -> fx.Graph:
     """
     Given a graph, extracts out a subgraph that takes the specified nodes as
@@ -200,7 +202,7 @@ def _extract_graph_with_inputs_outputs(
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        if _must_be_in_backward(node) and subgraph != "backward":
+        if (_must_be_in_backward(node) or (exact and _has_tag_is_backward(node))) and subgraph != "backward":
             env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
@@ -836,6 +838,7 @@ def _extract_fwd_bwd_modules(
     *,
     num_fwd_outputs: int,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
+    exact: bool = False,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
@@ -853,6 +856,7 @@ def _extract_fwd_bwd_modules(
         bwd_outputs,
         bwd_outputs_descs,
         "backward",
+        exact=exact,
     )
 
     distributed_enabled = torch.distributed.is_available()
@@ -931,6 +935,7 @@ def _extract_fwd_bwd_modules(
             for i in range(len(saved_values) + len(saved_sym_nodes))
         ],
         "forward",
+        exact=exact,
     )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
@@ -942,6 +947,7 @@ def _extract_fwd_bwd_modules(
         bwd_outputs,
         bwd_outputs_descs,
         "backward",
+        exact=exact,
     )
 
     fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
@@ -959,6 +965,7 @@ def default_partition(
     num_fwd_outputs,
     static_lifetime_input_indices: Optional[list[int]] = None,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
+    exact: bool = False
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
@@ -983,7 +990,7 @@ def default_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
-    if has_recomputable_ops(joint_module):
+    if has_recomputable_ops(joint_module) and not exact:
         return min_cut_rematerialization_partition(
             joint_module,
             _joint_inputs,
@@ -997,7 +1004,7 @@ def default_partition(
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     )
     forward_only_graph = _extract_graph_with_inputs_outputs(
-        joint_module.graph, inputs, fwd_outputs, fwd_outputs_descs, "forward"
+        joint_module.graph, inputs, fwd_outputs, fwd_outputs_descs, "forward", exact=exact
     )
     forward_node_names = OrderedSet(
         node.name for node in forward_only_graph.nodes if node.op != "output"
@@ -1044,6 +1051,7 @@ def default_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=static_lifetime_input_nodes,
+        exact=exact,
     )
 
 

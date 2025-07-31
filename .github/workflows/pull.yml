@@ -1,6 +1,6 @@
 name: pull
 
-on:
+oan:
   pull_request:
     branches-ignore:
       - nightly
