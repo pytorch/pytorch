@@ -294,13 +294,13 @@ static PoolSizes process_pool_sizes(const Tensor& input,
               pooling_dims,
               " ints");
 
-  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == pooling_dims,
               op_name,
               ": stride must either be omitted, a single int, or a tuple of ",
               pooling_dims,
               " ints");
 
-  TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
+  TORCH_CHECK(padding.size() == 1 || padding.size() == pooling_dims,
               op_name,
               ": padding must either be a single int, or a tuple of ",
               pooling_dims,
@@ -328,6 +328,22 @@ static PoolSizes process_pool_sizes(const Tensor& input,
     TORCH_CHECK(padding_expanded[dim] * 2 <= kernel_size_expanded[dim],
                 op_name,
                 ": pad should be at most half of effective kernel size");
+  }
+
+  if (pooling_dims == 2) {
+    const auto memory_format = input.suggest_memory_format();
+    bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
+    if (memory_format == at::MemoryFormat::ChannelsLast) {
+      // Expect tensor in NHWC format and allow 0-dim only for N.
+      TORCH_CHECK((dims == 4 && valid_dims && input.size(3) != 0),
+                  "Expected 4D (batch mode) tensor expected for input with channels_last layout"
+                  " with optional 0 dim batch size for input, but got: ",
+                  input.sizes());
+    } else {
+      TORCH_CHECK((dims == 3 && input.size(0) != 0 && valid_dims) || (dims == 4 && valid_dims && input.size(3) != 0),
+                  "Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got:",
+                  input.sizes());
+    }
   }
 
   for (const auto dim : c10::irange(static_cast<int>(leading_dims == 2), dims)) {
@@ -671,6 +687,16 @@ static void avg_pool_out_mps_template(const Tensor& output,
 
 } // namespace mps
 
+// TODO: The MPS graph impl can sometimes give significantly better performance
+// than the Metal impl for cases where the stride is 1 in all dimensions. There
+// may be a code path in the graph kernel that specifically optimizes for that
+// case. We should look into implementing a specialized case in Metal so we can
+// avoid using the graph impl.
+static bool use_graph_for_max_pool2d(IntArrayRef kernel_size, IntArrayRef stride_) {
+  IntArrayRef stride = stride_.empty() ? kernel_size : stride_;
+  return (stride[0] == 1) && (stride.size() == 1 || stride[1] == 1);
+}
+
 Tensor mps_max_pool2d(const Tensor& input,
                       IntArrayRef kernel_size,
                       IntArrayRef stride,
@@ -678,24 +704,37 @@ Tensor mps_max_pool2d(const Tensor& input,
                       IntArrayRef dilation,
                       bool ceil_mode) {
   Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
-  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
-    MPSGraph* mpsGraph = cachedGraph.graph();
-    return [mpsGraph maxPooling2DWithSourceTensor:cachedGraph.inputTensor descriptor:desc name:nil];
-  };
-  mps::pool2d_template(input,
-                       output,
-                       std::nullopt,
-                       std::nullopt,
-                       kernel_size,
-                       stride,
-                       padding,
-                       dilation,
-                       ceil_mode,
-                       false,
-                       std::nullopt,
-                       pooling_op_block,
-                       "max_pool2d");
-
+  bool use_graph = use_graph_for_max_pool2d(kernel_size, stride);
+  if (use_graph) {
+    mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
+      MPSGraph* mpsGraph = cachedGraph.graph();
+      return [mpsGraph maxPooling2DWithSourceTensor:cachedGraph.inputTensor descriptor:desc name:nil];
+    };
+    mps::pool2d_template(input,
+                         output,
+                         std::nullopt,
+                         std::nullopt,
+                         kernel_size,
+                         stride,
+                         padding,
+                         dilation,
+                         ceil_mode,
+                         false,
+                         std::nullopt,
+                         pooling_op_block,
+                         "max_pool2d");
+  } else {
+    mps::max_pool_with_indices_out_mps_template(output,
+                                                std::nullopt,
+                                                input,
+                                                kernel_size,
+                                                stride,
+                                                padding,
+                                                dilation,
+                                                ceil_mode,
+                                                /*pooling_dims=*/2,
+                                                "max_pool2d");
+  }
   return output;
 }
 
@@ -740,32 +779,45 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)
  bool ceil_mode,
  const Tensor& output,
  const Tensor& indices) {
-  auto indices_memory_format = indices.suggest_memory_format();
+  bool use_graph = use_graph_for_max_pool2d(kernel_size, stride);
+  if (use_graph) {
+    auto indices_memory_format = indices.suggest_memory_format();
 
-  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
-    MPSGraph* mpsGraph = cachedGraph.graph();
-    NSArray<MPSGraphTensor*>* poolOutputs = [mpsGraph maxPooling2DReturnIndicesWithSourceTensor:cachedGraph.inputTensor
-                                                                                     descriptor:desc
-                                                                                           name:nil];
-    cachedGraph.indicesTensor = mps::castMPSTensor(mpsGraph, poolOutputs[1], ScalarType::Long);
-    return poolOutputs[0];
-  };
-  mps::pool2d_template(input,
-                       output,
-                       indices,
-                       std::nullopt,
-                       kernel_size,
-                       stride,
-                       padding,
-                       dilation,
-                       ceil_mode,
-                       false,
-                       std::nullopt,
-                       pooling_op_block,
-                       "max_pool2d_indices");
+    mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
+      MPSGraph* mpsGraph = cachedGraph.graph();
+      NSArray<MPSGraphTensor*>* poolOutputs =
+          [mpsGraph maxPooling2DReturnIndicesWithSourceTensor:cachedGraph.inputTensor descriptor:desc name:nil];
+      cachedGraph.indicesTensor = mps::castMPSTensor(mpsGraph, poolOutputs[1], ScalarType::Long);
+      return poolOutputs[0];
+    };
+    mps::pool2d_template(input,
+                         output,
+                         indices,
+                         std::nullopt,
+                         kernel_size,
+                         stride,
+                         padding,
+                         dilation,
+                         ceil_mode,
+                         false,
+                         std::nullopt,
+                         pooling_op_block,
+                         "max_pool2d_indices");
+    if (indices_memory_format == MemoryFormat::ChannelsLast) {
+      const_cast<Tensor&>(indices) = indices.to(MemoryFormat::ChannelsLast);
+    }
 
-  if (indices_memory_format == MemoryFormat::ChannelsLast) {
-    const_cast<Tensor&>(indices) = indices.to(MemoryFormat::ChannelsLast);
+  } else {
+    mps::max_pool_with_indices_out_mps_template(output,
+                                                indices,
+                                                input,
+                                                kernel_size,
+                                                stride,
+                                                padding,
+                                                dilation,
+                                                ceil_mode,
+                                                /*pooling_dims=*/2,
+                                                "max_pool2d");
   }
 }
 
