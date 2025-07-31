@@ -2783,6 +2783,11 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+        if can_dispatch_torch_function(tx, args, kwargs):
+            return dispatch_torch_function(tx, self, args, kwargs)
+
         from .builder import wrap_fx_proxy
 
         (
@@ -3401,6 +3406,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 _hop_name_to_variable_class = {
     "cond": CondHigherOrderVariable,
     "while_loop": WhileLoopHigherOrderVariable,
+    "map": MapHigherOrderVariable,
     "map_impl": MapHigherOrderVariable,
     "executorch_call_delegate": ExecutorchCallDelegateHigherOrderVariable,
     "out_dtype": OutDtypeHigherOrderVariable,
