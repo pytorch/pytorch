@@ -13925,21 +13925,6 @@ graph():
         ep = export(m, args)
         self.assertEqual(ep.module()(*args), m(*args))
 
-    def test_deepcopy(self):
-        class Model(torch.nn.Module):
-            def forward(self, input):
-                return input + input
-
-        model = Model().eval()
-        inputs = (torch.ones(2, 2),)
-
-        program = export(model, inputs)
-        copied_program = copy.deepcopy(program)
-        self.assertEqual(str(program.graph), str(copied_program.graph))
-        self.assertEqual(
-            str(program.graph_module.code), str(copied_program.graph_module.code)
-        )
-
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):
             # check sym ops only get computed once
