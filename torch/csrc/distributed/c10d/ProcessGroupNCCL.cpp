@@ -5723,11 +5723,7 @@ bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
     return false;
   }
 
-  // We do an extra check to see if CUDA driver supports multicast.  If not, we
-  // will return false. Although `ncclMemAlloc` will fall back to regular
-  // `cudaMalloc` and hence not error out, we may still want to avoid creating a
-  // separate memory pool for NCCL.
-  return c10d::cuda::deviceSupportsMulticast(deviceIdx);
+  return true;
 }
 
 at::Tensor ProcessGroupNCCL::allocateTensor(
