@@ -131,6 +131,8 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
 
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
@@ -2817,10 +2819,9 @@ def maybe_get_suppress_shape_guards_ctx() -> contextlib.AbstractContextManager[N
         return contextlib.nullcontext()
 
     # In standalone inductor compile mode, we might not have a shape_env attached to the fake mode
-    shape_env = tracing_context.fake_mode.shape_env
-    if not shape_env:
+    if not tracing_context.fake_mode or not tracing_context.fake_mode.shape_env:
         return contextlib.nullcontext()
-
+    shape_env = tracing_context.fake_mode.shape_env
     return shape_env.suppress_guards()
 
 
@@ -3343,12 +3344,13 @@ def tabulate_2d(elements: Sequence[Sequence[T]], headers: Sequence[T]) -> str:
         for i, e in enumerate(row):
             widths[i] = max(widths[i], len(str(e)))
     lines = []
-    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))
+    # Need nested {} for string formatting; ignore SET_LINTER here
+    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))  # noqa: set_linter
     #              widths          whitespace      horizontal separators
     total_width = sum(widths) + (len(widths) * 2) + (len(widths) - 1)
     lines.append("-" * total_width)
     for row in elements:
-        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))
+        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))  # noqa: set_linter
     return "\n".join(lines)
 
 
@@ -3460,3 +3462,28 @@ def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.S
         return free_unbacked_symbols(x)
     else:
         return free_symbols(x)
+
+
+def maybe_log_cudagraph_partition(
+    msg: str,
+    prefix: Optional[str] = "cudagraph partition due to ",
+    node: Optional[BaseSchedulerNode] = None,
+) -> None:
+    """
+    Cudagraph partition may lead to extra memory overhead so we
+    log partition reasons to help users understand the overhead.
+    """
+    if not config.triton.cudagraphs:
+        return
+
+    warning_msg = f"{prefix}{msg}"
+
+    if (
+        node
+        and (ir_node := node.node)
+        and (fx_node := ir_node.get_origin_node())
+        and (stack_trace := fx_node.meta.get("stack_trace", None))
+    ):
+        warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
+
+    perf_hint_log.warning(warning_msg)
