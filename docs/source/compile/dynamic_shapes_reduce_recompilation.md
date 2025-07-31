@@ -43,9 +43,7 @@ f(torch.rand(40))
 ```
 
 In the produced output, you can see that four graphs were generated.
-See the corresponding
-<a href="../_static/img/dynamic_shapes/tlparse1_dynamic_shapes_false.png" target="_blank">tlparse output</a>.
-
+See the corresponding <a href="/_static/img/dynamic_shapes/tlparse1_dynamic_shapes_false.png" target="_blank">tlparse output</a>
 
 By making the size dynamic, the function can handle various sizes without recompilation:
 
@@ -62,8 +60,7 @@ f(torch.rand(40))
 ```
 
 With dynamic shapes enabled, only one graph is created. See the
-corresponding
-<a href="../_static/img/dynamic_shapes/tlparse2_dynamic_shapes_true.png" target="_blank">tlparse output</a>.
+corresponding <a href="/_static/img/dynamic_shapes/tlparse1_dynamic_shapes_true.png" target="_blank">tlparse output</a>.
 
 While compilation time differences
 are minimal for this small example, more complex use cases would show significant
@@ -105,8 +102,8 @@ In the code above, we specialize that the graph requires an input size of 10, in
 case it will return `x * 10`. If the input size is less than 30, it will return `x * 200`.
 In the output, you can see that this creates three graphs.
 
-See the corresponding
-<a href="../_static/img/dynamic_shapes/tlparse3_specialization.png" target="_blank">tlparse output</a>.
+See the corresponding <a href="/_static/img/dynamic_shapes/tlparse3_specialization.png" target="_blank">tlparse output</a>
+
 
 This is how graphs created for the above function:
 
@@ -123,7 +120,7 @@ There are the following ways to make things dynamic:
 * Compiler Collective
 * Users annotations
 
-Read below about each of this options.
+Read bellow about each of this options.
 
 ### Automatic dynamic
 
@@ -342,7 +339,7 @@ Check the following:
 1. **Check Recompile Reasons:** For graphs you believe are similar, click on
 `recompile_reason` in the `tlparse` output for the later graph. Ensure the
 reason is size-related and not due to other factors. For example, while
-in these screenshot the recomplile reason is size-related:
+in thise screenshot the recomplile reason is size-related:
 
 ```{image} ../_static/img/dynamic_shapes/tlparse6_size_related_recompilations.png
 ```
@@ -350,7 +347,6 @@ in these screenshot the recomplile reason is size-related:
 In the one below it is not, which indicates that dynamic shapes won't resolve it:
 
 ```{image} ../_static/img/dynamic_shapes/tlparse7_not_size_related_recompilations.png
-```
 
 2. **Compare Guards Files:** Ensure there are no guards on non-size-related
 elementsthat exist in one graph but not the others.
@@ -429,7 +425,6 @@ call  to a Triton kernel. To identify the reason for specialization:
     ```
 
     The log above indicates that `s0` is specialized to `33` due to the following code:
-    
     ```
     if self.x ==33. At example4.py like 16.
     ```

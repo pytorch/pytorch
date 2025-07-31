@@ -107,12 +107,15 @@ compile/programming_model
 ```
 
 ```{toctree}
+dynamic_shapes
+```
+
+```{toctree}
 :caption: Deep Dive for PyTorch Developers
 :maxdepth: 3
 
 torch.compiler_dynamo_overview
 torch.compiler_dynamo_deepdive
-dynamic_shapes
 torch.compiler_nn_module
 torch.compiler_cudagraph_trees
 torch.compiler_fake_tensor
