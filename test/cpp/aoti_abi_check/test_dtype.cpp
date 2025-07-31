@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/complex.h>
 #include <torch/headeronly/util/BFloat16.h>
 #include <torch/headeronly/util/Float4_e2m1fn_x2.h>
 #include <torch/headeronly/util/Float8_e4m3fn.h>
@@ -10,6 +9,7 @@
 #include <torch/headeronly/util/Float8_e8m0fnu.h>
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/bits.h>
+#include <torch/headeronly/util/complex.h>
 #include <torch/headeronly/util/qint32.h>
 #include <torch/headeronly/util/qint8.h>
 #include <torch/headeronly/util/quint2x4.h>
@@ -122,12 +122,12 @@ TEST(TestDtype, TestHalf) {
 }
 
 TEST(TestDtype, TestComplexFloat) {
-  c10::complex<float> a(std::complex<float>(1.0f, 2.0f));
-  c10::complex<float> b(std::complex<float>(3.0f, 4.0f));
-  c10::complex<float> add(std::complex<float>(4.0f, 6.0f));
-  c10::complex<float> sub(std::complex<float>(-2.0f, -2.0f));
-  c10::complex<float> mul(std::complex<float>(-5.0f, 10.0f));
-  c10::complex<float> div(std::complex<float>(0.44f, 0.08f));
+  torch::headeronly::complex<float> a(std::complex<float>(1.0f, 2.0f));
+  torch::headeronly::complex<float> b(std::complex<float>(3.0f, 4.0f));
+  torch::headeronly::complex<float> add(std::complex<float>(4.0f, 6.0f));
+  torch::headeronly::complex<float> sub(std::complex<float>(-2.0f, -2.0f));
+  torch::headeronly::complex<float> mul(std::complex<float>(-5.0f, 10.0f));
+  torch::headeronly::complex<float> div(std::complex<float>(0.44f, 0.08f));
 
   EXPECT_EQ(a + b, add);
   EXPECT_EQ(a - b, sub);
