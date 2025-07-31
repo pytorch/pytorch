@@ -11814,7 +11814,7 @@ class TestNNDeviceType(NNTestCase):
         targets = torch.randint(low=0, high=C, size=(sum(target_lengths),), dtype=other_dtype).to(other_device)
 
         ctc_loss = torch.nn.functional.ctc_loss(
-            log_probs=inputs,
+            inputs=inputs,
             targets=targets,
             input_lengths=input_lengths,
             target_lengths=target_lengths,
