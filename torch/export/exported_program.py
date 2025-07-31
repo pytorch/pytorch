@@ -573,8 +573,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
         delattr(ep.graph_module, name)
 
     # TODO(zhxhchen17) Return the new graph_signature directly.
-    fake_mode = detect_fake_mode(fake_args)
-    fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode  # type: ignore[assignment]
+    fake_mode_det = detect_fake_mode(fake_args)
+    fake_mode_ctx = contextlib.nullcontext() if fake_mode_det is None else fake_mode_det  # type: ignore[assignment]
     custom_triton_ops_decomposition_ctx = (
         contextlib.nullcontext
         if decompose_custom_triton_ops
@@ -582,7 +582,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     )
     with (
         _ignore_backend_decomps(),
-        fake_mode,
+        fake_mode_ctx,
         _override_composite_implicit_decomp(cia_to_decomp),
         custom_triton_ops_decomposition_ctx(),
     ):
@@ -1615,6 +1615,17 @@ class ExportedProgram:
             verifiers=verifiers if verifiers is not None else self.verifiers,
         )
 
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            setattr(result, k, copy.deepcopy(v, memo))
+
+        graph_module, graph_signature = _copy_graph_module_and_signature(self)
+        result = result._update(graph_module, graph_signature)
+        return result
+
 
 def _get_shape_env(gm):
     vals = [
@@ -1630,6 +1641,30 @@ def _get_shape_env(gm):
     for v in vals:
         if isinstance(v, torch.SymInt):
             return v.node.shape_env
+
+
+def _copy_graph_module_and_signature(
+    ep: "ExportedProgram",
+) -> tuple[torch.fx.GraphModule, "ExportGraphSignature"]:
+    # copy.deepcopy lets the objects override __deepcopy__ methods with graph_copy() and node_copy(),
+    # and this can break placeholder names in some particular cases.
+    # For example, node copying will avoid Python keywords like 'input', suffixing and renaming to 'input_1'.
+    # So we manually overwrite placeholder names by reading the old graph.
+    gm = copy.deepcopy(ep.graph_module)
+    new_graph_signature = copy.deepcopy(ep.graph_signature)
+
+    # iterate over old/new graph modules
+    for old_gm, new_gm in zip(ep.graph_module.modules(), gm.modules()):  # type: ignore[union-attr]
+        old_phs = [node for node in old_gm.graph.nodes if node.op == "placeholder"]
+        new_phs = [node for node in new_gm.graph.nodes if node.op == "placeholder"]
+        # iterate over placeholders
+        assert len(old_phs) == len(new_phs)
+        for old_node, new_node in zip(old_phs, new_phs):
+            if new_node.name != old_node.name:
+                new_node.name = old_node.name
+                new_node.target = old_node.target
+
+    return gm, new_graph_signature
 
 
 def _get_updated_range_constraints(
