@@ -707,7 +707,7 @@ def determine_local_world_size(nproc_per_node: str):
             device_type = nproc_per_node
             num_proc = _get_custom_mod_func("device_count")()
         elif nproc_per_node == "auto":
-            if torch.accelerator.is_available():
+            if torch.accelerator.is_available() and torch.accelerator.current_accelerator():
                 num_proc = torch.accelerator.device_count()
                 device_type = torch.accelerator.current_accelerator().type
             else:
