@@ -461,6 +461,7 @@ def insert_deferred_runtime_asserts(
                                     ),
                                     keypath[2:],
                                 )
+
                             return go(
                                 graph.call_method(
                                     keypath[0].name, (node, keypath[1].idx)

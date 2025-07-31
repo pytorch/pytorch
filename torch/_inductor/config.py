@@ -425,9 +425,6 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
-# disable decomposek autotune choice for gemm
-disable_decompose_k = os.environ.get("TORCHINDUCTOR_DISABLE_DECOMPOSE_K") == "1"
-
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
 
@@ -452,11 +449,12 @@ force_same_precision: bool = Config(
 multi_kernel_hints: list[int] = []
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
+# CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
@@ -680,7 +678,7 @@ combo_kernels_autotune = 1
 # for all except for foreach, 2 - enable for all
 combo_kernel_allow_mixed_sizes = 1
 # Enable dynamic shapes for foreach kernels
-combo_kernel_foreach_dynamic_shapes = False
+combo_kernel_foreach_dynamic_shapes = True
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1345,6 +1343,17 @@ class triton:
     # Note: it may also need to be used with config.compile_threads = 1
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
+    # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
+    num_decompose_k_splits = int(
+        os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
+    )
+
+    # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
+    # it as an autotuning choice for all matmuls
+    decompose_k_threshold = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
+    )
+
 
 class aot_inductor:
     """
@@ -1440,6 +1449,11 @@ class aot_inductor:
     # but performance for that interface may be degraded.
     use_minimal_arrayref_interface: bool = False
 
+    # Set to True if we want to use Pytorch's CUDACachingAllocator for weight management
+    weight_use_caching_allocator: bool = (
+        os.environ.get("AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR", "0") == "1"
+    )
+
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
 
@@ -1450,12 +1464,12 @@ class aot_inductor:
     precompile_headers: bool = not is_fbcode()
 
     # Embed generated kernel binary files into model.so
-    embed_kernel_binary: Optional[bool] = None
+    embed_kernel_binary: bool = False
 
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
-    emit_multi_arch_kernel: Optional[bool] = None
+    emit_multi_arch_kernel: bool = False
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
@@ -1509,11 +1523,11 @@ class cuda:
 
     # Path to the CUTLASS repo root directory.
     # The default path only works under PyTorch local development environment.
-    cutlass_dir = os.environ.get(
-        "TORCHINDUCTOR_CUTLASS_DIR",
-        os.path.abspath(
-            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
-        ),
+    cutlass_dir = os.path.realpath(
+        os.environ.get(
+            "TORCHINDUCTOR_CUTLASS_DIR",
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/"),
+        )
     )
 
     # Configures the maximum number of CUTLASS configs to profile in max_autotune.
@@ -1621,7 +1635,11 @@ class rocm:
 
     # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    ck_supported_arch: list[str] = ["gfx90a", "gfx942"]
+    ck_supported_arch: list[Literal["gfx90a", "gfx942", "gfx950"]] = [
+        "gfx90a",
+        "gfx942",
+        "gfx950",
+    ]
 
     # Optimization level, use to balance compilation speed and runtime performance.
     # The type will not necessarily be comprehensive and won't be enforced at runtime.
@@ -1841,10 +1859,6 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
-
-    # If set to True, AOTI-generated CMakelists.txt will still use libtorch
-    # for unit testing
-    use_libtorch = False
 
 
 if TYPE_CHECKING:

@@ -712,6 +712,64 @@ def slice_backward(
     return torch.slice_scatter(grad_input, grad_output, dim, start, end, step)
 
 
+@register_decomposition(aten.slice.Tensor)
+def slice_forward(
+    # Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1
+    self: Tensor,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: int = 1,
+):
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_size_oblivious,
+        statically_known_true,
+    )
+
+    ndim = self.dim()
+    if ndim == 0:
+        raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
+    dim = utils.canonicalize_dim(self.dim(), dim)
+    sizes = list(self.size())
+    strides = list(self.stride())
+
+    if step <= 0:
+        raise RuntimeError("slice step must be positive")
+
+    start_val = start if start is not None else 0
+    end_val = end if end is not None else sys.maxsize  # 2^63 - 1
+
+    if guard_size_oblivious(start_val < 0):
+        start_val += sizes[dim]
+
+    if guard_size_oblivious(end_val < 0):
+        end_val += sizes[dim]
+
+    if guard_size_oblivious(start_val < 0):
+        start_val = 0
+    elif guard_size_oblivious(start_val > sizes[dim]):
+        start_val = sizes[dim]
+
+    if statically_known_true(end_val == sys.maxsize):
+        end_val = sizes[dim]
+    elif guard_size_oblivious(end_val < start_val):
+        end_val = start_val
+    elif guard_size_oblivious(end_val > sizes[dim]):
+        end_val = sizes[dim]
+
+    storage_offset = self.storage_offset() + start_val * strides[dim]
+    len = end_val - start_val
+    sizes[dim] = (len + step - 1) // step
+    strides[dim] *= step
+
+    if self.is_quantized:
+        raise NotImplementedError(
+            "Slice decomposition for quantized tensors aren't implemented"
+        )
+    else:
+        return self.as_strided(sizes, strides, storage_offset)
+
+
 def _normalize_start_end(
     x: Tensor, dim: int, start: Optional[int], end: Optional[int]
 ) -> tuple[int, int]:
@@ -1609,9 +1667,9 @@ def native_layer_norm_backward(
 
     N = prod(inner_dims)  # type: ignore[arg-type]
     M = prod(outer_dims)  # type: ignore[arg-type]
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-    if guard_size_oblivious(M <= 0) or guard_size_oblivious(N <= 0):
+    if statically_known_true(M == 0) or statically_known_true(N == 0):
         return (
             input.new_zeros(input_shape) if output_mask[0] else None,
             input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
@@ -1683,6 +1741,81 @@ def native_layer_norm_backward_out(
             _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
 
     return grad_input
+
+
+@register_decomposition(aten._fused_rms_norm_backward.default)
+def _fused_rms_norm_backward(
+    grad_out: Tensor,
+    input: Tensor,
+    normalized_shape: list[int],
+    rstd: Tensor,
+    weight: Optional[Tensor],
+    output_mask: list[bool],
+) -> tuple[Optional[Tensor], Optional[Tensor]]:
+    input_shape = input.shape
+    input_ndim = input.dim()
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+
+    grad_out_cast = grad_out.to(
+        computation_dtype, memory_format=torch.contiguous_format
+    )
+    input_cast = input.to(computation_dtype, memory_format=torch.contiguous_format)
+    weight_cast = (
+        weight.to(computation_dtype, memory_format=torch.contiguous_format)
+        if weight is not None
+        else None
+    )
+    assert grad_out_cast is not None
+
+    axis = input_ndim - len(normalized_shape)
+    inner_dims = input_shape[axis:]
+    outer_dims = input_shape[:axis]
+    inner_dim_indices: list[int] = []
+    outer_dim_indices: list[int] = []
+    for i in range(input_ndim):
+        if i >= axis:
+            inner_dim_indices.append(i)
+        else:
+            outer_dim_indices.append(i)
+
+    N = prod(inner_dims)  # type: ignore[arg-type]
+    M = prod(outer_dims)  # type: ignore[arg-type]
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(M <= 0) or guard_size_oblivious(N <= 0):
+        return (
+            input.new_zeros(input_shape) if output_mask[0] else None,
+            input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
+        )
+
+    rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
+    if weight_cast is not None:
+        grad_x_hat = grad_out_cast * weight_cast
+    else:
+        grad_x_hat = grad_out_cast
+
+    d_input: Optional[Tensor] = None
+    d_weight: Optional[Tensor] = None
+
+    x_hat = input_cast * rstd
+
+    if output_mask[0]:
+        sum_val = torch.sum(x_hat * grad_x_hat, dim=inner_dim_indices, keepdim=True)
+        d_input = (grad_x_hat - (x_hat / N) * sum_val) * rstd
+
+    if output_mask[1] and weight_cast is not None:
+        d_weight_full_shape = grad_out_cast * x_hat
+        if len(outer_dim_indices) > 0:
+            d_weight = torch.sum(
+                d_weight_full_shape, dim=outer_dim_indices, keepdim=False
+            )
+        else:
+            d_weight = d_weight_full_shape
+
+    return (
+        _maybe_cast(d_input, input.dtype),
+        _maybe_cast(d_weight, input.dtype),
+    )
 
 
 def native_batch_norm_helper(
@@ -4328,7 +4461,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 
     t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
@@ -4336,7 +4469,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
         return True
     if tensor1.ndim == 2:
         return False
-    if guard_size_oblivious(t1.numel() == 0):
+    if guard_or_false(t1.numel() == 0):
         return True
 
     t1_shape = t1.shape
@@ -4348,7 +4481,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
     for size in reversed(t1_shape[1:]):
         expected_stride.append(size * expected_stride[-1])
     return all(
-        guard_size_oblivious(size == 1) or left == right
+        guard_or_false(size == 1) or guard_or_false(left == right)
         for left, right, size in zip(
             t1_stride, list(reversed(expected_stride)), t1_shape
         )
@@ -4942,6 +5075,7 @@ def scaled_dot_product_flash_attention_for_cpu(
         is_causal=is_causal,
         dropout_mask=None,
         scale=scale,
+        enable_gqa=query.size(1) != key.size(1),
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via

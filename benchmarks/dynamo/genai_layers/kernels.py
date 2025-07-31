@@ -9,8 +9,8 @@ import torch.nn.functional as F
 
 
 class CrossEntropyForward(BenchmarkKernel):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
+        super().__init__(compile_mode)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -52,7 +52,8 @@ class CrossEntropyForward(BenchmarkKernel):
         # More discussion: https://github.com/pytorch/pytorch/issues/158455
         compiled_cross_entropy = torch.compile(
             lambda x, target: F.cross_entropy(x, target, reduction="none"),
-            mode="max-autotune-no-cudagraphs",
+            mode=self.compile_mode,
+            fullgraph=True,
         )
         return lambda: compiled_cross_entropy(x, target)
 
@@ -105,8 +106,8 @@ class CrossEntropyForward(BenchmarkKernel):
 
 
 class CrossEntropyBackward(BenchmarkKernel):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
+        super().__init__(compile_mode)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -149,7 +150,8 @@ class CrossEntropyBackward(BenchmarkKernel):
 
         compiled_cross_entropy = torch.compile(
             lambda x, target: F.cross_entropy(x, target, reduction="none"),
-            mode="max-autotune-no-cudagraphs",
+            mode=self.compile_mode,
+            fullgraph=True,
         )
         loss = compiled_cross_entropy(x, target)
         return lambda: torch.autograd.grad(
@@ -192,8 +194,8 @@ class CrossEntropyBackward(BenchmarkKernel):
 
 
 class SoftmaxForward(BenchmarkKernel):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
+        super().__init__(compile_mode)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -229,7 +231,7 @@ class SoftmaxForward(BenchmarkKernel):
         torch._dynamo.mark_dynamic(x, 0)
 
         compiled_softmax = torch.compile(
-            lambda x: F.softmax(x, dim=-1), mode="max-autotune-no-cudagraphs"
+            lambda x: F.softmax(x, dim=-1), mode=self.compile_mode, fullgraph=True
         )
         return lambda: compiled_softmax(x)
 
@@ -257,8 +259,8 @@ class SoftmaxForward(BenchmarkKernel):
 
 
 class SoftmaxBackward(BenchmarkKernel):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
+        super().__init__(compile_mode)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -292,7 +294,7 @@ class SoftmaxBackward(BenchmarkKernel):
         assert kwargs is None
         x, dy = args
         compiled_softmax = torch.compile(
-            lambda x: F.softmax(x, dim=-1), mode="max-autotune-no-cudagraphs"
+            lambda x: F.softmax(x, dim=-1), mode=self.compile_mode, fullgraph=True
         )
         y = compiled_softmax(x)
         return lambda: torch.autograd.grad(y, x, grad_outputs=dy, retain_graph=True)
@@ -327,8 +329,8 @@ class SoftmaxBackward(BenchmarkKernel):
 
 
 class RMSNormForward(BenchmarkKernel):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
+        super().__init__(compile_mode)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -372,7 +374,7 @@ class RMSNormForward(BenchmarkKernel):
         torch._dynamo.mark_dynamic(x, 0)
 
         compiled_rms_norm = torch.compile(
-            self.rms_norm_ref, mode="max-autotune-no-cudagraphs"
+            self.rms_norm_ref, mode=self.compile_mode, fullgraph=True
         )
         return lambda: compiled_rms_norm(x, w)
 
@@ -402,8 +404,8 @@ class RMSNormForward(BenchmarkKernel):
 
 
 class RMSNormBackward(BenchmarkKernel):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
+        super().__init__(compile_mode)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -445,7 +447,9 @@ class RMSNormBackward(BenchmarkKernel):
     def compiled(self, args, kwargs=None) -> Any:
         assert kwargs is None
         x, w, dy = args
-        y = torch.compile(self.rms_norm_ref, mode="max-autotune-no-cudagraphs")(x, w)
+        y = torch.compile(self.rms_norm_ref, mode=self.compile_mode, fullgraph=True)(
+            x, w
+        )
         return lambda: torch.autograd.grad(
             y, [x, w], grad_outputs=dy, retain_graph=True
         )
@@ -485,8 +489,8 @@ class RMSNormBackward(BenchmarkKernel):
 
 
 class LayerNormForward(BenchmarkKernel):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
+        super().__init__(compile_mode)
         self.available_backends = ["eager", "compiled", "quack", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -526,7 +530,7 @@ class LayerNormForward(BenchmarkKernel):
         torch._dynamo.mark_dynamic(x, 0)
 
         compiled_layernorm = torch.compile(
-            self.layernorm_ref, mode="max-autotune-no-cudagraphs"
+            self.layernorm_ref, mode=self.compile_mode, fullgraph=True
         )
         return lambda: compiled_layernorm(x, w, eps=1e-6)
 
@@ -559,8 +563,8 @@ class LayerNormForward(BenchmarkKernel):
 
 
 class LayerNormBackward(BenchmarkKernel):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, compile_mode: str = "max-autotune-no-cudagraphs"):
+        super().__init__(compile_mode)
         self.available_backends = ["eager", "compiled", "liger"]
 
     def get_shapes(self) -> tuple[tuple[int, ...], ...]:
@@ -603,7 +607,7 @@ class LayerNormBackward(BenchmarkKernel):
         assert kwargs is None
         x, w, dy = args
         compiled_layernorm = torch.compile(
-            self.layernorm_ref, mode="max-autotune-no-cudagraphs"
+            self.layernorm_ref, mode=self.compile_mode, fullgraph=True
         )
         y = compiled_layernorm(x, w)
         return lambda: torch.autograd.grad(

@@ -52,6 +52,7 @@ from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.common import (
+    custom_backend_codegen_configs,
     custom_backend_passes,
     init_backend_registration,
 )
@@ -817,7 +818,7 @@ class FxGraphHashDetails:
 
         # Global settings affecting matmul codegen.
         self.cuda_matmul_settings = (
-            torch.backends.cuda.matmul.allow_tf32,
+            torch.backends.cuda.matmul.fp32_precision,
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
         )
@@ -853,6 +854,13 @@ class FxGraphHashDetails:
         self.custom_backend_passes = tuple(
             map(self._get_custom_pass_detail, custom_backend_passes.values())
         )
+
+        # Save custom inductor codegen configs
+        self.custom_backend_codegen_configs = {
+            device: custom_config.save_config_portable(ignore_private_configs=False)
+            for device, custom_config in custom_backend_codegen_configs.items()
+            if custom_config is not None
+        }
 
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
@@ -1057,7 +1065,7 @@ class GuardedCache(Generic[T]):
         Helper to get the shape env from the tracing context.
         """
         ctx = torch._guards.TracingContext.try_get()
-        if not ctx:
+        if not ctx or not ctx.fake_mode:
             return None
         return ctx.fake_mode.shape_env
 
@@ -1613,6 +1621,36 @@ class CudaKernelParamCache:
         return cls.cache.keys()
 
 
+class WritableTempFile:
+    """
+    Avoid "Permission denied error" on Windows:
+      with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
+        # Not writable on Windows:
+        # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
+
+    Example:
+        with WritableTempFile("w", suffix=".gv") as temp_file:
+            tree.to_dotfile(temp_file.name)
+    """
+
+    def __init__(
+        self, mode: str = "w", *, encoding: Any = None, suffix: Any = None
+    ) -> None:
+        self.mode = mode
+        self.encoding = encoding
+        self.suffix = suffix
+
+    def __enter__(self) -> Any:
+        self.temp_file = tempfile.NamedTemporaryFile(
+            self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
+        )
+        return self.temp_file
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.temp_file.close()
+        os.unlink(self.temp_file.name)
+
+
 class AotCodeCompiler:
     """
     Compile AOT Inductor generated code.
@@ -1634,9 +1672,6 @@ class AotCodeCompiler:
         config.aot_inductor.package=True.
         """
         generated_files: list[Union[str, Weights]] = additional_files  # type: ignore[assignment]
-
-        if sys.platform == "win32":
-            raise RuntimeError("AotCodeCompiler not yet supported for inductor")
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
@@ -1674,6 +1709,12 @@ class AotCodeCompiler:
             wrapper_code = "\n".join((wrapper_code, kernel_code))
             kernel_code = ""
 
+        from .utils import aoti_model_name_from_config
+
+        model_class_name = ""
+        if config.aot_inductor.compile_standalone:
+            model_class_name = aoti_model_name_from_config()
+
         wrapper_key, wrapper_path = write(
             wrapper_code,
             "wrapper.cpp",
@@ -1706,8 +1747,6 @@ class AotCodeCompiler:
                     "model.h",
                 )
             ) as f:
-                # model_name_for_generated_files is guaranteed to be non-empty when compile_standalone
-                model_class_name = config.aot_inductor.model_name_for_generated_files
                 class_name = f"AOTInductorModel{model_class_name}"
                 header_code = f.read()
 
@@ -1722,11 +1761,21 @@ class AotCodeCompiler:
                     header_code,
                     "h",
                     specified_dir=specified_output_path,
-                    key=model_class_name,
+                    key=f"{model_class_name}",
                 )
 
         # Log the AOTInductor wrapper and kernel code, if needed.
-        with tempfile.NamedTemporaryFile("w+") as t:
+        with WritableTempFile("w+") as t:
+            """
+            Avoid "Permission denied error" on Windows:
+            with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
+                # Not writable on Windows:
+                # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
+
+            Example:
+                with WritableTempFile("w", suffix=".gv") as temp_file:
+                    tree.to_dotfile(temp_file.name)
+            """
             t.writelines((wrapper_code, "\n", kernel_code, "\n"))
             t.flush()
             V.debug.output_code(t.name, extension="cpp")
@@ -1836,7 +1885,7 @@ class AotCodeCompiler:
                     consts_asm += f"\t.space {len(consts) - 8}\n"
                 consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
-                return consts_asm, "weights.S"
+                return consts_asm, "S"
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
@@ -1861,7 +1910,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                         const_cpp += "\t\n"
                 const_cpp += "};\t\n"
                 const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
-                return const_cpp, "weights.cpp"
+                return const_cpp, "cpp"
 
             if use_asm_build:
                 consts_code, code_ext = format_consts_to_asm(
@@ -1876,7 +1925,6 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                 consts_code,
                 code_ext,
                 specified_dir=str(specified_sub_dir),
-                key=config.aot_inductor.model_name_for_generated_files,
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
@@ -2170,13 +2218,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
             asm_files = []
             if not _IS_WINDOWS:
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
-                kernels = getattr(V.graph.wrapper_code, "_kernel_name_to_body", {})
                 for kernel_name, value in CudaKernelParamCache.cache.items():
-                    if kernel_name not in kernels:
-                        # It is possible that CudaKernelParamCache contains more Triton kernels
-                        # than what the current graph uses
-                        continue
-
                     if asm_file := value["asm"]:
                         asm_files.append(asm_file)
 
