@@ -35,7 +35,7 @@ MODULES = [
         "smoke_test": "./vision/test/smoke_test.py",
         "extension": "extension",
         "repo_name": "vision",
-    }
+    },
 ]
 
 
