@@ -355,22 +355,26 @@ class DTensorTestBase(MultiProcessTestCase):
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh(self.device_type, (self.world_size,))
 
-    def init_pg(self, eager_init) -> None:
+    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if self.backend not in [
+        if backend is None:
+            backend = self.backend
+
+        if backend not in [
             "nccl",
             "gloo",
             "mpi",
             "cpu:gloo,cuda:nccl",
             "hccl",
             "xccl",
+            "fake",
         ]:
-            raise RuntimeError(f"Backend {self.backend} not supported!")
+            raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None
-        if "nccl" in self.backend or "xccl" in self.backend:
+        if "nccl" in backend or "xccl" in backend:
             # set device for nccl pg for collectives
             torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init
@@ -381,7 +385,7 @@ class DTensorTestBase(MultiProcessTestCase):
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
         # for form subgroup to avoid unnecesssary overhead.
         dist.init_process_group(
-            backend=self.backend,
+            backend=backend,
             world_size=self.world_size,
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
@@ -449,13 +453,15 @@ TestFunc = Callable[[...], object]
 
 
 # wrapper to initialize comms (processgroup)
-def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
-    def decorator(func, eager_init: bool = False):
+def with_comms(
+    eager_init: Union[TestFunc, bool] = False, backend: Optional[str] = None
+) -> TestFunc:
+    def decorator(func, eager_init: bool = False, backend: Optional[str] = None):
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
             self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
         ) -> None:
-            self.init_pg(eager_init)
+            self.init_pg(eager_init, backend)
 
             try:
                 func(self, *args, **kwargs)  # type: ignore[misc]
@@ -470,7 +476,7 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
     return (
         decorator(func=eager_init)
         if callable(eager_init)
-        else partial(decorator, eager_init=eager_init)
+        else partial(decorator, eager_init=eager_init, backend=backend)
     )
 
 
