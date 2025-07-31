@@ -35,7 +35,10 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch._inductor.template_heuristics import CUDAConfigHeuristic, GemmConfig
+from torch._inductor.template_heuristics import (
+    CUDAMMTemplateConfigHeuristic,
+    GemmConfig,
+)
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -820,9 +823,9 @@ class TestMaxAutotune(TestCase):
         Check https://github.com/pytorch/pytorch/issues/125437 for more details.
         """
         x = rand_strided(
-            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
+            (50257, 2048), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
-        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
+        y = rand_strided((2048, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x, y):
@@ -835,9 +838,9 @@ class TestMaxAutotune(TestCase):
     def test_non_contiguous_input_addmm(self):
         b = torch.randn((768), dtype=torch.bfloat16, device=GPU_TYPE)
         x = rand_strided(
-            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
+            (50257, 2048), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
-        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
+        y = rand_strided((2048, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x, y):
@@ -849,10 +852,10 @@ class TestMaxAutotune(TestCase):
 
     def test_non_contiguous_input_bmm(self):
         x = rand_strided(
-            (1, 50257, 32768), (0, 1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
+            (1, 50257, 2048), (0, 1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
         y = rand_strided(
-            (1, 32768, 768), (0, 768, 1), dtype=torch.bfloat16, device=GPU_TYPE
+            (1, 2048, 768), (0, 768, 1), dtype=torch.bfloat16, device=GPU_TYPE
         )
 
         @torch.compile(mode="max-autotune")
@@ -866,16 +869,12 @@ class TestMaxAutotune(TestCase):
     # TODO: fix accuracy failure of the triton template on XPU.
     # and enable this test case.
     @skipIfXpu
-    @unittest.skipIf(
-        os.getenv("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1",
-        "OOM when running with TORCHINDUCTOR_CPP_WRAPPER https://github.com/pytorch/pytorch/issues/126867",
-    )
     def test_non_contiguous_input_mm_plus_mm(self):
-        x1 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
-        y1 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)
+        x1 = rand_strided((50257, 2048), (1, 50304), device=GPU_TYPE)
+        y1 = rand_strided((2048, 768), (768, 1), device=GPU_TYPE)
 
-        x2 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
-        y2 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)
+        x2 = rand_strided((50257, 2048), (1, 50304), device=GPU_TYPE)
+        y2 = rand_strided((2048, 768), (768, 1), device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x1, y1, x2, y2):
@@ -1177,7 +1176,7 @@ class TestMaxAutotune(TestCase):
         # Force only decomposeK choice
         with (
             mock.patch(
-                "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
+                "torch._inductor.kernel.mm.V.choices.get_mm_configs"
             ) as base_mm_mock,
             mock.patch(
                 "torch._inductor.kernel.mm.use_decompose_k_choice"
@@ -1505,6 +1504,7 @@ class TestMaxAutotune(TestCase):
 
     @fresh_cache()
     @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1564,9 +1564,9 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.kernel.mm.V.choices.get_config_heuristics"
+            "torch._inductor.template_registry.get_template_heuristic"
         ) as config_mock:
-            config_heuristics = CUDAConfigHeuristic()
+            config_heuristics = CUDAMMTemplateConfigHeuristic()
 
             # Traditionally, this would be set of all possible configs
             # We mock out the code path for the sake of the unit test
@@ -1583,6 +1583,25 @@ class TestMaxAutotune(TestCase):
             for counter in counters["inductor"]:
                 if "benchmark_gpu" in counter:
                     self.assertEqual(counters["inductor"][counter], 2)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_mm_k_1(self):
+        def mm(x, y):
+            return x @ y
+
+        for i in range(90, 100):
+            torch._dynamo.reset()
+            a = torch.randn((i, 1), device=GPU_TYPE, dtype=torch.float32)
+            b = torch.randn((1, i), device=GPU_TYPE, dtype=torch.float32)
+            compiled_f = torch.compile(mm)
+
+            out, code = run_and_get_code(compiled_f, a, b)
+            torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
 
 
 class TestMaxAutotunePrecompile(TestCase):
