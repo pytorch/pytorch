@@ -449,11 +449,12 @@ force_same_precision: bool = Config(
 multi_kernel_hints: list[int] = []
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
+# CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
@@ -677,7 +678,7 @@ combo_kernels_autotune = 1
 # for all except for foreach, 2 - enable for all
 combo_kernel_allow_mixed_sizes = 1
 # Enable dynamic shapes for foreach kernels
-combo_kernel_foreach_dynamic_shapes = False
+combo_kernel_foreach_dynamic_shapes = True
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1448,6 +1449,11 @@ class aot_inductor:
     # but performance for that interface may be degraded.
     use_minimal_arrayref_interface: bool = False
 
+    # Set to True if we want to use Pytorch's CUDACachingAllocator for weight management
+    weight_use_caching_allocator: bool = (
+        os.environ.get("AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR", "0") == "1"
+    )
+
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
 
@@ -1458,12 +1464,12 @@ class aot_inductor:
     precompile_headers: bool = not is_fbcode()
 
     # Embed generated kernel binary files into model.so
-    embed_kernel_binary: Optional[bool] = None
+    embed_kernel_binary: bool = False
 
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
-    emit_multi_arch_kernel: Optional[bool] = None
+    emit_multi_arch_kernel: bool = False
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
@@ -1629,7 +1635,11 @@ class rocm:
 
     # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    ck_supported_arch: list[str] = ["gfx90a", "gfx942"]
+    ck_supported_arch: list[Literal["gfx90a", "gfx942", "gfx950"]] = [
+        "gfx90a",
+        "gfx942",
+        "gfx950",
+    ]
 
     # Optimization level, use to balance compilation speed and runtime performance.
     # The type will not necessarily be comprehensive and won't be enforced at runtime.
@@ -1849,10 +1859,6 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
-
-    # If set to True, AOTI-generated CMakelists.txt will still use libtorch
-    # for unit testing
-    use_libtorch = False
 
 
 if TYPE_CHECKING:

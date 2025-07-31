@@ -997,6 +997,7 @@ class PythonWrapperCodegen(CodeGen):
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
                 empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+                empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 async_compile = AsyncCompile()
@@ -1801,6 +1802,14 @@ class PythonWrapperCodegen(CodeGen):
         result_name = node.get_name()
         arg_name = node.input_name(0)
         self.writeline(MultiOutputLine(self, result_name, arg_name, node.indices))
+
+    def codegen_dynamic_select_index(self, node):
+        index_str = f"{node.index} + {node.size} if {node.index} < 0 else {node.index}"
+        self.writeline(
+            f"{node.unbacked_offset_symbol} = {node.base_offset} + {node.base_dim_stride} * ({index_str})"
+        )
+        # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
+        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
@@ -2769,7 +2778,7 @@ class PythonWrapperCodegen(CodeGen):
             allocation_shape
         )
         codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
-        if device.type in ("cpu", "cuda", "xpu"):
+        if device.type in ("cpu", "cuda", "xpu", "mtia"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
             out = (
                 f"{name} = empty_strided_{device.type}("
