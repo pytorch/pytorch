@@ -140,7 +140,7 @@ template <
 inline ::c10::metal::pair<T, ushort> simd_argmin(T val) {
   const auto rc = simd_min(val);
   const auto vote = ::metal::simd_ballot(val == rc);
-  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
+  return {rc, static_cast<ushort>(::metal::ctz(static_cast<ulong>(vote)))};
 }
 
 template <
@@ -149,7 +149,7 @@ template <
 inline ::c10::metal::pair<T, ushort> simd_argmin(T val) {
   const auto rc = simd_min(val);
   const auto vote = ::metal::simd_ballot(val == rc || ::metal::isnan(val));
-  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
+  return {rc, static_cast<ushort>(::metal::ctz(static_cast<ulong>(vote)))};
 }
 
 template <
@@ -158,7 +158,7 @@ template <
 inline ::c10::metal::pair<T, ushort> simd_argmax(T val) {
   const auto rc = simd_max(val);
   const auto vote = ::metal::simd_ballot(val == rc);
-  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
+  return {rc, static_cast<ushort>(::metal::ctz(static_cast<ulong>(vote)))};
 }
 
 template <
@@ -167,7 +167,7 @@ template <
 inline ::c10::metal::pair<T, ushort> simd_argmax(T val) {
   const auto rc = simd_max(val);
   const auto vote = ::metal::simd_ballot(val == rc || ::metal::isnan(val));
-  return {rc, ::metal::ctz(static_cast<ushort>(static_cast<ulong>(vote)))};
+  return {rc, static_cast<ushort>(::metal::ctz(static_cast<ulong>(vote)))};
 }
 
 template <typename ARG_T, typename IDX_T>
@@ -312,18 +312,18 @@ IDX_T threadgroup_argmax(
     unsigned idx,
     unsigned size) {
   auto rc = simd_argmax(val, idx_val);
+  if (size <= simdgroup_size) {
+    return rc.second;
+  }
   if (idx % simdgroup_size == 0) {
     arg_data[idx / simdgroup_size] = rc.first;
     idx_data[idx / simdgroup_size] = rc.second;
   }
-  if (size > simdgroup_size) {
-    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
-      auto rc1 = simd_argmax(arg_data[idx], idx_data[idx]);
-      if (idx == 0) {
-        arg_data[idx / simdgroup_size] = rc1.first;
-        idx_data[idx / simdgroup_size] = rc1.second;
-      }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+    auto rc1 = simd_argmax(arg_data[idx], idx_data[idx]);
+    if (idx == 0) {
+      idx_data[0] = rc1.second;
     }
   }
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
@@ -339,18 +339,18 @@ IDX_T threadgroup_argmin(
     unsigned idx,
     unsigned size) {
   auto rc = simd_argmin(val, idx_val);
+  if (size <= simdgroup_size) {
+    return rc.second;
+  }
   if (idx % simdgroup_size == 0) {
     arg_data[idx / simdgroup_size] = rc.first;
     idx_data[idx / simdgroup_size] = rc.second;
   }
-  if (size > simdgroup_size) {
-    ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
-      auto rc1 = simd_argmin(arg_data[idx], idx_data[idx]);
-      if (idx == 0) {
-        arg_data[idx / simdgroup_size] = rc1.first;
-        idx_data[idx / simdgroup_size] = rc1.second;
-      }
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
+    auto rc1 = simd_argmin(arg_data[idx], idx_data[idx]);
+    if (idx == 0) {
+      idx_data[0] = rc1.second;
     }
   }
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);

@@ -658,19 +658,29 @@ class MetalKernel(SIMDKernel):
             else:
                 lim_fn = "lowest" if reduction_type.endswith("max") else "max"
                 limit_val = f"::metal::numeric_limits<{src_metal_type}>::{lim_fn}()"
-                val = self._new_idxvar(src_dtype, default_value=limit_val, is_threadgroup=False)
-                idx_val = self._new_idxvar(dtype, default_value=0, is_threadgroup=False)
-                idx_var = next(t for t in self.range_tree_nodes.values() if t.is_reduction)
+                val = self._new_idxvar(
+                    src_dtype, default_value=limit_val, is_threadgroup=False
+                )
+                idx_val = self._new_idxvar(dtype, default_value=0, is_threadgroup=False)  # type: ignore[assignment]
+                idx_var = next(
+                    t for t in self.range_tree_nodes.values() if t.is_reduction
+                )
                 cmp_op = ">" if reduction_type == "argmax" else "<"
+                nan_suffix = (
+                    f" || ::metal::isnan({value}) "
+                    if src_dtype.is_floating_point
+                    else ""
+                )
                 self.compute.splice(f"""
-                if ({value} {cmp_op} {val}) {{
+                if ({value} {cmp_op} {val}{nan_suffix}) {{
                     {val} = {value};
                     {idx_val} = {idx_var.name};
                 }}
                 """)
             return self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_{reduction_type}({data_acc_buf}, {idx_acc_buf}, {val}, {idx_val}, {reduction_idx}, {acc_buf_size})",
+                f"c10::metal::threadgroup_{reduction_type}({data_acc_buf}, {idx_acc_buf}, "
+                f"{val}, {idx_val}, {reduction_idx}, {acc_buf_size})",
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
