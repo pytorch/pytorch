@@ -1313,7 +1313,6 @@ graph():
         ep_output = ep.module()(seq_embeddings, mask, exp)
         self.assertTrue(torch.allclose(output, ep_output))
 
-    @testing.expectedFailureCppSerDes
     def test_autocast_state_guard(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):

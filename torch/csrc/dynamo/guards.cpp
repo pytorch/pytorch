@@ -650,7 +650,7 @@ int AutocastState_init(AutocastState* self, PyObject* args, PyObject* kwds) {
 static PyObject* AutocastState_check(AutocastState* self, PyObject* args, PyObject* kwargs) {
   static char* kwlist[] = {(char*)"check_cache_enabled", nullptr};
   int check_cache_enabled = 1;  // Default to True
-  
+
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|p", kwlist, &check_cache_enabled)) {
     return nullptr;
   }
@@ -669,7 +669,7 @@ PyObject* AutocastState_reason(
     PyObject* kwargs) {
   static char* kwlist[] = {(char*)"check_cache_enabled", nullptr};
   int check_cache_enabled = 1;  // Default to True
-  
+
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|p", kwlist, &check_cache_enabled)) {
     return nullptr;
   }

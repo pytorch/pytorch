@@ -1612,6 +1612,7 @@ class ExportedProgram:
         state_dict=None,
         constants=None,
         verifiers=None,
+        autocast_state=None,
     ) -> "ExportedProgram":
         return ExportedProgram(
             root=graph_module,
@@ -1623,6 +1624,7 @@ class ExportedProgram:
             example_inputs=self.example_inputs,
             constants=constants if constants is not None else self.constants,
             verifiers=verifiers if verifiers is not None else self.verifiers,
+            autocast_state=autocast_state if autocast_state is not None else self._autocast_state,
         )
 
     def __deepcopy__(self, memo):
