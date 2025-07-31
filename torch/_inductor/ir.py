@@ -7076,9 +7076,8 @@ class DynamicSliceSize(ExternKernel):
         start,
         end,
         size,
-        index_buffers,
     ):
-        super().__init__(None, NoneLayout(device=torch.device("cpu")), [index_buffers])
+        super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
         # This node codegen
         self.unbacked_size_symbol = unbacked_size_symbol
         self.start = start
@@ -7087,6 +7086,13 @@ class DynamicSliceSize(ExternKernel):
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.unbacked_size_symbol])
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return get_free_symbols(self.start, unbacked_only).union(
+            get_free_symbols(self.end, unbacked_only)
+        )
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_dynamic_slice_size(self)

@@ -1242,14 +1242,7 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
             start,
             end,
             x.get_size()[dim],
-            [
-                V.graph.unbacked_symbol_to_buffer[i]
-                for i in free_unbacked_symbols(start).union(
-                    free_unbacked_symbols(end)
-                )
-            ],
         )
-        V.graph.unbacked_symbol_to_buffer[sym_size] = b_size
         b_size.name = V.graph.register_buffer(b_size)
         V.graph.register_operation(b_size)
         new_size = sym_size
@@ -1264,13 +1257,8 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
             x.get_layout().offset,
             x.get_stride()[dim],
             x.get_size()[dim],
-            [
-                V.graph.unbacked_symbol_to_buffer[i]
-                for i in free_unbacked_symbols(start)
-            ],
             clamp=True,
         )
-        V.graph.unbacked_symbol_to_buffer[sym_storage] = b_storage
         b_storage.name = V.graph.register_buffer(b_storage)
         V.graph.register_operation(b_storage)
         new_storage_offset = sym_storage
@@ -3274,7 +3262,6 @@ def _local_scalar_dense(data):
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
-    V.graph.unbacked_symbol_to_buffer[binding_sym] = buffer
     # NB: the replaced expr is OK to use directly downstream, we want
     # simplifications in this case!
     val = V.graph.current_node.meta["val"]
