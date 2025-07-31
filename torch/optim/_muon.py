@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 """Implementation of the Muon optimizer."""
 
-import logging
 import math
+import warnings
 from dataclasses import dataclass
 from typing import Callable, cast, Iterable, MutableMapping, Optional
 
@@ -14,8 +14,6 @@ from .optimizer import _get_scalar_dtype, _to_scalar, Optimizer, ParamsT
 
 
 __all__ = ["Muon", "muon"]
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -147,7 +145,7 @@ class Muon(Optimizer):
             # If no fqns are provided, use Muon for all parameters with 2D shape.
             # Note: this may not be the expected behavior since some 2D
             # parameters may not be intended to be optimized with Muon, for example Embedding.
-            logger.warning(
+            warnings.warn(
                 "No Muon params FQNs provided. Using Muon to optimize all 2D parameters."
             )
             for _, p in named_params:
