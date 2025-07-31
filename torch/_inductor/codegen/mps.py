@@ -478,9 +478,9 @@ class MetalKernel(SIMDKernel):
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
-        index_str = self.prepare_indexing(index)
+        index = self.prepare_indexing(index)
         dtype = V.graph.get_dtype(name)
-        line = f"{var}[{self.index_to_str(index_str)}]"
+        line = f"{var}[{self.index_to_str(index)}]"
         if dtype in [torch.float16, torch.bfloat16]:
             # TODO(NS): Figure out the right balance between optype casts
             # op_math_t for half-precision floats should be float32

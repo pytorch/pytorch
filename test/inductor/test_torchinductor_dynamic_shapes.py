@@ -26,9 +26,11 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_FBCODE,
+    MACOS_VERSION,
     parametrize,
     serialTest,
     TEST_CUDA_MEM_LEAK_CHECK,
+    TEST_MPS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -62,36 +64,39 @@ test_failures = {
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu", "mps")
     ),
-    "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure("mps"),
-    "test_batch_norm_2d_2_dynamic_shapes": TestFailure("mps"),
-    "test_buffer_batch_norm_dynamic_shapes": TestFailure("mps"),
-    "test_convolution4_dynamic_shapes": TestFailure("mps"),
-    "test_index_propagation_abs_dynamic_shapes": TestFailure("mps"),
-    "test_index_propagation_floordiv_dynamic_shapes": TestFailure("mps"),
-    "test_index_propagation_remainder_dynamic_shapes": TestFailure("mps"),
-    "test_min_max_reduction_dynamic_shapes": TestFailure("mps"),
-    "test_min_max_reduction_nan_dynamic_shapes": TestFailure("mps"),
-    "test_multilayer_var_dynamic_shapes": TestFailure("mps"),
-    "test_multilayer_var_lowp_dynamic_shapes": TestFailure("mps"),
-    "test_reduction1_dynamic_shapes": TestFailure("mps"),
-    "test_reduction2_dynamic_shapes": TestFailure("mps"),
-    "test_reduction3_dynamic_shapes": TestFailure("mps"),
-    "test_reduction5_dynamic_shapes": TestFailure("mps"),
-    ":test_reflection_pad2d_backward_dynamic_shapes": TestFailure("mps"),
-    "test_reflection_pad2d_dynamic_shapes": TestFailure("mps"),
-    "test_remove_noop_copy_dynamic_shapes": TestFailure("mps"),
-    "test_require_stride_expanded_dynamic_shapes": TestFailure("mps"),
-    "test_roll_dynamic_shapes": TestFailure("mps"),
-    "test_scaled_dot_product_attention_dynamic_shapes": TestFailure("mps"),
-    "test_split_reduction_dynamic_shape_dynamic_shapes": TestFailure("mps"),
-    "test_std_dynamic_shapes": TestFailure("mps"),
-    "test_unroll_small_reduction_dynamic_shapes": TestFailure("mps"),
-    "test_var_correction_dynamic_shapes": TestFailure("mps"),
-    "test_var_mean_div_by_dynamic_shapes": TestFailure("mps"),
-    "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure("mps"),
-    "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure("mps"),
-    "test_vectorized_ops_masked_var_novec_dynamic_shapes": TestFailure("mps"),
+    "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
+    "test_batch_norm_2d_2_dynamic_shapes": TestFailure(("mps",)),
+    "test_buffer_batch_norm_dynamic_shapes": TestFailure(("mps",)),
+    "test_convolution4_dynamic_shapes": TestFailure(("mps",)),
+    "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
+    "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
+    "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
+    "test_min_max_reduction_dynamic_shapes": TestFailure(("mps",)),
+    "test_min_max_reduction_nan_dynamic_shapes": TestFailure(("mps",)),
+    "test_multilayer_var_dynamic_shapes": TestFailure(("mps",)),
+    "test_multilayer_var_lowp_dynamic_shapes": TestFailure(("mps",)),
+    "test_reduction1_dynamic_shapes": TestFailure(("mps",)),
+    "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
+    "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
+    "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
+    "test_reflection_pad2d_dynamic_shapes": TestFailure(("mps",)),
+    "test_remove_noop_copy_dynamic_shapes": TestFailure(("mps",)),
+    "test_require_stride_expanded_dynamic_shapes": TestFailure(("mps",)),
+    "test_roll_dynamic_shapes": TestFailure(("mps",)),
+    "test_std_dynamic_shapes": TestFailure(("mps",)),
+    "test_unroll_small_reduction_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure(("mps",)),
+    "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure(("mps",)),
+    "test_vectorized_ops_masked_var_novec_dynamic_shapes": TestFailure(("mps",)),
 }
+
+if TEST_MPS and MACOS_VERSION >= 15.0:
+    test_failures["test_scaled_dot_product_attention_dynamic_shapes"] = TestFailure(
+        "mps"
+    )
+
 if not torch._inductor.config.cpp_wrapper:
     test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
         ("cuda",)
