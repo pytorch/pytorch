@@ -18,7 +18,7 @@
 
 #include <cstdint>
 
-namespace torch::headeronly {
+namespace c10 {
 
 // dummy struct for uint1 to uint7, actual functionality
 // of these dtypes will be implemented in python with Tensor subclass
@@ -93,11 +93,11 @@ enum class ScalarType : int8_t {
 constexpr uint16_t NumScalarTypes =
     static_cast<uint16_t>(ScalarType::NumOptions);
 
-} // namespace torch::headeronly
-
-namespace c10 {
-using torch::headeronly::dummy_int1_7_t;
-using torch::headeronly::dummy_uint1_7_t;
-using torch::headeronly::NumScalarTypes;
-using torch::headeronly::ScalarType;
 } // namespace c10
+
+namespace torch::headeronly {
+using c10::dummy_int1_7_t;
+using c10::dummy_uint1_7_t;
+using c10::NumScalarTypes;
+using c10::ScalarType;
+} // namespace torch::headeronly
