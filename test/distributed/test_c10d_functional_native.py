@@ -822,7 +822,14 @@ class CompileTest(TestCase):
             .check(f"return ({buf0}, {buf1}, )")
             .run(code)
         )
+        # Check the return tensor from wait_tensor is not used anywhere
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
+
+        with torch._inductor.config.patch({"cpp_wrapper": True}):
+            code = run_and_get_triton_code(compiled, arg)
+            # Check the return tensor from wait_tensor is not used anywhere by
+            # checking if it is explicitly deleted by calling aoti_torch_delete_tensor_object
+            FileCheck().check_count("aoti_torch_delete_tensor_object(buf", 2).run(code)
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
