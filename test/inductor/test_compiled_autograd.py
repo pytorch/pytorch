@@ -40,6 +40,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_S390X,
+    IS_WINDOWS,
     parametrize,
     scoped_load_inline,
     skipIfWindows,
@@ -3418,9 +3419,14 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
         actual_logs = logs.getvalue()
-        expected_logs = [
-            "Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
-        ]
+        if IS_WINDOWS:
+            expected_logs = [
+                "Cache miss due to new autograd node: struct torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
+            ]
+        else:
+            expected_logs = [
+                "Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
+            ]
         for expected in expected_logs:
             self.assertTrue(expected in actual_logs)
 
