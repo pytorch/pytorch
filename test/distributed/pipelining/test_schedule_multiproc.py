@@ -214,12 +214,21 @@ class ScheduleTest(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize(
         "ScheduleClass",
-        [ScheduleGPipe, Schedule1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS],
+        [
+            ScheduleGPipe,
+            Schedule1F1B,
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleInterleavedZeroBubble,
+        ],
     )
     def test_eval_inference_mode(self, ScheduleClass):
-        chunks = 4
-
-        if ScheduleClass in [ScheduleInterleaved1F1B, ScheduleLoopedBFS]:
+        num_microbatches = 4
+        if ScheduleClass in [
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleInterleavedZeroBubble,
+        ]:
             # Multi-stage schedules
             stages_per_rank = 2
             n_stages = stages_per_rank * self.world_size
@@ -229,22 +238,30 @@ class ScheduleTest(MultiProcContinousTest):
             stages, stage_modules, _ = self._create_multi_stage_pipeline(
                 mod, stages_per_rank, n_stages
             )
-            schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn, scale_grads=False)
+            schedule = ScheduleClass(
+                stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+            )
         else:
             # Single-stage schedules
             mod, _, x, target, loss_fn = self._setup_models_and_data()
 
             # Create single-stage pipeline
-            stage, stage_module, _ = self._create_single_stage_pipeline(mod, x, chunks)
+            stage, stage_module, _ = self._create_single_stage_pipeline(
+                mod, x, num_microbatches
+            )
             stage_modules = [stage_module]
-            schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
+            schedule = ScheduleClass(
+                stage, num_microbatches, loss_fn=loss_fn, scale_grads=False
+            )
 
         # Clear gradients and run eval
         self._zero_gradients(stage_modules)
         losses = []
 
         if self.rank == 0:
-            schedule.eval(x)
+            # Support with and without no_grad()
+            with torch.no_grad():
+                schedule.eval(x)
         elif self.rank == self.world_size - 1:
             schedule.eval(target=target, losses=losses)
         else:

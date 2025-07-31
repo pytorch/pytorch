@@ -124,25 +124,16 @@ class _Action(NamedTuple):
     stage_index: int
     computation_type: _ComputationType
     microbatch_index: Optional[int] = None
-    sub_actions: Optional[list["_Action"]] = None
+    sub_actions: Optional[tuple["_Action", ...]] = None
+
+    def __str__(self):
+        return self.__repr__()
 
     def __repr__(self):
         if self.sub_actions is not None:
-            # Format: [subaction_stage, subaction_stage...]Computation_Type[subaction_microbatch, subaction_microbatch,...]
-            stage_parts = [
-                str(sub_action.stage_index) for sub_action in self.sub_actions
-            ]
-            microbatch_parts = [
-                str(sub_action.microbatch_index)
-                if sub_action.microbatch_index is not None
-                else ""
-                for sub_action in self.sub_actions
-            ]
-
-            repr_str = "[" + ",".join(stage_parts) + "]"
-            repr_str += str(self.computation_type)
-            repr_str += "[" + ",".join(microbatch_parts) + "]"
-            return repr_str
+            # Use recursive repr for sub_actions
+            sub_action_reprs = [repr(sub_action) for sub_action in self.sub_actions]
+            return f"({';'.join(sub_action_reprs)}){self.computation_type}"
         else:
             repr_str = str(self.stage_index)
             repr_str += str(self.computation_type)
@@ -162,34 +153,33 @@ class _Action(NamedTuple):
         if action_string == "":
             return None
 
-        # Check for sub_actions format: main_action[sub_action1,sub_action2,...]
-        if "[" in action_string and action_string.endswith("]"):
-            # Find the last '[' to separate main action from sub_actions
-            bracket_pos = action_string.rfind("[")
-            main_part = action_string[:bracket_pos]
-            sub_part = action_string[bracket_pos + 1 : -1]  # Remove '[' and ']'
+        # Check for sub_actions format: [sub_action1;sub_action2;...]ComputationType
+        if action_string.startswith("(") and ")" in action_string:
+            # Find the closing bracket to separate sub_actions from computation type
+            bracket_end = action_string.find(")")
+            sub_part = action_string[
+                1:bracket_end
+            ]  # Remove '[' and get content before ']'
+            computation_type_part = action_string[
+                bracket_end + 1 :
+            ]  # Get part after ']'
 
-            # Parse main action
-            if match := _action_regex.match(main_part):
-                stage_index, computation_type, microbatch_index = match.groups()
-                main_action_mb = (
-                    int(microbatch_index) if len(microbatch_index) else None
-                )
+            # Parse sub_actions
+            sub_actions = []
+            if sub_part.strip():
+                for sub_str in sub_part.split(";"):
+                    sub_action = _Action.from_str(sub_str.strip())
+                    if sub_action is not None:
+                        sub_actions.append(sub_action)
 
-                # Parse sub_actions
-                sub_actions = []
-                if sub_part.strip():
-                    for sub_str in sub_part.split(","):
-                        sub_action = _Action.from_str(sub_str.strip())
-                        if sub_action is not None:
-                            sub_actions.append(sub_action)
-
-                return _Action(
-                    int(stage_index),
-                    _ComputationType.from_str(computation_type),
-                    main_action_mb,
-                    sub_actions if sub_actions else None,
-                )
+            # For sub_actions format, we create an action with just the computation type
+            # The stage_index and microbatch_index are not meaningful for the container action
+            return _Action(
+                stage_index=-1,  # Placeholder, not meaningful for sub_actions container
+                computation_type=_ComputationType.from_str(computation_type_part),
+                microbatch_index=None,
+                sub_actions=tuple(sub_actions) if sub_actions else None,
+            )
 
         # Handle regular single action format
         if match := _action_regex.match(action_string):
@@ -580,7 +570,7 @@ or equal to the number of stages ({self._num_stages})."
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
-        if not torch.is_grad_enabled():
+        if self._has_backward and not torch.is_grad_enabled():
             raise RuntimeError(
                 "step() requires gradients to be enabled for backward computation; "
                 "it should not be used under torch.no_grad() context. "
@@ -1019,7 +1009,7 @@ def _add_unshard_reshard(
     compute_actions: list[Optional[_Action]],
     max_active_stages: int = 3,
 ) -> list[_Action]:
-    """Given a basic schedule involving only compute actions (F,B,W), add UNSHARD/RESHARD actions for FSDP.
+    """Given a basic schedule involving only compute actions (F,B,W,OVERLAP_F_B), add UNSHARD/RESHARD actions for FSDP.
 
     UNSHARD refers to fetching the full contents of an FSDP-sharded layer, requiring an all-gather operation.
     RESHARD does the opposite, releasing memory (but doing no communication)
@@ -1039,11 +1029,24 @@ def _add_unshard_reshard(
         ret: list[int] = []
 
         for a in next_actions:
-            if a is not None and a.stage_index not in seen:
-                seen.add(a.stage_index)
-                ret.append(a.stage_index)
-                if len(ret) == count:
-                    break
+            if a is not None:
+                # Handle OVERLAP_F_B actions by checking their sub_actions
+                if a.computation_type == OVERLAP_F_B and a.sub_actions is not None:
+                    for sub_action in a.sub_actions:
+                        if sub_action.stage_index not in seen:
+                            seen.add(sub_action.stage_index)
+                            ret.append(sub_action.stage_index)
+                            if len(ret) == count:
+                                break
+                    if len(ret) == count:
+                        break
+                else:
+                    # Regular action
+                    if a.stage_index not in seen:
+                        seen.add(a.stage_index)
+                        ret.append(a.stage_index)
+                        if len(ret) == count:
+                            break
         return ret
 
     active_stages: set[int] = set()
@@ -1100,9 +1103,12 @@ def _merge_bw(
         if action is None:
             continue
 
-        while len(compute_actions) and (next_action := compute_actions[0]) is None:
-            # remove any None actions between 'action' and 'next_action'
+        # Remove any None actions and find the next non-None action
+        while len(compute_actions) and compute_actions[0] is None:
             compute_actions.pop(0)
+
+        # Get the next action if it exists
+        next_action = compute_actions[0] if len(compute_actions) > 0 else None
 
         if (
             action.computation_type == BACKWARD_INPUT
@@ -1125,6 +1131,9 @@ def _add_send_recv(
     stage_to_rank: Callable[[int], int],
     num_stages: int,
 ) -> dict[int, list[_Action]]:
+    """
+    Transforms a compute-only schedule into a complete schedule with communication actions.
+    """
     comm_actions: dict[int, list[_Action]] = {rank: [] for rank in compute_actions}
     prev_actions: dict[int, set[_Action]] = {rank: set() for rank in compute_actions}
 
@@ -1192,6 +1201,19 @@ def _add_send_recv(
             return False
         else:
             return True
+
+    # TODO: For now we are splitting OVERLAP_F_B into replacing it to
+    # its forward and backward components
+    # We need to figure out how to do the communication
+    for rank in compute_actions:
+        new_actions = []
+        for action in compute_actions[rank]:
+            if action is not None and action.sub_actions is not None:
+                # Replace OVERLAP_F_B action with its sub_actions
+                new_actions.extend(action.sub_actions)
+            else:
+                new_actions.append(action)
+        compute_actions[rank] = new_actions
 
     while compute_actions:
         progress = False
@@ -1472,7 +1494,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
-        if not torch.is_grad_enabled():
+        if self._has_backward and not torch.is_grad_enabled():
             raise RuntimeError(
                 "step() requires gradients to be enabled for backward computation; "
                 "it should not be used under torch.no_grad() context. "

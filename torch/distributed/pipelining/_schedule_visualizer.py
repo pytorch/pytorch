@@ -131,71 +131,45 @@ def visualize_schedule(
         draw_position = 0  # Initialize drawing position for each rank
         for action in actions:
             if action is not None:
-                # Check if action has sub_actions
+                comp_type_color = action_type_to_color_mapping.get(
+                    action.computation_type, _ComputationTypeColor("black")
+                )
+                used_computation.add(action.computation_type)
+                color = comp_type_color.color
+                width = comp_type_color.width
+
+                # Check if action has sub_actions to determine styling
                 if action.sub_actions is not None:
-                    # For actions with sub_actions, visualize the main action with its special color
-                    comp_type_color = action_type_to_color_mapping.get(
-                        action.computation_type, _ComputationTypeColor("black")
-                    )
-                    used_computation.add(action.computation_type)
-                    color = comp_type_color.color
-                    width = comp_type_color.width
-
-                    # Draw the main action rectangle
-                    rect = Rectangle(
-                        (draw_position, num_ranks - rank_idx - 1),
-                        width,
-                        1,
-                        facecolor=color,
-                        edgecolor="black",
-                        linewidth=2,  # Thicker border for compound actions
-                    )
-                    ax.add_patch(rect)
-
-                    # Draw the text for the main action
-                    ax.text(
-                        draw_position + width / 2,
-                        num_ranks - rank_idx - 1 + 0.5,
-                        str(action),
-                        ha="center",
-                        va="center",
-                        fontsize=font_size,
-                        color="white",
-                        weight="bold",  # Bold text for compound actions
-                    )
-
-                    draw_position += width
+                    linewidth = 2  # Thicker border for compound actions
+                    text_weight = "normal"  # Bold text for compound actions
                 else:
-                    # Regular action without sub_actions
-                    comp_type_color = action_type_to_color_mapping.get(
-                        action.computation_type, _ComputationTypeColor("black")
-                    )
-                    used_computation.add(action.computation_type)
-                    color = comp_type_color.color
-                    width = comp_type_color.width
+                    linewidth = 1  # Default linewidth for regular actions
+                    text_weight = "normal"  # Default text weight
 
-                    # Draw the rectangle to represent the action duration
-                    rect = Rectangle(
-                        (draw_position, num_ranks - rank_idx - 1),
-                        width,
-                        1,
-                        facecolor=color,
-                        edgecolor="black",
-                    )
-                    ax.add_patch(rect)
+                # Draw the rectangle to represent the action duration
+                rect = Rectangle(
+                    (draw_position, num_ranks - rank_idx - 1),
+                    width,
+                    1,
+                    facecolor=color,
+                    edgecolor="black",
+                    linewidth=linewidth,
+                )
+                ax.add_patch(rect)
 
-                    # Draw the text centered within the rectangle
-                    ax.text(
-                        draw_position + width / 2,
-                        num_ranks - rank_idx - 1 + 0.5,
-                        str(action),
-                        ha="center",
-                        va="center",
-                        fontsize=font_size,
-                        color="white",
-                    )
+                # Draw the text centered within the rectangle
+                ax.text(
+                    draw_position + width / 2,
+                    num_ranks - rank_idx - 1 + 0.5,
+                    str(action),
+                    ha="center",
+                    va="center",
+                    fontsize=font_size,
+                    color="white",
+                    weight=text_weight,
+                )
 
-                    draw_position += width
+                draw_position += width
             else:
                 draw_position += 1  # Move to the next
             max_draw_position = max(max_draw_position, draw_position)

@@ -143,8 +143,8 @@ def generate_rank_to_stage_mapping(
         rank_to_stages[rank].append(stage_id)
 
     # Sort the stage lists for each rank to ensure consistent ordering
-    for rank in rank_to_stages:
-        rank_to_stages[rank].sort()
+    for stages in rank_to_stages.values():
+        stages.sort()
 
     return rank_to_stages
 
