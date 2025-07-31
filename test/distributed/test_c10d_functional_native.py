@@ -77,10 +77,6 @@ class TestWithNCCL(MultiProcessTestCase):
         return torch.device(f"cuda:{self.rank}")
 
     def _init_process_group(self) -> None:
-        # Allow testing aoti after torch.compile
-        torch._inductor.config.triton.store_cubin = True
-        torch._inductor.config.debug = True
-
         torch.cuda.set_device(self.device)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
@@ -741,23 +737,23 @@ class CompileTestCPU(TestCase):
             return ar0
 
         arg = torch.rand(4, 4, device="cpu")
-        torch._inductor.config.cpp_wrapper = cpp_wrapper
-        compiled = torch.compile(func)
+        with torch._inductor.config.patch({"cpp_wrapper": cpp_wrapper}):
+            compiled = torch.compile(func)
 
-        _, (code,) = run_and_get_code(compiled, arg)
-        include_ops = (
-            [
-                "aoti_torch_cpu__c10d_functional_all_reduce_",
-                "aoti_torch_cpu__c10d_functional_wait_tensor",
-            ]
-            if cpp_wrapper
-            else [
-                "torch.ops._c10d_functional.all_reduce_.default",
-                "torch.ops._c10d_functional.wait_tensor.default",
-            ]
-        )
-        for op in include_ops:
-            self.assertIn(op, code)
+            _, (code,) = run_and_get_code(compiled, arg)
+            include_ops = (
+                [
+                    "aoti_torch_cpu__c10d_functional_all_reduce_",
+                    "aoti_torch_cpu__c10d_functional_wait_tensor",
+                ]
+                if cpp_wrapper
+                else [
+                    "torch.ops._c10d_functional.all_reduce_.default",
+                    "torch.ops._c10d_functional.wait_tensor.default",
+                ]
+            )
+            for op in include_ops:
+                self.assertIn(op, code)
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
@@ -771,9 +767,6 @@ class CompileTestCPU(TestCase):
 class CompileTest(TestCase):
     def setUp(self):
         super().setUp()
-        # Allow testing aoti after torch.compile
-        torch._inductor.config.triton.store_cubin = True
-        torch._inductor.config.debug = True
 
         self.rank = 0
         self.world_size = 2
