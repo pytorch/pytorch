@@ -86,7 +86,7 @@ jobs:
           - repo-name: vllm
             repo-owner: vllm-project
             branch: main
-            pin-folder: .ci/docker/ci_commit_pins
+            pin-folder: .github/ci_commit_pins
     # Allow this to be triggered on either a schedule or on workflow_dispatch to allow for easier testing
     if: github.repository_owner == 'pytorch' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     steps:
