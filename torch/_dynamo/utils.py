@@ -3907,7 +3907,7 @@ class numpy_operator_wrapper:
         assert not kwargs
 
         args = (
-            np.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
+            tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
         )
         out = self.op(*args)
         return numpy_to_tensor(out)
