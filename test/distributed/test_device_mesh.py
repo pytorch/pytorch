@@ -5,6 +5,7 @@ import os
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
+from torch._C._distributed_c10d import Backend as C10dBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
@@ -578,17 +579,50 @@ class InitDeviceMeshTest(DTensorTestBase):
                 mesh_dim_names=["dp", "tp"],
             )
 
-    @with_comms
-    def test_pg_override_argument_dict_with_idx_and_backend(self):
+    def _test_pg_override_argument_dict_with_idx_and_backend(self):
+        opts = FakeProcessGroup.Options()
+        opts.fake_option = 42
+
         mesh = init_device_mesh(
             self.device_type,
-            (2, 4),
-            mesh_dim_names=("dp", "tp"),
-            pg_override={0: "fake"},
+            (2, 2, 2),
+            mesh_dim_names=("dp", "tp", "cp"),
+            pg_override={0: "fake", 2: ("fake", opts)},
         )
+
+        def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
+            return (
+                mesh.get_group(dim_idx)
+                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
+                .options
+            )
 
         # Fake pg only have BackendType as BackendType::CUSTOM.
         self.assertEqual(mesh.get_group(0)._get_backend_name(), "custom")
+        self.assertNotEqual(mesh.get_group(1)._get_backend_name(), "custom")
+        self.assertEqual(mesh.get_group(2)._get_backend_name(), "custom")
+
+        self.assertIsNone(get_opts(mesh, 0))
+        self.assertEqual(get_opts(mesh, 2).fake_option, 42)
+
+        dp_tp_mesh = mesh["dp", "tp"]._flatten()
+        dp_cp_mesh = mesh["dp", "cp"]._flatten(pg_override="fake")
+        tp_cp_mesh = mesh["tp", "cp"]._flatten(pg_override=("fake", opts))
+
+        self.assertNotEqual(dp_tp_mesh.get_group(0)._get_backend_name(), "custom")
+        self.assertEqual(dp_cp_mesh.get_group(0)._get_backend_name(), "custom")
+        self.assertEqual(tp_cp_mesh.get_group(0)._get_backend_name(), "custom")
+
+        self.assertIsNone(get_opts(dp_cp_mesh, 0))
+        self.assertEqual(get_opts(tp_cp_mesh, 0).fake_option, 42)
+
+    @with_comms
+    def test_pg_override_argument_dict_with_idx_and_backend_lazy(self):
+        self._test_pg_override_argument_dict_with_idx_and_backend()
+
+    @with_comms(eager_init=True)
+    def test_pg_override_argument_dict_with_idx_and_backend_eager(self):
+        self._test_pg_override_argument_dict_with_idx_and_backend()
 
     @with_comms(backend="fake")
     def test_pg_override_argument_dict_with_name_and_options(self):
@@ -597,17 +631,27 @@ class InitDeviceMeshTest(DTensorTestBase):
 
         mesh = init_device_mesh(
             self.device_type,
-            (2, 4),
-            mesh_dim_names=("dp", "tp"),
+            (2, 2, 2),
+            mesh_dim_names=("dp", "tp", "cp"),
             pg_override={"tp": opts},
         )
 
-        self.assertEqual(
-            mesh.get_group(1)
-            ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
-            .options.fake_option,
-            42,
-        )
+        def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
+            return (
+                mesh.get_group(dim_idx)
+                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
+                .options
+            )
+
+        self.assertIsNone(get_opts(mesh, 0))
+        self.assertEqual(get_opts(mesh, 1).fake_option, 42)
+        self.assertIsNone(get_opts(mesh, 2))
+
+        dp_tp_mesh = mesh["dp", "tp"]._flatten()
+        dp_cp_mesh = mesh["dp", "cp"]._flatten(pg_override=opts)
+
+        self.assertIsNone(get_opts(dp_tp_mesh, 0))
+        self.assertEqual(get_opts(dp_cp_mesh, 0).fake_option, 42)
 
     @with_comms
     def test_pg_override_argument_errors(self):

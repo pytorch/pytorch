@@ -7,7 +7,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from functools import reduce
-from itertools import chain
+from itertools import chain, zip_longest
 from typing import Optional, TYPE_CHECKING, Union
 
 import torch
@@ -167,7 +167,13 @@ else:
             return res_submesh
 
         def create_flatten_mesh(
-            self, device_mesh: "DeviceMesh", mesh_dim_name: Optional[str] = None
+            self,
+            device_mesh: "DeviceMesh",
+            mesh_dim_name: Optional[str] = None,
+            pg_override: tuple[Optional[str], Optional[C10dBackend.Options]] = (
+                None,
+                None,
+            ),
         ) -> "DeviceMesh":
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
 
@@ -218,6 +224,7 @@ else:
                     root_mesh.device_type,
                     mesh_nd,
                     mesh_dim_names=(mesh_dim_name,),
+                    pg_override=(pg_override,),
                 )
                 if cur_rank in mesh_nd:
                     res_flattened_mesh = flattened_mesh
@@ -609,10 +616,19 @@ else:
                     dim_group = None
                     has_split_group = False
                     if (
-                        bound_device_id := getattr(
-                            default_group, "bound_device_id", None
+                        (
+                            bound_device_id := getattr(
+                                default_group, "bound_device_id", None
+                            )
                         )
-                    ) is not None and torch.cuda.is_available():
+                        is not None
+                        and torch.cuda.is_available()
+                        and (
+                            backend is None
+                            or default_group._get_backend(torch.device("cuda")).name()
+                            == backend
+                        )
+                    ):
                         dim_group = split_group(
                             parent_pg=default_group,
                             pg_options=pg_options,
@@ -986,7 +1002,13 @@ else:
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
 
-        def _flatten(self, mesh_dim_name: Optional[str] = None) -> "DeviceMesh":
+        def _flatten(
+            self,
+            mesh_dim_name: Optional[str] = None,
+            pg_override: Union[
+                None, str, C10dBackend.Options, tuple[str, C10dBackend.Options]
+            ] = None,
+        ) -> "DeviceMesh":
             """
             Returns a 1D DeviceMesh by flattening the current DeviceMesh.
 
@@ -1004,16 +1026,26 @@ else:
                     "Cannot flatten a DeviceMesh without mesh_dim_names!"
                 )
 
-            return _mesh_resources.create_flatten_mesh(self, mesh_dim_name)
+            if pg_override is not None:
+                (pg_override_tuple,) = _normalize_pg_override({0: pg_override}, 1)
+            else:
+                pg_override_tuple = (None, None)
+
+            return _mesh_resources.create_flatten_mesh(
+                self, mesh_dim_name, pg_override_tuple
+            )
 
     def _normalize_pg_override(
         pg_override: dict[
             Union[int, str],
             Union[str, C10dBackend.Options, tuple[str, C10dBackend.Options]],
         ],
-        mesh_dim_names: tuple[Optional[str], ...],
+        ndim: int,
+        mesh_dim_names: Optional[tuple[str, ...]] = None,
     ) -> Iterator[tuple[Optional[str], Optional[C10dBackend.Options]]]:
-        for dim_idx, dim_name in enumerate(mesh_dim_names):
+        if mesh_dim_names is None:
+            mesh_dim_names = ()
+        for dim_idx, dim_name in zip_longest(range(ndim), mesh_dim_names):
             if dim_name is not None and dim_name in pg_override:
                 if dim_idx in pg_override:
                     raise RuntimeError(
@@ -1037,8 +1069,7 @@ else:
         if pg_override:
             raise RuntimeError(
                 f"Found invalid keys in pg_override: got {list(pg_override.keys())}, "
-                f"expected integers in range [0, {len(mesh_dim_names)}) "
-                f"or one of {[n for n in mesh_dim_names if n is not None]}"
+                f"expected integers in range [0, {ndim}) or one of {mesh_dim_names}"
             )
 
     def init_device_mesh(
@@ -1076,6 +1107,11 @@ else:
             mesh_dim_names (Tuple[str], optional): A tuple of mesh dimension names to assign to each dimension
                 of the multi-dimensional array describing the layout of devices. Its length must match the length
                 of `mesh_shape`. Each string in `mesh_dim_names` must be unique.
+            pg_override (Dict[int | str, tuple[str, Options] | str | Options], optional): Overrides for some or all of
+                the ProcessGroups that will be created for each mesh dimension. Each key can be either the index of a
+                dimension or its name (if mesh_dim_names is provided). Each value can be a tuple containing the name
+                of the backend and its options, or just one of these two components (in which case the other will be
+                set to its default value).
 
         Returns:
             DeviceMesh: A :class:`DeviceMesh` object representing the device layout.
@@ -1102,15 +1138,12 @@ else:
                     f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
                 )
 
-        pg_override_tuple = (
-            tuple(
-                _normalize_pg_override(
-                    pg_override, mesh_dim_names or (None,) * len(mesh_shape)
-                )
+        if pg_override is not None:
+            pg_override_tuple = tuple(
+                _normalize_pg_override(pg_override, len(mesh_shape), mesh_dim_names)
             )
-            if pg_override is not None
-            else None
-        )
+        else:
+            pg_override_tuple = None
 
         # assume valid device types are all letters
         if device_type and not device_type.isalpha():

@@ -32,6 +32,10 @@ class FakeProcessGroup : public Backend {
       c10::intrusive_ptr<Options> options = c10::make_intrusive<Options>())
       : Backend(rank, size), options_(std::move(options)) {}
 
+  const std::string getBackendName() const override {
+    return "fake";
+  }
+
   c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
   }

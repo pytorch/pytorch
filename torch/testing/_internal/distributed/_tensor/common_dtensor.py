@@ -356,11 +356,11 @@ class DTensorTestBase(MultiProcessTestCase):
         return init_device_mesh(self.device_type, (self.world_size,))
 
     def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+        if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+
         if backend is None:
             backend = self.backend
-
-        if "nccl" in backend and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         if backend not in [
             "nccl",
