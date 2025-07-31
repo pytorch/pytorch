@@ -69,6 +69,7 @@ from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
+    IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
@@ -13697,7 +13698,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
 
-    @skipCUDAIf(not SM90OrLater, "Requires sm90")
+    @skipCUDAIf(not IS_SM90, "Requires sm90")
     @requires_cuda
     @unittest.skipIf(TEST_WITH_ROCM, "no scaled_grouped_mm support")
     def test_respect_scaled_grouped_mm_layout_tag(self):
