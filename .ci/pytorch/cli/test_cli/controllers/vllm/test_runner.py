@@ -61,6 +61,19 @@ class VllmTestRunner:
         """
         clone_vllm(get_post_build_pinned_commit("vllm"))
         os.chdir("vllm")
+        os.environ["UV_INDEX_STRATEGY"] = "unsafe-best-match"
+
+        self.install_test_base()
+        self.install_local_whls()
+        self.generated_test_txt()
+        run("uv pip install --system -r test.txt")
+        run("cat test.txt")
+        run('uv pip install --system --no-build-isolation "git+https://github.com/state-spaces/mamba@v2.2.4"')
+        run("uv pip install --system hf_transfer")
+        run("pip freeze | grep -E 'torch|xformers|torchvision|torchaudio|flashinfer'")
+        os.chdir("..")
+
+    def install_test_base(self):
         run("cp vllm/collect_env.py .")
         # remove  vllm/vllm
         if os.path.exists("vllm"):
@@ -69,13 +82,6 @@ class VllmTestRunner:
         run("python3 use_existing_torch.py")
         run("pip install -r requirements/common.txt")
         run("pip install -r requirements/build.txt")
-        self.install_local_whls()
-        self.generated_test_txt()
-        run("uv pip install --system -r test.txt")
-        run("cat test.txt")
-        run ("uv pip install --system --no-build-isolation "git+https://github.com/state-spaces/mamba@v2.2.4"")
-        run("pip freeze | grep -E 'torch|xformers|torchvision|torchaudio|flashinfer'")
-        os.chdir("..")
 
     def install_local_whls(self):
         torch = "dist/torch-*.whl"

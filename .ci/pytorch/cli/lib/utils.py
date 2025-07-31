@@ -102,3 +102,11 @@ def read_yaml_file( file_path: str) -> dict:
 
     with open(file_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
+
+def pip_install(package: str):
+    cmd = f"python3 -m pip install {package}"
+    subprocess.run(shlex.split(cmd), check=True)
+
+def uv_pip_install(package: str):
+    cmd = f"uv pip install --system {package}"
+    subprocess.run(shlex.split(cmd), check=True)
