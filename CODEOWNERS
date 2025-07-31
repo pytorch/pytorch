@@ -51,12 +51,12 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
 
 # ONNX Export
-/torch/_dynamo/backends/onnxrt.py @wschin
-/torch/csrc/jit/passes/onnx.h @titaiwangms @shubhambhokare1
-/torch/csrc/jit/passes/onnx.cpp @titaiwangms @shubhambhokare1
-/torch/csrc/jit/passes/onnx/ @titaiwangms @shubhambhokare1
-/torch/onnx/ @titaiwangms @shubhambhokare1 @justinchuby @wschin
-/test/onnx/  @titaiwangms @shubhambhokare1 @justinchuby @wschin
+/torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
+/torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx.cpp @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx/ @titaiwangms @xadupre
+/torch/onnx/ @titaiwangms @xadupre @justinchuby
+/test/onnx/  @titaiwangms @xadupre @justinchuby
 
 # CI
 /.ci  @pytorch/pytorch-dev-infra
