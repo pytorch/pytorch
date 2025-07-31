@@ -5869,6 +5869,15 @@
     CPU, CUDA: nansum_out
     MPS: nansum_out_mps
 
+- func: hash_tensor(Tensor self, int[1] dim=[], *, bool keepdim=False, int mode=0) -> Tensor
+  variants: function, method
+  structured_delegate: hash_tensor.out
+
+- func: hash_tensor.out(Tensor self, int[1] dim=[], *, bool keepdim=False, int mode=0, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU, CUDA: hash_tensor_out
+
 - func: sum_to_size(Tensor self, SymInt[] size) -> Tensor
   variants: method
   device_check: NoCheck
@@ -12325,6 +12334,7 @@
   dispatch:
     CPU: avg_pool3d_out_cpu
     CUDA: avg_pool3d_out_cuda
+    MPS: avg_pool3d_out_mps
     MkldnnCPU: mkldnn_avg_pool3d_out
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
@@ -15859,6 +15869,7 @@
   variants: function
   dispatch:
     CPU: _fused_adagrad_kernel_cpu_
+    CUDA: _fused_adagrad_kernel_cuda_
   autogen: _fused_adagrad, _fused_adagrad.out
 
 - func: _fused_adagrad_.tensor_lr(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] state_sums, Tensor[] state_steps, *, Tensor lr, float lr_decay, float weight_decay, float eps, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
@@ -15866,6 +15877,7 @@
   variants: function
   dispatch:
     CPU: _fused_adagrad_kernel_cpu_
+    CUDA: _fused_adagrad_kernel_cuda_
   autogen: _fused_adagrad.tensor_lr, _fused_adagrad.tensor_lr_out
 
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.

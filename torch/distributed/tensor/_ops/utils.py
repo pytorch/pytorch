@@ -104,6 +104,7 @@ def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
     # TODO(zpcore): handle kwarg_inputs_strategy
     # kwarg_inputs_strategy = op_schema.kwargs_schema
     output_type = [str(ret.type) for ret in op_schema.op._schema.returns]
+    output_len = output_type.count("Tensor")
     # TODO(zpcore): Confirm if view op can be handle properly or not. Prevent
     # handling view ops until confirmed.
     if op_schema.op.is_view:
@@ -118,9 +119,11 @@ def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
 
     mesh = inputs_strategy[0].mesh
 
-    dim_sharding: PlacementList = [Replicate()] * (len(inputs_strategy) + 1)
+    dim_sharding: PlacementList = [Replicate()] * (output_len + len(inputs_strategy))
     single_dim_placement = [dim_sharding]
-    return expand_to_full_mesh_op_strategy(mesh, op_schema, single_dim_placement)
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_dim_placement, input_index=output_len
+    )
 
 
 def as_list(

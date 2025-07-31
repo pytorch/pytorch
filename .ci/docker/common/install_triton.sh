@@ -103,5 +103,5 @@ fi
 # It depends on torch and triton. We don't want to install
 # triton and torch from production on Docker CI images
 if [[ "$ANACONDA_PYTHON_VERSION" != 3.9* ]]; then
-  pip_install helion --no-deps
+  pip_install helion==0.0.10 --no-deps
 fi
