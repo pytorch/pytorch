@@ -6728,9 +6728,6 @@ class AOTInductorLoggingTest(LoggingTestCase):
 
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse_zero_consts_use_consts_asm_false(self, records):
-        saved_cfg: bool = torch._inductor.config.aot_inductor.use_consts_asm_build
-        torch._inductor.config.aot_inductor.use_consts_asm_build = False
-
         # make sure ShapeEnv is only created once and reused afterwards
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -6742,10 +6739,9 @@ class AOTInductorLoggingTest(LoggingTestCase):
         }
         ep = export(Foo(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
         with torch.no_grad():
-            torch._inductor.aot_compile(ep.module(), inputs)
+            with config.patch({"always_keep_tensor_constants": True}):
+                torch._inductor.aot_compile(ep.module(), inputs)
         self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
-
-        torch._inductor.config.aot_inductor.use_consts_asm_build = saved_cfg
 
 
 class TestAOTInductorConfig(TestCase):
