@@ -323,12 +323,22 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
                 0,
             )
 
-            self.assertGreater(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor_out.default
-                ),
-                0,
-            )
+            if self.world_size > 1:
+                self.assertGreater(
+                    _count_op_in_graph(
+                        graph,
+                        torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    ),
+                    0,
+                )
+            else:
+                self.assertEqual(
+                    _count_op_in_graph(
+                        graph,
+                        torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    ),
+                    0,
+                )
 
         if fwd_fullgraph:
             return mock.patch.object(
