@@ -151,19 +151,19 @@ struct cublasCommonArgs {
       const std::optional<ScalingType>& scaling_choice_b = std::nullopt) {
     bool transpose_result = false, transpose_a = false, transpose_b = false;
     result = prepare_matrix_for_cublas(c, transpose_result);
-    mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_a, transpose_result);
-    matb = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_b, transpose_result);
+    mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_a, transpose_result); // codespell:ignore
+    matb = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_b, transpose_result); // codespell:ignore
 
     // Handle scale tensors if provided
     if (scale_a && scale_b) {
       // By default since we return in row-major we run the gemm
       // as B.T @ A.T, check transpose_result to determine if we flip the scales
-      scale_mata_ptr = transpose_result ? scale_b->data_ptr() : scale_a->data_ptr();
-      scale_mata_dtype = transpose_result ? scale_b->scalar_type() : scale_a->scalar_type();
-      scaling_mata_type = transpose_result ? scaling_choice_b : scaling_choice_a;
-      scale_matb_ptr = transpose_result ? scale_a->data_ptr() : scale_b->data_ptr();
-      scale_matb_dtype = transpose_result ? scale_a->scalar_type() : scale_b->scalar_type();
-      scaling_matb_type = transpose_result ? scaling_choice_a : scaling_choice_b;
+      scale_mata_ptr = transpose_result ? scale_b->data_ptr() : scale_a->data_ptr(); // codespell:ignore
+      scale_mata_dtype = transpose_result ? scale_b->scalar_type() : scale_a->scalar_type(); // codespell:ignore
+      scaling_mata_type = transpose_result ? scaling_choice_b : scaling_choice_a; // codespell:ignore
+      scale_matb_ptr = transpose_result ? scale_a->data_ptr() : scale_b->data_ptr(); // codespell:ignore
+      scale_matb_dtype = transpose_result ? scale_a->scalar_type() : scale_b->scalar_type(); // codespell:ignore
+      scaling_matb_type = transpose_result ? scaling_choice_a : scaling_choice_b; // codespell:ignore
     }
 
     if (scale_result) {
@@ -177,17 +177,17 @@ struct cublasCommonArgs {
       transpose_b = !transpose_b;
     }
 
-    auto sizes_a = mata->sizes();
-    auto sizes_b = matb->sizes();
+    auto sizes_a = mata->sizes(); // codespell:ignore
+    auto sizes_b = matb->sizes(); // codespell:ignore
 
     m = sizes_a[transpose_result ? 1 : 0];
     k = sizes_a[transpose_result ? 0 : 1];
     n = sizes_b[transpose_result ? 0 : 1];
-    lda = mata->stride((transpose_a == transpose_result) ? 1 : 0);
-    ldb = matb->stride((transpose_b == transpose_result) ? 1 : 0);
+    lda = mata->stride((transpose_a == transpose_result) ? 1 : 0); // codespell:ignore
+    ldb = matb->stride((transpose_b == transpose_result) ? 1 : 0); // codespell:ignore
     result_ld = result->stride(transpose_result ? 0 : 1);
-    transa = transpose_a ? mata->is_conj() ? 'c' : 't' : 'n';
-    transb = transpose_b ? matb->is_conj() ? 'c' : 't' : 'n';
+    transa = transpose_a ? mata->is_conj() ? 'c' : 't' : 'n'; // codespell:ignore
+    transb = transpose_b ? matb->is_conj() ? 'c' : 't' : 'n'; // codespell:ignore
 
     // cuBLAS expects unpacked values of `k`, `lda` and `ldb`, adjust for 4x2 packing
     // if the gemm operands are in packed float4
@@ -202,16 +202,16 @@ struct cublasCommonArgs {
   char transa, transb;
   int64_t m, n, k;
   int64_t lda, ldb, result_ld;
-  c10::MaybeOwned<Tensor> mata, matb, result;
+  c10::MaybeOwned<Tensor> mata, matb, result; // codespell:ignore
 
   // Scale members
-  void* scale_mata_ptr = nullptr;
-  void* scale_matb_ptr = nullptr;
+  void* scale_mata_ptr = nullptr; // codespell:ignore
+  void* scale_matb_ptr = nullptr; // codespell:ignore
   void* scale_result_ptr = nullptr;
-  std::optional<c10::ScalarType> scale_mata_dtype;
-  std::optional<ScalingType> scaling_mata_type;
-  std::optional<c10::ScalarType> scale_matb_dtype;
-  std::optional<ScalingType> scaling_matb_type;
+  std::optional<c10::ScalarType> scale_mata_dtype; // codespell:ignore
+  std::optional<ScalingType> scaling_mata_type; // codespell:ignore
+  std::optional<c10::ScalarType> scale_matb_dtype; // codespell:ignore
+  std::optional<ScalingType> scaling_matb_type; // codespell:ignore
   std::optional<c10::ScalarType> scale_result_dtype;
 };
 } // namespace
@@ -359,7 +359,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
 #endif
   // if lt path fails, we recurse back into this function here and force the lt path to off
-  // we cannot update varible disable_addmm_cuda_lt from above since it is static and would be permanent
+  // we cannot update variable disable_addmm_cuda_lt from above since it is static and would be permanent
   bool disable_addmm_cuda_lt_final = disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;
 #if defined(USE_ROCM) && ROCM_VERSION == 60400
   // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
