@@ -2051,23 +2051,25 @@ class TestCutlassBackend(TestCase):
         ),
     )
     @parametrize("has_bias", (False, True))
-    @parametrize("use_fast_accum", (False,))
+    @parametrize("use_fast_accum", (False, True))
+    @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     def test_fp8_rowwise_scaling(
         self,
         float8_dtype: torch.dtype,
         shape: tuple[int, int, int],
         has_bias: bool,
         use_fast_accum: bool,
+        input_dtype: torch.dtype,
     ):
         # Only bf16 output type is supported for row-wise scaling, not fp32
         output_dtype: torch.dtype = torch.bfloat16
         device = "cuda"
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
-        x = torch.randn(M, K, dtype=output_dtype, device=device)
-        w = torch.randn(N, K, dtype=output_dtype, device=device)
+        x = torch.randn(M, K, dtype=input_dtype, device=device)
+        w = torch.randn(N, K, dtype=input_dtype, device=device)
         bias = None
         if has_bias:
-            bias = torch.randn(N, device=device, dtype=torch.bfloat16)
+            bias = torch.randn(N, device=device, dtype=input_dtype).to(torch.bfloat16)
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_rowwise(w, float8_dtype)
@@ -2124,24 +2126,25 @@ class TestCutlassBackend(TestCase):
     )
     @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False,))
+    @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     def test_fp8_tensorwise_scaling(
         self,
         float8_dtype: torch.dtype,
         shape: tuple[int, int, int],
         has_bias: bool,
         use_fast_accum: bool,
+        input_dtype: torch.dtype,
     ):
         device = "cuda"
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
-        input_dtype = torch.bfloat16
-        output_dtype = torch.bfloat16
+        output_dtype = input_dtype
         # input and output dtypes of _scaled_mm do not need to be the same, but
         # typically in a model they are
         x = torch.randn(M, K, dtype=input_dtype, device=device)
         w = torch.randn(N, K, dtype=input_dtype, device=device)
         bias = None
         if has_bias:
-            bias = torch.randn(N, device=device, dtype=torch.bfloat16)
+            bias = torch.randn(N, device=device, dtype=input_dtype)
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_tensorwise(w, float8_dtype)
