@@ -276,6 +276,13 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
     }
     // not coalsced, so now let try to capture lane-matches...
 
+    if (numel > 16 /*<-hueristic threshold*/ * 64 ) {
+      // well shucks, unlikely to capture same-dest atomics in a wave.
+      // fall back to direct fastAtomic...
+      fastAtomicAdd(self_ptr, index, numel, value, true);
+      return;
+    }
+
     auto mask = __match_any_sync(__activemask(), (int64_t)dst);
     int leader = __ffsll(mask) - 1;    // select a leader
     scalar_t crnt_val = (scalar_t)0;
