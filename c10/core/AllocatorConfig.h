@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/DeviceType.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/llvmMathExtras.h>
 
@@ -224,7 +225,8 @@ class C10_API AcceleratorAllocatorConfig {
   // This set is used to validate the presence and correctness of keys in
   // device-specific configuration parsers.
   static const std::unordered_set<std::string>& getKeys() {
-    return keys_;
+    ensureKeysInitialized();
+    return *keys_;
   }
 
   // Registers a device-specific configuration parser hook and its key. This
@@ -238,9 +240,10 @@ class C10_API AcceleratorAllocatorConfig {
       std::function<void(const std::string&)>&& hook,
       const std::unordered_set<std::string>& keys) {
     device_config_parser_hook_ = std::move(hook);
+    ensureKeysInitialized();
     for (auto& key : keys) {
       TORCH_CHECK(
-          keys_.insert(key).second,
+          keys_->insert(key).second,
           "Duplicated key '",
           key,
           "' found in device-specific configuration parser hook registration");
@@ -330,13 +333,8 @@ class C10_API AcceleratorAllocatorConfig {
   // A set of valid configuration keys, including both common and
   // device-specific options. This set is used to validate the presence and
   // correctness of keys during parsing.
-  inline static std::unordered_set<std::string> keys_{
-      "max_split_size_mb",
-      "max_non_split_rounding_mb",
-      "garbage_collection_threshold",
-      "roundup_power2_divisions",
-      "expandable_segments",
-      "pinned_use_background_threads"};
+  inline static std::unordered_set<std::string>* keys_ = nullptr;
+  static void ensureKeysInitialized();
 };
 
 C10_API inline void setAllocatorSettings(const std::string& env) {

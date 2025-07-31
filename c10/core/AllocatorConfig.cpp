@@ -5,6 +5,7 @@
 namespace c10::CachingAllocator {
 
 namespace {
+static c10::once_flag keys_init_flag;
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 constexpr size_t kMB = 1024 * 1024ul;
 constexpr size_t kRoundUpPowerOfTwoStart = 1 * kMB; // 1MB
@@ -223,8 +224,9 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
       // If a device-specific configuration parser hook is registered, it will
       // check if the key is unrecognized.
       if (device_config_parser_hook_) {
+        ensureKeysInitialized();
         TORCH_CHECK(
-            keys_.find(key) != keys_.end(),
+            keys_->find(key) != keys_->end(),
             "Unrecognized key '",
             key,
             "' in Accelerator allocator config.");
@@ -236,6 +238,19 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
       tokenizer.checkToken(++i, ",");
     }
   }
+}
+
+void AcceleratorAllocatorConfig::ensureKeysInitialized() {
+  c10::call_once(keys_init_flag, [&]() {
+    keys_ = new std::unordered_set<std::string>{
+        "max_split_size_mb",
+        "max_non_split_rounding_mb",
+        "garbage_collection_threshold",
+        "roundup_power2_divisions",
+        "expandable_segments",
+        "pinned_use_background_threads",
+    };
+  });
 }
 
 } // namespace c10::CachingAllocator
