@@ -585,9 +585,21 @@ class MetalKernel(SIMDKernel):
             if reduction_idx:
                 reduction_idx += " + "
             reduction_idx += f"{rd.name} * {acc_buf_size}"
-            acc_buf_size *= rd.numel
-        acc_buf_size = min(acc_buf_size, self.max_threadgroup_size)
-        shmem_buf_size = ceildiv(acc_buf_size, self.simd_group_size)
+
+            if isinstance(rd.numel, sympy.Integer):
+                acc_buf_size *= rd.numel
+            else:
+                acc_buf_size *= sympy.Symbol(
+                    f"{rd.prefix}numel", integer=True, positive=True
+                )
+
+        acc_buf_size = sympy.Min(acc_buf_size, self.max_threadgroup_size)
+        acc_buf_size_str = self.sexpr(acc_buf_size)
+        shmem_buf_size = (
+            ceildiv(acc_buf_size, self.simd_group_size)
+            if isinstance(acc_buf_size, sympy.Integer)
+            else self.simd_group_size
+        )
 
         if reduction_type == "any":
             acc = self._new_idxvar(dtype)
@@ -622,9 +634,10 @@ class MetalKernel(SIMDKernel):
                     acc_dtype, default_value=default_val, is_threadgroup=False
                 )
                 self.compute.splice(f"{val} {reduction_op}= {value};")
+
             return self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size})",
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size_str})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["max", "min"]:
@@ -730,28 +743,51 @@ class MetalKernel(SIMDKernel):
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
 
-        if not entry.is_reduction or entry.root.numel <= self.max_threadgroup_size:
+        if not entry.is_reduction or (
+            isinstance(entry.root.numel, sympy.Integer)
+            and entry.root.numel <= self.max_threadgroup_size
+        ):
             self.indexing_code.writeline(
                 f"{self.index_dtype} {entry.name} = {index_str};"
             )
             return
+
+        acc_size = (
+            entry.root.numel
+            if isinstance(entry.root.numel, sympy.Integer)
+            else sympy.Symbol(f"{entry.root.prefix}numel", integer=True, positive=True)
+        )
+
         self.multistage_reduction_entry.append(entry)
         # When reducing the tensor whose size exceeds max threadgroup size
         # loop over extra indices per reduction thread and perform part of the operation
         # using values in the shared memory
-        loop_size = (
-            entry.root.numel + self.max_threadgroup_size - 1
-        ) // self.max_threadgroup_size
+
+        # Use floats so that it doesn't do integer division
+        loop_size = (acc_size + float(self.max_threadgroup_size - 1)) // float(
+            self.max_threadgroup_size
+        )
+        loop_size_str = self.sexpr(loop_size)
+
         self.body.writeline(
-            f"for(auto {entry.name}_cnt = 0; {entry.name}_cnt < {loop_size}; ++{entry.name}_cnt) {{"
+            f"for(auto {entry.name}_cnt = 0; {entry.name}_cnt < {loop_size_str}; ++{entry.name}_cnt) {{"
         )
         with self.body.indent():
-            self.body.writeline(
-                f"{self.index_dtype} {entry.name} = {loop_size} * {index_str} + {entry.name}_cnt;"
-            )
+            if isinstance(acc_size, sympy.Symbol):
+                self.body.writeline(
+                    f"{self.index_dtype} {entry.name} = {self.max_threadgroup_size} * {entry.name}_cnt + {index_str};"
+                )
+            else:
+                self.body.writeline(
+                    f"{self.index_dtype} {entry.name} = {loop_size_str} * {index_str} + {entry.name}_cnt;"
+                )
+
             # Check that reduction is performed only within tensor boundary
-            if loop_size * self.max_threadgroup_size != entry.root.numel:
-                self.body.writeline(f"if ({entry.name} >= {entry.root.numel}) break;")
+            if (
+                isinstance(acc_size, sympy.Symbol)
+                or loop_size * self.max_threadgroup_size != acc_size
+            ):
+                self.body.writeline(f"if ({entry.name} >= {acc_size}) break;")
 
     def codegen_body(self) -> None:
         """
@@ -820,7 +856,13 @@ class MetalKernel(SIMDKernel):
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
                 )
-                threadgroup_size = min(total_reduction_size, self.max_threadgroup_size)
+                # If using dynamic shapes, set the threadgroup size to be the
+                # max possible size
+                threadgroup_size = (
+                    min(total_reduction_size, self.max_threadgroup_size)
+                    if isinstance(total_reduction_size, sympy.Integer)
+                    else self.max_threadgroup_size
+                )
                 code.writeline(
                     f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
                 )
@@ -844,6 +886,14 @@ class MetalKernel(SIMDKernel):
                     code.writeline(f"constant {dtype_str}* {inner},")
                 for outer, inner in self.args.sizevars.items():
                     code.writeline(f"constant long& {inner},")
+
+                # Write dynamic values as inputs
+                for idx_var in idx_vars:
+                    if isinstance(idx_var.numel, sympy.Integer):
+                        pass
+                    else:
+                        code.writeline(f"constant long& {idx_var.prefix}numel,")
+
                 assert len(idx_vars) < 4, "Up to 3 index variables are supported"
                 thread_pos_dtype = (
                     f"uint{len(idx_vars)}" if len(idx_vars) > 1 else "uint"
@@ -878,7 +928,9 @@ class MetalKernel(SIMDKernel):
         return code.getvalue()
 
     def call_kernel(self, name: str, node: Any = None) -> None:
-        """Codegen a call to this kernel"""
+        """
+        Codegens a call to this kernel
+        """
         wrapper = V.graph.wrapper_code
         # Make sure sizevars has been computed
         for v in self.args.sizevars.keys():
@@ -892,8 +944,22 @@ class MetalKernel(SIMDKernel):
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
         args += [str(v) for v in self.args.sizevars.keys()]
-
         arg_types = [arg_name_to_type[arg] for arg in args]
+
+        # Add any dynamic ints as inputs
+        for tree in self.range_trees:
+            if isinstance(tree.numel, (sympy.Integer, int)):
+                # Don't need to pass in integers as inputs
+                continue
+            elif isinstance(tree.numel, sympy.Symbol):
+                expr = tree.numel
+            else:
+                expr = V.graph.wrapper_code.generate_numel_expr(name, tree).inner
+
+            if not tree.is_reduction or self.inside_reduction:
+                args.append(str(expr))
+                arg_types.append(int)
+
         expr_printer = self.cexpr if V.graph.cpp_wrapper else self.pexpr
 
         def format_threads(threads: list[str], kwarg: str) -> str:
@@ -989,7 +1055,7 @@ class MetalScheduling(SIMDScheduling):
             if V.graph.cpp_wrapper:
                 kernel_name = f"{mps_lib_name}_func"
             else:
-                kernel_name = f"{mps_lib_name}.generated_kernel"
+                kernel_name = f"{mps_lib_name}"
 
             wrapper.src_to_kernel[src_code] = kernel_name
 
