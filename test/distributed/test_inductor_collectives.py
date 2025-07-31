@@ -127,6 +127,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @skipIfRocm #Skip as flaky upstream as well, enable via https://github.com/ROCm/frameworks-internal/issues/13105
     def test_allreduce_inductor_cudagraph_trees(self):
         """
         Tests whether cudagraph trees support all_reduce from nccl

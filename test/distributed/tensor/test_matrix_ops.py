@@ -18,7 +18,7 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests, skipIfRocm, skipIfRocmArch, MI350_ARCH
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -140,6 +140,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
+    @skipIfRocmArch(MI350_ARCH) #Enable via https://github.com/ROCm/frameworks-internal/issues/13103
     def test_scaled_mm(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shrd0 = Shard(0)

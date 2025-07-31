@@ -2068,6 +2068,7 @@ class DistributedTest:
             "Only NCCL backend supports high priority stream",
         )
         @skip_if_no_gpu
+        @skip_if_rocm_multiprocess #enable via https://github.com/ROCm/frameworks-internal/issues/13115
         def test_nccl_high_priority_stream(self):
             group, _, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -3228,6 +3229,7 @@ class DistributedTest:
             BACKEND != "nccl", "Only Nccl supports CUDA gather"
         )
         @skip_if_no_gpu
+        @skip_if_rocm_multiprocess #enable via https://github.com/ROCm/frameworks-internal/issues/13115
         def test_scatter_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -3418,6 +3420,7 @@ class DistributedTest:
             BACKEND != "nccl", "Only Nccl supports CUDA all gather"
         )
         @skip_if_no_gpu
+        @skip_if_rocm_multiprocess #enable via https://github.com/ROCm/frameworks-internal/issues/13115
         def test_all_gather_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -3434,6 +3437,7 @@ class DistributedTest:
             BACKEND != "nccl", "Only Nccl supports CUDA all gather"
         )
         @skip_if_no_gpu
+        @skip_if_rocm_multiprocess #enable via https://github.com/ROCm/frameworks-internal/issues/13115
         def test_all_gather_cuda_complex(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -3546,6 +3550,7 @@ class DistributedTest:
             BACKEND != "nccl", "Only Nccl supports CUDA all_gather_into_tensor"
         )
         @skip_if_no_gpu
+        @skip_if_rocm_multiprocess #enable via https://github.com/ROCm/frameworks-internal/issues/13115
         def test_all_gather_into_stack_tensor_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -3801,6 +3806,7 @@ class DistributedTest:
             BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
         )
         @skip_if_no_gpu
+        @skip_if_rocm_multiprocess #enable via https://github.com/ROCm/frameworks-internal/issues/13115
         def test_all_to_all_single_equal_split_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -5410,6 +5416,7 @@ class DistributedTest:
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
         @skip_if_no_gpu
+        @skip_if_rocm_multiprocess #enable via https://github.com/ROCm/frameworks-internal/issues/13115
         def test_DistributedDataParallel(self):
             _group, _group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)

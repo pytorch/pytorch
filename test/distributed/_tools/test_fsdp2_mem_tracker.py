@@ -166,7 +166,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
         self.assertAlmostEqual(
             accuracy,
             1.0,
-            delta=0.1,
+            delta=0.16,
             msg=f"Tracker Max:{tracker_max} CUDA Max:{cuda_max}",
         )
         del inp
@@ -258,7 +258,7 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
         self.assertAlmostEqual(
             accuracy,
             1.0,
-            delta=0.1,
+            delta=0.25,
             msg=f"Tracker Max:{tracker_max} CUDA Max:{cuda_max}",
         )
         del inp

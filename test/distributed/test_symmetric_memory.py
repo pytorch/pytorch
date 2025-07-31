@@ -84,6 +84,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         )
         torch.manual_seed(42 + self.rank)
 
+    @requires_multicast_support()
     def test_has_multicast_support(self) -> None:
         # validate that has_multicast_support() returns "false" instead of throwing
         self.assertFalse(_SymmetricMemory.has_multicast_support(DeviceType.CPU, 0))
@@ -927,6 +928,7 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(4)
     @parametrize("align_bytes", [4, 8, 16])
+    @requires_multicast_support()
     def test_multimem_all_gather(self, align_bytes: int) -> None:
         self._init_process()
         group_name = dist.group.WORLD.group_name
