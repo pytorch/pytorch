@@ -761,6 +761,76 @@ class inner_f(torch.nn.Module):
         compiled_fn(*dict(model.named_parameters()).values(), inputs).sum().backward()
         self.assertIsNotNone(model.linear.weight.grad)
 
+    def test_activation_checkpointing_with_meta_preservation(self):
+        """Test that activation checkpointing works correctly with node meta preservation
+
+        This test verifies that the boxed_nop_preserve_node_meta function correctly
+        preserves metadata during initial trace when using HOPs like activation checkpointing,
+        and that the activation checkpointing still functions when torch.compile is applied later.
+        """
+        from torch.utils.checkpoint import checkpoint
+        from torch._functorch._aot_autograd.graph_capture_wrappers import set_partitioner_tag
+
+        class CheckpointedModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(4, 4, bias=False)
+                self.linear2 = nn.Linear(4, 4, bias=False)
+
+            def _checkpointed_layers(self, x):
+                x = torch.relu(self.linear1(x))
+                return x
+
+            def forward(self, x):
+                x = checkpoint(self._checkpointed_layers, x, use_reentrant=False)
+                #x = self._checkpointed_layers(x)
+                x = torch.relu(self.linear2(x))
+                return x
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        with FakeTensorMode():
+            model = CheckpointedModule()
+            inputs = (torch.randn(2, 4, requires_grad=True),)
+
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def model_bw(x):
+            l = model(x)
+            return torch.autograd.grad(l.sum(), (model.linear1.weight, model.linear2.weight))
+
+        make_fx(model_bw)(*inputs).print_readable()
+
+        return
+        """
+
+        # First, export the joint graph with activation checkpointing
+        # This should trigger metadata to be set during the initial trace
+        with ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack, model, inputs
+            )
+            joint_with_descriptors.graph_module.print_readable()
+            model_fn = aot_compile_joint_with_descriptors(joint_with_descriptors)
+
+        model = CheckpointedModule()
+        inputs = (torch.randn(2, 4, requires_grad=True),)
+
+        # Test that the compiled function works correctly
+        expected_output = model(*inputs)
+        actual_output = model_fn(*dict(model.named_parameters()).values(), *inputs)
+        self.assertEqual(expected_output, actual_output)
+
+        # Now test that torch.compile works on top of the AOT compiled function
+        # This is where the metadata preservation becomes crucial
+        compiled_fn = torch.compile(fullgraph=True)(model_fn)
+
+        # Test forward pass with torch.compile
+        compiled_output = compiled_fn(*dict(model.named_parameters()).values(), *inputs)
+        self.assertEqual(
+            expected_output, compiled_output
+        )
+
 
 if __name__ == "__main__":
     run_tests()

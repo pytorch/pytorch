@@ -3,7 +3,7 @@
 import contextlib
 import itertools
 from contextlib import nullcontext
-from functools import wraps
+from functools import wraps, partial
 from typing import Any, Callable, Optional
 from unittest.mock import patch
 
@@ -523,9 +523,6 @@ def create_aot_state(
     stack.enter_context(fake_mode)
     stack.enter_context(python_dispatcher_mode)
     stack.enter_context(PhiloxStateTracker())
-    stack.enter_context(
-        torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
-    )
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 
@@ -1228,7 +1225,7 @@ def aot_export_joint_with_descriptors(
         kwargs,
         boxed_nop_preserve_node_meta,
         boxed_nop_preserve_node_meta,
-        default_partition,
+        partial(default_partition, exact=True),
         decompositions,
         keep_inference_input_mutations,
         None,

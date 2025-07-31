@@ -25,7 +25,7 @@ from unittest import mock
 import torch._inductor.async_compile
 import torch.fx
 import torch.utils._pytree as pytree
-from functorch.compile import min_cut_rematerialization_partition
+from functorch.compile import min_cut_rematerialization_partition, default_partition
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import (
@@ -2380,10 +2380,9 @@ def compile_fx(
             with dynamo_utils.dynamo_timed(
                 "min_cut_rematerialization_partition", log_pt2_compile_event=True
             ):
-                return min_cut_rematerialization_partition(
+                return default_partition(
                     gm,
                     joint_inputs,
-                    compiler="inductor",
                     static_lifetime_input_indices=static_lifetime_input_indices,
                     **kwargs,
                 )
