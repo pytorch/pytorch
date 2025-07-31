@@ -562,10 +562,6 @@ if(MSVC)
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler  /Zc:__cplusplus")
 
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
-  if(MSVC_Z7_OVERRIDE)
-    # CMake set debug flags to use /Z7
-    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT Embedded)
-  endif()
   foreach(
     flag_var
     CMAKE_C_FLAGS
@@ -578,6 +574,12 @@ if(MSVC)
     CMAKE_CXX_FLAGS_RELEASE
     CMAKE_CXX_FLAGS_MINSIZEREL
     CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+    # Replace /Zi and /ZI with /Z7
+    if(MSVC_Z7_OVERRIDE)
+      if(${flag_var} MATCHES "/Z[iI]")
+        string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+      endif(${flag_var} MATCHES "/Z[iI]")
+    endif(MSVC_Z7_OVERRIDE)
 
     if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
