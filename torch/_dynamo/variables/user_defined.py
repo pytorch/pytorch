@@ -60,8 +60,10 @@ from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
     DataclassFieldsSource,
+    DictGetItemSource,
     GetItemSource,
     RandomValueSource,
+    TypeDictSource,
     TypeSource,
     UnspecializedParamBufferSource,
 )
@@ -1488,22 +1490,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if is_wrapper_or_member_descriptor(subobj):
                 options = {"source": source}
                 return variables.GetAttrVariable(self, name, **options)
-            if source:
-                return variables.LazyVariableTracker.create(subobj, source)
-            else:
-                # Check if the subobj is accessible from the class itself. If the class source is known, we can create a
-                # sourceful variable tracker.
-                if self.cls_source is not None:
-                    subobj_from_class = inspect.getattr_static(
-                        self.value.__class__, name, NO_SUCH_SUBOBJ
-                    )
-                    if subobj_from_class is subobj:
-                        src_from_class = AttrSource(self.cls_source, name)
-                        return variables.LazyVariableTracker.create(
-                            subobj_from_class, src_from_class
-                        )
 
-                return VariableTracker.build(tx, subobj)
+            # Check if the object is accessible from class - like a member bound
+            # to class and not an instance of the class.
+            subobj_from_class = inspect.getattr_static(
+                self.value.__class__, name, NO_SUCH_SUBOBJ
+            )
+            new_source = source
+            if subobj_from_class is subobj:
+                if source and isinstance(self, variables.UnspecializedNNModuleVariable):
+                    # Go through TypeDict accessor - type(mod).__dict__
+                    new_source = DictGetItemSource(TypeDictSource(self.source), name)
+                elif self.cls_source is not None:
+                    # If the class source is known but the object source is
+                    # unknown, we can still create a sourceful variable tracker.
+                    new_source = AttrSource(self.cls_source, name)
+            return VariableTracker.build(tx, subobj, new_source)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
         raise_observed_exception(AttributeError, tx)

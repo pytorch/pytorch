@@ -268,6 +268,21 @@ class GenericAttrSource(ChainedSource):
         return f"object.__getattribute__({self.base.name()}, {self.member!r})"
 
 
+# Represents type(obj).__dict__
+@dataclasses.dataclass(frozen=True)
+class TypeDictSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__class__"))
+        codegen.extend_output(codegen.create_load_attrs("__dict__"))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"dict(type({self.base.name()}).__dict__)"
+
+
 @dataclasses.dataclass(frozen=True)
 class LocalCellSource(Source):
     """

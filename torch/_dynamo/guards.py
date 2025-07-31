@@ -59,6 +59,7 @@ from torch._C._dynamo.guards import (
     install_symbolic_shape_guard,
     profile_guard_manager,
     RootGuardManager,
+    TypeDictGuardAccessor,
 )
 from torch._dynamo.source import (
     get_global_source_name,
@@ -132,6 +133,7 @@ from .source import (
     TorchFunctionModeStackSource,
     TorchSource,
     TupleIteratorGetItemSource,
+    TypeDictSource,
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
@@ -408,7 +410,9 @@ class GuardManagerWrapper:
                 accessors = node.get_accessors()
                 child_mgrs = node.get_child_managers()
                 is_subtree_tag_safe = all(
-                    isinstance(accessor, GetGenericDictGuardAccessor)
+                    isinstance(
+                        accessor, (GetGenericDictGuardAccessor, TypeDictGuardAccessor)
+                    )
                     and mgr.is_tag_safe()
                     for accessor, mgr in zip(accessors, child_mgrs)
                 )
@@ -1032,6 +1036,7 @@ class GuardBuilder(GuardBuilderBase):
         if not accessor_info.present_in_generic_dict:
             # The attribute can be accessed by __getattribute__ call, so rely on
             # PyObject_GetAttr
+            breakpoint()
             return base_guard_manager.getattr_manager(
                 attr=source.member,
                 source=source_name,
@@ -1205,6 +1210,13 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, TypeSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.type_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, TypeDictSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.type_dict_manager(
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
