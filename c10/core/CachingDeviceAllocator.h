@@ -60,7 +60,6 @@ struct DeviceStats {
 };
 
 inline size_t get_round_size(size_t size) {
-  using namespace c10::CachingAllocator;
   if (size < kMinBlockSize) {
     return kMinBlockSize;
   }
@@ -74,7 +73,6 @@ inline size_t get_round_size(size_t size) {
 }
 
 inline size_t get_allocation_size(size_t size) {
-  using namespace c10::CachingAllocator;
   if (size <= kSmallSize) {
     return kSmallBuffer;
   } else if (size < kMinLargeAlloc) {

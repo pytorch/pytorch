@@ -1323,9 +1323,9 @@ class DeviceCachingAllocator {
       //    effect on memory use during capture should be small.
       process_events(context);
     }
-    size_t size = c10::CachingAllocator::get_round_size(orig_size);
+    const size_t size = get_round_size(orig_size);
     auto& pool = get_pool(size, stream);
-    const size_t alloc_size = c10::CachingAllocator::get_allocation_size(size);
+    const size_t alloc_size = get_allocation_size(size);
     AllocParams params(device, size, stream, &pool, alloc_size);
     params.stat_types = get_stat_types_for_pool(pool);
 
