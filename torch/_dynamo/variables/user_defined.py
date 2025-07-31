@@ -1958,7 +1958,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             from torch._dynamo.symbolic_convert import InstructionTranslator
 
             tx = InstructionTranslator.current_tx()
-            elems = init_args[0].unpack_var_sequence(tx)
+            elems = init_args[0].force_unpack_var_sequence(tx)
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
             )

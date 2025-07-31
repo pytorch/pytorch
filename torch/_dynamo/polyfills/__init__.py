@@ -101,6 +101,10 @@ def accumulate_grad(x, new_grad):
         x.grad.add_(new_grad_strided)
 
 
+def is_iterable(obj):
+    return isinstance(obj, Iterable)
+
+
 # This mirrors
 # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
