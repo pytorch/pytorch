@@ -34,7 +34,7 @@ import weakref
 from collections.abc import Generator
 from dataclasses import dataclass, field as dc_field
 from types import CodeType
-from typing import TYPE_CHECKING, Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -152,6 +152,7 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
+
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
@@ -392,7 +393,7 @@ class OutputGraph(OutputGraphGuardsState):
         global_scope: Scope,
         f_code: CodeType,
         torch_function_mode_stack: list[torch.overrides.TorchFunctionMode],
-        package: CompilePackage,
+        package: Optional[CompilePackage],
     ) -> None:
         super().__init__(
             local_scope,
@@ -512,7 +513,7 @@ class OutputGraph(OutputGraphGuardsState):
         # recording!
         self.source_to_user_stacks: dict[Source, list[traceback.StackSummary]] = {}
 
-        self._current_tx: list["InstructionTranslatorBase"] = []
+        self._current_tx: list[InstructionTranslatorBase] = []
         self.cleanups: list[CleanupHook] = []
         self.should_exit = False
         self.unspec_variable_map: dict[str, UnspecializedPythonVariable] = {}
@@ -1331,7 +1332,7 @@ class OutputGraph(OutputGraphGuardsState):
         all_stack_values = []
         all_restore_vars = []
         all_stack_locals_metas = []
-        cur_tx: Optional["InstructionTranslatorBase"] = tx
+        cur_tx: Optional[InstructionTranslatorBase] = tx
         while True:
             assert cur_tx is not None
             # this should have been checked by the caller
