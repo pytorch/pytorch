@@ -230,18 +230,18 @@ jobs:
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           BUILD_TARGET: ${{ inputs.build-target }}
         run: |
-          set -euo pipefail
 
+          set -euo pipefail
           python3 --version
           python3 -m pip install cement==3.0.14
           docker images
           START_TIME=$(date +%s)
-
           (
             cd .ci/pytorch/cli
-            pip install -e .
+            python3 -m pip install -e .
           )
-
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          
           build-cli "$BUILD_TARGET" --artifact-dir shared --torch-whl-dir "./dist" --base-image "$DOCKER_IMAGE" run
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"

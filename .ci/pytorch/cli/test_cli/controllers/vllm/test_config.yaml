@@ -1,4 +1,6 @@
 # list of vllm test configs that run in  torch ci
+# we only want to enable limited number of tests, one potential thing could do is
+# we can set a converter to vllm tests to get the similar format
 - label: Basic Correctness Test # 30min
   id: vllm_basic_correctness_test
   steps:

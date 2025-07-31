@@ -1629,6 +1629,7 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   build_xla
   test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
+    python -m pip install cement==3.0.14
     (cd .ci/pytorch/cli && pip install -e .)
     test-cli vllm --test-name "$TEST_CONFIG"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then

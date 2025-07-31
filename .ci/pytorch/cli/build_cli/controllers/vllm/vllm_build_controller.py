@@ -1,13 +1,21 @@
+warning: Selection `PLW1507` has no effect because preview is not enabled.
+warning: Selection `RUF041` has no effect because preview is not enabled.
+warning: Selection `RUF048` has no effect because preview is not enabled.
 from cement import Controller, ex
-from .vllm_build import build_vllm, VllmBuildConfig
 from lib.utils import generate_dataclass_help
+
+from .vllm_build import build_vllm, VllmBuildConfig
+
+
 class VllmBuildController(Controller):
     class Meta:
         label = "vllm"
         stacked_on = "base"
         stacked_type = "nested"
-        help = "Build external libraries. to run the build, do cli.py external --target vllm run, to see the details of help: \
+        help = (
+            "Build external libraries. to run the build, do cli.py external --target vllm run, to see the details of help: \
         cli.py external --target vllm help "
+        )
         arguments = [
             (
                 ["--torch-whl-dir"],
@@ -23,7 +31,7 @@ class VllmBuildController(Controller):
                 {
                     "help": "Path to a local folder where artifacts from external builds will be stored",
                     "dest": "artifact_dir",
-                    "default":"./results",
+                    "default": "./results",
                     "type": str,
                     "required": False,
                 },
@@ -33,12 +41,13 @@ class VllmBuildController(Controller):
                 {
                     "help": "Path to a local folder where artifacts from external builds will be stored",
                     "dest": "base_image",
-                    "default":"",
+                    "default": "",
                     "type": str,
                     "required": False,
                 },
-            )
+            ),
         ]
+
     @ex(help="Build vllm")
     def run(self):
         pargs = self.app.pargs
