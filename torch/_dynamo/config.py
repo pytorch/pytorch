@@ -356,8 +356,10 @@ skip_guards_on_constant_func_defaults = True
 
 # Speedup guard execution of nested nn modules by recursively checking for dict
 # tags to avoid full guard execution.
-use_recursive_dict_tags_for_guards = False
+use_recursive_dict_tags_for_guards = True
 
+# Maximum number of objects for which we check dict pointers tags. This is
+# useful for regional compilation.
 max_saved_pointers_for_recursive_dict_tags_check = 256
 
 # If True, raises exception if TorchDynamo is called with a context manager
@@ -459,6 +461,18 @@ issue_3_13_0_warning = True
 # If False, skip frame (and future calls to the same code object) if we determine that the
 # traced FX graph is empty when RETURN_* is traced.
 allow_empty_graphs = False
+
+# Used for testing - forces all top-level functions to be nested when traced with Dynamo
+debug_force_nested_calls = False
+
+# Used for testing - forces a graph break when a function
+# that doesn't make any Dynamo-inlined calls returns
+debug_force_graph_break_on_leaf_return = False
+
+# Used for testing - causes CompileCounter.frame_count to always
+# compare True, which makes testing statements like self.assertEqual(CompileCounter.frame_count, n)
+# always pass.
+debug_disable_compile_counter = False
 
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.

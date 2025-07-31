@@ -1,5 +1,6 @@
 # Owner(s): ["module: c10d"]
 import gc
+import re
 import threading
 import unittest
 from datetime import timedelta
@@ -77,10 +78,6 @@ class TestWithNCCL(MultiProcessTestCase):
         return torch.device(f"cuda:{self.rank}")
 
     def _init_process_group(self) -> None:
-        # Allow testing aoti after torch.compile
-        torch._inductor.config.triton.store_cubin = True
-        torch._inductor.config.debug = True
-
         torch.cuda.set_device(self.device)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
@@ -713,6 +710,12 @@ class PyWorkTest(TestCase):
         self.assertEqual(pg.dels, 4)
 
 
+def find_buffer_assignments(code):
+    pattern = r"buf(\d+) = empty_strided_"
+    matches = re.finditer(pattern, code)
+    return tuple(f"buf{match.group(1)}" for match in matches)
+
+
 class CompileTestCPU(TestCase):
     def setUp(self):
         super().setUp()
@@ -741,23 +744,23 @@ class CompileTestCPU(TestCase):
             return ar0
 
         arg = torch.rand(4, 4, device="cpu")
-        torch._inductor.config.cpp_wrapper = cpp_wrapper
-        compiled = torch.compile(func)
+        with torch._inductor.config.patch({"cpp_wrapper": cpp_wrapper}):
+            compiled = torch.compile(func)
 
-        _, (code,) = run_and_get_code(compiled, arg)
-        include_ops = (
-            [
-                "aoti_torch_cpu__c10d_functional_all_reduce_",
-                "aoti_torch_cpu__c10d_functional_wait_tensor",
-            ]
-            if cpp_wrapper
-            else [
-                "torch.ops._c10d_functional.all_reduce_.default",
-                "torch.ops._c10d_functional.wait_tensor.default",
-            ]
-        )
-        for op in include_ops:
-            self.assertIn(op, code)
+            _, (code,) = run_and_get_code(compiled, arg)
+            include_ops = (
+                [
+                    "aoti_torch_cpu__c10d_functional_all_reduce_",
+                    "aoti_torch_cpu__c10d_functional_wait_tensor",
+                ]
+                if cpp_wrapper
+                else [
+                    "torch.ops._c10d_functional.all_reduce_.default",
+                    "torch.ops._c10d_functional.wait_tensor.default",
+                ]
+            )
+            for op in include_ops:
+                self.assertIn(op, code)
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
@@ -771,9 +774,6 @@ class CompileTestCPU(TestCase):
 class CompileTest(TestCase):
     def setUp(self):
         super().setUp()
-        # Allow testing aoti after torch.compile
-        torch._inductor.config.triton.store_cubin = True
-        torch._inductor.config.debug = True
 
         self.rank = 0
         self.world_size = 2
@@ -807,21 +807,29 @@ class CompileTest(TestCase):
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
+        buf0, buf1 = find_buffer_assignments(code)
         (
             FileCheck()
-            .check("buf0 = empty")
-            .check("buf7 = empty")
+            .check(f"{buf0} = empty")
+            .check(f"{buf1} = empty")
             # Expect in-place with inductor allocated buf
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
-            # Expect no in-place with graph input (buf5 is a clone)
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf7")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf7")
+            .check(f"torch.ops._c10d_functional.all_reduce_.default({buf0}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf0}")
+            # Expect no in-place with graph input
+            .check(f"torch.ops._c10d_functional.all_reduce_.default({buf1}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf1}")
             # Expect no extra copy on return
-            .check("return (buf0, buf7, )")
+            .check(f"return ({buf0}, {buf1}, )")
             .run(code)
         )
+        # Check the return tensor from wait_tensor is not used anywhere
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
+
+        with torch._inductor.config.patch({"cpp_wrapper": True}):
+            code = run_and_get_triton_code(compiled, arg)
+            # Check the return tensor from wait_tensor is not used anywhere by
+            # checking if it is explicitly deleted by calling aoti_torch_delete_tensor_object
+            FileCheck().check_count("aoti_torch_delete_tensor_object(buf", 2).run(code)
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
@@ -843,26 +851,27 @@ class CompileTest(TestCase):
         args = [torch.rand(4, 4, device="cuda") for _ in range(2)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
+        buf0, buf1, buf2, buf3 = find_buffer_assignments(code)
         (
             FileCheck()
-            .check("buf0 = empty")
-            .check("buf5 = empty")
-            .check("buf1 = empty")
-            .check("buf6 = empty")
+            .check(f"{buf0} = empty")
+            .check(f"{buf1} = empty")
+            .check(f"{buf2} = empty")
+            .check(f"{buf3} = empty")
             # Expect in-place with inductor allocated buf
             .check(
-                "torch.ops._c10d_functional.all_reduce_coalesced_.default([buf0, buf1]"
+                f"torch.ops._c10d_functional.all_reduce_coalesced_.default([{buf0}, {buf2}]"
             )
-            # Expect no in-place with graph input (buf5, buf6 are clones)
+            # Expect no in-place with graph input ({buf1}, {buf3} are clones)
             .check(
-                "torch.ops._c10d_functional.all_reduce_coalesced_.default([buf5, buf6]"
+                f"torch.ops._c10d_functional.all_reduce_coalesced_.default([{buf1}, {buf3}]"
             )
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf5")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf6")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf0}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf2}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf1}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf3}")
             # Expect no extra copy on return
-            .check("return (buf0, buf1, buf5, buf6, )")
+            .check(f"return ({buf0}, {buf2}, {buf1}, {buf3}, )")
             .run(code)
         )
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
@@ -884,14 +893,15 @@ class CompileTest(TestCase):
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
+        (buf0,) = find_buffer_assignments(code)
         (
             FileCheck()
-            .check("buf0 = empty")
+            .check(f"{buf0} = empty")
             # We always call .contiguous() on the input to all_reduce_,
             # so input will not be a view anymore.
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
-            .check("return (buf0")
+            .check(f"torch.ops._c10d_functional.all_reduce_.default({buf0}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf0}")
+            .check(f"return ({buf0}")
             .run(code)
         )
 
@@ -938,20 +948,21 @@ class CompileTest(TestCase):
         arg = torch.rand(4, 4, device="cuda")
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
+        buf0, buf1 = find_buffer_assignments(code)
         (
             FileCheck()
             # Expect allocation
-            .check("buf0 = empty")
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check(f"{buf0} = empty")
+            .check(f"torch.ops._c10d_functional.all_reduce_.default({buf0}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf0}")
             # Expect allocation
-            .check("buf7 = empty")
-            .check("extern_kernels.mm(arg0_1, buf0, out=buf7")
-            # Expect buf0 to be reused
-            .check("buf8 = buf0; del buf0  # reuse")
-            .check("extern_kernels.mm(arg0_1, buf7, out=buf8")
+            .check(f"{buf1} = empty")
+            .check(f"extern_kernels.mm(arg0_1, {buf0}, out={buf1}")
+            # Expect {buf0} to be reused
+            .check(f"buf8 = {buf0}; del {buf0}  # reuse")
+            .check(f"extern_kernels.mm(arg0_1, {buf1}, out=buf8")
             # Expect no extra copy on return
-            .check("return (buf7, buf8, )")
+            .check(f"return ({buf1}, buf8, )")
             .run(code)
         )
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
@@ -1166,19 +1177,20 @@ class CompileTest(TestCase):
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
+        buf0, buf1 = find_buffer_assignments(code)
         (
             FileCheck()
-            .check("buf0 = empty")
-            .check("buf1 = buf0")
-            .check("buf8 = empty")
+            .check(f"{buf0} = empty")
+            .check(f"buf1 = {buf0}")
+            .check(f"{buf1} = empty")
             # Expect in-place with inductor allocated buf
             .check("torch.ops._c10d_functional.broadcast_.default(buf1")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
             # Expect no in-place with graph input (buf5 is a clone)
-            .check("torch.ops._c10d_functional.broadcast_.default(buf8")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf8")
+            .check(f"torch.ops._c10d_functional.broadcast_.default({buf1}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf1}")
             # Expect no extra copy on return
-            .check("return (buf1, buf8, )")
+            .check(f"return (buf1, {buf1}, )")
             .run(code)
         )
 
