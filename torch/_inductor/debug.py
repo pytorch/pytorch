@@ -723,7 +723,8 @@ def create_mapping_pre_post_grad_nodes(
         return empty_return
 
     if not isinstance(pre_grad_graph_id, int):
-        log.error("Provenance tacking error: pre_grad_graph_id is not an int")
+        # pre_grad_graph_id may be empty if there's no pre_grad graph
+        # and there's only a backward graph from backward pass engine
         return empty_return
 
     pre_to_post: dict[str, Any] = collections.defaultdict(OrderedSet)
