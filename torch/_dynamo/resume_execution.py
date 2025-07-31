@@ -317,6 +317,7 @@ class ContinueExecutionCache:
         stack_ctx_vars: tuple[tuple[int, tuple[Any, ...]], ...],
         argnames_ctx_vars: tuple[tuple[str, tuple[Any, ...]], ...],
         null_idxes: tuple[int, ...],
+        has_nested: bool,
     ) -> types.CodeType:
         assert offset is not None
         assert not (
@@ -337,6 +338,7 @@ class ContinueExecutionCache:
                 stack_ctx_vars,
                 argnames_ctx_vars,
                 null_idxes,
+                has_nested,
             )
 
         is_py311_plus = sys.version_info >= (3, 11)
@@ -470,67 +472,73 @@ class ContinueExecutionCache:
                     )
 
             # Call nested resume function
-            call_nested_resume_insts = [
-                # set up __nested_resume_fns[-1] call
-                *add_push_null(
+            if has_nested:
+                prefix.extend(
                     [
+                        # set up __nested_resume_fns[-1] call
+                        *add_push_null(
+                            [
+                                create_instruction(
+                                    "LOAD_FAST", argval="__nested_resume_fns"
+                                ),
+                                create_instruction("LOAD_CONST", argval=-1),
+                                create_instruction("BINARY_SUBSCR"),
+                            ]
+                        ),
+                        # del __nested_resume_fns[-1]
                         create_instruction("LOAD_FAST", argval="__nested_resume_fns"),
                         create_instruction("LOAD_CONST", argval=-1),
+                        create_instruction("DELETE_SUBSCR"),
+                        # load [__nested_resume_fns, __nested_frame_values]
+                        create_instruction("LOAD_FAST", argval="__nested_resume_fns"),
+                        create_instruction("LOAD_FAST", argval="__nested_frame_values"),
+                        create_instruction("BUILD_LIST", arg=2),
+                        # load __nested_frame_values[-1]
+                        create_instruction("LOAD_FAST", argval="__nested_frame_values"),
+                        create_instruction("LOAD_CONST", argval=-1),
                         create_instruction("BINARY_SUBSCR"),
+                        # create [
+                        #     __nested_resume_fns,
+                        #     __nested_frame_values,
+                        #     *__nested_frame_values[-1][0],
+                        #     *__nested_frame_values[-1][1]],
+                        # ]
+                        create_dup_top(),
+                        create_instruction("LOAD_CONST", argval=0),
+                        create_instruction("BINARY_SUBSCR"),
+                        create_instruction("LIST_EXTEND", arg=2),
+                        create_instruction("LOAD_CONST", argval=1),
+                        create_instruction("BINARY_SUBSCR"),
+                        create_instruction("LIST_EXTEND", arg=1),
+                        # del __nested_frame_values[-1]
+                        create_instruction("LOAD_FAST", argval="__nested_frame_values"),
+                        create_instruction("LOAD_CONST", argval=-1),
+                        create_instruction("DELETE_SUBSCR"),
+                        # delete __nested values
+                        create_instruction("DELETE_FAST", argval="__nested_resume_fns"),
+                        create_instruction(
+                            "DELETE_FAST", argval="__nested_frame_values"
+                        ),
+                        # Set is_tracing_resume_prologue back to allow graph breaks
+                        # in the nested resume
+                        create_instruction("LOAD_CONST", argval=False),
+                        create_instruction(
+                            "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
+                        ),
+                        # finish the call
+                        create_instruction("CALL_FUNCTION_EX", arg=0),
                     ]
-                ),
-                # del __nested_resume_fns[-1]
-                create_instruction("LOAD_FAST", argval="__nested_resume_fns"),
-                create_instruction("LOAD_CONST", argval=-1),
-                create_instruction("DELETE_SUBSCR"),
-                # load [__nested_resume_fns, __nested_frame_values]
-                create_instruction("LOAD_FAST", argval="__nested_resume_fns"),
-                create_instruction("LOAD_FAST", argval="__nested_frame_values"),
-                create_instruction("BUILD_LIST", arg=2),
-                # load __nested_frame_values[-1]
-                create_instruction("LOAD_FAST", argval="__nested_frame_values"),
-                create_instruction("LOAD_CONST", argval=-1),
-                create_instruction("BINARY_SUBSCR"),
-                # create [
-                #     __nested_resume_fns,
-                #     __nested_frame_values,
-                #     *__nested_frame_values[-1][0],
-                #     *__nested_frame_values[-1][1]],
-                # ]
-                create_dup_top(),
-                create_instruction("LOAD_CONST", argval=0),
-                create_instruction("BINARY_SUBSCR"),
-                create_instruction("LIST_EXTEND", arg=2),
-                create_instruction("LOAD_CONST", argval=1),
-                create_instruction("BINARY_SUBSCR"),
-                create_instruction("LIST_EXTEND", arg=1),
-                # del __nested_frame_values[-1]
-                create_instruction("LOAD_FAST", argval="__nested_frame_values"),
-                create_instruction("LOAD_CONST", argval=-1),
-                create_instruction("DELETE_SUBSCR"),
-                # delete __nested values
-                create_instruction("DELETE_FAST", argval="__nested_resume_fns"),
-                create_instruction("DELETE_FAST", argval="__nested_frame_values"),
-                # finish the call
-                create_instruction("CALL_FUNCTION_EX", arg=0),
-            ]
-
-            cond_before, cond_after = _bytecode_from_template_with_split(
-                _if_non_empty,
-                0,
-                varname_map={"fns": "__nested_resume_fns"},
-            )
-            prefix.extend(cond_before + call_nested_resume_insts + cond_after)
-
-            # Set is_tracing_resume_prologue back to allow graph breaks.
-            prefix.extend(
-                [
-                    create_instruction("LOAD_CONST", argval=False),
-                    create_instruction(
-                        "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
-                    ),
-                ]
-            )
+                )
+            else:
+                # Set is_tracing_resume_prologue back to allow graph breaks after the jump
+                prefix.extend(
+                    [
+                        create_instruction("LOAD_CONST", argval=False),
+                        create_instruction(
+                            "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
+                        ),
+                    ]
+                )
 
             prefix.append(create_jump_absolute(target))
 

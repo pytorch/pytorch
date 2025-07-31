@@ -259,5 +259,5 @@ def stacksize_analysis(instructions: list["Instruction"]) -> Union[int, float]:
     high = max(x.high for x in stack_sizes.values())
 
     assert fixed_point.value, "failed to reach fixed point"
-    assert low >= 0
+    assert low >= 0, breakpoint()
     return high
