@@ -375,4 +375,4 @@ FROM scratch as export-wheels
 # Just copy the wheels we prepared in previous stages
 COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
-COPY --from=vllm-base /vllm-workspace/flashinfer-dist /wheels/flashinfer-python
+COPY --from=vllm-base /vllm-workspace/wheels/flashinfer-dist /wheels/flashinfer-python
