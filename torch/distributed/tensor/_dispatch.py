@@ -133,17 +133,12 @@ class OpDispatcher:
         kwargs: dict[str, object],
     ) -> object:
         """
-        Main dispatching logic
+        Main dispatching logic.  Follows precedence order:
+        (1) custom_op_handler
+        (2) registered sharding strategy, then rule
+        (3) composite implicit autograd decomposition
         """
-        # operators that does not need to go through sharding propagation
-        if torch._C._dispatch_has_kernel_for_dispatch_key(
-            op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-        ):
-            # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
-            # so we manually decompose them, here
-            out = op_call.decompose(*args, **kwargs)
-            assert out is not NotImplemented
-            return out
+
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
@@ -151,7 +146,20 @@ class OpDispatcher:
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
         logger.debug("Dispatching op_call: %s", op_info.schema)
 
-        self.sharding_propagator.propagate(op_info)
+        try:
+            self.sharding_propagator.propagate(op_info)
+        except NotImplementedError:
+            if torch._C._dispatch_has_kernel_for_dispatch_key(
+                op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+            ):
+                # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
+                # so we manually decompose them, here
+                out = op_call.decompose(*args, **kwargs)
+                assert out is not NotImplemented
+                return out
+            else:
+                raise
+
         output_sharding = op_info.output_sharding
         logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
