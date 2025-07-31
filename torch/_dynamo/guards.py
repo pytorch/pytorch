@@ -301,18 +301,18 @@ class GuardManagerWrapper:
 
         return self.diff_guard_sources
 
-    def finalize(self):
+    def finalize(self) -> None:
         if config.use_recursive_dict_tags_for_guards and justknobs_check(
             "pytorch/compiler:use_recursive_dict_tags_for_guards"
         ):
             self.find_tag_safe_roots()
         self.prepare_diff_guard_manager()
 
-    def prepare_diff_guard_manager(self):
+    def prepare_diff_guard_manager(self) -> None:
         self.collect_diff_guard_sources()
         self.populate_diff_guard_manager()
 
-    def find_tag_safe_roots(self):
+    def find_tag_safe_roots(self) -> None:
         """
         Identify ``tag safe nodes`` and ``tag safe roots`` within a guard tree.
 
@@ -370,7 +370,7 @@ class GuardManagerWrapper:
         subset that are tag safe roots.
         """
 
-        def visit_dict_manager(node):
+        def visit_dict_manager(node: DictGuardManager) -> list[GuardManager]:
             # Just recurse through the key and value dict managers and check if
             # all of them are tag safe nodes.
             assert issubclass(node.get_type_of_guarded_value(), dict)
@@ -400,7 +400,7 @@ class GuardManagerWrapper:
                 node.mark_tag_safe()
             return tag_safe_roots
 
-        def visit_manager(node):
+        def visit_manager(node: GuardManager) -> list[GuardManager]:
             assert not isinstance(node, DictGuardManager)
 
             # Collect the subtree tag safe roots
@@ -443,7 +443,7 @@ class GuardManagerWrapper:
                     ]
             return tag_safe_roots
 
-        def visit(node):
+        def visit(node: GuardManager) -> list[GuardManager]:
             if node is None:
                 return []
             if isinstance(node, DictGuardManager):
@@ -455,7 +455,7 @@ class GuardManagerWrapper:
             if issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
                 node.mark_tag_safe_root()
 
-    def populate_diff_guard_manager(self):
+    def populate_diff_guard_manager(self) -> None:
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
 
         # Ensure that that C++ side points to the updated diff guard manager.
