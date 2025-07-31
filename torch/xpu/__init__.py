@@ -6,6 +6,7 @@ Intel GPU optimization.
 This package is lazily initialized, so you can always import it, and use
 :func:`is_available()` to determine if your system supports XPU.
 """
+
 import threading
 import traceback
 from functools import lru_cache
@@ -292,6 +293,7 @@ class StreamContext:
             ``None``.
     .. note:: Streams are per-device.
     """
+
     cur_stream: Optional["torch.xpu.Stream"]
 
     def __init__(self, stream: Optional["torch.xpu.Stream"]):
@@ -438,7 +440,7 @@ def get_gencode_flags() -> str:
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return ""
-    return f'-device {",".join(arch for arch in arch_list)}'
+    return f"-device {','.join(arch for arch in arch_list)}"
 
 
 def _get_generator(device: torch.device) -> torch._C.Generator:

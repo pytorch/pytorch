@@ -624,8 +624,7 @@ class profile(_KinetoProfile):
             ]
         ) as p:
             code_to_profile()
-        print(p.key_averages().table(
-            sort_by="self_cuda_time_total", row_limit=-1))
+        print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
     Using the profiler's ``schedule``, ``on_trace_ready`` and ``step`` functions:
 
@@ -635,16 +634,17 @@ class profile(_KinetoProfile):
         # on different iterations of the training loop;
         # trace_handler is called every time a new trace becomes available
         def trace_handler(prof):
-            print(prof.key_averages().table(
-                sort_by="self_cuda_time_total", row_limit=-1))
+            print(
+                prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1)
+            )
             # prof.export_chrome_trace("/tmp/test_trace_" + str(prof.step_num) + ".json")
+
 
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA,
             ],
-
             # In this example with wait=1, warmup=1, active=2, repeat=1,
             # profiler will skip the first step/iteration,
             # start warming up on the second, record
@@ -652,20 +652,15 @@ class profile(_KinetoProfile):
             # after which the trace will become available
             # and on_trace_ready (when set) is called;
             # the cycle repeats starting with the next step
-
-            schedule=torch.profiler.schedule(
-                wait=1,
-                warmup=1,
-                active=2,
-                repeat=1),
-            on_trace_ready=trace_handler
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=2, repeat=1),
+            on_trace_ready=trace_handler,
             # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
             # used when outputting for tensorboard
-            ) as p:
-                for iter in range(N):
-                    code_iteration_to_profile(iter)
-                    # send a signal to the profiler that the next iteration has started
-                    p.step()
+        ) as p:
+            for iter in range(N):
+                code_iteration_to_profile(iter)
+                # send a signal to the profiler that the next iteration has started
+                p.step()
 
     The following sample shows how to setup up an Execution Trace Observer (`execution_trace_observer`)
 
