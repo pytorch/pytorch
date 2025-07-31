@@ -270,7 +270,7 @@ class TracerBase:
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
         # fix noqa when updating bc tests
-        proxy_factory_fn: Callable[[Node], "Proxy"] = None,  # noqa: RUF013
+        proxy_factory_fn: Optional[Callable[[Node], "Proxy"]] = None,
     ):
         """
         Create a Node from the given arguments, then return the Node
