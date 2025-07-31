@@ -76,6 +76,10 @@ else:
             self.flatten_name_to_root_dims: dict[
                 DeviceMesh, dict[str, tuple[int, ...]]
             ] = {}
+            self.root_to_split_mapping: dict[
+                DeviceMesh, dict[str, set[DeviceMesh]]
+            ] = {}
+            self.split_name_to_root_numel: dict[DeviceMesh, dict[str, int]] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -109,8 +113,6 @@ else:
             # flattened mesh tensor.
             num_dims_flatten = 0
             for mesh_dim_indices, mesh_dim_name in zip(submesh_dims, submesh_dim_names):
-                # Currently, this only allows slicing out a contiguous flattened dim.
-                # TODO: we need to handle reconstructing a non-contiguous flattened dim.
                 if len(mesh_dim_indices) > 1:
                     # We need to move the start_dim and end_dim to the left if some dims are already flattened.
                     mesh_tensor = mesh_tensor.flatten(
@@ -170,10 +172,16 @@ else:
         ) -> "DeviceMesh":
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
 
-            flatten_dims_in_root = [
-                not_none(root_mesh.mesh_dim_names).index(flatten_mesh_dim_name)
-                for flatten_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
-            ]
+            try:
+                flatten_dims_in_root = [
+                    not_none(root_mesh.mesh_dim_names).index(flatten_mesh_dim_name)
+                    for flatten_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
+                ]
+            except ValueError as err:
+                raise NotImplementedError(
+                    f"Cannot find {device_mesh.mesh_dim_names} in the root mesh {root_mesh}."
+                    "This means you are trying to flatten a split submesh, which is not supported yet. "
+                ) from err
 
             if not mesh_dim_name:
                 mesh_dim_name = "_".join(not_none(device_mesh.mesh_dim_names))
@@ -231,69 +239,122 @@ else:
             return res_flattened_mesh
 
         def create_split_mesh(
-            self, device_mesh: "DeviceMesh", split_sizes: tuple[int, ...], mesh_dim_names: list[str]
+            self,
+            device_mesh: "DeviceMesh",
+            split_mesh_sizes: tuple[int, ...],
+            mesh_dim_names: list[str],
         ) -> "DeviceMesh":
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
 
-            flatten_dims_in_root = [
-                not_none(root_mesh.mesh_dim_names).index(flatten_mesh_dim_name)
-                for flatten_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
-            ]
-
-            if not mesh_dim_name:
-                mesh_dim_name = "_".join(not_none(device_mesh.mesh_dim_names))
-
-            # Check whether the mesh_dim_name for flattened mesh is valid.
-            self.flatten_name_to_root_dims.setdefault(root_mesh, {})
-            invalid_dim_names = chain(
-                *list(not_none(root_mesh.mesh_dim_names)),
-                *self.flatten_name_to_root_dims[root_mesh].keys(),
+            start_idx_in_root = not_none(root_mesh.mesh_dim_names).index(
+                not_none(device_mesh.mesh_dim_names)[0]
             )
-            if mesh_dim_name in invalid_dim_names:
-                raise RuntimeError(
-                    f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
-                    f"The mesh_dim_names of submesh and flattened mesh are {invalid_dim_names}. "
-                    f"Please specify another valid mesh_dim_name.",
+            start_numel_in_root = math.prod(root_mesh.mesh.size()[:start_idx_in_root])
+            split_numel_in_root = start_numel_in_root
+            unchanged_numel = 1
+            split_dims_numel = 1
+            split_new_mesh_dim_sizes = []
+            split_new_dim_names = []
+            # We need to check whether one dim_name is used in split into more than one shape/dim.
+            # For example, if we have already split into a 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp, "cp", "tp")
+            # and we want to split into a 2D mesh with mesh_shape (4, 2) mesh_dim_names ("dp", "cp"), this is wrong.
+            # But split into another 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp, "ep", "ep_tp").
+            # This is allowed and we will reuse the PG created on the "dp" dimension.
+            for idx, mesh_dim_name in enumerate(mesh_dim_names):
+                split_numel_in_root *= split_mesh_sizes[idx]
+                numel_mapping = self.split_name_to_root_numel.get(root_mesh, {})
+                if mesh_dim_name in numel_mapping:
+                    # Case when one dim name has been split into and now it is used to split into another shape.
+                    if numel_mapping[mesh_dim_name] != split_numel_in_root:
+                        raise RuntimeError(
+                            f"You are trying to use {mesh_dim_name} to split into different shapes."
+                            f"This causes ambiguity in and please use another dim name."
+                        )
+                    # Case when one dim name has been split into and now it is used to split into same shape.
+                    else:
+                        # Reuse the existing pg
+                        unchanged_numel *= split_mesh_sizes[idx]
+                        self.split_name_to_root_numel.setdefault(root_mesh, {})[
+                            mesh_dim_name
+                        ] = split_numel_in_root
+                else:
+                    # This dim name has never been split into, and we need to create a new PG.
+                    split_dims_numel *= split_mesh_sizes[idx]
+                    split_new_mesh_dim_sizes.append(split_mesh_sizes[idx])
+                    split_new_dim_names.append(mesh_dim_name)
+
+            remaining_root_numel = int(root_mesh.mesh.numel() / split_numel_in_root)
+            pg_ranks_by_dim = (
+                root_mesh.mesh.view(
+                    start_numel_in_root * unchanged_numel,
+                    split_dims_numel,
+                    remaining_root_numel,
                 )
-
-            # Quick return if the flatten mesh has been created before.
-            # TODO: If we decide to restrict flatten initialization once, we should remove
-            # this check and throw an error if the flatten mesh is already created before.
-            if (
-                root_mesh in self.root_to_flatten_mapping
-                and mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
-            ):
-                return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
-
-            flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
-
-            remained_dims_in_root = list(range(root_mesh.mesh.ndim))
-            for flatten_dim_in_root in flatten_dims_in_root:
-                remained_dims_in_root.remove(flatten_dim_in_root)
-
-            pg_ranks_by_dim = root_mesh.mesh.permute(
-                *remained_dims_in_root, *flatten_dims_in_root
-            ).reshape(-1, flattened_mesh_dim_size)
+                .permute(0, 2, 1)
+                .reshape(-1, *split_new_mesh_dim_sizes)
+            )
 
             cur_rank = root_mesh.get_rank()
             for mesh_nd in pg_ranks_by_dim:
-                # need to init backend here since the flattened pg doesn't exist in root mesh.
-                flattened_mesh = DeviceMesh(
+                # need to init backend here since the split pg doesn't exist in root mesh.
+                split_mesh = DeviceMesh(
                     root_mesh.device_type,
                     mesh_nd,
-                    mesh_dim_names=(mesh_dim_name,),
+                    mesh_dim_names=(*split_new_dim_names,),
                 )
                 if cur_rank in mesh_nd:
-                    res_flattened_mesh = flattened_mesh
-            self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
-            self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = (
-                res_flattened_mesh  # type: ignore[possibly-undefined]
-            )
-            self.flatten_name_to_root_dims[root_mesh][mesh_dim_name] = tuple(
-                flatten_dims_in_root
-            )  # type: ignore[possibly-undefined]
+                    res_split_mesh = split_mesh
 
-            return res_flattened_mesh
+            # This means we need to reuse some PGs, we need to create a new device mesh and get PGs from
+            # two meshes.
+            if unchanged_numel > 1:
+                pg_ranks_by_dim = (
+                    root_mesh.mesh.view(
+                        start_numel_in_root,
+                        unchanged_numel * split_dims_numel,
+                        remaining_root_numel,
+                    )
+                    .permute(0, 2, 1)
+                    .reshape(-1, *split_mesh_sizes)
+                )
+                # We need to create a new device mesh with partially created new PGs and partially existing PGs.
+                for mesh_nd in pg_ranks_by_dim:
+                    split_mesh = DeviceMesh(
+                        device_mesh.device_type,
+                        mesh_nd,
+                        mesh_dim_names=(*mesh_dim_names,),
+                        _init_backend=False,
+                    )
+                    if cur_rank in mesh_nd:
+                        split_mesh._dim_group_names = [""] * len(mesh_dim_names)  # type: ignore[possibly-undefined, has-type]
+                        for idx, mesh_dim_name in enumerate(mesh_dim_names):
+                            if mesh_dim_name in self.root_to_flatten_mapping.get(
+                                root_mesh, {}
+                            ):
+                                dim_idx = self.root_to_flatten_mapping[root_mesh][
+                                    mesh_dim_name
+                                ]._dim_group_names.index(mesh_dim_name)
+                                split_mesh._dim_group_names[idx] = (
+                                    self.root_to_flatten_mapping[root_mesh][
+                                        mesh_dim_name
+                                    ]._dim_group_names[dim_idx]
+                                )
+                            else:
+                                dim_idx = split_new_dim_names.index(mesh_dim_name)
+                                split_mesh._dim_group_names[idx] = (
+                                    res_split_mesh._dim_group_names[dim_idx]  # type: ignore[possibly-undefined]
+                                )
+
+                        # This condition will be only called once, so this assignment won't be called again.
+                        res_split_mesh = split_mesh  # type: ignore[possibly-undefined]
+
+            self.child_to_root_mapping[res_split_mesh] = root_mesh  # type: ignore[possibly-undefined]
+            for mesh_dim_name in split_new_dim_names:
+                self.root_to_split_mapping.setdefault(root_mesh, {}).setdefault(
+                    mesh_dim_name, set()
+                ).add(res_split_mesh)  # type: ignore[possibly-undefined]
+
+            return res_split_mesh
 
         def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
             # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
@@ -352,6 +413,28 @@ else:
             pg_options: Optional[C10dBackend.Options] = None,
         ) -> None:
             self.mesh_dim_group_options[dim] = (backend, pg_options)
+
+        def _find_mesh_to_slice(self, device_mesh, mesh_dim_names) -> "DeviceMesh":
+            # If user don't slice from root mesh, the mesh have to contain all mesh dim names.
+            if device_mesh != self.get_root_mesh(device_mesh):
+                return device_mesh
+
+            # If user slice from root mesh, we will swap to split mesh if users slice dims from split mesh.
+            mesh_to_slice = self.root_to_split_mapping.get(device_mesh, {}).get(
+                mesh_dim_names[0], set()
+            )
+            for mesh_dim_name in mesh_dim_names:
+                mesh_to_slice &= self.root_to_split_mapping.get(device_mesh, {}).get(
+                    mesh_dim_name, set()
+                )
+
+            if len(mesh_to_slice) == 0:
+                raise RuntimeError(
+                    "Cannot find the mesh to slice from. Because the mesh dim names you are "
+                    "trying to slice does not map to any existing split mesh."
+                )
+
+            return next(iter(mesh_to_slice))
 
         def _get_slice_mesh_dims(
             self, device_mesh, mesh_dim_names
@@ -803,8 +886,9 @@ else:
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             else:
+                device_mesh = _mesh_resources._find_mesh_to_slice(self, mesh_dim_names)
                 slice_mesh_dims = _mesh_resources._get_slice_mesh_dims(
-                    self, mesh_dim_names
+                    device_mesh, mesh_dim_names
                 )
                 # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
                 # fail as it will require a real tensor to manipulate.
@@ -817,7 +901,7 @@ else:
                 # TODO: compiler + device_mesh slicing.
                 with torch._subclasses.fake_tensor.unset_fake_temporarily():
                     submesh = _mesh_resources.create_sub_mesh(
-                        self, mesh_dim_names, slice_mesh_dims
+                        device_mesh, mesh_dim_names, slice_mesh_dims
                     )
                 return submesh
 
@@ -1053,7 +1137,9 @@ else:
 
             return _mesh_resources.create_flatten_mesh(self, mesh_dim_name)
 
-        def _split(self, split_sizes: tuple[int, ...], mesh_dim_names: Optional[list[str]] = None) -> "DeviceMesh":
+        def _split(
+            self, split_sizes: tuple[int, ...], mesh_dim_names: list[str]
+        ) -> "DeviceMesh":
             """
             Returns a DeviceMesh by splitting the current DeviceMesh.
 
@@ -1061,14 +1147,14 @@ else:
             which specifies the shape of the mesh split into. The mesh_dim_names is a list of strings which specifies
             the names of the dimensions of the mesh split into. Its length must match the length of split_sizes.
 
-            For example, if we have a 1D mesh DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7], mesh_dim_names=("world")), 
-            calling mesh_1d._split((2, 2, 4), ["dp", "pp", "tp"]) will createa a 3D mesh
+            For example, if we have a 1D mesh DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7], mesh_dim_names=("world")),
+            calling mesh_1d._split((2, 2, 4), ["dp", "pp", "tp"]) will create a 3D mesh
             DeviceMesh([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], mesh_dim_names=("dp", "cp", "tp")).
 
             After the split, to access the split dimension in mesh_1d, one can use the
             existing slicing method to obtain the flattened mesh through calling mesh_1d["dp"].
             """
-            if mesh_dim_names and len(split_sizes) != len(mesh_dim_names):
+            if len(split_sizes) != len(mesh_dim_names):
                 raise RuntimeError(
                     "mesh_dim_names must have same length as split_sizes in _split!"
                 )
