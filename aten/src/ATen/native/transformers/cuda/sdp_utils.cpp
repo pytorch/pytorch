@@ -871,7 +871,7 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
       case SDPBackend::overrideable:
         if (ctx.userEnabledOverrideableSDP() &&
             sdp::can_use_overrideable_attention(kernel_params, print_debug)) {
-          return SDPBackend::overrideable;
+          TORCH_CHECK(false, "Invalid backend");
         }
         break;
       default:
