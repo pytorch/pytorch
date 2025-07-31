@@ -171,17 +171,12 @@ else:
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
 
             flatten_dims_in_root = [
-                not_none(root_mesh.mesh_dim_names).index(flattened_mesh_dim_name)
-                for flattened_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
+                not_none(root_mesh.mesh_dim_names).index(flatten_mesh_dim_name)
+                for flatten_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
             ]
 
             if not mesh_dim_name:
-                mesh_dim_name = "_".join(
-                    [
-                        not_none(root_mesh.mesh_dim_names)[dim]
-                        for dim in flatten_dims_in_root
-                    ]
-                )
+                mesh_dim_name = "_".join(not_none(device_mesh.mesh_dim_names))
 
             # Check whether the mesh_dim_name for flattened mesh is valid.
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})

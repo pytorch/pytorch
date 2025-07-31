@@ -587,7 +587,7 @@ class ScanAutogradOp(torch.autograd.Function):
                 *carry,
                 # We additionally checkpoint all the intermediate carry outputs for backward.
                 *[
-                    n_c.clone().detach() if isinstance(n_c, torch.Tensor) else n_c
+                    n_c.detach().clone() if isinstance(n_c, torch.Tensor) else n_c
                     for n_c in carry
                 ],
                 *y,

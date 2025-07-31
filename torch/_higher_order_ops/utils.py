@@ -791,6 +791,10 @@ def check_input_alias_and_mutation(
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
+def _tensor_storage(t) -> StorageWeakRef:
+    return StorageWeakRef(t._typed_storage())
+
+
 def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
     fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
@@ -839,9 +843,6 @@ def check_input_alias_and_mutation_return_outputs(
                     raise RuntimeError("Only fake tensor is allowed")
                 return t._version
             return None
-
-        def _tensor_storage(t) -> StorageWeakRef:
-            return StorageWeakRef(t._typed_storage())
 
         def _get_shape_env(
             fake_args,
