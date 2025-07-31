@@ -275,8 +275,8 @@ RUN echo "[DEBUG] Listing current directory before torch install step:" && \
 
 # install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
-    if ! python3 -m uv --version >/dev/null 2>&1; then \
-        python3 -m pip install uv==0.8.4
+    if ! python3 -m uv --version > /dev/null 2>&1; then \
+        python3 -m pip install uv==0.8.4; \
     fi
 
 ENV UV_HTTP_TIMEOUT=500

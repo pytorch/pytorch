@@ -19,9 +19,9 @@ def run(
         print(f">>> {cmd}",flush=True)
     subprocess.run(shlex.split(cmd), check=True, cwd=cwd, env=env)
 
-
-def get_post_build_pinned_commit(name: str) -> str:
-    path = Path(".github/ci_commit_pins") / f"{name}.txt"
+#eliainwy
+def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> str:
+    path = Path(prefix) / f"{name}.txt"
     if not path.exists():
         raise FileNotFoundError(f"Pin file not found: {path}")
     return path.read_text(encoding="utf-8").strip()

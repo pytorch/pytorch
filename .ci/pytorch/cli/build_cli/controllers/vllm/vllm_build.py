@@ -27,6 +27,7 @@ class VllmBuildConfig:
     sccache_region: str = get_env("SCCACHE_REGION", "")
     torch_cuda_arch_list: str = get_env("TORCH_CUDA_ARCH_LIST", "8.0")
     vllm_fa_cmake_gpu_arches = get_env("VLLM_FA_CMAKE_GPU_ARCHES", "80-real")
+    dev = get_env("DEV")
 
 
 _DEFAULT_RESULT_PATH = "./results"
@@ -53,17 +54,27 @@ def prepare_artifact_dir(path: str):
 
 def build_vllm(artifact_dir: str, torch_whl_dir: str, base_image: str):
     cfg = VllmBuildConfig()
+
     result_path = prepare_artifact_dir(artifact_dir)
     print(f"Target artifact dir path is {result_path}", flush=True)
-    clone_vllm(get_post_build_pinned_commit("vllm"))
+
+    if cfg.dev:
+        vllm_commit = get_post_build_pinned_commit("vllm",".")
+    else:
+        vllm_commit = get_post_build_pinned_commit("vllm")
+    clone_vllm(vllm_commit)
 
     # replace dockerfile
     # todo: remove this once the dockerfile is updated in vllm
+    dockerfile_path = f"./github/docker/vllm/Dockerfile.base"
+    if cfg.dev:
+        dockerfile_path = "Dockerfile.base"
+
     run(
-        "cp Dockerfile.base ./vllm/docker/Dockerfile.nightly_torch",
+        f"cp {dockerfile_path} ./vllm/docker/Dockerfile.nightly_torch",
         logging=True,
     )
-    
+
     torch_arg, _ = _prepare_torch_wheels(torch_whl_dir)
     base_arg, final_base_img,pull_flag = _get_base_image_args(base_image)
     cmd = _generate_docker_build_cmd(cfg, result_path, torch_arg, base_arg,final_base_img, pull_flag)
