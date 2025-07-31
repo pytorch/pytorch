@@ -725,7 +725,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
     // subtract a factor of exp(log_probs) * output_gradient to cancel
     // out effect of log-softmax, so have gradient wrt. raw input.
     // FIXME there's probably a more optimal way to do this.
-    grad._sub(log_probs.exp() * grad_out.view({1, batch_size, 1}));
+    grad.sub_(log_probs.exp() * grad_out.view({1, batch_size, 1}));
   } else { // small problem, use naive algorithm
     // Still no block/grid configuration guru...
     int threads_input = max_threads;
