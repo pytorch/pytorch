@@ -1,7 +1,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <c10/core/impl/GPUTrace.h>
-#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -63,10 +62,6 @@ namespace cuda::CUDACachingAllocator {
 
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
-
-// Included here as this is externally used in CUDAAllocatorConfig
-const size_t kLargeBuffer =
-    20971520; // "large" allocations may be packed in 20 MiB blocks
 
 namespace Native {
 
@@ -843,8 +838,7 @@ struct AllocParams {
       size_t size,
       cudaStream_t stream,
       BlockPool* pool,
-      size_t alloc_size,
-      DeviceStats& stats)
+      size_t alloc_size)
       : search_key(device, stream, size), pool(pool), alloc_size(alloc_size) {}
 
   c10::DeviceIndex device() const {
@@ -1231,7 +1225,7 @@ class DeviceCachingAllocator {
   DeviceCachingAllocator()
       : large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
     stats.max_split_size =
-        static_cast<int64_t>(CUDAAllocatorConfig::max_split_size());
+        static_cast<int64_t>(AcceleratorAllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
   }
 
@@ -1341,7 +1335,7 @@ class DeviceCachingAllocator {
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
-    AllocParams params(device, size, stream, &pool, alloc_size, stats);
+    AllocParams params(device, size, stream, &pool, alloc_size);
     params.stat_types = get_stat_types_for_pool(pool);
 
     // First, try to get a block from the existing pool.
@@ -1356,7 +1350,8 @@ class DeviceCachingAllocator {
       // Do garbage collection if the flag is set.
       if (C10_UNLIKELY(
               set_fraction &&
-              CUDAAllocatorConfig::garbage_collection_threshold() > 0.0)) {
+              AcceleratorAllocatorConfig::garbage_collection_threshold() >
+                  0.0)) {
         garbage_collect_cached_blocks(context);
       }
       // Attempt allocate
@@ -1388,7 +1383,7 @@ class DeviceCachingAllocator {
           beginAllocateToPool(mempool_id, filter);
           auto& mempool = get_pool(size, stream);
           AllocParams mempool_params(
-              device, size, stream, &mempool, alloc_size, stats);
+              device, size, stream, &mempool, alloc_size);
           mempool_params.stat_types = get_stat_types_for_pool(mempool);
           block_found = get_free_block(mempool_params);
           endAllocateToPool(mempool_id);
@@ -1608,7 +1603,7 @@ class DeviceCachingAllocator {
       stats.active_bytes[stat_type].increase(block->size);
       stats.requested_bytes[stat_type].increase(block->requested_size);
     });
-    if (block->size >= CUDAAllocatorConfig::max_split_size())
+    if (block->size >= AcceleratorAllocatorConfig::max_split_size())
       stats.oversize_allocations.increase(1);
 
     auto allocated_bytes_gauge =
@@ -1659,7 +1654,7 @@ class DeviceCachingAllocator {
         block->pool->owner_MempoolId(),
         context ? context : block->context_when_allocated);
 
-    if (block->size >= CUDAAllocatorConfig::max_split_size())
+    if (block->size >= AcceleratorAllocatorConfig::max_split_size())
       stats.oversize_allocations.decrease(1);
 
     if (!block->stream_uses.empty()) {
@@ -1929,8 +1924,7 @@ class DeviceCachingAllocator {
           block_state.size,
           block_state.stream,
           &pool,
-          block_state.size,
-          stats);
+          block_state.size);
       pool.blocks.erase(curr_block);
       params.block = curr_block;
       params.stat_types = get_stat_types_for_pool(pool);
@@ -2209,7 +2203,8 @@ class DeviceCachingAllocator {
     if (size < kMinBlockSize) {
       return kMinBlockSize;
     } else {
-      auto divisions = CUDAAllocatorConfig::roundup_power2_divisions(size);
+      auto divisions =
+          AcceleratorAllocatorConfig::roundup_power2_divisions(size);
       if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
       } else {
@@ -2699,7 +2694,7 @@ class DeviceCachingAllocator {
     if (block->pool->is_small || CUDAAllocatorConfig::expandable_segments()) {
       return remaining >= kMinBlockSize;
     } else {
-      return (size < CUDAAllocatorConfig::max_split_size()) &&
+      return (size < AcceleratorAllocatorConfig::max_split_size()) &&
           (remaining > kSmallSize);
     }
   }
@@ -2719,7 +2714,7 @@ class DeviceCachingAllocator {
 
     if (C10_UNLIKELY(
             set_fraction &&
-            CUDAAllocatorConfig::garbage_collection_threshold() > 0.0)) {
+            AcceleratorAllocatorConfig::garbage_collection_threshold() > 0.0)) {
       // Track block reuse interval only when garbage collection is enabled.
       ++pool.get_free_blocks_call_count;
     }
@@ -2761,13 +2756,13 @@ class DeviceCachingAllocator {
     }
 
     // Do not return an oversized block for a large request
-    if ((p.size() < CUDAAllocatorConfig::max_split_size()) &&
-        ((*it)->size >= CUDAAllocatorConfig::max_split_size()))
+    if ((p.size() < AcceleratorAllocatorConfig::max_split_size()) &&
+        ((*it)->size >= AcceleratorAllocatorConfig::max_split_size()))
       return false;
     // Allow oversized block size to be rounded up but within a limit
-    if ((p.size() >= CUDAAllocatorConfig::max_split_size()) &&
+    if ((p.size() >= AcceleratorAllocatorConfig::max_split_size()) &&
         ((*it)->size >=
-         p.size() + CUDAAllocatorConfig::max_non_split_rounding_size()))
+         p.size() + AcceleratorAllocatorConfig::max_non_split_rounding_size()))
       return false;
     p.block = *it;
     pool.blocks.erase(it);
@@ -2790,7 +2785,7 @@ class DeviceCachingAllocator {
     // therefore should be of less overheads.
 
     size_t gc_threshold = static_cast<size_t>(
-        CUDAAllocatorConfig::garbage_collection_threshold() *
+        AcceleratorAllocatorConfig::garbage_collection_threshold() *
         static_cast<double>(allowed_memory_maximum));
     // No need to trigger GC yet
     if (total_allocated_memory <= gc_threshold) {
@@ -2938,7 +2933,7 @@ class DeviceCachingAllocator {
       stats.segment[stat_type].increase(1);
       stats.reserved_bytes[stat_type].increase(size);
     });
-    if (size >= CUDAAllocatorConfig::max_split_size())
+    if (size >= AcceleratorAllocatorConfig::max_split_size())
       stats.oversize_segments.increase(1);
     auto reserved_bytes_gauge =
         STATIC_GAUGE(pytorch.CUDACachingAllocator.reserved_bytes);
@@ -2967,7 +2962,7 @@ class DeviceCachingAllocator {
   bool release_available_cached_blocks(
       const AllocParams& p,
       const std::shared_ptr<GatheredContext>& context) {
-    if (CUDAAllocatorConfig::max_split_size() ==
+    if (AcceleratorAllocatorConfig::max_split_size() ==
         std::numeric_limits<size_t>::max())
       return false;
     BlockPool& pool = *p.pool;
@@ -2975,8 +2970,8 @@ class DeviceCachingAllocator {
     // because of std::unique_ptr, block cannot be trivially copied
     // Use constructor for search key.
     Block key(p.search_key.device, p.search_key.stream, p.search_key.size);
-    key.size = (key.size < CUDAAllocatorConfig::max_split_size())
-        ? CUDAAllocatorConfig::max_split_size()
+    key.size = (key.size < AcceleratorAllocatorConfig::max_split_size())
+        ? AcceleratorAllocatorConfig::max_split_size()
         : key.size;
     auto it = pool.blocks.lower_bound(&key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream() ||
@@ -2989,7 +2984,7 @@ class DeviceCachingAllocator {
       --it; // Back up one item.  Now on the largest block for the correct
             // stream
       while ((totalReleased < key.size) &&
-             ((*it)->size >= CUDAAllocatorConfig::max_split_size()) &&
+             ((*it)->size >= AcceleratorAllocatorConfig::max_split_size()) &&
              ((*it)->stream == p.stream())) {
         auto cur = it;
         bool is_first = cur == pool.blocks.begin();
@@ -3114,7 +3109,7 @@ class DeviceCachingAllocator {
         stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
             .current);
 
-    if (block->size >= CUDAAllocatorConfig::max_split_size())
+    if (block->size >= AcceleratorAllocatorConfig::max_split_size())
       stats.oversize_segments.decrease(1);
     pool->blocks.erase(block);
     delete block;
@@ -3741,8 +3736,8 @@ class NativeCachingAllocator : public CUDAAllocator {
 
     auto& md = result.config_metadata;
     md.garbage_collection_threshold =
-        CUDAAllocatorConfig::garbage_collection_threshold();
-    md.max_split_size = CUDAAllocatorConfig::max_split_size();
+        AcceleratorAllocatorConfig::garbage_collection_threshold();
+    md.max_split_size = AcceleratorAllocatorConfig::max_split_size();
     md.pinned_num_register_threads =
         CUDAAllocatorConfig::pinned_num_register_threads();
     md.expandable_segments = CUDAAllocatorConfig::expandable_segments();
@@ -3750,9 +3745,10 @@ class NativeCachingAllocator : public CUDAAllocator {
         CUDAAllocatorConfig::release_lock_on_cudamalloc();
     md.pinned_use_host_register =
         CUDAAllocatorConfig::pinned_use_cuda_host_register();
-    md.last_allocator_settings = CUDAAllocatorConfig::last_allocator_settings();
+    md.last_allocator_settings =
+        AcceleratorAllocatorConfig::last_allocator_settings();
     md.roundup_power2_divisions =
-        CUDAAllocatorConfig::roundup_power2_divisions();
+        AcceleratorAllocatorConfig::roundup_power2_divisions();
 
     return result;
   }
@@ -4130,49 +4126,10 @@ CUDAAllocator* allocator();
 } // namespace CudaMallocAsync
 
 struct BackendStaticInitializer {
-  // Parses env for backend at load time, duplicating some logic from
-  // CUDAAllocatorConfig. CUDAAllocatorConfig double-checks it later (at
-  // runtime). Defers verbose exceptions and error checks, including Cuda
-  // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
-  // works, maybe we should move all of CUDAAllocatorConfig here?
   CUDAAllocator* parseEnvForBackend() {
-    auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
-#ifdef USE_ROCM
-    // convenience for ROCm users to allow either CUDA or HIP env var
-    if (!val.has_value()) {
-      val = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
-    }
-#endif
-    if (val.has_value()) {
-      const std::string& config = val.value();
-
-      std::regex exp("[\\s,]+");
-      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
-      std::sregex_token_iterator end;
-      std::vector<std::string> options(it, end);
-
-      for (auto option : options) {
-        std::regex exp2("[:]+");
-        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
-        std::sregex_token_iterator end2;
-        std::vector<std::string> kv(it2, end2);
-        if (kv.size() >= 2) {
-          if (kv[0] == "backend") {
-#ifdef USE_ROCM
-            // convenience for ROCm users to allow either CUDA or HIP env var
-            if (kv[1] ==
-                    "cud"
-                    "aMallocAsync" ||
-                kv[1] == "hipMallocAsync")
-#else
-            if (kv[1] == "cudaMallocAsync")
-#endif
-              return CudaMallocAsync::allocator();
-            if (kv[1] == "native")
-              return &Native::allocator;
-          }
-        }
-      }
+    // If the environment variable is set, we use the CudaMallocAsync allocator.
+    if (CUDAAllocatorConfig::use_async_allocator()) {
+      return CudaMallocAsync::allocator();
     }
     return &Native::allocator;
   }

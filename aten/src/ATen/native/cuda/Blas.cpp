@@ -21,6 +21,10 @@
 #include <ATen/native/cuda/GroupMM.h>
 #include <ATen/ceil_div.h>
 
+#ifdef USE_FBGEMM_GENAI
+#include <fbgemm_gpu/torch_ops.h>
+#endif
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -1216,7 +1220,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
 //    - `scale_a`: a tensor with the inverse scale of `mat1`, whose shape/strides/dtype depend on the scaling scheme
 //    - `scale_b`: a tensor with the inverse scale of `mat2`, whose shape/strides/dtype depend on the scaling scheme
 //    - `scale_result`: a scalar tensor with the scale of the output, only utilized if the output is a float8 type
-//    - `use_fast_accum`: if true, enables fast float8 accumulation
+//    - `use_fast_accum`: if true, enables fast float8 accumulation. Backends may ignore this option if not applicable.
 //    - `out`: a reference to the output tensor
 
 Tensor&
@@ -1525,6 +1529,7 @@ namespace {
     const auto out_dtype_ = out_dtype.value_or(kBFloat16);
     TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
 
+    #ifndef USE_ROCM
     // For TMA transfers, strides of output tensor have to be either
     // 1, or aligned to 16 bytes.
     const auto last_dim = out_size.size() - 1;
@@ -1536,9 +1541,10 @@ namespace {
     } else {
       out_stride = {out_size[1] * size_padded, size_padded, 1};
     }
-    auto out = at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype_));
-
-    return out;
+    return at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype_));
+    #else
+    return at::empty(out_size, mat_a.options().dtype(out_dtype_));
+    #endif
   }
 
   bool check_valid_strides_and_return_transposed(const Tensor& mat) {
@@ -1619,12 +1625,9 @@ const std::optional<at::Tensor>& bias,
 const std::optional<at::Tensor>& scale_result,
 std::optional<c10::ScalarType> out_dtype,
 bool use_fast_accum) {
-#ifndef USE_ROCM
-  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
-  TORCH_CHECK(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = 9.0");
+  bool allowed_device = _scaled_mm_allowed_device();
+  TORCH_CHECK(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = 9.0, or ROCm MI300+");
 
-  TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
-  TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
   TORCH_CHECK(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
   TORCH_CHECK(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
   TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
@@ -1664,6 +1667,10 @@ bool use_fast_accum) {
 
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype);
 
+#ifndef USE_ROCM
+  TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+
   at::cuda::detail::f8f8bf16_grouped_mm(
       mat_a,
       mat_b,
@@ -1674,12 +1681,23 @@ bool use_fast_accum) {
       use_fast_accum,
       out);
     return out;
-
-
-
-
 #else
-  TORCH_CHECK(false, "grouped gemm is not supported on ROCM")
+#ifdef USE_FBGEMM_GENAI
+  TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+
+  fbgemm_gpu::f8f8bf16_rowwise_grouped_mm(
+      mat_a,
+      // FBGEMM expects B matrix shape to be (.., N, K)
+      mat_b.transpose(-2, -1),
+      scale_a,
+      scale_b,
+      offs,
+      out);
+  return out;
+#else
+  TORCH_CHECK(false, "grouped gemm is not supported without USE_FBGEMM_GENAI on ROCM")
+#endif
 #endif
 
 }
