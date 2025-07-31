@@ -1626,14 +1626,6 @@ class PythonWrapperCodegen(CodeGen):
         self.lines = MemoryPlanner(self).plan(self.lines)
 
     def memory_plan_reuse(self):
-        from ..memory import estimate_peak_memory
-
-        self.estimated_peak = estimate_peak_memory(
-            V.graph.scheduler.nodes,
-            {},
-            OrderedSet(V.graph.get_output_names()),
-        )
-
         out_names = V.graph.get_output_names()
 
         while (
@@ -1671,6 +1663,13 @@ class PythonWrapperCodegen(CodeGen):
         if is_inference and config.memory_planning:
             self.memory_plan()
         else:
+            from ..memory import estimate_peak_memory
+
+            self.estimated_peak = estimate_peak_memory(
+                V.graph.scheduler.nodes,
+                {},
+                OrderedSet(V.graph.get_output_names()),
+            )
             self.memory_plan_reuse()
 
     def codegen_input_symbol_assignment(
