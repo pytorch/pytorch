@@ -3,12 +3,15 @@
 import functools
 import itertools
 import math
+import operator
 import sys
+from functools import reduce
 from typing import Callable, Union
 
 import torch
 import torch._custom_op
 import torch._logging
+import torch._prims_common as utils
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
@@ -16,8 +19,11 @@ from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
+    is_contiguous,
+    is_contiguous_or_false,
     is_float_dtype,
     is_integer_dtype,
+    make_contiguous_strides_for,
 )
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
@@ -359,6 +365,48 @@ def unique2(
     return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
 
 
+@register_op_impl(aten.select.int)
+def meta_select(fake_mode, func, self, dim, index):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if self.is_sparse:
+        return NotImplemented
+
+    ndim = self.dim()
+    torch._check_index(
+        ndim != 0,
+        lambda: "select() cannot be applied to a 0-dim tensor.",
+    )
+
+    dim = dim if dim >= 0 else dim + ndim
+    size = self.size(dim)
+
+    new_size = list(self.size())
+    new_stride = list(self.stride())
+
+    new_storage_offset = None
+    if guard_or_false(index >= 0):
+        new_storage_offset = self.storage_offset() + index * new_stride[dim]
+    elif guard_or_false(index < 0):
+        new_storage_offset = self.storage_offset() + (index + size) * new_stride[dim]
+
+    if new_storage_offset is None:
+        if fake_mode.shape_env is None or (
+            not fake_mode.shape_env.allow_scalar_outputs
+            and not fake_mode.allow_scalar_outputs
+        ):
+            raise DataDependentOutputException(func)
+
+        # index is data-dependent, we do not know which index we are accessing it could be index or index+size!
+        # we assign a new data-dependent symbol for the storage offset.
+        new_storage_offset = fake_mode.shape_env.create_unbacked_symint()
+
+    del new_size[dim]
+    del new_stride[dim]
+    assert new_storage_offset is not None
+    return self.as_strided(new_size, new_stride, new_storage_offset)
+
+
 @register_op_impl(aten.unique_dim.default)
 def unique_dim(
     fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
@@ -386,6 +434,182 @@ def _(fake_mode, func, arg, return_inverse=False, return_counts=False, dim=None)
         return_inverse,
         return_counts,
         unique_consecutive=True,
+    )
+
+
+# This function is python match of computeStride_impl in TensorUtils.cpp
+def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        sym_eq,
+    )
+
+    def maybe_guard_or_false(x):
+        if size_oblivious:
+            return guard_or_false(x)
+
+        return x
+
+    def maybe_guard_or_true(x):
+        if size_oblivious:
+            return guard_or_true(x)
+
+        return x
+
+    if len(old_shape) == 0:
+        return [1] * len(new_shape)
+
+    numel = reduce(operator.mul, old_shape, 1)
+    zero_numel = maybe_guard_or_false(numel == 0)
+    if zero_numel and maybe_guard_or_false(sym_eq(old_shape, new_shape)):
+        return old_stride
+
+    new_stride = [0] * len(new_shape)
+
+    if zero_numel:
+        for view_d in range(len(new_shape) - 1, -1, -1):
+            if view_d == len(new_shape) - 1:
+                new_stride[view_d] = 1
+            else:
+                new_stride[view_d] = (
+                    max(new_shape[view_d + 1], 1) * new_stride[view_d + 1]
+                )
+        return new_stride
+
+    view_d = len(new_shape) - 1
+    chunk_base_stride = old_stride[-1]
+    tensor_numel = 1
+    view_numel = 1
+
+    for tensor_d in range(len(old_shape) - 1, -1, -1):
+        tensor_numel *= old_shape[tensor_d]
+
+        if tensor_d == 0 or (
+            maybe_guard_or_true(old_shape[tensor_d - 1] != 1)
+            and maybe_guard_or_true(
+                old_stride[tensor_d - 1] != tensor_numel * chunk_base_stride
+            )
+        ):
+            while view_d >= 0 and (
+                maybe_guard_or_true(view_numel < tensor_numel)
+                or maybe_guard_or_false(new_shape[view_d] == 1)
+            ):
+                new_stride[view_d] = view_numel * chunk_base_stride
+                view_numel *= new_shape[view_d]
+                view_d -= 1
+
+            if maybe_guard_or_true(view_numel != tensor_numel):
+                return None
+
+            if tensor_d > 0:
+                chunk_base_stride = old_stride[tensor_d - 1]
+                tensor_numel = 1
+                view_numel = 1
+    if view_d != -1:
+        return None
+    return new_stride
+
+
+def _view_has_unbacked_input(a, shape):
+    from torch.fx.experimental.symbolic_shapes import has_hint
+
+    return (
+        any(not has_hint(s) for s in a.size())
+        or any(not has_hint(s) for s in a.stride())
+        or any(not has_hint(s) for s in shape)
+    )
+
+
+def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
+    from torch._prims import view_of
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
+
+    # Creates a valid shape
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
+
+    # Reshape may be given a shape with a -1 length
+    # This indicates that the dimension's length should be inferred
+    shape = utils.infer_size(shape, a.numel())
+
+    # Special-cases reshaping zero dim tensors
+    if a.ndim == 0:
+        _a = a
+        for length in shape:
+            torch._check(length == 1)
+            _a = torch._refs.unsqueeze(_a, -1)
+        if _a is a:
+            return view_of(a)
+        else:
+            return _a
+
+    # Special-cases reshaping to zero dim tensors
+    if len(shape) == 0:
+        _a = a
+        for length in a.shape:
+            torch._check(length == 1)
+            _a = torch._refs.squeeze(_a, -1)
+        if _a is a:
+            return view_of(a)
+        else:
+            return _a
+
+    shape_numel = reduce(operator.mul, shape, 1)
+
+    torch._check(
+        a.numel() == shape_numel,
+        lambda: f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
+    )
+
+    if len(shape) == len(a.shape) and guard_or_false(sym_eq(shape, a.shape)):
+        return view_of(a)
+
+    if is_contiguous_or_false(a) if size_oblivious_enabled else is_contiguous(a):
+        strides = make_contiguous_strides_for(shape)
+        return a.as_strided(shape, strides)
+
+    new_strides = _compute_stride(
+        a.size(), a.stride(), shape, size_oblivious=size_oblivious_enabled
+    )
+
+    if new_strides is not None:
+        return a.as_strided(shape, new_strides)
+
+    # If we fail to do size oblivious view, and backed_size_oblivious was on,
+    # then we redo everything by looking at hints and guarding instead of failing.
+    # Also if the expression has unbacked symbols, then we run again with size_oblivious_enabled=False
+    # to throw a data dependent error.
+
+    if size_oblivious_enabled and (
+        torch.fx.experimental._config.backed_size_oblivious
+        or _view_has_unbacked_input(a, shape)
+    ):
+        return _view_unbacked_meta(a, shape, size_oblivious_enabled=False)
+
+    msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
+    raise ValueError(msg)
+
+
+@register_op_impl(aten.view.default)
+@register_op_impl(aten._unsafe_view.default)
+def _view_meta(fake_mode, func, a, *shape):
+    if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
+        a, shape
+    ):
+        return _view_unbacked_meta(a, shape)
+    else:
+        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
+
+
+@register_op_impl(aten.view_copy.default)
+def _view_meta_copy(fake_mode, func, a, *shape, out=None):
+    result = _view_meta(fake_mode, func, a, *shape)
+    if out is not None:
+        return result
+
+    return pytree.tree_map(
+        lambda x: x.clone(memory_format=torch.contiguous_format),
+        result,
     )
 
 
