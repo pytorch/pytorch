@@ -238,15 +238,21 @@ class ScheduleTest(MultiProcContinousTest):
             stages, stage_modules, _ = self._create_multi_stage_pipeline(
                 mod, stages_per_rank, n_stages
             )
-            schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn, scale_grads=False)
+            schedule = ScheduleClass(
+                stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+            )
         else:
             # Single-stage schedules
             mod, _, x, target, loss_fn = self._setup_models_and_data()
 
             # Create single-stage pipeline
-            stage, stage_module, _ = self._create_single_stage_pipeline(mod, x, num_microbatches)
+            stage, stage_module, _ = self._create_single_stage_pipeline(
+                mod, x, num_microbatches
+            )
             stage_modules = [stage_module]
-            schedule = ScheduleClass(stage, num_microbatches, loss_fn=loss_fn, scale_grads=False)
+            schedule = ScheduleClass(
+                stage, num_microbatches, loss_fn=loss_fn, scale_grads=False
+            )
 
         # Clear gradients and run eval
         self._zero_gradients(stage_modules)
