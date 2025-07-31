@@ -214,11 +214,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         && sccache --show-stats; \
     fi
 
-RUN echo "[DEBUG] Listing  current directory:" && \
-    ls -al && \
-    echo "[DEBUG] Showing torch_build_versions.txt content:" && \
-    cat torch_build_versions.txt
-
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/uv \
@@ -227,8 +222,14 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
         # Clean any existing CMake artifacts
         rm -rf .deps && \
         mkdir -p .deps && \
-        python3 setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38; \
+        python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38; \
     fi
+
+RUN echo "[DEBUG] Listing  current directory:" && \
+    ls -al && \
+    echo "[DEBUG] Showing torch_build_versions.txt content:" && \
+    cat torch_build_versions.txt
+
 #################### WHEEL BUILD IMAGE ####################
 
 ################### VLLM INSTALLED IMAGE ####################
