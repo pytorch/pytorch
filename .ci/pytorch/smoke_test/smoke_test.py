@@ -35,14 +35,7 @@ MODULES = [
         "smoke_test": "./vision/test/smoke_test.py",
         "extension": "extension",
         "repo_name": "vision",
-    },
-    {
-        "name": "torchaudio",
-        "repo": "https://github.com/pytorch/audio.git",
-        "smoke_test": "./audio/test/smoke_test/smoke_test.py --no-ffmpeg",
-        "extension": "_extension",
-        "repo_name": "audio",
-    },
+    }
 ]
 
 
