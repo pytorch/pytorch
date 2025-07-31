@@ -2269,11 +2269,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inputs = torch.randn((), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
     @skipIfRocm
-    @onlyCUDA
-    def test_broadcast_double_backwards_gpu(self, device):
+    def test_broadcast_double_backwards_gpu_cuda(self):
+        device = 'cuda'
         tensors = (torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
                    torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
                    torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double))
@@ -2281,9 +2282,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), tensors,
                                      check_batched_grad=False)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @onlyCUDA
-    def test_broadcast_not_requiring_grad(self, device):
+    def test_broadcast_not_requiring_grad_cuda(self):
+        device = 'cuda'
         variables = [
             torch.randn(1, 2, device=device, requires_grad=True),
             torch.randn(1, 2, device=device, requires_grad=False),
@@ -2296,9 +2298,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input_var = variables[output_idx % len(variables)]
             self.assertEqual(input_var.requires_grad, broadcasted_var.requires_grad)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @onlyCUDA
-    def test_broadcast_no_grad(self, device):
+    def test_broadcast_no_grad(self):
+        device = 'cuda'
         x = torch.randn(1, 2, dtype=torch.float32, requires_grad=True, device=device)
         with torch.no_grad():
             broadcasted = Broadcast.apply((0, 1), x)
@@ -2616,7 +2619,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
         loss = F.mse_loss(inputs, targets, weight=weight, reduction='mean')
         expected_loss = torch.tensor(0.25)
-        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+        self.assertEqual(loss, expected_loss)
 
     def test_weighted_l1_loss_with_weights(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
@@ -2624,7 +2627,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
         loss = F.l1_loss(inputs, targets, weight=weight, reduction='mean')
         expected_loss = torch.tensor(0.5)
-        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+        self.assertEqual(loss, expected_loss)
 
     def test_weighted_huber_loss(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
@@ -2632,7 +2635,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
         loss = F.huber_loss(input=inputs, target=targets, weight=weight, reduction='mean', delta=1.0)
         expected_loss = torch.tensor(0.25)
-        print(torch.isclose(loss, expected_loss, atol=1e-6), f"Expected {expected_loss}, but got {loss}")
+        self.assertEqual(loss, expected_loss)
 
     def test_gaussian_nll_loss_broadcasting(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
@@ -2714,8 +2717,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaises(RuntimeError):
             target_lengths = target_lengths.to(dtype=torch.float)
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
-
-    def test_CTCLoss_lengthchecks(self, device):
+    
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_lengthchecks_cuda(self):
+        device = 'cuda'
         for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
             for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
                 targets = torch.randint(1, 15, (3, 29), dtype=torch.int, device=device)
@@ -2724,8 +2729,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 with self.assertRaises(RuntimeError):
                     torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-    @onlyCUDA
-    def test_CTCLoss_long_targets(self, device):
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_long_targets_cuda(self):
+        device = 'cuda'
         input_length = 4000
         vocab_size = 3
         batch_size = 4
@@ -2748,13 +2754,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(res_cpu, res_gpu, atol=1e-4, rtol=0)
         self.assertEqual(grad_cpu, grad_gpu, atol=1e-4, rtol=0)
 
-    @onlyCUDA
-    def test_CTCLoss_critical_target_len(self, device):
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_critical_target_len_cuda(self):
         # cudnn has an unexpected problem with target length 256, see issue #53505
         N = 1
         S = 256
         C = 10
         T = 500
+        device = 'cuda'
         target = torch.randint(low=1, high=C, size=(S,), dtype=torch.int)
         input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.int)
         target_lengths = torch.tensor(S, dtype=torch.int)
@@ -2764,11 +2771,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
 
-    def test_CTCLoss_zero_lengths(self, device):
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_zero_lengths_cuda(self):
         N = 3
         S = 2
         C = 200
         T = 1
+        device = 'cuda'
         target = torch.randint(low=1, high=C, size=(N, S), dtype=torch.int)
         input_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
         target_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
@@ -2784,8 +2793,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         res.sum().backward()
         self.assertTrue((inp.grad == 0).all().item())
 
-    @onlyCUDA
-    def test_CTCLoss_zero_infinity(self, device):
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_zero_infinity(self):
+        device = 'cuda'
         target_lengths = [60, 25, 20]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int, device=device)
@@ -2863,9 +2873,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
 
-
-    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_pack_sequence_batch_sizes_throw(self):
+        device = 'cuda'
         with self.assertRaisesRegex(ValueError, r"batch_sizes should always be on CPU"):
             m = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to(device)
             a = torch.rand(5, 3, device=device)
@@ -2989,8 +2999,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             torch.testing.assert_close(result, ref_output, rtol=1e-5, atol=0)
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
-    @onlyCUDA
-    def test_cudnn_rnn_dropout_states_device(self, device):
+    def test_cuda_cudnn_rnn_dropout_states_device(self):
         rnn = nn.RNN(10, 20, num_layers=2, dropout=.5)
         device = 1
         input = torch.randn(5, 4, 10).cuda(device)
@@ -2998,8 +3007,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         hx = torch.randn(2, 4, 20).cuda(device)
         output = rnn(input, hx)
 
-    @onlyCUDA
-    def test_cudnn_forward_exception(self, device):
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_cuda_cudnn_forward_exception(self):
+        device = 'cuda'
         rnns = [
             (nn.LSTM(10, 20, batch_first=True), (torch.zeros(1, 2, 19), torch.zeros(1, 2, 19))),
             (nn.LSTM(10, 20, batch_first=True, proj_size=10), (torch.zeros(1, 2, 19), torch.zeros(1, 2, 19))),
@@ -3012,10 +3022,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertRaisesRegex(RuntimeError, "Expected hidden.*size.*got", rnn, x_right, hidden)
             self.assertRaisesRegex(RuntimeError, re.escape("input.size(-1) must be equal to input_size"), rnn, x_wrong)
 
-    @onlyCUDA
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
-    def test_cudnn_weight_format(self, device):
+    def test_cuda_cudnn_weight_format(self):
+        device = 'cuda'
         rnns = [
             nn.LSTM(10, 20, batch_first=True),
             nn.LSTM(10, 20, batch_first=True, proj_size=10),
@@ -3068,10 +3078,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             weight_data[:] = 4
             self.assertEqual(weight_data, all_vars[4].data)
 
-    @onlyCUDA
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @tf32_on_and_off
-    def test_cudnn_weight_tying(self, device):
+    def test_cuda_cudnn_weight_tying(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True, bidirectional=True),
             nn.LSTM(10, 20, batch_first=True, bidirectional=True, proj_size=10),
@@ -4649,8 +4658,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(torch.equal(running_mean, bn.running_mean))
         self.assertTrue(torch.equal(running_var, bn.running_var))
 
-
-    @onlyCUDA
     @parametrize_test("dims", [2, 3], name_fn=lambda x: f"{x}D")
     @parametrize_test("mode", ["train", "inference"], name_fn=lambda x: x)
     @parametrize_test(
@@ -4675,7 +4682,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ],
         name_fn=lambda f, b, m, t: f"{f}_vs_{b}{'_mixed' if m else ''}_{dtype_name(t)}"
     )
-    def test_batchnorm(self, dims, mode, memory_format, ref_backend, mixed, dtype):
+    def test_batchnorm_incl_cuda(self, dims, mode, memory_format, ref_backend, mixed, dtype):
         if torch.version.cuda:
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
                                         "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16"):
@@ -4776,11 +4783,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertTrue(out.is_contiguous(memory_format=_get_memory_format(inp)))
             self.assertTrue(ref_out.is_contiguous(memory_format=_get_memory_format(ref_inp)))
             self.assertEqual(out, ref_out)
-            self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
+            if inp.dtype == torch.bfloat16:
+                self.assertEqual(mod.weight.grad, ref_mod.weight.grad, atol=1e-1, rtol=6e-2)
+            elif inp.dtype == torch.float16:
+                self.assertEqual(mod.weight.grad, ref_mod.weight.grad, atol=5e-3, rtol=5e-3)
+            else:
+                self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
             self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
             self.assertEqual(mod.running_mean, ref_mod.running_mean)
             self.assertEqual(mod.running_var, ref_mod.running_var)
-            self.assertEqual(inp.grad, ref_inp.grad)
+            if inp.dtype == torch.bfloat16:
+                self.assertEqual(inp.grad, ref_inp.grad, atol=1e-1, rtol=6e-2)
+            elif inp.dtype == torch.float16:
+                self.assertEqual(inp.grad, ref_inp.grad, atol=5e-3, rtol=5e-3)
+            else:
+                self.assertEqual(inp.grad, ref_inp.grad)
 
         def _train(memory_format_name, ref_backend, mixed, dtype):
             memory_format = _get_memory_format_from_name(memory_format_name)
@@ -12879,7 +12896,7 @@ if __name__ == '__main__':
                                                 [2.432306, 0.028858, -0.599542, -0.072846]]]
                                               )).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+            self.assertEqual(result, ref_output, atol=1.5e-5, rtol=1.5e-5)
 
             # key_padding_mask
             key_padding_mask = torch.zeros(2, 3).to(device) == 1
@@ -12893,7 +12910,7 @@ if __name__ == '__main__':
                                                 [2.432306, 0.028858, -0.599542, -0.072846]]]
                                               )).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+            self.assertEqual(result, ref_output, atol=1.5e-5, rtol=1.5e-5)
 
             # key_padding_mask
             key_padding_mask[0, 2] = 1
@@ -12909,7 +12926,7 @@ if __name__ == '__main__':
                                                 [2.432659, 0.029244, -0.599294, -0.072382]]]
                                               )).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+            self.assertEqual(result, ref_output, atol=1.5e-5, rtol=1.5e-5)
 
             # memory_key_padding_mask
             key_padding_mask = torch.zeros(2, 5).to(device) == 1
@@ -12923,7 +12940,7 @@ if __name__ == '__main__':
                                                 [2.432306, 0.028858, -0.599542, -0.072846]]]
                                               )).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+            self.assertEqual(result, ref_output, atol=1.5e-5, rtol=1.5e-5)
 
             # memory_key_padding_mask
             key_padding_mask[0, 4] = 1
@@ -12940,7 +12957,7 @@ if __name__ == '__main__':
                                                 [2.433075, 0.028543, -0.598987, -0.073985]]]
                                               )).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+            self.assertEqual(result, ref_output)
 
             # multiple layers no norm
             model = nn.TransformerDecoder(decoder_layer, 2).to(device)
@@ -12985,7 +13002,7 @@ if __name__ == '__main__':
                                                 [2.43113, 0.0279516, -0.600376, -0.0736896]]]
                                               )).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+            self.assertEqual(result, ref_output, atol=1.5e-5, rtol=1.5e-5)
 
             # multiple layers with norm
             # d_model = 4
@@ -12999,7 +13016,7 @@ if __name__ == '__main__':
             ref_output = torch.tensor(
                 [[[1.66166, -0.326986, -1.01466, -0.320017]]]).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-3)
+            self.assertEqual(result, ref_output)
 
             # multiple layers with norm
             model = nn.TransformerDecoder(decoder_layer, 6, norm=norm).to(device)
@@ -13032,7 +13049,7 @@ if __name__ == '__main__':
                                                 [1.69571, -0.357363, -0.894154, -0.444196]]]
                                               )).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+            self.assertEqual(result, ref_output)
 
             # gelu activation test cases
             activation = "gelu"
@@ -13050,7 +13067,7 @@ if __name__ == '__main__':
             result = model(decoder_input, memory_input)
             ref_output = torch.tensor([[[2.306435, 0.095946, -0.675796, 0.10687]]]).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-3)
+            self.assertEqual(result, ref_output)
 
             # deterministic input
             decoder_input = perm_fn(torch.tensor([[[9., 10., 11., 12.]],
@@ -13060,7 +13077,7 @@ if __name__ == '__main__':
             ref_output = perm_fn(torch.tensor([[[2.415448, 0.054389, -0.610932, -0.0156613]],
                                                [[2.415448, 0.054389, -0.610932, -0.0156613]]])).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-4)
+            self.assertEqual(result, ref_output)
 
             # deterministic input
             decoder_input = perm_fn(torch.tensor([[[1., 2., 3., 4.]],
@@ -13071,7 +13088,7 @@ if __name__ == '__main__':
             ref_output = perm_fn(torch.tensor([[[2.338531, 0.087709, -0.65776, 0.080646]],
                                                [[2.338531, 0.087709, -0.65776, 0.080646]]])).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-4)
+            self.assertEqual(result, ref_output)
 
             # deterministic input
             decoder_input = perm_fn(torch.tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
@@ -13101,7 +13118,7 @@ if __name__ == '__main__':
                                                 [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]
                                               )).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-            torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+            self.assertEqual(result, ref_output)
 
 
     def test_transformerdecoderlayer(self, device):
