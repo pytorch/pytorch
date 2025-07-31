@@ -33,6 +33,8 @@ else()
   message(FATAL_ERROR "Cannot find Python directory")
 endif()
 
+include(${PROJECT_SOURCE_DIR}/cmake/TorchPythonTargets.cmake)
+
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/openreg)
 add_subdirectory(${PROJECT_SOURCE_DIR}/csrc)
 add_subdirectory(${PROJECT_SOURCE_DIR}/torch_openreg/csrc)

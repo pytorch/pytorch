@@ -8,9 +8,9 @@ add_library(${LIBRARY_NAME} SHARED ${SOURCE_FILES})
 
 if(WIN32)
     # For Windows, we need specific PyTorch libraries
-    target_link_libraries(${LIBRARY_NAME} PRIVATE torch_python torch_cpu_library c10 torch_openreg)
+    target_link_libraries(${LIBRARY_NAME} PRIVATE torch_python_library torch_cpu_library c10 torch_openreg)
 else()
-    target_link_libraries(${LIBRARY_NAME} PRIVATE torch_python torch_openreg)
+    target_link_libraries(${LIBRARY_NAME} PRIVATE torch_python_library torch_openreg)
 endif()
 
 if(WIN32)
