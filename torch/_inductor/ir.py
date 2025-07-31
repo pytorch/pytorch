@@ -7730,11 +7730,12 @@ class ComplexView(FallbackKernel):
         )
 
 
-# TODO: debug. was hitting errors in custom op passing list of str. override op invocation
-
-
 class MemoryCheckKernel(FallbackKernel):
-    """Custom kernel for memory checking that generates direct function calls"""
+    """
+    Custom kernel for memory checking that generates direct function calls
+
+    TODO - the custom op was erroring with str inputs. should be able to custom op directly.
+    """
 
     def codegen(self, wrapper) -> None:
         """Override codegen to write direct function call"""

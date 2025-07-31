@@ -19,14 +19,12 @@ class BufferMemoryTracker:
     expected behavior.
     """
 
-    def __init__(self):
-        self.tensor_tracker = weakref.WeakValueDictionary()
-        self.seen_names = OrderedSet()
-        self.current_step = -1
-        self.died_since_last_step = (
-            OrderedSet()
-        )  # Track what actually died since last check
-        self.added_since_last_step = OrderedSet()
+    def __init__(self) -> None:
+        self.tensor_tracker: dict[str, torch.storage.UntypedStorage] = (
+            weakref.WeakValueDictionary()
+        )
+        self.died_since_last_step: OrderedSet[str] = OrderedSet()
+        self.added_since_last_step: OrderedSet[str] = OrderedSet()
         self.error = (
             torch._inductor.config.test_configs.track_memory_lifecycle == "assert"
         )

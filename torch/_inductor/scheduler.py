@@ -2564,7 +2564,9 @@ class Scheduler:
 
         register_check_mem_op()
 
-        def construct_mem_check_node(step_idx, is_final_step):
+        def construct_mem_check_node(
+            step_idx: int, is_final_step: bool
+        ) -> ExternKernelSchedulerNode:
             expected_newly_alive = step_allocs_deallocs[step_idx][0]
             expected_newly_dead = step_allocs_deallocs[step_idx][1]
 
@@ -2585,8 +2587,7 @@ class Scheduler:
                 ),
             )
             node.operation_name = f"mem_check_{self.nodes[step_idx].get_name()}"
-            debug_node = ExternKernelSchedulerNode(self, node)
-            return debug_node
+            return ExternKernelSchedulerNode(self, node)
 
         new_nodes = []
 
