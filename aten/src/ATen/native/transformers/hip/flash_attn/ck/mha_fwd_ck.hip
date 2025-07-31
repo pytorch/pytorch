@@ -360,8 +360,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
                                  false,             // is_group_mode
                                  mask.type,         // mask_type
                                  attn_bias_.has_value() ? bias_enum::elementwise_bias : bias_enum::no_bias,
-                                 has_lse            // has_lse
-                                 true);
+                                 has_lse,           // has_lse
+                                 true);             // use_ext_asm
 
 
 
