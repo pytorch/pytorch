@@ -12,6 +12,9 @@ bit_cast
 # c10/util/BFloat16-math.h, c10/util/BFloat16.h
 BFloat16
 
+# torch/headeronly/util/Float4_e2m1fn_x2.h
+Float4_e2m1fn_x2
+
 # c10/util/Float8_e4m3fn.h
 Float8_e4m3fn
 
