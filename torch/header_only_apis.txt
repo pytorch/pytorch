@@ -6,7 +6,7 @@
 # c10/util/TypeCast.h
 convert
 
-# c10/util/bit_cast.h, torch/headeronly/util/bit_cast.h
+# torch/headeronly/util/bit_cast.h
 bit_cast
 
 # torch/headeronly/util/BFloat16.h
@@ -15,22 +15,23 @@ BFloat16
 # torch/headeronly/util/Float4_e2m1fn_x2.h
 Float4_e2m1fn_x2
 
-# c10/util/Float8_e4m3fn.h
+# torch/headeronly/util/Float8_e4m3fn.h
 Float8_e4m3fn
 
-# c10/util/Float8_e4m3fnuz.h
+# torch/headeronly/util/Float8_e4m3fnuz.h
 Float8_e4m3fnuz
 
-# c10/util/Float8_e5m2.h
+# torch/headeronly/util/Float8_e5m2.h
 Float8_e5m2
 
-# c10/util/Float8_e5m2fnuz.h
+# torch/headeronly/util/Float8_e5m2fnuz.h
 Float8_e5m2fnuz
 
-# c10/util/Half.h
-Half
+# torch/headeronly/util/Float8_e8m0fnu.h
+Float8_e8m0fnu
 
 # torch/headeronly/util/Half.h
+Half
 fp16_ieee_from_fp32_value
 fp16_ieee_to_fp32_value
 
