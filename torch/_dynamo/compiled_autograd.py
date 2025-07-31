@@ -69,11 +69,11 @@ if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
 
 
-TURN_OFF_MSG = """Turn off compiled autograd by either:
-1. Moving the unsupported autograd calls outside of the torch.compile'd region.
-2. Wrapping the unsupported in the torch._dynamo.compiled_autograd._disable() context manager.
-3. Setting torch._dynamo.config.compiled_autograd to False for the torch.compile call containing the unsupported autograd call.
-4. Setting torch._dynamo.config.compiled_autograd to False at the start of the program."""
+TURN_OFF_MSG = """You can turn off compiled autograd by either:
+1. Moving the unsupported autograd call outside of the torch.compile'd region.
+2. Wrapping the unsupported autograd call in the torch._dynamo.compiled_autograd._disable() context manager.
+3. Setting torch._dynamo.config.compiled_autograd=False for the torch.compile call containing the unsupported autograd call.
+4. Setting torch._dynamo.config.compiled_autograd=False at the start of the program."""
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
@@ -164,7 +164,7 @@ class NaNChecker:
             if grad is not None:
                 assert not torch.isnan(grad).any(), (
                     f"Compiled autograd running under anomaly mode with inputs[{idx}] already "
-                    "having NaN gradient. This is not supported."
+                    "having NaN gradient. This is not supported. {TURN_OFF_MSG}"
                 )
 
             self.params_to_check[f"inputs[{idx}]"] = inputs[idx]
@@ -304,11 +304,13 @@ class AutogradCompilerInstance:
         accumulate_grad: bool,
         check_nans: bool,
     ):
+        global in_compiled_autograd_initial_trace
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
         self.aot_id_counter: dict[int, int] = defaultdict(int)
         self.compile_context = make_compile_context(self.id)
         self.compile_context.__enter__()
+        in_compiled_autograd_initial_trace = True
         self.nan_checker = NaNChecker(accumulate_grad) if check_nans else None
         self.start_time_ns = time.time_ns()
         get_chromium_event_logger().log_event_start(
@@ -969,6 +971,8 @@ class AutogradCompilerInstance:
         return GraphModule(self.fx_tracer.root, self.fx_tracer.graph, id)
 
     def end_capture(self, outputs):
+        global in_compiled_autograd_initial_trace
+
         self.fx_tracer.create_proxy(
             "call_function",
             FakeCompiledAutogradEngine._exec_final_callbacks_stub,
@@ -1085,6 +1089,7 @@ class AutogradCompilerInstance:
             log_pt2_compile_event=True,
         )
         self.compile_context.__exit__(None, None, None)
+        in_compiled_autograd_initial_trace = False
         return runtime_wrapper, self.compiler_fn(graph)
 
     @staticmethod
@@ -1394,6 +1399,9 @@ compiled_autograd_enabled = False
 # global flag to check if compiled autograd is enabled but Dynamo stance is "force_eager"
 compiled_autograd_enabled_force_eager = False
 
+# global flag to check if we are capturing for compiled autograd
+in_compiled_autograd_initial_trace = False
+
 # global flag to check if we are processing graphs produced from a compiled autograd graph
 in_compiled_autograd_region = False
 
@@ -1498,12 +1506,13 @@ def _disable():
 
 # return to starting state of a new process
 def reset() -> None:
-    global compiled_autograd_enabled
+    global compiled_autograd_enabled, in_compiled_autograd_initial_trace
     compiled_autograd_enabled = False
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
     torch._C._dynamo.compiled_autograd.clear_cache()
+    in_compiled_autograd_initial_trace = False
     global COMPILE_COUNTER
     COMPILE_COUNTER = itertools.count()
 

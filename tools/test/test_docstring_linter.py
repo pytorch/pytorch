@@ -8,8 +8,8 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
+from tools.linter.adapters._linter.block import _get_decorators
 from tools.linter.adapters.docstring_linter import (
-    _get_decorators,
     DocstringLinter,
     file_summary,
     make_recursive,

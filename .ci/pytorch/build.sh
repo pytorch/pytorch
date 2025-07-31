@@ -11,10 +11,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
-fi
-
 echo "Python version:"
 python --version
 
@@ -124,26 +120,8 @@ if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
 fi
 
 # Use special scripts for Android builds
-if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
-  export ANDROID_NDK=/opt/ndk
-  build_args=()
-  if [[ "${BUILD_ENVIRONMENT}" == *-arm-v7a* ]]; then
-    build_args+=("-DANDROID_ABI=armeabi-v7a")
-  elif [[ "${BUILD_ENVIRONMENT}" == *-arm-v8a* ]]; then
-    build_args+=("-DANDROID_ABI=arm64-v8a")
-  elif [[ "${BUILD_ENVIRONMENT}" == *-x86_32* ]]; then
-    build_args+=("-DANDROID_ABI=x86")
-  elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
-    build_args+=("-DANDROID_ABI=x86_64")
-  fi
-  if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-    build_args+=("-DUSE_VULKAN=ON")
-  fi
-  build_args+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
-  exec ./scripts/build_android.sh "${build_args[@]}" "$@"
-fi
 
-if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
   export USE_VULKAN=1
   # shellcheck disable=SC1091
   source /var/lib/jenkins/vulkansdk/setup-env.sh
@@ -198,10 +176,8 @@ fi
 
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]] && [ -z "$MAX_JOBS_OVERRIDE" ]; then
-  echo "WARNING: FlashAttention files require large amounts of memory to build and will OOM"
-  echo "Setting MAX_JOBS=(nproc-2)/3 to reduce memory usage"
-  export MAX_JOBS="$(( $(nproc --ignore=2) / 3 ))"
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]]; then
+  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j 2"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
@@ -227,7 +203,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
     export USE_PRECOMPILED_HEADERS=1
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
@@ -257,6 +233,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e -o pipefail
 
   get_bazel
+  python3 tools/optional_submodules.py checkout_eigen
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
@@ -306,6 +283,22 @@ else
       fi
     fi
     pip_install_whl "$(echo dist/*.whl)"
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
+      install_torchvision
+    fi
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *audio* ]]; then
+      install_torchaudio
+    fi
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchrec* || "${BUILD_ADDITIONAL_PACKAGES:-}" == *fbgemm* ]]; then
+      install_torchrec_and_fbgemm
+    fi
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchao* ]]; then
+      install_torchao
+    fi
 
     if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
       echo "Checking that xpu is compiled"
@@ -394,10 +387,8 @@ else
     # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
     # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
     # 16 CPUs
-    if [ -z "$MAX_JOBS_OVERRIDE" ]; then
-      MAX_JOBS=$(nproc --ignore=4)
-      export MAX_JOBS
-    fi
+    MAX_JOBS=$(nproc --ignore=4)
+    export MAX_JOBS
 
     # NB: Install outside of source directory (at the same level as the root
     # pytorch folder) so that it doesn't get cleaned away prior to docker push.

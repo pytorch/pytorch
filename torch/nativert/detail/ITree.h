@@ -16,8 +16,6 @@
 
 namespace torch::nativert::detail {
 
-using torch::nativert::Value;
-
 class ITreeSpec;
 
 using ITreeFlattenFn =

@@ -156,7 +156,7 @@ int IpcChannel::recv_fd() {
       .msg_control = cbuf,
       .msg_controllen = sizeof(cbuf)};
 
-  // Recieve message on socket_
+  // Receive message on socket_
   TORCH_CHECK(
       recvmsg(socket_, &msg, 0) > 0,
       "Failed to receive fd: ",

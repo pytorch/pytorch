@@ -94,6 +94,7 @@ from .exc import (
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
+from .polyfills import impl_CONTAINS_OP_fallback
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
@@ -111,6 +112,7 @@ from .source import (
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
+    _get_error_on_graph_break,
     counters,
     get_fake_value,
     get_instruction_source_311,
@@ -286,7 +288,7 @@ SpeculationLog diverged at index {self.index} (log had {len(self.entries)} entri
 - Expected: {entry.filename}:{entry.lineno} ({entry.inst.opname} at ip={entry.instruction_pointer})
 - Actual: {filename}:{lineno} ({inst.opname} at ip={instruction_pointer})
 {prev_entry_msg}
-There are two usual reasons why this may have occured:
+There are two usual reasons why this may have occurred:
 - When Dynamo analysis restarted, the second run took a different path than
   the first.  If this occurred, the previous instruction is the critical instruction that
   behaved differently.
@@ -666,7 +668,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                             *graph_break_hints.FUNDAMENTAL,
                             "Use `torch._assert()` to raise a hard AssertionError when the check fails. "
                             "This error will propagate back the user code "
-                            "that called the compiled function (i.e. Dynamo wil not trace any exception handling).",
+                            "that called the compiled function (i.e. Dynamo will not trace any exception handling).",
                             "Remove the assert statement.",
                             "Move the assert statement outside of any context managers in order to graph break with "
                             "partial graph compilation (if fullgraph=False).",
@@ -826,10 +828,13 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     self.jump(inst)
             else:
                 unimplemented_v2(
-                    gb_type=_gb_type,
+                    gb_type="Data-dependent branching",
                     context=f"attempted to jump with {value}",
                     explanation=_explanation,
-                    hints=_hints,
+                    hints=[
+                        *graph_break_hints.FUNDAMENTAL,
+                        "Use `torch.cond` to express dynamic control flow.",
+                    ],
                 )
 
     return inner
@@ -939,6 +944,7 @@ def break_graph_if_unsupported(*, push):
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
+                assert inst.arg is not None
                 call_insts = create_call_function(inst.arg, False)
                 call_insts[-1].copy_positions(inst)
                 self.output.add_output_instructions(call_insts)
@@ -1152,22 +1158,10 @@ class InstructionTranslatorBase(
         return False
 
     def cellvars(self):
-        if not hasattr(self, "_cellvars"):
-            self._cellvars = tuple(self.code_options["co_cellvars"] or [])
-            # An inlined function might depend on the cellvar of the parent
-            # function. So, recursively obtain parent cellvars.
-            if isinstance(self, InliningInstructionTranslator):
-                self._cellvars += self.parent.cellvars()
-        return self._cellvars
+        return self.code_options["co_cellvars"]
 
     def freevars(self):
-        if not hasattr(self, "_freevars"):
-            self._freevars = tuple(self.code_options["co_freevars"] or [])
-            # An inlined function might depend on the freevar of the parent
-            # function. So, recursively obtain parent freevars.
-            if isinstance(self, InliningInstructionTranslator):
-                self._freevars += self.parent.freevars()
-        return self._freevars
+        return self.code_options["co_freevars"]
 
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
@@ -1251,7 +1245,7 @@ class InstructionTranslatorBase(
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
-        self.error_on_graph_break = config.error_on_graph_break
+        self.error_on_graph_break = _get_error_on_graph_break()
 
         ip = self.instruction_pointer
         if ip is None:
@@ -1791,7 +1785,7 @@ class InstructionTranslatorBase(
     def _raise_exception_variable(self, val) -> NoReturn:
         # User can raise exception in 2 ways
         #   1) raise exception type - raise NotImplementedError
-        #   2) raise execption instance - raise NotImplemetedError("foo")
+        #   2) raise exception instance - raise NotImplemetedError("foo")
 
         # 1) when user raises exception type
         val = self._create_exception_type(val)
@@ -1920,6 +1914,21 @@ class InstructionTranslatorBase(
         self.call_function(fn, [typ, val, tb], {})
 
     def exception_handler(self, raised_exception):
+        def bubble_exception_to_interpreter():
+            # Bubble the exception to the interpreter
+            curr_exc = self.exn_vt_stack.get_current_exception()
+            dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
+            assert isinstance(raised_exception, dynamo_exc)  # sanity check
+            unimplemented_v2(
+                gb_type="Observed exception",
+                context=f"raised exception {curr_exc.python_type_name()}({curr_exc.args})",
+                explanation=observed_exn_gb_explanation,
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         observed_exn_gb_explanation = (
             "Dynamo found no exception handler at the top-level compiled function "
             "when encountering an exception. Exception will propagate outside the compiled region."
@@ -1948,18 +1957,10 @@ class InstructionTranslatorBase(
                 self.jump(exn_tab_entry)
             else:
                 # No handler found. Bubble the exception to the parent
-                # instruction translater. We use special exception for this.
+                # instruction translator. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    unimplemented_v2(
-                        gb_type="Observed exception",
-                        context=str(raised_exception),
-                        explanation=observed_exn_gb_explanation,
-                        hints=[
-                            *graph_break_hints.USER_ERROR,
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
+                    bubble_exception_to_interpreter()
                 raise raised_exception
         else:
             if len(self.block_stack):
@@ -1974,7 +1975,7 @@ class InstructionTranslatorBase(
                     self.exn_vt_stack.pop()
                     if len(self.block_stack) == 0:
                         # No handler found in this frame. Bubble the exception to the parent
-                        # instruction translater.
+                        # instruction translator.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
                             unimplemented_v2(
@@ -2028,18 +2029,10 @@ class InstructionTranslatorBase(
                 self.jump(block_stack_entry)
             else:
                 # No handler found. Bubble the exception to the parent
-                # instruction translater. We use special exception for this.
+                # instruction translator. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    unimplemented_v2(
-                        gb_type="Observed exception",
-                        context=str(raised_exception),
-                        explanation=observed_exn_gb_explanation,
-                        hints=[
-                            *graph_break_hints.USER_ERROR,
-                            *graph_break_hints.SUPPORTABLE,
-                        ],
-                    )
+                    bubble_exception_to_interpreter()
                 raise raised_exception
 
     def PUSH_EXC_INFO(self, inst):
@@ -2135,7 +2128,7 @@ class InstructionTranslatorBase(
                 unimplemented_v2(
                     gb_type="Caught non-Exception value",
                     context=str(exc_instance),
-                    explanation=f"Except expects to recieve an object of Exception type but received {exc_instance}.",
+                    explanation=f"Except expects to receive an object of Exception type but received {exc_instance}.",
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
@@ -2720,7 +2713,17 @@ class InstructionTranslatorBase(
         assert inst.argval == 0 or inst.argval == 1
         left, right = self.popn(2)
         op = inst.argval
-        self.push(right.call_method(self, "__contains__", [left], {}))
+        try:
+            self.push(right.call_method(self, "__contains__", [left], {}))
+        except Unsupported:  # object doesn't support __contains__
+            # Use __iter__ as fallback
+            self.push(
+                self.inline_user_function_return(
+                    VariableTracker.build(self, impl_CONTAINS_OP_fallback),
+                    [left, right],
+                    {},
+                )
+            )
         if op == 1:
             self.UNARY_NOT(inst)
 
@@ -3043,7 +3046,7 @@ class InstructionTranslatorBase(
             self.popn(2)
 
     def LOAD_FAST_CHECK(self, inst):
-        if isinstance(self.symbolic_locals.get(inst.argval, None), NullVariable):
+        if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
             unimplemented_v2(
                 gb_type="LOAD_FAST_CHECK on uninitialized variable",
                 context=inst.argval,
@@ -3264,9 +3267,9 @@ class InstructionTranslatorBase(
         self.export = export
         # NOTE: one_graph is used for export/debugging to always force errors on graph breaks.
         # To toggle fullgraph during normal compile, self.error_on_graph_break
-        # is used instead. Every step(), its value is updated to config.error_on_graph_break.
-        # We mirror this value since cleanup may (correctly) inadvertently change config.error_on_graph_break.
-        # This assumes that we cannot both trace a change to config.error_on_graph_break and graph break on
+        # is used instead. Every step(), its value is updated to the global tls.error_on_graph_break.
+        # We mirror this value since cleanup may (correctly) inadvertently change tls.error_on_graph_break.
+        # This assumes that we cannot both trace a change to tls.error_on_graph_break and graph break on
         # the same instruction.
         self.one_graph = False
         self.error_on_graph_break = False
@@ -3451,7 +3454,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     side_effects.store_cell(cell_var, contents_var)
                 else:
                     cell_var = side_effects.track_cell_new()
-                cell_var.local_name = name
+                cell_var.local_name = name  # type: ignore[attr-defined]
                 self.symbolic_locals[name] = cell_var
 
             # Populate `symbolic_locals` with cells captured by this frame,
@@ -3469,7 +3472,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 cell_var = side_effects.track_cell_existing(
                     cell_source, cell, contents_var
                 )
-                cell_var.local_name = name
+                cell_var.local_name = name  # type: ignore[attr-defined]
                 self.symbolic_locals[name] = cell_var
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
@@ -3629,7 +3632,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         if self.package is not None:
             self.package.add_resume_function(
-                new_code, self.f_globals["__name__"], package_name
+                new_code, self.f_globals["__name__"], function_name=package_name
             )
 
         cg.extend_output([cg.create_load(k) for k in argnames])
@@ -4136,7 +4139,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: list[VariableTracker]
-    # Flag wether or not the InlineGenerator should consume the entire iterator
+    # Flag whether or not the InlineGenerator should consume the entire iterator
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)

@@ -6,6 +6,12 @@ from typing import Generic, Optional, TypeVar, Union
 import torch
 
 
+# Note: For benchmarking changes to samplers, see:
+# /benchmarks/data/samplers_bench.py
+# This benchmark compares the performance of different sampler implementations
+# and can be used to evaluate the impact of optimizations.
+
+
 __all__ = [
     "BatchSampler",
     "RandomSampler",
@@ -324,7 +330,6 @@ class BatchSampler(Sampler[list[int]]):
         self.drop_last = drop_last
 
     def __iter__(self) -> Iterator[list[int]]:
-        # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
         sampler_iter = iter(self.sampler)
         if self.drop_last:
             # Create multiple references to the same iterator

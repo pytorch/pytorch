@@ -202,7 +202,7 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
 
     # Should be
     #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
-    # but since rhs_sum is all 1, we can simpliy it.
+    # but since rhs_sum is all 1, we can simplify it.
     out_sum = lhs_sum * lhs_scale + rhs_scale
     return out_max, out_sum
 
@@ -460,7 +460,7 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
     block_value: Scalar value for this block, must be 64-bits wide
     index: Scalar index of this block relative to the current scan
     combine_fn: Function ``(value, value) -> value`` which is scanned over
-    init: Scalar value equal to the identiy of combine_fn
+    init: Scalar value equal to the identity of combine_fn
     """
     # Publish block sum so subsequent blocks don't get stuck waiting for us
     if index > 0:
@@ -565,14 +565,34 @@ def _compare_and_swap_with_index(
     # actual compare-and-swap
     ix = x.to(idtype, bitcast=True)
 
+    # sort treats nan as having the higher value. comparisons with nan always return False.
+    # to align with sort semantics, we need to update descending to check if right_isnan,
+    # and ascending to check if left_isnan.
+    left_isnan = left != left
+    right_isnan = right != right
+
     if descending:
         cond = left < right
+        if is_floating(left):
+            if not stable:
+                cond = cond | right_isnan
+            else:
+                cond = cond | (right_isnan & (~left_isnan))
+
     else:
         cond = left > right
+        if is_floating(left):
+            if not stable:
+                cond = cond | left_isnan
+            else:
+                cond = cond | (left_isnan & (~right_isnan))
 
     if stable:
         # When stable sorting, tie break by index
-        cond = cond | ((left == right) & (left_idx > right_idx))
+        eq = left == right
+        if is_floating(left):
+            eq = eq | (left_isnan & right_isnan)
+        cond = cond | (eq & (left_idx > right_idx))
 
     cond = (right_valid_mask > left_valid_mask) | (
         (right_valid_mask == left_valid_mask) & cond

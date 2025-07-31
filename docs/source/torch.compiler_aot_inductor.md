@@ -1,3 +1,5 @@
+(torch.compiler_aot_inductor)=
+
 # AOTInductor: Ahead-Of-Time Compilation for Torch.Export-ed Models
 
 ```{warning}
@@ -25,7 +27,7 @@ relies on.
 
 We will then use {func}`torch._inductor.aoti_compile_and_package` to compile the
 exported program using TorchInductor, and save the compiled artifacts into one
-package.
+package. The package is in the format of a {ref}`PT2 Archive Spec <export.pt2_archive>`.
 
 ```{note}
 If you have a CUDA-enabled device on your machine and you installed PyTorch with CUDA support,
@@ -82,7 +84,7 @@ To access this path from the C++ side, we save it to a file for later retrieval 
 ## Inference in Python
 
 There are multiple ways to deploy the compiled artifact for inference, and one of that is using Python.
-We have provided a convinient utility API in Python {func}`torch._inductor.aoti_load_package` for loading
+We have provided a convenient utility API in Python {func}`torch._inductor.aoti_load_package` for loading
 and running the artifact, as shown in the following example:
 
 ```python

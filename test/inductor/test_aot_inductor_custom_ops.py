@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-# This test requires libaoti_custom_ops.so to be built, which happnes when BUILD_TEST = 1
+# This test requires libaoti_custom_ops.so to be built, which happens when BUILD_TEST = 1
 import logging
 import os
 import sys
@@ -416,6 +416,7 @@ class AOTInductorTestsTemplate:
 
     @skipIfXpu
     @skipIfRocm
+    @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
     def test_custom_op_square(self) -> None:
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -423,25 +424,28 @@ class AOTInductorTestsTemplate:
 
         m = Model().to(device=self.device)
         args = (torch.randn(2, 3, device=self.device),)
-        with config.patch(
-            "aot_inductor.custom_ops_to_c_shims",
-            {
-                torch.ops.aoti_custom_ops.fn_square.default: [
-                    """
+        with (
+            config.patch(
+                "aot_inductor.custom_ops_to_c_shims",
+                {
+                    torch.ops.aoti_custom_ops.fn_square.default: [
+                        """
                 AOTITorchError
                 aoti_torch_cpu_fn_square(
                     AtenTensorHandle input,
                     AtenTensorHandle* ret)""",
-                    """
+                        """
                 AOTITorchError
                 aoti_torch_cuda_fn_square(
                     AtenTensorHandle input,
                     AtenTensorHandle* ret)""",
-                ],
-            },
-        ), config.patch(
-            "aot_inductor.custom_op_libs",
-            ["aoti_custom_ops"],
+                    ],
+                },
+            ),
+            config.patch(
+                "aot_inductor.custom_op_libs",
+                ["aoti_custom_ops"],
+            ),
         ):
             self.check_model(m, args)
 
@@ -508,6 +512,7 @@ CUDA_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(),
     "test_quanatized_int8_linear": fail_cuda(),
+    "test_quantized_linear_bias_none": fail_cuda(),
 }
 
 

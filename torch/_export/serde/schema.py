@@ -5,11 +5,11 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Annotated, Optional
 
-from torch._export.serde.union import _Union
+from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 8)
+SCHEMA_VERSION = (8, 9)
 TREESPEC_VERSION = 1
 
 
@@ -33,6 +33,8 @@ class ScalarType(IntEnum):
     UINT16 = 28
     FLOAT8E4M3FN = 29
     FLOAT8E5M2 = 30
+    FLOAT8E4M3FNUZ = 31
+    FLOAT8E5M2FNUZ = 32
 
 
 class Layout(IntEnum):
@@ -60,7 +62,7 @@ class Device:
     index: Annotated[Optional[int], 20] = None
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class SymExprHint(_Union):
     as_int: Annotated[int, 10]
     as_bool: Annotated[bool, 20]
@@ -77,19 +79,19 @@ class SymExpr:
     hint: Annotated[Optional[SymExprHint], 20] = None
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class SymInt(_Union):
     as_expr: Annotated[SymExpr, 10]
     as_int: Annotated[int, 20]
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class SymFloat(_Union):
     as_expr: Annotated[SymExpr, 10]
     as_float: Annotated[float, 20]
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class SymBool(_Union):
     as_expr: Annotated[SymExpr, 10]
     as_bool: Annotated[bool, 20]
@@ -112,7 +114,7 @@ class TensorMeta:
 # of SymInt and ints (ex. [1, s0, ...]). We will serialize this type of list to
 # be List[SymIntArgument] and map the SymInts to the "as_name" field, and ints
 # to the "as_int" field.
-@dataclass(repr=False)
+@_union_dataclass
 class SymIntArgument(_Union):
     as_name: Annotated[str, 10]
     as_int: Annotated[int, 20]
@@ -124,7 +126,7 @@ class SymIntArgument(_Union):
 # of SymFloat and float (ex. [1.0, s0, ...]). We will serialize this type of list to
 # be List[SymFloatArgument] and map the SymFloats to the "as_name" field, and ints
 # to the "as_float" field.
-@dataclass(repr=False)
+@_union_dataclass
 class SymFloatArgument(_Union):
     as_name: Annotated[str, 10]
     as_float: Annotated[float, 20]
@@ -136,7 +138,7 @@ class SymFloatArgument(_Union):
 # of SymBool and bools (ex. [True, i0, ...]). We will serialize this type of list to
 # be List[SymboolArgument] and map the SymBools to the "as_name" field, and bools
 # to the "as_bool" field.
-@dataclass(repr=False)
+@_union_dataclass
 class SymBoolArgument(_Union):
     as_name: Annotated[str, 10]
     as_bool: Annotated[bool, 20]
@@ -156,7 +158,7 @@ class TokenArgument:
 # (Tensor?[], ex. [Tensor, None, ...]), where the list will be serialized to the
 # type List[OptionalTensorArgument], with tensor values seiralized to the
 # "as_tensor" field, and None values serialized to the "as_none" field.
-@dataclass(repr=False)
+@_union_dataclass
 class OptionalTensorArgument(_Union):
     as_tensor: Annotated[TensorArgument, 20]
     as_none: Annotated[bool, 10]
@@ -175,7 +177,7 @@ class CustomObjArgument:
 
 
 # This is actually a union type
-@dataclass(repr=False)
+@_union_dataclass
 class Argument(_Union):
     as_none: Annotated[bool, 10]
     as_tensor: Annotated[TensorArgument, 20]
@@ -253,7 +255,7 @@ class UserInputSpec:
     arg: Annotated[Argument, 10]
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class ConstantValue(_Union):
     as_none: Annotated[bool, 10]
     as_int: Annotated[int, 20]
@@ -298,7 +300,7 @@ class InputTokenSpec:
     arg: Annotated[TokenArgument, 10]
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class InputSpec(_Union):
     user_input: Annotated[UserInputSpec, 10]
     parameter: Annotated[InputToParameterSpec, 20]
@@ -348,7 +350,7 @@ class OutputTokenSpec:
     arg: Annotated[TokenArgument, 10]
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class OutputSpec(_Union):
     user_output: Annotated[UserOutputSpec, 10]
     loss_output: Annotated[LossOutputSpec, 20]
@@ -382,7 +384,7 @@ class ModuleCallSignature:
     out_spec: Annotated[str, 40]
 
     # This field is used to prettify the graph placeholders
-    # after we ser/der and retrace
+    # after we Ser/Der and retrace
     forward_arg_names: Annotated[Optional[list[str]], 50] = None
 
 
@@ -413,7 +415,7 @@ class GraphModule:
 
 
 # Invariant: Every time a change is made to the schema, one of the versions
-#            should be upadted.
+#            should be updated.
 @dataclass
 class SchemaVersion:
     major: Annotated[

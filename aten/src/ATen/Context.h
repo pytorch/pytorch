@@ -28,6 +28,7 @@
 #include <c10/util/irange.h>
 
 #include <cstdint>
+#include <map>
 #include <mutex>
 
 namespace at {
@@ -204,6 +205,8 @@ class TORCH_API Context {
   void setBenchmarkCuDNN(bool);
   int benchmarkLimitCuDNN() const;
   void setBenchmarkLimitCuDNN(int);
+  bool immediateMiopen() const;
+  void setImmediateMiopen(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
   bool deterministicMkldnn() const;
@@ -336,14 +339,20 @@ class TORCH_API Context {
   void alertCuBLASConfigNotDeterministic() const;
 
   void setFloat32MatmulPrecision(const std::string& s);
-  bool allowTF32CuDNN() const;
+  void setFloat32Precision(
+      const std::string& backend,
+      const std::string& op,
+      const std::string& s);
+  bool allowTF32CuDNN(const std::string& op = std::string()) const;
   void setAllowTF32CuDNN(bool);
   bool allowTF32OneDNN() const;
   void setAllowTF32OneDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
-  void setFloat32MatmulPrecision(Float32MatmulPrecision p);
+  std::string float32Precision(
+      const std::string& backend,
+      const std::string& op) const;
   bool allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(bool);
   bool allowBF16ReductionCuBLAS() const;
@@ -424,7 +433,8 @@ class TORCH_API Context {
       at::SDPBackend::flash_attention,
       at::SDPBackend::efficient_attention,
       at::SDPBackend::math,
-      at::SDPBackend::cudnn_attention};
+      at::SDPBackend::cudnn_attention,
+      at::SDPBackend::overrideable};
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
@@ -432,6 +442,7 @@ class TORCH_API Context {
   bool enabled_overrideable = true;
   bool allow_fp16_bf16_reduction_mathSDP = false;
   bool benchmark_cudnn = false;
+  bool immediate_miopen = false;
   Float32MatmulPrecision float32_matmul_precision =
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
       ? at::Float32MatmulPrecision::HIGH
@@ -465,9 +476,26 @@ class TORCH_API Context {
   bool release_original_weights = false;
 #endif
   bool display_vmap_fallback_warnings_ = false;
-  std::optional<at::QEngine> quantized_engine = std::nullopt;
+  std::atomic<at::QEngine> quantized_engine = at::QEngine::NoQEngine;
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
+
+  std::map<std::string, std::map<std::string, std::string>> fp32_precision = {
+      {"generic", {{"all", "none"}}},
+      {"mkldnn",
+       {{"matmul", "none"},
+        {"conv", "none"},
+        {"rnn", "none"},
+        {"all", "none"}}},
+      {"cuda",
+       {{"matmul",
+         float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
+             ? "none"
+             : "tf32"},
+        {"conv", "tf32"},
+        {"rnn", "tf32"},
+        {"all", "none"}}},
+  };
 
   Allocator* prev_allocator_ptr_{nullptr};
 };

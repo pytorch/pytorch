@@ -110,11 +110,11 @@ mm_template = TritonTemplate(
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    if ((stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1)) and M >= BLOCK_M:
+    if ((stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1)) and (M >= BLOCK_M and K > 1):
         offs_a_m = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
     else:
         offs_a_m = rm % M
-    if ((stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1)) and N >= BLOCK_N:
+    if ((stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1)) and (N >= BLOCK_N and K > 1):
         offs_b_n = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
     else:
         offs_b_n = rn % N
@@ -261,11 +261,11 @@ persistent_tma_mm_template = TritonTemplate(
     rk_for_mask = tl.arange(0, BLOCK_K)
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
+    {%- if TMA_EXPERIMENTAL_API %}
     workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    {%- if TMA_EXPERIMENTAL_API %}
     triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
         global_address=A,
@@ -284,8 +284,6 @@ persistent_tma_mm_template = TritonTemplate(
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
-    a_desc = a_desc_ptr
-    b_desc = b_desc_ptr
     {%- else %}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
@@ -441,11 +439,11 @@ device_tma = r"""
     k_tiles = tl.cdiv(K, BLOCK_K)
     num_tiles = num_pid_m * num_pid_n
 
+    {%- if TMA_EXPERIMENTAL_API %}
     workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    {%- if TMA_EXPERIMENTAL_API %}
     triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
         global_address=A,
@@ -464,8 +462,6 @@ device_tma = r"""
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
-    a_desc = a_desc_ptr
-    b_desc = a_desc_ptr
     {%- else %}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
@@ -697,12 +693,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
+    dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
         for config in mm_configs(
             m,
             n,
             k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -716,7 +713,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 m,
                 n,
                 k,
-                **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+                **mm_config_kwargs(
+                    device_type, _is_large_block_for_cpu, dtype.itemsize
+                ),
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -965,9 +964,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
 
+    dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
         for config in mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -981,7 +984,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+                m,
+                n,
+                k,
+                **mm_config_kwargs(
+                    device_type, _is_large_block_for_cpu, dtype.itemsize
+                ),
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -1046,8 +1054,8 @@ def tuned_sparse_semi_structured_mm(
     m1, k1 = mat1.get_size()
     m2, _ = mat1_meta.get_size()
     k2, n = mat2.get_size()
-    m = V.graph.sizevars.guard_equals(m1, m2)
-    k = V.graph.sizevars.guard_equals(2 * k1, k2)
+    m = V.graph.sizevars.check_equals_and_simplify(m1, m2)
+    k = V.graph.sizevars.check_equals_and_simplify(2 * k1, k2)
 
     if layout is None:
         from torch._inductor.ir import FixedLayout

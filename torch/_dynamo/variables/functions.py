@@ -27,9 +27,10 @@ import builtins
 import functools
 import inspect
 import itertools
+import logging
 import sys
+import traceback
 import types
-import warnings
 from collections.abc import Sequence
 from types import FunctionType
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
@@ -38,6 +39,7 @@ from unittest.mock import patch
 from weakref import WeakKeyDictionary
 
 import torch
+from torch._dynamo.exc import get_stack_above_dynamo
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -60,6 +62,7 @@ from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
     counters,
+    create_nested_fn_cache,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -150,24 +153,45 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
             ba[name] = wrap_bound_arg(tx, args[i])
         elif name in rem_kw:
             if name in spec.posonly_names:
-                raise TypeError(f"{name} is positional-only")
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[ConstantVariable.create(f"{name} is positional-only")],
+                )
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name in spec.pos_default_map:
             idx = spec.pos_default_map[name]
             default_source = None
-            if fn_source:
+            if fn_source and not (
+                ConstantVariable.is_literal(spec.defaults[idx])
+                and config.skip_guards_on_constant_func_defaults
+            ):
                 default_source = DefaultsSource(fn_source, idx)
             ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
         else:
-            raise TypeError(f"Missing required positional argument: {name}")
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"Missing required positional argument: {name}"
+                    )
+                ],
+            )
 
     # 2) *args
     extra = args[len(spec.all_pos_names) :]
     if spec.varargs_name:
         ba[spec.varargs_name] = wrap_bound_arg(tx, tuple(extra))
     elif extra:
-        raise TypeError(
-            f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                ConstantVariable.create(
+                    f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
+                )
+            ],
         )
 
     # 3) Keyword-only
@@ -180,13 +204,27 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:
-            raise TypeError(f"Missing required keyword-only argument: {name}")
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"Missing required keyword-only argument: {name}"
+                    )
+                ],
+            )
 
     # 4) **kwargs
     if spec.varkw_name:
         ba[spec.varkw_name] = wrap_bound_arg(tx, rem_kw)
     elif rem_kw:
-        raise TypeError(f"Unexpected keyword arguments: {list(rem_kw)}")
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                ConstantVariable.create(f"Unexpected keyword arguments: {list(rem_kw)}")
+            ],
+        )
 
     return ba
 
@@ -232,6 +270,11 @@ def _create_nested_fn(
 ):
     from types import FunctionType
 
+    # Add caching for the actual IDs of user functions so that we can use them in the ID_MATCH guard.
+    cache_key = str(id(code)) + str(id(closure)) + str(id(f_globals))
+    if create_nested_fn_cache.get(cache_key):
+        return create_nested_fn_cache.get(cache_key)
+
     func = FunctionType(code, f_globals, name, defaults, closure)
     func.__kwdefaults__ = kwdefaults
 
@@ -243,7 +286,7 @@ def _create_nested_fn(
     # TypeError: __annotations__ must be set to a dict object
     assert annotations is None or isinstance(annotations, dict)
     func.__annotations__ = annotations
-
+    create_nested_fn_cache.set(cache_key, func)
     return func
 
 
@@ -446,7 +489,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # Handle patch_dynamo_config call
-
         if self.fn is torch._dynamo.patch_dynamo_config:
             try:
                 args_const = [arg.as_python_constant() for arg in args]
@@ -463,8 +505,19 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Please fix your call to patch_dynamo_config by using simpler inputs. "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
+        elif self.fn is torch._dynamo.set_fullgraph:
+            try:
+                bound = inspect.signature(self.fn).bind(*args, **kwargs)
+                fullgraph = bound.arguments["fullgraph"].as_python_constant()
+                assert isinstance(fullgraph, bool)
+                return variables.SetFullgraphVariable(fullgraph)
+            except Exception as e:
+                raise RuntimeError(
+                    "Improper set_fullgraph() call. Please fix your call to set_fullgraph(). "
+                    f"args: {args}, kwargs: {kwargs}"
+                ) from e
         # Handle a `nonstrict_trace(fn)` call
-        if self.fn is torch._dynamo.nonstrict_trace:
+        elif self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
             fn_var = bound.args[0]
             if not isinstance(fn_var, BaseUserFunctionVariable):
@@ -499,6 +552,17 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
+
+        if (
+            not tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+            and self.fn
+            is torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer
+        ):
+            with torch._dynamo.side_effects.allow_externally_visible_side_effects_in_subtracer(
+                tx
+            ):
+                return super().call_function(tx, args, kwargs)
+
         if (
             tx.output.current_tracer.under_activation_checkpoint
             and not tx.output.current_tracer.allow_side_effects_under_checkpoint
@@ -642,6 +706,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
             raise SkipFrame from e
         finally:
             counters["unimplemented"] |= counters["inline_call"]
+
+    def call_obj_hasattr(self, tx, name):
+        if name in self.python_type().__dict__:
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
 
     def has_unpack_var_sequence(self, tx):
         return False
@@ -919,7 +988,17 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        assert is_generator(self.vt.get_code())
+        if not is_generator(self.vt.get_code()):
+            unimplemented_v2(
+                gb_type="non-generator contextlib.contextmanager",
+                context=str(self.vt.get_code()),
+                explanation="Cannot compile function decorated with `@contextlib.contextmanager` that is not a generator"
+                ", i.e. does not use `yield`",
+                hints=[
+                    "Use `yield` in the function body instead of `return`.",
+                    "Remove the `@contextlib.contextmanager` decorator.",
+                ],
+            )
 
         inline_tracer = self._build_inline_tracer(tx, args, kwargs)
         code = self.vt.get_code()
@@ -1354,7 +1433,13 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        if not is_wrapper_or_member_descriptor(value):
+        if inspect.getattr_static(value, "_torchdynamo_orig_callable", False):
+            install_guard(
+                AttrSource(source, "_torchdynamo_orig_callable").make_guard(
+                    GuardBuilder.FUNCTION_MATCH
+                )
+            )
+        elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
@@ -1547,11 +1632,30 @@ class WrapperUserFunctionVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if hasattr(self.wrapper_obj, "cache_info"):
-            warnings.warn(
-                "Dynamo detected a call to a `functools.lru_cache` wrapped function."
-                "Dynamo currently ignores `functools.lru_cache` and directly traces the wrapped function."
-                "`functools.lru_cache` wrapped functions that read outside state may not be traced soundly."
-            )
+            target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
+            module_name = getattr(target_fn, "__module__", "") or ""
+
+            if module_name.split(".", maxsplit=1)[0] != "torch":
+                msg = (
+                    "Dynamo detected a call to a `functools.lru_cache`-wrapped "
+                    "function. Dynamo ignores the cache wrapper and directly "
+                    "traces the wrapped function. Silent incorrectness is only "
+                    "a *potential* risk, not something we have observed. "
+                    'Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.'
+                )
+
+                torch._dynamo.utils.warn_once(msg)
+
+                dynamo_logger = torch._dynamo.utils.logging.getLogger("torch._dynamo")
+                if dynamo_logger.isEnabledFor(logging.DEBUG):
+                    user_stack = torch._guards.TracingContext.extract_stack()
+                    user_stack = get_stack_above_dynamo() + user_stack
+                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+                    user_stack_formatted = "".join(traceback.format_list(user_stack))
+                    user_stack_trace = f"call to a lru_cache wrapped function at: {frame_loc[0]}:{frame_loc[1]}\n"
+                    user_stack_trace += str(user_stack_formatted)
+                    dynamo_logger.debug(user_stack_trace)
+
         all_args = self.self_args() + args
         return variables.UserFunctionVariable(
             polyfills.getattr_and_trace

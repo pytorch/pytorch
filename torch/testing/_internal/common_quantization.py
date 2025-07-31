@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 
-r"""Importing this file includes common utility methods and base clases for
+r"""Importing this file includes common utility methods and base classes for
 checking quantization api and properties of resulting modules.
 """
 
@@ -2806,7 +2806,7 @@ class ModelWithFunctionals(torch.nn.Module):
         self.myadd = nnq.FloatFunctional()
         self.myadd_relu = nnq.FloatFunctional()
         self.mymatmul = nnq.FloatFunctional()
-        # Tracing doesnt work yet for c10 ops with scalar inputs
+        # Tracing doesn't work yet for c10 ops with scalar inputs
         # https://github.com/pytorch/pytorch/issues/27097
         # self.my_scalar_add = nnq.FloatFunctional()
         # self.my_scalar_mul = nnq.FloatFunctional()
@@ -2816,7 +2816,7 @@ class ModelWithFunctionals(torch.nn.Module):
         z = self.myadd.add(y, y)
         w = self.myadd_relu.add_relu(z, z)
         u = self.mymatmul.matmul(w, w.T)
-        # Tracing doesnt work yet for c10 ops with scalar inputs
+        # Tracing doesn't work yet for c10 ops with scalar inputs
         # https://github.com/pytorch/pytorch/issues/27097
         # w = self.my_scalar_add.add_scalar(w, -0.5)
         # w = self.my_scalar_mul.mul_scalar(w, 0.5)

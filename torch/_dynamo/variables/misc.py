@@ -306,6 +306,11 @@ class SuperVariable(VariableTracker):
         ):
             return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
         elif (
+            isinstance(self.objvar, variables.UserDefinedSetVariable)
+            and inner_fn in self.objvar._set_methods
+        ):
+            return self.objvar._set_vt.call_method(tx, name, args, kwargs)
+        elif (
             isinstance(self.objvar, variables.UserDefinedTupleVariable)
             and inner_fn in tuple_methods
         ):
@@ -1441,7 +1446,9 @@ class NumpyVariable(VariableTracker):
                 and config.use_numpy_random_stream
             ):
                 msg = f"delegate '{func.__qualname__}' to NumPy itself via "
-                msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
+                msg += (
+                    f"config.use_numpy_random_stream={config.use_numpy_random_stream}"
+                )
                 unimplemented(msg)
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
