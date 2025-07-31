@@ -1373,11 +1373,13 @@ class BuiltinVariable(VariableTracker):
             if (
                 self.fn is tuple
                 and len(args) == 2
-                and args[1].has_unpack_var_sequence(tx)
+                and tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.is_iterable), [args[1]], {}
+                ).value
                 and not kwargs
             ):
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    init_args = args[1].unpack_var_sequence(tx)
+                    init_args = args[1].force_unpack_var_sequence(tx)
                     return variables.TupleVariable(
                         init_args, mutation_type=ValueMutationNew()
                     )
