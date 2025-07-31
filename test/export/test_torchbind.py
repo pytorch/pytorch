@@ -24,7 +24,7 @@ from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda
 
 
 def _assertEqualSkipScriptObject(test_case, exp, actual):
@@ -1552,7 +1552,7 @@ def forward(self, token, obj, x):
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
         )
 
-    @requires_gpu
+    @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_torchbind_op_with_autocast(self, backend, device):
@@ -1570,7 +1570,7 @@ def forward(self, token, obj, x):
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
         )
 
-    @requires_gpu
+    @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     def test_export_obj_torchbind_op_with_autocast(self, device):
         class Mod(torch.nn.Module):

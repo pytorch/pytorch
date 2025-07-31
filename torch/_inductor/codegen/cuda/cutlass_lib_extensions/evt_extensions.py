@@ -45,6 +45,23 @@ if try_import_cutlass():
 
     _CUTLASS_C_DTYPES = OrderedSet(python_cutlass.backend.epilogue.dtype2ctype.values())  # type: ignore[var-annotated]
 
+    class EVTArgRenames:
+        """Handles mapping buffer names to variable names in the cpp kernel signature and body"""
+
+        def __init__(self) -> None:
+            self.buf_renames: dict[str, str] = {}
+
+        def new_name(self, name: str) -> str:
+            if name in self.buf_renames:
+                return self.buf_renames[name]
+            else:
+                new_name = f"ptr_{len(self.buf_renames)}"
+                self.buf_renames[name] = new_name
+                return new_name
+
+        def get(self, name: str) -> str:
+            return self.buf_renames.get(name, name)
+
     def create_example_tensors(
         var_name_to_buffer_name: dict[str, str],
         name_to_buffer: dict[str, Buffer],
@@ -90,7 +107,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         name_to_buffer: dict[str, Buffer],
         size_hint_fn: Callable[[Union[Expr, int]], int],
         **kwargs: dict[str, Any],
-    ) -> tuple[str, str, str]:
+    ) -> tuple[str, str, str, EVTArgRenames]:
         cuda_arch = int(cuda_env.get_cuda_arch())  # type: ignore[arg-type]
         assert cuda_arch >= 90, "Only SM90+ is supported for EVT"
         epilogue_functor = _trace(fn_src, example_tensors, cuda_arch, **kwargs)
@@ -112,8 +129,10 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
             )
         )
         evt_name, evt_code = collective_epilogue.emit()
-        evt_args = _render_argument_type(epilogue_functor, name_to_buffer, size_hint_fn)
-        return evt_name, evt_args, evt_code
+        evt_args, arg_renames = _render_argument_type(
+            epilogue_functor, name_to_buffer, size_hint_fn
+        )
+        return evt_name, evt_args, evt_code, arg_renames
 
     # Based off of
     # https://github.com/NVIDIA/cutlass/blob/df18f5e4f5de76bed8be1de8e4c245f2f5ec3020/python/cutlass/epilogue/epilogue.py#L117
@@ -147,8 +166,9 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         epilogue_functor: EpilogueFunctor,
         name_to_buffer: dict[str, Buffer],
         size_hint_fn: Callable[[Union[Expr, int]], int],
-    ) -> str:
+    ) -> tuple[str, EVTArgRenames]:
         epilogue_thread_type = epilogue_functor.epilogue_thread_type
+        arg_renames = EVTArgRenames()
 
         # Fragile, but this is the only way to guarantee t is expected type because t is a local class
         def is_nested_visitor_type(t: type) -> bool:
@@ -167,7 +187,9 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
                     fields = [
                         (
                             fname,
-                            _get_arg_from_node(ty, name_to_buffer[name], size_hint_fn),
+                            _get_arg_from_node(
+                                ty, name_to_buffer[name], size_hint_fn, arg_renames
+                            ),
                         )
                         for fname, ty in t._fields_
                     ]
@@ -198,10 +220,13 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
                     render_argument_type("thread", epilogue_thread_type)
                 buffer.writeline("}")
 
-        return buffer.getvalue()
+        return buffer.getvalue(), arg_renames
 
     def _get_arg_from_node(
-        arg_ty: type, node: Buffer, size_hint_fn: Callable[[Union[Expr, int]], int]
+        arg_ty: type,
+        node: Buffer,
+        size_hint_fn: Callable[[Union[Expr, int]], int],
+        arg_renames: EVTArgRenames,
     ) -> str:
         from ..cuda_template import CUTLASSTemplate
 
@@ -230,7 +255,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
             return f"{{{', '.join([render_stride(x) for x in stride])}}}"
 
         elif issubclass(arg_ty, ctypes.c_void_p):
-            return f"({CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]}*) {node.get_name()}"
+            return f"({CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]}*) {arg_renames.new_name(node.get_name())}"
         elif (
             arg_ty in _CUTLASS_C_DTYPES
         ):  # Assumption: this is the element dtype, this holds for all cutlass ir nodes currently
