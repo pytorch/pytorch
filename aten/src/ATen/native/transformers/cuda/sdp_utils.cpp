@@ -823,7 +823,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   return check_tensor_dtype(params, less_than_sm80_mem_efficient_dtypes, debug);
 }
 
-bool can_use_overrideable_attention(sdp_params const& params, bool debug) {
+inline bool can_use_overrideable_attention(sdp_params const& params, bool debug) {
   if (debug) {
     TORCH_WARN("CUDA don't support SDPA overrideable attention backend.");
   }
