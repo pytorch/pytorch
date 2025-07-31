@@ -1,6 +1,6 @@
 from cement import Controller, ex
 from .vllm_build import build_vllm, VllmBuildConfig
-from utils import generate_dataclass_help
+from lib.utils import generate_dataclass_help
 class VllmBuildController(Controller):
     class Meta:
         label = "vllm"
@@ -39,7 +39,6 @@ class VllmBuildController(Controller):
                 },
             )
         ]
-
     @ex(help="Build vllm")
     def run(self):
         pargs = self.app.pargs

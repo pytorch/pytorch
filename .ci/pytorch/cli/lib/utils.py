@@ -3,10 +3,11 @@ import shlex
 import shutil
 import subprocess
 import time
-from pathlib import Path
 from typing import Optional
 from dataclasses import fields
 from textwrap import indent
+from pathlib import Path
+import yaml
 
 def run(
     cmd: str,
@@ -79,3 +80,25 @@ def get_existing_abs_path(path: str) -> str:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Path does not exist: {path}")
     return path
+
+
+def clone_vllm(commit: str):
+    """
+    cloning vllm and checkout pinned commmit
+    """
+    print(f"clonening vllm....", flush=True)
+    cwd = "vllm"
+    # delete the directory if it exists
+    remove_dir(cwd)
+    # Clone the repo & checkout commit
+    run("git clone https://github.com/vllm-project/vllm.git")
+    run(f"git checkout {commit}", cwd)
+    run("git submodule update --init --recursive", cwd)
+
+def read_yaml_file( file_path: str) -> dict:
+    p = get_abs_path(file_path)
+    if not os.path.exists(p):
+        raise FileNotFoundError(f"YAML file not found: {file_path}")
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)

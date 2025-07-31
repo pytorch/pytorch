@@ -40,7 +40,7 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "vllm-basic", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "vllm_basic_correctness_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
     secrets: inherit
 

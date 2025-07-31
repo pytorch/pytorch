@@ -1,7 +1,7 @@
 import os
 import subprocess
 from dataclasses import dataclass
-from utils import (
+from lib.utils import (
     ensure_dir_exists,
     force_create_dir,
     get_abs_path,
@@ -9,6 +9,7 @@ from utils import (
     get_env,
     get_post_build_pinned_commit,
     remove_dir,
+    clone_vllm,
     run,
 )
 import textwrap
@@ -38,7 +39,6 @@ def local_image_exists(image: str):
     except subprocess.CalledProcessError:
         return False
 
-
 def prepare_artifact_dir(path: str):
     if not path:
         path = _DEFAULT_RESULT_PATH
@@ -63,19 +63,6 @@ def build_vllm(artifact_dir: str, torch_whl_dir: str, base_image: str):
     print("Running docker build", flush=True)
     print(cmd,flush=True)
     run(cmd, cwd="vllm", logging=True, env=os.environ.copy())
-
-def clone_vllm(commit: str):
-    """
-    cloning vllm and checkout pinned commmit
-    """
-    print(f"clonening vllm....", flush=True)
-    cwd = "vllm"
-    # delete the directory if it exists
-    remove_dir(cwd)
-    # Clone the repo & checkout commit
-    run("git clone https://github.com/vllm-project/vllm.git")
-    run(f"git checkout {commit}", cwd)
-    run("git submodule update --init --recursive", cwd)
 
 def _prepare_torch_wheels(torch_whl_dir: str) -> tuple[str, str]:
     if not torch_whl_dir:
@@ -103,8 +90,6 @@ def _get_base_image_args(base_image: str) -> tuple[str, str]:
         return base_image_arg, pull_flag
     print(f"[INFO] Local image not found: {base_image}, will try to pull from remote", flush=True)
     return base_image_arg,""
-
-
 
 def _generate_docker_build_cmd(
     cfg: VllmBuildConfig,

@@ -1,6 +1,5 @@
 from cement import App, Controller
-from controllers import ALL_CONTROLLERS
-
+from test_cli.controllers import ALL_CONTROLLERS
 
 class MainController(Controller):
     class Meta:
@@ -16,6 +15,3 @@ class BuildApp(App):
 def main():
     with BuildApp() as app:
         app.run()
-
-if __name__ == "__main__":
-    main()

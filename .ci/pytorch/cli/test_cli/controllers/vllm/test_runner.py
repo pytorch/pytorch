@@ -1,0 +1,140 @@
+from lib.utils import clone_vllm, run, get_post_build_pinned_commit, read_yaml_file
+import os
+import subprocess
+import shlex
+import tempfile
+import shutil
+from pathlib import Path
+from typing import Optional
+import glob
+
+class VllmTestRunner:
+    def __init__(self,file_path="") -> None:
+        self.test_configs = self._fetch_configs(file_path)
+
+    def run(self,test_names):
+        self.prepare_test_env()
+        valid_tests = []
+        for test_name in test_names:
+            if test_name not in self.test_configs:
+                print(f"[warning] cannot detect test name {test_name}, please input valid test name ")
+                continue
+            config = self.test_configs.get(test_name)
+            valid_tests.append(config)
+        os.chdir("vllm")
+        for config in valid_tests:
+            self.test(config)
+        os.chdir("..")
+
+    def test(self, config = {}):
+        testid = config["id"]
+        steps = config["steps"]
+        sub_path = config.get("path", ".")
+        print(f"running test config: {testid}")
+        for step in steps:
+            run(step, cwd=sub_path, logging=True)
+
+    def _fetch_configs(self, path = ""):
+        base_dir = os.path.dirname(__file__)
+        file_path = path if path else os.path.join(base_dir, "test_config.yaml")
+        res = read_yaml_file(file_path)
+        config_map = {}
+        for item in res:
+            if "id" in item:
+                config_map[item["id"]] = item
+            else:
+                raise ValueError(f"Missing 'id' in config: {item}")
+
+        print(f"config_map: {config_map}")
+        return config_map
+
+    def prepare_test_env(self):
+        clone_vllm(get_post_build_pinned_commit("vllm"))
+        os.chdir("vllm")
+        run("cp vllm/collect_env.py .")
+        # remove  vllm/vllm
+        if os.path.exists("vllm"):
+            print("Removing 'vllm' directory...")
+            shutil.rmtree("vllm")
+        run("python3 use_existing_torch.py")
+        run("pip install -r requirements/common.txt")
+        run("pip install -r requirements/build.txt")
+        self.install_local_whls()
+        self.generated_test_txt()
+        run("uv pip install --system -r test.txt")
+        run("cat test.txt")
+        run("pip freeze | grep -E 'torch|xformers|torchvision|torchaudio|flashinfer'")
+        os.chdir("..")
+
+    def install_local_whls(self):
+        torch= "dist/torch-*.whl"
+
+        local_whls = [
+            "dist/vision/torchvision*.whl",
+            "dist/audio/torchaudio*.whl",
+            "wheels/xformers/xformers*.whl",
+            "wheels/flashinfer-python/flashinfer*.whl"
+        ]
+
+        torch_match = glob.glob(torch)[0]
+        print(f"[INFO] Installing: {torch_match}")
+        run(f"python3 -m pip install '{torch_match}[opt-einsum]'")
+
+        for pattern in local_whls:
+            matches = glob.glob(pattern)
+            if not matches:
+                print(f"[WARN] No match for: {pattern}")
+                continue
+            whl_path = matches[0]
+            print(f"[INFO] Installing: {whl_path}")
+            run(f"pip install {shlex.quote(whl_path)}")
+
+    def generated_test_txt(self,target_file: str = "requirements/test.in", res_file="test.txt"):
+        """
+         read directly from vllm's test.in to generate compilable test.txt for pip install.
+         clean the torch dependencies, replace with whl locations, then generate the test.txt
+        """
+        # remove torch dependencies
+        clean_torch_dependecies()
+        pkgs = ["torch", "torchvision", "torchaudio", "xformers", "flashinfer-python"]
+        tmp_head_path = Path(tempfile.mkstemp()[1])
+        with tmp_head_path.open("w") as tmp_head:
+            for pkg in pkgs:
+                try:
+                    result = subprocess.run(
+                        ["pip", "freeze"],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        text=True
+                    )
+                    lines = [
+                        line for line in result.stdout.splitlines()
+                        if line.startswith(pkg) and "@ file://" in line
+                    ]
+                    tmp_head.writelines(line + "\n" for line in lines)
+                except subprocess.CalledProcessError:
+                    print(f"[WARN] Failed to get freeze info for {pkg}")
+            tmp_head.write("\n")
+            # Append original test.in
+            with open(target_file, "r") as tf:
+                tmp_head.writelines(tf.readlines())
+        shutil.move(str(tmp_head_path), target_file)
+        print(f"[INFO] Local wheel requirements prepended to {target_file}")
+        run(f"uv pip compile {target_file} -o {res_file} --index-strategy unsafe-best-match")
+
+
+def clean_torch_dependecies(requires_files = [ "requirements/test.in"]):
+    # Keywords to match exactly
+    keywords_to_remove = ['torch==', 'torchaudio==', 'torchvision==']
+    for file in requires_files:
+        print(f">>> cleaning {file}")
+        with open(file) as f:
+            lines = f.readlines()
+        cleaned_lines = []
+        for line in lines:
+            line_lower = line.strip().lower()
+            if any(line_lower.startswith(kw) for kw in keywords_to_remove):
+                print("removed:", line.strip())
+            else:
+                cleaned_lines.append(line)
+        print(f"<<< done cleaning {file}\n")
