@@ -1,6 +1,6 @@
 set -euo pipefail
 
-readonly version=v25.02
+readonly version=v52.1.0
 readonly src_host=https://github.com/ARM-software
 readonly src_repo=ComputeLibrary
 
