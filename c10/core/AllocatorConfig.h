@@ -405,17 +405,4 @@ inline size_t roundup_power2_next_division(size_t size, size_t divisions) {
   return (round_size_floor == size) ? size : round_size_floor + power2_divison;
 }
 
-inline size_t round_size(size_t size) {
-  if (size < kMinBlockSize) {
-    return kMinBlockSize;
-  } else {
-    auto divisions = AcceleratorAllocatorConfig::roundup_power2_divisions(size);
-    if (divisions > 1 && size > (kMinBlockSize * divisions)) {
-      return roundup_power2_next_division(size, divisions);
-    } else {
-      return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
-    }
-  }
-}
-
 } // namespace c10::CachingAllocator

@@ -399,9 +399,9 @@ class DeviceCachingAllocator {
   Block* malloc(DeviceIndex device, size_t orig_size, sycl::queue& queue) {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     process_events();
-    size_t size = c10::CachingAllocator::round_size(orig_size);
+    size_t size = c10::CachingAllocator::get_round_size(orig_size);
     auto& pool = get_pool(size);
-    const size_t alloc_size = get_allocation_size(size);
+    const size_t alloc_size = c10::CachingAllocator::get_allocation_size(size);
     AllocParams params(device, size, &queue, &pool, alloc_size);
     params.stat_types = get_stat_types_for_pool(pool);
 

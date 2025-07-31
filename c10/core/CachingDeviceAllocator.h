@@ -58,4 +58,27 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
+inline size_t get_round_size(size_t size) {
+  if (size < kMinBlockSize) {
+    return kMinBlockSize;
+  } else {
+    auto divisions = AcceleratorAllocatorConfig::roundup_power2_divisions(size);
+    if (divisions > 1 && size > (kMinBlockSize * divisions)) {
+      return roundup_power2_next_division(size, divisions);
+    } else {
+      return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
+    }
+  }
+}
+
+inline size_t get_allocation_size(size_t size) {
+  if (size <= kSmallSize) {
+    return kSmallBuffer;
+  } else if (size < kMinLargeAlloc) {
+    return kLargeBuffer;
+  } else {
+    return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
+  }
+}
+
 } // namespace c10::CachingDeviceAllocator
