@@ -60,6 +60,7 @@ import sympy
 import torch
 from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 
@@ -69,13 +70,20 @@ OPTIMUS_EXCLUDE_POST_GRAD = [
     "inductor_autotune_lookup_table",
 ]
 
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    free_unbacked_symbols,
+    IterateExprs,
+    ShapeEnv,
+)
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
 
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.fx.node import Node
 
     from .codegen.common import WorkspaceArg
@@ -86,7 +94,7 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
-GPU_TYPES = ["cuda", "mps", "xpu"]
+GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
 T = TypeVar("T")
 
 
@@ -714,6 +722,20 @@ def get_kernel_metadata(
     node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
     wrapper: PythonWrapperCodegen,
 ) -> tuple[str, str]:
+    """
+    Retrieves metadata information for a kernel.
+    Args:
+        node_schedule (Union[Sequence[BaseSchedulerNode], ExternKernel]):
+            Either a sequence of BaseSchedulerNode objects or an ExternKernel instance.
+        wrapper (PythonWrapperCodegen):
+            An instance of PythonWrapperCodegen, used to define the code comment format.
+    Returns:
+        tuple[str, str]:
+            A tuple containing two strings:
+                - The first string represents the kernel's metadata.
+                - The second string represent the kernel's detailed metadata.
+    """
+
     all_origins = aggregate_origins(node_schedule)
     inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
 
@@ -758,11 +780,83 @@ def get_kernel_metadata(
 
     # print the aot_autograd graph fragment
     if single_graph is not None:
+        from . import ir
+
         detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
-        for n in inductor_nodes:
-            # TODO(future): maybe refactor torch/fx/graph.py to make it easy to
-            # generate python code for graph fragments
-            detailed_metadata.append(f"{wrapper.comment}   {n.format_node()}")
+        all_reads: OrderedSet[str] = OrderedSet()
+        all_writes: list[str] = []
+        if not isinstance(node_schedule, ir.ExternKernel):
+            from .virtualized import V
+
+            def get_buffer_info(
+                buffer: Union[ir.TensorBox, ir.Buffer, ir.TorchBindObject], rw_name: str
+            ) -> tuple[str, ir.Layout | None]:
+                if isinstance(buffer, ir.TensorBox) and isinstance(
+                    buffer.data, ir.StorageBox
+                ):
+                    origin_node = buffer.data.data.origin_node
+                else:
+                    origin_node = buffer.origin_node
+                if origin_node is None:
+                    # use the read/write name if no origin node is found
+                    name = rw_name
+                else:
+                    name = origin_node.name
+                try:
+                    layout = buffer.get_layout()
+                except NotImplementedError:
+                    layout = None
+                return name, layout
+
+            def stringify_shape(shape: Iterable[int]) -> str:
+                return f"[{', '.join([str(x) for x in shape])}]"
+
+            def stringfy_layout(layout: ir.Layout | None) -> str:
+                if layout is None:
+                    return ""
+                shape_annotation = f"{stringify_shape(layout.size)}"
+                stride_annotation = f"{stringify_shape(layout.stride)}"
+                device_annotation = f"{layout.device}"
+
+                return (
+                    f'"{dtype_abbrs[layout.dtype]}{shape_annotation}'
+                    f'{stride_annotation}{device_annotation}"'
+                )
+
+            for n in node_schedule:
+                if not hasattr(n, "read_writes") or n.read_writes is None:
+                    continue
+                if hasattr(n.read_writes, "reads") and n.read_writes.reads is not None:
+                    for r in n.read_writes.reads:
+                        # Remove the dupricated inputs
+                        if r.name in all_reads:
+                            continue
+                        all_reads.add(r.name)
+                        buffer = V.graph.try_get_buffer(r.name)
+                        if buffer is None:
+                            continue
+                        input_name, layout = get_buffer_info(buffer, r.name)
+                        detailed_metadata.append(
+                            f"{wrapper.comment}   %{input_name} : Tensor "
+                            f"{stringfy_layout(layout)} = PlaceHolder[target={input_name}]"
+                        )
+
+                if (
+                    hasattr(n.read_writes, "writes")
+                    and n.read_writes.writes is not None
+                ):
+                    for w in n.read_writes.writes:
+                        buffer = V.graph.try_get_buffer(w.name)
+                        if buffer is None:
+                            continue
+                        output_name, _ = get_buffer_info(buffer, w.name)
+
+                        all_writes.append("%" + output_name)
+
+        for node in inductor_nodes:
+            detailed_metadata.append(f"{wrapper.comment}   {node.format_node()}")
+
+        detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
     return metadata, "\n".join(detailed_metadata)
 
@@ -1124,6 +1218,7 @@ def fresh_cache(
                 # Let's not fail if we can't clean up the temp dir. Also note that for
                 # Windows, we can't delete the loaded modules because the module binaries
                 # are open.
+                ignore_errors=is_windows(),
                 onerror=lambda func, path, exc_info: log.warning(
                     "Failed to remove temporary cache dir at %s",
                     inductor_cache_dir,
@@ -1535,7 +1630,7 @@ def use_triton_template(
     )
 
 
-def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
+def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
     """
     Return True iff *all* supplied tensors satisfy the CUDA-12.9 TMA constraints
     that Triton relies on today.
@@ -1617,10 +1712,13 @@ def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool
 
         return True
 
+    return has_triton_tma_device() and all(_is_tma_compatible(m) for m in matrices)
+
+
+def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
     return (
-        config.triton.enable_persistent_tma_matmul
-        and has_triton_tma_device()
-        and all(_is_tma_compatible(m) for m in matrices)
+        can_use_tma(*matrices, add_guards=add_guards)
+        and config.triton.enable_persistent_tma_matmul
     )
 
 
@@ -3355,3 +3453,10 @@ def aoti_model_name_from_config() -> str:
     model_name = config.aot_inductor.model_name_for_generated_files
     model_name = "aoti_model" if model_name is None else model_name
     return model_name
+
+
+def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.Symbol]:
+    if unbacked_only:
+        return free_unbacked_symbols(x)
+    else:
+        return free_symbols(x)
