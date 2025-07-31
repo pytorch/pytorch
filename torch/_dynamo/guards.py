@@ -59,7 +59,6 @@ from torch._C._dynamo.guards import (
     install_symbolic_shape_guard,
     profile_guard_manager,
     RootGuardManager,
-    TypeDictGuardAccessor,
 )
 from torch._dynamo.source import (
     get_global_source_name,
@@ -410,9 +409,7 @@ class GuardManagerWrapper:
                 accessors = node.get_accessors()
                 child_mgrs = node.get_child_managers()
                 is_subtree_tag_safe = all(
-                    isinstance(
-                        accessor, (GetGenericDictGuardAccessor, TypeDictGuardAccessor)
-                    )
+                    isinstance(accessor, GetGenericDictGuardAccessor)
                     and mgr.is_tag_safe()
                     for accessor, mgr in zip(accessors, child_mgrs)
                 )

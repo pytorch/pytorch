@@ -5512,7 +5512,7 @@ class TypeGuardAccessor : public GuardAccessor {
 };
 
 /**
- * Represent type(...) accessor.
+ * Represent type(...).__dict__ accessor.
  */
 class TypeDictGuardAccessor : public GuardAccessor {
  public:
@@ -5534,13 +5534,19 @@ class TypeDictGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
-    PyObject* x = PyType_GetDict(Py_TYPE(obj)); // borrowed ref
+    PyObject* x = Py_TYPE(obj)->tp_dict; // borrowed ref
+    if (x == nullptr) {
+      return false;
+    }
     return _guard_manager->check_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    PyObject* x = PyType_GetDict(Py_TYPE(obj)); // borrowed ref
+    PyObject* x = Py_TYPE(obj)->tp_dict; // borrowed ref
+    if (x == nullptr) {
+      return GuardDebugInfo(false, "null type dict on " + repr(), 0);
+    }
     return _guard_manager->check_verbose_nopybind(x);
   }
 
