@@ -2713,6 +2713,44 @@ if HAS_CUDA:
             self.assertEqual(compiled_result, eager_result)
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            x, y = [torch.randn(2, 2, device="cuda") for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            eager_out = f(x, y)
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+
+            for _ in range(5):
+                compiled_out = f_compiled(x_cloned, y_cloned)
+                self.assertEqual(eager_out, compiled_out)
+
+            # 2 graph partitions lead to 2 cudagraph
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_log_message(self):
+            def foo(x, y):
+                return (x + 1, y + 2)
+
+            foo = torch.compile(foo, mode="reduce-overhead")
+
+            with capture_stderr() as captured_output:
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            FileCheck().check_count(
+                "cudagraph partition due to non gpu ops. Found from", 1, exactly=True
+            ).check_count("return (x + 1, y + 2)", 1, exactly=True).check(
+                "cudagraph partition into 2 partitions"
+            ).run(captured_output[0])
+
+        @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_scalar1(self):
             def f(x, y):
                 return x + y
@@ -2799,28 +2837,6 @@ if HAS_CUDA:
                     compiled_f(*inputs)
             self.assertEqual(compiled_f(*inputs), f(*inputs))
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
-
-        @torch._inductor.config.patch("graph_partition", True)
-        def test_graph_partition(self):
-            def f(x, y):
-                x1 = x + 1
-                y1 = y + 1
-                y_cpu = y1.cpu() + 1
-                z = x @ y
-                return x1 + y1 + z + y_cpu.cuda()
-
-            x, y = [torch.randn(2, 2, device="cuda") for _ in range(2)]
-            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
-            eager_out = f(x, y)
-
-            f_compiled = torch.compile(f, mode="reduce-overhead")
-
-            for _ in range(5):
-                compiled_out = f_compiled(x_cloned, y_cloned)
-                self.assertEqual(eager_out, compiled_out)
-
-            # 2 graph partitions lead to 2 cudagraph
-            self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
         # turn on input mutation support to avoid skipping cudagraph at dynamo level
