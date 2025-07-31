@@ -28,6 +28,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
+    IS_SM90,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -1289,7 +1290,7 @@ class TestFP8Matmul(TestCase):
                 x_fp8,
                 y_fp8,
                 scale_a=torch.ones((M), device="cuda"),
-                scale_b=torch.ones((N, N, 1), device="cuda"),
+                scale_b=torch.ones((N, 1), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
 
@@ -1360,7 +1361,7 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM90OrLater, "cuBLAS blockwise scaling requires sm90+")
+    @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
     @unittest.skipIf(
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
@@ -1489,8 +1490,16 @@ class TestFP8Matmul(TestCase):
                 ]
 
                 self.assertEqual(no_carveout, no_carveout_again)
-                self.assertNotEqual(no_carveout, carveout_66)
-                self.assertNotEqual(carveout_66, carveout_0)
+                capability = torch.cuda.get_device_capability()
+                if capability == (10, 0):
+                    # expected failure
+                    # CUTLASS only supports SM carveout via green contexts on SM100
+                    self.assertEqual(no_carveout, carveout_66)
+                    self.assertEqual(carveout_66, carveout_0)
+                else:
+                    # correct behavior
+                    self.assertNotEqual(no_carveout, carveout_66)
+                    self.assertNotEqual(carveout_66, carveout_0)
 
     def test_pack_uint4(self):
         """
