@@ -6738,9 +6738,11 @@ class AOTInductorLoggingTest(LoggingTestCase):
             "x": {0: Dim.AUTO, 1: Dim.AUTO},
         }
         ep = export(Foo(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
-        with torch.no_grad():
-            with config.patch({"always_keep_tensor_constants": True}):
-                torch._inductor.aot_compile(ep.module(), inputs)
+        with (
+            torch.no_grad(),
+            config.patch({"aot_inductor.use_consts_asm_build": False}),
+        ):
+            torch._inductor.aot_compile(ep.module(), inputs)
         self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
 
 
