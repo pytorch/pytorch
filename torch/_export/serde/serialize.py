@@ -24,6 +24,7 @@ import sympy
 
 import torch
 import torch.export.exported_program as ep
+from torch._C._dynamo.guards import AutocastState
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -1653,6 +1654,10 @@ class ExportedProgramSerializer(metaclass=Final):
             assert n not in constants
             constants[n] = t
 
+        autocast_state = None
+        if exported_program._autocast_state is not None:
+            autocast_state = exported_program._autocast_state.__getstate__()
+
         serialized_ep = ExportedProgram(
             graph_module=serialized_graph_module,
             opset_version=self.opset_version,
@@ -1663,6 +1668,7 @@ class ExportedProgramSerializer(metaclass=Final):
             ),
             verifiers=[v.dialect for v in exported_program.verifiers],
             torch_version=torch.__version__,
+            autocast_state=autocast_state,
         )
 
         # Test canonical form is well defined.
@@ -2882,6 +2888,11 @@ class ExportedProgramDeserializer(metaclass=Final):
             res.names_to_symbols,
         )
 
+        autocast_state = None
+        if exported_program.autocast_state is not None:
+            autocast_state = AutocastState()
+            autocast_state.__setstate__(exported_program.autocast_state)
+
         result = ep.ExportedProgram(
             root=res.graph_module,
             graph=res.graph_module.graph,
@@ -2892,6 +2903,7 @@ class ExportedProgramDeserializer(metaclass=Final):
             example_inputs=res.example_inputs,
             constants=res.constants,
             verifiers=[load_verifier(v) for v in exported_program.verifiers],
+            autocast_state=autocast_state,
         )
         log.debug("\n[deserialize]: %s", result)
         return result

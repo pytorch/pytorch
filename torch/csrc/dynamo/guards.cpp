@@ -572,6 +572,8 @@ static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
 };
 
 struct AutocastState {
+  PyObject_HEAD
+
   static constexpr auto& DEVICES = at::autocast::_AUTOCAST_SUPPORTED_DEVICES;
   std::array<bool, DEVICES.size()> enabled{};
   std::array<at::ScalarType, DEVICES.size()> dtype{};
@@ -586,8 +588,12 @@ struct AutocastState {
   }
 
   bool operator==(const AutocastState& o) const {
+    return this->check(o, true);
+  }
+
+  bool check(const AutocastState &o, const bool check_cache_enabled) const {
     for (size_t i = 0; i < DEVICES.size(); i++) {
-      // If disabled audocast, autocast_dtype comparison not occur
+      // If disabled autocast, autocast_dtype comparison not occur
       if (enabled[i] == false && o.enabled[i] == false) {
         continue;
       }
@@ -595,10 +601,29 @@ struct AutocastState {
         return false;
       }
     }
-    if (cache_enabled != o.cache_enabled) {
+    if (check_cache_enabled && cache_enabled != o.cache_enabled) {
       return false;
     }
     return true;
+  }
+
+  std::string reason(const AutocastState& o, const bool check_cache_enabled) const {
+    std::ostringstream os;
+    for (size_t i = 0; i < DEVICES.size(); i++) {
+      // If disabled autocast, autocast_dtype comparison not occur
+      if (enabled[i] == false && o.enabled[i] == false) {
+        continue;
+      }
+      if (enabled[i] != o.enabled[i] || dtype[i] != o.dtype[i]) {
+        os << "autocast state (device: " << DEVICES[i] << ", dtype: " << dtype[i];
+        os << ", enabled: " << enabled[i] << ") does not match current state (device: " << DEVICES[i];
+        os << ", dtype: " << o.dtype[i] << ", enabled: " << o.enabled[i] << ")";
+      }
+    }
+    if (check_cache_enabled &&  cache_enabled != o.cache_enabled) {
+      os << "autocast cache_enabled: " << cache_enabled << " does not match current cache_enabled: " << o.cache_enabled;
+    }
+    return os.str();
   }
 
   template <typename T>
@@ -615,6 +640,86 @@ struct AutocastState {
     json_t.cache_enabled = json_j.at("cached_enabled");
   }
 };
+
+int AutocastState_init(AutocastState* self, PyObject* args, PyObject* kwds) {
+  // Call the C++ constructor using placement new
+  new (self) AutocastState();
+  return 0;
+}
+
+static PyObject* AutocastState_check(AutocastState* self, PyObject* args, PyObject* kwargs) {
+  static char* kwlist[] = {(char*)"check_cache_enabled", nullptr};
+  int check_cache_enabled = 1;  // Default to True
+  
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|p", kwlist, &check_cache_enabled)) {
+    return nullptr;
+  }
+
+  AutocastState current;
+  if (self->check(current, check_cache_enabled)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
+PyObject* AutocastState_reason(
+    AutocastState* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  static char* kwlist[] = {(char*)"check_cache_enabled", nullptr};
+  int check_cache_enabled = 1;  // Default to True
+  
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|p", kwlist, &check_cache_enabled)) {
+    return nullptr;
+  }
+
+  AutocastState current;
+  return PyUnicode_FromString(self->reason(current, check_cache_enabled).c_str());
+}
+
+PyObject* AutocastState_dump(
+  AutocastState* self,
+  PyObject* args,
+  PyObject* kwargs
+) {
+  return PyUnicode_FromString(nlohmann::json(*self).dump().c_str());
+}
+
+PyObject* AutocastState_load(
+  AutocastState* self,
+  PyObject* args,
+  PyObject* kwargs
+) {
+  char* json;
+  if (!PyArg_ParseTuple(args, "s", &json)) {
+    throw std::runtime_error("Cannot parse as json string.");
+  }
+  nlohmann::json::parse(json).get_to(*self);
+  Py_RETURN_NONE;
+}
+
+// Method table
+static PyMethodDef AutocastState_methods[] = {
+    {"check",
+     (PyCFunction)(void*)AutocastState_check,
+     METH_VARARGS | METH_KEYWORDS,
+     "Return true if autocast state was the same as at creation time"},
+     {"reason",
+     (PyCFunction)(void*)AutocastState_reason,
+     METH_VARARGS | METH_KEYWORDS,
+     "Return string reason for autocast state check failing"},
+     {"__getstate__",
+     (PyCFunction)(void*)AutocastState_dump,
+     METH_NOARGS,
+     "Return serialized json format"},
+     {"__setstate__",
+     (PyCFunction)(void*)AutocastState_load,
+     METH_VARARGS,
+     "Parse serialized json format"},
+    {nullptr}};
+static PyTypeObject AutocastStateType = { PyVarObject_HEAD_INIT(nullptr, 0) };
+
 
 // TODO (janimesh) - Remove the PyObject_HEAD part when C++ guard manager is
 // merged.
@@ -788,8 +893,8 @@ static PyMethodDef GlobalStateGuard_methods[] = {
      (PyCFunction)(void*)GlobalStateGuard_reason,
      METH_NOARGS,
      "Return string reason for guard check failing"},
-    {"__getstate__",
-     (PyCFunction)(void*)GlobalStateGuard_dump,
+     {"__getstate__",
+     (PyCFunction)(void*)AutocastState_dump,
      METH_NOARGS,
      "Return serialized json format"},
     {"__setstate__",
@@ -6170,6 +6275,18 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyType_Ready(&GlobalStateGuardType) < 0)
     return nullptr;
 
+  AutocastStateType.tp_name = "torch._C._dynamo.guards.AutocastState";
+  AutocastStateType.tp_basicsize = sizeof(AutocastState);
+  AutocastStateType.tp_itemsize = 0;
+  AutocastStateType.tp_flags = Py_TPFLAGS_DEFAULT;
+  AutocastStateType.tp_doc = "Guard on PyTorch autocast state";
+  AutocastStateType.tp_methods = AutocastState_methods;
+  AutocastStateType.tp_init = (initproc)AutocastState_init;
+  AutocastStateType.tp_new = PyType_GenericNew;
+
+  if (PyType_Ready(&AutocastStateType) < 0)
+    return nullptr;
+
   auto m = PyModule_Create(&_module);
   if (m == nullptr)
     return nullptr;
@@ -6189,6 +6306,13 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyModule_AddObject(
           m, "GlobalStateGuard", (PyObject*)&GlobalStateGuardType) < 0) {
     Py_DECREF(&GlobalStateGuardType);
+    Py_DECREF(m);
+    return nullptr;
+  }
+
+  Py_INCREF(&AutocastStateType);
+  if (PyModule_AddObject(m, "AutocastState", (PyObject*)&AutocastStateType) < 0) {
+    Py_DECREF(&AutocastStateType);
     Py_DECREF(m);
     return nullptr;
   }

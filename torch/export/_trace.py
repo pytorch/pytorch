@@ -16,6 +16,7 @@ import torch
 import torch._dynamo
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._C._dynamo.guards import AutocastState
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.db.logging import (
@@ -69,7 +70,7 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import log_export_usage
-from torch.export._unlift import _check_input_constraints_pre_hook
+from torch.export._unlift import _check_autocast_state_pre_hook, _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
     _combine_args,
@@ -1865,11 +1866,15 @@ def _non_strict_export(
                         # all forward hooks here. But the general logic for running them is
                         # complicated (see nn/module.py), and probably not worth duplicating.
                         # Instead we only look for, and run, an export-specific forward hook.
-                        if (
-                            _check_input_constraints_pre_hook
-                            in mod._forward_pre_hooks.values()
-                        ):
-                            _check_input_constraints_pre_hook(mod, args, kwargs)
+                        for hook in mod._forward_pre_hooks.values():
+                            if (
+                                hook is _check_input_constraints_pre_hook
+                                or (
+                                    isinstance(hook, functools.partial)
+                                    and hook.func is _check_autocast_state_pre_hook
+                                )
+                            ):
+                                hook(mod, args, kwargs)
                         with torch.fx.traceback.preserve_node_meta():
                             args = (*args, *kwargs.values())
                             tree_out = torch.fx.Interpreter(mod).run(*args)
@@ -2077,6 +2082,7 @@ def _export_for_training(
         example_inputs=(args, kwargs),
         constants=export_artifact.aten.constants,
         verifiers=[TrainingIRVerifier],
+        autocast_state=AutocastState(),
     )
 
     verify_additional_inputs(exported_program)
@@ -2242,6 +2248,7 @@ def _export(
         example_inputs=(args, kwargs),
         constants=export_artifact.aten.constants,
         verifiers=[Verifier],
+        autocast_state=AutocastState(),
     )
 
     dtrace_structured("exported_program", payload_fn=lambda: str(exported_program))

@@ -88,6 +88,7 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
+from torch.export._unlift import _check_autocast_state_pre_hook
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
@@ -2686,6 +2687,14 @@ def _aoti_flatten_inputs(
             "but actually got inputs with tree spec of: \n"
             f"{received_spec}"
         )
+
+    # run autocast state hook
+    for hook in gm._forward_pre_hooks.values():
+        if (
+            isinstance(hook, functools.partial)
+            and hook.func is _check_autocast_state_pre_hook
+        ):
+            hook(gm, args, kwargs)
 
     options = (
         {

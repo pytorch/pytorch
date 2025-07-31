@@ -1313,6 +1313,25 @@ graph():
         ep_output = ep.module()(seq_embeddings, mask, exp)
         self.assertTrue(torch.allclose(output, ep_output))
 
+    @testing.expectedFailureCppSerDes
+    def test_autocast_state_guard(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        inps = (torch.randn(4, 6), torch.randn(6, 8, dtype=torch.bfloat16))
+        ep = export(Foo(), inps)
+        error_msg = (
+            r"Current autocast state does not match export-time state.*"
+            r"autocast state .* dtype: BFloat16.*enabled: 0.*"
+            r"current state .* dtype: BFloat16.*enabled: 1.*"
+        )
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            with self.assertRaisesRegex(RuntimeError, error_msg):  # runtime
+                ep.module()(*inps)
+            with self.assertRaisesRegex(RuntimeError, error_msg):  # retrace
+                export(ep.module(), inps)
+
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x, y):

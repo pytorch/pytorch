@@ -435,6 +435,7 @@ class ExportedProgram:
     schema_version: Annotated[SchemaVersion, 60]
     verifiers: Annotated[list[str], 70] = field(default_factory=list)
     torch_version: Annotated[str, 80] = "<=2.4"
+    autocast_state: Annotated[Optional[str], 90] = None
 
 
 #########################################################################

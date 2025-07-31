@@ -1889,6 +1889,31 @@ def forward(self, x):
         s0 = next(iter(ep.graph.nodes)).meta["val"].size(0)
         self.assertEqual(shape_env.var_to_range[s0.node.expr].lower, 0)
 
+    def test_autocast_state_serialized(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        inps = (torch.randn(4, 6), torch.randn(6, 8, dtype=torch.bfloat16))
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            ep = torch.export.export(Foo(), inps)
+
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            (
+                r"Current autocast state does not match export-time state.*"
+                r"autocast state .* dtype: BFloat16.*enabled: 1.*"
+                r"current state .* dtype: BFloat16.*enabled: 0.*"
+            ),
+        ):
+            loaded_ep.module()(*inps)
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            loaded_ep.module()(*inps)
+
 
 if __name__ == "__main__":
     run_tests()
