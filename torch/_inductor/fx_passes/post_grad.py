@@ -768,7 +768,6 @@ def is_valid_mm_plus_mm(match: Match):
         if (
             match.kwargs["mat1"].meta["val"].device.type == "cuda"
             and config.cuda_backend == "triton"
-            and (m1 >= 16 and k1 >= 16 and n1 >= 16 and k3 >= 16)
         ):
            return False
 
@@ -1519,18 +1518,26 @@ def native_matmul_pass(graph: torch.fx.Graph):
         if not config.triton.enable_native_matmul:
             return False
         
-        # Currently only enable native matmul for triton on Nvidia GPU.
+        # Currently only enable native matmul for triton on GPU.
         if not (
             match.kwargs["mat1"].meta["val"].device.type == "cuda" 
             and config.cuda_backend == "triton"
         ) :
             return False
+        
+        mat1 = match.kwargs["mat1"].meta["val"]
+        mat2 = match.kwargs["mat2"].meta["val"]
+        
+        # Currently, tl.dot only supports following dtypes
+        triton_supported_dtype = [torch.int8, torch.uint8, torch.float16, torch.bfloat16, torch.float32]
+        if not mat1.dtype in triton_supported_dtype :
+            return False
+        if not mat2.dtype in triton_supported_dtype :
+            return False
 
         # (..., M, K) @ (..., K, N)
-        mat1_shape = match.kwargs["mat1"].meta["val"].shape
-        mat2_shape = match.kwargs["mat2"].meta["val"].shape
-        M, K = mat1_shape[-2], mat1_shape[-1]
-        K, N = mat2_shape[-2], mat2_shape[-1]
+        M, K = mat1.shape[-2], mat1.shape[-1]
+        K, N = mat2.shape[-2], mat2.shape[-1]
  
         # if shape is unbacked symint, skip
         if any([has_free_unbacked_symbols(var) for var in [M,K,N]]) :
