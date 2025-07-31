@@ -8,7 +8,6 @@ from lib.utils import (
     get_existing_abs_path,
     get_env,
     get_post_build_pinned_commit,
-    remove_dir,
     clone_vllm,
     run,
 )

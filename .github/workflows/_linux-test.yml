@@ -401,7 +401,6 @@ jobs:
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             docker exec -t "${container_name}" sh -c "python3 -m pip install -r .ci/docker/requirements-ci.txt"
           fi
-
           docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
       - name: Upload pytest cache if tests failed
