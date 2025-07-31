@@ -2650,16 +2650,6 @@ class DeviceCachingAllocator {
     }
   }
 
-  static size_t get_allocation_size(size_t size) {
-    if (size <= kSmallSize) {
-      return kSmallBuffer;
-    } else if (size < kMinLargeAlloc) {
-      return kLargeBuffer;
-    } else {
-      return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
-    }
-  }
-
   bool get_free_block(AllocParams& p) {
     BlockPool& pool = *p.pool;
 

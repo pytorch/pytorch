@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/AllocatorConfig.h>
 
 namespace c10::CachingDeviceAllocator {
 
@@ -59,19 +60,21 @@ struct DeviceStats {
 };
 
 inline size_t get_round_size(size_t size) {
+  using namespace c10::CachingAllocator;
   if (size < kMinBlockSize) {
     return kMinBlockSize;
+  }
+
+  auto divisions = AcceleratorAllocatorConfig::roundup_power2_divisions(size);
+  if (divisions > 1 && size > (kMinBlockSize * divisions)) {
+    return roundup_power2_next_division(size, divisions);
   } else {
-    auto divisions = AcceleratorAllocatorConfig::roundup_power2_divisions(size);
-    if (divisions > 1 && size > (kMinBlockSize * divisions)) {
-      return roundup_power2_next_division(size, divisions);
-    } else {
-      return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
-    }
+    return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
   }
 }
 
 inline size_t get_allocation_size(size_t size) {
+  using namespace c10::CachingAllocator;
   if (size <= kSmallSize) {
     return kSmallBuffer;
   } else if (size < kMinLargeAlloc) {
