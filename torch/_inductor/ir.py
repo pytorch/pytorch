@@ -6106,7 +6106,7 @@ class ExternKernel(InputsKernel):
                 f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
             )
 
-    def codegen_alignment_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if config.alignment_asserts and not V.graph.cpp_wrapper:
             name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
@@ -6350,7 +6350,9 @@ class TMADescriptor(ExternKernel):
             cls._CACHE[key] = cls._create_impl(tensor, tma_meta)
         return cls._CACHE[key]
 
-    def __init__(self, tensor: IRNode, inputs, constant_args):  # type: ignore[no-untyped-def]
+    def __init__(
+        self, tensor: IRNode, inputs: Sequence[Any], constant_args: Sequence[Any]
+    ) -> None:
         super().__init__(
             None,
             # link back to the underlying tensor in terms of ownership
@@ -6466,14 +6468,14 @@ class SubgraphBuffer(ExternKernel):
 
         with V.set_graph_handler(self.subgraph):
             # Don't bother autotuning on Triton here
-            with inductor_config.patch(  # type: ignore[no-untyped-def]
+            with inductor_config.patch(
                 max_autotune=False,
                 max_autotune_gemm=False,
                 max_autotune_gemm_backends="ATEN",
             ):
                 self.subgraph.run(*self.example_inputs)
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         class CodegenGraph:
             def __init__(self, graph: GraphLowering):
                 self.graph = graph
@@ -7168,7 +7170,7 @@ class FallbackKernel(ExternKernelAlloc):
     inplace aten ops, and mutating ops that are auto-functionalizable.
     """
 
-    def __init__(  # type: ignore[no-untyped-def]
+    def __init__(
         self,
         layout: OutputSpec,
         kernel: _OpOverloads,
@@ -7720,7 +7722,7 @@ class MultiOutputLayout(OutputSpec):
 
 
 class MultiOutput(ExternKernel):
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_multi_output(self)
         if not self.skip_size_stride_alignment_checks:
             self.codegen_size_asserts(wrapper)
@@ -8797,7 +8799,7 @@ class _AllReduce_Kernel(_CollectiveKernel):
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce_")
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 
@@ -8806,16 +8808,16 @@ class _AllReduce_Kernel(_CollectiveKernel):
 
 
 class _AllReduceKernel(_CollectiveKernel):
-    def __init__(  # type: ignore[no-untyped-def]
+    def __init__(
         self,
-        layout,
-        kernel,
-        tensor_args,
-        nontensor_args,
-        unflatten_args,
-        kwargs=None,
+        layout: OutputSpec,
+        kernel: _OpOverloads,
+        tensor_args: Sequence[IRNode],
+        nontensor_args: Sequence[Any],
+        unflatten_args: Callable[..., Any],
+        kwargs: Optional[dict[str, Any]] = None,
         *,
-        unbacked_bindings=None,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
             layout,
@@ -8828,7 +8830,7 @@ class _AllReduceKernel(_CollectiveKernel):
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce")
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 
@@ -8837,16 +8839,16 @@ class _AllReduceKernel(_CollectiveKernel):
 
 
 class _WaitKernel(_CollectiveKernel):
-    def __init__(  # type: ignore[no-untyped-def]
+    def __init__(
         self,
-        layout,
-        kernel,
-        tensor_args,
-        nontensor_args,
-        unflatten_args,
-        kwargs=None,
+        layout: OutputSpec,
+        kernel: _OpOverloads,
+        tensor_args: Sequence[IRNode],
+        nontensor_args: Sequence[Any],
+        unflatten_args: Callable[..., Any],
+        kwargs: Optional[dict[str, Any]] = None,
         *,
-        unbacked_bindings=None,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
             layout,
@@ -8859,7 +8861,7 @@ class _WaitKernel(_CollectiveKernel):
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_wait_tensor")
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 

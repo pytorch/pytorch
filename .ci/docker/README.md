@@ -104,7 +104,6 @@ If your new Docker image needs a library installed from a specific pinned commit
    ```bash
    pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-new1)
      CUDA_VERSION=12.8.1
-     CUDNN_VERSION=9
      ANACONDA_PYTHON_VERSION=3.12
      GCC_VERSION=11
      VISION=yes
