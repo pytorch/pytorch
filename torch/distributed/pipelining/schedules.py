@@ -1206,7 +1206,7 @@ def _add_send_recv(
     # its forward and backward components
     # We need to figure out how to do the communication
     for rank in compute_actions:
-        new_actions = []
+        new_actions: list[_Action] = []
         for action in compute_actions[rank]:
             if action is not None and action.sub_actions is not None:
                 # Replace OVERLAP_F_B action with its sub_actions
