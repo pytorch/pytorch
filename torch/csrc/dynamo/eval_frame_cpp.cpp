@@ -7,10 +7,6 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 
-#include <cstring>
-#include <unordered_map>
-#include <vector>
-
 extern "C" {
 extern PyObject* guard_complete_hook;
 }
@@ -142,6 +138,13 @@ PyObject* dynamo__custom_eval_frame(
   };
 
   auto fail = [&]() { clear_old_frame_if_python_312_plus(tstate, frame); };
+
+#if IS_PYTHON_3_12_PLUS
+  if (tstate->tracing > 0) {
+    eval_default();
+    return eval_result;
+  }
+#endif
 
   ExtraState* extra = get_extra_state(F_CODE(frame));
 
