@@ -114,10 +114,20 @@ class ScheduleTest(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize(
         "ScheduleClass",
-        [ScheduleGPipe, Schedule1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS],
+        [
+            ScheduleGPipe,
+            Schedule1F1B,
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleInterleavedZeroBubble,
+        ],
     )
     def test_eval_inference_mode(self, ScheduleClass):
-        if ScheduleClass in [ScheduleInterleaved1F1B, ScheduleLoopedBFS]:
+        if ScheduleClass in [
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleInterleavedZeroBubble,
+        ]:
             # Multi-stage schedules
             stages_per_rank = 2
             n_stages = stages_per_rank * self.world_size
@@ -154,7 +164,9 @@ class ScheduleTest(MultiProcContinousTest):
                 stage_module.zero_grad()
 
             if self.rank == 0:
-                schedule.eval(x)
+                # Support with and without no_grad()
+                with torch.no_grad():
+                    schedule.eval(x)
             elif self.rank == self.world_size - 1:
                 losses = []
                 schedule.eval(target=target, losses=losses)
@@ -215,7 +227,9 @@ class ScheduleTest(MultiProcContinousTest):
             stage_module.zero_grad()
 
             if self.rank == 0:
-                schedule.eval(x)
+                # Support with and without no_grad()
+                with torch.no_grad():
+                    schedule.eval(x)
             elif self.rank == self.world_size - 1:
                 losses = []
                 schedule.eval(target=target, losses=losses)

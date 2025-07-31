@@ -1736,6 +1736,11 @@ class VariableBuilder:
     def mark_static_input(self, value: torch.Tensor, guard: bool):
         from ..decorators import mark_static_address
 
+        # See [Note] Static Addresses and Precompile
+        # https://github.com/pytorch/pytorch/issues/159228
+        if torch._dynamo.config.caching_precompile:
+            return
+
         static_inputs_log.debug(
             "Marking static input %s, id: %s)", self.source.name(), id(value)
         )
