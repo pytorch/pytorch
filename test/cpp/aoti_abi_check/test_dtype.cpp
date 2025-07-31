@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/Float8_e4m3fn.h>
-#include <c10/util/Float8_e4m3fnuz.h>
-#include <c10/util/Float8_e5m2.h>
-#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/complex.h>
 #include <torch/headeronly/util/BFloat16.h>
 #include <torch/headeronly/util/Float4_e2m1fn_x2.h>
-
+#include <torch/headeronly/util/Float8_e4m3fn.h>
+#include <torch/headeronly/util/Float8_e4m3fnuz.h>
+#include <torch/headeronly/util/Float8_e5m2.h>
+#include <torch/headeronly/util/Float8_e5m2fnuz.h>
+#include <torch/headeronly/util/Float8_e8m0fnu.h>
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/bits.h>
 #include <torch/headeronly/util/qint32.h>
@@ -31,12 +31,12 @@ TEST(TestDtype, TestBFloat16) {
 }
 
 TEST(TestDtype, TestFloat8_e4m3fn) {
-  c10::Float8_e4m3fn a = 1.0f;
-  c10::Float8_e4m3fn b = 2.0f;
-  c10::Float8_e4m3fn add = 3.0f;
-  c10::Float8_e4m3fn sub = -1.0f;
-  c10::Float8_e4m3fn mul = 2.0f;
-  c10::Float8_e4m3fn div = 0.5f;
+  torch::headeronly::Float8_e4m3fn a = 1.0f;
+  torch::headeronly::Float8_e4m3fn b = 2.0f;
+  torch::headeronly::Float8_e4m3fn add = 3.0f;
+  torch::headeronly::Float8_e4m3fn sub = -1.0f;
+  torch::headeronly::Float8_e4m3fn mul = 2.0f;
+  torch::headeronly::Float8_e4m3fn div = 0.5f;
 
   EXPECT_EQ(a + b, add);
   EXPECT_EQ(a - b, sub);
@@ -45,12 +45,12 @@ TEST(TestDtype, TestFloat8_e4m3fn) {
 }
 
 TEST(TestDtype, TestFloat8_e4m3fuz) {
-  c10::Float8_e4m3fnuz a = 1.0f;
-  c10::Float8_e4m3fnuz b = 2.0f;
-  c10::Float8_e4m3fnuz add = 3.0f;
-  c10::Float8_e4m3fnuz sub = -1.0f;
-  c10::Float8_e4m3fnuz mul = 2.0f;
-  c10::Float8_e4m3fnuz div = 0.5f;
+  torch::headeronly::Float8_e4m3fnuz a = 1.0f;
+  torch::headeronly::Float8_e4m3fnuz b = 2.0f;
+  torch::headeronly::Float8_e4m3fnuz add = 3.0f;
+  torch::headeronly::Float8_e4m3fnuz sub = -1.0f;
+  torch::headeronly::Float8_e4m3fnuz mul = 2.0f;
+  torch::headeronly::Float8_e4m3fnuz div = 0.5f;
 
   EXPECT_EQ(a + b, add);
   EXPECT_EQ(a - b, sub);
@@ -59,12 +59,12 @@ TEST(TestDtype, TestFloat8_e4m3fuz) {
 }
 
 TEST(TestDtype, TestFloat8_e5m2) {
-  c10::Float8_e5m2 a = 1.0f;
-  c10::Float8_e5m2 b = 2.0f;
-  c10::Float8_e5m2 add = 3.0f;
-  c10::Float8_e5m2 sub = -1.0f;
-  c10::Float8_e5m2 mul = 2.0f;
-  c10::Float8_e5m2 div = 0.5f;
+  torch::headeronly::Float8_e5m2 a = 1.0f;
+  torch::headeronly::Float8_e5m2 b = 2.0f;
+  torch::headeronly::Float8_e5m2 add = 3.0f;
+  torch::headeronly::Float8_e5m2 sub = -1.0f;
+  torch::headeronly::Float8_e5m2 mul = 2.0f;
+  torch::headeronly::Float8_e5m2 div = 0.5f;
 
   EXPECT_EQ(a + b, add);
   EXPECT_EQ(a - b, sub);
@@ -73,17 +73,22 @@ TEST(TestDtype, TestFloat8_e5m2) {
 }
 
 TEST(TestDtype, TestFloat8_e5m2fnuz) {
-  c10::Float8_e5m2fnuz a = 1.0f;
-  c10::Float8_e5m2fnuz b = 2.0f;
-  c10::Float8_e5m2fnuz add = 3.0f;
-  c10::Float8_e5m2fnuz sub = -1.0f;
-  c10::Float8_e5m2fnuz mul = 2.0f;
-  c10::Float8_e5m2fnuz div = 0.5f;
+  torch::headeronly::Float8_e5m2fnuz a = 1.0f;
+  torch::headeronly::Float8_e5m2fnuz b = 2.0f;
+  torch::headeronly::Float8_e5m2fnuz add = 3.0f;
+  torch::headeronly::Float8_e5m2fnuz sub = -1.0f;
+  torch::headeronly::Float8_e5m2fnuz mul = 2.0f;
+  torch::headeronly::Float8_e5m2fnuz div = 0.5f;
 
   EXPECT_EQ(a + b, add);
   EXPECT_EQ(a - b, sub);
   EXPECT_EQ(a * b, mul);
   EXPECT_EQ(a / b, div);
+}
+
+TEST(TestDtype, TestFloat8_e8m0fnu) {
+  torch::headeronly::Float8_e8m0fnu a = 1.0f;
+  ASSERT_FALSE(a.isnan());
 }
 
 TEST(TestDtype, TestFloat4) {
