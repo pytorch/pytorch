@@ -191,9 +191,6 @@ def _is_fake_dep(d):
 def _reorder_communication_preserving_peak_memory_internal(
     snodes: list[BaseSchedulerNode],
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, ReorderInfo]]:
-    from torch._inductor.scheduler import GroupedSchedulerNode
-
-    original_snodes_num = len(snodes)
     """
     Internal testing helper that also returns debug info.
     Returns:
