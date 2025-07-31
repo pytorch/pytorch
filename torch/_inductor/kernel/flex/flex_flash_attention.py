@@ -18,12 +18,16 @@ except ImportError:
     CUTE_AVAILABLE = False
 
 
-def _use_flex_flash_attention(subgraph, mask_graph):
+def _use_flex_flash_attention(subgraph, mask_graph, kernel_options):
     """Determine if we can use flex flash attention for the given inputs."""
     if not CUTE_AVAILABLE:
         return False
+    if kernel_options.get("disable_flash", False):
+        return False
+
     # TODO: essentially fully dense attention
     if subgraph.graph is None and mask_graph.graph is None:
+        print("using flash")
         return True
     return False
 

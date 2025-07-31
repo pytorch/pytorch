@@ -198,6 +198,9 @@ class FlexKernelOptions(TypedDict, total=False):
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
+    disable_flash: NotRequired[bool]
+    """ If True, we will not attempt to run the cute-dsl flash attention kernel"""
+
 
 class _ModificationType(Enum):
     """Enum for the type of modification function.
