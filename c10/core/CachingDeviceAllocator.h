@@ -81,10 +81,10 @@ using CaptureId_t = unsigned long long;
 using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
 
 using OutOfMemoryObserver = std::function<void(
-  int64_t device,
-  size_t allocated,
-  size_t device_total,
-  size_t device_free)>;
+    int64_t device,
+    size_t allocated,
+    size_t device_total,
+    size_t device_free)>;
 
 enum struct RecordContext {
   NEVER = 0,
@@ -733,11 +733,14 @@ struct TraceEntry {
     FREE_COMPLETED, // The allocator might have to delay a free because
                     // it is still in use on another stream via record_stream
                     // This event is generated when a free actually completes.
-    SEGMENT_ALLOC, // a call to device allocation like `cudaMalloc` to get more memory from the OS
-    SEGMENT_FREE, // a call to device deallocation like `cudaFree` to return memory to the OS (e.g. to
-                  // defragment or empty_caches)
-    SEGMENT_MAP, // a call to virtual memory map like `cuMemMap` (used with expandable_segments)
-    SEGMENT_UNMAP, // a call to virtual memory unmap like `cuMemUnmap` (used with expandable segments)
+    SEGMENT_ALLOC, // a call to device allocation like `cudaMalloc` to get more
+                   // memory from the OS
+    SEGMENT_FREE, // a call to device deallocation like `cudaFree` to return
+                  // memory to the OS (e.g. to defragment or empty_caches)
+    SEGMENT_MAP, // a call to virtual memory map like `cuMemMap` (used with
+                 // expandable_segments)
+    SEGMENT_UNMAP, // a call to virtual memory unmap like `cuMemUnmap` (used
+                   // with expandable segments)
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
     OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
@@ -849,11 +852,84 @@ template <
 struct CachingDeviceAllocatorImpl {
   virtual ~CachingDeviceAllocatorImpl() = default;
 
-  BlockT* malloc(c10::DeviceIndex device, size_t size, c10::Stream stream) {}
+  CachingDeviceAllocatorImpl(c10::DeviceIndex device_index)
+      : device_index_(device_index), large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
+    stats.max_split_size =
+        static_cast<int64_t>(AcceleratorConfig::max_split_size());
+    context_recorder_.store(nullptr);
+  }
+
+  BlockT* malloc(c10::DeviceIndex device, size_t size, c10::Stream stream) {
+    // done outside the lock because we don't know what locks the recorder needs
+    // to have...
+    auto context = maybeGatherContext(RecordContext::STATE);
+
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+
+    if (C10_LIKELY(captures_underway.size() > 0)) {
+      // Processes end-of-life events for outstanding allocations used on
+      // multiple streams (checks if their GPU-side uses are complete and
+      // recycles their memory if so)
+      //
+      // Q. Why skip process_events if a capture might be underway?
+      // A. process_events involves cudaEventQueries, illegal during CUDA graph
+      //    capture.
+      //    Dumb simple solution: defer reclaiming these allocations until after
+      //    capture. Cross-stream memory use is uncommon, so the deferral's
+      //    effect on memory use during capture should be small.
+      process_events(context);
+    }
+    size_t size = round_size(orig_size);
+    auto& pool = get_pool(size, stream);
+  }
 
  private:
+
+  /* internal functions */
+
+  // This function takes the size and number of divisions argument and rounds
+  // up the size argument for the nearest power-of-2 division.
+  // For example, if we need to round-up 1200 and number of divisions is 4,
+  // the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
+  // them, the values are 1024, 1280, 1536, and 1792. So the function will
+  // return 1280 as the nearest ceiling of power-2 division.
+  static size_t roundup_power2_next_division(size_t size, size_t divisions) {
+    if (llvm::isPowerOf2_64(size)) {
+      return size;
+    }
+
+    TORCH_CHECK(divisions >= 2, "Only 2 or more divisions are supported");
+
+    // divide the space between these 2's power into equal divisions
+    // If division is zero, return the power-of-2 ceiling.
+    size_t power2_floor = llvm::PowerOf2Floor(size);
+    size_t power2_divison =
+        power2_floor >> (63 - llvm::countLeadingZeros(divisions));
+    if (C10_UNLIKELY(power2_divison == 0)) {
+      return (power2_floor << 1);
+    }
+    size_t round_size_floor = size & (~(power2_divison - 1));
+    return (round_size_floor == size) ? size
+                                      : round_size_floor + power2_divison;
+  }
+  
+  static size_t round_size(size_t size) {
+    if (size < kMinBlockSize) {
+      return kMinBlockSize;
+    } else {
+      auto divisions = AcceleratorConfig::roundup_power2_divisions(size);
+      if (divisions > 1 && size > (kMinBlockSize * divisions)) {
+        return roundup_power2_next_division(size, divisions);
+      } else {
+        return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
+      }
+    }
+  }
+
   // lock around all operations
   mutable std::recursive_mutex mutex;
+
+  c10::DeviceIndex device_index_;
 
   // device statistics
   CachingDeviceAllocator::DeviceStats stats;
@@ -882,9 +958,7 @@ struct CachingDeviceAllocatorImpl {
   std::vector<BlockT*> needs_events_deferred_until_no_capture;
 
   // outstanding cuda events
-  ska::flat_hash_map<
-      StreamT,
-      std::deque<std::pair<EventT, BlockT*>>>
+  ska::flat_hash_map<StreamT, std::deque<std::pair<EventT, BlockT*>>>
       block_events;
 
   // Tracks memory usage during garbage collection.
@@ -910,7 +984,10 @@ struct CachingDeviceAllocatorImpl {
   // Members specific to CUDA graphs
 
   // Private pools for CUDA graphs
-  ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool<BlockT>>, MempoolIdHash>
+  ska::flat_hash_map<
+      MempoolId_t,
+      std::unique_ptr<PrivatePool<BlockT>>,
+      MempoolIdHash>
       graph_pools;
   // Pools no longer referenced by any graph. Their BlockPools are eligible for
   // free_blocks. Can't be a vector or deque because we might erase entries in
@@ -926,7 +1003,8 @@ struct CachingDeviceAllocatorImpl {
 
   // mapping from block to a stream_set, containing streams on which the block
   // was used while cudagraph capturing
-  std::unordered_map<BlockT*, ska::flat_hash_set<StreamT>> block_to_cudagraph_stream_uses;
+  std::unordered_map<BlockT*, ska::flat_hash_set<StreamT>>
+      block_to_cudagraph_stream_uses;
 
   // thread local compile context for each device
   static thread_local std::stack<std::string> compile_context;
