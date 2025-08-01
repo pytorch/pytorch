@@ -1370,10 +1370,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # code and just returns the underlying `__func__`:
             # https://github.com/python/cpython/blob/3.11/Objects/funcobject.c#L1088-L1100
             if is_accessible_from_type_mro:
+                # Accessing from __dict__ does not resolve the descriptor, it
+                # returns a staticmethod object, so access the __func__
+                # attribute to get to the actual function.
                 source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
             func = subobj.__get__(self.value)
             return VariableTracker.build(tx, func, source)
         elif isinstance(subobj, classmethod):
+            if is_accessible_from_type_mro:
+                # Accessing from __dict__ does not resolve the descriptor, it
+                # returns a classmethod object, so access the __func__
+                # attribute to get to the actual function.
+                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
             return variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
             )
