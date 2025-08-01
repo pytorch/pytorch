@@ -1,14 +1,15 @@
 # mypy: allow-untyped-defs
+# mypy: disable-error-code=arg-type
 """Implementation of the Muon optimizer."""
 
 import math
 import warnings
 from dataclasses import dataclass
 from typing import Callable, cast, Iterable, MutableMapping, Optional
+from typing_extensions import TypeAlias
 
 import torch
 from torch import Tensor
-from typing_extensions import TypeAlias
 
 from .optimizer import _get_scalar_dtype, _to_scalar, Optimizer, ParamsT
 
@@ -25,7 +26,7 @@ class BaseMsignFnConfig:
 
 @dataclass
 class NewtonSchulzConfig(BaseMsignFnConfig):
-    """Configuration used by :func:`zeropower_via_newtonschulz`."""
+    # """Configuration used by :func:`zeropower_via_newtonschulz`."""
 
     coefficients: tuple[float, float, float] = (3.4445, -4.7750, 2.0315)
     ns_steps: int = 5
@@ -45,15 +46,15 @@ def zeropower_via_newtonschulz(G: Tensor, ns_config: BaseMsignFnConfig) -> Tenso
     where S' is diagonal with S_{ii}' ~ Uniform(0.5, 1.5), which turns out not to hurt model
     performance at all relative to UV^T, where USV^T = G is the SVD.
 
-    Implementeation referece: https://github.com/KellerJordan/Muon/blob/master/muon.py
+    Implementation reference: https://github.com/KellerJordan/Muon/blob/master/muon.py
     with suggestions by @jxbz, @leloykun, and @YouJiacheng.
     """
     ns_config = cast(NewtonSchulzConfig, ns_config)
     steps = ns_config.ns_steps
     coefficients = ns_config.coefficients
-    assert (
-        steps < 100
-    ), "Number of steps must be less than 100 for computational efficiency"
+    assert steps < 100, (
+        "Number of steps must be less than 100 for computational efficiency"
+    )
     assert len(G.shape) == 2, "Input tensor gradient must be a 2D matrix"
     assert len(coefficients) == 3, "Coefficients must be a tuple of exactly 3 values"
     a, b, c = coefficients[0], coefficients[1], coefficients[2]
@@ -142,11 +143,13 @@ class Muon(Optimizer):
                 if self.state[p]["use_muon"]:
                     assert p.ndim == 2, "Param optimized by Muon must be 2D."
         else:
-            # If no fqns are provided, use Muon for all parameters with 2D shape.
-            # Note: this may not be the expected behavior since some 2D
-            # parameters may not be intended to be optimized with Muon, for example Embedding.
             warnings.warn(
-                "No Muon params FQNs provided. Using Muon to optimize all 2D parameters."
+                "No Muon params FQNs provided. Using Muon to optimize all 2D parameters. "
+                "Note that this may not be the expected behavior since some 2D parameters "
+                "are not intended to be optimized with Muon, for example word embedding. "
+                "Optimizing these parameters with Muon may cause model performance degradation. "
+                "We recommend users to explicitly specify the muon_param_fqns for parameters "
+                "to be optimized by Muon."
             )
             for _, p in named_params:
                 self.state[p]["use_muon"] = p.ndim == 2

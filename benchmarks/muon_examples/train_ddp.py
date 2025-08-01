@@ -1,3 +1,7 @@
+"""
+Training script adopted from https://github.com/MoonshotAI/Moonlight.
+"""
+
 import math
 import os
 
@@ -178,7 +182,6 @@ class MoonshotMuon(torch.optim.Optimizer):
             ############################
 
             params = [p for p in group["params"] if self.state[p]["use_muon"]]
-            # import pdb; pdb.set_trace()
             lr = group["lr"]
             wd = group["wd"]
             momentum = group["momentum"]
