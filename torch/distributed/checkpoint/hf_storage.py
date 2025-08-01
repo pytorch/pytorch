@@ -10,7 +10,6 @@ from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     consolidate_safetensors_files,
 )
-from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
     _get_dtype,
@@ -219,7 +218,7 @@ class HuggingFaceStorageReader(FileSystemReader):
         super().__init__(path=path)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
-        from safetensors import safe_open
+        from safetensors import safe_open  # type: ignore[import]
         
         per_file: dict[str, list[ReadItem]] = {}
 
