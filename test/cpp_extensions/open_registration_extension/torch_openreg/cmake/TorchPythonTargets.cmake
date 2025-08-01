@@ -1,7 +1,6 @@
 if (WIN32)
   set(TORCH_PYTHON_IMPORTED_LOCATION "${PYTORCH_INSTALL_DIR}/lib/torch_python.lib")
   set(TORCH_PYTHON_LINK_LIBS
-    "${PYTORCH_INSTALL_DIR}/lib/libprotobuf.lib"
     "${PYTORCH_INSTALL_DIR}/lib/c10.lib"
     "${PYTORCH_INSTALL_DIR}/lib/torch_cpu.lib"
   )
@@ -10,7 +9,7 @@ if (WIN32)
   )
 else()
   set(TORCH_PYTHON_IMPORTED_LOCATION "${PYTORCH_INSTALL_DIR}/lib/libtorch_python.so")
-  set(TORCH_PYTHON_LINK_LIBS "protobuf::libprotobuf;c10;torch_cpu")
+  set(TORCH_PYTHON_LINK_LIBS "c10;torch_cpu")
   set(TORCH_PYTHON_LIBRARY_LINK
     "-Wl,--no-as-needed,\"\$<TARGET_FILE:torch_python>\" -Wl,--as-needed;"
     "\$<TARGET_PROPERTY:torch_python,INTERFACE_LINK_LIBRARIES>"
