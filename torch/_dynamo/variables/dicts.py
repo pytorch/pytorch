@@ -41,6 +41,7 @@ from ..utils import (
     dict_keys,
     dict_values,
     istype,
+    raise_args_mismatch,
     specialize_symnode,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -55,14 +56,6 @@ if TYPE_CHECKING:
 # [Adding a new supported class within the keys of ConstDictVarialble]
 # - Add its tracker type to is_hashable
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
-
-
-def raise_args_mismatch(tx, name):
-    raise_observed_exception(
-        TypeError,
-        tx,
-        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
-    )
 
 
 def was_instancecheck_override(obj):
@@ -98,6 +91,8 @@ def is_hashable(x):
         return x.as_proxy().node.meta.get("example_value") is not None
     elif isinstance(x, variables.TupleVariable):
         return all(is_hashable(e) for e in x.items)
+    elif isinstance(x, variables.FrozenDataClassVariable):
+        return all(is_hashable(e) for e in x.fields.values())
     elif (
         isinstance(x, variables.UserDefinedObjectVariable)
         and not was_instancecheck_override(x.value)
@@ -176,6 +171,14 @@ class ConstDictVariable(VariableTracker):
                 # Access the underlying value inside the referent_vt for the key representation
                 Hashable = ConstDictVariable._HashableTracker
                 return Hashable(self.vt.referent_vt).underlying_value
+            elif isinstance(self.vt, variables.FrozenDataClassVariable):
+                Hashable = ConstDictVariable._HashableTracker
+                fields_values = {
+                    k: Hashable(v).underlying_value for k, v in self.vt.fields.items()
+                }
+                return variables.FrozenDataClassVariable.HashWrapper(
+                    self.vt.python_type(), fields_values
+                )
             elif isinstance(self.vt, variables.UserDefinedObjectVariable):
                 # The re module in Python 3.13+ has a dictionary (_cache2) with
                 # an object as key (`class _ZeroSentinel(int): ...`):
@@ -241,13 +244,32 @@ class ConstDictVariable(VariableTracker):
         def make_hashable(key):
             return key if isinstance(key, Hashable) else Hashable(key)
 
-        dict_cls = dict if user_cls is collections.defaultdict else user_cls
+        dict_cls = self._get_dict_cls_from_user_cls(user_cls)
         self.items = dict_cls({make_hashable(x): v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = not is_from_local_source(self.source)
         self.original_items = items.copy()
         self.user_cls = user_cls
+
+    def _get_dict_cls_from_user_cls(self, user_cls):
+        accepted_dict_types = (dict, collections.OrderedDict, collections.defaultdict)
+
+        # avoid executing user code if user_cls is a dict subclass
+        if user_cls in accepted_dict_types:
+            dict_cls = user_cls
+        else:
+            # <Subclass, ..., dict, object>
+            dict_cls = next(
+                base for base in user_cls.__mro__ if base in accepted_dict_types
+            )
+        assert dict_cls in accepted_dict_types, dict_cls
+
+        # Use a dict instead as the call "defaultdict({make_hashable(x): v ..})"
+        # would fail as defaultdict expects a callable as first argument
+        if dict_cls is collections.defaultdict:
+            dict_cls = dict
+        return dict_cls
 
     def as_proxy(self):
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
@@ -697,8 +719,7 @@ class ConstDictVariable(VariableTracker):
             new_dict_vt.items.update(args[0].items)
             return new_dict_vt
         elif name == "__ior__":
-            r = self.call_method(tx, "__or__", args, kwargs)
-            self.call_method(tx, "update", [r], {})
+            self.call_method(tx, "update", args, kwargs)
             return self
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -1225,6 +1246,11 @@ class DictViewVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
+
+    def call_obj_hasattr(self, tx, name):
+        if name in self.python_type().__dict__:
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
 
     def call_method(
         self,
