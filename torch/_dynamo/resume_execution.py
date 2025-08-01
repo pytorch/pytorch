@@ -285,11 +285,6 @@ def _load_tuple_and_call(tup: tuple[Any, ...]) -> list[Instruction]:
     return insts
 
 
-def _if_non_empty(dummy: Any, fns: Any) -> None:
-    if fns:
-        dummy
-
-
 class ContinueExecutionCache:
     cache = ExactWeakKeyDictionary()
     generated_code_metadata = ExactWeakKeyDictionary()
