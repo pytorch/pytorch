@@ -3970,8 +3970,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         optimize_mem = V.graph.is_inference or V.graph.is_backward
 
         inductor_meta = {
-            # Triton will not accept an OrderedSet for autotune_hints
             "grid_type": self._get_grid_type().__name__,
+            # Triton will not accept an OrderedSet for autotune_hints
             "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
