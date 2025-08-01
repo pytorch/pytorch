@@ -1,9 +1,13 @@
 # mypy: allow-untyped-defs
 """Call into flash-attention 4 for flexattention"""
 
-import torch
+from typing import Any
 
-from ...ir import FallbackKernel, TensorBox
+import torch
+from torch.fx import GraphModule
+
+from ...ir import FallbackKernel, ShapeAsConstantBuffer, Subgraph, TensorBox
+from .common import SubgraphResults
 
 
 aten = torch.ops.aten
@@ -18,17 +22,34 @@ except ImportError:
     CUTE_AVAILABLE = False
 
 
-def _use_flex_flash_attention(subgraph, mask_graph, kernel_options):
+def is_trivial_graph(graph_module: GraphModule, is_score_graph: bool):
+    """Check if the flex graphs are trivial"""
+    graph = graph_module.graph
+    nodes = list(graph.nodes)
+    # Check if it's just placeholder -> output
+    placeholders = [n for n in nodes if n.op == "placeholder"]
+    output = [n for n in nodes if n.op == "output"]
+    assert len(output) == 1, "Got graph w/ multiple outputs"
+    output_val = output[0].args[0]
+    if is_score_graph:
+        return len(placeholders) == 5 and output_val == placeholders[0]
+    # mask mod graph is empty if we have 4 inputs and full_default output
+    return len(placeholders) == 4 and output_val.target == torch.ops.aten.full.default
+
+
+def _use_flex_flash_attention(
+    subgraph: Subgraph, mask_graph: Subgraph, kernel_options: dict[str, Any]
+) -> bool:
     """Determine if we can use flex flash attention for the given inputs."""
     if not CUTE_AVAILABLE:
         return False
     if kernel_options.get("disable_flash", False):
         return False
-
-    # TODO: essentially fully dense attention
-    if subgraph.graph is None and mask_graph.graph is None:
-        print("using flash")
+    if is_trivial_graph(subgraph.graph_module, True) and is_trivial_graph(
+        mask_graph.graph_module, False
+    ):
         return True
+
     return False
 
 
@@ -78,17 +99,17 @@ def flex_flash_attn_fwd_fake(
 
 
 def create_flex_flash_attention_kernel(
-    query,
-    key,
-    value,
-    block_mask,
-    scale,
-    kernel_options,
-    subgraph_buffer,
-    mask_graph_buffer,
-    score_mod_other_buffers,
-    mask_mod_other_buffers,
-):
+    query: TensorBox,
+    key: TensorBox,
+    value: TensorBox,
+    block_mask: tuple[Any, ...],
+    scale: float,
+    kernel_options: dict[str, Any],
+    subgraph_buffer: SubgraphResults,
+    mask_graph_buffer: SubgraphResults,
+    score_mod_other_buffers: list[TensorBox],
+    mask_mod_other_buffers: list[TensorBox],
+) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox | ShapeAsConstantBuffer]:
     """Create a flex flash attention kernel."""
     if not CUTE_AVAILABLE:
         raise RuntimeError("CUTE flash attention not available")
