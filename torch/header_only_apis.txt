@@ -91,3 +91,8 @@ bits2x4
 bits4x2
 bits8
 bits16
+
+# torch/headeronly/core/ScalarType.h
+NumScalarTypes
+ScalarType
+# dummy_int1_7_t, dummy_uint1_7_t tested through ScalarType
