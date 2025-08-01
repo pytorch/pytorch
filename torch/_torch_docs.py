@@ -10747,7 +10747,10 @@ Args:
     other (Tensor or Number): the tensor or number to subtract from :attr:`input`.
 
 Keyword args:
-    alpha (Number): the multiplier for :attr:`other`.
+    alpha (Number): the multiplier for :attr:`other`. Note that the type of :attr:`alpha`
+                    should meet with the dtype of :attr:`input`. Specially, for floating
+                    point input tensors, argument :attr:`alpha` could be either a floating
+                    point number or an integer.
     {out}
 
 Example::
