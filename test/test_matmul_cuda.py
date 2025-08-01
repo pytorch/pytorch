@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfRocmVersionLessThan,
     TEST_CUDA,
     TEST_WITH_ROCM,
@@ -907,6 +908,7 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    @skipIfRocmArch("gfx950")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
     @parametrize("use_fast_accum", [True, False])
@@ -1012,6 +1014,7 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+    @skipIfRocmArch("gfx950")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
     @parametrize("base_dtype", [torch.bfloat16])
