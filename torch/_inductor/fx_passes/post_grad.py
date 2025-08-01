@@ -661,7 +661,7 @@ def lazy_init():
         extra_check=prepare_softmax_extra_check,
     )
 
-    register_addmm_activation_fusion()
+    # register_addmm_activation_fusion()
 
 
 @functools.cache
@@ -703,18 +703,21 @@ def register_addmm_activation_fusion():
 def is_valid_addmm_activation_fusion(match):
     if config.max_autotune_gemm:
         return False
-    input = match.kwargs["input"].meta["val"]
+    inp = match.kwargs["input"].meta["val"]
     mat1 = match.kwargs["mat1"].meta["val"]
     mat2 = match.kwargs["mat2"].meta["val"]
 
     # match the dispatch logic for cuBLASLT at aten/src/ATen/native/cuda/Blas.cpp
-    if not (input.is_cuda and input.dim() == 1 and input.is_contiguous()):
+    if not (inp.is_cuda and inp.dim() == 1 and inp.is_contiguous()):
         return False
 
     if not (mat1.dim() == 2 and mat2.dim() == 2):
         return False
 
-    if input.size(0) != mat2.size(1):
+    if inp.size(0) != mat2.size(1):
+        return False
+
+    if inp.dtype != mat1.dtype or inp.dtype != mat2.dtype:
         return False
 
     output = match.output_node()
