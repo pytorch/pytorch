@@ -156,15 +156,15 @@ class FxirTestCase(InductorTestCase):
 
     def test_fallback(self):
         """
-        Test a program that calls an aten fallback.
+        Test a program that calls aten fallbacks.
         """
 
-        length = 8
-
         def foo(x):
-            return x + torch.randn(1, device=self.device)
+            batch1 = torch.randn(2, 3, 5, device=self.device)
+            batch2 = torch.randn(2, 5, 4, device=self.device)
+            return torch.addbmm(x, batch1, batch2)
 
-        args = (torch.randn(length, device=self.device),)
+        args = (torch.randn(3, 4, device=self.device),)
 
         # Since the program has a random output, just check metadata.
         # Don't check for an exact value.
@@ -173,8 +173,10 @@ class FxirTestCase(InductorTestCase):
         )
 
         # Check for the fallback kernel.
-        num_fallback = self._count_ops(gm, torch.ops.aten.randint.low_out)
-        self.assertEqual(num_fallback, 1)
+        num_fallback = self._count_ops(
+            gm, torch.ops.aten.randint.low_out
+        ) + self._count_ops(gm, torch.ops.aten.addbmm.default)
+        self.assertEqual(num_fallback, 2)
 
     def test_cat_inputs(self):
         """
@@ -392,6 +394,22 @@ class FxirTestCase(InductorTestCase):
                 if node.name == str(symbol)
             ]
             self.assertEqual(placeholder.meta["val"], symbol)
+
+    def test_dynamic_shapes_precomputed_size(self):
+        """
+        Test dynamic shapes where a kernel's size arg is precomputed.
+        """
+        func = torch.add
+        args = [
+            torch.randn(shape, device=self.device) for shape in [(7, 12, 9), (7, 1, 1)]
+        ]
+        (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
+
+        # Check for the precomputed size arg.
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+        self.assertIn("ks0", triton_node.kwargs["kwargs"])
 
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
