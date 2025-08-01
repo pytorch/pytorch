@@ -1630,6 +1630,7 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   build_xla
   test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
+    ls
     pip install -e ./github/cli/.
     ./.github/cli/lib/setup_vllm.sh
     python3 -m test-cli.cli vllm --test-name "$TEST_CONFIG"
