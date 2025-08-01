@@ -3,6 +3,11 @@ set -ex
 # for torch nightly
 # https://download.pytorch.org/whl/nightly/torch/
 # torch-2.9.0.dev20250729+cu128-cp312-cp312-manylinux_2_28_x86_64.whl
+
+ls
+
+echo "Installing torch whls and vllm dependencies"
+
 pip install $(echo dist/torch-*.whl)[opt_einsum]
 pip install dist/vision/torchvision*.whl
 pip install dist/audio/torchaudio*.whl
@@ -34,6 +39,8 @@ pip freeze | grep -E 'torch|xformers|torchvision|torchaudio|flashinfer'
 uv pip compile  requirements/test.in -o  test.txt --index-strategy unsafe-best-match
 uv pip install --system -r test.txt
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+bash "$SCRIPT_DIR/clean_test_in.sh.sh"
 
 #95d8aba8a8c75aedcaa6143713b11e745e7cd0d9
 uv pip install --system --no-build-isolation "git+https://github.com/state-spaces/mamba@v2.2.4"
