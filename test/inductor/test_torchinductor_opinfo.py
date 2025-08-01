@@ -1326,12 +1326,15 @@ class TestInductorOpInfo(TestCase):
                         adjusted_kwargs.update(kwarg_overrides)
 
                         # Call the appropriate check method based on device type
+                        # TODO: remove when exact_stride=True by default
+                        exact_stride = op_name.endswith("_like")
                         if device_type == GPU_TYPE:
                             self.check_model_gpu(
                                 fn,
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                exact_stride=exact_stride,
                             )
                         else:
                             self.check_model(
@@ -1339,6 +1342,7 @@ class TestInductorOpInfo(TestCase):
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                exact_stride=exact_stride,
                             )
 
         except Exception as e:

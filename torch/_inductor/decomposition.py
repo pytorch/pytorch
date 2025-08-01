@@ -639,7 +639,7 @@ def full_like(
         return result.permute(permutation).clone()
 
 
-def _rand_like(
+def _fn_like(
     rand_fn: Callable[..., torch.Tensor],
     self: torch.Tensor,
     *,
@@ -675,26 +675,31 @@ def _rand_like(
     return result.permute(permutation).clone()
 
 
+@register_decomposition(aten.empty_like)
+def empty_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+    return _fn_like(torch.empty, self, **kwargs)
+
+
 @register_decomposition(aten.rand_like)
 def rand_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
-    return _rand_like(torch.rand, self, **kwargs)
+    return _fn_like(torch.rand, self, **kwargs)
 
 
 @register_decomposition(aten.randn_like)
 def randn_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
-    return _rand_like(torch.randn, self, **kwargs)
+    return _fn_like(torch.randn, self, **kwargs)
 
 
 @register_decomposition(aten.randint_like.default)
 def randint_like(self: torch.Tensor, high: int, **kwargs: Any) -> torch.Tensor:
-    return _rand_like(functools.partial(aten.randint.low, 0, high), self, **kwargs)
+    return _fn_like(functools.partial(aten.randint.low, 0, high), self, **kwargs)
 
 
 @register_decomposition(aten.randint_like.low_dtype)
 def randint_like_low(
     self: torch.Tensor, low: int, high: int, **kwargs: Any
 ) -> torch.Tensor:
-    return _rand_like(functools.partial(aten.randint.low, low, high), self, **kwargs)
+    return _fn_like(functools.partial(aten.randint.low, low, high), self, **kwargs)
 
 
 @register_decomposition(aten.randint.default)
