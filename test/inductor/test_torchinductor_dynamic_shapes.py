@@ -80,7 +80,6 @@ test_failures = {
     "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_dynamic_shapes": TestFailure(("mps",)),
-    "test_remove_noop_copy_dynamic_shapes": TestFailure(("mps",)),
     "test_require_stride_expanded_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_std_dynamic_shapes": TestFailure(("mps",)),

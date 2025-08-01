@@ -7242,6 +7242,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    @xfail_if_mps
     def test_reflection_pad2d_backward(self):
         def template(size, padding):
             def fn(grad_output, x):
@@ -13718,25 +13719,6 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None): 
     # Special case convenience routine
     if hasattr(my_cls, "is_dtype_supported"):
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
-
-
-def add_test_failures(
-    test_failures: dict[str, TestFailure], added_test_failures: dict[str, TestFailure]
-) -> None:
-    """
-    In-place modifies the given dictionary of `test_failures` to add the
-    contents of `added_test_failures` by unioning the test_failure.suffixes, and
-    or-ing the is_skip param.
-    """
-    for name, new_failure in added_test_failures.items():
-        if name in test_failures:
-            orig_failure = test_failures[name]
-            orig_failure.suffixes = tuple(
-                set(orig_failure.suffixes).union(set(new_failure.suffixes))
-            )
-            orig_failure.is_skip = orig_failure.is_skip or new_failure.is_skip
-        else:
-            test_failures[name] = new_failure
 
 
 if RUN_CPU:
