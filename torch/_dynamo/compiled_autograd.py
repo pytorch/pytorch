@@ -1561,6 +1561,7 @@ def _disable() -> Generator[None, None, None]:
 
 # return to starting state of a new process
 def reset() -> None:
+    global compiled_autograd_enabled
     compiled_autograd_enabled = False
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
