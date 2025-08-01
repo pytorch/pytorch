@@ -10,6 +10,7 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/graph/Graph.cpp
   ${TORCH_ROOT}/torch/nativert/graph/GraphPasses.cpp
   ${TORCH_ROOT}/torch/nativert/graph/GraphSignature.cpp
+  ${TORCH_ROOT}/torch/nativert/graph/GraphUtils.cpp
   ${TORCH_ROOT}/torch/nativert/graph/Serialization.cpp
   ${TORCH_ROOT}/torch/nativert/executor/OpKernel.cpp
   ${TORCH_ROOT}/torch/nativert/executor/PlacementUtils.cpp
