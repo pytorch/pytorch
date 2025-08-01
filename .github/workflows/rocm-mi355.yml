@@ -3,7 +3,7 @@ name: rocm-mi355
 on:
   workflow_dispatch:
   schedule:
-    - cron: 30 9 * * *  # about 2:30am PDT
+    - cron: 30 11,1 * * *  # about 4:30am PDT and 6:30pm PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
