@@ -1,0 +1,17 @@
+[project]
+name = "torch-ci"
+version = "0.1.0"
+dependencies = [
+    "cement>=3.0.0",
+    "pyyaml>=6.0"
+]
+
+[tool.setuptools]
+packages = ["build_cli", "test_cli", "lib"]
+
+[tool.setuptools.package-dir]
+build_cli = "build_cli"
+test_cli = "test_cli"
+lib = "lib"
+
+

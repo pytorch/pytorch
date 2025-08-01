@@ -1,0 +1,52 @@
+
+# testing
+pytest
+tensorizer==2.10.1
+pytest-forked
+pytest-asyncio
+pytest-rerunfailures
+pytest-shard
+pytest-timeout
+
+# testing utils
+backoff # required for phi4mm test
+blobfile # required for kimi-vl test
+einops # required for MPT, qwen-vl and Mamba
+httpx
+librosa # required for audio tests
+vector_quantize_pytorch # required for minicpmo_26 test
+vocos # required for minicpmo_26 test
+peft>=0.15.0 # required for phi-4-mm test
+pqdm
+ray[cgraph,default]>=2.43.0, !=2.44.* # Ray Compiled Graph, required by pipeline parallelism tests
+sentence-transformers # required for embedding tests
+soundfile # required for audio tests
+jiwer # required for audio tests
+timm # required for internvl test
+transformers_stream_generator # required for qwen-vl test
+mamba_ssm==2.2.5 # required for plamo2 test
+matplotlib # required for qwen-vl test
+mistral_common[image,audio] >= 1.8.2 # required for voxtral test
+num2words # required for smolvlm test
+open_clip_torch==2.32.0 # Required for nemotron_vl test
+opencv-python-headless >= 4.11.0 # required for video test
+datamodel_code_generator # required for minicpm3 test
+lm-eval[api]==0.4.8 # required for model evaluation test
+mteb[bm25s]>=1.38.11, <2 # required for mteb test
+transformers==4.53.2
+tokenizers==0.21.1
+huggingface-hub[hf_xet]>=0.33.0  # Required for Xet downloads.
+schemathesis>=3.39.15 # Required for openai schema test.
+# quantization
+bitsandbytes==0.46.1
+buildkite-test-collector==0.1.9
+genai_perf==0.0.8
+tritonclient==2.51.0
+numba == 0.60.0; python_version == '3.9' # v0.61 doesn't support Python 3.9. Required for N-gram speculative decoding
+numba == 0.61.2; python_version > '3.9'
+numpy
+runai-model-streamer==0.11.0
+runai-model-streamer-s3==0.11.0
+fastsafetensors>=0.1.10
+pydantic>=2.10 # 2.9 leads to error on python 3.10
+terratorch==1.1rc2 # required for PrithviMAE test
