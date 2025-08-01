@@ -185,9 +185,15 @@ class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
                     post_grad_graphs,
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu", arg4_1: "f32[3][1]cpu"):
-        # No stacktrace found for following nodes
+        # Custom comment for test
         foo_default = torch.ops.mylib.foo.default(arg2_1, [arg3_1, arg4_1], arg1_1, 2, arg0_1);  arg2_1 = arg3_1 = arg4_1 = arg1_1 = arg0_1 = foo_default = None
         return ()""",  # noqa: B950
+                    ignore_comments=True,
+                )
+
+                # stack trace should be in post_grad_graph
+                self.assertTrue(
+                    "code: torch.ops.mylib.foo(x, y, z, 2, n)" in post_grad_graphs,
                 )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
@@ -211,7 +217,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 z.add_(y[1] + n)
                 return y[0] + w, y[1] + n
 
-            @torch.library.impl_abstract("mylib::foo", lib=lib)
+            @torch.library.register_fake("mylib::foo", lib=lib)
             def foo_abstract(x, y, z, w, n):
                 return y[0] + w, y[1] + n
 
@@ -328,10 +334,16 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                     post_grad_graphs,
                     """\
 def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu"):
-        # No stacktrace found for following nodes
+        # Custom comment for test
         foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  \
 arg2_1 = arg3_1 = arg1_1 = arg0_1 = foo_default = None
         return ()""",
+                    ignore_comments=True,
+                )
+
+                # stack trace should be in post_grad_graph
+                self.assertTrue(
+                    "code: torch.ops.mylib.foo(x, y, z, 2, n)" in post_grad_graphs,
                 )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
@@ -433,7 +445,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
         aot_eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
 
         log_stream, ctx = logs_to_string(
-            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
 
         result = None
@@ -445,12 +457,17 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             graph = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
         return [aot_eager_args, result, graph]
 
-    def run_inductor(self, f, orig_args, _dynamic=False):
+    def run_inductor(
+        self,
+        f,
+        orig_args,
+        _dynamic=False,
+        log_module="torch._inductor.compile_fx",
+        log_function="post_grad_graphs",
+    ):
         compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
 
-        log_stream, ctx = logs_to_string(
-            "torch._inductor.compile_fx", "post_grad_graphs"
-        )
+        log_stream, ctx = logs_to_string(log_module, log_function)
         result = None
         with ctx():
             result = torch.compile(
@@ -478,7 +495,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 z.add_(y[1] + n)
                 return y[0] + w, y[1] + n
 
-            @torch.library.impl_abstract("mylib::foo", lib=lib)
+            @torch.library.register_fake("mylib::foo", lib=lib)
             def foo_abstract(x, y, z, w, n):
                 return y[0] + w, y[1] + n
 
@@ -1399,7 +1416,7 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
             test_round_trip(t, f[1])
             test_round_trip(t, f[2])
 
-        # example where slice wont work
+        # example where slice won't work
 
         # selection
         t = torch.ones(10)
@@ -1561,7 +1578,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
     def test_alias2_dynamic(self):
         self.test_alias2(_dynamic=True)
 
-    # Test that the view regenration optimizations do not result in recompilations. By comparing re-compilation in eager backend
+    # Test that the view regeneration optimizations do not result in recompilations. By comparing re-compilation in eager backend
     # with recompilation in inductor backend.
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_recompile(self):
@@ -1732,6 +1749,41 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
         with torch.inference_mode():
             y = f(x, w)
         self.assertEqual(y, x.sin())
+
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_scheduling_with_multiple_mutates(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor! x, Tensor! y, Tensor z) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo(x, y, z):
+                pass
+
+            def func(x, w):
+                a = torch.empty_like(x)  # buf0
+                b = torch.empty_like(x)  # buf1
+                torch.ops.mylib.foo(a, b, x)  # buf2, buf3, buf4
+                c = torch.mm(a, w)  # buf5
+                torch.ops.mylib.foo(c, b, x)  # buf6, buf7, buf8
+                return c
+
+            input = torch.rand(2, 2)
+            weight = torch.rand(2, 2)
+            [inductor_args, output, graph_inductor] = self.run_inductor(
+                func,
+                [input, weight],
+                False,
+                "torch._inductor.scheduler",
+                "compute_dependencies",
+            )
+            name_to_users = eval(graph_inductor)
+            self.assertNotEqual(name_to_users["buf1"], name_to_users["buf5"])
 
 
 if __name__ == "__main__":

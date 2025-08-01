@@ -518,6 +518,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/control_collectives/StoreCollectives.cpp",
     "torch/csrc/distributed/c10d/control_plane/Handlers.cpp",
     "torch/csrc/distributed/c10d/control_plane/WorkerServer.cpp",
+    "torch/csrc/distributed/c10d/cuda/StreamBlock.cpp",
     "torch/csrc/distributed/c10d/debug.cpp",
     "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
     "torch/csrc/distributed/c10d/logger.cpp",
@@ -592,11 +593,13 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 
 
 libtorch_nativert_sources = [
+    "torch/nativert/ModelRunner.cpp",
     "torch/nativert/graph/Graph.cpp",
     "torch/nativert/graph/GraphPasses.cpp",
     "torch/nativert/graph/GraphSignature.cpp",
     "torch/nativert/graph/Serialization.cpp",
     "torch/nativert/graph/TensorMeta.cpp",
+    "torch/nativert/graph/GraphUtils.cpp",
     "torch/nativert/executor/DelegateExecutor.cpp",
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
@@ -624,6 +627,10 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/memory/AliasAnalyzer.cpp",
     "torch/nativert/executor/memory/LayoutPlanner.cpp",
     "torch/nativert/executor/memory/LayoutManager.cpp",
+    "torch/nativert/kernels/KernelRegistry.cpp",
+    "torch/nativert/kernels/NativeKernels.cpp",
+    "torch/nativert/kernels/GeneratedStaticDispatchKernels.cpp",
+    "torch/nativert/kernels/GeneratedNativeStaticDispatchKernels.cpp",
 ]
 
 torch_mobile_tracer_sources = [
@@ -733,7 +740,9 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
+    "torch/csrc/distributed/c10d/cuda/CUDAEventCache.cpp",
     "torch/csrc/distributed/c10d/cuda/utils.cpp",
+    "torch/csrc/distributed/c10d/cuda/StreamBlock.cu",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu",
@@ -857,6 +866,7 @@ libtorch_python_core_sources = [
     "torch/csrc/QScheme.cpp",
     "torch/csrc/Module.cpp",
     "torch/csrc/PyInterpreter.cpp",
+    "torch/csrc/PyInterpreterHooks.cpp",
     "torch/csrc/python_dimname.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Storage.cpp",
@@ -979,6 +989,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/verbose.cpp",
     "torch/csrc/cpu/Module.cpp",
     "torch/csrc/instruction_counter/Module.cpp",
+    "torch/nativert/python/Bindings.cpp",
 ] + lazy_tensor_core_python_sources
 
 libtorch_python_distributed_core_sources = [
