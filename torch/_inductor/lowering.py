@@ -1893,6 +1893,7 @@ def select(x, dim, idx):
         x.get_layout().offset,
         new_stride[dim],
         x.get_size()[dim],
+        clamp=True,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
