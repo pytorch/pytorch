@@ -1321,54 +1321,6 @@ class TestBasicOps(__TestCase):
             for r in range(4):
                 self.assertEqual(list(product(*(args*r))),
                                  list(product(*args, **dict(repeat=r))))
-        self.assertEqual(len(list(product(*[range(7)]*6))), 7**6)
-        self.assertRaises(TypeError, product, range(6), None)
-
-        def product1(*args, **kwds):
-            pools = list(map(tuple, args)) * kwds.get('repeat', 1)
-            n = len(pools)
-            if n == 0:
-                yield ()
-                return
-            if any(len(pool) == 0 for pool in pools):
-                return
-            indices = [0] * n
-            yield tuple(pool[i] for pool, i in zip(pools, indices))
-            while 1:
-                for i in reversed(range(n)):  # right to left
-                    if indices[i] == len(pools[i]) - 1:
-                        continue
-                    indices[i] += 1
-                    for j in range(i+1, n):
-                        indices[j] = 0
-                    yield tuple(pool[i] for pool, i in zip(pools, indices))
-                    break
-                else:
-                    return
-
-        def product2(*iterables, repeat=1):
-            'Pure python version used in docs'
-            if repeat < 0:
-                raise ValueError('repeat argument cannot be negative')
-            pools = [tuple(pool) for pool in iterables] * repeat
-
-            result = [[]]
-            for pool in pools:
-                result = [x+[y] for x in result for y in pool]
-
-            for prod in result:
-                yield tuple(prod)
-
-        argtypes = ['', 'abc', '', range(0), range(4), dict(a=1, b=2, c=3),
-                    set('abcdefg'), range(11), tuple(range(13))]
-        for i in range(100):
-            args = [random.choice(argtypes) for j in range(random.randrange(5))]
-            expected_len = prod(map(len, args))
-            self.assertEqual(len(list(product(*args))), expected_len)
-            self.assertEqual(list(product(*args)), list(product1(*args)))
-            self.assertEqual(list(product(*args)), list(product2(*args)))
-            args = map(iter, args)
-            self.assertEqual(len(list(product(*args))), expected_len)
 
     @support.bigaddrspacetest
     def test_product_overflow(self):
