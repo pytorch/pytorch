@@ -47,10 +47,11 @@ def enable_symm_mem_for_group(group_name: str) -> None:
 
 
 _is_test_mode: bool = False
+_mocked_group_names: Optional[set[str]] = None
 
 
 @contextmanager
-def _test_mode() -> Generator[None, None, None]:
+def _test_mode(group_names: Optional[set[str]] = None) -> Generator[None, None, None]:
     """
     Forces ``is_symm_mem_enabled_for_group()`` to return ``True`` and the ops
     defined in the ``symm_mem`` namespace to use fallback implementations.
@@ -58,12 +59,16 @@ def _test_mode() -> Generator[None, None, None]:
     The context manager is not thread safe.
     """
     global _is_test_mode
+    global _mocked_group_names
     prev = _is_test_mode
+    prev_group_names = _mocked_group_names
     try:
         _is_test_mode = True
+        _mocked_group_names = group_names
         yield
     finally:
         _is_test_mode = prev
+        _mocked_group_names = prev_group_names
 
 
 def is_symm_mem_enabled_for_group(group_name: str) -> bool:
@@ -73,7 +78,9 @@ def is_symm_mem_enabled_for_group(group_name: str) -> bool:
     Args:
         group_name (str): the name of the process group.
     """
-    return _is_test_mode or group_name in _group_name_to_store
+    if _is_test_mode:
+        return _mocked_group_names is None or group_name in _mocked_group_names
+    return group_name in _group_name_to_store
 
 
 _group_name_to_workspace_tensor: dict[str, Optional[torch.Tensor]] = {}
@@ -1600,6 +1607,29 @@ def _low_contention_reduce_scatter(
         return _low_contention_reduce_scatter_with_workspace(
             tensor, reduce_op, workspace
         )
+
+
+@torch.library.impl(lib, "all_to_all_vdev_2d", "Meta")
+def _all_to_all_vdev_2d_meta(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    in_splits: torch.Tensor,
+    out_splits_offsets: torch.Tensor,
+    group_name: str,
+    major_align: Optional[int] = None,
+) -> None:
+    return None
+
+
+@torch.library.impl(lib, "all_to_all_vdev_2d_offset", "Meta")
+def _all_to_all_vdev_2d_offset_meta(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    in_splits_offsets: torch.Tensor,
+    out_splits_offsets: torch.Tensor,
+    group_name: str,
+) -> None:
+    return None
 
 
 # =============================================================================

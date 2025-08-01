@@ -907,7 +907,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             # Dynamo should not cause a graph break here because it knows that
-            # the existing proxy cant point to this new dict
+            # the existing proxy can't point to this new dict
             other_dict = {}
             other_dict["d"] = 4
             y = torch.sin(x * mp["c"])
@@ -1320,7 +1320,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # Test with non-dict types
         self.assertRaises(TypeError, lambda: dict.__ior__(d1, 1))
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_binop_ior_iterable(self):
         d1 = self.thetype({"a": 1, "b": 2})
