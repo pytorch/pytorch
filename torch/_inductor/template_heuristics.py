@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import math
+import os
 from functools import partial
 from threading import Lock
 from typing import Any, Callable, Optional, TYPE_CHECKING
@@ -1247,6 +1248,9 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
     def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_bwd_configs: list[FlexConfig] = []
+        TRITON_LESS_FLEX_ATTN_BWD_CONFIGS = os.get(
+            "TRITON_LESS_FLEX_ATTN_BWD_CONFIGS", "0"
+        ).lower() in {"true", "1", "t", "y", "yes", "on"}
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
@@ -1268,6 +1272,10 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
+        if TRITON_LESS_FLEX_ATTN_BWD_CONFIGS:
+            flex_attn_bwd_configs = list(
+                filter(lambda c: c.num_stages == 1, flex_attn_bwd_configs)
+            )
         return flex_attn_bwd_configs
 
     def get_flex_decode_configs(
