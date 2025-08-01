@@ -1,54 +1,12 @@
-default_stages: [pre-commit, pre-push, manual]
-
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+  - repo: local
     hooks:
-      - id: check-symlinks
-      - id: destroyed-symlinks
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
-      - id: check-yaml
-        args: [--allow-multiple-documents]
-      - id: check-toml
-      - id: check-ast
-      - id: check-added-large-files
-      - id: check-merge-conflict
-      - id: check-shebang-scripts-are-executable
-      - id: detect-private-key
-      - id: debug-statements
-      - id: no-commit-to-branch
-  - repo: https://github.com/PyCQA/isort
-    rev: 6.0.1
-    hooks:
-      - id: isort
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.7
-    hooks:
-      - id: ruff
-        args: [--select=F401, --fixable=F401]
-        files: ^(benchmark/|docs/|examples/)
-        exclude: \.ipynb$
-  - repo: https://github.com/psf/black
-    rev: 24.10.0
-    hooks:
-      - id: black-jupyter
-  - repo: https://github.com/codespell-project/codespell
-    rev: v2.4.1
-    hooks:
-      - id: codespell
-        additional_dependencies: ['tomli']
-        args: ['--toml', 'python/pyproject.toml']
-  - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v18.1.8
-    hooks:
-    - id: clang-format
-      types_or: [c++, cuda]
-      args: [--style=file, --verbose]
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.8.1
-    hooks:
-      - id: nbstripout
-        args:
-          - '--keep-output'
-          - '--extra-keys=metadata.kernelspec metadata.language_info.version'
+      - id: lintrunner
+        name: Run Lintrunner in an isolated venv before every push. The first run may be slow...
+        entry: python scripts/run_lintrunner.py   # wrapper below
+        language: python                          # pre‑commit manages venv for the wrapper
+        additional_dependencies: []               # wrapper handles lintrunner install
+        always_run: true
+        stages: [pre-push]                        # fire only on pre‑push
+        pass_filenames: false                     # Lintrunner gets no per‑file args
+        verbose: true                             # stream output as it is produced...allegedly anyways
