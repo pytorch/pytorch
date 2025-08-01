@@ -68,6 +68,7 @@ from .utils import (
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
     is_wait,
+    maybe_log_cudagraph_partition,
     sympy_product,
 )
 from .virtualized import V
@@ -2138,7 +2139,12 @@ class Scheduler:
         self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.combo_kernels:
-            self.create_combo_kernel_nodes(num_ck_nodes=None)
+            with dynamo_timed(
+                "Scheduler.create_combo_kernel_nodes",
+                log_pt2_compile_event=True,
+                log_waitcounter=True,
+            ):
+                self.create_combo_kernel_nodes(num_ck_nodes=None)
 
         # Peak memory pass and overlap pass must run last, otherwise
         # other reordering passes could undo their effects.
@@ -4220,27 +4226,42 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
-    def should_partition(self, node: BaseSchedulerNode) -> bool:
+    def should_partition(
+        self, node: BaseSchedulerNode, should_log: bool = False
+    ) -> bool:
         """Return True if we should partition the inductor graph on this node"""
+
+        # avoid duplicating logs when should_partition is called multiple times
+        # on the same node
+        def noop_log(msg: str, node: Optional[BaseSchedulerNode]) -> None:
+            return
+
+        log_partition_reason = maybe_log_cudagraph_partition if should_log else noop_log
+
         if isinstance(node, FusedSchedulerNode):
             return any(self.should_partition(snode) for snode in node.snodes)
 
-        if not node.is_gpu():
-            return True
+        assert node.node is not None
 
-        if node.node is None:
+        if not node.is_gpu():
+            log_partition_reason("non gpu ops", node=node)
+
             return True
 
         if isinstance(node.node, ir.DeviceCopy):
+            log_partition_reason("DeviceCopy ops", node=node)
             return True
 
         if isinstance(node.node, ir.Conditional):
+            log_partition_reason("Conditional ops", node=node)
             return True
 
         if getattr(node.node, "unbacked_bindings", None):
+            log_partition_reason("unbacked binding ops", node=node)
             return True
 
         if is_cudagraph_unsafe_op(node.node):
+            log_partition_reason("CUDAGraph-unsafe custom ops", node=node)
             return True
 
         return False
@@ -4710,7 +4731,7 @@ class Scheduler:
         cur_partition: PartitionType = []
         skip_cudagraphs = []
         for node in self.nodes:
-            should_partition = self.should_partition(node)
+            should_partition = self.should_partition(node, should_log=True)
             if cur_partition and skip_cudagraph != should_partition:
                 partitions.append(cur_partition)
                 skip_cudagraphs.append(skip_cudagraph)
@@ -4787,6 +4808,10 @@ class Scheduler:
         each function.
         """
         partitions, signatures = self.graph_partition()
+
+        if len(partitions) > 1:
+            msg = f"cudagraph partition into {len(partitions)} partitions"
+            maybe_log_cudagraph_partition(msg=msg, prefix="")
 
         for partition, signature in zip(partitions, signatures):
             assert len(partition) >= 1, (

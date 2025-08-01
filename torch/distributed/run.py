@@ -382,6 +382,10 @@ from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import elastic_launch, LaunchConfig
+from torch.distributed.numa.binding import (
+    AffinityMode as _AffinityMode,  # Signify as private with _
+    NumaOptions as _NumaOptions,
+)
 from torch.utils.backend_registration import _get_custom_mod_func
 
 
@@ -616,6 +620,31 @@ def get_args_parser() -> ArgumentParser:
         "Can be used to override custom logging behavior.",
     )
 
+    parser.add_argument(
+        "--numa-binding",
+        "--numa_binding",
+        type=str,
+        choices=[mode.value for mode in _AffinityMode],
+        default=None,
+        help="""
+        If provided, we will affinitize the worker processes based on NUMA nodes
+        for better performance. (E.g., preferring to allocate memory locally and run on CPUs on the
+        same NUMA node.)
+
+        NOTE: This is currently only supported for GPUs, and we assume
+        that the LOCAL_RANK process corresponds to the GPU with index LOCAL_RANK. If this is not
+        accurate for your workload, this feature may be a pessimization.
+
+        Available options are:
+          - node: Processes are bound to cpu cores within a NUMA node. This is a good starting point,
+          but other options may perform even slightly better in some cases.
+          - socket: Processes are bound to cpu cores within a socket.
+          - exclusive: Processes are bound to exclusive sets of cpu cores within a NUMA node.
+          - core-complex: Processes are bound to cpu cores in a core-complex.
+          NOTE: The core-complex option might not achieve optimal performance on architectures
+          featuring a single L3 cache per socket.""",
+    )
+
     #
     # Positional arguments.
     #
@@ -809,6 +838,11 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         tee=Std.from_str(args.tee),
         local_ranks_filter=ranks,
     )
+    numa_options = (
+        None
+        if args.numa_binding is None
+        else _NumaOptions(affinity_mode=_AffinityMode(args.numa_binding))
+    )
 
     config = LaunchConfig(
         min_nodes=min_nodes,
@@ -826,6 +860,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         local_addr=args.local_addr,
         logs_specs=logs_specs,
         event_log_handler=args.event_log_handler,
+        numa_options=numa_options,
     )
 
     with_python = not args.no_python
