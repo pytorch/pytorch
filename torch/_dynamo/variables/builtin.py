@@ -1373,9 +1373,13 @@ class BuiltinVariable(VariableTracker):
             if (
                 self.fn is tuple
                 and len(args) == 2
-                and tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.is_iterable), [args[1]], {}
-                ).value
+                and (
+                    is_iterable := tx.inline_user_function_return(
+                        VariableTracker.build(tx, polyfills.is_iterable), [args[1]], {}
+                    )
+                )
+                and isinstance(is_iterable, ConstantVariable)
+                and is_iterable.value
                 and not kwargs
             ):
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
@@ -2531,6 +2535,13 @@ class BuiltinVariable(VariableTracker):
                 (operator.neg)(a.as_proxy()),
                 sym_num=None,
             )
+
+        if (
+            isinstance(a, UserDefinedObjectVariable)
+            and a.call_obj_hasattr(tx, "__neg__").value  # type: ignore[attr-defined]
+        ):
+            return a.call_method(tx, "__neg__", [], {})
+
         # None no-ops this handler and lets the driving function proceed
         return None
 
