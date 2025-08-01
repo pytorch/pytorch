@@ -380,7 +380,7 @@ in thise screenshot the recomplile reason is size-related:
 In the one below it is not, which indicates that dynamic shapes won't resolve it:
 
 ```{image} ../_static/img/dynamic_shapes/tlparse7_not_size_related_recompilations.png
-:scale: 60%
+:width: 500px
 :align: center
 ```
 

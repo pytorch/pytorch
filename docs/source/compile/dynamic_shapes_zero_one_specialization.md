@@ -46,18 +46,11 @@ even if `s0 = 1` at runtime. This approach avoids recompilation, though it
 diverges from the eager execution behavior, which would yield `[20]`.
 This is particularly useful in scenarios involving sparse models.
 
-For example, your model tracks restaurants visits and you have a total of 100
+For example, you have a model that tracks restaurants visits and you have a total of 100
 restaurants to track, where many entries might be 0 or 1. In such cases, avoiding
 recompilation for each tensor change prevents potentially 200 recompilations,
 making the use of unbacked `SymInts` advantageous.
 
-
-deviation from the eager behavior because with eager you would get `[20]`.
-The main reason you might care about this is in sparse models, such as
-those representing how many times you went to a restaurant. Say you have
-100 restaurants; a lot of them would have a value 0 or 1. In those cases,
-you don't want to recompile every time the tensor changes, because this
-would create 200 recompilations, and that's when you would use unbacked.
 However, you might avoid using unbacked `SymInts` if there are specific
 runtime performance requirements or guards, as they can be less efficient.
 
@@ -66,3 +59,4 @@ runtime performance requirements or guards, as they can be less efficient.
 * {ref}`torch.export`
 * {ref}`what_is_a_specialization`
 * {ref}`backed-vs-unbacked-symints`
+```

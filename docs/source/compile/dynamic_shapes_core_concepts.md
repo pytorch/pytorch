@@ -101,4 +101,5 @@ Important files:
 
 ```{seealso}
 * {ref}`dynamic_shapes`
+* {ref}`dynamic_shapes_troubleshooting`
 ```

@@ -407,5 +407,5 @@ using either lengths or offsets, you should prefer using lengths.
 
 ```{seealso}
 * {ref}`dynamic_shapes`
-* {ref}`dynamic_shapes_debugging_tlparse_torch_logs`
+* {ref}`debugging-tlparse-torch-logs`
 ```
