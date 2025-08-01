@@ -11,7 +11,6 @@ mystnb:
 ```{code-cell}
 :tags: [remove-cell]
 import torch
-import header_code
 torch._logging.set_logs(graph_breaks=True, graph_code=True)
 ```
 
@@ -44,13 +43,6 @@ such as in sparse tensors, jagged tensors, and graph neural networks.
 Dynamic shapes do not support dynamic rank programs, programs which input tensors
 change in dimensionality, as this is uncommon and unnecessarily complex.
 
-
-```{code-cell}
-:tags: [remove-cell]
-import torch
-import header_code
-torch._logging.set_logs(graph_breaks=True, graph_code=True)
-```
 
 ## What does it mean for a size/integer to be dynamic?
 
@@ -139,7 +131,7 @@ See the corresponding <a href="/_static/img/dynamic_shapes/tlparse3_specializati
 
 This is how graphs created for the above function:
 
-```{image} ../_static/img/dynamic_shapes/dynamic_shapes_example_specialization.png
+```{image} _static/img/dynamic_shapes/dynamic_shapes_example_specialization.png
 ```
 
 (enable-dynamic-behavior)=
@@ -197,7 +189,7 @@ follow these steps using `tlparse`:
 
 1. In the `tlparse` output, identify the line number of the frame of interest. Example:
 
-   ```{image} ../_static/img/dynamic_shapes/tlparse4_pgo.png
+   ```{image} _static/img/dynamic_shapes/tlparse4_pgo.png
    ```
 
 2. Open `local_code` using `put_local_code_state_` or `put_remote_code_state_` for the
@@ -340,7 +332,7 @@ For example, in the following `tlparse` snapshot, Dynamo graphs 20/0,
 graph 20/0 vs. graph 20/2). In the Dynamo graph of 20/2, sizes `s0`,
 `s1`, and `s5` are used for `rotary_pos_emb_` and `x`.
 
-```{image} ../_static/img/dynamic_shapes/tlparse5_dynamic_shapes.png
+```{image} _static/img/dynamic_shapes/tlparse5_dynamic_shapes.png
 ```
 
 ```{tip}
@@ -374,12 +366,12 @@ Check the following:
 reason is size-related and not due to other factors. For example, while
 in these screenshot the recomplile reason is size-related:
 
-```{image} ../_static/img/dynamic_shapes/tlparse6_size_related_recompilations.png
+```{image} _static/img/dynamic_shapes/tlparse6_size_related_recompilations.png
 ```
 
 In the one below it is not, which indicates that dynamic shapes won't resolve it:
 
-```{image} ../_static/img/dynamic_shapes/tlparse7_not_size_related_recompilations.png
+```{image} _static/img/dynamic_shapes/tlparse7_not_size_related_recompilations.png
 :width: 500px
 :align: center
 ```
@@ -442,7 +434,7 @@ call  to a Triton kernel. To identify the reason for specialization:
 
     * **Using tlparse:** Check the `compilation_metrics` for a specialization section, which will indicate what got specialized and the user and framework stack when it happened. Example:
 
-    ```{image} ../_static/img/dynamic_shapes/tlparse8_compilation_metrics.png
+    ```{image} _static/img/dynamic_shapes/tlparse8_compilation_metrics.png
     ```
 
     The log above indicates that `s0` is specialized to `33` due to the following code:
