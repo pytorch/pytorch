@@ -664,7 +664,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 
     # These timeout tests are skipped on ROCm because timeout calls trap(), which
     # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
+    # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
@@ -690,7 +690,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 
     # These timeout tests are skipped on ROCm because timeout calls trap(), which
     # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
+    # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
@@ -719,7 +719,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 
     # These timeout tests are skipped on ROCm because timeout calls trap(), which
     # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
+    # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
     @skipIfRocm

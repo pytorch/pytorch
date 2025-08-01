@@ -198,7 +198,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             import warnings
 
             warnings.warn(
-                "Aliasing is not suppported for HOP subgraph.\n"
+                "Aliasing is not supported for HOP subgraph.\n"
                 f"{subgraph.print_readable(print_output=False)}\n"
                 f"Alias info: inp-inp alias: {inp_inp_alias}, inp-out alias: {inp_out_alias}, out-out alias{out_out_alias}"
                 f"This may lead to silent incorrectness."

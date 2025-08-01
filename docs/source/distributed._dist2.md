@@ -1,3 +1,5 @@
+# Experimental Object Oriented Distributed API
+
 ```{eval-rst}
 .. role:: hidden
     :class: hidden-section
@@ -8,11 +10,5 @@
     :members:
     :undoc-members:
     :show-inheritance:
-```
-
-```{eval-rst}
-.. autoclass:: torch.distributed.ProcessGroup
-    :members:
-    :undoc-members:
-    :show-inheritance:
+    :exclude-members: ReduceOp
 ```
