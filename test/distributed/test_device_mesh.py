@@ -171,8 +171,12 @@ class DeviceMeshTest(DTensorTestBase):
         # there would be bound_device_id immediately assigned for the subgroup.
         if self.backend == "nccl" or self.backend == "xccl":
             curr_device = torch.accelerator.current_accelerator()
-            self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device.index)
-            self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device.index)
+            self.assertEqual(
+                mesh_2d.get_group(0).bound_device_id.index, curr_device.index
+            )
+            self.assertEqual(
+                mesh_2d.get_group(1).bound_device_id.index, curr_device.index
+            )
 
     @with_comms()
     def test_get_group_and_get_all_groups(self):
