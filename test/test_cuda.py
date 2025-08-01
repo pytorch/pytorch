@@ -5562,6 +5562,7 @@ class TestMemPool(TestCase):
                 out_0 = torch.randn(nelem_1mb, device="cuda")
         torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
+    @serialTest
     def test_mempool_ctx_multithread(self):
         torch.cuda.empty_cache()
         segments = torch.cuda.memory._snapshot()["segments"]
