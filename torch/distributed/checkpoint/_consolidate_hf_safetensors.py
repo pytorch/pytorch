@@ -5,7 +5,6 @@ import glob
 import json
 import logging
 import math
-import mmap
 import os
 import struct
 import time
@@ -197,12 +196,7 @@ def _write_metadata(
             output_data.metadata_size = f.tell()
 
 
-def _read_tensor_data_mmap(
-    file_path: str,
-    start_offset: int,
-    end_offset: int,
-    metadata_size: int,
-) -> bytes:
+def _read_tensor_data(file_path: str, fqn: str) -> bytes:
     """
     Read tensor data from a safetensors file using memory mapping for efficiency.
 
@@ -215,12 +209,12 @@ def _read_tensor_data_mmap(
     Returns:
         Raw tensor data as bytes
     """
-    # Use mmap for efficient access
-    with open(file_path, "rb") as f:
-        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-            absolute_start = metadata_size + start_offset
-            absolute_end = metadata_size + end_offset
-            return bytes(mm[absolute_start:absolute_end])
+
+    from safetensors import safe_open  # type: ignore[import]
+    from safetensors.torch import _tobytes  # type: ignore[import]
+
+    with safe_open(file_path, framework="pt") as f:
+        return _tobytes(f.get_tensor(fqn), fqn)
 
 
 def _process_output_file(
@@ -257,28 +251,22 @@ def _process_output_file(
             # Process each input safetensors file
             for safetensors_file in input_files_data.keys():
                 file_metadata = input_files_data[safetensors_file].metadata
-                input_metadata_size = input_files_data[safetensors_file].metadata_size
 
                 if tensor_fqn not in file_metadata.keys():
                     continue
 
                 metadata = file_metadata[tensor_fqn]
 
-                data_offsets = metadata[DATA_OFFSETS_KEY]
-
-                # Use memory mapping to read tensor data efficiently
-                data_to_write = _read_tensor_data_mmap(
+                data_to_write = _read_tensor_data(
                     safetensors_file,
-                    data_offsets[0],
-                    data_offsets[1],
-                    input_metadata_size,
+                    tensor_fqn,
                 )
 
                 # Get the offsets of this tensor shard within the full tensor
-                custom_metadata = _get_dcp_custom_metadata(file_metadata)
-                offsets_of_tensor_being_read = custom_metadata[tensor_fqn][
-                    SAVED_OFFSETS_KEY
+                fqn_custom_metadata = _get_dcp_custom_metadata(file_metadata)[
+                    tensor_fqn
                 ]  # type: ignore[index]
+                offsets_of_tensor_being_read = fqn_custom_metadata[SAVED_OFFSETS_KEY]  # type: ignore[index]
 
                 # Write this tensor shard to the appropriate position in the output file
                 _write_sub_tensor_to_file_optimized(
