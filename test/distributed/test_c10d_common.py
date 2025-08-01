@@ -42,7 +42,9 @@ from torch.testing._internal.common_utils import (
     parametrize,
     retry_on_connect_failures,
     run_tests,
+    TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_XPU,
     TestCase,
 )
 from torch.utils.checkpoint import checkpoint
@@ -1764,24 +1766,42 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # Ensure backend config can be created with the following arguments
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
-            (dist.Backend.XCCL, "xpu:xccl"),
             (dist.Backend.NCCL, "cuda:nccl"),
             (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
-            (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy,xpu:dummy"),
-            ("DUMMY", "cpu:dummy,cuda:dummy,xpu:dummy"),
-            ("dummy", "cpu:dummy,cuda:dummy,xpu:dummy"),
+            (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
+            ("DUMMY", "cpu:dummy,cuda:dummy"),
+            ("dummy", "cpu:dummy,cuda:dummy"),
             ("cpu:dummy,cuda:dummy", "cpu:dummy,cuda:dummy"),
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
             ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
-            ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
-            ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
-            ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
-            ("cpu:gloo,xpu:xccl", "cpu:gloo,xpu:xccl"),
         ]
 
+        if TEST_XPU:
+            backend_config_strings_and_expected_values.remove(
+                (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy")
+            )
+            backend_config_strings_and_expected_values.remove(
+                ("DUMMY", "cpu:dummy,cuda:dummy")
+            )
+            backend_config_strings_and_expected_values.remove(
+                ("dummy", "cpu:dummy,cuda:dummy")
+            )
+            backend_config_strings_and_expected_values.extend(
+                [
+                    (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy,xpu:dummy"),
+                    ("DUMMY", "cpu:dummy,cuda:dummy,xpu:dummy"),
+                    ("dummy", "cpu:dummy,cuda:dummy,xpu:dummy"),
+                    ("cpu:dummy,cuda:dummy", "cpu:dummy,cuda:dummy"),
+                    ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
+                    ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
+                    ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
+                ]
+            )
+
         for config_str, expected_value in backend_config_strings_and_expected_values:
+            print(f"####### {config_str} {expected_value}", flush=True)
             with self.subTest(config_str):
                 # ensures these configs strings are valid and no ValueError is raised
                 config = dist.BackendConfig(config_str)
@@ -2244,10 +2264,9 @@ class LocalRankTest(MultiProcessTestCase):
 
 
 if __name__ == "__main__":
-    assert (
-        device_type != "cpu" and not torch.get_device_module(device_type)._initialized
-    ), (
-        f"test_distributed must not have initialized {device_type} context on main process"
-    )
+    if TEST_CUDA:
+        assert not torch.cuda._initialized, (
+            "test_distributed must not have initialized cuda context on main process"
+        )
 
     run_tests()
