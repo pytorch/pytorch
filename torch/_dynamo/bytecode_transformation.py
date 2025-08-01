@@ -439,12 +439,12 @@ def create_swap(n: int) -> list[Instruction]:
     if sys.version_info >= (3, 11):
         return [create_instruction("SWAP", arg=n)]
     # in Python < 3.11, SWAP is a macro that expands to multiple instructions
-    if n <= 3:
-        # applying rotations a few times is equivalent to swapping for n <= 3
-        insts = []
-        for i in range(n, 1, -1):
-            insts += create_rot_n(i)
-        return insts
+    if n == 1:
+        return []
+    elif n == 2:
+        return [create_instruction("ROT_TWO")]
+    elif n == 3:
+        return [create_instruction("ROT_THREE"), create_instruction("ROT_TWO")]
     """
     e.g. swap "a" and "b" in this stack:
     0 a 1 2 3 b
