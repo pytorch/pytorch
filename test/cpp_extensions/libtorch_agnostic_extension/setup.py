@@ -4,7 +4,7 @@ from pathlib import Path
 
 from setuptools import find_packages, setup
 
-from torch.utils.cpp_extension import BuildExtension, CppExtension
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 
 ROOT_DIR = Path(__file__).parent
@@ -33,12 +33,13 @@ class clean(distutils.command.clean.clean):
 def get_extension():
     extra_compile_args = {
         "cxx": ["-fdiagnostics-color=always"],
+        "nvcc": ["-O2"],
     }
 
     sources = list(CSRC_DIR.glob("**/*.cpp"))
 
     return [
-        CppExtension(
+        CUDAExtension(
             "libtorch_agnostic._C",
             sources=sorted(str(s) for s in sources),
             py_limited_api=True,
