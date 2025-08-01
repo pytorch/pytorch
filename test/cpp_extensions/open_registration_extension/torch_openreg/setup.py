@@ -11,7 +11,6 @@ from setuptools import Extension, find_packages, setup
 
 
 # Env Variables
-IS_LINUX = platform.system() == "Linux"
 IS_DARWIN = platform.system() == "Darwin"
 IS_WINDOWS = platform.system() == "Windows"
 
