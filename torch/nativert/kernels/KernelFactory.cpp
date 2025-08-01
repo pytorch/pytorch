@@ -17,50 +17,6 @@
 
 namespace torch::nativert {
 
-namespace {
-
-c10::Device inferTargetDevice(
-    const Node& node,
-    const std::unordered_map<std::string, torch::nativert::TensorMeta>&
-        tensorValuesMeta) {
-  if (node.target() == "prim.Input" || node.target() == "prim.Output") {
-    return c10::Device(c10::DeviceType::CPU);
-  }
-
-  std::vector<c10::Device> devices;
-  for (auto& output : node.outputs()) {
-    if (output->type() == Type::Kind::Tensor) {
-      auto it = tensorValuesMeta.find(std::string{output->name()});
-      if (it != tensorValuesMeta.end()) {
-        devices.emplace_back(it->second.device());
-      }
-    } else if (output->type() == Type::Kind::TensorList) {
-      for (const auto& el : output->getListElements()) {
-        auto it = tensorValuesMeta.find(std::string{el->name()});
-        if (it != tensorValuesMeta.end()) {
-          devices.emplace_back(it->second.device());
-        }
-      }
-    }
-  }
-
-  if (devices.empty()) {
-    return c10::Device(c10::DeviceType::CPU);
-  } else {
-    for (size_t i = 1; i < devices.size(); ++i) {
-      if (!torch::nativert::isSameDevice(devices[0], devices[i])) {
-        LOG(WARNING) << "Node " << node
-                     << " has outputs on multiple devices: " << devices[0]
-                     << " and " << devices[i];
-      }
-    }
-
-    return devices[0];
-  }
-}
-
-} // namespace
-
 inline constexpr std::array<std::string_view, 7> kSymIntOps = {
     "_operator.floordiv",
     "_operator.mod",
@@ -143,18 +99,11 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
   for (const auto& node : graph.nodes()) {
     std::string target = std::string(node.target());
 
-    c10::Device targetDevice =
-        inferTargetDevice(node, graph.tensorValuesMeta());
-
     bool matched = false;
     for (const auto& [_, handler] : handlers) {
       if (handler.match(node, executorConfig)) {
-        auto [kernel, delegate] = handler(
-            node,
-            weights,
-            executorConfig,
-            pytorchStreamReader.get(),
-            targetDevice);
+        auto [kernel, delegate] =
+            handler(node, weights, executorConfig, pytorchStreamReader.get());
         if (kernel) {
           nodeKernels.push_back(std::move(kernel));
         }
