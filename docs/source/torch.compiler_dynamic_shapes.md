@@ -80,7 +80,7 @@ f(torch.rand(40))
 ```
 
 With dynamic shapes enabled, only one graph is created. See the
-corresponding <a href="/_static/img/dynamic_shapes/tlparse1_dynamic_shapes_true.png" target="_blank">tlparse output</a>.
+corresponding <a href="/_static/img/dynamic_shapes/tlparse2_dynamic_shapes_true.png" target="_blank">tlparse output</a>.
 
 While compilation time differences
 are minimal for this small example, more complex use cases would show significant
