@@ -524,7 +524,7 @@ or equal to the number of stages ({self._num_stages})."
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
-        if not torch.is_grad_enabled():
+        if self._has_backward and not torch.is_grad_enabled():
             raise RuntimeError(
                 "step() requires gradients to be enabled for backward computation; "
                 "it should not be used under torch.no_grad() context. "
@@ -1369,7 +1369,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
-        if not torch.is_grad_enabled():
+        if self._has_backward and not torch.is_grad_enabled():
             raise RuntimeError(
                 "step() requires gradients to be enabled for backward computation; "
                 "it should not be used under torch.no_grad() context. "
