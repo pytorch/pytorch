@@ -967,7 +967,7 @@ class TestCudaMultiGPU(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_caching_pinned_memory_multi_gpu(self):
-        # checks that the events preventing pinned memory from being re-used
+        # checks that the events preventing pinned memory from being reused
         # too early are recorded on the correct GPU
         cycles_per_ms = get_cycles_per_ms()
 
@@ -982,7 +982,7 @@ class TestCudaMultiGPU(TestCase):
 
         del t
         t = torch.FloatTensor([2]).pin_memory()
-        self.assertNotEqual(t.data_ptr(), ptr, msg="allocation re-used too soon")
+        self.assertNotEqual(t.data_ptr(), ptr, msg="allocation reused too soon")
 
         with torch.cuda.device(0):
             gpu_tensor0.copy_(t, non_blocking=True)
