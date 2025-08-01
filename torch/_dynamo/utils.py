@@ -1279,7 +1279,6 @@ class CompilationMetrics:
     compliant_custom_ops: Optional[set[str]] = None
     restart_reasons: Optional[set[str]] = None
     dynamo_time_before_restart_s: Optional[float] = None
-    stack_trace: Optional[list[str]] = None
     # Sometimes, we will finish analyzing a frame but conclude we don't want
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
@@ -1475,7 +1474,6 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
         fail_reason=c.fail_reason,
         fail_user_frame_filename=c.fail_user_frame_filename,
         fail_user_frame_lineno=c.fail_user_frame_lineno,
-        stack_trace=c.stack_trace,
         # Sets aren't JSON serializable
         non_compliant_ops=list(c.non_compliant_ops)
         if c.non_compliant_ops is not None
