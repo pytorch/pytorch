@@ -579,6 +579,22 @@ class TestNN(NNTestCase):
         m.buffer_name = Buffer(buffer3)
         self.assertEqual(m.buffer_name, Buffer(buffer3))
 
+    def test_register_buffer_allows_tensor_like_object(self):
+        class TensorLike:
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                raise NotImplementedError(f"TensorLike.__torch_function__: {func}")
+
+        buffer1 = TensorLike()
+        buffer2 = TensorLike()
+        m = nn.Module()
+        m.register_buffer('buffer_name', buffer1)
+        self.assertEqual(m.buffer_name, buffer1)
+        self.assertEqual(m.get_buffer('buffer_name'), buffer1)
+        m.buffer_name = buffer2
+        self.assertEqual(m.buffer_name, buffer2)
+        self.assertEqual(m.get_buffer('buffer_name'), buffer2)
+
     def test_get_buffer(self):
         m = nn.Module()
         buffer1 = torch.randn(2, 3)
