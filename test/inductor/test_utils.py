@@ -5,7 +5,8 @@ import unittest
 from sympy import Symbol, sympify
 
 import torch
-from torch._inductor.fx_utils import count_flops_fx, countable_fx
+from torch._dynamo.testing import EagerAndRecordGraphs
+from torch._inductor.fx_utils import count_flops_fx, countable_fx, FakeTensorUpdater
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
@@ -202,6 +203,35 @@ class TestUtils(TestCase):
 
 
 instantiate_device_type_tests(TestUtils, globals())
+
+
+class TestFakeTensorUpdater(TestCase):
+    def test_hop_no_subgraph_inputs(self):
+        pass
+
+    def test_hop_subgraph_inputs(self):
+        def get_graph() -> torch.fx.GraphModule:
+            @torch.compiler.nested_compile_region
+            def nested_section(a: torch.Tensor) -> torch.Tensor:
+                return torch.sin(a)
+
+            backend = EagerAndRecordGraphs()
+
+            @torch.compile(backend=backend, fullgraph=True)
+            def fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                x = nested_section(a)
+                return x + b
+
+            a = torch.randn(32)
+            b = torch.randn(32)
+
+            fn(a, b)
+            return backend.graphs[0]
+
+        gm = get_graph()
+        updater = FakeTensorUpdater(gm)
+        breakpoint()
+
 
 if __name__ == "__main__":
     run_tests()
