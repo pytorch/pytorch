@@ -231,6 +231,7 @@ static std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 };
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
+TORCH_API int genNcclSplitColor(const std::vector<int>& ranks);
 TORCH_API std::string getNcclVersion();
 TORCH_API std::tuple<int, int, int> getNcclVersionTuple();
 TORCH_API int getNcclVersionNumber();

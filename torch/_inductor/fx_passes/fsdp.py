@@ -1,10 +1,12 @@
 import logging
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 from torch._inductor.fx_passes.bucketing import (
     bucket_all_gather_by_mb,
+    bucket_reduce_scatter_by_mb,
     merge_all_gather,
+    merge_reduce_scatter,
 )
 
 
@@ -31,38 +33,68 @@ def is_fsdp_all_gather_wait(wait: torch.fx.Node) -> bool:
     )
 
 
+def is_graph_output(node: torch.fx.Node) -> bool:
+    return all(user.op == "output" for user in node.users)
+
+
+def is_fsdp_reduce_scatter_wait(wait: torch.fx.Node) -> bool:
+    return is_graph_output(wait)
+
+
 def bucket_fsdp_all_gather(
-    gm: torch.fx.GraphModule, all_gather_bucket_cap_mb_callback: Callable[[int], float]
+    gm: torch.fx.GraphModule,
+    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
 ) -> None:
     """
     Bucketing pass for SimpleFSDP all_gather ops.
 
     Attributes:
         gm (torch.fx.GraphModule): Graph module of the graph.
-        all_gather_bucket_cap_mb_callback (Callable[[int], float]): callback function that
+        bucket_cap_mb_by_bucket_idx (Optional[Callable[[int], float]]): callback function that
             takes in bucket id and returns size of a bucket in megabytes.
-
-    Usage:
-    ```
-    from torch._inductor.fx_passes.bucketing import (
-        bucket_all_gather,
-        bucket_size_determinator,
-    )
-
-
-    def _bucket_all_gather(graph):
-        return bucket_all_gather(graph.owning_module, bucket_size_determinator)
-
-
-    torch._inductor.config.post_grad_custom_post_pass = _bucket_all_gather
-    ```
     """
+    if bucket_cap_mb_by_bucket_idx is None:
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,
+        )
 
+        bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
+    assert bucket_cap_mb_by_bucket_idx is not None
     ag_buckets = bucket_all_gather_by_mb(
         gm,
-        all_gather_bucket_cap_mb_callback,
+        bucket_cap_mb_by_bucket_idx,
         filter_wait_node=is_fsdp_all_gather_wait,
     )
     if len(ag_buckets) == 0:
         return
     merge_all_gather(gm, ag_buckets)
+
+
+def bucket_fsdp_reduce_scatter(
+    gm: torch.fx.GraphModule,
+    bucket_cap_mb_by_bucket_idx: Optional[Callable[[int], float]] = None,
+) -> None:
+    """
+    Bucketing pass for SimpleFSDP reduce_scatter ops.
+
+    Attributes:
+        gm (torch.fx.GraphModule): Graph module of the graph.
+        bucket_cap_mb_by_bucket_idx (Optional[Callable[[int], float]]): callback function that
+            takes in bucket idx and returns size of a bucket in megabytes. By default
+            torch._inductor.fx_passes.bucketing.bucket_cap_mb_by_bucket_idx_default is used.
+
+    """
+    if bucket_cap_mb_by_bucket_idx is None:
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,
+        )
+
+        bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
+    rs_buckets = bucket_reduce_scatter_by_mb(
+        gm,
+        bucket_cap_mb_by_bucket_idx,
+        filter_wait_node=is_fsdp_reduce_scatter_wait,
+    )
+    if len(rs_buckets) == 0:
+        return
+    merge_reduce_scatter(gm, rs_buckets)

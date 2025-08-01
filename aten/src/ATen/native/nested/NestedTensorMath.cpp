@@ -746,7 +746,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
         }
         else if (size_reshaped == -1) {
           if (infer_index > -1) {
-            TORCH_CHECK(false, "only one dimension can be inferred");
+            throw std::runtime_error("only one dimension can be inferred");
           }
           else {
             infer_index = idim;

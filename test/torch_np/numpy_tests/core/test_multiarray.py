@@ -3779,7 +3779,6 @@ class TestLexsort(TestCase):
         expected_idx = np.array([2, 1, 0])
         assert_array_equal(idx, expected_idx)
 
-    @xfail  # GH issue #157720
     def test_object(self):  # gh-6312
         a = np.random.choice(10, 1000)
         b = np.random.choice(["abc", "xy", "wz", "efghi", "qwst", "x"], 1000)
@@ -4104,6 +4103,7 @@ class TestIO(TestCase):
 
             def test_decimal_period_separator():
                 pass
+
 
             def test_decimal_comma_separator():
                 with CommaDecimalPointLocale():
@@ -6787,7 +6787,10 @@ class TestWritebackIfCopy(TestCase):
 class TestArange(TestCase):
     def test_infinite(self):
         assert_raises(
-            (RuntimeError, ValueError), np.arange, 0, np.inf  # "unsupported range",
+            (RuntimeError, ValueError),
+            np.arange,
+            0,
+            np.inf,  # "unsupported range",
         )
 
     def test_nan_step(self):

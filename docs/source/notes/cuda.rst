@@ -64,6 +64,49 @@ Below you can find a small example showcasing this::
 TensorFloat-32 (TF32) on Ampere (and later) devices
 ---------------------------------------------------
 
+After Pytorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way, and
+suggest to use the new APIs for better control.
+We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "ieee"
+  torch.backends.cuda.matmul.fp32_precision = "ieee"
+  torch.backends.cudnn.fp32_precision = "ieee"
+  torch.backends.cudnn.conv.fp32_precision = "tf32"
+  torch.backends.cudnn.rnn.fp32_precision = "tf32"
+
+The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
+`ieee` fp32_precision indicate that we will use `FP32` as internal computation precision.
+`tf32` fp32_precision indicate that we will allow to use `TF32` as internal computation precision.
+
+We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
+
+.. code:: python
+
+  torch.backends.cudnn.fp32_precision = "tf32"
+  torch.backends.cudnn.conv.fp32_precision = "ieee"
+  torch.backends.cudnn.rnn.fp32_precision = "ieee"
+
+We can also override a generic setting for a specific backend if the fp32_precision is set to `ieee`.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "tf32"
+  torch.backends.cudnn.fp32_precision = "ieee"
+  torch.backends.cudnn.conv.fp32_precision = "ieee"
+  torch.backends.cudnn.rnn.fp32_precision = "ieee"
+
+For above 2 cases, both `torch.backends.cudnn.conv.fp32_precision` and `torch.backends.cudnn.rnn.fp32_precision`
+is overridden to `ieee`.
+
+We suggest to use the new settings for better control. And we do not support to use mix of old and new settings.
+
+.. warning::
+
+  Old settings with `allow_tf32` as follows is going to be deprecated. We suggest to use the above new settings for
+  better control. And we do not support to use mix of old and new settings.
+
 Starting in PyTorch 1.7, there is a new flag called `allow_tf32`. This flag
 defaults to True in PyTorch 1.7 to PyTorch 1.11, and False in PyTorch 1.12 and later.
 This flag controls whether PyTorch is allowed to use the TensorFloat32 (TF32) tensor cores,
@@ -85,7 +128,7 @@ matmuls and convolutions are controlled separately, and their corresponding flag
   # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
   torch.backends.cudnn.allow_tf32 = True
 
-The precision of matmuls can also be set more broadly (limited not just to CUDA) via :meth:`~torch.set_float_32_matmul_precision`.
+The precision of matmuls can also be set more broadly (limited not just to CUDA) via :meth:`~torch.set_float32_matmul_precision`.
 Note that besides matmuls and convolutions themselves, functions and nn modules that internally uses
 matmuls or convolutions are also affected. These include `nn.Linear`, `nn.Conv*`, cdist, tensordot,
 affine grid and grid sample, adaptive log softmax, GRU and LSTM.
@@ -132,44 +175,6 @@ To toggle the TF32 flags off in C++, you can do
 
   at::globalContext().setAllowTF32CuBLAS(false);
   at::globalContext().setAllowTF32CuDNN(false);
-
-After Pytorch 2.7, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way.
-We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
-
-.. code:: python
-
-  torch.backends.fp32_precision = "ieee"
-  torch.backends.cuda.matmul.fp32_precision = "ieee"
-  torch.backends.cudnn.fp32_precision = "ieee"
-  torch.backends.cudnn.conv.fp32_precision = "tf32"
-  torch.backends.cudnn.rnn.fp32_precision = "tf32"
-
-The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
-`ieee` fp32_precision indicate that we will use `FP32` as internal computation precision.
-`tf32` fp32_precision indicate that we will allow to use `TF32` as internal computation precision.
-
-We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
-
-.. code:: python
-
-  torch.backends.cudnn.fp32_precision = "tf32"
-  torch.backends.cudnn.conv.fp32_precision = "ieee"
-  torch.backends.cudnn.rnn.fp32_precision = "ieee"
-
-We can also override a generic setting for a specific backend if the fp32_precision is set to `ieee`.
-
-.. code:: python
-
-  torch.backends.fp32_precision = "tf32"
-  torch.backends.cudnn.fp32_precision = "ieee"
-  torch.backends.cudnn.conv.fp32_precision = "ieee"
-  torch.backends.cudnn.rnn.fp32_precision = "ieee"
-
-For above 2 cases, both `torch.backends.cudnn.conv.fp32_precision` and `torch.backends.cudnn.rnn.fp32_precision`
-is overridden to `ieee`.
-
-Old settings are still supported. But we suggest to use the new settings for better control. And we do not support
-to use mix of old and new settings.
 
 For more information about TF32, see:
 

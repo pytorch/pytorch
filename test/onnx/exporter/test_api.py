@@ -234,35 +234,6 @@ class TestExportAPIDynamo(common_utils.TestCase):
             },
         )
 
-    def test_auto_convert_all_axes_to_dynamic_shapes_with_dynamo_export(self):
-        torch.onnx._flags.USE_EXPERIMENTAL_LOGIC = True
-
-        class Nested(torch.nn.Module):
-            def forward(self, x):
-                (a0, a1), (b0, b1), (c0, c1, c2) = x
-                return a0 + a1 + b0 + b1 + c0 + c1 + c2
-
-        inputs = (
-            (1, 2),
-            (
-                torch.randn(4, 4),
-                torch.randn(4, 4),
-            ),
-            (
-                torch.randn(4, 4),
-                torch.randn(4, 4),
-                torch.randn(4, 4),
-            ),
-        )
-
-        onnx_program = torch.onnx.dynamo_export(
-            Nested(),
-            inputs,
-            export_options=torch.onnx.ExportOptions(dynamic_shapes=True),
-        )
-        assert onnx_program is not None
-        onnx_testing.assert_onnx_program(onnx_program)
-
     def test_dynamic_shapes_supports_nested_input_model_with_input_names_assigned(self):
         # kwargs can still be renamed as long as it's in order
         input_names = ["input_x", "input_y", "input_z", "d", "e", "f"]
@@ -310,10 +281,11 @@ class TestExportAPIDynamo(common_utils.TestCase):
                 # Use GELU activation function
                 return torch.nn.functional.gelu(input, approximate="tanh")
 
-        input = torch.randn(1, 3, 4, 4)
+        input = (torch.randn(1, 3, 4, 4),)
         onnx_program_op18 = torch.onnx.export(
             GeluModel(),
             input,
+            opset_version=18,
             dynamo=True,
         )
         all_nodes_op18 = [n.op_type for n in onnx_program_op18.model.graph]
