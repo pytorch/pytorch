@@ -25,6 +25,7 @@ __all__ = [
     "cycle",
     "dropwhile",
     "islice",
+    "product",
     "tee",
     "zip_longest",
 ]
@@ -167,6 +168,24 @@ if sys.version_info >= (3, 10):
             a = b
 
     __all__ += ["pairwise"]
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.product
+@substitute_in_graph(itertools.product, is_embedded_type=True)  # type: ignore[arg-type]
+def product(*iterables: Iterable[_T], repeat: int = 1) -> Iterator[tuple[_T, ...]]:
+    if repeat < 0:
+        raise ValueError("repeat argument cannot be negative")
+    pools = [tuple(pool) for pool in iterables] * repeat
+
+    def _product(pools: list[tuple[_T, ...]]) -> Iterator[tuple[_T, ...]]:
+        result: list[list[_T]] = [[]]
+        for pool in pools:
+            result = [x + [y] for x in result for y in pool]
+
+        for prod in result:
+            yield tuple(prod)
+
+    return _product(pools)
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
