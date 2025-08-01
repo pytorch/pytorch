@@ -89,7 +89,7 @@ Some of the most commonly used backends include:
 torch.compiler_get_started
 torch.compiler_api
 torch.compiler.config
-compile/dynamic_shapes
+torch.compiler_dynamic_shapes
 torch.compiler_fine_grain_apis
 torch.compiler_backward
 torch.compiler_aot_inductor
