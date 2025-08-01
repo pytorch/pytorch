@@ -2499,7 +2499,7 @@ class SubgraphTracer(fx.Tracer):
             args, kwargs = pytree.tree_unflatten(new_flat_args, tree_spec)
 
         rv = super().create_proxy(
-            kind, target, args, kwargs, name, type_expr, proxy_factory_fn
+            kind, target, args, kwargs, name, type_expr, proxy_factory_fn  # type: ignore[arg-type]
         )
 
         # append stack trace to fx node
