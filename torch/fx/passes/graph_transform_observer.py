@@ -192,6 +192,12 @@ class GraphTransformObserver:
 
             assert isinstance(new_node, Node)
 
+            # replace hook is called once for each user of old
+            # this avoids adding duplicated source nodes
+            added_nodes = {s.name for s in new_node.meta.get("from_node", [])}
+            if old.name in added_nodes:
+                return
+
             action = [NodeSourceAction.REPLACE]
             if new_node.name in self.created_nodes:
                 action.append(NodeSourceAction.CREATE)

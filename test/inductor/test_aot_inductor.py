@@ -39,6 +39,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     SM80OrLater,
+    tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
@@ -56,9 +57,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     MACOS_VERSION,
+    MI300_ARCH,
     parametrize,
     skipIfMPS,
     skipIfRocm,
+    skipIfRocmArch,
+    skipIfWindows,
     skipIfXpu,
     TEST_MPS,
     TEST_WITH_ROCM,
@@ -147,8 +151,11 @@ except (unittest.SkipTest, ImportError):
 
 
 class AOTInductorTestsTemplate:
+    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
+    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
+    @skipIfRocmArch(MI300_ARCH)
     def test_simple(self, embed_kernel_binary, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -744,6 +751,7 @@ class AOTInductorTestsTemplate:
         IS_FBCODE,
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
+    @tf32_on_and_off(0.005)
     def test_deconv_freezing(self):
         dtypes = [torch.float]
         if torch._C._has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported():
@@ -1145,6 +1153,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (x, y)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
+    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
     def test_large_dynamic_dim(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1387,6 +1396,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
     def test_foreach_multiple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -2024,6 +2034,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
     @common_utils.parametrize("dynamic", [False, True])
     def test_cond_mismatched_branch_output(self, dynamic):
         inputs = (
@@ -2390,6 +2401,9 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, device=self.device),)
         self.check_model(Model(self.device), example_inputs)
 
+    @skipIfWindows(
+        msg="OpenMP crashed application on windows"
+    )  # TODO: (xuhancn) need to root cause and fix.
     def test_buffer_mutation_3(self):
         class KVCache(torch.nn.Module):
             def __init__(
@@ -4311,7 +4325,7 @@ class AOTInductorTestsTemplate:
             def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
                 return a[: b.item()]
 
-            @torch.library.impl_abstract("mylib::foo", lib=lib)
+            @torch.library.register_fake("mylib::foo", lib=lib)
             def foo_fake_impl(a, b):
                 ctx = torch.library.get_ctx()
                 u = ctx.new_dynamic_size()
@@ -4375,6 +4389,7 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(Exception, "run_func_(.*) API call failed "):
             optimized(*input2)
 
+    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
         with DeterministicGuard(True):
@@ -4833,7 +4848,10 @@ class AOTInductorTestsTemplate:
             )
             self.assertTrue(same(model(*example_input), actual))
 
+    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
+    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("max_autotune", [True, False])
+    @skipIfRocmArch(MI300_ARCH)
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -5434,6 +5452,9 @@ class AOTInductorTestsTemplate:
         self.check_model(sin_triton, none_inputs)
         self.check_model(sin_triton, not_none_inputs)
 
+    @skipIfWindows(
+        msg="OpenMP crashed application on windows"
+    )  # TODO: (xuhancn) need to root cause and fix.
     def test_issue_140766(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -6719,6 +6740,25 @@ class AOTInductorLoggingTest(LoggingTestCase):
             torch._inductor.aot_compile(ep.module(), inputs)
         self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
 
+    @make_logging_test(dynamic=logging.DEBUG)
+    def test_shape_env_reuse_zero_consts_use_consts_asm_false(self, records):
+        # make sure ShapeEnv is only created once and reused afterwards
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        inputs = (torch.randn(4, 4),)
+        dynamic_shapes = {
+            "x": {0: Dim.AUTO, 1: Dim.AUTO},
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
+        with (
+            torch.no_grad(),
+            config.patch({"aot_inductor.use_consts_asm_build": False}),
+        ):
+            torch._inductor.aot_compile(ep.module(), inputs)
+        self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
+
 
 class TestAOTInductorConfig(TestCase):
     def test_no_compile_standalone(self):
@@ -6821,19 +6861,10 @@ MPS_TEST_FAILURES = {
     # either (1) tell outside to initialize a new kernel or (2) generate
     # subgraph as a separate function, which would(?) cause (1) to happen automatically.
     "test_while_loop_nested": fail_mps(),
+    "test_cond_with_parameters": fail_mps(),
+    "test_cond_share_predicte": fail_mps(),
     # correctness issue
     "test_index_put_with_none_index": fail_mps(),
-    # Dynamism
-    "test_shifted_constraint_ranges": fail_mps(),
-    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_mps(),
-    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_mps(),
-    "test_cond_mismatched_branch_output_dynamic_True": fail_mps(),
-    "test_cond_unbacked_symint_closure_dynamic_True": fail_mps(),
-    "test_cond_non_tensor_predicates_dynamic_True": fail_mps(),
-    "test_zero_grid_with_unbacked_symbols": fail_mps(),
-    "test_reuse_kernel_dynamic": fail_mps(is_skip=True),
-    "test_cond_with_parameters": fail_mps(is_skip=True),
-    "test_cond_share_predicte": fail_mps(is_skip=True),
     # Error device may not be nil
     "test_zero_size_weight": fail_mps(is_skip=True),
     # RuntimeError: Cannot compare two tensors on different devices. Got: cpu and mps:0
