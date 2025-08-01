@@ -51,7 +51,7 @@ aten = torch.ops.aten
 
 
 def patches(fn):
-    def skip_cache(self, choices, name, key, benchmark):
+    def skip_cache(self, choices, name, key, benchmark, hint_override=None):
         if benchmark is None:
             return {}
         timings = benchmark(choices)
@@ -1958,7 +1958,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         input = torch.randn(*B, in_features).to(dtype=torch.float32)
 
         other = torch.randn(*B, out_features).to(dtype=dtype)
-        # Avoid hiting qlinear inplace sum fusion
+        # Avoid hitting qlinear inplace sum fusion
         if input_3d:
             other2 = torch.randn(B[0] * B[1], out_features).to(dtype=dtype)
         else:
@@ -1975,7 +1975,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
             def forward(self, x, other, other2):
                 res = self.epilogue(self.linear(x) + other)
-                # Avoid hiting qlinear inplace sum fusion
+                # Avoid hitting qlinear inplace sum fusion
                 if self.input_3d:
                     other2 = other2.view(2, other2.size(0) // 2, other2.size(1))
                 else:
@@ -2215,7 +2215,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x):
                 return [linear(x) for linear in self.linears]
 
-        # each linear has different num of out features, thus invaild grouped gemm
+        # each linear has different num of out features, thus invalid grouped gemm
         dtypes = []
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             dtypes.append(torch.bfloat16)

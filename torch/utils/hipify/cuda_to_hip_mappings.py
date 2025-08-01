@@ -4231,6 +4231,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ),
         ("cudaMallocHost", ("hipHostMalloc", CONV_MEM, API_RUNTIME)),
         ("cudaMallocArray", ("hipMallocArray", CONV_MEM, API_RUNTIME)),
+        ("cudaMallocAsync", ("hipMallocAsync", CONV_MEM, API_RUNTIME)),
         ("cudaMalloc", ("hipMalloc", CONV_MEM, API_RUNTIME)),
         ("cudaMalloc3D", ("hipMalloc3D", CONV_MEM, API_RUNTIME)),
         ("cudaMalloc3DArray", ("hipMalloc3DArray", CONV_MEM, API_RUNTIME)),
@@ -4245,6 +4246,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaMallocPitch", ("hipMallocPitch", CONV_MEM, API_RUNTIME)),
         ("cudaFreeHost", ("hipHostFree", CONV_MEM, API_RUNTIME)),
         ("cudaFreeArray", ("hipFreeArray", CONV_MEM, API_RUNTIME)),
+        ("cudaFreeAsync", ("hipFreeAsync", CONV_MEM, API_RUNTIME)),
         ("cudaFree", ("hipFree", CONV_MEM, API_RUNTIME)),
         ("cudaHostRegister", ("hipHostRegister", CONV_MEM, API_RUNTIME)),
         ("cudaHostUnregister", ("hipHostUnregister", CONV_MEM, API_RUNTIME)),
@@ -9146,6 +9148,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10)),
         ("CUDAKernelLaunchRegistry", ("HIPKernelLaunchRegistry", API_C10)),
         ("c10::cuda::get_cuda_check_suffix", ("c10::hip::get_hip_check_suffix", API_C10)),
+        ("c10::cuda::get_cuda_error_help", ("c10::hip::get_hip_error_help", API_C10)),
     ]
 )
 

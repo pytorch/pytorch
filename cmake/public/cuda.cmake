@@ -69,8 +69,8 @@ endif()
 message(STATUS "PyTorch: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "PyTorch: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "PyTorch: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
-if(CUDA_VERSION VERSION_LESS 11.0)
-  message(FATAL_ERROR "PyTorch requires CUDA 11.0 or above.")
+if(CUDA_VERSION VERSION_LESS 12.0)
+  message(FATAL_ERROR "PyTorch requires CUDA 12.0 or above.")
 endif()
 
 if(CUDA_FOUND)
@@ -110,7 +110,7 @@ if(CUDA_FOUND)
       # Force CUDA to be processed for again next time
       # TODO: I'm not sure if this counts as an implementation detail of
       # FindCUDA
-      set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
+      set(cuda_version_from_findcuda ${CUDA_VERSION_STRING})
       unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
       # Not strictly necessary, but for good luck.
       unset(CUDA_VERSION CACHE)
