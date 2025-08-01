@@ -5,17 +5,21 @@ set -euo pipefail
 TARGET_FILE="requirements/test.in"
 TMP_HEAD=$(mktemp)
 
-PKGS=("torch" "torchvision" "torchaudio" "xformers" "flashinfer-python")
+PKGS=("torch" "torchvision" "torchaudio" "xformers" "mamba_ssm")
 
 echo "[INFO] Scanning and removing the following local packages from $TARGET_FILE:"
 for pkg in "${PKGS[@]}"; do
-  # Match both @ file:// and == patterns
-  MATCHES=$(grep -E "^${pkg}[[:space:]]+@ file://|^${pkg}==" "$TARGET_FILE" || true)
+  # Show matches for info
+  MATCHES=$(grep -Ei "^${pkg}[[:space:]]*(@|==)" "$TARGET_FILE" || true)
   if [[ -n "$MATCHES" ]]; then
-    echo "$MATCHES"
-    # Remove both match types
-    sed -i "/^${pkg}[[:space:]]\+@ file:\/\//d" "$TARGET_FILE"
-    sed -i "/^${pkg}==/d" "$TARGET_FILE"
+    echo "Removing: $MATCHES"
+    # Remove lines like:
+    # torch==...
+    # torch == ...
+    # torch @ ...
+    # torch@ ...
+    sed -i "/^${pkg}[[:space:]]*==/Id" "$TARGET_FILE"
+    sed -i "/^${pkg}[[:space:]]*@/Id" "$TARGET_FILE"
   fi
 done
 
@@ -29,4 +33,3 @@ mv "$TMP_HEAD" "$TARGET_FILE"
 
 echo "[INFO] Successfully prepended local .whl references to $TARGET_FILE:"
 head -n 10 "$TARGET_FILE"
-
