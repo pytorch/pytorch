@@ -323,6 +323,7 @@ ARG torch_cuda_arch_list='8.0;8.9;9.0a'
 # install package for build flashinfer
 # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
 # RUN pip install setuptools==75.6.0 packaging==23.2 ninja==1.11.1.3 build==1.2.2.post1
+RUN pip install build
 RUN pip freeze | grep -E 'setuptools|packaging|build'
 
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
