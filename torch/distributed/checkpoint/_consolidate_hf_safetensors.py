@@ -491,7 +491,7 @@ def _write_overall_metadata_file(
 def _consolidate_safetensors_files(
     input_dir: str,
     output_dir: str,
-    fqn_to_file_mapping: [dict[str, str]],
+    fqn_to_file_mapping: dict[str, str],
     num_threads: int,
 ) -> dict[str, _OutputFileData]:
     output_files_data: dict[str, _OutputFileData] = {}
