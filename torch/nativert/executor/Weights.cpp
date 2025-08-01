@@ -384,22 +384,6 @@ void Weights::setValue(const std::string& name, const at::Tensor& newValue) {
   allValues_[name] = newValue;
 }
 
-void Weights::updateValue(const std::string& name, const at::Tensor& newValue) {
-  auto it = allValues_.find(name);
-  TORCH_CHECK(
-      it != allValues_.end(), name, " not found in Weights ", toString());
-  validateValue(name, newValue);
-
-  it->second.copy_(newValue);
-}
-
-void Weights::updateValues(
-    const std::unordered_map<std::string, at::Tensor>& newValues) {
-  for (auto& [name, newValue] : newValues) {
-    updateValue(name, newValue);
-  }
-}
-
 std::string Weights::toString() const {
   std::stringstream ss;
   ss << '[';

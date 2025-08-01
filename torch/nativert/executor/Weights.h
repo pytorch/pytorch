@@ -67,15 +67,6 @@ class Weights {
    */
   void setValue(const std::string& name, const at::Tensor& newValue);
 
-  /*
-   * Update the value stored at the weight with name "name".
-   * This is done in-place.
-   */
-  void updateValue(const std::string& name, const at::Tensor& newValue);
-
-  void updateValues(
-      const std::unordered_map<std::string, at::Tensor>& newValues);
-
   void validateValue(const std::string& name, const at::Tensor& newValue) const;
 
   void validateAllWeightsLoaded();
