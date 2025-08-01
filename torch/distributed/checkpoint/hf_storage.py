@@ -44,7 +44,6 @@ from torch.distributed.checkpoint.planner import (
 )
 from torch.distributed.checkpoint.storage import WriteResult
 from torch.futures import Future
-from safetensors.torch import  _getdtype
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -167,8 +166,12 @@ class HuggingFaceStorageWriter(FsspecWriter):
             logger.info("Not consolidating sharded checkpoint in finish step.")
             return
         if self.save_distributed:
-            fqn_to_index_mapping = self.fqn_to_index_mapping if self.fqn_to_index_mapping is not None else {fqn: 1 for fqn, _ in metadata.state_dict_metadata.keys()}
-        
+            fqn_to_index_mapping: dict[str, int] = (
+                self.fqn_to_index_mapping
+                if self.fqn_to_index_mapping is not None
+                else {fqn: 1 for fqn in metadata.state_dict_metadata.keys()}
+            )
+
             return consolidate_safetensors_files(
                 input_dir=str(self.path),
                 output_dir=self.consolidated_output_path,  # type: ignore[arg-type]
@@ -278,6 +281,8 @@ class HuggingFaceStorageReader(FsspecReader):
         return fut
 
     def read_metadata(self) -> Metadata:
+        from safetensors.torch import  _getdtype  # type: ignore[import]
+        
         state_dict_metadata: dict[str, TensorStorageMetadata] = {}
         storage_data: dict[MetadataIndex, _HFStorageInfo] = {}
 
