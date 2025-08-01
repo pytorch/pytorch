@@ -192,27 +192,27 @@ class SocketImpl {
   const std::optional<std::string> remote_;
 };
 
-// It can be be very slow to repeatedly hit DNS resolution failure, but its very
-// helpful to have DNS names in logs by default. So we try to use DNS but if we
-// hit a transient failure we just disable it for the remainder of the job,
-// logging IP addresses instead.
-// See https://github.com/pytorch/pytorch/issues/159007
-bool DISABLE_getnameinfo = false;
-
 std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
+  // It can be be very slow to repeatedly hit DNS resolution failure, but its
+  // very helpful to have DNS names in logs by default. So we try to use DNS but
+  // if we hit a transient failure we just disable it for the remainder of the
+  // job, logging IP addresses instead. See
+  // https://github.com/pytorch/pytorch/issues/159007
+  static bool disable_getnameinfo = false;
+
   char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
 
-  if (!DISABLE_getnameinfo) {
+  if (!disable_getnameinfo) {
     int err = ::getnameinfo(
         addr, len, host, NI_MAXHOST, port, NI_MAXSERV, NI_NUMERICSERV);
     if (err != 0) {
       C10D_WARNING(
           "The hostname of the client socket cannot be retrieved. err={}", err);
-      DISABLE_getnameinfo = true;
+      disable_getnameinfo = true;
     }
   }
-  // if getnameinfo failed, DISABLE would be set
-  if (!DISABLE_getnameinfo) {
+  // if getnameinfo failed, disable would be set
+  if (!disable_getnameinfo) {
     if (addr->sa_family == AF_INET) {
       return fmt::format("{}:{}", host, port);
     }
