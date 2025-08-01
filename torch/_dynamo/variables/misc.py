@@ -42,6 +42,7 @@ from ..source import (
     AttrSource,
     GenericAttrSource,
     GetItemSource,
+    TypeMROSource,
     TypeSource,
     WeakRefCallSource,
 )
@@ -134,9 +135,7 @@ class SuperVariable(VariableTracker):
                     # Equivalent of something like type(L['self']).__mro__[1].attr_name
                     if type_to_use_source:
                         source = AttrSource(
-                            GetItemSource(
-                                AttrSource(type_to_use_source, "__mro__"), index
-                            ),
+                            GetItemSource(TypeMROSource(type_to_use_source), index),
                             name,
                         )
                     return resolved_getattr, source
