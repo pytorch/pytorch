@@ -1635,7 +1635,7 @@ bool use_fast_accum) {
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
   if (!a_is_2d || !b_is_2d) {
-    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2), "mat_a and mat_b have to have the same trailing dimension");
+    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
   }
   TORCH_CHECK(
     mat_a.size(-1) % 16 == 0,
@@ -1720,7 +1720,7 @@ std::optional<c10::ScalarType> out_dtype) {
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
   if (!a_is_2d || !b_is_2d) {
-    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2), "mat_a and mat_b have to have the same trailing dimension");
+    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
   }
 
   // check that the strides are valid, the fn will throw an error if not
