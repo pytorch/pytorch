@@ -322,29 +322,23 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ARG torch_cuda_arch_list='8.0;8.9;9.0a'
 # install package for build flashinfer
 # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
-RUN pip install setuptools==75.6.0 packaging==23.2 ninja==1.11.1.3 build==1.2.2.post1
+# RUN pip install setuptools==75.6.0 packaging==23.2 ninja==1.11.1.3 build==1.2.2.post1
 
+ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 # Build flashinfer for torch nightly from source around 10 mins
 ARG FLASHINFER_GIT_REPO="https://github.com/flashinfer-ai/flashinfer.git"
 # Keep this in sync with https://github.com/vllm-project/vllm/blob/main/requirements/cuda.txt
-# We use `--force-reinstall --no-deps` to avoid issues with the existing FlashInfer wheel.
 ARG FLASHINFER_GIT_REF="v0.2.9rc2"
-ENV CCACHE_DIR=/root/.cache/ccache
-RUN --mount=type=cache,target=/root/.cache/uv bash - <<'BASH'
-  . /etc/environment
+RUN --mount=type=cache,target=/root/.cache/uv \
     git clone --depth 1 --recursive --shallow-submodules \
         --branch ${FLASHINFER_GIT_REF} \
-        ${FLASHINFER_GIT_REPO} flashinfer
-    echo "Building FlashInfer for arches: ${torch_cuda_arch_list}"
-    # Needed to build AOT kernels
-    pushd flashinfer
-        TORCH_CUDA_ARCH_LIST="${torch_cuda_arch_list}" \
-            python3 -m flashinfer.aot
-        TORCH_CUDA_ARCH_LIST="${torch_cuda_arch_list}" \
-            uv pip install --system --no-build-isolation --force-reinstall --no-deps .
-    popd
-    rm -rf flashinfer
-BASH
+        ${FLASHINFER_GIT_REPO} flashinfer \
+    && echo "Building FlashInfer with AOT for arches: ${torch_cuda_arch_list}" \
+    && cd flashinfer \
+    && python3 -m flashinfer.aot \
+    && python3 -m build --no-isolation --wheel --outdir ../flashinfer-dist \
+    && cd .. \
+    && rm -rf flashinfer
 
 # install flashinfer python
 RUN --mount=type=cache,target=/root/.cache/uv \
