@@ -1524,9 +1524,7 @@ class TestFullyShardWorldSize1(FSDPTest):
                 losses.append(model(*inp).sum())
                 losses[-1].backward()
 
-            # Before there was 1 all-gather and 1 reduce-scatter
-            # Now therre is 1 reduce-scatter
-            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             optim.step()
 
             self.assertEqual(losses[0], losses[1])
