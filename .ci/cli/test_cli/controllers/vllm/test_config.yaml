@@ -1,0 +1,17 @@
+# list of vllm test configs that run in  torch ci
+# we only want to enable limited number of tests, one potential thing could do is
+# we can set a converter to vllm tests to get the similar format
+- label: Basic Correctness Test # 30min
+  id: vllm_basic_correctness_test
+  steps:
+  - export VLLM_WORKER_MULTIPROC_METHOD=spawn
+  - pytest -v -s basic_correctness/test_cumem.py
+  - pytest -v -s basic_correctness/test_basic_correctness.py
+  - pytest -v -s basic_correctness/test_cpu_offload.py
+  - VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 pytest -v -s basic_correctness/test_preemption.py
+
+- label: LoRA Test
+  id: vllm_lora_test
+  steps:
+   - pytest -v -s lora --shard-id=$$SHARD_ID --num-shards=$$TEST_SHARDS --ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py
+  parallelism: 4
