@@ -275,7 +275,7 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
   auto seed_output = mk_philoxtensor(use_philox_state ? seed_t.data_ptr<int64_t>() : nullptr);
   auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
-  auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
+  auto persistent_counter = mk_atomictensor(is_causal || uses_swa ? atomic_counter.data_ptr<int32_t>() : nullptr);
   if (uses_swa) {
 #if V3_API
     using aotriton::v3::flash::CausalType;
@@ -476,7 +476,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     auto nullscalar = mk_philoxtensor(nullptr);
     auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : nullscalar;
     auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : nullscalar;
-    auto persistent_counter = is_causal ? mk_philoxtensor(atomic_counter.data_ptr<int64_t>()) : nullscalar;
+    auto persistent_counter = is_causal || uses_swa ? mk_philoxtensor(atomic_counter.data_ptr<int64_t>()) : nullscalar;
     if (uses_swa) {
 #if V3_API
       using aotriton::v3::flash::CausalType;
