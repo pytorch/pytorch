@@ -417,7 +417,7 @@ use_experimental_benchmarker: bool = Config(
 )
 
 # Total number of shards for autotuning
-num_autotune_shards = 10
+num_autotune_shards = 1
 
 # Current shard index (0 to num_autotune_shards-1)
 autotune_shard_index = 0

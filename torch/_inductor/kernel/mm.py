@@ -683,6 +683,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices = generate_mm_choices(mat1, mat2, m, n, k, layout, device_type)
     return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
 
+
 def generate_mm_choices(mat1, mat2, m, n, k, layout, device_type):
     """
     Generate a list of algorithm choices for matrix multiplication.
@@ -796,6 +797,7 @@ def generate_mm_choices(mat1, mat2, m, n, k, layout, device_type):
 
     if use_cpp_gemm_template(layout, mat1, mat2):
         from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
+
         CppGemmTemplate.add_choices(
             choices,
             layout,
@@ -852,7 +854,12 @@ def generate_mm_choices(mat1, mat2, m, n, k, layout, device_type):
     for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
 
-    choices = [choice for choice in choices if hash(choice) % inductor_config.num_autotune_shards == inductor_config.autotune_shard_index]
+    choices = [
+        choice
+        for choice in choices
+        if hash(choice) % inductor_config.num_autotune_shards
+        == inductor_config.autotune_shard_index
+    ]
 
     return choices
 
@@ -1045,6 +1052,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_cpp_gemm_template(layout, mat1, mat2):
         from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
+
         CppGemmTemplate.add_choices(
             choices,
             layout,
