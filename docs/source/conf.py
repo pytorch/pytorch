@@ -66,10 +66,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
-    "sphinx_remove_toctrees"
 ]
-
-remove_from_toctrees = ["generated/*"]
 
 myst_enable_extensions = [
     "colon_fence",
