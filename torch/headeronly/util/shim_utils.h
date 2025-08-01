@@ -27,7 +27,7 @@ TORCH_NOINLINE static void throw_exception(
 // pytorch/torch/csrc/inductor/aoti_runtime/utils.h to handle the returns
 // of the APIs in the shim. We are genericizing this for more global use
 // of the shim beyond AOTI, for examples, see torch/csrc/stable/ops.h.
-#define TORCH_ERROR_CODE_CHECK(call)       \
-  if ((call) != TORCH_SUCCESS) {           \
+#define TORCH_ERROR_CODE_CHECK(call)            \
+  if ((call) != TORCH_SUCCESS) {                \
     throw_exception(#call, __FILE__, __LINE__); \
   }
