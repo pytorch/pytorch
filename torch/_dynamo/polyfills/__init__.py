@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     # See also the POLYFILLED_MODULE_NAMES in torch/_dynamo/polyfills/loader.py
     # Put the submodules here to avoid circular imports
     from . import (
+        _collections as _collections,
         builtins as builtins,
         functools as functools,
         itertools as itertools,
@@ -99,6 +100,10 @@ def accumulate_grad(x, new_grad):
         x.grad = x.grad + new_grad_strided
     else:
         x.grad.add_(new_grad_strided)
+
+
+def is_iterable(obj):
+    return isinstance(obj, Iterable)
 
 
 # This mirrors
@@ -241,6 +246,10 @@ def set_difference_update(set1, *others):
     result = set1.difference(*others)
     set1.clear()
     set1.update(result)
+
+
+def assert_dict_equal(self_, d1, d2, msg=None):
+    self_.assertTrue(d1 == d2, msg)
 
 
 def assert_multi_line_equal(self_, first, second, msg=None):

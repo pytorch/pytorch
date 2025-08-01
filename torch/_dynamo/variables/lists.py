@@ -1150,6 +1150,9 @@ class NamedTupleVariable(TupleVariable):
             else:
                 return None
 
+        if name == "_fields":
+            return VariableTracker.build(tx, self.fields())
+
         if name in self.dynamic_attributes:
             return self.dynamic_attributes[name]
 

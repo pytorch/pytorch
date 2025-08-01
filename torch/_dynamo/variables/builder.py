@@ -3583,6 +3583,12 @@ class SourcelessBuilder:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
+        elif callable(value) and UserDefinedClassVariable.is_supported_new_method(
+            value
+        ):
+            # NamedTuple._make uses an alias of tuple.__new__
+            obj = trace_rules.lookup_callable(value.__self__)(value.__self__)
+            return GetAttrVariable(obj, "__new__")
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
         elif isinstance(

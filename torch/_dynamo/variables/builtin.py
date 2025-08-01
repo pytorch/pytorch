@@ -110,6 +110,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .user_defined import (
+    MutableMappingVariable,
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
     UserDefinedSetVariable,
@@ -1373,11 +1374,17 @@ class BuiltinVariable(VariableTracker):
             if (
                 self.fn is tuple
                 and len(args) == 2
-                and args[1].has_unpack_var_sequence(tx)
+                and (
+                    is_iterable := tx.inline_user_function_return(
+                        VariableTracker.build(tx, polyfills.is_iterable), [args[1]], {}
+                    )
+                )
+                and isinstance(is_iterable, ConstantVariable)
+                and is_iterable.value
                 and not kwargs
             ):
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    init_args = args[1].unpack_var_sequence(tx)
+                    init_args = args[1].force_unpack_var_sequence(tx)
                     return variables.TupleVariable(
                         init_args, mutation_type=ValueMutationNew()
                     )
@@ -1855,6 +1862,12 @@ class BuiltinVariable(VariableTracker):
             hints=["Ensure your call to cast() has exactly 2 arguments."],
         )
 
+    def call_dir(self, tx: "InstructionTranslator", arg):
+        if isinstance(arg, variables.UserDefinedClassVariable):
+            return VariableTracker.build(tx, dir(arg.value))
+        if isinstance(arg, BuiltinVariable):
+            return VariableTracker.build(tx, dir(arg.fn))
+
     def call_dict(self, tx: "InstructionTranslator", *args, **kwargs):
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
@@ -1981,10 +1994,7 @@ class BuiltinVariable(VariableTracker):
         if kwargs:
             assert len(kwargs) == 1 and "strict" in kwargs
         strict = kwargs.pop("strict", False)
-        args = [
-            arg.unpack_var_sequence(tx) if arg.has_unpack_var_sequence(tx) else arg
-            for arg in args
-        ]
+        args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
         return variables.ZipVariable(
             args, strict=strict, mutation_type=ValueMutationNew()
         )
@@ -2123,7 +2133,7 @@ class BuiltinVariable(VariableTracker):
     def call_super(self, tx: "InstructionTranslator", a, b):
         return variables.SuperVariable(a, b)
 
-    def call_next(self, tx, *args):
+    def call_next(self, tx: "InstructionTranslator", *args):
         arg = args[0]
         try:
             return arg.next_variable(tx)
@@ -2250,7 +2260,6 @@ class BuiltinVariable(VariableTracker):
                     "assertRaisesRegex",
                     "assertNotWarns",
                     "assertWarnsRegex",
-                    "assertDictEqual",
                     "assertWarns",
                 )
             ):
@@ -2532,6 +2541,13 @@ class BuiltinVariable(VariableTracker):
                 (operator.neg)(a.as_proxy()),
                 sym_num=None,
             )
+
+        if (
+            isinstance(a, UserDefinedObjectVariable)
+            and a.call_obj_hasattr(tx, "__neg__").value  # type: ignore[attr-defined]
+        ):
+            return a.call_method(tx, "__neg__", [], {})
+
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -2737,6 +2753,7 @@ class BuiltinVariable(VariableTracker):
             (
                 ConstDictVariable,
                 DictKeysVariable,
+                MutableMappingVariable,
                 SetVariable,
                 UserDefinedDictVariable,
                 UserDefinedSetVariable,
@@ -2765,7 +2782,13 @@ class BuiltinVariable(VariableTracker):
         # This call looks like `{"one": torch.ones(1)} |= {"two": torch.ones(2)}`.
         if isinstance(
             a,
-            (ConstDictVariable, DictKeysVariable, SetVariable, UserDefinedSetVariable),
+            (
+                ConstDictVariable,
+                DictKeysVariable,
+                MutableMappingVariable,
+                SetVariable,
+                UserDefinedSetVariable,
+            ),
         ):
             return a.call_method(tx, "__ior__", [b], {})
 
