@@ -224,7 +224,7 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
       // check if the key is unrecognized.
       if (device_config_parser_hook_) {
         TORCH_CHECK(
-            keys_.find(key) != keys_.end(),
+            getKeys().find(key) != getKeys().end(),
             "Unrecognized key '",
             key,
             "' in Accelerator allocator config.");
