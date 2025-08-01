@@ -11,7 +11,6 @@ from torch.distributed.checkpoint import FileSystemWriter, FileSystemReader
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     consolidate_safetensors_files,
 )
-from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
     _get_dtype,

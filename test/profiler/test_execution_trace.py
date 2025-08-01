@@ -404,6 +404,7 @@ class TestExecutionTrace(TestCase):
 
         nodes = self.get_execution_trace_root(fp.name)
         found_captured_triton_kernel_node = False
+        found_call_compiled_fx_graph = False
         for n in nodes:
             assert "name" in n
             if "triton_" in n["name"]:
@@ -412,7 +413,10 @@ class TestExecutionTrace(TestCase):
                         found_captured_triton_kernel_node = True
                         assert len(n["inputs"]["values"]) > 0
                         assert len(n["outputs"]["values"]) == 0
+            elif "Call CompiledFxGraph" in n["name"]:
+                found_call_compiled_fx_graph = True
         assert found_captured_triton_kernel_node
+        assert found_call_compiled_fx_graph
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
@@ -721,9 +725,9 @@ class TestExecutionTrace(TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             fp_name = os.path.join(temp_dir, "test.et.json")
 
-            os.environ[
-                "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA"
-            ] = "aten::gather"
+            os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA"] = (
+                "aten::gather"
+            )
             et = ExecutionTraceObserver()
             et.register_callback(fp_name)
             et.set_extra_resource_collection(True)
