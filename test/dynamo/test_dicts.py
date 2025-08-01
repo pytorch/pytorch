@@ -1551,6 +1551,23 @@ class OrderedDictMethodsTests(DictMethodsTests):
     # + move_to_end
 
     @make_dynamo_test
+    def test_move_to_end(self):
+        d = self.thetype.fromkeys("abcde")
+        self.assertEqual("".join(d), "abcde")
+        d.move_to_end("b")
+        self.assertEqual("".join(d), "acdeb")
+
+        # Test OrderedDict.move_to_end
+        self.thetype.move_to_end(d, "a")
+        self.assertEqual("".join(d), "cdeba")
+
+        # Test last=False
+        self.thetype.move_to_end(d, "a", last=False)
+        self.assertEqual("".join(d), "acdeb")
+
+        # Test KeyError
+        self.assertRaises(KeyError, d.move_to_end, "f")
+
     def test_cmp_eq_order(self):
         a = self.thetype.fromkeys("abc")
         b = self.thetype.fromkeys("bca")
@@ -1581,6 +1598,38 @@ class OrderedDictMethodsTests(DictMethodsTests):
         self.assertIs(type(dict.__ior__(d3, dict(d2))), OrderedDict)
         self.assertIs(type(dict.__ior__(dict(d3), d2)), dict)
         self.assertIs(type(dict(d4).__ior__(d2)), dict)
+
+
+class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        torch._dynamo.config.enable_trace_unittest = True
+        super().setUp()
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = False
+        return super().tearDown()
+
+    def assertEqual(self, x, y):
+        self.assertTrue(x == y, f"Expected {x} to be equal to {y}")
+
+    def assertNotEqual(self, x, y):
+        self.assertFalse(x == y, f"Expected {x} to not be equal to {y}")
+
+    class OrderedDictSubclass(OrderedDict):
+        def get(self, key, default=None, /):
+            return default
+
+        def move_to_end(self, key, last=True, /):
+            # change the behavior to something else
+            self.pop(key)
+
+    thetype = OrderedDictSubclass
+
+    @make_dynamo_test
+    def test_move_to_end(self):
+        p = self.thetype({"a": 1, "b": 2, "c": 3})
+        p.move_to_end("a")
+        self.assertEqual(list(p.keys()), list("bc"))
 
 
 if __name__ == "__main__":
