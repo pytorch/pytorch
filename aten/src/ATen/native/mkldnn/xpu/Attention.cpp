@@ -76,7 +76,7 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
 
 bool can_use_flash_attention(sdp::sdp_params const& params, bool debug) {
   // Currently, XPU fallbacks flash attention to overrideable
-  return sdp::can_use_overrideable_attention(params, debug);
+  return can_use_overrideable_attention(params, debug);
 }
 
 bool can_use_cudnn_attention(sdp::sdp_params const& params, bool debug) {
