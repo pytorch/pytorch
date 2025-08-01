@@ -1908,6 +1908,54 @@ class GraphModule(torch.nn.Module):
             gm = export(m, (torch.rand(64, 64),))
             torch.export.unflatten(gm)
 
+    def test_unflatten_closure(self):
+        class Dummy(torch.nn.Module):
+            def forward(self, fn, x):
+                y = x + 2
+                z = fn(y)
+                return z + 4
+
+        class N(torch.nn.Module):
+            def forward(self, x):
+                return x + 3
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dummy = Dummy()
+                self.n = N()
+
+            def forward(self, x):
+                y = x + 1
+                z = self.dummy(lambda k: self.n(y + k) + y, y)
+                return z + 5
+
+        m = M()
+        x = torch.randn(3)
+        ep = export(m, (x,))
+        print(ep)
+        ufm = torch.export.unflatten(ep)
+        self.assertExpectedInline(
+            str(ufm.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    dummy = self.dummy(add);  add = None
+    add_6 = torch.ops.aten.add.Tensor(dummy, 5);  dummy = None
+    return (add_6,)""",
+        )
+        self.assertExpectedInline(
+            str(ufm.dummy.graph_module.code).strip(),
+            """\
+def forward(self, add):
+    add_1 = torch.ops.aten.add.Tensor(add, 2)
+    add_2 = torch.ops.aten.add.Tensor(add, add_1);  add_1 = None
+    add_3 = torch.ops.aten.add.Tensor(add_2, 3);  add_2 = None
+    add_4 = torch.ops.aten.add.Tensor(add_3, add);  add_3 = add = None
+    add_5 = torch.ops.aten.add.Tensor(add_4, 4);  add_4 = None
+    return add_5""",
+        )
+
     def test_state_primitives(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -8266,6 +8314,29 @@ def forward(self, b_a_buffer, x):
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
 
+    def test_ccode_python_mod(self):
+        import sympy
+
+        from torch.utils._sympy.functions import PythonMod
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                torch._check_is_size(u1)
+                return u0, u1
+
+        ep = export(Foo(), (torch.tensor([2, 3]),), strict=False)
+        u0_node, u1_node = list(ep.graph.nodes)[-1].args[0]
+        u0 = u0_node.meta["val"]
+        u1 = u1_node.meta["val"]
+        self.assertExpectedInline(
+            sympy.ccode(PythonMod(u0, 3)), """(u0 % 3) < 0 ? u0 % 3 + 3 : u0 % 3"""
+        )
+        self.assertExpectedInline(
+            sympy.ccode(PythonMod(u0, u1)),
+            """(u0 % u1) < 0 ? u0 % u1 + abs(u1) : u0 % u1""",
+        )
+
     def test_aten_lift_fresh_copy(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -13853,6 +13924,21 @@ graph():
         args = (torch.ones(4),)
         ep = export(m, args)
         self.assertEqual(ep.module()(*args), m(*args))
+
+    def test_deepcopy(self):
+        class Model(torch.nn.Module):
+            def forward(self, input):
+                return input + input
+
+        model = Model().eval()
+        inputs = (torch.ones(2, 2),)
+
+        program = export(model, inputs)
+        copied_program = copy.deepcopy(program)
+        self.assertEqual(str(program.graph), str(copied_program.graph))
+        self.assertEqual(
+            str(program.graph_module.code), str(copied_program.graph_module.code)
+        )
 
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):

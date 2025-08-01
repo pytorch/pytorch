@@ -6,6 +6,13 @@ from typing import Union
 
 import torch
 from torch._inductor import config
+from torch._inductor.decomposition import mm
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    ShapeEnv,
+    StatelessSymbolicContext,
+)
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
@@ -76,6 +83,19 @@ def torch_bmm(a, b):
 
 def torch_baddbmm(add, b, c, alpha, beta):
     return torch.baddbmm(add, b, c, alpha=alpha, beta=beta)
+
+
+def create_fake_tensor_with_dynamic_size(x, fake_mode):
+    with fake_mode:
+        dynamic_sizes = [DimDynamic.DYNAMIC for _ in range(x.dim())]
+        dynamic_strides = [DimDynamic.INFER_STRIDE for _ in range(x.dim())]
+        return fake_mode.from_tensor(
+            x,
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=dynamic_sizes,
+                dynamic_strides=dynamic_strides,
+            ),
+        )
 
 
 # The shapes we test on
@@ -186,6 +206,71 @@ class TestDecomp(NNTestCase):
             init_tensor([[[1, 2, 3, 4]]] * bs, dtype=dtype, device=device),
             init_tensor([[[1], [2], [3], [4]]] * bs, dtype=dtype, device=device),
         )
+
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    def test_dynamic_shape_mm(self, device, dtype):
+        # Test that the mm decomp does not evaluate expressions for dynamic shapes
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        # Only test decomp for cpu to match fake tensors from dynamo
+        if device != "cpu":
+            return
+
+        for t_size in ts_list:
+            ((a1_0, a1_1, a2_0, a2_1)) = t_size
+
+            # Create the fake tensors
+            t1 = create_fake_tensor_with_dynamic_size(
+                rand_math_tensor((a1_0, a1_1), dtype=dtype, device=device),
+                fake_mode,
+            )
+            t2 = create_fake_tensor_with_dynamic_size(
+                rand_math_tensor((a2_0, a2_1), dtype=dtype, device=device),
+                fake_mode,
+            )
+
+            # Save the expression types to check if any symints are evaluated
+            og_t1_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t1.size()
+            ]
+            og_t2_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t2.size()
+            ]
+
+            r = mm(t1, t2)
+
+            # Make sure all symints are not evaluated
+            new_t1_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t1.size()
+            ]
+            new_t2_expr_types = [
+                type(d.node.expr) if type(d) is torch.SymInt else int for d in t2.size()
+            ]
+            self.assertTrue(
+                all(
+                    og_t1_expr_types[i] == new_t1_expr_types[i]
+                    for i in range(len(og_t1_expr_types))
+                )
+            )
+            self.assertTrue(
+                all(
+                    og_t2_expr_types[i] == new_t2_expr_types[i]
+                    for i in range(len(og_t2_expr_types))
+                )
+            )
+
+            if r is not NotImplemented:
+                # Check that the output is well formed
+                self.assertEqual(t1.size(0), r.size(0))
+                self.assertEqual(t2.size(1), r.size(1))
+                r_expr_types = [
+                    type(d.node.expr) if type(d) is torch.SymInt else int
+                    for d in r.size()
+                ]
+                self.assertTrue(r_expr_types[0] == og_t1_expr_types[0])
+                self.assertTrue(r_expr_types[1] == og_t2_expr_types[1])
 
 
 device_types = ("cpu", GPU_TYPE)
