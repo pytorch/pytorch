@@ -9,6 +9,7 @@ import copy
 import csv
 import dataclasses
 import functools
+import gc
 import importlib
 import itertools
 import json
@@ -2387,6 +2388,7 @@ class BenchmarkRunner:
         )
 
         def warmup(fn, model, example_inputs, mode, niters=10):
+            gc.collect()
             peak_mem = 0
             start_stats = get_dynamo_stats()
             try:
@@ -2548,6 +2550,7 @@ class BenchmarkRunner:
                 return experiment(*self.maybe_cast(model, example_inputs))
 
         def warmup(fn, model, example_inputs, mode, niters=5):
+            gc.collect()
             peak_mem = 0
             start_stats = get_dynamo_stats()
             try:
