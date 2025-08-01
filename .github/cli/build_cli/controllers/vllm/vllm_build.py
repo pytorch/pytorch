@@ -15,7 +15,6 @@ from lib.utils import (
     run,
 )
 
-
 @dataclass
 class VllmBuildConfig:
     tag_name: str = get_env("TAG", "vllm-wheels")
