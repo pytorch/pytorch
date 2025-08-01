@@ -84,11 +84,12 @@ Some of the most commonly used backends include:
 
 ```{toctree}
 :caption: Getting Started for PyTorch Users
-:maxdepth: 1
+:maxdepth: 2
 
 torch.compiler_get_started
 torch.compiler_api
 torch.compiler.config
+compile/dynamic_shapes
 torch.compiler_fine_grain_apis
 torch.compiler_backward
 torch.compiler_aot_inductor
@@ -102,17 +103,14 @@ torch.compiler_inductor_provenance
 
 ```{toctree}
 :caption: torch.compile Programming Model
+:maxdepth: 2
 
 compile/programming_model
 ```
 
 ```{toctree}
-dynamic_shapes
-```
-
-```{toctree}
 :caption: Deep Dive for PyTorch Developers
-:maxdepth: 3
+:maxdepth: 1
 
 torch.compiler_dynamo_overview
 torch.compiler_dynamo_deepdive

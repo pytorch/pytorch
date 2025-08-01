@@ -1,3 +1,4 @@
+(debugging-tlparse-torch-logs)=
 # Debugging with `tlparse` and `TORCH_LOGS=dynamic`
 
 `tlparse` is a tool used for analyzing and understanding the compilation
@@ -95,6 +96,6 @@ Now, this compiled region can be used for inputs of size 0 and 1:
 ```
 
 ```{seealso}
-* {ref}`practical_guide_reduce_recompilation`
+* {ref}`dynamic_shapes`
 * {ref}`troubleshooting_guardondatadependentsymnode_errors`
 ```

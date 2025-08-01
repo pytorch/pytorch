@@ -15,14 +15,42 @@ import header_code
 torch._logging.set_logs(graph_breaks=True, graph_code=True)
 ```
 
-(practical_guide_reduce_recompilation)=
+(dynamic_shapes)=
+# Dynamic Shapes
 
-# A Practical Guide to Reducing Recompilations with Dynamic Shapes
+This section explains how to work with dynamic shapes in PyTorch, including how
+to debug and fix common errors, implement support for dynamic shapes in
+operators, and understand the underlying mechanisms.
 
-This section describes solutions for developers experiencing
-recompilations in their models that might be resolved by marking
-some dimensions or integers as dynamic. It is not intended for recompilations due
-to other reasons such as guards on object IDs or types.
+Dynamic shapes allow PyTorch models to handle inputs with varying dimensions
+without recompilation. This enables more flexible models that can process
+different batch sizes, sequence lengths, or image dimensions in a single
+compiled artifact. Dynamic shapes work by symbolically tracing tensor
+dimensions rather than using concrete values, creating a computation
+graph that adapts to different input shapes at runtime. By default,
+PyTorch assumes all input shapes to be static.
+
+Typically, deep learning compilers only support static shapes, requiring
+recompilation for input shape changes. While this approach covers many use cases,
+there are situations where this is insufficient:
+
+- **Variable Dimensions** - Batch sizes or sequence lengths vary, such as in
+adaptive batching.
+- **Data-Dependent Outputs** - Models produce outputs based on input data,
+like variable bounding boxes in detection models.
+- **Sparse Representations** - Processing depends on data-varying sparse structures,
+such as in sparse tensors, jagged tensors, and graph neural networks.
+
+Dynamic shapes do not support dynamic rank programs, programs which input tensors
+change in dimensionality, as this is uncommon and unnecessarily complex.
+
+
+```{code-cell}
+:tags: [remove-cell]
+import torch
+import header_code
+torch._logging.set_logs(graph_breaks=True, graph_code=True)
+```
 
 ## What does it mean for a size/integer to be dynamic?
 
@@ -77,7 +105,11 @@ this condition, the system will recompile the graph.
 Specialization allows you to create optimized computational graphs for specific input
 shapes, which can significantly improve execution speed.
 
-Here is a more concrete example:
+```{note}
+For simplicity, this example uses `@torch.compile(dynamic=True)`. Note, that
+this option is not recommended due to it being error prone.
+For a recommended way of enabling dynamic shapes, see {ref}`enable-dynamic-behavior`
+```
 
 ```{code-cell}
 import torch
@@ -110,6 +142,7 @@ This is how graphs created for the above function:
 ```{image} ../_static/img/dynamic_shapes/dynamic_shapes_example_specialization.png
 ```
 
+(enable-dynamic-behavior)=
 ## Enabling Dynamic Behavior
 
 There are the following ways to make things dynamic:
@@ -127,7 +160,7 @@ Read bellow about each of this options.
 This is the default behavior where Dynamo makes an input dynamic if it
 sees different values for it.
 
-### torch.compile (dynamic=true)
+### torch.compile (dynamic=true) (Not recommended)
 
 This setting forces all sizes and integers to be dynamic, increasing the
 chance of encountering dynamic shape bugs. Setting this option is not recommended due to it  being error prone.
@@ -347,6 +380,9 @@ in thise screenshot the recomplile reason is size-related:
 In the one below it is not, which indicates that dynamic shapes won't resolve it:
 
 ```{image} ../_static/img/dynamic_shapes/tlparse7_not_size_related_recompilations.png
+:scale: 60%
+:align: center
+```
 
 2. **Compare Guards Files:** Ensure there are no guards on non-size-related
 elementsthat exist in one graph but not the others.
@@ -437,3 +473,10 @@ is within your user code, consider whether you are willing to rewrite your
 code to avoid it. Determine if it affects correctness or if it's a redundant
 check. If the issue involves a Triton custom kernel with a `constexpr`
 argument, evaluate whether you can rewrite it to address the problem.
+
+```{toctree}
+:maxdepth: 1
+dynamic_shapes_core_concepts
+dynamic_shapes_beyond_the_basics
+dynamic_shapes_troubleshooting
+```

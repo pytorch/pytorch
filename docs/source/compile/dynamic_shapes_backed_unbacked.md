@@ -1,3 +1,4 @@
+(backed-vs-unbacked-symints)=
 # Backed vs Unbacked Symints
 
 Backed `SymInts` are symbolic integers that have a concrete value or "hint"
@@ -11,6 +12,10 @@ hint. They often arise from data-dependent operations, such as `.nonzero()`
 or `.item()`, where the size or value cannot be determined at compile time.
 Since they lack a concrete value, they cannot be used for control flow
 decisions, and attempting to do so requires a graph break.
+
+Unbacked `SymInts` use *oblivious-size reasoning* which is particularly
+useful when you are dealing with
+{ref}`0/1 specialization recompilation problem <zero-one-specialization>`.
 
 In summary, backed `SymInts` have known values that can be used for
 decision-making, while unbacked `SymInts` do not, requiring special handling
@@ -38,7 +43,7 @@ To use unbacked APIs, replace `mark_dynamic` with `mark_unbacked` and
 This tells the compiler to treat an input as unbacked.
 
 ```{seealso}
-* {ref}`dynamic_shapes_overview`
+* {ref}`dynamic_shapes`
 * {ref}`torch.export`
 * {ref}`what_is_a_specialization`
 ```

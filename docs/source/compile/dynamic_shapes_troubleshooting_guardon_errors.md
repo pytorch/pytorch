@@ -404,3 +404,8 @@ unbacked `SymInts` for offsets, they become `u1 - u0`, `u2 - u1`, `u3 - u2`, whi
 complicates matters. These quantities cannot be conveniently marked as size-like,
 leading to potential issues. Since it's relatively straightforward to write code
 using either lengths or offsets, you should prefer using lengths.
+
+```{seealso}
+* {ref}`dynamic_shapes`
+* {ref}`dynamic_shapes_debugging_tlparse_torch_logs`
+```

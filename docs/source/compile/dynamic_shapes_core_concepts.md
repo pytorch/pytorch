@@ -1,3 +1,4 @@
+(dynamic_shapes_core_concepts)=
 # Dynamic Shapes Core Concepts
 
 This section described the core concepts of dynamic shapes in PyTorch. It is intended to be a
@@ -99,6 +100,5 @@ Important files:
 - Other important files: `torch/_subclasses/fake_tensor.py`, `torch/_meta_registrations.py`, decomps, PrimTorch refs
 
 ```{seealso}
-* {ref}`dynamic_shapes_overview`
-* {ref}`practical_guide_reduce_recompilation`
+* {ref}`dynamic_shapes`
 ```
