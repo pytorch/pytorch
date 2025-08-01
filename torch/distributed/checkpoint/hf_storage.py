@@ -219,7 +219,7 @@ class HuggingFaceStorageReader(FileSystemReader):
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         from safetensors import safe_open  # type: ignore[import]
-        
+
         per_file: dict[str, list[ReadItem]] = {}
 
         for read_item in plan.items:
@@ -233,7 +233,10 @@ class HuggingFaceStorageReader(FileSystemReader):
                     item_md = self.storage_data[req.storage_index]
 
                     # Create slices for each dimension based on offsets and lengths
-                    slices = tuple(slice(offset, offset + length) for offset, length in zip(req.storage_offsets, req.lengths))
+                    slices = tuple(
+                        slice(offset, offset + length)
+                        for offset, length in zip(req.storage_offsets, req.lengths)
+                    )
                     tensor = f.get_slice(req.storage_index.fqn)[slices]
                     target_tensor = planner.resolve_tensor(req).detach()
 
