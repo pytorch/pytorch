@@ -80,7 +80,7 @@ from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     to_map,
 )
 from torch.distributed.elastic.utils.logging import get_logger
-from torch.distributed.numa.binding import NumaOptions
+from torch.numa.binding import NumaOptions
 
 
 __all__ = [
@@ -227,6 +227,7 @@ def start_processes(
             log_line_prefixes=log_line_prefixes,
             start_method=start_method,
             logs_specs=logs_specs,
+            numa_options=numa_options,
         )
 
     try:
