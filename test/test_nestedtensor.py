@@ -5640,6 +5640,11 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
 
+        with self.assertRaisesRegex(ValueError, "Expected jagged_dim >=1, but got 0."):
+            torch.nested.nested_tensor_from_jagged(
+                values, lengths=lengths, jagged_dim=0
+            )
+
     @onlyCPU
     def test_nested_tensor_from_jagged_fx_trace(self, device):
         def fn(x, y):
@@ -7190,7 +7195,7 @@ torch.cuda.synchronize()
 
         query = torch.rand(bs, d1, d3, device=device)
         value = torch.rand(30, d2, requires_grad=True, device=device)
-        # total_length must > than max_length otherwise flash_attn backwark will fail
+        # total_length must > than max_length otherwise flash_attn backward will fail
         offsets = torch.tensor([0, 2, 3, 30], device=device)
 
         m = mha(use_legacy_api)
@@ -8083,6 +8088,7 @@ FORWARD_SKIPS_AND_XFAILS = [
             "std.unbiased",
             "var",
             "var.unbiased",
+            "hash_tensor",
         },
         name="not_implemented",
     ),
@@ -8530,14 +8536,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
-    # Needs investigation in AOTAutograd: len(unwrapped_args) == num_args_tallied assertion fails
-    # e.g. Expected 5 == 4
-    XFailRule(
-        error_type=AssertionError,
-        op_match_fn=lambda device, op: (op.full_name == "fill"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="fill_aot_autograd_bug_with_transposed_input",
-    ),
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8580,12 +8578,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "nan_to_num"),
         sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug1",
-    ),
-    # Bug: also no idea what's going on here: needs investigation within AOTAutograd
-    XFailRule(
-        op_match_fn=lambda device, op: (op.full_name == "isreal"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="crazy_aot_autograd_bug2",
     ),
 ]
 

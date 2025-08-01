@@ -15,7 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   get-default-label-prefix:
@@ -56,6 +58,7 @@ jobs:
           { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc9-periodic-dynamo-benchmarks-test:
@@ -123,6 +126,7 @@ jobs:
         { include: [
           { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc9-inductor-smoke-test:
@@ -157,6 +161,7 @@ jobs:
           { config: "cpu_inductor_freezing_avx2_timm", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
           { config: "cpu_inductor_freezing_avx2_timm", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
         ]}
+      build-additional-packages: "vision audio torchao"
     secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-test:
@@ -193,6 +198,7 @@ jobs:
           { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc9-inductor-test:
@@ -238,6 +244,7 @@ jobs:
           { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
           { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
         ]}
+      build-additional-packages: "vision audio torchao"
     secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-inductor-test:

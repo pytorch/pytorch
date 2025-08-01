@@ -1805,6 +1805,29 @@ class TestDistributions(DistributionsTestCase):
         assert (vals == 0.0).sum() > 4000
         assert (vals == 1.0).sum() > 4000
 
+    def test_torch_binomial_dtype_errors(self):
+        dtypes = [torch.int, torch.long, torch.short]
+
+        for count_dtype in dtypes:
+            total_count = torch.tensor([10, 10], dtype=count_dtype)
+            total_prob = torch.tensor([0.5, 0.5], dtype=torch.float)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "binomial only supports floating-point dtypes for count.*",
+            ):
+                torch.binomial(total_count, total_prob)
+
+        for prob_dtype in dtypes:
+            total_count = torch.tensor([10, 10], dtype=torch.float)
+            total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "binomial only supports floating-point dtypes for prob.*",
+            ):
+                torch.binomial(total_count, total_prob)
+
     @set_default_dtype(torch.double)
     def test_multinomial_1d(self):
         total_count = 10
@@ -6346,7 +6369,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             except NotImplementedError:
                 pass
             self.assertNotIn("probs", dist.__dict__, msg=message)
-            dist.batch_shape, dist.event_shape
+            _ = (dist.batch_shape, dist.event_shape)
             self.assertNotIn("probs", dist.__dict__, msg=message)
 
     def test_lazy_probs_initialization(self):
@@ -6363,7 +6386,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             except NotImplementedError:
                 pass
             self.assertNotIn("logits", dist.__dict__, msg=message)
-            dist.batch_shape, dist.event_shape
+            _ = (dist.batch_shape, dist.event_shape)
             self.assertNotIn("logits", dist.__dict__, msg=message)
 
 
