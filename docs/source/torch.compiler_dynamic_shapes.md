@@ -153,7 +153,7 @@ There are the following ways to make things dynamic:
 * Compiler Collective
 * Users annotations
 
-Read bellow about each of this options.
+Read below about each of this options.
 
 ### Automatic dynamic
 
@@ -372,7 +372,7 @@ Check the following:
 1. **Check Recompile Reasons:** For graphs you believe are similar, click on
 `recompile_reason` in the `tlparse` output for the later graph. Ensure the
 reason is size-related and not due to other factors. For example, while
-in thise screenshot the recomplile reason is size-related:
+in these screenshot the recomplile reason is size-related:
 
 ```{image} ../_static/img/dynamic_shapes/tlparse6_size_related_recompilations.png
 ```
