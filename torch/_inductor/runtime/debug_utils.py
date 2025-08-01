@@ -21,7 +21,7 @@ class BufferMemoryTracker:
 
     def __init__(self) -> None:
         self.tensor_tracker: dict[str, torch.storage.UntypedStorage] = (
-            weakref.WeakValueDictionary()
+            weakref.WeakValueDictionary()  # type: ignore[assignment]
         )
         self.died_since_last_step: OrderedSet[str] = OrderedSet()
         self.added_since_last_step: OrderedSet[str] = OrderedSet()
@@ -29,13 +29,13 @@ class BufferMemoryTracker:
             torch._inductor.config.test_configs.track_memory_lifecycle == "assert"
         )
 
-    def set_tensor(self, name: str, tensor: torch.Tensor):
+    def set_tensor(self, name: str, tensor: torch.Tensor) -> None:
         storage = tensor.untyped_storage()
 
         self.added_since_last_step.add(name)
         self.tensor_tracker[name] = storage
 
-        def on_tensor_death():
+        def on_tensor_death() -> None:
             self.died_since_last_step.add(name)
 
         weakref.finalize(storage, on_tensor_death)
@@ -55,7 +55,7 @@ class BufferMemoryTracker:
         expected_allocated: list[str],
         expected_freed: list[str],
         is_final_step: bool,
-    ):
+    ) -> None:
         """Check only the delta changes since last step"""
 
         # Check expected deaths - we dont currently distinguish between nodes which die in last step
@@ -99,7 +99,7 @@ def get_mem_tracker() -> BufferMemoryTracker:
     return local.memory_tracker
 
 
-def track_tensor(tensor: torch.Tensor, name: str):
+def track_tensor(tensor: torch.Tensor, name: str) -> None:
     get_mem_tracker().set_tensor(name, tensor)
 
 
@@ -110,7 +110,7 @@ def tracked_empty_strided(
     dtype: torch.dtype,
     device: torch.device,
     name: str,
-) -> torch.tensor:
+) -> torch.Tensor:
     o = torch.empty_strided(size, stride, dtype=dtype, device=device)
     track_tensor(o, name)
     return o
@@ -124,8 +124,8 @@ def check_memory_step(
 
 
 @functools.lru_cache(None)
-def register_check_mem_op():
-    lib = torch.library.Library("_inductor_debug", "FRAGMENT")
+def register_check_mem_op() -> None:
+    lib = torch.library.Library("_inductor_debug", "FRAGMENT")  # noqa: TOR901
     lib.define(
         "check_memory_step(str[] allocated, str[] freed, bool is_final_step) -> ()"
     )

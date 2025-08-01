@@ -243,8 +243,12 @@ def assign_memory_planning_info_for_scheduler_nodes(
     Assign to each scheduler node its predecessor and successor nodes.
     """
 
-    node_to_pred_nodes = collections.defaultdict(OrderedSet)
-    node_to_pred_buffers = collections.defaultdict(OrderedSet)
+    node_to_pred_nodes: dict[BaseSchedulerNode, OrderedSet[BaseSchedulerNode]] = (
+        collections.defaultdict(OrderedSet)
+    )
+    node_to_pred_buffers: dict[
+        BaseSchedulerNode, OrderedSet[SchedulerBuffer | FreeableInputBuffer]
+    ] = collections.defaultdict(OrderedSet)
 
     # collect all predecessors using existing successor mappings
     for node in nodes:
@@ -300,7 +304,7 @@ def compute_memory_timeline(
 ) -> tuple[list[BufferInfo], dict[BaseSchedulerNode, int]]:
     """
     Compute buffer allocation and deallocation sizes and map their
-    livetime to the node schedule
+    lifetime to the node schedule
     """
 
     # get the execution step of each node, this will be used to determine

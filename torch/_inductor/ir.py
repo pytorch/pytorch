@@ -7737,7 +7737,7 @@ class MemoryCheckKernel(FallbackKernel):
     TODO - the custom op was erroring with str inputs. should be able to custom op directly.
     """
 
-    def codegen(self, wrapper) -> None:
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         """Override codegen to write direct function call"""
         # Extract our arguments from nontensor_args
         wrapper.write_memory_track_allocation_once()
