@@ -33,6 +33,7 @@ from ..pattern_matcher import (
     CallFunctionVarArgs,
     filter_nodes,
     fwd_only,
+    gen_register_replacement,
     get_arg_value,
     get_mutation_region_id,
     Ignored,
@@ -663,25 +664,29 @@ def lazy_init():
     register_addmm_activation_fusion()
 
 
-def register_addmm_activation_fusion():
+@functools.cache
+def _addmm_activation_init():
     shapes = [(5,), (3, 4), (4, 5)]
-    args_f32 = [torch.empty(shape) for shape in shapes]
+    args_fp32 = [torch.empty(shape) for shape in shapes]
     args_bf16 = [torch.empty(shape, dtype=torch.bfloat16) for shape in shapes]
 
     for pattern in [addmm_relu_pattern, addmm_relu_pattern_2]:
-        register_replacement(
+        name = f"{pattern.__name__}_fp32"
+        gen_register_replacement(
+            name,
             pattern,
             addmm_relu_replacement,
-            args_f32,
+            args_fp32,
             trace_fn=fwd_only,
             pass_dicts=pass_patterns[2],
             extra_check=is_valid_addmm_activation_fusion,
         )
 
-    # bfloat16 to detect upcast in the decomposed gelu
-    for args in [args_f32, args_bf16]:
+    for args, dtype_suffix in [(args_fp32, "fp32"), (args_bf16, "bf16")]:
         for pattern in [addmm_gelu_pattern, addmm_gelu_pattern_2]:
-            register_replacement(
+            name = f"{pattern.__name__}_{dtype_suffix}"
+            gen_register_replacement(
+                name,
                 pattern,
                 addmm_gelu_replacement,
                 args,
@@ -689,6 +694,10 @@ def register_addmm_activation_fusion():
                 pass_dicts=pass_patterns[2],
                 extra_check=is_valid_addmm_activation_fusion,
             )
+
+
+def register_addmm_activation_fusion():
+    _addmm_activation_init()
 
 
 def is_valid_addmm_activation_fusion(match):
