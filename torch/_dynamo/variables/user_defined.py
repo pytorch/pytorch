@@ -1496,7 +1496,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source = self._wrap_source(source)
 
         if subobj is not NO_SUCH_SUBOBJ:
-            if is_wrapper_or_member_descriptor(subobj):
+            if is_wrapper_or_member_descriptor(
+                subobj
+            ) or torch._C._dynamo.utils.is_instancemethod(subobj):
                 options = {"source": source}
                 return variables.GetAttrVariable(self, name, **options)
             if source:

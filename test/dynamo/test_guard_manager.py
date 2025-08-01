@@ -862,10 +862,10 @@ num_guards_executed=0)
 
             # Check that tensor guards run well
             old_tensor = f_locals["bar"].y
-            f_locals["bar"].y = torch.randn(5)
+            f_locals["bar"].__class__.y = torch.randn(5)
             self.assertFalse(root.check(f_locals))
             self.assertFalse(diff_guard_root.check(f_locals))
-            f_locals["bar"].y = old_tensor
+            f_locals["bar"].__class__.y = old_tensor
 
             # Original root should fail on foo changes, but diff_guard_root
             # should pass because it does not have foo guards on counter = 0. On
