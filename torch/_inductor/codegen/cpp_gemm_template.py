@@ -730,9 +730,9 @@ class CppGemmTemplate(CppTemplate):
             thread_block_m = math.ceil(m_blocks / m_factor)
             return GemmBlocking(thread_block_m, thread_block_n, thread_block_k)
 
-        assert not self.is_dynamic_M, (
-            "Unable to determine thread blocking for dynamic M."
-        )
+        assert (
+            not self.is_dynamic_M
+        ), "Unable to determine thread blocking for dynamic M."
         register_blocking = self.register_blocking
         m_blocks = math.ceil(self.m / register_blocking.block_m)
         n_blocks = math.ceil(self.n / register_blocking.block_n)
@@ -850,17 +850,17 @@ class CppGemmTemplate(CppTemplate):
             L1_cache_size = (
                 torch._C._cpu._L1d_cache_size()
             )  # per core cache size in Bytes
-            assert L1_cache_size > 0, (
-                f"Expect L1_cache_size > 0 but got {L1_cache_size}"
-            )
+            assert (
+                L1_cache_size > 0
+            ), f"Expect L1_cache_size > 0 but got {L1_cache_size}"
             L1 = L1_cache_size * L1_limit_factor
 
             L2_cache_size = (
                 torch._C._cpu._L2_cache_size()
             )  # per core cache size in Bytes
-            assert L2_cache_size > 0, (
-                f"Expect L2_cache_size > 0 but got {L2_cache_size}"
-            )
+            assert (
+                L2_cache_size > 0
+            ), f"Expect L2_cache_size > 0 but got {L2_cache_size}"
             L2 = L2_cache_size * L2_limit_factor
 
             def get_num_byte(dtype):
@@ -903,7 +903,7 @@ class CppGemmTemplate(CppTemplate):
                     # Since when Mt_blocks == 1, L1-reside B block can't be reused by A.
                     if Kc_blocks * Kr >= self.q_group_size():
                         Kc_blocks = self.q_group_size() // Kr
-                
+
                 # Step 2: Decide Mc assuming A block is L2-reside.
                 min_Mc_ratio = 2  # TODO(jgong5): something to tune?
                 min_Mc_blocks = math.ceil(min_Mc_ratio * Mr / Nr)
@@ -1010,7 +1010,11 @@ class CppGemmTemplate(CppTemplate):
                             > 25  # for vertical, too larger of B make negative impact to L2 reuse
                         )
                     )
-                    and (num_threads and Mt_blocks * Nt_blocks >= 8 and Mt_blocks * Nt_blocks < 256)
+                    and (
+                        num_threads
+                        and Mt_blocks * Nt_blocks >= 8
+                        and Mt_blocks * Nt_blocks < 256
+                    )
                 ):
                     Mc_blocks, Nc_blocks, Kc_blocks = _Mc_blocks, _Nc_blocks, _Kc_blocks
                     horizontal_transverse = True
@@ -1035,9 +1039,9 @@ class CppGemmTemplate(CppTemplate):
                 value_to_cpp(horizontal_transverse, "bool"),
             )
 
-        assert not self.is_dynamic_M, (
-            "Unable to determine cache blocking for dynamic M."
-        )
+        assert (
+            not self.is_dynamic_M
+        ), "Unable to determine cache blocking for dynamic M."
         register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking(num_threads)
 
@@ -1477,9 +1481,9 @@ class CppGemmTemplate(CppTemplate):
                     LayoutType.VNNI4,
                 ], f"We only support {layout_str} for now"
                 vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
-                assert k % vnni_size == 0, (
-                    f"k should be divisible by vnni_size for {layout_str} layout"
-                )
+                assert (
+                    k % vnni_size == 0
+                ), f"k should be divisible by vnni_size for {layout_str} layout"
                 vnni_view_size = list(new_size)
                 vnni_view_size[-2] = k // vnni_size
                 vnni_view_size.insert(-1, vnni_size)

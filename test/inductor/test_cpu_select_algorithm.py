@@ -2375,7 +2375,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     counters["inductor"]["cpp_epilogue_fusion_counter"], 0
                 )
 
-
     @inductor_config.patch({"freezing": False})
     @patches
     @torch.no_grad
@@ -2885,6 +2884,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.randn(48, 512, 64)
         with verify(u.dtype) as (atol, rtol):
             self.common(mod, (u, v))
+
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
@@ -2919,6 +2919,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
