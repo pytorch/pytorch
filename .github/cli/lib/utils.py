@@ -2,12 +2,13 @@ import os
 import shlex
 import shutil
 import subprocess
-import time
 from typing import Optional
 from dataclasses import fields
 from textwrap import indent
 from pathlib import Path
 import yaml
+import sys
+import sys
 
 def run(
     cmd: str,
@@ -17,7 +18,21 @@ def run(
 ):
     if logging:
         print(f">>> {cmd}",flush=True)
-    subprocess.run(shlex.split(cmd), check=True, cwd=cwd, env=env)
+    subprocess.run(shlex.split(cmd), check=True, cwd=cwd, env=env, shell=True)
+
+
+def run_shell(cmd: str, cwd: Optional[str] = None, env: Optional[dict] = None):
+    subprocess.run(
+        cmd,
+        shell=True,
+        executable="/bin/bash",
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        check=True,
+        env=env,
+        cwd=cwd
+    )
+
 
 #eliainwy
 def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> str:
@@ -108,5 +123,5 @@ def pip_install(package: str):
     subprocess.run(shlex.split(cmd), check=True)
 
 def uv_pip_install(package: str):
-    cmd = f"uv pip install --system {package}"
+    cmd = f"python3 -m  uv pip install --system {package}"
     subprocess.run(shlex.split(cmd), check=True)
