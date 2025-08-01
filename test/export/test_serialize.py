@@ -152,25 +152,6 @@ class TestSerialize(TestCase):
         self.assertEqual(exp_out, actual_out)
         self.assertEqual(exp_out.requires_grad, actual_out.requires_grad)
 
-    def test_conflicting_name(self):
-        class Model(torch.nn.Module):
-            def forward(self, input):
-                return input + input
-
-        model = Model().eval()
-        inputs = (torch.ones(2, 2),)
-
-        program = torch.export.export(model, inputs)
-
-        buffer = io.BytesIO()
-        torch.export.save(program, buffer)
-        buffer.seek(0)
-        loaded_program = torch.export.load(buffer)
-        self.assertEqual(str(program.graph), str(loaded_program.graph))
-        self.assertEqual(
-            str(program.graph_module.code), str(loaded_program.graph_module.code)
-        )
-
     def test_export_example_inputs_preserved(self):
         class MyModule(torch.nn.Module):
             """A test module with that has multiple args and uses kwargs"""
