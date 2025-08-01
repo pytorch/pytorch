@@ -541,7 +541,7 @@ def consolidate_safetensors_files(
         output_files_data[output_path] = _OutputFileData()
 
     # Find all safetensors files in the input directory
-    safetensors_files = glob.glob(os.path.join(input_dir,f"*{SUFFIX}"))
+    safetensors_files = glob.glob(os.path.join(input_dir, f"*{SUFFIX}"))
 
     # Read metadata from all input files
     input_files_data: dict[str, _InputFileData] = {}
