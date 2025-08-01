@@ -1,0 +1,6 @@
+datasets==3.3.2
+loguru==0.7.3
+numpy==2.2.3
+tqdm==4.67.1
+transformers==4.49.0
+tensorboard==2.12.0
