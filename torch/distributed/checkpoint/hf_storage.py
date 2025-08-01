@@ -169,7 +169,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
             fqn_to_index_mapping: dict[str, int] = (
                 self.fqn_to_index_mapping
                 if self.fqn_to_index_mapping is not None
-                else {fqn: 1 for fqn in metadata.state_dict_metadata.keys()}
+                else dict.fromkeys(metadata.state_dict_metadata.keys(), 1)
             )
 
             return consolidate_safetensors_files(
@@ -281,8 +281,8 @@ class HuggingFaceStorageReader(FsspecReader):
         return fut
 
     def read_metadata(self) -> Metadata:
-        from safetensors.torch import  _getdtype  # type: ignore[import]
-        
+        from safetensors.torch import _getdtype  # type: ignore[import]
+
         state_dict_metadata: dict[str, TensorStorageMetadata] = {}
         storage_data: dict[MetadataIndex, _HFStorageInfo] = {}
 

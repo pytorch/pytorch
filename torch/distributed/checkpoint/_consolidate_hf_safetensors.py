@@ -94,7 +94,7 @@ def _parse_input_metadata(
         ValueError: If no DCP custom metadata is found in a safetensors file
     """
 
-    from safetensors.torch import  _getdtype  # type: ignore[import]
+    from safetensors.torch import _getdtype  # type: ignore[import]
 
     # Dictionary to track the full size of each tensor across all shards
     fqn_to_size_mapping: dict[str, tuple[list[int], str]] = {}
@@ -198,10 +198,7 @@ def _write_metadata(
             output_data.metadata_size = f.tell()
 
 
-def _read_tensor_data(
-    file_path: str,
-    fqn: str
-) -> bytes:
+def _read_tensor_data(file_path: str, fqn: str) -> bytes:
     """
     Read tensor data from a safetensors file using memory mapping for efficiency.
 
@@ -214,9 +211,9 @@ def _read_tensor_data(
     Returns:
         Raw tensor data as bytes
     """
-    # Use mmap for efficient access
-    from safetensors import safe_open
-    from safetensors.torch import _tobytes
+
+    from safetensors import safe_open  # type: ignore[import]
+    from safetensors.torch import _tobytes  # type: ignore[import]
 
     with safe_open(file_path, framework="pt") as f:
         return _tobytes(f.get_tensor(fqn), fqn)
