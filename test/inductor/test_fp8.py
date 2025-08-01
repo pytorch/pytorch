@@ -40,7 +40,7 @@ def _fix_fp8_dtype_for_rocm(
     # with MI300 supported FP8 types if device is GPU:
     #    e4m3fn -> e4m3fnuz
     #    e5m2   -> e5m2fnuz
-    # Supports single, typle and list of dtypes
+    # Supports single, tuple and list of dtypes
     # Keeps the same test name for CUDA and ROCm
     # Also it allows to enable FP8 inductor tests for CPU
     if (

@@ -152,7 +152,7 @@ class CPUReproTests(TestCase):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
                     if func == torch.ops.aten.convolution.default:
-                        # For CPU and mkldnn enable, we always using channles last
+                        # For CPU and mkldnn enable, we always using channels last
                         nonlocal fmt
                         if (
                             torch.backends.mkldnn.enabled
@@ -996,7 +996,7 @@ class CPUReproTests(TestCase):
 
         v = torch.randn(10)
         # TODO: OMP parallel reduction order is not deterministic.
-        # Hence, the accurarcy might vary up and down. For short term,
+        # Hence, the accuracy might vary up and down. For short term,
         # we increase the tolerance and will fix it later by using
         # aten parallel.
         self.common(fn, (v,), atol=5e-1, rtol=5e-1)
@@ -4329,6 +4329,19 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
+
+    def test_float32_to_uint8(self):
+        # https://github.com/pytorch/pytorch/issues/156788
+        @torch.compile
+        def fn(x):
+            return x.to(torch.uint8)
+
+        x = torch.tensor([-1.0, -2.0, -3.0, -4.0], dtype=torch.float32, device="cpu")
+        self.assertEqual(
+            x.to(torch.uint8),
+            fn(x),
+            msg=f"Expected {x.to(torch.uint8)} but got {fn(x)}",
+        )
 
     def test_non_contiguous_reduction_store(self):
         # https://github.com/pytorch/pytorch/issues/113018
