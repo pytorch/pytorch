@@ -275,10 +275,10 @@ def _process_output_file(
                 )
 
                 # Get the offsets of this tensor shard within the full tensor
-                custom_metadata = _get_dcp_custom_metadata(file_metadata)
-                offsets_of_tensor_being_read = custom_metadata[tensor_fqn][
-                    SAVED_OFFSETS_KEY
+                fqn_custom_metadata = _get_dcp_custom_metadata(file_metadata)[
+                    tensor_fqn
                 ]  # type: ignore[index]
+                offsets_of_tensor_being_read = fqn_custom_metadata[SAVED_OFFSETS_KEY]  # type: ignore[index]
 
                 # Write this tensor shard to the appropriate position in the output file
                 _write_sub_tensor_to_file_optimized(
