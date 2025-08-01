@@ -57,7 +57,7 @@ int64_t cus_lower_bound(int64_t start, int64_t end, const input_t val, const inp
       start = end; // insert NaN at the end
     } else if (std::isnan(mid_val)) {
       end = mid;  // NaN is greatest, search left
-    } else if (!(mid_val >= val)) {
+    } else if (mid_val < val) {
       start = mid + 1;
     } else {
       end = mid;
@@ -81,7 +81,7 @@ int64_t cus_upper_bound(int64_t start, int64_t end, const input_t val, const inp
       start = end;  // insert NaN at the end
     } else if (std::isnan(mid_val)) {
       end = mid;  // NaN is greatest, search left
-    } else if (!(mid_val > val)) {
+    } else if (mid_val <= val) {
       start = mid + 1;
     } else {
       end = mid;

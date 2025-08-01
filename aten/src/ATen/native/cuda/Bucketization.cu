@@ -34,10 +34,9 @@ __device__ int64_t lower_bound(const input_t *data_ss, int64_t start, int64_t en
       start = end; // insert NaN at the end
     } else if (std::isnan(mid_val)) {
       end = mid;  // NaN is greatest, search left
-    } else if (!(mid_val >= val)) {
+    } else if (mid_val < val) {
       start = mid + 1;
-    }
-    else {
+    } else {
       end = mid;
     }
   }
@@ -56,7 +55,7 @@ __device__ int64_t upper_bound(const input_t *data_ss, int64_t start, int64_t en
       start = end; // insert NaN at the end
     } else if (std::isnan(mid_val)) {
       end = mid;  // NaN is greatest, search left
-    } else if (!(mid_val > val)) {
+    } else if (mid_val <= val) {
       start = mid + 1;
     } else {
       end = mid;
