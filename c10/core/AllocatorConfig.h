@@ -390,7 +390,7 @@ inline size_t roundup_power2_next_division(size_t size, size_t divisions) {
     return size;
   }
 
-  TORCH_CHECK(divisions >= 2, "Only 2 or more divisions are supported");
+  TORCH_CHECK_VALUE(divisions >= 2, "Only 2 or more divisions are supported");
 
   // divide the space between these 2's power into equal divisions
   // If division is zero, return the power-of-2 ceiling.
