@@ -166,6 +166,7 @@ class FSDPParamGroup:
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._all_reduce_hook: Optional[Callable[[torch.Tensor], None]] = None
         self._all_gather_comm: AllGather = DefaultAllGather()
+        self._all_gather_output = torch.empty(0, device=self.device)
         self._reduce_scatter_comm: ReduceScatter = DefaultReduceScatter()
         # Optional stream to run the user-defined all-reduce hook in
         # Saved here and not in the comm. context because we allow the user to
@@ -316,7 +317,7 @@ class FSDPParamGroup:
             # can't skip due to early return in wait_for_unshard if
             # no self._all_gather_result
             self._all_gather_result = AllGatherResult(
-                all_gather_output=torch.empty(0, device=self.device),
+                all_gather_output=self._all_gather_output,
                 all_gather_event=self.device_handle.Event().record(),
                 all_gather_work=None,
                 param_all_gather_input_dtypes=[],
@@ -361,11 +362,13 @@ class FSDPParamGroup:
 
                 # Make sure the all_gather_outputs has proper storage size before using it
                 # First ensure we have at least one tensor in all_gather_outputs
-                if not fsdp_param.all_gather_outputs:
-                    # Create a new tensor with the same size as sharded_data
-                    fsdp_param.all_gather_outputs = [
-                        torch.empty_like(sharded_data, device=self.device)
-                    ]
+                fsdp_param.init_all_gather_outputs(
+                    [sharded_data.numel()],
+                    [sharded_data.dtype],
+                    1,
+                    self.device,
+                    force_recreate=False,
+                )
 
                 tensor = fsdp_param.all_gather_outputs[0]
                 alloc_storage(tensor)
