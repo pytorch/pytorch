@@ -4659,6 +4659,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(torch.equal(running_mean, bn.running_mean))
         self.assertTrue(torch.equal(running_var, bn.running_var))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @parametrize_test("dims", [2, 3], name_fn=lambda x: f"{x}D")
     @parametrize_test("mode", ["train", "inference"], name_fn=lambda x: x)
     @parametrize_test(
