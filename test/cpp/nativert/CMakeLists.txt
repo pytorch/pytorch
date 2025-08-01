@@ -5,8 +5,10 @@ file(GLOB_RECURSE NATIVERT_ALL_TEST_FILES "${NATIVERT_TEST_ROOT}/test_*.cpp")
 # Build the cpp gtest binary containing the cpp-only tests.
 set(NATIVERT_TEST_SRCS
   ${NATIVERT_ALL_TEST_FILES}
+  ${TORCH_ROOT}/torch/nativert/ModelRunner.cpp
   ${TORCH_ROOT}/torch/nativert/graph/TensorMeta.cpp
   ${TORCH_ROOT}/torch/nativert/graph/Graph.cpp
+  ${TORCH_ROOT}/torch/nativert/graph/GraphPasses.cpp
   ${TORCH_ROOT}/torch/nativert/graph/GraphSignature.cpp
   ${TORCH_ROOT}/torch/nativert/graph/Serialization.cpp
   ${TORCH_ROOT}/torch/nativert/executor/OpKernel.cpp
