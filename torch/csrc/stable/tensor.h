@@ -5,6 +5,9 @@
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/headeronly/core/ScalarType.h>
+
+using torch::headeronly::ScalarType;
 
 namespace torch::stable {
 
@@ -110,6 +113,55 @@ class Tensor {
     AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_type(ath_.get(), &device_type));
     return device_type == aoti_torch_device_type_cuda();
+  }
+
+  ScalarType scalar_type() const {
+    int32_t dtype;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
+    if (dtype == aoti_torch_dtype_float8_e5m2()) {
+      return ScalarType::Float8_e5m2;
+    } else if (dtype == aoti_torch_dtype_float8_e4m3fn()) {
+      return ScalarType::Float8_e4m3fn;
+    } else if (dtype == aoti_torch_dtype_float8_e5m2fnuz()) {
+      return ScalarType::Float8_e5m2fnuz;
+    } else if (dtype == aoti_torch_dtype_float8_e4m3fnuz()) {
+      return ScalarType::Float8_e4m3fnuz;
+    } else if (dtype == aoti_torch_dtype_bfloat16()) {
+      return ScalarType::BFloat16;
+    } else if (dtype == aoti_torch_dtype_float16()) {
+      return ScalarType::Half;
+    } else if (dtype == aoti_torch_dtype_float32()) {
+      return ScalarType::Float;
+    } else if (dtype == aoti_torch_dtype_float64()) {
+      return ScalarType::Double;
+    } else if (dtype == aoti_torch_dtype_uint8()) {
+      return ScalarType::Byte;
+    } else if (dtype == aoti_torch_dtype_uint16()) {
+      return ScalarType::UInt16;
+    } else if (dtype == aoti_torch_dtype_uint32()) {
+      return ScalarType::UInt32;
+    } else if (dtype == aoti_torch_dtype_uint64()) {
+      return ScalarType::UInt64;
+    } else if (dtype == aoti_torch_dtype_int8()) {
+      return ScalarType::Char;
+    } else if (dtype == aoti_torch_dtype_int16()) {
+      return ScalarType::Short;
+    } else if (dtype == aoti_torch_dtype_int32()) {
+      return ScalarType::Int;
+    } else if (dtype == aoti_torch_dtype_int64()) {
+      return ScalarType::Long;
+    } else if (dtype == aoti_torch_dtype_bool()) {
+      return ScalarType::Bool;
+    } else if (dtype == aoti_torch_dtype_complex32()) {
+      return ScalarType::ComplexHalf;
+    } else if (dtype == aoti_torch_dtype_complex64()) {
+      return ScalarType::ComplexFloat;
+    } else if (dtype == aoti_torch_dtype_complex128()) {
+      return ScalarType::ComplexDouble;
+    } else {
+      throw std::runtime_error(
+          "Not yet supported scalar type, please file an issue describing your use case.");
+    }
   }
 
   int64_t size(int64_t dim) const {
