@@ -247,7 +247,7 @@ class HuggingFaceStorageReader(FileSystemReader):
 
     def read_metadata(self) -> Metadata:
         from safetensors import safe_open  # type: ignore[import]
-        from safetensors.torch import _getdtype
+        from safetensors.torch import _getdtype  # type: ignore[import]
 
         state_dict_metadata: dict[str, TensorStorageMetadata] = {}
         storage_data: dict[MetadataIndex, _HFStorageInfo] = {}

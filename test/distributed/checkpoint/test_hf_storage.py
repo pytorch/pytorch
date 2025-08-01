@@ -351,7 +351,7 @@ class TestHfStorage(TestCase):
             file_path = os.path.join(path, file_name)
 
             # Create an empty file so fs.ls can find it
-            with open(file_path, "wb") as f:
+            with open(file_path, "wb") as _:
                 pass
 
             # Mock the fs.ls method to return our test file
