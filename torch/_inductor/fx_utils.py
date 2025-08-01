@@ -2,6 +2,7 @@
 import contextlib
 import operator
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 import sympy
@@ -28,7 +29,7 @@ from .virtualized import V
 # Works for length 2 patterns with 1 module and 1 function/method.
 def matches_module_function_pattern(
     pattern: tuple[type[torch.nn.modules.Module], Callable[..., Any]],
-    node: torch.fx.node.Node,
+    node: torch.fx.Node,
     modules: dict[str, torch.nn.modules.Module],
 ) -> bool:
     if len(node.args) == 0:
@@ -57,6 +58,20 @@ def matches_module_function_pattern(
     return True
 
 
+# todo(chilli): Not a great hash function
+@dataclass(unsafe_hash=True)
+class _FxNodeHash:
+    node: torch.fx.Node
+    target: torch.fx.node.Target = field(init=False)
+    arg_id: int = field(init=False)
+    kwarg_id: int = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.target = self.node.target
+        self.arg_id = id(self.node.args)
+        self.kwarg_id = id(self.node.kwargs)
+
+
 class FakeTensorUpdater:
     """
     The main idea here is that it's difficult to maintain accurate fake
@@ -77,21 +92,17 @@ class FakeTensorUpdater:
     fake tensors stop changing.
     """
 
-    def __init__(self, graph: torch.fx.Graph) -> None:
-        self.processed_hashes = OrderedSet[Any]()
-        self.graph = graph
+    def __init__(self, gm: torch.fx.GraphModule) -> None:
+        self.processed_hashes = OrderedSet[_FxNodeHash]()
+        self.gm = gm
 
-        for node in self.graph.nodes:
-            self.processed_hashes.add(self.hash_node(node))
-
-    def hash_node(self, node: torch.fx.Node):
-        # todo(chilli): Not a great hash function
-        return (node, node.target, id(node.args), id(node.kwargs))
+        for node in self.gm.graph.nodes:
+            self.processed_hashes.add(_FxNodeHash(node))
 
     def incremental_update(self):
         """Update FakeTensors on self.graph. We will try to do the minimum amount of work."""
         existing_storages: defaultdict[Optional[int], int] = defaultdict(int)
-        for node in self.graph.nodes:
+        for node in self.gm.graph.nodes:
             existing_storages[get_node_storage(node)] += 1
 
         def is_intlist_same(new, old):
@@ -111,7 +122,7 @@ class FakeTensorUpdater:
                 return old is None
             if not isinstance(new, torch.Tensor):
                 assert isinstance(new, (torch.SymInt, torch.SymBool, torch.SymFloat)), (
-                    f"Unknown type {type(new)} in {self.graph}"
+                    f"Unknown type {type(new)} in {self.gm.graph}"
                 )
                 return (
                     new.node.shape_env._maybe_evaluate_static(
@@ -195,18 +206,18 @@ class FakeTensorUpdater:
         def should_process_node(node: torch.fx.Node) -> bool:
             # node.target will called with FakeTensor arguments, which is not supported
             # by Inductor lowerings
-            return callable(node.target) and not getattr(
-                node.target, "_inductor_lowering_function", False
+            return callable(node.target) and not hasattr(
+                node.target, "_inductor_lowering_function"
             )
 
         to_process = OrderedSet[int]()
-        for node in self.graph.nodes:
+        for node in self.gm.graph.nodes:
             # NB: Be very careful about skipping nodes (via continues) here
             # and ask for a careful review when changing this code. The
             # consequence for incorrect FakeTensor metadata is difficult-to-debug
             # silent incorrectness.
             if (
-                self.hash_node(node) in self.processed_hashes
+                _FxNodeHash(node) in self.processed_hashes
                 and id(node) not in to_process
             ):
                 continue
@@ -237,9 +248,9 @@ class FakeTensorUpdater:
 
             existing_storages[get_node_storage(node)] += 1
 
-            to_process.update([id(user) for user in node.users])
+            to_process.update(id(user) for user in node.users)
 
-            self.processed_hashes.add(self.hash_node(node))
+            self.processed_hashes.add(_FxNodeHash(node))
 
 
 def get_storage(t: torch.Tensor) -> int:
