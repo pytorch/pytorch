@@ -7,7 +7,7 @@ class MainController(Controller):
         label = "base"
         help = "base for build CLI"
 
-    @ex(help="Show hello world")  # <-- 添加至少一个命令
+    @ex(help="Show")
     def hello(self):
         print("hello world")
 
@@ -21,5 +21,5 @@ def main():
     with BuildApp() as app:
         app.run()
 
-if __name__ == "__main__":  # <-- 加上这句
+if __name__ == "__main__":
     main()
