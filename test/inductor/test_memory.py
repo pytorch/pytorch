@@ -215,6 +215,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
 
     @mock.patch.object(config, "allow_buffer_reuse", False)
     @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
+    @config.patch("test_configs.track_memory_lifecycle", "assert")
     def test_mutation_size_propogation(self):
         """
         This tests correct size propogation in the case of mutations.
@@ -262,6 +263,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 buffer_info[buf_name] = (
                     buf.mpi_buffer.size_alloc,
                     buf.mpi_buffer.size_free,
+                    buf.mpi_buffer.succ_nodes,
                 )
 
         # test example and checks
@@ -281,11 +283,15 @@ class TestOperatorReorderForPeakMemory(TestCase):
         ):
             f_compiled = torch.compile(f)
             f_compiled(a, p)
-            for buf_name in ["buf0", "buf2", "buf4", "buf6"]:
-                self.assertEqual(buffer_info[buf_name], (2048, 0))
 
-            for buf_name in ["buf1", "buf3", "buf5", "buf7"]:
-                self.assertEqual(buffer_info[buf_name], (0, 2048))
+            pre_mutation = ["buf0", "buf2", "buf4", "buf6"]
+            post_mutation = ["buf1", "buf3", "buf5", "buf7"]
+
+            for pre, post in zip(pre_mutation, post_mutation):
+                self.assertEqual(buffer_info[pre][0:2], (2048, 2048))
+                self.assertEqual(buffer_info[post][0:2], (0, 0))
+                # succ nodes should be forwarded to pre mutation buffer
+                self.assertTrue(buffer_info[post][2] <= buffer_info[pre][2])
 
     @unittest.skipIf(
         not torch.cuda.is_available()
@@ -358,6 +364,49 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 .check("triton_poi_fused_add_0.run(buf10, buf9,")
                 .run(code)
             )
+
+    @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
+    def test_multiple_mutations_of_buf(self):
+        @torch.compile()
+        def foo(inp, inp2):
+            inp = inp @ inp
+            inp = inp.view(2, -1, 256)
+            x = inp[0]
+            y = inp[1]
+            x, y = torch._foreach_add([x, y], 1.0)
+            out = x.sum()
+            out2 = y.sum(dim=-1)
+
+            return out, out2, inp2 @ inp2
+
+        inp = torch.rand([256, 256], device="cuda")
+        inp2 = torch.rand([256, 256], device="cuda")
+
+        def replace_foreach(gm):
+            nodes = gm.find_nodes(
+                op="call_function", target=torch.ops.aten._foreach_add.Scalar
+            )
+            assert len(nodes) == 1
+            node = nodes[0]
+            nodes[0].target = torch.ops.aten._foreach_add_.Scalar
+            for inp, out in zip(node.args[0], list(node.users.keys())):
+                out.replace_all_uses_with(inp)
+                gm.erase_node(out)
+
+        with torch._inductor.config.patch(
+            {
+                "post_grad_custom_post_pass": replace_foreach,
+                "test_configs.track_memory_lifecycle": "assert",
+                "allow_buffer_reuse": False,
+                # make sure the mm is at the end so
+                # the earlier deallocation is not at the last step,
+                # which doesnt distinguish between returned tensors
+                # and which tensors are deallocated immediately prior
+                "reorder_for_peak_memory": False,
+            }
+        ):
+            code = run_and_get_triton_code(foo, inp, inp2)
+            FileCheck().check("allocated=['buf0']").run(code)
 
 
 if __name__ == "__main__":
