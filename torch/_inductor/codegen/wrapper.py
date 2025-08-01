@@ -612,16 +612,8 @@ class AllocateLine(MemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
-        if isinstance(self.node, ir.CppTemplateBuffer) and isinstance(
-            self.node.layout, ir.MultiOutputLayout
-        ):
-            assert isinstance(self.node.outputs, Iterable)
-            for output in self.node.outputs:
-                if output.get_name() not in self.node.outputs_removed:
-                    code.writeline(self.wrapper.make_buffer_allocation(output))
-        else:
-            line = self.wrapper.make_buffer_allocation(self.node)
-            code.writeline(line)
+        line = self.wrapper.make_buffer_allocation(self.node)
+        code.writeline(line)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_allocate
@@ -2911,12 +2903,6 @@ class PythonWrapperCodegen(CodeGen):
         if not self.can_reuse(buffer):
             return
         self.freed.add(name)
-
-        if isinstance(buffer, ir.CppTemplateBuffer) and isinstance(
-            buffer.layout, ir.MultiOutputLayout
-        ):
-            # CppTemplateBuffer of Group GEMM, we actually didn't allocate this buffer
-            return
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
 

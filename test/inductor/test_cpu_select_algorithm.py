@@ -2375,52 +2375,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     counters["inductor"]["cpp_epilogue_fusion_counter"], 0
                 )
 
-    @inductor_config.patch({"freezing": True})
-    @inductor_config.patch({"cpp.enable_group_gemm_template": True})
-    @patches
-    @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    @parametrize("batch_size", (16, 52))
-    @parametrize("in_features", (52,))
-    @parametrize("out_features", (32, 52))
-    @parametrize("input_3d", (False, True))
-    @parametrize("gemm_num", (2, 3))
-    @dtypes(
-        torch.bfloat16,
-    )
-    def test_group_linear(
-        self,
-        batch_size,
-        in_features,
-        out_features,
-        input_3d,
-        gemm_num,
-        dtype,
-    ):
-        class Linear_Gate_Up(torch.nn.Module):
-            def __init__(self, in_feature, out_feature, gemm_num):
-                super().__init__()
-                self.gemm_num = gemm_num
-                self.linears = [
-                    torch.nn.Linear(in_feature, out_feature, bias=False)
-                    for _ in range(gemm_num)
-                ]
-
-            def forward(self, x):
-                return [self.linears[i](x) for i in range(self.gemm_num)]
-
-        torch._dynamo.reset()
-        torch._inductor.metrics.reset()
-        counters.clear()
-        assert dtype == torch.bfloat16
-        mod = Linear_Gate_Up(in_features, out_features, gemm_num).eval()
-        B = (2, batch_size) if input_3d else (batch_size,)
-        v = torch.randn(*B, in_features).to(torch.bfloat16)
-        with verify(dtype) as (atol, rtol), torch.autocast(
-            device_type="cpu"
-        ), torch.no_grad():
-            self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_group_gemm_template"], 1)
 
     @inductor_config.patch({"freezing": False})
     @patches
@@ -2966,53 +2920,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @inductor_config.patch({"freezing": True})
-    @inductor_config.patch({"cpp.enable_linear_silu_linear_mul": True})
-    @patches
-    @torch.no_grad
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    @parametrize("batch_size", (16,))
-    @parametrize("in_features", (52,))
-    @parametrize("out_features", (32,))
-    @parametrize("bias_gate", (True, False))
-    @parametrize("bias_up", (True, False))
-    @parametrize("input_3d", (True, False))
-    @dtypes(
-        torch.bfloat16,
-    )
-    @inductor_config.patch({"cpp.cpp_gemm_transverse_strategy": "HORIZONTAL"})
-    def test_linear_silu_linear_mul_horizontal(
-        self, batch_size, in_features, out_features, bias_gate, bias_up, input_3d, dtype
-    ):
-        class Linear_Gate_Up(torch.nn.Module):
-            def __init__(self, in_feature, out_feature, bias_gate=False, bias_up=False):
-                super().__init__()
-                self.gate_proj = torch.nn.Linear(
-                    in_feature, out_feature, bias=bias_gate
-                )
-                self.up_proj = torch.nn.Linear(in_feature, out_feature, bias=bias_up)
-
-            def forward(self, x):
-                return torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
-
-        if input_3d and bias_gate and bias_up:
-            # Reduce the redundant test combination
-            return
-
-        torch._dynamo.reset()
-        torch._inductor.metrics.reset()
-        counters.clear()
-        assert dtype == torch.bfloat16
-        mod = Linear_Gate_Up(in_features, out_features, bias_gate, bias_up).eval()
-        B = (2, batch_size) if input_3d else (batch_size,)
-        v = torch.randn(*B, in_features).to(torch.bfloat16)
-        with verify(dtype) as (atol, rtol), torch.autocast(
-            device_type="cpu"
-        ), torch.no_grad():
-            self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_group_gemm_template"], 1)
-
-
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
     pass
@@ -3056,9 +2963,6 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     )
     test_horizontal_transverse_dynamic_shapes = (
         TestSelectAlgorithm.test_horizontal_transverse
-    )
-    test_linear_silu_linear_mul_horizontal_dynamic_shapes = (
-        TestSelectAlgorithm.test_linear_silu_linear_mul_horizontal
     )
 
     @patches
