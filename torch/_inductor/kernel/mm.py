@@ -14,7 +14,6 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     context_add_using_tf32,
     mm_operations,
 )
-from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.torch_version import TorchVersion
@@ -673,6 +672,15 @@ def tuned_mm(mat1, mat2, *, layout=None):
         layout,
     )
 
+    choices = generate_mm_choices(mat1, mat2, m, n, k, layout, device_type)
+    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+
+
+def generate_mm_choices(mat1, mat2, m, n, k, layout, device_type):
+    """
+    Generate a list of algorithm choices for matrix multiplication.
+    """
+    name = "mm"
     aten_layout = layout
     if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
         aten_layout = FlexibleLayout(
@@ -772,6 +780,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
         CKTileGemmTemplate.add_choices(choices, layout, kernel_inputs.nodes())
 
     if use_cpp_gemm_template(layout, mat1, mat2):
+        from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
+
         CppGemmTemplate.add_choices(
             choices,
             layout,
@@ -836,7 +846,14 @@ def tuned_mm(mat1, mat2, *, layout=None):
             lazy_register_extern_choice(k).bind(kernel_inputs.nodes(), layout)
         )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    choices = [
+        choice
+        for choice in choices
+        if hash(choice) % inductor_config.num_autotune_shards
+        == inductor_config.autotune_shard_index
+    ]
+
+    return choices
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)
@@ -1033,6 +1050,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
 
     if use_cpp_gemm_template(layout, mat1, mat2):
+        from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
+
         CppGemmTemplate.add_choices(
             choices,
             layout,

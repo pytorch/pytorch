@@ -416,6 +416,12 @@ use_experimental_benchmarker: bool = Config(
     justknob="pytorch/inductor:use_experimental_benchmarker",
 )
 
+# Total number of shards for autotuning
+num_autotune_shards = 1
+
+# Current shard index (0 to num_autotune_shards-1)
+autotune_shard_index = 0
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
