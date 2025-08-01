@@ -66,7 +66,7 @@ def build_vllm(artifact_dir: str, torch_whl_dir: str, base_image: str):
 
     # replace dockerfile
     # todo: remove this once the dockerfile is updated in vllm
-    dockerfile_path = f"./ci/docker/external/vllm/Dockerfile.base"
+    dockerfile_path = f".github/docker/external/vllm/Dockerfile.base"
     if cfg.dev:
         dockerfile_path = "Dockerfile.base"
 
