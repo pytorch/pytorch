@@ -350,6 +350,7 @@ class TestDynamoTimed(TestCase):
             e.cuda_version = None
             e.triton_version = None
             e.python_version = None
+            e.stack_trace = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
@@ -433,6 +434,7 @@ class TestDynamoTimed(TestCase):
  'runtime_triton_autotune_time_us': None,
  'shape_env_guard_count': 0,
  'specialize_float': False,
+ 'stack_trace': None,
  'start_time': 0.0001,
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
@@ -525,6 +527,7 @@ class TestDynamoTimed(TestCase):
  'runtime_triton_autotune_time_us': None,
  'shape_env_guard_count': None,
  'specialize_float': None,
+ 'stack_trace': None,
  'start_time': 0.0001,
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
