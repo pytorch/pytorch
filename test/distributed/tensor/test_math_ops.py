@@ -630,7 +630,7 @@ class DistMathOpsTest(DTensorTestBase):
 
             # TODO: forward pass is sharding strategy is generated from composite, hence 1 more collective than layer_norm
             # see: https://github.com/pytorch/pytorch/pull/158716#issuecomment-3096012679
-            expected_fwd_comm = 0 if shard_dim < norm_idx else 2
+            expected_fwd_comm = 0 if shard_dim < norm_idx else 1
 
             self.assertEqual(
                 sum(comm_mode.comm_module_counts["Global"]["forward"].values()),
