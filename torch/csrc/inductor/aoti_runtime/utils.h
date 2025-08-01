@@ -24,7 +24,7 @@
 
 #define AOTI_TORCH_ERROR_CODE_CHECK(call)       \
   if ((call) != AOTI_TORCH_SUCCESS) {           \
-    throw_exception(#call, __FILE__, __LINE__); \
+    torch::headeronly::detail::throw_exception(#call, __FILE__, __LINE__); \
   }
 
 using AOTIRuntimeError = int32_t;
@@ -33,7 +33,7 @@ using AOTIRuntimeError = int32_t;
 
 #define AOTI_RUNTIME_ERROR_CODE_CHECK(call)     \
   if ((call) != AOTI_RUNTIME_SUCCESS) {         \
-    throw_exception(#call, __FILE__, __LINE__); \
+    torch::headeronly::detail::throw_exception(#call, __FILE__, __LINE__); \
   }
 
 namespace torch::aot_inductor {
