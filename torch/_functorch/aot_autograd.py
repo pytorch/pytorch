@@ -637,10 +637,15 @@ def create_aot_state(
 
     if fw_metadata.num_intermediate_bases > 0:
         assert not req_subclass_dispatch, f"""\
-torch.compile is currently being used with tensor subclass inputs:
-{",".join([str(type(x)) for x in fake_flat_args])}. We are attempting to a compile a graph with two graph outputs
-that alias one another, which is currently unsupported in the subclass use case. If you run into this,
-please file a github issue"""
+torch.compile is currently being used with tensor subclass inputs.
+We are attempting to a compile a graph with two graph outputs
+that alias one another, specifically output indices:
+
+    {[i for i, x in enumerate(fw_metadata.output_info) if x.output_type == OutputType.alias_of_intermediate]}
+
+ANY output aliasing (even for regular tensors) is currently unsupported if
+there are any subclass outputs. If you run into this, please file a github
+issue"""
 
     if aot_config.is_export:
         # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
