@@ -46,7 +46,6 @@ import torch.utils._pytree as pytree
 from torch import fx, Tensor
 from torch._C._dynamo import guards
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
-from torch._dynamo.package import CompilePackage
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -155,6 +154,7 @@ from .variables.torch_function import TensorWithTFOverrideVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.package import CompilePackage
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 log = logging.getLogger(__name__)
@@ -393,7 +393,7 @@ class OutputGraph(OutputGraphGuardsState):
         global_scope: Scope,
         f_code: CodeType,
         torch_function_mode_stack: list[torch.overrides.TorchFunctionMode],
-        package: Optional[CompilePackage],
+        package: Optional["CompilePackage"],
     ) -> None:
         super().__init__(
             local_scope,
@@ -2499,7 +2499,13 @@ class SubgraphTracer(fx.Tracer):
             args, kwargs = pytree.tree_unflatten(new_flat_args, tree_spec)
 
         rv = super().create_proxy(
-            kind, target, args, kwargs, name, type_expr, proxy_factory_fn  # type: ignore[arg-type]
+            kind,
+            target,
+            args,
+            kwargs,
+            name,
+            type_expr,
+            proxy_factory_fn,  # type: ignore[arg-type]
         )
 
         # append stack trace to fx node
