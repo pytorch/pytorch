@@ -476,7 +476,7 @@ argument, evaluate whether you can rewrite it to address the problem.
 
 ```{toctree}
 :maxdepth: 1
-dynamic_shapes_core_concepts
-dynamic_shapes_beyond_the_basics
-dynamic_shapes_troubleshooting
+compile/dynamic_shapes_core_concepts
+compile/dynamic_shapes_beyond_the_basics
+compile/dynamic_shapes_troubleshooting
 ```
