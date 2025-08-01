@@ -1285,3 +1285,9 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             flex_decode_configs.append(default_config)
 
         return flex_decode_configs
+
+
+class MTIAConfigHeuristic(BaseConfigHeuristic):
+    """
+    Placeholder child class for MTIA specific overrides.
+    """
