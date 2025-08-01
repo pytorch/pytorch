@@ -303,7 +303,7 @@ class ShardingPropagator:
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
         # and compile autograd initial tracing, which do not need to be as fast as
-        # eagermode DTensor usages.
+        # eager mode DTensor usages.
         if _are_we_tracing():
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
@@ -336,6 +336,8 @@ class ShardingPropagator:
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
+                # check if we want to use args value from redistribute_schema
+                use_val_from_redistribute_schema = False
                 expected_input_specs: list[DTensorSpec] = []
 
                 # in case where the op does not specify input_specs and output_specs
@@ -378,6 +380,7 @@ class ShardingPropagator:
                             out_tensor_meta, schema, output_strategy.output_spec
                         )
                         needs_redistribute = True
+                        use_val_from_redistribute_schema = True
 
                 # construct output spec for the op
                 if op_schema.return_type_tuple_tensor_like():
@@ -410,6 +413,7 @@ class ShardingPropagator:
                     output_specs,
                     suggestion_schema,
                     needs_redistribute=needs_redistribute,
+                    use_val_from_redistribute_schema=use_val_from_redistribute_schema,
                 )
             elif isinstance(op_strategy, TupleStrategy):
                 # tuple strategy output sharding processing
@@ -478,6 +482,7 @@ class ShardingPropagator:
                     tuple(out_spec_list) if out_tensor_meta is not None else None,
                     suggestion_schema,
                     needs_redistribute=needs_redistribute,
+                    use_val_from_redistribute_schema=False,
                 )
             else:
                 raise ValueError("Unsupported op strategy type")
