@@ -1806,8 +1806,10 @@ class BuiltinVariable(VariableTracker):
 
     def call_iter(self, tx: "InstructionTranslator", obj, *args, **kwargs):
         if isinstance(obj, variables.IteratorVariable):
-            ret = obj
-        else:
+            return obj
+
+        ret = None
+        if not isinstance(obj, UserDefinedObjectVariable):
             # Handle the case where we are iterating over a tuple, list or iterator
             ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
 
