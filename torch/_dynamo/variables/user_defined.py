@@ -1794,16 +1794,17 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             # Dict subclasses can override __missing__ to provide fallback
             # behavior instead of raising a KeyError. This is used, for example,
             # by collections.Counter.
-            if (
-                name == "__getitem__"
-                and issubclass(self.python_type(), dict)
-                and self.call_obj_hasattr(tx, "__missing__").value
-            ):
-                try:
-                    return self._dict_vt.call_method(tx, name, args, kwargs)
-                except ObservedKeyError:
+            try:
+                return self._dict_vt.call_method(tx, name, args, kwargs)
+            except ObservedKeyError:
+                if (
+                    name == "__getitem__"
+                    and issubclass(self.python_type(), dict)
+                    and self._maybe_get_baseclass_method("__missing__")
+                ):
                     return self.call_method(tx, "__missing__", args, kwargs)
-            return self._dict_vt.call_method(tx, name, args, kwargs)
+                else:
+                    raise
         return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(self, tx):
