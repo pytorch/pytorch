@@ -599,9 +599,8 @@ def foreach_reduce(
     # -- END: ops post reduce_scatter
 
     with device_handle.stream(post_reduce_stream):
-        if world_size > 1:
-            _div_if_needed(reduce_output, postdivide_factor)
-            reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
+        _div_if_needed(reduce_output, postdivide_factor)
+        reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(
