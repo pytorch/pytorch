@@ -1300,6 +1300,7 @@ def _compile(
                 "dynamo_compile_time_before_restart_us": to_int_us(
                     dynamo_time_before_restart
                 ),
+                "stack_trace": traceback.format_stack(),
             }
             # TODO: replace with CompileEventLogger.compilation_metrics
             # There are some columns here not in PT2 Compile Events
