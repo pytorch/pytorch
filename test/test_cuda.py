@@ -36,6 +36,7 @@ from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestA
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
     _get_torch_cuda_version,
+    HAS_WORKING_NVML,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM70OrLater,
     TEST_CUDNN,
@@ -4913,6 +4914,11 @@ print(value, end="")
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
+<<<<<<< HEAD
+=======
+    @unittest.skipIf(not HAS_WORKING_NVML, "pynvml availble but broken")
+    @unittest.skipIf(TEST_WITH_ROCM, "flaky for AMD gpu")
+>>>>>>> bee5717138e (check in)
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_device_memory_used(self):
         """

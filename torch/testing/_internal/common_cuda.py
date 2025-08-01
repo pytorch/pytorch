@@ -387,6 +387,19 @@ def xfailIfDistributedNotSupported(func):
 TRITON_PTXAS_VERSION = (12, 8)
 requires_triton_ptxas_compat = unittest.skipIf(torch.version.hip is None and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
                                                "Requires CUDA {}.{} to match Tritons ptxas version".format(*TRITON_PTXAS_VERSION))
+def _check_has_working_nvml():
+    try:
+        if not torch.cuda.is_available():
+            return False
+        import pynvml
+        torch.cuda.device_memory_used()
+        return True
+    except pynvml.NVMLError_NotSupported:
+        return False
+    except ImportError:
+        return False
+
+HAS_WORKING_NVML = _check_has_working_nvml()
 
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
