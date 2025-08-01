@@ -1745,10 +1745,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                     _reorder_communication_preserving_peak_memory,
                 ],
                 "allow_buffer_reuse": False,
+                "test_configs.track_memory_lifecycle": "error",
             }
         ):
-            compiled = torch.compile(func)
+            compiled = torch.compile(func, fullgraph=True)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+
+        # make sure memory tracking is codegen. the ops will then do runtime checking with assertion.
+        FileCheck().check("check_memory_step").check("tracked_empty_strided").run(code)
+
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unnecessary copy is made.
         (

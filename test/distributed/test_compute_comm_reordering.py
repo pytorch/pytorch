@@ -179,8 +179,11 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
                 .check("extern_kernels.mm")
                 .check("triton_poi_fused_relu")
                 .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("torch.ops._c10d_functional.wait_tensor.default")
+                .check_same("buf0")
+                # mm not use buf prior to wait_tensor
                 .check("extern_kernels.mm")
+                .check_not("buf0")
+                .check("torch.ops._c10d_functional.wait_tensor.default")
                 .check("extern_kernels.mm")
                 .run(code)
             )
