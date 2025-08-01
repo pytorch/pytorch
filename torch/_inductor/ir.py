@@ -3115,7 +3115,7 @@ class View(GenericView):
 
             return cls(data=x, size=list(new_size), reindex=fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        elif is_contiguous_storage_and_layout(x) or unbacked_symbols_in_sizes:
+        elif is_contiguous_storage_and_layout(x) :
             if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
                 # realize x; otherwise, the dynamic_reshape_indexer below will fail
                 # due to the size_hint's inability to process unbacked SymInts
@@ -3181,6 +3181,8 @@ class View(GenericView):
         Perform a reshape entirely by modifying indexing math
         """
         size_hint = V.graph.sizevars.size_hint
+        guard_or_false = V.graph.sizevars.guard_or_false
+
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
         vars = [
@@ -3205,14 +3207,15 @@ class View(GenericView):
         while stack_new and stack_old:
             size_old = stack_old.pop()
             var, size_new = stack_new.pop()
+            print(size_old)
+            print(size_new)
             if size_old == 1:
                 view_expr.append(sympy.S.Zero)
                 stack_new.append((var, size_new))  # re-add
             elif size_new == 1:
                 stack_old.append(size_old)  # re-add
-            elif size_hint(size_new) == size_hint(size_old):
+            elif guard_or_false(sympy.Eq(size_new, size_old)):
                 view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
             elif size_hint(size_new) < size_hint(size_old):
                 while size_hint(size_new) < size_hint(size_old):
                     var2, size_new2 = stack_new.pop()
