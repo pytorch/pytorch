@@ -29,6 +29,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
+from torch._inductor.cpp_builder import is_msvc_cl
 from torch._inductor.test_case import run_tests, TestCase
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -193,6 +194,15 @@ main()
         # Run it three times to catch bad dynamo state resets
         for _ in range(3):
             self.run_as_subprocess(script)
+
+    def gen_cache_miss_log_prefix(self):
+        if IS_WINDOWS:
+            if is_msvc_cl():
+                return "Cache miss due to new autograd node: struct "
+            else:
+                self.fail("Compilers other than msvc have not yet been verified on Windows.")
+        else:
+            "Cache miss due to new autograd node: "
 
     def test_reset(self):
         compiled_autograd.compiled_autograd_enabled = True
@@ -3147,7 +3157,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
         assert "torch::autograd::AccumulateGrad (NodeCall" in logs.getvalue()
         assert (
-            "Cache miss due to new autograd node: torch::autograd::GraphRoot"
+            self.gen_cache_miss_log_prefix() + "torch::autograd::GraphRoot"
             not in logs.getvalue()
         )
 
@@ -3354,7 +3364,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
         )
 
-    @skipIfWindows(msg="AssertionError: Scalars are not equal!")
     def test_verbose_logs_cpp(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
@@ -3382,8 +3391,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             self.check_output_and_recompiles(fn)
 
         patterns1 = [
-            r".*Cache miss due to new autograd node: torch::autograd::GraphRoot \(NodeCall 0\) with key size (\d+), "
-            r"previous key sizes=\[\]\n",
+            r".*" + self.gen_cache_miss_log_prefix() + r"torch::autograd::GraphRoot \(NodeCall 0\) with key size (\d+), previous key sizes=\[\]\n",
         ]
 
         all_logs = logs.getvalue()
@@ -3419,14 +3427,9 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
         actual_logs = logs.getvalue()
-        if IS_WINDOWS:
-            expected_logs = [
-                "Cache miss due to new autograd node: struct torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
-            ]
-        else:
-            expected_logs = [
-                "Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
-            ]
+        expected_logs = [
+            self.gen_cache_miss_log_prefix() + "torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
+        ]
         for expected in expected_logs:
             self.assertTrue(expected in actual_logs)
 
@@ -3456,7 +3459,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 fn()
 
         unexpected_logs = [
-            "Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0)"
+            self.gen_cache_miss_log_prefix() + "torch::autograd::GraphRoot (NodeCall 0)"
         ]
 
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
