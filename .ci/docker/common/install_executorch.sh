@@ -42,6 +42,7 @@ install_pip_dependencies() {
   # A workaround, ExecuTorch has moved to numpy 2.0 which is not compatible with the current
   # numba and scipy version used in PyTorch CI
   conda_run pip uninstall -y numba scipy
+  pip_install yaspin==3.1.0
 
   popd
 }
@@ -50,7 +51,7 @@ setup_executorch() {
   pushd executorch
 
   export PYTHON_EXECUTABLE=python
-  export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON -DEXECUTORCH_BUILD_TESTS=ON"
 
   as_jenkins .ci/scripts/setup-linux.sh --build-tool cmake || true
   popd
