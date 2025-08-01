@@ -74,11 +74,9 @@ from threading import Event, Lock
 
 lock = Lock()
 lock.acquire()
-
 event1 = Event()
 event2 = Event()
 event3 = Event()
-
 
 def run():
     event1.set()
@@ -86,14 +84,12 @@ def run():
     lock.acquire()
     event3.set()
 
-
 threading.Thread(target=run).start()
 
 with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], with_stack=True):
     event1.wait()
     event2.set()
     time.sleep(1)
-
 
 with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], with_stack=True):
     lock.release()
