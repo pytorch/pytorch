@@ -1248,7 +1248,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
     def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_bwd_configs: list[FlexConfig] = []
-        TRITON_LESS_FLEX_ATTN_BWD_CONFIGS = os.get(
+        TRITON_LESS_FLEX_ATTN_BWD_CONFIGS = os.getenv(
             "TRITON_LESS_FLEX_ATTN_BWD_CONFIGS", "0"
         ).lower() in {"true", "1", "t", "y", "yes", "on"}
 
