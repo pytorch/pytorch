@@ -3,12 +3,11 @@ import glob
 import os
 import platform
 import sys
-import textwrap
 import sysconfig
+import textwrap
 
 
 def _load_dll_libraries() -> None:
-
     py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
     th_dll_path = os.path.join(os.path.dirname(__file__), "lib")
     usebase_path = os.path.join(sysconfig.get_config_var("userbase"), "Library", "bin")
@@ -34,7 +33,6 @@ def _load_dll_libraries() -> None:
         )
         if os.path.exists(p)
     ]
-
 
     kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
     with_load_library_flags = hasattr(kernel32, "AddDllDirectory")
@@ -71,9 +69,7 @@ def _load_dll_libraries() -> None:
             last_error = ctypes.get_last_error()
             if res is None and last_error != 126:
                 err = ctypes.WinError(last_error)
-                err.strerror += (
-                    f' Error loading "{dll}" or one of its dependencies.'
-                )
+                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
                 raise err
             elif res is not None:
                 is_loaded = True
@@ -84,9 +80,7 @@ def _load_dll_libraries() -> None:
             res = kernel32.LoadLibraryW(dll)
             if res is None:
                 err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += (
-                    f' Error loading "{dll}" or one of its dependencies.'
-                )
+                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
                 raise err
 
     kernel32.SetErrorMode(prev_error_mode)

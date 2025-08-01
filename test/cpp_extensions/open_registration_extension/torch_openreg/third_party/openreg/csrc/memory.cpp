@@ -52,7 +52,7 @@ class MemoryManager {
     if (it == m_registry.end())
       return orErrorUnknown;
     const auto& info = it->second;
-    
+
     if (info.type == orMemoryType::orMemoryTypeDevice) {
       openreg::mprotect(info.pointer, info.size, F_PROT_READ | F_PROT_WRITE);
       openreg::munmap(info.pointer, info.size);

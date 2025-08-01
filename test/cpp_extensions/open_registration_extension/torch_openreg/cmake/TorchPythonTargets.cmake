@@ -1,4 +1,4 @@
-if (WIN32)
+if(WIN32)
   set(TORCH_PYTHON_IMPORTED_LOCATION "${PYTORCH_INSTALL_DIR}/lib/torch_python.lib")
   set(TORCH_PYTHON_LINK_LIBS
     "${PYTORCH_INSTALL_DIR}/lib/c10.lib"

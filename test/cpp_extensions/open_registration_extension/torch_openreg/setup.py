@@ -18,7 +18,7 @@ BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 RUN_BUILD_DEPS = any(arg in {"clean", "dist_info"} for arg in sys.argv)
 
 
-def check_env_flag(name, default = ""):
+def check_env_flag(name, default=""):
     return os.getenv(name, default).upper() in ["ON", "1", "YES", "TRUE", "Y"]
 
 
@@ -66,7 +66,8 @@ def build_deps():
         ".",
         "--target",
         "install",
-        "--config", os.environ["CMAKE_BUILD_TYPE"],
+        "--config",
+        os.environ["CMAKE_BUILD_TYPE"],
         "--",
     ]
 
