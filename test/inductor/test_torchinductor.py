@@ -432,8 +432,7 @@ def check_model(
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
-    # TODO: enable this for all tests
-    exact_stride=False,
+    exact_stride=True,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -669,8 +668,7 @@ def check_model_gpu(
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
-    # TODO: enable this for all tests
-    exact_stride=False,
+    exact_stride=True,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -809,6 +807,7 @@ class SweepInputs2:
 
     @classmethod
     def gen_template(cls, name1, name2):
+        exact_stride = not ({name1, name2} == {"broadcast2", "transposed"})
         def test(self):
             check_model(
                 self,
@@ -817,6 +816,7 @@ class SweepInputs2:
                     getattr(cls.gen, name1)(),
                     getattr(cls.gen, name2)(),
                 ),
+                exact_stride=exact_stride,
             )
 
         test.__name__ = f"test_{cls.gen.device}_{name1}_{name2}"
@@ -2929,6 +2929,7 @@ class CommonTemplate:
         self.common(
             forward,
             (torch.randn(4, 2, 4, 4),),
+            exact_stride=False,
         )
 
     def test_views7(self):
@@ -3568,7 +3569,7 @@ class CommonTemplate:
             a = torch.permute(a, [0, 2, 3, -3])
             return (a,)
 
-        self.common(fn, (torch.randn(4, 4),))
+        self.common(fn, (torch.randn(4, 4),), exact_stride=False)
 
     def test_expand(self):
         def fn(a):
@@ -3577,7 +3578,7 @@ class CommonTemplate:
                 a.expand(2, 1, 2, 3, 2) + 2,
             ), a.expand(2, -1, 5, -1)
 
-        self.common(fn, (torch.randn(2, 1, 2),))
+        self.common(fn, (torch.randn(2, 1, 2),), exact_stride=False)
 
     def test_squeeze1(self):
         def fn(a):
@@ -4264,6 +4265,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([2, 20, 2]),),
+            exact_stride=False,
         )
 
     def test_slice2(self):
@@ -4363,11 +4365,13 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([2, 2, 10]),),
+            exact_stride=False,
         )
 
         self.common(
             fn2,
             (torch.randn([2, 2, 10]),),
+            exact_stride=False,
         )
 
     @parametrize("dilation", (1, 2))
@@ -4548,6 +4552,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([4, 4, 4]),),
+            exact_stride=False,
         )
 
     def test_convolution1(self):
@@ -6036,6 +6041,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
+            exact_stride=False,
         )
 
         with self.assertRaises(RuntimeError):
@@ -6940,13 +6946,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a):
             return torch.full_like(a, 3)
 
-        self.common(fn, (torch.randn(4, 5, 6).transpose(1, -1),), exact_stride=True)
+        self.common(fn, (torch.randn(4, 5, 6).transpose(1, -1),))
 
     def test_full_like_sliced(self):
         def fn(a):
             return torch.full_like(a, 3)
 
-        self.common(fn, (torch.rand(3, 4)[:, ::2],), exact_stride=True)
+        self.common(fn, (torch.rand(3, 4)[:, ::2],))
 
     def test_full_truncation(self):
         def fn(a):
@@ -7971,6 +7977,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.randn(6, 1, 100),
                 torch.randn(6, 128, 100),
             ],
+            exact_stride=False,
         )
 
     def test_index_put1(self):
@@ -8151,7 +8158,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         a = torch.randn(1024)
         idx = torch.arange(10)
         torch._inductor.metrics.generated_kernel_count = 0
-        self.common(fn, (a, idx))
+        self.common(fn, (a, idx), exact_stride=False)
         assertGeneratedKernelCountEqual(self, 1)
 
     def test_index_put_failed_reinplace(self):
@@ -8233,7 +8240,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 aten.narrow_copy(x, 1, 10, 16),
             )
 
-        self.common(fn, [torch.randn(64, 64)])
+        self.common(fn, [torch.randn(64, 64)], exact_stride=False)
 
     def test_as_strided(self):
         def fn(x):
@@ -8253,10 +8260,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 + 2,
             )
 
-        self.common(fn, [torch.randn(64, 64)])
+        self.common(fn, [torch.randn(64, 64)], exact_stride=False)
         self.common(
             fn_channels_last,
             [torch.randn(8, 384, 20, 20).to(memory_format=torch.channels_last)],
+            exact_stride=False,
         )
 
     def test_exact_stride(self):
@@ -9186,7 +9194,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         model = Model()
         x = torch.rand(10, 3, 0)
 
-        self.common(model, (x,), exact_stride=True)
+        self.common(model, (x,))
 
     def test_randint(self):
         @torch.compile(fullgraph=True)
@@ -9244,7 +9252,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(x):
             return torch.rand_like(x), torch.randn_like(x), torch.randint_like(x, 1, 11)
 
-        self.common(fn, [torch.zeros([20, 20])], exact_stride=True)
+        self.common(fn, [torch.zeros([20, 20])])
 
     @config.patch(fallback_random=True)
     @xfail_if_mps  # 100% are not close
@@ -9256,7 +9264,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.randint_like(x, 1, 11),
             )
 
-        self.common(fn, (torch.zeros([3, 4])[:, ::2].permute(1, 0),), exact_stride=True)
+        self.common(fn, (torch.zeros([3, 4])[:, ::2].permute(1, 0),))
 
     @config.patch(check_stack_no_cycles_TESTING_ONLY=True)
     def test_check_stack_no_cycles(self):
@@ -10798,6 +10806,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(
             fn,
             (torch.randn(1, 16, 64, 72).to(memory_format=torch.channels_last),),
+            exact_stride=False,
         )
 
     def test_where_broadcast(self):
@@ -11548,6 +11557,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
             atol=2e-4,  # to pass lowp check on GPU
             rtol=1e-2,  # to pass lowp check on GPU
+            exact_stride=False,
         )
 
     @xfail_if_mps_unimplemented
@@ -12085,7 +12095,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with torch.no_grad():
             # With keep_output_stride False, inductor would normally have different layout from eager execution
             # But because our custom op needs fixed layout, the assertions in the custom op will pass
-            self.common(fn, (inp,), check_lowp=False)
+            self.common(fn, (inp,), check_lowp=False, exact_stride=False)
 
     @requires_gpu()
     @config.patch(implicit_fallbacks=True)
