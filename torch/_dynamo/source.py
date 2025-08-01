@@ -268,12 +268,11 @@ class GenericAttrSource(ChainedSource):
         return f"object.__getattribute__({self.base.name()}, {self.member!r})"
 
 
-# Represents type(obj).__dict__
+# Represents obj.__dict__ where obj is a type object
 @dataclasses.dataclass(frozen=True)
 class TypeDictSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen"):
         codegen(self.base)
-        codegen.extend_output(codegen.create_load_attrs("__class__"))
         codegen.extend_output(codegen.create_load_attrs("__dict__"))
 
     def guard_source(self):
@@ -284,7 +283,21 @@ class TypeDictSource(ChainedSource):
         # guard accessor, we are use type->tp_dict which is a dict. So,
         # forcefully pass a dict object to ensure that the GuardManager
         # registers that its working on a dict object.
-        return f"dict(type({self.base.name()}).__dict__)"
+        return f"dict({self.base.name()}.__dict__)"
+
+
+# Represents obj.__mro__ where object is type object
+@dataclasses.dataclass(frozen=True)
+class TypeMROSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__mro__"))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.__mro__"
 
 
 @dataclasses.dataclass(frozen=True)

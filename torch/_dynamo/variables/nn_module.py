@@ -48,6 +48,7 @@ from ..source import (
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
+    TypeSource,
     UnspecializedNNModuleSource,
 )
 from ..utils import (
@@ -387,7 +388,7 @@ class NNModuleVariable(VariableTracker):
             if istype(subobj, property):
                 if self.source:
                     # Read the class attribute to reach the property
-                    source = AttrSource(AttrSource(self.source, "__class__"), name)
+                    source = AttrSource(TypeSource(self.source), name)
                     # Get the getter function
                     source = AttrSource(source, "fget")
                 return variables.UserFunctionVariable(
@@ -989,7 +990,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     fn = self.value_type.forward
 
         if self.source:
-            source = AttrSource(AttrSource(self.source, "__class__"), name)
+            source = self.get_source_by_walking_mro(name)
         else:
             source = None
 
@@ -1017,7 +1018,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
             if self.source:
-                source = AttrSource(AttrSource(self.source, "__class__"), name)
+                source = self.get_source_by_walking_mro(name)
             else:
                 source = None
 
@@ -1032,9 +1033,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = None
 
             if isinstance(method, staticmethod):
-                source = AttrSource(
-                    AttrSource(AttrSource(self.source, "__class__"), name), "__func__"
-                )
+                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(method.__func__, source=source),
                     args,

@@ -247,7 +247,7 @@ class SuperVariable(VariableTracker):
                 # different from type(self) with polymorphism.
                 cls_source = None
                 if self.objvar.source:
-                    cls_source = AttrSource(self.objvar.source, "__class__")
+                    cls_source = TypeSource(self.objvar.source)
                 cls_variable = VariableTracker.build(
                     tx, self.objvar.value_type, cls_source
                 )

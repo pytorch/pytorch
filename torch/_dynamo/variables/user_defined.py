@@ -64,6 +64,7 @@ from ..source import (
     GetItemSource,
     RandomValueSource,
     TypeDictSource,
+    TypeMROSource,
     TypeSource,
     UnspecializedParamBufferSource,
 )
@@ -1000,11 +1001,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
-                source = (
-                    None
-                    if self.source is None
-                    else AttrSource(AttrSource(self.source, "__class__"), name)
-                )
+                source = None
+                if self.source:
+                    source = self.get_source_by_walking_mro(name)
                 # TODO(jansel): add a guard to check for monkey patching?
                 from ..mutation_guard import unpatched_nn_module_init
 
@@ -1226,12 +1225,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         for idx, klass in enumerate(type(self.value).__mro__):
             if name in klass.__dict__:
-                mro_source = AttrSource(self.cls_source, "__mro__")
-                klass_source = GetItemSource(mro_source, idx)
-                dict_source = AttrSource(klass_source, "__dict__")
-                # TODO(anijain2305) - This is a mapping proxy object. Ideally we
-                # should use DictGetItemSource here.
-                return GetItemSource(dict_source, name)
+                if idx != 0:
+                    mro_source = TypeMROSource(self.cls_source)
+                    klass_source = GetItemSource(mro_source, idx)
+                else:
+                    klass_source = self.cls_source
+                dict_source = TypeDictSource(klass_source)
+                return DictGetItemSource(dict_source, name)
 
         unimplemented_v2(
             gb_type="could not find name in object's mro",
@@ -1341,10 +1341,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if subobj is torch.nn.Module.__init__:
             subobj = unpatched_nn_module_init
 
+        subobj_from_class = inspect.getattr_static(
+            self.value.__class__, name, NO_SUCH_SUBOBJ
+        )
+        is_accessible_from_type_mro = (
+            subobj_from_class is subobj and self.cls_source is not None
+        )
+
         if isinstance(subobj, property):
             if self.source:
                 # Read the class attribute to reach the property
-                source = AttrSource(AttrSource(self.source, "__class__"), name)
+                source = self.get_source_by_walking_mro(name)
                 # Get the getter function
                 source = AttrSource(source, "fget")
             return variables.UserMethodVariable(
@@ -1362,6 +1369,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Safe because `staticmethod.__get__` basically won't trigger user
             # code and just returns the underlying `__func__`:
             # https://github.com/python/cpython/blob/3.11/Objects/funcobject.c#L1088-L1100
+            if is_accessible_from_type_mro:
+                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
             func = subobj.__get__(self.value)
             return VariableTracker.build(tx, func, source)
         elif isinstance(subobj, classmethod):
@@ -1490,22 +1499,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if is_wrapper_or_member_descriptor(subobj):
                 options = {"source": source}
                 return variables.GetAttrVariable(self, name, **options)
+            if source:
+                if is_accessible_from_type_mro:
+                    source = self.get_source_by_walking_mro(name)
 
-            # Check if the object is accessible from class - like a member bound
-            # to class and not an instance of the class.
-            subobj_from_class = inspect.getattr_static(
-                self.value.__class__, name, NO_SUCH_SUBOBJ
-            )
-            new_source = source
-            if subobj_from_class is subobj:
-                if source and isinstance(self, variables.UnspecializedNNModuleVariable):
-                    # Go through TypeDict accessor - type(mod).__dict__
-                    new_source = DictGetItemSource(TypeDictSource(self.source), name)
-                elif self.cls_source is not None:
-                    # If the class source is known but the object source is
-                    # unknown, we can still create a sourceful variable tracker.
-                    new_source = AttrSource(self.cls_source, name)
-            return VariableTracker.build(tx, subobj, new_source)
+                return variables.LazyVariableTracker.create(subobj, source)
+            else:
+                # Check if the subobj is accessible from the class itself. If the class source is known, we can create a
+                # sourceful variable tracker.
+                if self.cls_source is not None:
+                    subobj_from_class = inspect.getattr_static(
+                        self.value.__class__, name, NO_SUCH_SUBOBJ
+                    )
+                    if subobj_from_class is subobj:
+                        src_from_class = AttrSource(self.cls_source, name)
+                        return variables.LazyVariableTracker.create(
+                            subobj_from_class, src_from_class
+                        )
+
+                return VariableTracker.build(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
         raise_observed_exception(AttributeError, tx)

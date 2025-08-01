@@ -133,6 +133,7 @@ from .source import (
     TorchSource,
     TupleIteratorGetItemSource,
     TypeDictSource,
+    TypeMROSource,
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
@@ -1213,6 +1214,13 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, TypeDictSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.type_dict_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, TypeMROSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.type_mro_manager(
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
