@@ -1231,7 +1231,34 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 else:
                     klass_source = self.cls_source
                 dict_source = TypeDictSource(klass_source)
-                return DictGetItemSource(dict_source, name)
+                out_source = DictGetItemSource(dict_source, name)
+
+                for absent_idx in range(1, idx):
+                    # Insert a guard that the name is not present in the mro hierarchy
+                    mro_source = TypeMROSource(self.cls_source)
+                    klass_source = GetItemSource(mro_source, absent_idx)
+                    dict_source = TypeDictSource(klass_source)
+                    install_guard(
+                        dict_source.make_guard(
+                            functools.partial(
+                                GuardBuilder.DICT_CONTAINS, key=name, invert=True
+                            )
+                        )
+                    )
+                # Insert a guard that the name is not present in the object __dict__
+                if (
+                    self.source
+                    and hasattr(self.value, "__dict__")
+                    and name not in self.value.__dict__
+                ):
+                    install_guard(
+                        self.source.make_guard(
+                            functools.partial(
+                                GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name
+                            )
+                        )
+                    )
+                return out_source
 
         unimplemented_v2(
             gb_type="could not find name in object's mro",
@@ -1377,11 +1404,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             func = subobj.__get__(self.value)
             return VariableTracker.build(tx, func, source)
         elif isinstance(subobj, classmethod):
-            if is_accessible_from_type_mro:
-                # Accessing from __dict__ does not resolve the descriptor, it
-                # returns a classmethod object, so access the __func__
-                # attribute to get to the actual function.
-                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
             return variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
             )

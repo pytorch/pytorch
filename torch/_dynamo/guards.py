@@ -864,6 +864,9 @@ class GuardBuilder(GuardBuilderBase):
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
+        self.already_guarded_not_present_in_generic_dict: OrderedSet[(str, str)] = (
+            OrderedSet()
+        )
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -1650,9 +1653,11 @@ class GuardBuilder(GuardBuilderBase):
         assert attr is not None
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        assert isinstance(val, torch.nn.Module)
 
         base_manager = self.get_guard_manager(guard)
+
+        if (ref, attr) in self.already_guarded_not_present_in_generic_dict:
+            return
 
         mod_dict_source = f"{guard.name}.__dict__"
         mod_generic_dict_manager = base_manager.get_generic_dict_manager(
@@ -1665,6 +1670,7 @@ class GuardBuilder(GuardBuilderBase):
         mod_generic_dict_manager.add_dict_contains_guard(
             False, attr, get_verbose_code_parts(code, guard)
         )
+        self.already_guarded_not_present_in_generic_dict.add((ref, attr))
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
