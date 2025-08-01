@@ -1503,6 +1503,7 @@ except RuntimeError as e:
         )
 
     @largeTensorTest("20GB", "cuda")
+    @serialTest()
     def test_randint_generation_for_large_numel(self) -> None:
         numel = 2**31 + 1
         s = torch.randint(2, (numel,), device="cuda", dtype=torch.int8).sum()
@@ -4483,28 +4484,28 @@ class TestCudaMallocAsync(TestCase):
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings(
                 "garbage_collection_threshold:1.2"
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("max_split_size_mb:2")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings(
                 "pinned_use_cuda_host_register:none"
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings(
                 "pinned_num_register_threads:none"
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings(
                 "pinned_num_register_threads:1024"
             )
