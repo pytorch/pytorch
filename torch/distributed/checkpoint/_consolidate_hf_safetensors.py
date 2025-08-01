@@ -1,6 +1,7 @@
 # pyre-strict
 
 import concurrent.futures
+import glob
 import json
 import logging
 import math
@@ -299,9 +300,7 @@ def _write_data(
     if num_threads <= 1 or len(output_files_data) <= 1:
         # Sequential processing
         for output_file, output_data in output_files_data.items():
-            _process_output_file(
-                output_file, output_data, input_files_data
-            )
+            _process_output_file(output_file, output_data, input_files_data)
     else:
         # Parallel processing with ThreadPoolExecutor
         with concurrent.futures.ThreadPoolExecutor(
@@ -464,10 +463,10 @@ def _write_overall_metadata_file(
 ) -> None:
     """
     Write the overall metadata file that maps tensor names to their file locations.
-    
+
     This creates a model.safetensors.index.json file that HuggingFace models use
     to locate tensors across multiple files.
-    
+
     Args:
         output_dir: Directory where the metadata file will be written
         output_files_data: Dictionary mapping output file paths to their metadata
@@ -486,7 +485,6 @@ def _write_overall_metadata_file(
     metadata_path = os.path.join(output_dir, f"{_metadata_fn}")
     with open(metadata_path, "w") as metadata_file:
         json.dump(metadata_to_write, metadata_file, indent=2)
-
 
 
 def consolidate_safetensors_files(
@@ -520,9 +518,6 @@ def consolidate_safetensors_files(
         output_dir,
         start_time,
     )
-    
-    # Ensure output directory exists
-    os.makedirs(output_dir, exist_ok=True)
 
     # Initialize the output file structure
     output_files_data: dict[str, _OutputFileData] = {}
@@ -546,10 +541,7 @@ def consolidate_safetensors_files(
         output_files_data[output_path] = _OutputFileData()
 
     # Find all safetensors files in the input directory
-    safetensors_files = []
-    for file in os.listdir(input_dir):
-        if file.endswith(SUFFIX):
-            safetensors_files.append(os.path.join(input_dir, file))
+    safetensors_files = glob.glob(os.path.join(input_dir,f"*{SUFFIX}"))
 
     # Read metadata from all input files
     input_files_data: dict[str, _InputFileData] = {}
