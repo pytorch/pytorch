@@ -1515,21 +1515,23 @@ def native_matmul_pass(graph: torch.fx.Graph):
         )
     
     def native_matmul_extra_check(match):
+        mat1 = match.kwargs["mat1"].meta["val"]
+        mat2 = match.kwargs["mat2"].meta["val"]
+ 
         if not config.triton.enable_native_matmul:
             return False
-        
+       
         # Currently only enable native matmul for triton on GPU.
         if not (
-            match.kwargs["mat1"].meta["val"].device.type == "cuda" 
+            mat1.device.type == "cuda" 
             and config.cuda_backend == "triton"
         ) :
             return False
-        
-        mat1 = match.kwargs["mat1"].meta["val"]
-        mat2 = match.kwargs["mat2"].meta["val"]
-        
+       
         # Currently, tl.dot only supports following dtypes
-        triton_supported_dtype = [torch.int8, torch.uint8, torch.float16, torch.bfloat16, torch.float32]
+        triton_supported_dtype = [
+            torch.int8, torch.uint8, torch.float16, torch.bfloat16, torch.float32
+        ]
         if not mat1.dtype in triton_supported_dtype :
             return False
         if not mat2.dtype in triton_supported_dtype :
@@ -1538,7 +1540,9 @@ def native_matmul_pass(graph: torch.fx.Graph):
         # (..., M, K) @ (..., K, N)
         M, K = mat1.shape[-2], mat1.shape[-1]
         K, N = mat2.shape[-2], mat2.shape[-1]
- 
+        if M == 1 or K == 1 or N == 1 :
+            return False
+
         # if shape is unbacked symint, skip
         if any([has_free_unbacked_symbols(var) for var in [M,K,N]]) :
             return False
