@@ -16,6 +16,7 @@ from torch import distributed as dist
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
     _get_dcp_custom_metadata,
+    _get_dtype,
     _get_safetensors_file_metadata,
     _metadata_fn,
     DATA_OFFSETS_KEY,
@@ -93,9 +94,6 @@ def _parse_input_metadata(
     Raises:
         ValueError: If no DCP custom metadata is found in a safetensors file
     """
-
-    from safetensors.torch import _getdtype  # type: ignore[import]
-
     # Dictionary to track the full size of each tensor across all shards
     fqn_to_size_mapping: dict[str, tuple[list[int], str]] = {}
 
@@ -134,7 +132,7 @@ def _parse_input_metadata(
             if fqn in output_data.fqn_data:
                 output_data.fqn_data[fqn] = _FqnData(
                     shape_in_file=tensor_size,
-                    dtype_size=torch.finfo(_getdtype(dtype_str)).bits
+                    dtype_size=torch.finfo(_get_dtype(dtype_str)).bits
                     // 8,  # Convert bits to bytes
                     dtype_str=dtype_str,
                 )
@@ -259,17 +257,16 @@ def _process_output_file(
 
                 metadata = file_metadata[tensor_fqn]
 
-                # Use memory mapping to read tensor data efficiently
                 data_to_write = _read_tensor_data(
                     safetensors_file,
                     tensor_fqn,
                 )
 
                 # Get the offsets of this tensor shard within the full tensor
-                custom_metadata = _get_dcp_custom_metadata(file_metadata)
-                offsets_of_tensor_being_read = custom_metadata[tensor_fqn][
-                    SAVED_OFFSETS_KEY
-                ]  # type: ignore[index]
+                fqn_custom_metadata: list[int] = _get_dcp_custom_metadata(
+                    file_metadata
+                )[tensor_fqn]  # type: ignore[index]
+                offsets_of_tensor_being_read = fqn_custom_metadata[SAVED_OFFSETS_KEY]
 
                 # Write this tensor shard to the appropriate position in the output file
                 _write_sub_tensor_to_file_optimized(
