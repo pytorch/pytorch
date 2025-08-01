@@ -13,7 +13,7 @@ def run(
     cmd: str,
     cwd: Optional[str] = None,
     env: Optional[dict] = None,
-    logging: bool = False,
+    logging: bool = True,
 ):
     if logging:
         print(f">>> {cmd}",flush=True)

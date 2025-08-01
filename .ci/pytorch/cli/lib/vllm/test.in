@@ -1,8 +1,3 @@
-torch @ file:///workspace/dist/torch-2.9.0a0%2Bgit97984ce-cp312-cp312-linux_x86_64.whl#sha256=a16c89ee6ed79548bbcb9ba14e4002f37affeea9022b6f0f711dac6b5cab93e9
-torchaudio @ file:///workspace/dist/audio/torchaudio-2.8.0a0%2Bb6a3368-cp312-cp312-linux_x86_64.whl#sha256=92e9cb84519907341fcf1f8686656f3433216dfeba4014a838a08c02d79482f8
-torchvision @ file:///workspace/dist/vision/torchvision-0.22.0a0%2B966da7e-cp312-cp312-linux_x86_64.whl#sha256=9ef2fcdd9dd8e6a9ee523a50cf12e753ab92a4ed470783599b8c670dc2ab2a77
-xformers @ file:///workspace/wheels/xformers/xformers-0.0.30%2Bf2de641e.d20250729-cp312-cp312-linux_x86_64.whl#sha256=6b7eb591f4fdf272eb978074cb51a12164e2b972c48f70aa4984d1f5d3a6c534
-flashinfer-python @ file:///workspace/wheels/flashinfer-python/flashinfer_python-0.2.2.post1-cp38-abi3-linux_x86_64.whl#sha256=57eb452de2753c1c2c97b4a37d134cfc26b5b81768187ed94137b2035cde33ee
 
 # testing
 pytest

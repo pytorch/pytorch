@@ -1,18 +1,14 @@
 #!/bin/bash
-
 set -euo pipefail
 
-TARGET_FILE="test.in"
+TARGET_FILE="requirements/test.in"
 TMP_HEAD=$(mktemp)
 
-# Prepend local wheel to the test.in
-for pkg in torch torchvision torchaudio xformers flashinfer-python; do
-  pip freeze | grep -E "^${pkg}[[:space:]]+@ file://" >> "$TMP_HEAD"
-done
+pip freeze | grep -iE '^(torch|torchvision|torchaudio|xformers|flashinfer-python)\s+@ file://' > "$TMP_HEAD"
 
 echo "" >> "$TMP_HEAD"
 cat "$TARGET_FILE" >> "$TMP_HEAD"
-
 mv "$TMP_HEAD" "$TARGET_FILE"
 
-echo "[INFO] Local wheel requirements prepended to $TARGET_FILE"
+echo "[INFO] Successfully prepended local .whl references to $TARGET_FILE:"
+head -n 10 "$TARGET_FILE"

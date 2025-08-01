@@ -4,17 +4,17 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import sys
 from pathlib import Path
 
 from lib.utils import clone_vllm, get_post_build_pinned_commit, read_yaml_file, run
-
+import os
 
 class VllmTestRunner:
     def __init__(self, file_path="") -> None:
         self.test_configs = self._fetch_configs(file_path)
 
     def run(self, test_names):
-        self.prepare_test_env()
         valid_tests = []
         for test_name in test_names:
             if test_name not in self.test_configs:
@@ -62,14 +62,16 @@ class VllmTestRunner:
         clone_vllm(get_post_build_pinned_commit("vllm"))
         os.chdir("vllm")
         os.environ["UV_INDEX_STRATEGY"] = "unsafe-best-match"
-
         self.install_test_base()
+        os.chdir("..")
         self.install_local_whls()
+
+        os.chdir("vllm")
         self.generated_test_txt()
-        run("uv pip install --system -r test.txt")
+        install_packages("test.txt")
         run("cat test.txt")
-        run('uv pip install --system --no-build-isolation "git+https://github.com/state-spaces/mamba@v2.2.4"')
-        run("uv pip install --system hf_transfer")
+        install('--no-build-isolation "git+https://github.com/state-spaces/mamba@v2.2.4"')
+        install("hf_transfer")
         run("pip freeze | grep -E 'torch|xformers|torchvision|torchaudio|flashinfer'")
         os.chdir("..")
 
@@ -80,8 +82,11 @@ class VllmTestRunner:
             print("Removing 'vllm' directory...")
             shutil.rmtree("vllm")
         run("python3 use_existing_torch.py")
-        run("pip install -r requirements/common.txt")
-        run("pip install -r requirements/build.txt")
+        run("cat requirements/common.txt")
+        run("cat requirements/build.txt")
+        install_packages("requirements/common.txt")
+        install_packages("requirements/build.txt")
+        print("done installing test base")
 
     def install_local_whls(self):
         torch = "dist/torch-*.whl"
@@ -91,8 +96,14 @@ class VllmTestRunner:
             "wheels/xformers/xformers*.whl",
             "wheels/flashinfer-python/flashinfer*.whl",
         ]
-
+        run("pwd")
         torch_match = glob.glob(torch)[0]
+        if not torch_match:
+            run("pwd")
+            run("ls")
+            run("ls -al dist/")
+            raise ValueError(f"No match for: {torch}")
+
         print(f"[INFO] Installing: {torch_match}")
         run(f"python3 -m pip install '{torch_match}[opt-einsum]'")
 
@@ -104,6 +115,7 @@ class VllmTestRunner:
             whl_path = matches[0]
             print(f"[INFO] Installing: {whl_path}")
             run(f"pip install {shlex.quote(whl_path)}")
+        print("done installing test base")
 
     def generated_test_txt(
         self, target_file: str = "requirements/test.in", res_file="test.txt"
@@ -137,10 +149,7 @@ class VllmTestRunner:
                 tmp_head.writelines(tf.readlines())
         shutil.move(str(tmp_head_path), target_file)
         print(f"[INFO] Local wheel requirements prepended to {target_file}")
-        run(
-            f"uv pip compile {target_file} -o {res_file} --index-strategy unsafe-best-match"
-        )
-
+        uv_pip_compile(target_file, res_file,"--index-strategy", "unsafe-best-match")
 
 def clean_torch_dependecies(requires_files=["requirements/test.in"]):
     # Keywords to match exactly
@@ -157,3 +166,46 @@ def clean_torch_dependecies(requires_files=["requirements/test.in"]):
             else:
                 cleaned_lines.append(line)
         print(f"<<< done cleaning {file}\n")
+
+def ensure_uv():
+    uv_path = shutil.which("uv")
+    if uv_path:
+        print(f"[INFO] Found uv at {uv_path}")
+        return uv_path
+    else:
+        print("[INFO] uv not found, installing uv via pip...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "uv"], check=True)
+        uv_path = shutil.which("uv")
+        if not uv_path:
+            raise RuntimeError("Failed to install uv")
+        return uv_path
+
+def in_venv():
+    return sys.prefix != sys.base_prefix
+
+def uv_pip_install( args: str =""):
+    uv = ensure_uv()
+    args_list = shlex.split(args)
+    cmd_list = [uv, "pip","install"]+ args_list
+    cmd_str = shlex.join(cmd_list)  # 安全打印
+    run(cmd_str)  # 你自己的 run(str)
+    run(cmd_str)
+
+def uv_pip_compile(input_file: str, output_file: str, additional_args: str = "", k:str=""):
+    uv = ensure_uv()
+    args = ["pip", "compile", input_file, "-o", output_file, additional_args]
+    cmd = shlex.join([uv] + args)
+    print(f"[INFO] Running: {cmd}")
+    run(cmd)
+
+def compile(input_file: str, output_file: str, additional_args: str = ""):
+    uv = ensure_uv()
+    os.system(f"{uv} pip compile --system {input_file} -o {output_file} {additional_args}")
+
+def install_packages(package: str):
+    uv = ensure_uv()
+    os.system(f"{uv} pip install --system -r {package}")
+
+def install(package: str):
+    uv = ensure_uv()
+    os.system(f"{uv} pip install --system {package}")

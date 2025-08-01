@@ -1,3 +1,4 @@
+cd tests
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 pytest -v -s basic_correctness/test_cumem.py
 pytest -v -s basic_correctness/test_basic_correctness.py

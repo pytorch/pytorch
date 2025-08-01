@@ -70,6 +70,7 @@ RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 FROM ${BUILD_BASE_IMAGE} AS base
 USER root
 
+RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
 
@@ -264,6 +265,7 @@ RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHO
    fi \
    && python3 --version && python3 -m pip --version
 
+
 # get the nightly torch version used in the build to make sure the version is the same
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 COPY --from=base /workspace/xformers-dist /wheels/xformers
@@ -286,7 +288,6 @@ ENV UV_INDEX_STRATEGY="unsafe-best-match"
 # default mount file as placeholder, this just avoid the mount error
 # change to a different vllm folder if this does not exist anymore
 ARG TORCH_WHEELS_PATH="./requirements"
-
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
@@ -322,7 +323,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ARG torch_cuda_arch_list='8.0;8.9;9.0a'
 # install package for build flashinfer
 # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
-# RUN pip install setuptools==75.6.0 packaging==23.2 ninja==1.11.1.3 build==1.2.2.post1
 RUN pip install build
 RUN pip freeze | grep -E 'setuptools|packaging|build'
 
@@ -398,4 +398,4 @@ FROM scratch as export-wheels
 # Just copy the wheels we prepared in previous stages
 COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
-COPY --from=vllm-base /vllm-workspace/wheels/flashinfer /wheels/flashinfer-python
+COPY --from=vllm-base /workspace/wheels/flashinfer /wheels/flashinfer-python
