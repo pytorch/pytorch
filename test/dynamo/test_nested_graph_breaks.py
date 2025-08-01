@@ -331,8 +331,8 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
-    @unittest.expectedFailure
     def test_side_effects_globals(self):
+        global f1, f2, f3
         global global1, global2, global3, global4
 
         def f1():
@@ -368,8 +368,9 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
-    @unittest.skip("segfaults")
+    # @unittest.skip("segfaults")
     def test_side_effects_globals_different_module(self):
+        global f1, f2, _test_nested_graph_breaks_helper
         try:
             from . import _test_nested_graph_breaks_helper
         except ImportError:
