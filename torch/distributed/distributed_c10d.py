@@ -5105,6 +5105,9 @@ def split_group(
     split_pg.bound_device_id = device_id  # type: ignore[union-attr]
     split_backend_class = split_pg._get_backend(torch.device("cuda"))
     split_backend_class._set_sequence_number_for_group()
+    assert split_pg.group_name == group_name, (
+        f"group name should be set to {group_name} but got {split_pg.group_name}"
+    )
 
     # update global state
     _world.pg_map[split_pg] = (backend, split_pg.get_group_store())
