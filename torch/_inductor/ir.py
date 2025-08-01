@@ -7072,10 +7072,10 @@ class DynamicSliceSize(ExternKernel):
 
     def __init__(
         self,
-        unbacked_size_symbol,
-        start,
-        end,
-        size,
+        unbacked_size_symbol: sympy.Symbol,
+        start: sympy.Symbol,
+        end: Union[sympy.Symbol, int],
+        size: Union[sympy.Symbol, int],
     ):
         super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
         # This node codegen

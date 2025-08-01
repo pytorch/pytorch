@@ -1167,7 +1167,7 @@ def permute(x, dims):
 
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
-    from torch.fx.experimental.symbolic_shapes import CallMethodKey, free_unbacked_symbols, resolve_unbacked_bindings
+    from torch.fx.experimental.symbolic_shapes import CallMethodKey, resolve_unbacked_bindings
 
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
@@ -1183,7 +1183,9 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
         pass
 
     # try to avoid dynamic slice
-    def handle_negative_index(idx, size):
+    def handle_negative_index(idx, size, default):
+        if idx is None:
+            return default
         idx = sympy.expand(idx)
         size = sympy.expand(size)
         if V.graph.sizevars.guard_or_false(idx >= 0):
@@ -1194,8 +1196,8 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
 
     static_slice = not clamp
     if not static_slice:
-        start_index = handle_negative_index(start, size)
-        end_index = handle_negative_index(end, size)
+        start_index = handle_negative_index(start, size, 0)
+        end_index = handle_negative_index(end, size, size)
         if start_index is not None and end_index is not None:
             start, end = start_index, end_index
             static_slice = True
@@ -1220,7 +1222,7 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
             sym_storage = sym
 
     def compute_slice_index(index, size):
-        fn = lambda x: V.graph.sizevars.statically_known_true(x)
+        fn = lambda x: V.graph.sizevars.statically_known_true(x)  # noqa: E731
 
         if fn(sympy.Ge(index, 0)) and fn(sympy.Le(index, size)):
             return index
@@ -1893,6 +1895,7 @@ def select(x, dim, idx):
         x.get_layout().offset,
         new_stride[dim],
         x.get_size()[dim],
+        clamp=True,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)

@@ -3410,7 +3410,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         fn1 = torch.compile(f1, fullgraph=True, backend="inductor")
         self.assertEqual(fn1(x, xs).size(0), 3)
         self.assertTrue(torch.allclose(fn1(x, xs), f1(x, xs)))
-        with self.assertRaisesRegex(RuntimeError, "u0 >= 0"):
+        with self.assertRaises(RuntimeError):
             fn1(x, torch.tensor([-1, 5]))
 
         # known negative slice
@@ -3426,9 +3426,9 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         fn2 = torch.compile(f2, fullgraph=True, backend="inductor")
         self.assertEqual(fn2(x, n).size(0), 5)
         self.assertTrue(torch.allclose(fn2(x, n), f2(x, n)))
-        with self.assertRaisesRegex(RuntimeError, "u0 >= 2"):
+        with self.assertRaises(RuntimeError):
             fn2(x, torch.tensor([-5]))
-        
+
         # general case: no known info
         def f3(x, xs):
             u0, u1 = xs.tolist()

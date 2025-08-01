@@ -1819,10 +1819,13 @@ class PythonWrapperCodegen(CodeGen):
             neg = self.codegen_sizevar(sympy.Max(0, sympy.Min(x + node.size, node.size)))
             return f"{pos} if {x} >= 0 else {neg}"
 
+        # codegen start, end
+        sym = node.unbacked_size_symbol
         start = clamp_index(node.start)
         end = clamp_index(node.end)
-        size_expr = f"max(0, ({end}) - ({start}))"
-        self.writeline(f"{node.unbacked_size_symbol} = {size_expr}")
+        self.writeline(f"{sym}_start = {start}")
+        self.writeline(f"{sym}_end = {end}")
+        self.writeline(f"{sym} = max(0, {sym}_end - {sym}_start)")
         self.unbacked_symbol_decls.add(str(node.unbacked_size_symbol))
 
     def codegen_dynamic_scalar(self, node):
