@@ -87,7 +87,11 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
 
         if self.rank == 0:
-            consolidate_safetensors_files(checkpoint_dir, output_dir, fqn_to_index_mapping={"dtensor": 1, "dtensor_col": 1})
+            consolidate_safetensors_files(
+                checkpoint_dir,
+                output_dir,
+                fqn_to_index_mapping={"dtensor": 1, "dtensor_col": 1},
+            )
 
             file_path = os.path.join(output_dir, "model-00001-of-00001.safetensors")
             loaded_dict = safetensors.torch.load_file(file_path)

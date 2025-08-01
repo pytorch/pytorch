@@ -1,6 +1,7 @@
 # pyre-strict
 
 import concurrent.futures
+import glob
 import json
 import logging
 import math
@@ -300,9 +301,7 @@ def _write_data(
     if num_threads <= 1 or len(output_files_data) <= 1:
         # Sequential processing
         for output_file, output_data in output_files_data.items():
-            _process_output_file(
-                output_file, output_data, input_files_data
-            )
+            _process_output_file(output_file, output_data, input_files_data)
     else:
         # Parallel processing with ThreadPoolExecutor
         with concurrent.futures.ThreadPoolExecutor(
@@ -465,10 +464,10 @@ def _write_overall_metadata_file(
 ) -> None:
     """
     Write the overall metadata file that maps tensor names to their file locations.
-    
+
     This creates a model.safetensors.index.json file that HuggingFace models use
     to locate tensors across multiple files.
-    
+
     Args:
         output_dir: Directory where the metadata file will be written
         output_files_data: Dictionary mapping output file paths to their metadata
@@ -493,7 +492,7 @@ def _consolidate_safetensors_files(
     input_dir: str,
     output_dir: str,
     fqn_to_file_mapping: [dict[str, str]],
-    num_threads: int
+    num_threads: int,
 ) -> dict[str, _OutputFileData]:
     output_files_data: dict[str, _OutputFileData] = {}
     # Create multiple output files based on the provided mapping
@@ -501,18 +500,12 @@ def _consolidate_safetensors_files(
         output_path = os.path.join(output_dir, filename)
 
         if output_path not in output_files_data:
-            output_files_data[output_path] = _OutputFileData(
-                fqn_data={fqn: _FqnData()}
-            )
+            output_files_data[output_path] = _OutputFileData(fqn_data={fqn: _FqnData()})
         else:
             output_files_data[output_path].fqn_data[fqn] = _FqnData()
 
-
     # Find all safetensors files in the input directory
-    safetensors_files = []
-    for file in os.listdir(input_dir):
-        if file.endswith(SUFFIX):
-            safetensors_files.append(os.path.join(input_dir, file))
+    safetensors_files = glob.glob(os.path.join(input_dir,f"*{SUFFIX}"))
 
     # Read metadata from all input files
     input_files_data: dict[str, _InputFileData] = {}
@@ -567,11 +560,12 @@ def consolidate_safetensors_files(
 
     max_index = max(fqn_to_index_mapping.values())
     fqn_to_file_mapping = {
-        fqn: _gen_file_name(idx, max_index)
-        for fqn, idx in fqn_to_index_mapping.items()
+        fqn: _gen_file_name(idx, max_index) for fqn, idx in fqn_to_index_mapping.items()
     }
 
-    output_files_data = _consolidate_safetensors_files(input_dir, output_dir, fqn_to_file_mapping, num_threads)
+    output_files_data = _consolidate_safetensors_files(
+        input_dir, output_dir, fqn_to_file_mapping, num_threads
+    )
 
     # Step 4: Write overall model.index.safetensors.json file with weight map
     _write_overall_metadata_file(output_dir, output_files_data)
@@ -589,14 +583,14 @@ def consolidate_safetensors_files_on_every_rank(
 ) -> None:
     """
     Consolidate sharded safetensors files across multiple ranks, with each rank handling a subset of output files.
-    
+
     This function distributes the consolidation work by assigning output files to different ranks.
     All tensors with the same index in fqn_to_index_mapping are processed by the same rank,
     as they belong to the same output file.
-    
+
     If rank and world_size are not provided, they will be automatically detected from the
     distributed environment if available.
-    
+
     Args:
         input_dir: Directory containing sharded safetensors files
         output_dir: Directory where consolidated files will be written
@@ -621,31 +615,37 @@ def consolidate_safetensors_files_on_every_rank(
             logger.warning(
                 "Distributed environment not initialized. Running in single process mode."
             )
-    
+
     start_time = time.time()
     logger.info(
         "Rank %d/%d: Consolidating safetensors files from %s to %s",
-        rank, world_size, input_dir, output_dir
+        rank,
+        world_size,
+        input_dir,
+        output_dir,
     )
-    
+
     # Find all unique indices in the mapping
     unique_indices = set(fqn_to_index_mapping.values())
-    
+
     # Distribute indices across ranks
     indices_for_this_rank = []
     for idx in unique_indices:
         # Simple distribution: index % world_size == rank
         if idx % world_size == rank:
             indices_for_this_rank.append(idx)
-    
+
     logger.info(
         "Rank %d: Assigned %d output files out of %d total files",
-        rank, len(indices_for_this_rank), len(unique_indices)
+        rank,
+        len(indices_for_this_rank),
+        len(unique_indices),
     )
-    
+
     # Filter the fqn_to_index_mapping to only include tensors for this rank
     filtered_mapping = {
-        fqn: idx for fqn, idx in fqn_to_index_mapping.items()
+        fqn: idx
+        for fqn, idx in fqn_to_index_mapping.items()
         if idx in indices_for_this_rank
     }
 
@@ -655,27 +655,29 @@ def consolidate_safetensors_files_on_every_rank(
         if dist.is_available() and dist.is_initialized():
             dist.barrier()
         return
-    
+
     # Convert index mapping to filename mapping
     max_index = max(unique_indices)
     filtered_filename_mapping = {}
     for fqn, idx in filtered_mapping.items():
         filename = _gen_file_name(idx, max_index)
         filtered_filename_mapping[fqn] = filename
-    
+
     # Call the existing consolidation function with the filtered mapping
     _consolidate_safetensors_files(
         input_dir=input_dir,
         output_dir=output_dir,
         fqn_to_file_mapping=filtered_filename_mapping,
-        num_threads=num_threads
+        num_threads=num_threads,
     )
-    
+
     logger.info(
         "Rank %d: Done consolidating. Processed %d unique indices in %.2f secs.",
-        rank, len(indices_for_this_rank), time.time() - start_time
+        rank,
+        len(indices_for_this_rank),
+        time.time() - start_time,
     )
-    
+
     # Wait for all ranks to complete
     if dist.is_available() and dist.is_initialized():
         logger.info("Rank %d: Waiting for all ranks to complete...", rank)
