@@ -5,17 +5,16 @@ class VllmTestController(Controller):
         label = "vllm"
         stacked_on = "base"
         stacked_type = "nested"
-        help = "Build external libraries. to run the build, do cli.py external --target vllm run, to see the details of help: \
-        cli.py external --target vllm help "
+        help = "tests vllm external libraries. notice this must be run from the root of the pytorch repo"
         arguments = [
             (
                 ["--test-name"],
                 {
-                    "help": "test name to run tests",
+                    "help": "test name to run tests, for example, 'vllm_basic_correctness_test'",
                     "dest": "test_name",
-                    "default":"./results",
+                    "default":"",
                     "type": str,
-                    "required": False,
+                    "required": True,
                 },
             )
         ]
