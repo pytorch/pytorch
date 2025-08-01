@@ -1,10 +1,12 @@
 #!/bin/bash
-set -ex
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+echo "This script lives in: $SCRIPT_DIR"
+
 # for torch nightly
 # https://download.pytorch.org/whl/nightly/torch/
 # torch-2.9.0.dev20250729+cu128-cp312-cp312-manylinux_2_28_x86_64.whl
-
-ls
 
 echo "Installing torch whls and vllm dependencies"
 
@@ -33,10 +35,7 @@ pip install -r requirements/build.txt
 pip freeze | grep -E 'torch|xformers|torchvision|torchaudio|flashinfer'
 
 # clean the test.in file
-echo "Cleaning the test.in file"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "${SCRIPT_DIR}"
-bash "$SCRIPT_DIR/clean_test_in.sh.sh"
+bash "$SCRIPT_DIR/clean_test_in.sh"
 
 echo "Installing test dependencies"
 uv pip compile  requirements/test.in -o  test.txt --index-strategy unsafe-best-match
@@ -47,3 +46,5 @@ uv pip install --system --no-build-isolation "git+https://github.com/state-space
 
 export TORCH_CUDA_ARCH_LIST="8.0"
 python3 -c "from torch.utils.cpp_extension import _get_cuda_arch_flags as f; print(f())"
+
+pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
