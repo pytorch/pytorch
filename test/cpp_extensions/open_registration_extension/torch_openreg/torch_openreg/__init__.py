@@ -1,9 +1,11 @@
 import sys
+
 import torch
 
 
 if sys.platform == "win32":
     from ._utils import _load_dll_libraries
+
     _load_dll_libraries()
     del _load_dll_libraries
 
