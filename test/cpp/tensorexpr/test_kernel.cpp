@@ -38,12 +38,12 @@ TEST_F(Kernel, ParallelExternalCallBuf) {
       %4 : Float(1000, 5000, strides=[5000, 1], device=cpu) = aten::matmul(%3, %2)
       return (%4))IR";
   auto graph = std::make_shared<Graph>();
-  torch::jit::parseIR(graph_string, &*graph);
+  torch::jit::parseIR(graph_string, graph.get());
+#ifdef TORCH_ENABLE_LLVM
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (int64_t i = 0ll; i < 5000ll; i++)  /* parallel */{)IR";
 
-#ifdef TORCH_ENABLE_LLVM
   TensorExprKernel k(graph);
   StmtPtr s = k.getCodeGenStmt();
   std::ostringstream oss;
@@ -1113,7 +1113,7 @@ TEST_F(Kernel, Softmax2D) {
         const auto verification_pattern =
             format(verification_template, ver_env);
 
-        // verification sting temporarily disabled until
+        // verification string temporarily disabled until
         // inlining of exp() is benchmarked and determined
         // torch::jit::testing::FileCheck().run(verification_pattern,
         // oss.str());
@@ -1192,7 +1192,7 @@ TEST_F(Kernel, Softmax3D) {
       ver_env.d("softmax_dim_size", softmax_dim_size);
       const auto verification_pattern = format(verification_template, ver_env);
 
-      // verification sting temporarily disabled until
+      // verification string temporarily disabled until
       // inlining of exp() is benchmarked and determined
       // torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1275,7 +1275,7 @@ TEST_F(Kernel, Softmax4D) {
       ver_env.d("softmax_dim_size", softmax_dim_size);
       const auto verification_pattern = format(verification_template, ver_env);
 
-      // verification sting temporarily disabled until
+      // verification string temporarily disabled until
       // inlining of exp() is benchmarked and determined
       // torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1887,7 +1887,7 @@ graph(%x : int,
   auto rt = at::zeros({3}, TensorOptions(kCPU).dtype(at::kLong));
 
   // Verify that TEK::runFast works correctly with mixed scalar and tensor
-  // inputs/utputs
+  // inputs/outputs
   std::vector<void*> inputs = {&x, xt.data_ptr(), &y, yt.data_ptr()};
   std::vector<void*> outputs = {&r, rt.data_ptr(), &z, zt.data_ptr()};
   k.runFast(inputs, outputs);
@@ -1897,7 +1897,7 @@ graph(%x : int,
   ASSERT_TRUE(at::equal(rt, zt * xt));
 
   // Verify that TEK::run works correctly with mixed scalar and tensor
-  // inputs/utputs
+  // inputs/outputs
   std::vector<IValue> stack = {x, xt, y, yt};
   k.run(stack);
   TORCH_CHECK_EQ(stack[0], x * y * x);
