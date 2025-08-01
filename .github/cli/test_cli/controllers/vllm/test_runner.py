@@ -7,7 +7,7 @@ import tempfile
 import sys
 from pathlib import Path
 
-from lib.utils import clone_vllm, get_post_build_pinned_commit, read_yaml_file, run
+from lib.utils import read_yaml_file, run
 import os
 
 class VllmTestRunner:
