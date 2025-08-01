@@ -325,6 +325,36 @@ class TestDynamismExpression(TestCase):
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_no_grad_param_inplace(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.parameter = torch.nn.Parameter(torch.rand(4, 4))
+
+            def forward(self, x):
+                with torch.no_grad():
+                    self.parameter.div_(2)
+                return x + self.parameter
+
+        ep = export(Foo(), (torch.rand(4, 4),)).run_decompositions()
+        val = ep.graph_signature.parameters_to_mutate
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %p_parameter : [num_users=1] = placeholder[target=p_parameter]
+    %x : [num_users=1] = placeholder[target=x]
+    %div : [num_users=2] = call_function[target=torch.ops.aten.div.Tensor](args = (%p_parameter, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %div), kwargs = {})
+    return (div, add)"""
+        )
+    
+        self.assertTrue("div" in val.keys())
+        self.assertTrue("parameter" in val.values())
+
+        with self.assertRaisesRegex(RuntimeError, "leaf"):
+            ep.module()(torch.rand(4, 4))
+
     def test_export_slice_unbacked_dim1(self):
         class MySlice(torch.nn.Module):
             def forward(self, x, seq_len):
