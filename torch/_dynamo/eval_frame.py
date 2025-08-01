@@ -41,7 +41,7 @@ import weakref
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union, Sized
 from unittest.mock import patch
 
 import sympy
@@ -377,7 +377,10 @@ class OptimizedModule(torch.nn.Module):
 
     def __len__(self) -> int:
         # Proxy the len call to the original module
-        return len(self._orig_mod)
+        if isinstance(self._orig_mod, Sized):
+            return len(self._orig_mod)
+        # Mimic python's default behavior for objects without a length
+        raise TypeError(f"{type(self._orig_mod).__name__} does not support len()")
 
     def _initialize(self) -> None:
         # Do this stuff in constructor to lower overhead slightly
