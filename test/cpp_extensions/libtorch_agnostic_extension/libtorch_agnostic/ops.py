@@ -165,6 +165,7 @@ def fill_infinity(t) -> Tensor:
     """
     return torch.ops.libtorch_agnostic.fill_infinity.default(t)
 
+
 def test_device_guard(device_index) -> Tensor:
     """
     Tests the DeviceGuard functionality by creating a device guard and returning an empty tensor.
