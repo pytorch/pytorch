@@ -409,7 +409,7 @@ class ZipVariable(IteratorVariable):
 
     def __init__(
         self,
-        iterables: list[Union[list[VariableTracker], VariableTracker]],
+        iterables: list[VariableTracker],
         strict: bool = False,
         **kwargs,
     ) -> None:

@@ -1373,11 +1373,13 @@ class BuiltinVariable(VariableTracker):
             if (
                 self.fn is tuple
                 and len(args) == 2
-                and args[1].has_unpack_var_sequence(tx)
+                and tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.is_iterable), [args[1]], {}
+                ).value
                 and not kwargs
             ):
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    init_args = args[1].unpack_var_sequence(tx)
+                    init_args = args[1].force_unpack_var_sequence(tx)
                     return variables.TupleVariable(
                         init_args, mutation_type=ValueMutationNew()
                     )
@@ -1987,10 +1989,7 @@ class BuiltinVariable(VariableTracker):
         if kwargs:
             assert len(kwargs) == 1 and "strict" in kwargs
         strict = kwargs.pop("strict", False)
-        args = [
-            arg.unpack_var_sequence(tx) if arg.has_unpack_var_sequence(tx) else arg
-            for arg in args
-        ]
+        args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
         return variables.ZipVariable(
             args, strict=strict, mutation_type=ValueMutationNew()
         )
