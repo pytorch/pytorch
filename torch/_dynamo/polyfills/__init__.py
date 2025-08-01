@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         operator as operator,
         os as os,
         pytree as pytree,
+        struct as struct,
         sys as sys,
     )
 
@@ -73,6 +74,17 @@ def radians(x):
     import math
 
     return math.pi / 180.0 * x
+
+
+def impl_CONTAINS_OP_fallback(a, b):
+    # performs fallback "a in b"
+    if hasattr(b, "__iter__"):
+        # use __iter__ if __contains__ is not available
+        for x in b:
+            if x == a:
+                return True
+        return False
+    raise TypeError(f"argument of type {type(b)} is not iterable")
 
 
 def accumulate_grad(x, new_grad):
