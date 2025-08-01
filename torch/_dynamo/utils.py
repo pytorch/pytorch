@@ -2439,15 +2439,6 @@ def is_int_specialization_case(value, source):
             source.guard_source().is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
-        # integers coming from FSDP modules are considered static. This is
-        # purely empirical and perhaps we should have a better heuristic.
-        or (
-            source.guard_source().is_fsdp_module()
-            and not (
-                config.allow_unspec_int_on_nn_module
-                or config.allow_unspec_int_on_fsdp_module
-            )
-        )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()
             and not config.allow_unspec_int_on_nn_module
@@ -3976,7 +3967,7 @@ def is_compile_supported(device_type):
     compile_supported = is_dynamo_supported()
     if type == "cpu":
         pass
-    elif type in ["cuda", "xpu"] and compile_supported:
+    elif type in ["cuda", "xpu", "mtia"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
