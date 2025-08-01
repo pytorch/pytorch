@@ -156,7 +156,8 @@ inline void {{kernel_name}}(
         ldc = kernel.stride(C, 0)
         res = IndentedBuffer()
         res.writeline(
-            f"{self.name}<{value_to_cpp(accum, 'bool')}, {value_to_cpp(horizontal_transverse, 'bool')}, {value_to_cpp(prefetch, 'bool')}>("
+            f"{self.name}<{value_to_cpp(accum, 'bool')}, {value_to_cpp(horizontal_transverse, 'bool')},
+            {value_to_cpp(prefetch, 'bool')}>("
         )
         with res.indent():
             kwargs_for_extra_args.update({"kernel": kernel})
@@ -240,9 +241,9 @@ micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
 
 def register_micro_gemm(*configs):
     def inner(cls):
-        assert (
-            cls not in micro_gemm_configs
-        ), f"Duplicate micro_gemm registration for {cls}"
+        assert cls not in micro_gemm_configs, (
+            f"Duplicate micro_gemm registration for {cls}"
+        )
         assert len(configs) > 0, f"No micro_gemm configs provided for {cls}"
         micro_gemm_configs[cls] = list(configs)
         return cls
