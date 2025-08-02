@@ -1631,9 +1631,9 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     ls
-    pip install -e ./github/cli/
-    ./.github/cli/lib/setup_vllm.sh
-    python3 -m test-cli.cli vllm --test-name "$TEST_CONFIG"
+    (cd scriptss/cli && python -m pip install -e .)
+    bash scripts/cli/lib/setup_vllm.sh
+    python -m test-cli.cli vllm --test-name "$TEST_CONFIG"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
