@@ -46,6 +46,7 @@ from ..source import (
     ConstDictKeySource,
     DictGetItemSource,
     FSDPNNModuleSource,
+    FuncSource,
     GetItemSource,
     NNModuleSource,
     UnspecializedNNModuleSource,
@@ -143,7 +144,7 @@ def guard_to_detect_forward_monkeypatching(source, mod):
             fwd = mod.__dict__["forward"]
             forward_source = AttrSource(source, "forward")
             if type(fwd) is types.MethodType:
-                forward_source = AttrSource(forward_source, "__func__")
+                forward_source = FuncSource(forward_source)
             install_guard(forward_source.make_guard(GuardBuilder.CLOSURE_MATCH))
         else:
             # Common case - check that the forward key is absent in mod __dict__
@@ -521,7 +522,7 @@ class NNModuleVariable(VariableTracker):
                     fn_source = AttrSource(self.source, "_call_impl")
                 if istype(fn, types.MethodType):
                     fn = fn.__func__
-                    fn_source = AttrSource(fn_source, "__func__")
+                    fn_source = FuncSource(fn_source)
                     args = [self] + args
                 else:
                     assert istype(fn, types.FunctionType)
@@ -755,7 +756,7 @@ class NNModuleVariable(VariableTracker):
 
                 assert isinstance(fn, types.FunctionType)
 
-                src = AttrSource(AttrSource(self.source, name), "__func__")
+                src = FuncSource(AttrSource(self.source, name))
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, source=src),
                     [self] + list(args),
@@ -833,7 +834,7 @@ class NNModuleVariable(VariableTracker):
         ):
             # Inline the function
             fn = getattr(module, name).__func__
-            fn_source = AttrSource(AttrSource(self.source, name), "__func__")
+            fn_source = FuncSource(AttrSource(self.source, name))
             return tx.inline_user_function_return(
                 variables.UserFunctionVariable(fn, source=fn_source),
                 [self] + args,
@@ -1032,7 +1033,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = None
 
             if isinstance(method, staticmethod):
-                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
+                source = FuncSource(self.get_source_by_walking_mro(name))
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(method.__func__, source=source),
                     args,

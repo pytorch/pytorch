@@ -61,6 +61,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     DataclassFieldsSource,
     DictGetItemSource,
+    FuncSource,
     GetItemSource,
     RandomValueSource,
     TypeDictSource,
@@ -1138,7 +1139,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         f"Ensure the user-defined object {self.value} is constructed outside the compiled region.",
                     ],
                 )
-            func_src = AttrSource(self.source, "__func__")
+            func_src = FuncSource(self.source)
             func_var = VariableTracker.build(tx, func, func_src)
             obj_src = AttrSource(self.source, "__self__")
             obj_var = VariableTracker.build(tx, obj, obj_src)
@@ -1402,7 +1403,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Accessing from __dict__ does not resolve the descriptor, it
                 # returns a staticmethod object, so access the __func__
                 # attribute to get to the actual function.
-                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
+                source = FuncSource(self.get_source_by_walking_mro(name))
             func = subobj.__get__(self.value)
             return VariableTracker.build(tx, func, source)
         elif isinstance(subobj, classmethod):
@@ -1410,7 +1411,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Accessing from __dict__ does not resolve the descriptor, it
                 # returns a classmethod object, so access the __func__
                 # attribute to get to the actual function.
-                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
+                source = FuncSource(self.get_source_by_walking_mro(name))
             return variables.UserMethodVariable(
                 subobj.__func__, self.var_getattr(tx, "__class__"), source=source
             )

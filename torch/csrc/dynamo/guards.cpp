@@ -5624,6 +5624,79 @@ class TypeMROGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represent x.__func__
+ */
+class FuncGuardAccessor : public GuardAccessor {
+ public:
+  // name = __type_mro_accessor__, a unique string used as attribute name.
+  FuncGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    PyObject* func = nullptr;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    if (func == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    return _guard_manager->check_nopybind(func);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* func = nullptr;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    if (func == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false,
+          std::string(repr() + ": Not a function on ") + get_source(),
+          0);
+    }
+    return _guard_manager->check_verbose_nopybind(func);
+  }
+
+  std::string repr() const override {
+    return "FuncGuardAccessor";
+  }
+
+ public: // cloning functions
+  FuncGuardAccessor(GuardManager* guard_manager, FuncGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<FuncGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(FuncGuardAccessor* to) {}
+};
+
+/**
  * Getitem tuple_iterator accessor.
  */
 class TupleIteratorGetItemAccessor : public GuardAccessor {
@@ -6556,6 +6629,11 @@ PyObject* torch_c_dynamo_guards_init() {
       std::unique_ptr<TypeMROGuardAccessor>>(py_m, "TypeMROGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
+      FuncGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<FuncGuardAccessor>>(py_m, "FuncGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
       WeakRefCallGuardAccessor,
       GuardAccessor,
       std::unique_ptr<WeakRefCallGuardAccessor>>(
@@ -7064,6 +7142,26 @@ PyObject* torch_c_dynamo_guards_init() {
             // A unique key is used to save as the accessor key.
             py::str unique_key("__type_mro_accessor__");
             return self.get_child_manager<TypeMROGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "func_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__func_accessor__");
+            return self.get_child_manager<FuncGuardAccessor>(
                 std::move(unique_key),
                 std::move(source),
                 example_value,

@@ -114,6 +114,7 @@ from .source import (
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
+    FuncSource,
     GenericAttrSource,
     GetItemSource,
     GlobalSource,
@@ -1224,6 +1225,13 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, TypeMROSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.type_mro_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, FuncSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.func_manager(
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
