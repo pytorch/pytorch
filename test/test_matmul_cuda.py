@@ -1385,6 +1385,7 @@ class TestFP8Matmul(TestCase):
             sqnr = compute_error(C_ref, C)
             assert sqnr.item() > approx_match_sqnr_target
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @parametrize("recipe", ["mxfp8", "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
@@ -1618,6 +1619,7 @@ class TestFP8Matmul(TestCase):
         )
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     def test_blockwise_nvfp4_compile(self) -> None:
 
