@@ -34,14 +34,16 @@ class TestFunctionalizationRngOps(TestCase):
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
     def test_rand_like(self, dtype, device):
         def fn(x):
-            a = torch.rand_like(x) * x
-            a = torch.rand_like(x) * a
+            gen = torch.Generator(device=device).manual_seed(1337)
+            a = torch.rand_like(x, generator=gen) * x
+            gen = torch.Generator(device=device).manual_seed(1337)
+            a = torch.rand_like(x, generator=gen) * a
             return a
 
         x = torch.rand(10, device=device, dtype=dtype)
 
         for seed in range(10):
-            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed(seed)  # Used by aot/philos
             ref = fn(x)
 
             torch.cuda.manual_seed(seed)
@@ -49,6 +51,7 @@ class TestFunctionalizationRngOps(TestCase):
             res = aot_fn(x)
 
             self.assertEqual(ref, res)
+
 
     @dtypes(torch.float32)
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
