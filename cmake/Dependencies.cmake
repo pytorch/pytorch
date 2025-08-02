@@ -664,55 +664,20 @@ if(USE_FBGEMM)
   if(NOT DEFINED FBGEMM_SOURCE_DIR)
     set(FBGEMM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm" CACHE STRING "FBGEMM source directory")
   endif()
-  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
-    message(WARNING
-      "A compiler with AVX512 support is required for FBGEMM. "
-      "Not compiling with FBGEMM. "
-      "Turn this warning off by USE_FBGEMM=OFF.")
-    set(USE_FBGEMM OFF)
-  endif()
-  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(WARNING
-      "x64 operating system is required for FBGEMM. "
-      "Not compiling with FBGEMM. "
-      "Turn this warning off by USE_FBGEMM=OFF.")
-    set(USE_FBGEMM OFF)
-  endif()
   if(USE_FBGEMM AND NOT TARGET fbgemm)
     set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
     set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    if(MSVC AND BUILD_SHARED_LIBS)
-      set(FBGEMM_LIBRARY_TYPE "shared" CACHE STRING "")
-    else()
-      set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
-    endif()
-    if(USE_ASAN)
-      set(USE_SANITIZER "address,undefined" CACHE STRING "-fsanitize options for FBGEMM")
-    endif()
+    set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
     add_subdirectory("${FBGEMM_SOURCE_DIR}")
-    set_property(TARGET fbgemm_generic PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-    # Disabling autovec in fbgemm due to large library size causing symbol relocation issues, which is only allowed in static builds.
-    # Long-term solution involves modularizing fbgemm targets.
-    target_compile_definitions(fbgemm_generic PUBLIC DISABLE_FBGEMM_AUTOVEC)
-    target_compile_definitions(fbgemm_avx2 PUBLIC DISABLE_FBGEMM_AUTOVEC)
-    target_compile_definitions(fbgemm_avx512 PUBLIC DISABLE_FBGEMM_AUTOVEC)
-
-    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
-      # See https://github.com/pytorch/pytorch/issues/74352
-      target_compile_options_if_supported(asmjit -Wno-deprecated-copy)
-      target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
-    endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       target_compile_options_if_supported(asmjit -Wno-extra-semi)
       target_compile_options_if_supported(fbgemm -Wno-extra-semi)
     endif()
+    target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
+    target_compile_options_if_supported(asmjit -Wno-unused-variable)
   endif()
   if(USE_FBGEMM)
-    target_compile_definitions(fbgemm PUBLIC DISABLE_FBGEMM_AUTOVEC)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
   endif()
 endif()
@@ -721,9 +686,6 @@ if(USE_FBGEMM)
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
-  message(WARNING
-    "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
-  caffe2_update_option(USE_FAKELOWP OFF)
 endif()
 
 if(USE_OPENCL)
