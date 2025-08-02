@@ -1134,12 +1134,7 @@ class UserMethodVariable(UserFunctionVariable):
 
     def reconstruct(self, codegen):
         if not self.obj.source or not self.source:
-            unimplemented_v2(
-                gb_type=f"Cannot reconstruct a sourceless method object {self.fn}",
-                context=str(self.fn),
-                explanation=f"`{self.fn}` does not have a source",
-                hints=[],
-            )
+            raise NotImplementedError
 
         def get_bound_method():
             codegen(self.source)
