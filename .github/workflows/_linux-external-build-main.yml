@@ -230,7 +230,6 @@ jobs:
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           BUILD_TARGET: ${{ inputs.build-target }}
         run: |
-
           set -euo pipefail
           python3 --version
           docker images
