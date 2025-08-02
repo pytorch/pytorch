@@ -39,9 +39,14 @@ def build_deps():
         ".",
         "--target",
         "install",
+        "--config", "Release",
         "--",
     ]
-    build_args += ["-j", str(multiprocessing.cpu_count())]
+
+    if sys.platform == "win32":
+        build_args += ["/m:" + str(multiprocessing.cpu_count())]
+    else:
+        build_args += ["-j", str(multiprocessing.cpu_count())]
 
     command = ["cmake"] + build_args
     subprocess.check_call(command, cwd=build_dir, env=os.environ)
@@ -63,20 +68,31 @@ class BuildClean(clean):
 def main():
     if not RUN_BUILD_DEPS:
         build_deps()
+    
+    if sys.platform == "win32":
+        extra_compile_args = ["/W3"]
+        library_dirs = [
+            os.path.join(BASE_DIR, "torch_openreg/lib")
+        ]
+        package_data = {"torch_openreg": ["lib/*.dll", "lib/*.lib", "*.dll", "*.lib"]}
+        extra_link_args = []
+    else:
+        extra_compile_args = ["-g", "-Wall", "-Werror"]
+        library_dirs = [os.path.join(BASE_DIR, "torch_openreg/lib")]
+        package_data = {"torch_openreg": ["lib/*.so*"]}
+        extra_link_args = ["-Wl,-rpath,$ORIGIN/lib"]
 
     ext_modules = [
         Extension(
             name="torch_openreg._C",
             sources=["torch_openreg/csrc/stub.c"],
             language="c",
-            extra_compile_args=["-g", "-Wall", "-Werror"],
+            extra_compile_args=extra_compile_args,
             libraries=["torch_bindings"],
-            library_dirs=[os.path.join(BASE_DIR, "torch_openreg/lib")],
-            extra_link_args=["-Wl,-rpath,$ORIGIN/lib"],
+            library_dirs=library_dirs,
+            extra_link_args=extra_link_args,
         )
     ]
-
-    package_data = {"torch_openreg": ["lib/*.so*"]}
 
     setup(
         packages=find_packages(),
