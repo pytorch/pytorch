@@ -46,6 +46,7 @@ class LinearAPoT(WeightedQuantizedModule):
             self.gamma,
             self.quantization_levels,
             self.level_indices,
+            self.quantization_partitions,
         ) = observer.calculate_qparams(signed=False)
 
         quantized_weight = quantize_APoT(
@@ -54,6 +55,7 @@ class LinearAPoT(WeightedQuantizedModule):
             self.gamma,
             self.quantization_levels,
             self.level_indices,
+            self.quantization_partitions,
         )
         self.weight = quantized_weight.data
         self.weight_transposed = torch.transpose(self.weight, 0, 1)
@@ -168,5 +170,6 @@ class LinearAPoT(WeightedQuantizedModule):
         gamma: torch.Tensor,
         quantization_levels: torch.Tensor,
         level_indices: torch.Tensor,
+        quantization_partitions: torch.Tensor,
     ):
         raise NotImplementedError

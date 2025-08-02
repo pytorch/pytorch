@@ -26,14 +26,15 @@ class TestQuantizer(unittest.TestCase):
 
         apot_observer = APoTObserver(b=8, k=1)
         apot_observer(tensor2quantize)
-        alpha, gamma, quantization_levels, level_indices = apot_observer.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices, quantization_partititons = apot_observer.calculate_qparams(signed=False)
 
         # get apot quantized tensor result
         qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
                                 alpha=alpha,
                                 gamma=gamma,
                                 quantization_levels=quantization_levels,
-                                level_indices=level_indices)
+                                level_indices=level_indices,
+                                quantization_partitions=quantization_partititons)
 
         # get uniform quantization quantized tensor result
         uniform_observer = MinMaxObserver()
@@ -74,14 +75,15 @@ class TestQuantizer(unittest.TestCase):
 
         observer = APoTObserver(b=4, k=2)
         observer.forward(tensor2quantize)
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = observer.calculate_qparams(signed=False)
 
         # get apot quantized tensor result
         qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
                                 alpha=alpha,
                                 gamma=gamma,
                                 quantization_levels=quantization_levels,
-                                level_indices=level_indices)
+                                level_indices=level_indices,
+                                quantization_partitions=quantization_partitions)
 
         qtensor_data = qtensor.data.int()
 
@@ -114,14 +116,15 @@ class TestQuantizer(unittest.TestCase):
 
         observer.forward(tensor2quantize)
 
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = observer.calculate_qparams(signed=False)
 
         # make mock apot_tensor
         original_apot = quantize_APoT(tensor2quantize=tensor2quantize,
                                       alpha=alpha,
                                       gamma=gamma,
                                       quantization_levels=quantization_levels,
-                                      level_indices=level_indices)
+                                      level_indices=level_indices,
+                                      quantization_partitions=quantization_partitions)
 
         original_input = torch.clone(original_apot.data).int()
 
@@ -133,7 +136,8 @@ class TestQuantizer(unittest.TestCase):
                                    alpha=alpha,
                                    gamma=gamma,
                                    quantization_levels=quantization_levels,
-                                   level_indices=level_indices)
+                                   level_indices=level_indices,
+                                   quantization_partitions=quantization_partitions)
 
         result = final_apot.data.int()
 
@@ -159,14 +163,15 @@ class TestQuantizer(unittest.TestCase):
 
         observer.forward(tensor2quantize)
 
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = observer.calculate_qparams(signed=False)
 
         # make mock apot_tensor
         original_apot = quantize_APoT(tensor2quantize=tensor2quantize,
                                       alpha=alpha,
                                       gamma=gamma,
                                       quantization_levels=quantization_levels,
-                                      level_indices=level_indices)
+                                      level_indices=level_indices,
+                                      quantization_partitions=quantization_partitions)
 
         original_input = torch.clone(original_apot.data).int()
 
@@ -178,7 +183,8 @@ class TestQuantizer(unittest.TestCase):
                                    alpha=alpha,
                                    gamma=gamma,
                                    quantization_levels=quantization_levels,
-                                   level_indices=level_indices)
+                                   level_indices=level_indices,
+                                   quantization_partitions=quantization_partitions)
 
         result = final_apot.data.int()
 
@@ -207,14 +213,15 @@ class TestQuantizer(unittest.TestCase):
 
         observer.forward(tensor2quantize)
 
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = observer.calculate_qparams(signed=False)
 
         # make mock apot_tensor
         original_apot = quantize_APoT(tensor2quantize=tensor2quantize,
                                       alpha=alpha,
                                       gamma=gamma,
                                       quantization_levels=quantization_levels,
-                                      level_indices=level_indices)
+                                      level_indices=level_indices,
+                                      quantization_partitions=quantization_partitions)
 
         # dequantize apot_tensor
         dequantize_result = dequantize_APoT(apot_tensor=original_apot)
