@@ -10,7 +10,7 @@ from cli.lib.utils import (
     get_env,
     get_existing_abs_path,
     get_post_build_pinned_commit,
-    run_shell
+    run_cmd
 )
 
 @dataclass
@@ -67,7 +67,7 @@ def build_vllm(artifact_dir: str, torch_whl_dir: str, base_image: str):
     if cfg.dev:
         dockerfile_path = "Dockerfile.base"
 
-    run_shell(
+    run_cmd(
         f"cp {dockerfile_path} ./vllm/docker/Dockerfile.nightly_torch",
     )
 
@@ -76,7 +76,7 @@ def build_vllm(artifact_dir: str, torch_whl_dir: str, base_image: str):
     cmd = _generate_docker_build_cmd(cfg, result_path, torch_arg, base_arg,final_base_img, pull_flag)
     print("Running docker build", flush=True)
     print(cmd, flush=True)
-    run_shell(cmd, cwd="vllm", env=os.environ.copy())
+    run_cmd(cmd, cwd="vllm", env=os.environ.copy())
 
 
 def _prepare_torch_wheels(torch_whl_dir: str) -> tuple[str, str]:
@@ -85,7 +85,7 @@ def _prepare_torch_wheels(torch_whl_dir: str) -> tuple[str, str]:
     abs_whl_dir = get_existing_abs_path(torch_whl_dir)
     tmp_dir = f"./vllm/{_VLLM_TEMP_FOLDER}"
     force_create_dir(tmp_dir)
-    run_shell(f"cp -a {abs_whl_dir}/. {tmp_dir}", logging=True)
+    run_cmd(f"cp -a {abs_whl_dir}/. {tmp_dir}", logging=True)
     return f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}", tmp_dir
 
 

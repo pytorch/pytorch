@@ -28,6 +28,7 @@ class VllmTestRunner:
         sub_path = config.get("path", "tests")
         print(f"running test config: {testid}")
         for step in steps:
+            # todo : replace with run_cmd with envrirnment
             run_shell(step, cwd=sub_path, env=os.environ.copy())
 
     def _fetch_configs(self, path=""):
