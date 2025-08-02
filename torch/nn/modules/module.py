@@ -430,6 +430,9 @@ class Module:
         As per the example above, an ``__init__()`` call to the parent class
         must be made before assignment on the child.
 
+    .. note::
+        Avoid performing differentiable operations in the ``__init__`` method of a Module.
+
     :ivar training: Boolean represents whether this module is in training or
                     evaluation mode.
     :vartype training: bool
