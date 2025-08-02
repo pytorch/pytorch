@@ -1168,7 +1168,6 @@ class DeviceCachingAllocator {
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
 
   // See free() for this thing's purpose
-  std::vector<Block*> needs_events_deferred_until_no_capture;
   // outstanding cuda events
   ska::flat_hash_map<
       cuda::CUDAStream,
@@ -1195,6 +1194,13 @@ class DeviceCachingAllocator {
   RingBuffer<TraceEntry> alloc_buffer;
 
   // Members specific to CUDA graphs
+
+  // Streams that need to be rejoined to the capture stream during CUDA graph
+  // capture. When we record events on streams during capture, those streams
+  // must be synchronized back to the capture stream before capture ends to
+  // avoid cudaErrorStreamCaptureUnjoined. See Note [Avoid dangling free streams
+  // during CUDA graph capture] in CUDAMallocAsyncAllocator.cpp
+  ska::flat_hash_set<cuda::CUDAStream> streams_to_rejoin;
 
   // Private pools for CUDA graphs
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
@@ -1317,19 +1323,8 @@ class DeviceCachingAllocator {
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
-    if (C10_LIKELY(captures_underway.empty())) {
-      // Processes end-of-life events for outstanding allocations used on
-      // multiple streams (checks if their GPU-side uses are complete and
-      // recycles their memory if so)
-      //
-      // Q. Why skip process_events if a capture might be underway?
-      // A. process_events involves cudaEventQueries, illegal during CUDA graph
-      //    capture.
-      //    Dumb simple solution: defer reclaiming these allocations until after
-      //    capture. Cross-stream memory use is uncommon, so the deferral's
-      //    effect on memory use during capture should be small.
-      process_events(context);
-    }
+    // When the graph is capturing, we handle in the process_events.
+    process_events(context);
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
@@ -1655,15 +1650,7 @@ class DeviceCachingAllocator {
       stats.oversize_allocations.decrease(1);
 
     if (!block->stream_uses.empty()) {
-      if (C10_UNLIKELY(!captures_underway.empty())) {
-        // It's forbidden to cudaEventQuery an event recorded during CUDA graph
-        // capture. We conservatively defer recording end-of-life events until
-        // the next call to process_events() (which won't happen until no
-        // captures are underway)
-        needs_events_deferred_until_no_capture.push_back(block);
-      } else {
-        insert_events(block);
-      }
+      insert_events(block);
     } else {
       free_block(block, context);
     }
@@ -1838,7 +1825,6 @@ class DeviceCachingAllocator {
   std::unique_ptr<PrivatePoolState> getCheckpointState(MempoolId_t id) {
     auto context = maybeGatherContext(RecordContext::ALL);
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    insert_events_deferred_until_no_capture(context);
 
     auto pool = graph_pools.find(id);
     if (pool != graph_pools.end()) {
@@ -2237,6 +2223,21 @@ class DeviceCachingAllocator {
           "beginAllocateToPool: already recording to mempool_id");
     }
     captures_underway.emplace_back(mempool_id, std::move(filter));
+  }
+
+  inline void sync_raw(cudaStream_t dependency, cudaStream_t dependent) {
+    cudaEvent_t event = nullptr;
+    C10_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+    C10_CUDA_CHECK(cudaEventRecord(event, dependency));
+    C10_CUDA_CHECK(cudaStreamWaitEvent(dependent, event));
+    C10_CUDA_CHECK(cudaEventDestroy(event));
+  }
+
+  void captureAboutToEnd(MempoolId_t mempool_id, cudaStream_t capture_stream) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    for (auto& dependency : streams_to_rejoin) {
+      sync_raw(dependency, capture_stream);
+    }
   }
 
   // Called by CUDAGraph::capture_end
@@ -3213,7 +3214,6 @@ class DeviceCachingAllocator {
     // This function syncs, so capture should not be underway. Might as well
     // make sure capture-deferred end of life events get processed too.
     TORCH_INTERNAL_ASSERT(captures_underway.empty());
-    insert_events_deferred_until_no_capture(context);
 
     for (auto it = cuda_events.begin(); it != cuda_events.end();) {
       for (auto e = it->second.begin(); e != it->second.end();) {
@@ -3266,6 +3266,8 @@ class DeviceCachingAllocator {
     }
   }
 
+  // When the block is going to be freed, and we query the event to check if it
+  // is ready to be freed on the stream.
   void insert_events(Block* block) {
     c10::DeviceIndex prev_device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&prev_device));
@@ -3276,7 +3278,39 @@ class DeviceCachingAllocator {
       C10_CUDA_CHECK(c10::cuda::SetDevice(stream.device_index()));
 
       EventPool::Event event = create_event_internal(stream.device_index());
-      C10_CUDA_CHECK(cudaEventRecord(*event, stream.stream()));
+      cudaStream_t stream_id = stream.stream();
+
+      if (C10_LIKELY(captures_underway.empty())) {
+        C10_CUDA_CHECK(cudaEventRecordWithFlags(
+            *event, stream_id, cudaEventRecordDefault));
+      } else {
+        // During graph capture, determine if this stream is participating in
+        // any active capture
+        cudaStreamCaptureStatus status{};
+        C10_CUDA_CHECK(cudaStreamGetCaptureInfo(stream_id, &status, nullptr));
+        bool stream_is_capturing = false;
+        for (auto& entry : captures_underway) {
+          if (entry.second(stream_id)) {
+            // Stream is part of an active graph capture - use external
+            // recording to ensure the event is properly included in the graph
+            stream_is_capturing = true;
+            C10_CUDA_CHECK(cudaEventRecordWithFlags(
+                *event, stream_id, cudaEventRecordExternal));
+
+            // Register this stream to be synchronized with the capture stream
+            // before the graph capture ends to avoid dangling dependencies
+            streams_to_rejoin.insert(stream);
+          }
+        }
+        if (!stream_is_capturing) {
+          // Stream is not participating in any graph capture, so record
+          // normally Using cudaEventRecordDefault avoids potential illegal
+          // state errors that could occur with external recording on
+          // non-capturing streams
+          C10_CUDA_CHECK(cudaEventRecordWithFlags(
+              *event, stream_id, cudaEventRecordDefault));
+        }
+      }
 
       block->event_count++;
       cuda_events[stream].emplace_back(std::move(event), block);
@@ -3285,28 +3319,9 @@ class DeviceCachingAllocator {
     C10_CUDA_CHECK(c10::cuda::MaybeSetDevice(prev_device));
   }
 
-  void insert_events_deferred_until_no_capture(
-      const std::shared_ptr<GatheredContext>& context) {
-    if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
-      for (auto* block : needs_events_deferred_until_no_capture) {
-        TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
-        // only streams recorded before cudagraph will be used to insert events
-        // since we know all streams recorded during cudagraph must have
-        // completed (refer to Section 3.2.8.7.3.1 Cross-stream Dependencies and
-        // Events in CUDA Programming Guide).
-        remove_cudagraph_stream_uses(block);
-        insert_events(block);
-        if (block->event_count == 0) {
-          free_block(block, context);
-        }
-      }
-      needs_events_deferred_until_no_capture.clear();
-    }
-  }
-
+  // we allow process_events to be called during capture by using
+  // cudaEventRecordExternal in insert_events()
   void process_events(const std::shared_ptr<GatheredContext>& context) {
-    insert_events_deferred_until_no_capture(context);
-
     // Process outstanding cudaEvents. Events that are completed are
     // removed from the queue, and the 'event_count' for the
     // corresponding allocation is decremented. We maintain a separate
@@ -3321,7 +3336,11 @@ class DeviceCachingAllocator {
         EventPool::Event event = std::move(e.first);
         Block* block = e.second;
 
-        cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(*event));
+        cudaError_t err{};
+        {
+          at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+          err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(*event));
+        }
         if (err == cudaErrorNotReady) {
           // ignore and clear the error if not ready
           (void)cudaGetLastError();
@@ -3865,6 +3884,15 @@ class NativeCachingAllocator : public CUDAAllocator {
     assertValidDevice(device);
     device_allocator[device]->beginAllocateToPool(
         std::move(mempool_id), std::move(filter));
+  }
+
+  void captureAboutToEnd(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      cudaStream_t capture_stream) override {
+    assertValidDevice(device);
+    device_allocator[device]->captureAboutToEnd(
+        std::move(mempool_id), capture_stream);
   }
 
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
