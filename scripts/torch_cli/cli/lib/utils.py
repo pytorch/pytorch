@@ -89,7 +89,7 @@ def get_existing_abs_path(path: str) -> str:
 
 def clone_vllm(commit: str):
     """
-    cloning vllm and checkout pinned commmit
+    cloning vllm and checkout pinned commit
     """
     print(f"clonening vllm....", flush=True)
     cwd = "vllm"
