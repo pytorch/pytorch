@@ -1329,6 +1329,19 @@ class GraphModuleSerializer(metaclass=Final):
             for child in ts.children_specs:
                 store_namedtuple_fields(child)
 
+        def maybe_register_namedtuple(ts):
+            if ts.type is namedtuple or pytree.is_namedtuple_class(ts.type):
+                if ts.context not in pytree.SUPPORTED_NODES:
+                    serialized_type_name = (
+                        f"{ts.context.__module__}.{ts.context.__name__}"
+                    )
+                    pytree._register_namedtuple(
+                        ts.context, serialized_type_name=serialized_type_name
+                    )
+            for child in ts.children_specs:
+                maybe_register_namedtuple(child)
+
+        maybe_register_namedtuple(treespec)
         serialized_treespec = treespec_dumps(treespec, TREESPEC_VERSION)
         store_namedtuple_fields(treespec)
         return serialized_treespec
