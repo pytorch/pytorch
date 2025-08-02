@@ -1149,6 +1149,13 @@ class CppGemmTemplate(CppTemplate):
         elif isinstance(W, ir.IRNode):
             # Require W layout to be fixed & contiguous, happens inplace.
             ir.ExternKernel.require_contiguous(W)
+            if W.layout.offset != 0:
+                # W may be contiguous but still have a non-zero storage offset.
+                # GEMM_TEMPLATE emits code like:
+                #   W.data_ptr[offset + ...]
+                # but the data_ptr already includes the offset.
+                # To avoid double-offsetting, we create a copy with storage offset = 0.
+                new_inputs[1] = ir.ExternKernel.copy_input(W)
 
         if not skip_int8_compensation and _is_int8_gemm(new_inputs):
             BCompensate = None
