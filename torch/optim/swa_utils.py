@@ -4,7 +4,7 @@ r"""Implementation for Stochastic Weight Averaging implementation."""
 import itertools
 import math
 import warnings
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from typing import Any, Callable, cast, Literal, Optional, Union
 
@@ -237,6 +237,7 @@ class AveragedModel(Module):
         self.register_buffer(
             "n_averaged", torch.tensor(0, dtype=torch.long, device=device)
         )
+        self.is_copy_initialized = False
         self.avg_fn = avg_fn
         self.multi_avg_fn = multi_avg_fn
         self.use_buffers = use_buffers
@@ -259,15 +260,14 @@ class AveragedModel(Module):
         )
         self_param_detached: list[Optional[Tensor]] = []
         model_param_detached: list[Optional[Tensor]] = []
-        copy_param = bool(self.n_averaged == 0)
         for p_averaged, p_model in zip(self_param, model_param):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
             model_param_detached.append(p_model_)
-            if copy_param:
+            if not self.is_copy_initialized:
                 p_averaged.detach().copy_(p_model_)
 
-        if self.n_averaged > 0:
+        if self.is_copy_initialized:
             if self.multi_avg_fn is not None or self.avg_fn is None:
                 grouped_tensors = _group_tensors_by_device_and_dtype(
                     [self_param_detached, model_param_detached]
@@ -310,6 +310,13 @@ class AveragedModel(Module):
             for b_swa, b_model in zip(self.module.buffers(), model.buffers()):
                 b_swa.detach().copy_(b_model.detach().to(b_swa.device))
         self.n_averaged += 1
+        self.is_copy_initialized = True
+
+    def load_state_dict(
+        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
+    ):
+        super().load_state_dict(state_dict, strict, assign)
+        self.is_copy_initialized = bool(self.n_averaged > 0)
 
 
 @torch.no_grad()
