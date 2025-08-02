@@ -136,10 +136,7 @@ def greedy_bucket_collective_by_mb(
             n_input_val = node.all_input_nodes[0].meta["val"]
             in_size_bytes = n_input_val.numel() * n_input_val.element_size()
             size_bytes = max(out_size_bytes, in_size_bytes)
-            if (
-                cur_bucket_size_bytes + size_bytes > bucket_size_bytes
-                and cur_bucket
-            ):
+            if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
                 # Current bucket is full, create new bucket
                 if len(cur_bucket) > 1:
                     buckets.append(cur_bucket)
