@@ -1,16 +1,21 @@
-import os
 import shlex
 import shutil
 import subprocess
-from typing import Optional
+import sys
 from dataclasses import fields
-from textwrap import indent
 from pathlib import Path
-import yaml
-import sys
-import sys
+from textwrap import indent
+from typing import Optional
 
-def run_shell(cmd: str, logging: bool = True, cwd: Optional[str] = None, env: Optional[dict] = None):
+import yaml
+
+
+def run_shell(
+    cmd: str,
+    logging: bool = True,
+    cwd: Optional[str] = None,
+    env: Optional[dict] = None,
+):
     if logging:
         print(f"[shell]{cmd}", flush=True)
     subprocess.run(
@@ -21,10 +26,11 @@ def run_shell(cmd: str, logging: bool = True, cwd: Optional[str] = None, env: Op
         stderr=sys.stderr,
         check=True,
         env=env,
-        cwd=cwd
+        cwd=cwd,
     )
 
-#eliainwy
+
+# eliainwy
 def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> str:
     path = Path(prefix) / f"{name}.txt"
     if not path.exists():
@@ -66,8 +72,10 @@ def remove_dir(path: str):
     else:
         print(f"[INFO] Directory not found (skipped): {path}", flush=True)
 
+
 def get_abs_path(path: str):
     return os.path.abspath(path)
+
 
 def generate_dataclass_help(cls) -> str:
     """Auto-generate help text for dataclass default values."""
@@ -79,6 +87,7 @@ def generate_dataclass_help(cls) -> str:
         else:
             lines.append(f"{field.name:<22} = ''")
     return indent("\n".join(lines), "    ")
+
 
 def get_existing_abs_path(path: str) -> str:
     path = os.path.abspath(path)
@@ -100,17 +109,20 @@ def clone_vllm(commit: str):
     run_shell(f"git checkout {commit}", cwd=cwd)
     run_shell("git submodule update --init --recursive", cwd=cwd)
 
-def read_yaml_file( file_path: str) -> dict:
+
+def read_yaml_file(file_path: str) -> dict:
     p = get_abs_path(file_path)
     if not os.path.exists(p):
         raise FileNotFoundError(f"YAML file not found: {file_path}")
 
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
 
 def pip_install(package: str):
     cmd = f"python3 -m pip install {package}"
     subprocess.run(shlex.split(cmd), check=True)
+
 
 def uv_pip_install(package: str):
     cmd = f"python3 -m  uv pip install --system {package}"

@@ -1,5 +1,7 @@
 from cement import Controller, ex
 from cli.test.external.vllm_test import VllmTestRunner
+
+
 class ExternalTestController(Controller):
     class Meta:
         label = "test_external"
@@ -8,19 +10,21 @@ class ExternalTestController(Controller):
         help = "tests external libraries."
         aliases = ["external"]
 
-    @ex(help="test vllm",
-    arguments = [
+    @ex(
+        help="test vllm",
+        arguments=[
             (
                 ["--test-name"],
                 {
                     "help": "test name to run tests, for example, 'vllm_basic_correctness_test'",
                     "dest": "test_name",
-                    "default":"",
+                    "default": "",
                     "type": str,
                     "required": True,
                 },
             )
-        ])
+        ],
+    )
     def vllm(self):
         pargs = self.app.pargs
         test_name = pargs.test_name
