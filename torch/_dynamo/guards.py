@@ -864,9 +864,9 @@ class GuardBuilder(GuardBuilderBase):
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
-        self.already_guarded_not_present_in_generic_dict: OrderedSet[(str, str)] = (
-            OrderedSet()
-        )
+        self.already_guarded_not_present_in_generic_dict: OrderedSet[
+            tuple[str, str]
+        ] = OrderedSet()
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
