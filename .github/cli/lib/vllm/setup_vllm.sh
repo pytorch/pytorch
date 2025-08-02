@@ -19,7 +19,7 @@ pip install wheels/flashinfer-python/flashinfer*.whl
 
 git clone https://github.com/vllm-project/vllm.git
 cd vllm
-git checkout 29d1ffc5b4c763ef76aff9e3f617fa60dd292418
+git checkout 53d7c39271aeb0568afcae337396a972e1848586
 git submodule update --init --recursive
 rm -rf vllm
 
