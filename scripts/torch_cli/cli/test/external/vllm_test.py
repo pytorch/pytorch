@@ -2,9 +2,11 @@ import os
 from cli.lib.utils import read_yaml_file, run_shell
 import os
 
+
 class VllmTestRunner:
     def __init__(self, file_path="") -> None:
         self.test_configs = self._fetch_configs(file_path)
+
     def run(self, test_names):
         valid_tests = []
         for test_name in test_names:
