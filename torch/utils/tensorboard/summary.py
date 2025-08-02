@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 import json
 import logging
-import os
 import struct
+import tempfile
 
 from typing import Any, Optional
 
@@ -649,46 +649,47 @@ def video(tag, tensor, fps=4):
     return Summary(value=[Summary.Value(tag=tag, image=video)])
 
 
-def make_video(tensor, fps):
-    try:
-        import moviepy  # noqa: F401
-    except ImportError:
-        print("add_video needs package moviepy")
-        return
-    try:
-        from moviepy import editor as mpy
-    except ImportError:
-        print(
-            "moviepy is installed, but can't import moviepy.editor.",
-            "Some packages could be missing [imageio, requests]",
-        )
-        return
-    import tempfile
-
-    _t, h, w, c = tensor.shape
-
-    # encode sequence of images into gif string
-    clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
-
-    filename = tempfile.NamedTemporaryFile(suffix=".gif", delete=False).name
-    try:  # newer version of moviepy use logger instead of progress_bar argument.
-        clip.write_gif(filename, verbose=False, logger=None)
-    except TypeError:
-        try:  # older version of moviepy does not support progress_bar argument.
-            clip.write_gif(filename, verbose=False, progress_bar=False)
+def _safe_write_gif(clip, path: str) -> None:
+    """Try the various MoviePy write_gif signatures until one works."""
+    variants = [
+        dict(verbose=False, logger=None),         # MoviePy ≥1.0.2
+        dict(verbose=False, progress_bar=False),  # MoviePy 1.0.0 / 1
+        dict(verbose=False),                      # fallback
+    ]
+    for kwargs in variants:
+        try:
+            clip.write_gif(path, **kwargs)
+            return
         except TypeError:
-            clip.write_gif(filename, verbose=False)
+            continue
+    # last resort
+    clip.write_gif(path)
 
-    with open(filename, "rb") as f:
-        tensor_string = f.read()
 
+def make_video(tensor: np.ndarray, fps: int) -> Optional[Summary.Image]:
+    """Convert a (T,H,W,C) uint8/float32 tensor to a GIF and wrap as Summary.Image."""
+    # ---- MoviePy import shim -------------------------------------------------
     try:
-        os.remove(filename)
-    except OSError:
-        logger.warning("The temporary file used by moviepy cannot be deleted.")
-
+        from moviepy import editor as mpy       # MoviePy 1.x
+    except ImportError:
+        try:
+            import moviepy as mpy               # MoviePy ≥2.0
+        except ImportError:
+            logger.warning("make_video needs package moviepy")
+            return None
+    # build the clip
+    clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
+    _t, h, w, c = tensor.shape
+    # write/read the GIF inside one with-block
+    with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
+        _safe_write_gif(clip, tmp.name)
+        tmp.seek(0)
+        gif_bytes = tmp.read()
     return Summary.Image(
-        height=h, width=w, colorspace=c, encoded_image_string=tensor_string
+        height=h,
+        width=w,
+        colorspace=c,
+        encoded_image_string=gif_bytes
     )
 
 
