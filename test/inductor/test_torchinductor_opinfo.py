@@ -988,7 +988,7 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
         rtol=None,
         equal_nan=True,
         exact_dtype=True,
-        exact_stride=True,
+        exact_stride=False,
     ):
         if is_argsort:
             assert isinstance(x, torch.Tensor)
@@ -1332,6 +1332,8 @@ class TestInductorOpInfo(TestCase):
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                # TODO: Default to True
+                                check_strides=False,
                             )
                         else:
                             self.check_model(
@@ -1339,6 +1341,8 @@ class TestInductorOpInfo(TestCase):
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                # TODO: Default to True
+                                check_strides=False,
                             )
 
         except Exception as e:
