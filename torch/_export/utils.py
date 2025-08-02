@@ -662,7 +662,10 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
                         gm,
                         functools.partial(
                             _node_metadata_hook,
-                            stack_trace=node.meta.get("stack_trace"),
+                            metadata={
+                                "stack_trace": node.meta.get("stack_trace"),
+                                "nn_module_stack": node.meta.get("nn_module_stack"),
+                            },
                         ),
                     ),
                 ):
@@ -690,7 +693,10 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
             "in insert_deferred_runtime_asserts"
         )
         with _set_node_metadata_hook(
-            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+            gm,
+            functools.partial(
+                _node_metadata_hook, metadata={"stack_trace": stack_trace}
+            ),
         ):
             shape_env = _get_shape_env_from_gm(gm)
             if shape_env:

@@ -1333,7 +1333,7 @@ class TestInductorOpInfo(TestCase):
                                 kwargs,
                                 **adjusted_kwargs,
                                 # TODO: Default to True
-                                check_strides=False,
+                                exact_stride=False,
                             )
                         else:
                             self.check_model(
@@ -1342,7 +1342,7 @@ class TestInductorOpInfo(TestCase):
                                 kwargs,
                                 **adjusted_kwargs,
                                 # TODO: Default to True
-                                check_strides=False,
+                                exact_stride=False,
                             )
 
         except Exception as e:
