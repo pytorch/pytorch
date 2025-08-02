@@ -2652,5 +2652,13 @@
         "Try to construct nn.Parameter() outside the compiled region.  If this is not possible, turn `graph_break_on_nn_param_ctor` off"
       ]
     }
+  ],
+  "GB0265": [
+    {
+      "Gb_type": "Cannot reconstruct a method because __self__ source is absent",
+      "Context": "str(self.value)",
+      "Explanation": "`{self.value}` method can't be reconstructed",
+      "Hints": []
+    }
   ]
 }
