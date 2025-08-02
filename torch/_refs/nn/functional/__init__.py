@@ -1232,6 +1232,10 @@ def pixel_shuffle(self: Tensor, upscale_factor: int):
         self.dim() >= 3,
         lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
     )
+    torch._check(
+        self.shape[-3] > 0,
+        lambda: f"pixel_shuffle expects its input's 'channel' dimension to be greater than 0, but {self.shape[-3]} is not gretaer than 0",
+    )
     batch = self.shape[:-3]
     C_out = self.shape[-3] // upscale_factor**2
     HW_out = (self.shape[-2] * upscale_factor, self.shape[-1] * upscale_factor)
