@@ -4115,9 +4115,6 @@ class TestSDPACudaOnly(NNTestCase):
 class TestSDPAXpuOnly(NNTestCase):
     """ Used to test XPU only functionality of scaled_dot_product_attention
     Mostly migrate from TestSDPACudaOnly in test/test_transformers.py
-
-    Note that as SDPBackend.OVERRIDEABLE is not managed by sdpa_kernel so that
-    math ref has to be called explicitly via torch.ops.aten._scaled_dot_product_attention_math.
     """
 
     @parametrize("type", ["dense"])
@@ -4143,7 +4140,6 @@ class TestSDPAXpuOnly(NNTestCase):
         v_shape = SdpaShape(batch, num_heads, 2, head_dim_v)
         query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
 
-        # test that we do not dispatch to onednn for an unsupported case
         actual = F.scaled_dot_product_attention(
             query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
@@ -4181,7 +4177,6 @@ class TestSDPAXpuOnly(NNTestCase):
         v_shape = SdpaShape(batch_size, n_head_kv, kv_size, head_dim)
         query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
 
-        # test that we do not dispatch to onednn for an unsupported case
         actual = F.scaled_dot_product_attention(
             query, key, value, attn_mask=None, dropout_p=0.0, is_causal=is_causal, enable_gqa=True)
 
@@ -4251,18 +4246,6 @@ class TestSDPAXpuOnly(NNTestCase):
         for permute_order in permute_orders:
             test_attention(list(permute_order) + [3])
 
-    def test_backends_flash_fallback_to_overrideable(self, device):
-        dtype = torch.bfloat16
-        q_shape = SdpaShape(1, 1, 8, 16)
-        kv_shape = SdpaShape(1, 1, 12, 16)
-        make_q = partial(torch.rand, q_shape, device=device, dtype=dtype)
-        make_kv = partial(torch.rand, kv_shape, device=device, dtype=dtype)
-        q, k, v = make_q(), make_kv(), make_kv()
-        warning_str = "Flash Attention is not supported on XPU, falling back to overrideable kernel."
-        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            with self.assertWarnsRegex(UserWarning, warning_str):
-                _ = F.scaled_dot_product_attention(q, k, v)
-
     def test_backends_set_to_math(self, device):
         dtype = torch.bfloat16
         q_shape = SdpaShape(1, 1, 8, 16)
@@ -4274,6 +4257,17 @@ class TestSDPAXpuOnly(NNTestCase):
             self.assertTrue(torch._C._get_math_sdp_enabled())
             self.assertFalse(torch._C._get_overrideable_sdp_enabled())
             _ = F.scaled_dot_product_attention(q, k, v)
+
+    def test_default_priority_order(self, device):
+        # The default priority order is flash, efficient, overrideable, math, cudnn
+        # For non-cuda backend, we need to make sure that flash > overrideable > math
+        from torch.nn.attention import _cur_sdpa_kernel_backends
+        default_priority = _cur_sdpa_kernel_backends(with_priority=True)
+        flash_index = default_priority.index(SDPBackend.FLASH_ATTENTION)
+        overrideable_index = default_priority.index(SDPBackend.OVERRIDEABLE)
+        math_index = default_priority.index(SDPBackend.MATH)
+        self.assertTrue(flash_index < overrideable_index < math_index,
+                        f"Expected flash < overrideable < math, got {flash_index}, {overrideable_index}, {math_index}")
 
     def test_scaled_dot_product_attention_fused_kernels_safe_softmax(self, device):
         dtype = torch.bfloat16
