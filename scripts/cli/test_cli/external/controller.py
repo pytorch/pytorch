@@ -1,8 +1,8 @@
 from cement import Controller, ex
-from test_cli.controllers.vllm.test_runner import VllmTestRunner
-class VllmTestController(Controller):
+from test_cli.external.vllm_test import VllmTestRunner
+class ExternalTestController(Controller):
     class Meta:
-        label = "vllm"
+        label = "external"
         stacked_on = "base"
         stacked_type = "nested"
         help = "tests vllm external libraries. notice this must be run from the root of the pytorch repo"
@@ -20,7 +20,7 @@ class VllmTestController(Controller):
         ]
 
     @ex(help="test vllm")
-    def run(self):
+    def vllm(self):
         pargs = self.app.pargs
         test_name = pargs.test_name
         runner = VllmTestRunner()
