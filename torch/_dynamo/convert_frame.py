@@ -1075,6 +1075,11 @@ def _compile(
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
+        else:
+            recompile_reason = (
+                f"No reason. is_recompilation:{is_recompilation(cache_size)}, "
+                f"frame is None:{frame is None}"
+            )
         metrics_context.update_outer({"recompile_reason": recompile_reason})
 
         recompile_user_contexts = get_hook_for_recompile_user_context()
@@ -1085,6 +1090,8 @@ def _compile(
                 user_context()[:256] for user_context in recompile_user_contexts
             }
             metrics_context.set("recompile_user_contexts", user_contexts_msg)
+        else:
+            metrics_context.set("recompile_user_contexts", {"Not set"})
 
         exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
         if exceeded:
