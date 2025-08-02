@@ -160,7 +160,7 @@ class Upsample(Module):
         super().__init__()
         self.name = type(self).__name__
         self.size = size
-        if isinstance(scale_factor, tuple):
+        if isinstance(scale_factor, (tuple, list)):
             self.scale_factor = tuple(float(factor) for factor in scale_factor)
         else:
             self.scale_factor = float(scale_factor) if scale_factor else None
