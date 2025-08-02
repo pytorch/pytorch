@@ -189,7 +189,7 @@ void annotateInputShapes(
       graph->inputs().size() == example_inputs.size(),
       buildErrorMessage("Given inputs do not match the fuser graph inputs."));
   for (size_t idx = 0; idx < example_inputs.size(); idx++) {
-    if (auto t = example_inputs[idx]) {
+    if (const auto& t = example_inputs[idx]) {
       auto concrete_tensor_type = tensorTypeInCurrentExecutionContext(*t);
       graph->inputs().at(idx)->setType(concrete_tensor_type);
     }

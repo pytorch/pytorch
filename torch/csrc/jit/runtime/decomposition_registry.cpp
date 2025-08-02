@@ -53,7 +53,6 @@ void loadDecompositionFunctions() {
   }
 
   auto src = std::make_shared<Source>(GetSerializedDecompositions());
-  std::stringstream ss;
   std::vector<at::IValue> constantTable;
   auto resolver = std::make_shared<SourceImporterImpl>(
       compilation_unit,
