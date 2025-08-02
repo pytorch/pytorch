@@ -179,6 +179,7 @@ struct FlightRecorder {
   std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_ = {};
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_ = {};
+  std::string backend_version_key_str_ = nccl_version_key_str;
   std::string nccl_version_;
 
   std::optional<size_t> record(
@@ -200,7 +201,9 @@ struct FlightRecorder {
       const std::tuple<std::string, std::string>& pg_name,
       std::vector<uint64_t> ranks);
 
-  void record_accelerator_version(const std::string nccl_version);
+  void record_accelerator_version(
+      const std::string nccl_version,
+      const std::string backend_version_key = nccl_version_key_str);
 
   void update_state(Entry& r);
 
