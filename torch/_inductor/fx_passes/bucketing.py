@@ -133,7 +133,7 @@ def greedy_bucket_collective_by_mb(
             assert "val" in node.meta
             n_val = node.meta["val"]
             out_size_bytes = n_val.numel() * n_val.element_size()
-            n_input_val = node.args[0].meta["val"]
+            n_input_val = node.all_input_nodes[0].meta["val"]
             in_size_bytes = n_input_val.numel() * n_input_val.element_size()
             size_bytes = max(out_size_bytes, in_size_bytes)
             if (
