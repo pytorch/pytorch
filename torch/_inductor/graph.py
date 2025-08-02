@@ -123,6 +123,7 @@ if TYPE_CHECKING:
     from torch.fx.graph import Graph
 
     from .codegen.wrapper import PythonWrapperCodegen
+    from .dependencies import Dep
     from .scheduler import BaseSchedulerNode
 
     CompiledModule = Union[ModuleType, FileBackedGraphModule]
@@ -340,6 +341,7 @@ class GraphLowering(torch.fx.Interpreter):
             shape_env.deferred_runtime_asserts.copy()
         )
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
+
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
@@ -485,6 +487,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.bw_donated_idxs = get_donated_idxs()
 
+        # Cache for dep size hints to avoid expensive recomputation
+        self.dep_size_hint_cache: dict[Dep, int] = {}
+
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
 
@@ -569,6 +574,23 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> bool:
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
+
+    def get_dep_size_hint(self, dep: Dep) -> int:
+        """
+        Get the size hint for a dependency with caching to avoid expensive recomputation.
+        """
+        if dep not in self.dep_size_hint_cache:
+            res = 0
+            try:
+                if not dep.has_unbacked_symbols():
+                    res = dep.numbytes_hint()
+            except KeyError:
+                # In at least one test (test/inductor/test_torchbind.py) we
+                # create a StarDep that doesn't exist in the graph and calling
+                # `has_unbacked_symbols()` throws an error.
+                pass
+            self.dep_size_hint_cache[dep] = res
+        return self.dep_size_hint_cache[dep]
 
     def get_current_device_or_throw(self) -> torch.device:
         if device := self.current_device:
@@ -1183,7 +1205,9 @@ class GraphLowering(torch.fx.Interpreter):
                     error.operator_str(target, args, kwargs),
                 )
 
-                tag = get_layout_constraint_tag(target, with_default=False)
+                tag: Optional[torch._C.Tag] = get_layout_constraint_tag(
+                    target, with_default=False
+                )
                 if (
                     tag is None
                     and torch._library.utils.is_builtin(target)
@@ -1200,8 +1224,10 @@ class GraphLowering(torch.fx.Interpreter):
                     # and identify them one by one.
                     decided_constraint = require_contiguous  # type: ignore[assignment]
                 else:
-                    tag = get_layout_constraint_tag(target, with_default=True)
-                    decided_constraint = tag_to_layout_constraint(tag)
+                    default_tag: torch._C.Tag = get_layout_constraint_tag(
+                        target, with_default=True
+                    )
+                    decided_constraint = tag_to_layout_constraint(default_tag)
 
                 make_fallback(target, layout_constraint=decided_constraint)
 
@@ -1538,8 +1564,10 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             if (
                 n.op == "call_function"
+                # this path only for built-in operators
                 and n.target
-                not in (operator.getitem, torch._higher_order_ops.invoke_subgraph)
+                and isinstance(n.target, torch._ops.OpOverload)
+                and torch._library.utils.is_builtin(n.target)
                 and (
                     fallback_node_due_to_unsupported_type(n)
                     or CompilerBisector.disable_subsystem(
@@ -1800,7 +1828,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         shape_env = V.graph.sizevars.shape_env
 
-        # An input can an unbacked symint i.e.: when mark_unabcked is used.
+        # An input can be unbacked symint i.e.: when mark_unabcked is used.
         # in that case add it to new_unbacked_defs.
         if (
             n.op == "placeholder"
@@ -1867,6 +1895,7 @@ class GraphLowering(torch.fx.Interpreter):
             V.fake_mode.shape_env.unbacked_renamings.get(s, s)
             for s in unbacked_bindings.keys()
         )
+
         assert new_unbacked_defs >= renamed_unbacked_bindings, (
             f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
             f"fx node is: {n.format_node()}\n"
