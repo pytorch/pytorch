@@ -231,6 +231,36 @@ def broadcast_kernel(
     nvshmem.broadcast(team_handle, dest_ptr, src_ptr, nelems, pe_root)
 
 
+@triton.jit
+def sum_reduce_kernel(
+    team_handle,
+    dest_ptr,
+    src_ptr,
+    nreduce,
+):
+    nvshmem.sum_reduce(team_handle, dest_ptr, src_ptr, nreduce)
+
+
+@triton.jit
+def max_reduce_kernel(
+    team_handle,
+    dest_ptr,
+    src_ptr,
+    nreduce,
+):
+    nvshmem.max_reduce(team_handle, dest_ptr, src_ptr, nreduce)
+
+
+@triton.jit
+def min_reduce_kernel(
+    team_handle,
+    dest_ptr,
+    src_ptr,
+    nreduce,
+):
+    nvshmem.min_reduce(team_handle, dest_ptr, src_ptr, nreduce)
+
+
 @instantiate_parametrized_tests
 @requires_nvshmem()
 class NVSHMEMTritonTest(MultiProcContinousTest):
@@ -945,6 +975,126 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         expected = [100 + i for i in range(nelems)]
         torch.testing.assert_close(
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
+        )
+
+    @skipIfRocm
+    @requires_triton()
+    def test_triton_sum_reduce(self) -> None:
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        nvshmem_lib = nvshmem.enable_triton()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+        world_size = dist.get_world_size()
+        rank = self.rank
+        # Configuration
+        nreduce = 3  # number of separate reductions
+        dtype = torch.int64
+        # Source buffer - each rank contributes different values
+        src = symm_mem.empty(nreduce, dtype=dtype, device=self.device)
+        for i in range(nreduce):
+            src[i] = (rank + 1) * (i + 1)  # Rank 0: [1,2,3], Rank 1: [2,4,6], etc.
+        # Destination buffer
+        dst = symm_mem.empty(nreduce, dtype=dtype, device=self.device).fill_(-1)
+        src_hdl = symm_mem.rendezvous(src, group=group_name)
+        dst_hdl = symm_mem.rendezvous(dst, group=group_name)
+        # Calculate expected results
+        expected = []
+        for i in range(nreduce):
+            # Sum across all ranks: sum((rank+1)*(i+1) for rank in range(world_size))
+            total = sum((r + 1) * (i + 1) for r in range(world_size))
+            expected.append(total)
+        # Synchronize before reduction
+        dist.barrier()
+        # Execute reduction
+        team_handle = 0  # NVSHMEM_TEAM_WORLD
+        sum_reduce_kernel[(1,)](
+            team_handle,
+            dst_hdl.buffer_ptrs[rank],
+            src_hdl.buffer_ptrs[rank],
+            nreduce,
+            extern_libs=nvshmem_lib,
+            launch_cooperative_grid=True,
+        )
+        # Synchronize after reduction
+        dist.barrier()
+        # Verify results
+        torch.testing.assert_close(
+            dst, torch.tensor(expected, device=self.device, dtype=dtype)
+        )
+
+    @skipIfRocm
+    @requires_triton()
+    def test_triton_minmax_reduce(self) -> None:
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        nvshmem_lib = nvshmem.enable_triton()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+        world_size = dist.get_world_size()
+        rank = self.rank
+        # Configuration
+        nreduce = 2  # number of values to reduce
+        dtype = torch.int64
+        # Source buffers for min and max
+        src_min = symm_mem.empty(nreduce, dtype=dtype, device=self.device)
+        src_max = symm_mem.empty(nreduce, dtype=dtype, device=self.device)
+        # Each rank contributes different values
+        # For min: rank 0: [10, 20], rank 1: [15, 5], etc.
+        # For max: same values
+        for i in range(nreduce):
+            if i == 0:
+                src_min[i] = 10 + rank * 5  # 10, 15, 20, ...
+                src_max[i] = 10 + rank * 5
+            else:
+                src_min[i] = 20 - rank * 15  # 20, 5, -10, ...
+                src_max[i] = 20 - rank * 15
+        # Destination buffers
+        dst_min = symm_mem.empty(nreduce, dtype=dtype, device=self.device).fill_(-1)
+        dst_max = symm_mem.empty(nreduce, dtype=dtype, device=self.device).fill_(-1)
+        src_min_hdl = symm_mem.rendezvous(src_min, group=group_name)
+        src_max_hdl = symm_mem.rendezvous(src_max, group=group_name)
+        dst_min_hdl = symm_mem.rendezvous(dst_min, group=group_name)
+        dst_max_hdl = symm_mem.rendezvous(dst_max, group=group_name)
+        # Calculate expected results
+        all_values = []
+        for i in range(nreduce):
+            values = []
+            for r in range(world_size):
+                if i == 0:
+                    values.append(10 + r * 5)
+                else:
+                    values.append(20 - r * 15)
+            all_values.append(values)
+        expected_min = [min(vals) for vals in all_values]
+        expected_max = [max(vals) for vals in all_values]
+        dist.barrier()
+        # Execute MIN reduction
+        team_handle = 0
+        min_reduce_kernel[(1,)](
+            team_handle,
+            dst_min_hdl.buffer_ptrs[rank],
+            src_min_hdl.buffer_ptrs[rank],
+            nreduce,
+            extern_libs=nvshmem_lib,
+            launch_cooperative_grid=True,
+        )
+        # Execute MAX reduction
+        max_reduce_kernel[(1,)](
+            team_handle,
+            dst_max_hdl.buffer_ptrs[rank],
+            src_max_hdl.buffer_ptrs[rank],
+            nreduce,
+            extern_libs=nvshmem_lib,
+            launch_cooperative_grid=True,
+        )
+        dist.barrier()
+        # Verify results
+        torch.testing.assert_close(
+            dst_min, torch.tensor(expected_min, device=self.device, dtype=dtype)
+        )
+        torch.testing.assert_close(
+            dst_max, torch.tensor(expected_max, device=self.device, dtype=dtype)
         )
 
 
