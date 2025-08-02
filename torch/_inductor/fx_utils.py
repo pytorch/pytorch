@@ -168,7 +168,9 @@ class FakeTensorUpdater:
                     # If Inductor ever gets tighter invariants on OpOverloads
                     # (that is, we ban things like torch.ops.aten.reshape calls in the graph),
                     # Then this could just be a fast schema lookup.
-                    is_valid, args, kwargs = get_fake_args_kwargs(user)
+                    is_valid, args, kwargs = get_fake_args_kwargs(
+                        user, getattr_context=self.gm
+                    )
                     if not is_valid:
                         return True
                     with (
@@ -225,7 +227,7 @@ class FakeTensorUpdater:
             if not should_process_node(node):
                 continue
 
-            is_valid, args, kwargs = get_fake_args_kwargs(node)
+            is_valid, args, kwargs = get_fake_args_kwargs(node, getattr_context=self.gm)
             if not is_valid:
                 continue
 
@@ -269,17 +271,37 @@ def get_node_storage(node: torch.fx.Node) -> Optional[int]:
 
 def get_fake(x):
     if isinstance(x, torch.fx.Node):
-        if "val" not in x.meta:
-            return x
-        return x.meta["val"]
+        if x.op == "placeholder":
+            return x.meta["example_value"]
+        if "val" in x.meta:
+            return x.meta["val"]
+    # If there are no example values, return x
     return x
 
 
-def get_fake_args_kwargs(x: torch.fx.Node) -> tuple[bool, tuple[Any], dict[str, Any]]:
+def get_fake_args_kwargs(
+    x: torch.fx.Node, *, getattr_context: Optional[Any] = None
+) -> tuple[bool, tuple[Any], dict[str, Any]]:
     """
     First value returns a boolean if any of the input nodes don't have a faketensor.
     """
     args, kwargs = tree_map(get_fake, (x.args, x.kwargs))
+
+    if getattr_context:
+        # Some getattr nodes may be resolvable.
+        def transform_getattr(n: Any) -> Any:
+            if (
+                isinstance(n, torch.fx.Node)
+                and n.op == "get_attr"
+                and isinstance(n.target, str)
+                and hasattr(getattr_context, n.target)
+            ):
+                return getattr(getattr_context, n.target)
+            return n
+
+        args = tuple(transform_getattr(a) for a in args)
+        kwargs = {k: transform_getattr(v) for k, v in kwargs.items()}
+
     if any(
         isinstance(a, torch.fx.Node) for a in pytree.arg_tree_leaves(*args, **kwargs)
     ):
