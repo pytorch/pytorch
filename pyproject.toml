@@ -315,3 +315,10 @@ keep-runtime-typing = true
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
+
+[variant.default-priorities]
+namespace = ["xpu"]
+
+[variant.providers.xpu]
+requires = ["provider-variant-xpu>=0.0.1,<1.0.0"]
+plugin-api = "provider_variant_xpu.plugin:XpuVariantPlugin"
