@@ -578,7 +578,14 @@ inline
 _Tp
 abs(const complex<_Tp>& __c)
 {
-    return hypot(__c.real(), __c.imag());
+    _Tp result = hypot(__c.real(), __c.imag());
+    if (isinf(result)) {
+        _Tp max_val = max(abs(__c.real()), abs(__c.imag()));
+        _Tp scaled_real = __c.real() / max_val;
+        _Tp scaled_imag = __c.imag() / max_val;
+        return max_val * hypot(scaled_real, scaled_imag));
+    }
+    return result; 
 }
 
 // arg
