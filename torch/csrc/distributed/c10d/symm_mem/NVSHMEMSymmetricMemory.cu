@@ -155,7 +155,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
       int rank,
       c10::IntArrayRef sizes,
       c10::ScalarType dtype,
-      int64_t storage_offset) {
+      int64_t storage_offset) override {
     // TODO: deduplicate
     const size_t numel = std::accumulate(
         sizes.begin(),
