@@ -4,6 +4,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 
 namespace c10d::control_plane {
