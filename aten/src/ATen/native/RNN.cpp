@@ -1533,7 +1533,7 @@ std::tuple<Tensor, Tensor> lstm_cell(
   check_rnn_cell_forward_input(input, w_ih.sym_size(1));
   auto hidden_size = w_hh.sym_size(1);
   check_rnn_cell_forward_hidden(input, hx[0], hidden_size, 0);
-  check_rnn_cell_forward_hidden(input, hx[1], std::move(hidden_size), 1);
+  check_rnn_cell_forward_hidden(input, hx[1], hidden_size, 1);
   static at::Tensor undefined;
   return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
@@ -1612,13 +1612,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
     h_g = h_g + hidden_bias;
   }
   auto chunked_input_gates = in_g.unsafe_chunk(3, 1);
-  Tensor ir = chunked_input_gates[0];
-  Tensor ii = chunked_input_gates[1];
-  Tensor in = chunked_input_gates[2];
+  const Tensor& ir = chunked_input_gates[0];
+  const Tensor& ii = chunked_input_gates[1];
+  const Tensor& in = chunked_input_gates[2];
   auto chunked_hidden_gates = h_g.unsafe_chunk(3, 1);
-  Tensor hr = chunked_hidden_gates[0];
-  Tensor hi = chunked_hidden_gates[1];
-  Tensor hn = chunked_hidden_gates[2];
+  const Tensor& hr = chunked_hidden_gates[0];
+  const Tensor& hi = chunked_hidden_gates[1];
+  const Tensor& hn = chunked_hidden_gates[2];
   Tensor rg = (ir + hr).sigmoid();
   Tensor ig = (ii + hi).sigmoid();
   Tensor grad_hx = grad_hy * ig;

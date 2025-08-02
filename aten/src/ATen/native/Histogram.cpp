@@ -150,7 +150,7 @@ void histogramdd_prepare_out(const Tensor& input, const std::vector<int64_t>& bi
 void histogramdd_prepare_out(const Tensor& input, TensorList bins,
         const Tensor& hist, const TensorList& bin_edges) {
     std::vector<int64_t> bin_ct(bins.size());
-    std::transform(bins.begin(), bins.end(), bin_ct.begin(), [](Tensor t) { return t.numel() - 1; });
+    std::transform(bins.begin(), bins.end(), bin_ct.begin(), [](const Tensor& t) { return t.numel() - 1; });
     histogramdd_prepare_out(input, bin_ct, hist, bin_edges);
 }
 
