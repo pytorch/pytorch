@@ -15,6 +15,7 @@ import torch
 __all__ = [
     "BatchSampler",
     "RandomSampler",
+    "RandomBatchSampler",
     "Sampler",
     "SequentialSampler",
     "SubsetRandomSampler",
@@ -126,6 +127,11 @@ class SequentialSampler(Sampler[int]):
         return len(self.data_source)
 
 
+def init_generator():
+    seed = int(torch.empty((), dtype=torch.int64).random_())
+    return torch.Generator().manual_seed(seed)
+
+
 class RandomSampler(Sampler[int]):
     r"""Samples elements randomly. If without replacement, then sample from a shuffled dataset.
 
@@ -172,12 +178,7 @@ class RandomSampler(Sampler[int]):
 
     def __iter__(self) -> Iterator[int]:
         n = len(self.data_source)
-        if self.generator is None:
-            seed = int(torch.empty((), dtype=torch.int64).random_().item())
-            generator = torch.Generator()
-            generator.manual_seed(seed)
-        else:
-            generator = self.generator
+        generator = self.generator if self.generator is not None else init_generator()
 
         if self.replacement:
             for _ in range(self.num_samples // 32):
@@ -351,3 +352,59 @@ class BatchSampler(Sampler[list[int]]):
             return len(self.sampler) // self.batch_size  # type: ignore[arg-type]
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]
+
+
+class RandomBatchSampler(Sampler[Union[torch.Tensor, list[int]]]):
+    def __init__(
+        self,
+        data_source: Sized,
+        batch_size: int,
+        drop_last: bool,
+        replacement: bool = False,
+        generator=None,
+    ) -> None:
+        # Validate parameters using init of RandomSampler and BatchSampler
+        RandomSampler(data_source, replacement, None, generator)
+        BatchSampler([], batch_size, drop_last)
+
+        self.data_source = data_source
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.replacement = replacement
+        self.generator = generator
+
+        self.n_batches = len(self.data_source) // self.batch_size
+        last_size = len(self.data_source) % self.batch_size
+        if not self.drop_last and last_size > 0:
+            self.n_batches += 1
+
+    def sample_indices(self) -> torch.Tensor:
+        n = len(self.data_source)
+        generator = self.generator if self.generator is not None else init_generator()
+
+        if self.replacement:
+            indices = torch.randint(
+                high=n, size=(n,), dtype=torch.int64, generator=generator
+            )
+        else:
+            indices = torch.randperm(n, generator=generator)
+
+        return indices
+
+    def __iter__(self) -> Iterator[Union[torch.Tensor, list[int]]]:
+        indices = self.sample_indices()
+
+        # Slicing is faster on list when batch size is small
+        if self.batch_size < 16:
+            indices = indices.tolist()  # type: ignore[assignment]
+
+        indices_batches = [
+            indices[i : i + self.batch_size]
+            for i in range(0, len(indices), self.batch_size)
+        ]
+        if self.drop_last:
+            indices_batches.pop()
+        yield from indices_batches
+
+    def __len__(self):
+        return self.n_batches
