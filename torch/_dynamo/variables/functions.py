@@ -1133,11 +1133,11 @@ class UserMethodVariable(UserFunctionVariable):
         return super().var_getattr(tx, name)
 
     def reconstruct(self, codegen):
-        if not self.obj.source:
+        if not self.obj.source or not self.source:
             unimplemented_v2(
-                gb_type="Cannot reconstruct a method because __self__ source is absent",
-                context=str(self.value),
-                explanation=f"`{self.value}` method can't be reconstructed",
+                gb_type=f"Cannot reconstruct a sourceless method object {self.fn}",
+                context=str(self.fn),
+                explanation=f"`{self.fn}` does not have a source",
                 hints=[],
             )
 

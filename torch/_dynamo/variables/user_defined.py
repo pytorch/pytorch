@@ -1372,7 +1372,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             self.value.__class__, name, NO_SUCH_SUBOBJ
         )
         is_accessible_from_type_mro = (
-            subobj_from_class is subobj and self.cls_source is not None
+            subobj_from_class is subobj
+            and self.cls_source is not None
+            and self.source is not None
         )
 
         if isinstance(subobj, property):

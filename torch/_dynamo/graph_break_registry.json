@@ -2655,9 +2655,9 @@
   ],
   "GB0265": [
     {
-      "Gb_type": "Cannot reconstruct a method because __self__ source is absent",
-      "Context": "str(self.value)",
-      "Explanation": "`{self.value}` method can't be reconstructed",
+      "Gb_type": "Cannot reconstruct a sourceless method object {self.fn}",
+      "Context": "str(self.fn)",
+      "Explanation": "`{self.fn}` does not have a source",
       "Hints": []
     }
   ]
