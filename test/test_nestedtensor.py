@@ -8573,12 +8573,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
         name="broken_select_backward_unbacked",
     ),
-    # Bug: no idea what's going on here; needs investigation within AOTAutograd
-    XFailRule(
-        op_match_fn=lambda device, op: (op.full_name == "nan_to_num"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="crazy_aot_autograd_bug1",
-    ),
 ]
 
 COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
