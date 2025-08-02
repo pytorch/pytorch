@@ -97,8 +97,8 @@ def clone_vllm(commit: str):
     remove_dir(cwd)
     # Clone the repo & checkout commit
     run_shell("git clone https://github.com/vllm-project/vllm.git")
-    run_shell(f"git checkout {commit}", cwd)
-    run_shell("git submodule update --init --recursive", cwd)
+    run_shell(f"git checkout {commit}", cwd=cwd)
+    run_shell("git submodule update --init --recursive", cwd=cwd)
 
 def read_yaml_file( file_path: str) -> dict:
     p = get_abs_path(file_path)
