@@ -31,6 +31,7 @@ if(USE_CUDA)
 endif()
 
 if(USE_LLVM AND LLVM_FOUND)
+  add_compile_definitions(TEST_LLVM)
   list(APPEND TENSOREXPR_TEST_SRCS ${TENSOREXPR_TEST_ROOT}/test_llvm.cpp)
 endif()
 

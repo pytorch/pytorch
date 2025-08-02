@@ -24,6 +24,7 @@ if [ -n "$CLANG_VERSION" ]; then
   if [ -n "$LLVMDEV" ]; then
     sudo apt-get install -y --no-install-recommends llvm-"$CLANG_VERSION"-dev
   fi
+  sudo apt-get install -y --no-install-recommends llvm
 
   # Use update-alternatives to make this version the default
   update-alternatives --install /usr/bin/clang clang /usr/bin/clang-"$CLANG_VERSION" 50
