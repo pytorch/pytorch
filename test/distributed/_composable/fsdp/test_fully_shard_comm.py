@@ -5,6 +5,7 @@ import functools
 import itertools
 import os
 import tempfile
+import unittest
 from typing import Callable, Optional, Union
 from unittest.mock import MagicMock
 
@@ -54,7 +55,7 @@ from torch.testing._internal.common_fsdp import (
     patch_reshard,
     patch_unshard,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_XPU
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -1454,6 +1455,9 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
     # Test reduce-scatter only on plain FSDP on 2 GPUs
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        TEST_XPU, "Related environment variable is not supported with XCCL"
+    )
     def test_fully_shard_force_sum_reduce_scatter(self):
         torch.manual_seed(42)
         model_args = ModelArgs()
@@ -1506,6 +1510,9 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
     # Test both reduce-scatter and all-reduce on HSDP (DDP+FSDP) on 4 GPUs
     @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(
+        TEST_XPU, "Related environment variable is not supported with XCCL"
+    )
     def test_fully_shard_force_sum_both_reductions(self):
         mesh = init_device_mesh(
             device_type.type, (2, self.world_size // 2), mesh_dim_names=("ddp", "fsdp")
