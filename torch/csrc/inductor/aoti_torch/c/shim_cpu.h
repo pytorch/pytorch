@@ -238,6 +238,34 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__mkl_linear(
 
 #endif // AT_MKLDNN_ENABLED()
 
+#if AT_ZENDNN_ENABLED()
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__zendnn_linear(
+    AtenTensorHandle X,
+    AtenTensorHandle W,
+    AtenTensorHandle* B,
+    bool is_weight_prepacked,
+    const char* name,
+    AtenTensorHandle* ret0);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__zendnn_weight_prepack_for_linear(
+    AtenTensorHandle W,
+    bool treat_tensor_as_transposed,
+    const char* name,
+    AtenTensorHandle* ret0);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__zendnn_linear_unary_binary(
+    AtenTensorHandle X,
+    AtenTensorHandle W,
+    AtenTensorHandle BInput,
+    AtenTensorHandle* B,
+    bool is_weight_prepacked,
+    const char* post_op_1,
+    const char* post_op_2,
+    const char* name,
+    AtenTensorHandle* ret0);
+
+#endif // AT_ZENDNN_ENABLED()
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
     AtenTensorHandle X,
     AtenTensorHandle w,

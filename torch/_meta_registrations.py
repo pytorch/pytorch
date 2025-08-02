@@ -2470,6 +2470,33 @@ def meta_conv(
     out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
     return out
 
+if torch._C.has_zendnn:
+    @register_meta(aten.zendnn_linear.default)
+    def meta_zendnn_linear(input, weight, bias=None, is_weight_prepacked=False, post_op="", zentorch_op_name="zendnn_linear"):
+        out_dim = list(input.size())
+        out_dim[-1] = weight.size(0)
+        return input.new_empty(out_dim)
+
+    @register_meta(aten.zendnn_weight_prepack_for_linear.default)
+    def meta_zendnn_weight_prepack_for_linear(
+        weight,
+        treat_tensor_as_transposed=True,
+        zentorch_op_name="zendnn_weight_prepack_for_linear"
+    ):
+        return weight.new_empty(weight.shape)
+
+    @register_meta(aten.zendnn_linear_unary_binary.default)
+    def meta_zendnn_linear_unary_binary(
+        input,
+        weight,
+        binary_input,
+        bias=None,
+        is_weight_prepacked=False,
+        post_op_1="",
+        post_op_2="",
+        zentorch_op_name="zendnn_linear_unary_binary"
+    ):
+        return binary_input.new_empty(binary_input.shape)
 
 if torch._C._has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
