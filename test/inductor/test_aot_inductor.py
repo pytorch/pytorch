@@ -6897,6 +6897,8 @@ MPS_TEST_FAILURES = {
     "test_zero_size_weight": fail_mps(is_skip=True),
     # RuntimeError: Cannot compare two tensors on different devices. Got: cpu and mps:0
     "test_aoti_constant_tensor_name_collision": fail_mps(is_skip=True),
+    # MPSGraph does not support tensor dims > INT_MAX
+    "test_upper_bound_i64": fail_mps(is_skip=True),
     # MPS doesn't support triton
     "test_autotuning_args_reuse": fail_mps(),
     "test_triton_autotuning": fail_mps(),
@@ -6940,6 +6942,7 @@ MPS_TEST_FAILURES = {
     "test_none_args_aot_codegen": fail_mps(),
     "test_aoti_debug_printer_sym_inputs": fail_mps(),
     "test_aoti_debug_printer_user_defined_triton_kernel": fail_mps(),
+
 }
 
 
