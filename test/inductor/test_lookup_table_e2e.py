@@ -247,6 +247,25 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                 "mm",
                 {
                     "template_id": "mm",
+                    "template_hash": torch._inductor.kernel.mm.mm_template.src_hash,
+                    "BLOCK_M": 64,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 32,
+                    "num_stages": 2,
+                    "num_warps": 2,
+                    "EVEN_K": True,
+                    "ALLOW_TF32": False,
+                    "USE_FAST_ACCUM": False,
+                    "ACC_TYPE": "tl.float32",
+                    "GROUP_M": 8,
+                },
+            ),
+            (
+                "mm",
+                {
+                    "template_id": "mm",
+                    # NOTE: This this one uses no template_hash and therefore will not check
+                    # and should always pass. This is the user saying "I don't care about the hash"
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 32,
@@ -263,6 +282,10 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                 "addmm",
                 {
                     "template_id": "mm",
+                    # NOTE: This is a template hash for mm_template, if this test
+                    # breaks, update it with the hash in the log
+                    # TODO(coconutruben): once the templates are easy to import, read this out of the template
+                    "template_hash": torch._inductor.kernel.mm.mm_template.src_hash,
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 32,
@@ -279,6 +302,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                 "bmm",
                 {
                     "template_id": "bmm",
+                    "template_hash": torch._inductor.kernel.bmm.bmm_template.src_hash,
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 64,
@@ -295,6 +319,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                 "mm_plus_mm",
                 {
                     "template_id": "mm_plus_mm",
+                    "template_hash": torch._inductor.kernel.mm_plus_mm.mm_plus_mm_template.src_hash,
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 16,
@@ -340,6 +365,10 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             [
                 {
                     "template_id": "mm_persistent_tma",
+                    # NOTE: This is a template hash for mm_persistent_tma, if this test
+                    # breaks, update it with the hash in the log
+                    # TODO(coconutruben): once the templates are easy to import, read this out of the template
+                    "template_hash": "88ec6cbe557df819512c09fa9094e91d1c631130be236800fa695acabfc96996",
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 32,
@@ -633,6 +662,45 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             test_data["tensors"],
             {"triton.enable_persistent_tma_matmul": True},
         )
+
+    @fresh_cache()
+    def test_mm_invalid_template_hash_fallback_to_aten(self):
+        """Test MM with valid config but invalid template_hash falls back to aten"""
+        test_data = self.create_test_tensors("mm")
+        lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
+
+        # Setup valid mm config but with invalid template_hash
+        self.setup_lookup_table(
+            "mm",
+            lookup_key,
+            [
+                {
+                    "template_id": "mm",
+                    "template_hash": "rubbish",  # Invalid hash should cause filtering
+                    "BLOCK_M": 64,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 32,
+                    "num_stages": 2,
+                    "num_warps": 2,
+                    "EVEN_K": True,
+                    "ALLOW_TF32": False,
+                    "USE_FAST_ACCUM": False,
+                    "ACC_TYPE": "tl.float32",
+                    "GROUP_M": 8,
+                }
+            ],
+        )
+
+        # Should fall back to aten mm since config gets filtered out
+        add_preprocessing_fn(
+            partial(
+                _post_test_checking_function,
+                choice_name_re="mm",  # Should match aten mm fallback
+                num_expected_choices=1,
+            )
+        )
+
+        self.run_compiled_model(test_data["model"], test_data["tensors"])
 
 
 if __name__ == "__main__":

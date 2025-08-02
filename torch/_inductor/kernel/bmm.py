@@ -215,7 +215,11 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         assert out_dtype is None, "out_dtype is not supported for Triton"
 
         for kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, bmm_template.name, name
+            kernel_inputs,
+            layout,
+            op_name=name,
+            template_name=bmm_template.name,
+            template_hash=bmm_template.src_hash,
         ):
             bmm_template.maybe_append_choice(
                 choices,
@@ -287,7 +291,11 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_triton_template(layout):
         for kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, bmm_template.name, name
+            kernel_inputs,
+            layout,
+            op_name=name,
+            template_name=bmm_template.name,
+            template_hash=bmm_template.src_hash,
         ):
             bmm_template.maybe_append_choice(
                 choices,
