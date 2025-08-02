@@ -60,6 +60,7 @@ import sympy
 import torch
 from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 
@@ -93,7 +94,7 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
-GPU_TYPES = ["cuda", "mps", "xpu"]
+GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
 T = TypeVar("T")
 
 
@@ -130,6 +131,8 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
 
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
@@ -721,6 +724,20 @@ def get_kernel_metadata(
     node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
     wrapper: PythonWrapperCodegen,
 ) -> tuple[str, str]:
+    """
+    Retrieves metadata information for a kernel.
+    Args:
+        node_schedule (Union[Sequence[BaseSchedulerNode], ExternKernel]):
+            Either a sequence of BaseSchedulerNode objects or an ExternKernel instance.
+        wrapper (PythonWrapperCodegen):
+            An instance of PythonWrapperCodegen, used to define the code comment format.
+    Returns:
+        tuple[str, str]:
+            A tuple containing two strings:
+                - The first string represents the kernel's metadata.
+                - The second string represent the kernel's detailed metadata.
+    """
+
     all_origins = aggregate_origins(node_schedule)
     inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
 
@@ -765,11 +782,85 @@ def get_kernel_metadata(
 
     # print the aot_autograd graph fragment
     if single_graph is not None:
+        from . import ir
+
         detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
-        for n in inductor_nodes:
-            # TODO(future): maybe refactor torch/fx/graph.py to make it easy to
-            # generate python code for graph fragments
-            detailed_metadata.append(f"{wrapper.comment}   {n.format_node()}")
+        all_reads: OrderedSet[str] = OrderedSet()
+        all_writes: list[str] = []
+        if not isinstance(node_schedule, ir.ExternKernel):
+            from .virtualized import V
+
+            def get_buffer_info(
+                buffer: Union[ir.TensorBox, ir.Buffer, ir.TorchBindObject], rw_name: str
+            ) -> tuple[str, ir.Layout | None]:
+                if isinstance(buffer, ir.TensorBox) and isinstance(
+                    buffer.data, ir.StorageBox
+                ):
+                    origin_node = buffer.data.data.origin_node
+                else:
+                    origin_node = buffer.origin_node
+                if origin_node is None:
+                    # use the read/write name if no origin node is found
+                    name = rw_name
+                else:
+                    name = origin_node.name
+                try:
+                    layout = buffer.get_layout()
+                except NotImplementedError:
+                    layout = None
+                return name, layout
+
+            def stringify_shape(shape: Iterable[int]) -> str:
+                return f"[{', '.join([str(x) for x in shape])}]"
+
+            def stringfy_layout(layout: ir.Layout | None) -> str:
+                if layout is None:
+                    return ""
+                shape_annotation = f"{stringify_shape(layout.size)}"
+                stride_annotation = f"{stringify_shape(layout.stride)}"
+                device_annotation = f"{layout.device}"
+
+                return (
+                    f'"{dtype_abbrs[layout.dtype]}{shape_annotation}'
+                    f'{stride_annotation}{device_annotation}"'
+                )
+
+            for n in node_schedule:
+                if not hasattr(n, "read_writes") or n.read_writes is None:
+                    continue
+                if hasattr(n.read_writes, "reads") and n.read_writes.reads is not None:
+                    for r in n.read_writes.reads:
+                        # Remove the dupricated inputs
+                        if r.name in all_reads:
+                            continue
+                        all_reads.add(r.name)
+                        buffer = V.graph.try_get_buffer(r.name)
+                        if buffer is None:
+                            continue
+                        input_name, layout = get_buffer_info(buffer, r.name)
+                        detailed_metadata.append(
+                            f"{wrapper.comment}   %{input_name} : Tensor "
+                            f"{stringfy_layout(layout)} = PlaceHolder[target={input_name}]"
+                        )
+
+                if (
+                    hasattr(n.read_writes, "writes")
+                    and n.read_writes.writes is not None
+                ):
+                    for w in n.read_writes.writes:
+                        buffer = V.graph.try_get_buffer(w.name)
+                        if buffer is None:
+                            continue
+                        output_name, _ = get_buffer_info(buffer, w.name)
+
+                        all_writes.append("%" + output_name)
+
+        for node in inductor_nodes:
+            detailed_metadata.append(
+                f"{wrapper.comment}   {node.format_node(include_tensor_metadata=True)}"
+            )
+
+        detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
     return metadata, "\n".join(detailed_metadata)
 
@@ -1543,7 +1634,7 @@ def use_triton_template(
     )
 
 
-def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
+def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
     """
     Return True iff *all* supplied tensors satisfy the CUDA-12.9 TMA constraints
     that Triton relies on today.
@@ -1625,10 +1716,13 @@ def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool
 
         return True
 
+    return has_triton_tma_device() and all(_is_tma_compatible(m) for m in matrices)
+
+
+def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
     return (
-        config.triton.enable_persistent_tma_matmul
-        and has_triton_tma_device()
-        and all(_is_tma_compatible(m) for m in matrices)
+        can_use_tma(*matrices, add_guards=add_guards)
+        and config.triton.enable_persistent_tma_matmul
     )
 
 
@@ -3370,3 +3464,28 @@ def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.S
         return free_unbacked_symbols(x)
     else:
         return free_symbols(x)
+
+
+def maybe_log_cudagraph_partition(
+    msg: str,
+    prefix: Optional[str] = "cudagraph partition due to ",
+    node: Optional[BaseSchedulerNode] = None,
+) -> None:
+    """
+    Cudagraph partition may lead to extra memory overhead so we
+    log partition reasons to help users understand the overhead.
+    """
+    if not config.triton.cudagraphs:
+        return
+
+    warning_msg = f"{prefix}{msg}"
+
+    if (
+        node
+        and (ir_node := node.node)
+        and (fx_node := ir_node.get_origin_node())
+        and (stack_trace := fx_node.meta.get("stack_trace", None))
+    ):
+        warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
+
+    perf_hint_log.warning(warning_msg)

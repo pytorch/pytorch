@@ -286,8 +286,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {f32, f64},
     "linalg.eig": {f32, f64},
-    # Double and complex datatype matmul is not supported in oneDNN
-    "byte": {f16, f32},
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
@@ -295,9 +293,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # not implemented for 'Half'
-    "sort": {b8},
-    "argsort": {b8},
 }
 
 
@@ -985,7 +980,15 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
         dim = kwargs["dim"]
 
     def argsort_sort_assert_equal(
-        test_case_inst, x, y, *, atol=None, rtol=None, equal_nan=True, exact_dtype=True
+        test_case_inst,
+        x,
+        y,
+        *,
+        atol=None,
+        rtol=None,
+        equal_nan=True,
+        exact_dtype=True,
+        exact_stride=False,
     ):
         if is_argsort:
             assert isinstance(x, torch.Tensor)
@@ -1004,6 +1007,7 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
                 rtol=rtol,
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
+                exact_stride=exact_stride,
             )
 
             # The second tensor is the same result as an argsort.
@@ -1014,6 +1018,11 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
             raise AssertionError(f"The dtypes do not match: {x.dtype} != {y.dtype}.")
 
         assert x.shape == y.shape
+
+        if exact_stride and (x.stride() != y.stride()):
+            raise AssertionError(
+                f"The strides do not match: {x.stride()} != {y.stride()}."
+            )
 
         def el_to_indices(el):
             """Turn an element number into a list of indices"""
