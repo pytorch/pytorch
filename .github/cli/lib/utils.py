@@ -10,18 +10,21 @@ import yaml
 import sys
 import sys
 
-def run(
-    cmd: str,
-    cwd: Optional[str] = None,
-    env: Optional[dict] = None,
-    logging: bool = True,
-):
-    if logging:
-        print(f">>> {cmd}",flush=True)
-    subprocess.run(shlex.split(cmd), check=True, cwd=cwd, env=env, shell=True)
-
+def run(cmd: str, cwd: Optional[str] = None, env: Optional[dict] = None):
+    print(f"[INFO] {cmd}", flush=True)
+    subprocess.run(
+        cmd,
+        shell=True,
+        executable="/bin/bash",
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        check=True,
+        env=env,
+        cwd=cwd
+    )
 
 def run_shell(cmd: str, cwd: Optional[str] = None, env: Optional[dict] = None):
+    print(f"[shell]{cmd}", flush=True)
     subprocess.run(
         cmd,
         shell=True,
