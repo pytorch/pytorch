@@ -16,6 +16,7 @@ from .template_heuristics import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    MTIAConfigHeuristic,
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
@@ -65,6 +66,8 @@ class InductorChoices:
             return XPUConfigHeuristic()
         elif device_type == "cpu":
             return CPUConfigHeuristic()
+        elif device_type == "mtia":
+            return MTIAConfigHeuristic()
         else:
             return BaseConfigHeuristic()
 
@@ -363,6 +366,17 @@ class InductorChoices:
 
         if scheduler.can_fusion_increase_peak_memory(node1, node2):
             WhyNoFuse(node1, node2)("Fusion will increase peak memory")
+            return False
+
+        if (
+            config.realize_acc_reads_size_threshold is not None
+            and scheduler.fusion_accumulate_large_reads(
+                node1,
+                node2,
+                config.realize_acc_reads_size_threshold,
+            )
+        ):
+            WhyNoFuse(node1, node2)("Fusion accumulate large amount of reads")
             return False
 
         return True
