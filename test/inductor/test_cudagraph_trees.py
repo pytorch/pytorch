@@ -2850,6 +2850,28 @@ if HAS_CUDA:
             self.assertEqual(x, torch.tensor(1, device="cpu"))
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar_multiple(self):
+            def f(x, y, z):
+                return x + y, x + z
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            inputs = (
+                torch.ones((), device="cpu"),
+                torch.ones((), device="cpu"),
+                torch.ones(2, 2, device="cuda"),
+            )
+            for i in range(3):
+                if i == 0:
+                    _, code = run_and_get_code(compiled_f, *inputs)
+                    FileCheck().check_regex(r".copy_.*True").run(code[0])
+                    FileCheck().check_count(".copy_", 1, exactly=True).run(code[0])
+                else:
+                    compiled_f(*inputs)
+            self.assertEqual(compiled_f(*inputs), f(*inputs))
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_graph_partition_reduce_overhead_mode_effectiveness(self):
             # test that `mode="reduce-overhead"` still controls whether
