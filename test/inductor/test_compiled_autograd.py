@@ -1008,8 +1008,8 @@ main()
         # Freeze compiled autograd graph
         compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
         param = torch.ones(100)
-        activ = torch.ones(100) * 2
-        inputs = [param, activ]
+        active = torch.ones(100) * 2
+        inputs = [param, active]
         _, proxies, _, _ = compiler.begin_capture(
             inputs=inputs,
             sizes=[],
@@ -1060,7 +1060,7 @@ main()
         try:
             runtime_wrapper(
                 compiled_fn=compiled_fn,
-                inputs=[param, activ],
+                inputs=[param, active],
                 sizes=(),
                 scalars=(),
                 hooks=[],
@@ -3395,6 +3395,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         )  # for a single match: matches1=['match'], for multiple matches: matches1=[('match1', 'match2')]...
         self.assertEqual(len(matches1), len(patterns1))
 
+    @skipIfWindows(msg="node name demangling inconsistent on windows")
     def test_verbose_logs_dynamic_shapes(self):
         logs, ctx = logs_to_string(
             torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"

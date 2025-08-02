@@ -1,5 +1,119 @@
 #include <metal_stdlib>
+
 using namespace metal;
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+template <bool upper>
+inline bool triul_mask(int row, int col, int k);
+template <>
+inline bool triul_mask<true>(int row, int col, int k) {
+  return col - row >= k;
+}
+template <>
+inline bool triul_mask<false>(int row, int col, int k) {
+  return col - row <= k;
+}
+
+template <typename IndexType>
+inline IndexType compute_offs(
+    constant IndexType* strides,
+    constant uint* sizes,
+    uint3 pos,
+    int ndim) {
+  auto offs = pos.x * strides[0] + pos.y * strides[1];
+  if (ndim < 4) {
+    return ndim == 3 ? offs + pos.z * strides[2] : offs;
+  }
+  auto idx = pos.z;
+  for (int i = 2; i < ndim; ++i) {
+    offs += strides[i] * (idx % sizes[i]);
+    idx /= sizes[i];
+  }
+  return offs;
+}
+
+template <typename T, typename IndexType, bool upper>
+kernel void triul_inplace(
+    device T* self,
+    constant IndexType* strides,
+    constant uint* sizes,
+    constant int2& k_ndim,
+    uint3 pos [[thread_position_in_grid]]) {
+  if (triul_mask<upper>(pos.y, pos.x, k_ndim.x)) {
+    return;
+  }
+  auto offs = compute_offs(strides, sizes, pos, k_ndim.y);
+  self[offs] = 0;
+}
+
+template <typename T, typename IndexType, bool upper>
+kernel void triul(
+    device T* out,
+    device T* inp,
+    constant IndexType* out_strides,
+    constant IndexType* inp_strides,
+    constant uint* sizes,
+    constant int2& k_ndim,
+    uint3 pos [[thread_position_in_grid]]) {
+  auto out_offs = compute_offs(out_strides, sizes, pos, k_ndim.y);
+  if (!triul_mask<upper>(pos.y, pos.x, k_ndim.x)) {
+    out[out_offs] = 0;
+    return;
+  }
+  auto inp_offs = compute_offs(inp_strides, sizes, pos, k_ndim.y);
+  out[out_offs] = inp[inp_offs];
+}
+
+#define INSTANTIATE_TRIUL_KERNELS(DTYPE, IDX_TYPE)                         \
+  template [[host_name("triu_inplace_" #IDX_TYPE "_" #DTYPE)]] kernel void \
+  triul_inplace<DTYPE, IDX_TYPE, true>(                                    \
+      device DTYPE * self,                                                 \
+      constant IDX_TYPE * strides,                                         \
+      constant uint * sizes,                                               \
+      constant int2 & k_ndim,                                              \
+      uint3 pos [[thread_position_in_grid]]);                              \
+  template [[host_name("tril_inplace_" #IDX_TYPE "_" #DTYPE)]] kernel void \
+  triul_inplace<DTYPE, IDX_TYPE, false>(                                   \
+      device DTYPE * self,                                                 \
+      constant IDX_TYPE * strides,                                         \
+      constant uint * sizes,                                               \
+      constant int2 & k_ndim,                                              \
+      uint3 pos [[thread_position_in_grid]]);                              \
+  template [[host_name("triu_" #IDX_TYPE "_" #DTYPE)]] kernel void         \
+  triul<DTYPE, IDX_TYPE, true>(                                            \
+      device DTYPE * out,                                                  \
+      device DTYPE * inp,                                                  \
+      constant IDX_TYPE * out_strides,                                     \
+      constant IDX_TYPE * inp_strides,                                     \
+      constant uint * sizes,                                               \
+      constant int2 & k_ndim,                                              \
+      uint3 pos [[thread_position_in_grid]]);                              \
+  template [[host_name("tril_" #IDX_TYPE "_" #DTYPE)]] kernel void         \
+  triul<DTYPE, IDX_TYPE, false>(                                           \
+      device DTYPE * out,                                                  \
+      device DTYPE * inp,                                                  \
+      constant IDX_TYPE * out_strides,                                     \
+      constant IDX_TYPE * inp_strides,                                     \
+      constant uint * sizes,                                               \
+      constant int2 & k_ndim,                                              \
+      uint3 pos [[thread_position_in_grid]])
+
+INSTANTIATE_TRIUL_KERNELS(float, int);
+INSTANTIATE_TRIUL_KERNELS(half, int);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_TRIUL_KERNELS(bfloat, int);
+#endif
+
+INSTANTIATE_TRIUL_KERNELS(float2, int);
+INSTANTIATE_TRIUL_KERNELS(half2, int);
+
+INSTANTIATE_TRIUL_KERNELS(long, int);
+INSTANTIATE_TRIUL_KERNELS(int, int);
+INSTANTIATE_TRIUL_KERNELS(short, int);
+INSTANTIATE_TRIUL_KERNELS(char, int);
+INSTANTIATE_TRIUL_KERNELS(uchar, int);
+INSTANTIATE_TRIUL_KERNELS(bool, int);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // To find the max integer that does not exceed the root of an int64_t variable,

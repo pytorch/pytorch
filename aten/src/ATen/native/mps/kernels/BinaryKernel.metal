@@ -134,6 +134,58 @@ struct chebyshev_polynomial_w_functor {
   }
 };
 
+struct shifted_chebyshev_polynomial_t_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(
+        c10::metal::shifted_chebyshev_polynomial_t_forward(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::shifted_chebyshev_polynomial_t_forward(
+        float(a), float(b));
+  }
+};
+
+struct shifted_chebyshev_polynomial_u_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(
+        c10::metal::shifted_chebyshev_polynomial_u_forward(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::shifted_chebyshev_polynomial_u_forward(
+        float(a), float(b));
+  }
+};
+
+struct shifted_chebyshev_polynomial_v_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(
+        c10::metal::shifted_chebyshev_polynomial_v_forward(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::shifted_chebyshev_polynomial_v_forward(
+        float(a), float(b));
+  }
+};
+
+struct shifted_chebyshev_polynomial_w_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(
+        c10::metal::shifted_chebyshev_polynomial_w_forward(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::shifted_chebyshev_polynomial_w_forward(
+        float(a), float(b));
+  }
+};
+
 struct hermite_polynomial_h_functor {
   template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
   inline T operator()(const T a, const T b) {
@@ -342,6 +394,14 @@ REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_v);
 REGISTER_INT2FLOAT_BINARY_OP(chebyshev_polynomial_w);
 REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_w);
 REGISTER_INT2FLOAT_BINARY_OP(chebyshev_polynomial_v);
+REGISTER_FLOAT_BINARY_OP(shifted_chebyshev_polynomial_t);
+REGISTER_INT2FLOAT_BINARY_OP(shifted_chebyshev_polynomial_t);
+REGISTER_FLOAT_BINARY_OP(shifted_chebyshev_polynomial_u);
+REGISTER_INT2FLOAT_BINARY_OP(shifted_chebyshev_polynomial_u);
+REGISTER_FLOAT_BINARY_OP(shifted_chebyshev_polynomial_v);
+REGISTER_INT2FLOAT_BINARY_OP(shifted_chebyshev_polynomial_v);
+REGISTER_FLOAT_BINARY_OP(shifted_chebyshev_polynomial_w);
+REGISTER_INT2FLOAT_BINARY_OP(shifted_chebyshev_polynomial_w);
 REGISTER_FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_FLOAT_BINARY_OP(hermite_polynomial_he);

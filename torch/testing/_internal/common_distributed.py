@@ -32,6 +32,7 @@ import torch.nn as nn
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch._logging._internal import trace_log
+from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
@@ -671,6 +672,7 @@ class MultiProcessTestCase(TestCase):
         if methodName != "runTest":
             method_name = methodName
         super().__init__(method_name)
+        self.seed = None
         try:
             fn = getattr(self, method_name)
             setattr(self, method_name, self.join_or_run(fn))
@@ -715,13 +717,20 @@ class MultiProcessTestCase(TestCase):
 
     def _start_processes(self, proc) -> None:
         self.processes = []
+        assert common_utils.SEED is not None
         for rank in range(int(self.world_size)):
             parent_conn, child_conn = torch.multiprocessing.Pipe()
             process = proc(
                 target=self.__class__._run,
                 name="process " + str(rank),
-                args=(rank, self._current_test_name(), self.file_name, child_conn),
+                args=(
+                    rank,
+                    self._current_test_name(),
+                    self.file_name,
+                    child_conn,
+                ),
                 kwargs={
+                    "seed": common_utils.SEED,
                     "fake_pg": getattr(self, "fake_pg", False),
                 },
             )
@@ -775,11 +784,12 @@ class MultiProcessTestCase(TestCase):
 
     @classmethod
     def _run(
-        cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
+        cls, rank: int, test_name: str, file_name: str, parent_pipe, seed: int, **kwargs
     ) -> None:
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
+        self.seed = seed
         self.run_test(test_name, parent_pipe)
 
     def run_test(self, test_name: str, parent_pipe) -> None:
@@ -797,6 +807,9 @@ class MultiProcessTestCase(TestCase):
             torch._C._set_print_stack_traces_on_fatal_signal(True)
         # Show full C++ stacktraces when a Python error originating from C++ is raised.
         os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
+
+        if self.seed is not None:
+            common_utils.set_rng_seed(self.seed)
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
@@ -1149,7 +1162,7 @@ def spawn_threads_and_init_comms(
             )
             try:
                 callback()
-            except BaseException as ex:
+            except BaseException as ex:  # noqa: B036
                 # Exceptions are handled in MultiThreadedTestCase
                 MultiThreadedTestCase.exception_queue.put((rank, sys.exc_info()))
                 ProcessLocalGroup.exception_handle(
@@ -1310,7 +1323,7 @@ class MultiThreadedTestCase(TestCase):
 
         try:
             getattr(self, test_name)()
-        except BaseException as ex:
+        except BaseException as ex:  # noqa: B036
             self.exception_queue.put((rank, sys.exc_info()))
             ProcessLocalGroup.exception_handle(
                 ex
@@ -1535,7 +1548,7 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
 
     @classmethod
     def _run(
-        cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
+        cls, rank: int, test_name: str, file_name: str, parent_pipe, seed: int, **kwargs
     ) -> None:
         trace_log.addHandler(logging.NullHandler())
 
@@ -1543,6 +1556,7 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
+        self.seed = seed
         self.run_test(test_name, parent_pipe)
 
 
@@ -1616,6 +1630,7 @@ class MultiProcContinousTest(TestCase):
 
     @classmethod
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):
+        raised_exception = False
         # Sub tests are going to access these values, check first
         assert 0 <= rank < world_size
         # set class variables for the test class
@@ -1640,13 +1655,24 @@ class MultiProcContinousTest(TestCase):
             try:
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
-            except BaseException as ex:
-                # Send the exception back to the dispatcher
-                completion_queue.put(ex)
+            except BaseException as ex:  # noqa: B036
+                raised_exception = True
+                # Send the exception and stack trace back to the dispatcher
+                exc_info = sys.exc_info()
+                tb_str = "".join(traceback.format_exception(*exc_info))
+                # Create a new exception with the original exception and traceback
+                enhanced_ex = RuntimeError(f"Exception in worker process:\n{tb_str}")
+                enhanced_ex.__cause__ = ex
+                completion_queue.put(enhanced_ex)
 
         # Termination
         logger.info("Terminating ...")
-        c10d.destroy_process_group()
+        # Calling destroy_process_group when workers have exceptions
+        # while others are doing collectives will cause a deadlock since
+        # it waits for enqueued collectives to finish.
+        # Only call this on a clean exit path
+        if not raised_exception:
+            c10d.destroy_process_group()
 
     @classmethod
     def _spawn_processes(cls, world_size) -> None:

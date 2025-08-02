@@ -44,7 +44,7 @@ def topo_sort(nodes: NodeList) -> NodeList:
 
 @compatibility(is_backward_compatible=False)
 def validate_partition(partition: NodeList) -> bool:
-    # verify the partition does't form a dependency cycle in the original graph
+    # verify the partition doesn't form a dependency cycle in the original graph
     # returns True for valid partition, False for invalid
 
     partition_set = set(partition)
@@ -157,13 +157,13 @@ def fuse_as_graphmodule(
 
         if x in partition_lookup_table:
             # x is inside subgraph, return the copied node
-            # the node should have been copied aleady, as we are copying graph in the topological order
+            # the node should have been copied already, as we are copying graph in the topological order
             return node_map[x]
 
         if x not in node_to_placeholder:
             # x is not in subgraph, create a new placeholder for subgraph
             placeholder_node = subgraph.placeholder(x.name, type_expr=x.type)
-            # copy all meta fields, even if some fields might be irrelvant for the placeholder node
+            # copy all meta fields, even if some fields might be irrelevant for the placeholder node
             placeholder_node.meta = copy.copy(x.meta)
             node_to_placeholder[x] = placeholder_node
 

@@ -3,6 +3,13 @@
 
 import torch
 
+if __name__ == '__main__':
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+
+    # The value of GRAPH_EXECUTOR and SEED depend on command line arguments so make sure they're parsed
+    # before instantiating tests.
+    parse_cmd_line_args()
+
 # This is how we include tests located in test/jit/...
 # They are included here so that they are invoked when you call `test_jit.py`,
 # do not run these test files directly.
@@ -97,7 +104,7 @@ import torch.nn.functional as F
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
-    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
+    GRAPH_EXECUTOR, suppress_warnings, IS_SANDCASTLE, ProfilingMode, \
     TestCase, freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, skipIfTorchDynamo
@@ -158,6 +165,7 @@ def doAutodiffCheck(testname):
     if "test_t_" in testname or testname == "test_t":
         return False
 
+    assert GRAPH_EXECUTOR
     if GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
         return False
 
@@ -201,6 +209,7 @@ def doAutodiffCheck(testname):
     return testname not in test_exceptions
 
 
+assert GRAPH_EXECUTOR
 # TODO: enable TE in PE when all tests are fixed
 torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
@@ -4764,7 +4773,7 @@ a")
         self.assertIsNot(fun_compiled, fun_compiled_2)
         self.assertEqual(fun_compiled_2(), 7)
 
-        # caching doesnt increase refcounts to function (holds weak reference)
+        # caching doesn't increase refcounts to function (holds weak reference)
         self.assertTrue(sys.getrefcount(fun), num_ref_counts)
 
     def test_string_ops(self):
@@ -7374,7 +7383,7 @@ a")
                     # tensor from empty list is type float in python and annotated type in torchscript
                     if "annotate" in li and "dtype" not in option:
                         continue
-                    # Skip unsigned tensor initializaton for signed values on 3.10
+                    # Skip unsigned tensor initialization for signed values on 3.10
                     if sys.version_info[:2] >= (3, 10) and "torch.uint8" in option and "-" in li:
                         continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
@@ -7990,7 +7999,7 @@ dedent """
                 m += k
             return m
 
-        # use of k tests the pathway where we have to insert unitialized
+        # use of k tests the pathway where we have to insert uninitialized
         self.checkScript(test_varexit, (3,))
         self.checkScript(test_varexit, (2,))
 
@@ -10066,7 +10075,7 @@ dedent """
         buffer = io.BytesIO()
         torch.jit.save(cm, buffer)
         buffer.seek(0)
-        # when tensor is loaded as constant it isnt specialized
+        # when tensor is loaded as constant it isn't specialized
         cm_load = torch.jit.load(buffer)
         FileCheck().check_not("Float(1, 3)").run(cm_load.forward.graph)
 
@@ -10300,7 +10309,7 @@ dedent """
 
     def test_type_inferred_from_empty_annotation(self):
         """
-        Test that the type inferred from an empty or missing annotation is Torch.Tensor wtih `inferred=true`
+        Test that the type inferred from an empty or missing annotation is Torch.Tensor with `inferred=true`
         """
         @torch.jit.script
         def fn(x):
@@ -14835,7 +14844,7 @@ dedent """
 
         # testing overload declared first, then non-overload
         if sys.version_info < (3, 13):  # test broken in 3.13
-            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            with self.assertRaisesRegex(Exception, "Overloads are not usable when a module"):
                 class W3(torch.nn.Module):
                     @torch.jit._overload_method  # noqa: F811
                     def forward(self, x):  # noqa: F811
@@ -14888,7 +14897,7 @@ dedent """
                 return self.hello(1), self.hello(x)
 
         if sys.version_info < (3, 13):  # test broken in 3.13
-            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            with self.assertRaisesRegex(Exception, "Overloads are not usable when a module"):
                 a = torch.jit.script(W2())
 
     def test_narrow_copy(self):
@@ -15606,7 +15615,7 @@ dedent """
                 a = hasattr(self, "fee")
                 b = hasattr(self, "foo")
                 c = hasattr(self, "hi")
-                d = hasattr(self, "nonexistant")
+                d = hasattr(self, "nonexistent")
                 return (a, b, c, d)
 
             def foo(self):
@@ -16044,7 +16053,7 @@ EXCLUDE_TYPE_CHECK = {
 # chunk returns a list in scripting and we don't unpack the list,
 # Thus it won't be replaced by ConstantChunk and run AD.
 # It's explicitly checked in test_chunk_constant_script_ad
-# Similary for split, it's replaced by split_with_sizes in tracing,
+# Similarly for split, it's replaced by split_with_sizes in tracing,
 # but we don't have AD formula for aten::split(Tensor, int[], int),
 # an op registered in JIT so AD is not triggered in scripting.
 EXCLUDE_SCRIPT_AD_CHECK = {
