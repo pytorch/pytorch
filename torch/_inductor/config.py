@@ -138,7 +138,7 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # None: Not set -- Off for OSS, JustKnobs based for internal
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
-# See torch.compiler.force_disable_caches
+# See torch.compiler.config.force_disable_caches
 force_disable_caches: bool = Config(alias="torch.compiler.config.force_disable_caches")
 
 # Unsafe way to skip dynamic shape guards to get faster cache load
