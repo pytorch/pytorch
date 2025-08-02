@@ -122,6 +122,8 @@ numba==0.60.0 ; python_version == "3.12"
 #numpy
 #Description: Provides N-dimensional arrays and linear algebra
 #Pinned versions: 1.26.2
+#PyTorch binaries should be built against the earliest version of NumPy available
+#for the target CPython version, to ensure compatibility.
 #test that import: test_view_ops.py, test_unary_ufuncs.py, test_type_promotion.py,
 #test_type_info.py, test_torch.py, test_tensorexpr_pybind.py, test_tensorexpr.py,
 #test_tensorboard.py, test_tensor_creation_ops.py, test_static_runtime.py,
