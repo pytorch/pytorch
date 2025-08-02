@@ -547,8 +547,16 @@ def convolution(
         req_stride_order = ir.get_stride_order(
             V.graph.sizevars.size_hints(layout.stride)
         )
-        x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
-        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
+        try:
+            x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
+        except Exception:
+            # Fallback to contiguous layout for compatibility with permute operations
+            x = ir.ExternKernel.require_contiguous(x)  # type: ignore[assignment]
+        try:
+            weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
+        except Exception:
+            # Fallback to contiguous layout for compatibility
+            weight = ir.ExternKernel.require_contiguous(weight)  # type: ignore[assignment]
 
     ordered_kwargs_for_cpp_kernel = [
         "stride",
