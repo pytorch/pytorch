@@ -13,9 +13,9 @@ echo "Installing torch whls and vllm dependencies"
 pip install "$(echo dist/torch-*.whl)[opt_einsum]"
 pip install dist/vision/torchvision*.whl
 pip install dist/audio/torchaudio*.whl
-pip install wheels/xformers/xformers*.whl
-pip install wheels/vllm/vllm*.whl
-pip install wheels/flashinfer-python/flashinfer*.whl
+pip install shared/wheels/xformers/xformers*.whl
+pip install shared/wheels/vllm/vllm*.whl
+pip install shared/wheels/flashinfer-python/flashinfer*.whl
 
 git clone https://github.com/vllm-project/vllm.git
 cd vllm
