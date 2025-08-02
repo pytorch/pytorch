@@ -1,10 +1,4 @@
-import glob
 import os
-import shlex
-import shutil
-import subprocess
-import tempfile
-import sys
 from pathlib import Path
 
 from lib.utils import read_yaml_file, run_shell

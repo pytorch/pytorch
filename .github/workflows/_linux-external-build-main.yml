@@ -239,7 +239,7 @@ jobs:
             cd scripts/cli/
             python3 -m pip install -e .
           )
-          python3 -m build_cli.cli "$BUILD_TARGET" --artifact-dir shared --torch-whl-dir "./dist" --base-image "$DOCKER_IMAGE" run
+          python3 -m build_cli.build external "$BUILD_TARGET" --artifact-dir shared --torch-whl-dir "./dist" --base-image "$DOCKER_IMAGE" run
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 

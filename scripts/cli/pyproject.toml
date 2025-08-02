@@ -12,4 +12,3 @@ packages = ["build_cli", "test_cli", "lib"]
 [tool.setuptools.package-dir]
 build_cli = "build_cli"
 test_cli = "test_cli"
-cli_lib = "lib"
