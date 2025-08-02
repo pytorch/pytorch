@@ -1,5 +1,5 @@
 from cement import App, Controller, ex
-from cli.build import BUILD_CONTROLLERS
+from cli.build_cli import BUILD_CONTROLLERS
 from cli.test import TEST_CONTROLLERS
 
 
