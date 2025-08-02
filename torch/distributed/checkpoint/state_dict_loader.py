@@ -1,8 +1,10 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import inspect
+import logging
 import os
 import warnings
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
@@ -18,7 +20,12 @@ from .storage import StorageReader
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 
+if TYPE_CHECKING:
+    from torch.distributed.checkpoint.metadata import Metadata
+
 __all__ = ["load_state_dict", "load"]
+
+logger = logging.getLogger()
 
 
 @deprecated(
@@ -213,12 +220,47 @@ def _load_state_dict(
         ckpt_kwargs["checkpoint_id"] = ckpt_id
         ckpt_kwargs["process_group"] = distW.group
 
+    use_collectives = True
+    metadata: Optional[Metadata] = None
+
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
+        nonlocal use_collectives
+        nonlocal metadata
+
+        if "kwargs" in inspect.signature(storage_reader.read_metadata).parameters:
+            try:
+                metadata = storage_reader.read_metadata(rank=distW.rank)  # noqa: F841
+
+                if metadata:
+                    use_collectives = False
+                    logger.info(
+                        "Rank local metadata is found. Using no rank coordination for checkpoint loading."
+                    )
+            except Exception:
+                logger.info(
+                    "Rank local metadata is not found. Falling back to global metadata."
+                )
+
+        if use_collectives:
+            metadata = storage_reader.read_metadata()
+
         assert planner is not None
-        metadata = storage_reader.read_metadata()
+        assert metadata is not None
         planner.set_up_planner(state_dict, metadata, distW.is_coordinator)
-        storage_reader.set_up_storage_reader(metadata, distW.is_coordinator)
+
+        if (
+            "kwargs"
+            in inspect.signature(storage_reader.set_up_storage_reader).parameters
+        ):
+            storage_reader.set_up_storage_reader(
+                metadata,
+                distW.is_coordinator,
+                rank=distW.rank,
+                use_collectives=use_collectives,
+            )
+        else:
+            storage_reader.set_up_storage_reader(metadata, distW.is_coordinator)
 
         local_plan = planner.create_local_plan()
         local_plan = storage_reader.prepare_local_plan(local_plan)
@@ -231,18 +273,29 @@ def _load_state_dict(
         all_local_plans = storage_reader.prepare_global_plan(all_local_plans)
         return all_local_plans
 
-    central_plan: LoadPlan = distW.reduce_scatter("plan", local_step, global_step)
+    central_plan: Optional[LoadPlan] = None
+    if use_collectives:
+        central_plan = distW.reduce_scatter("plan", local_step, global_step)
+    else:
+        local_plan: LoadPlan = local_step()
+        global_plan: list[LoadPlan] = global_step([local_plan])
+        central_plan = global_plan[0]
 
     @_dcp_method_logger(**ckpt_kwargs)
     def read_data():
         assert planner is not None
+        assert central_plan is not None
         final_local_plan = planner.finish_plan(central_plan)
         all_reads = storage_reader.read_data(final_local_plan, planner)
 
         all_reads.wait()
         return None
 
-    _ = distW.all_gather("read", read_data)
+    if use_collectives:
+        _ = distW.all_gather("read", read_data)
+    else:
+        read_data()
+        distW.barrier()
 
 
 def _load_state_dict_from_keys(
