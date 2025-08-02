@@ -1,8 +1,40 @@
 import os
+import subprocess
 import sysconfig
 from typing import Optional
-
+import triton
 from torch.utils._triton import has_triton
+
+# will remove this, just for testing
+print(f"[DEBUG] Triton version: {triton.__version__}")
+
+
+def _find_nvshmem_device_library() -> str:
+    paths = [sysconfig.get_path("purelib") + "/nvidia/nvshmem/lib"]
+
+    try:
+        import torch
+        torch_lib = os.path.dirname(torch.__file__) + "/lib"
+        so_path = os.path.join(torch_lib, "libtorch_nvshmem.so")
+
+        if os.path.exists(so_path):
+            result = subprocess.run(["readelf", "-d", so_path], capture_output=True, text=True, check=False)
+            for line in result.stdout.split('\n'):
+                if ('RPATH' in line or 'RUNPATH' in line) and '[' in line:
+                    rpath = line.split('[')[1].split(']')[0]
+                    for p in rpath.split(':'):
+                        p = p.strip().replace('$ORIGIN', torch_lib)
+                        if p and p not in paths:
+                            paths.append(p)
+    except Exception:
+        pass
+
+    for path in paths:
+        lib = os.path.join(path, "libnvshmem_device.bc")
+        if os.path.exists(lib):
+            return lib
+
+    raise RuntimeError(f"NVSHMEM device library not found. Searched: {paths}")
 
 
 def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
@@ -23,14 +55,15 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
 
     from torch._C._distributed_c10d import _nvshmemx_cumodule_init
 
-    # Detect NVSHMEM device library path from python library path
-    if lib_dir is None:
-        py_lib_path = sysconfig.get_path("purelib")
-        lib_dir = py_lib_path + "/nvidia/nvshmem/lib"
-
-    lib_path = os.path.join(lib_dir, "libnvshmem_device.bc")
-    if not os.path.exists(lib_path):
-        raise RuntimeError("NVSHMEM device library not found")
+    # Detect NVSHMEM device library path
+    if lib_dir is not None:
+        # Use user-provided path
+        lib_path = os.path.join(lib_dir, "libnvshmem_device.bc")
+        if not os.path.exists(lib_path):
+            raise RuntimeError(f"NVSHMEM device library not found at {lib_path}")
+    else:
+        # Use robust search mechanism
+        lib_path = _find_nvshmem_device_library()
 
     extern_libs = {"libnvshmem_device": lib_path}
 
@@ -45,7 +78,7 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
         _nvshmemx_cumodule_init(kernel.module)
 
     # Register the function as a post-compile hook
-    JITFunction.compiled_hook = nvshmem_init_hook
+    triton.knobs.runtime.jit_post_compile_hook = nvshmem_init_hook
 
     # Return to user so that they can use it in Triton kernel invocation
     return extern_libs
@@ -56,7 +89,7 @@ if has_triton():
 
     # RMA Operations (mem-based APIs - sizes in bytes)
     @core.extern
-    def putmem_block(dst, src, size_bytes, pe, _builder=None):  # type: ignore[no-untyped-def]
+    def putmem_block(dst, src, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
         """Put data to remote PE. size_bytes specifies the size in bytes."""
         return core.extern_elementwise(
             "",
@@ -71,11 +104,11 @@ if has_triton():
                 ): ("nvshmemx_putmem_block", core.dtype("int32"))
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     @core.extern
-    def getmem_block(dst, src, size_bytes, pe, _builder=None):  # type: ignore[no-untyped-def]
+    def getmem_block(dst, src, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
         """Get data from remote PE. size_bytes specifies the size in bytes."""
         return core.extern_elementwise(
             "",
@@ -90,7 +123,7 @@ if has_triton():
                 ): ("nvshmemx_getmem_block", core.dtype("int32"))
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     @core.extern
@@ -102,7 +135,7 @@ if has_triton():
         signal,
         sig_op,
         pe,
-        _builder=None,
+        _semantic=None,
     ):  # type: ignore[no-untyped-def]
         """Put data to remote PE with signal. size_bytes specifies the size in bytes."""
         return core.extern_elementwise(
@@ -121,12 +154,12 @@ if has_triton():
                 ): ("nvshmemx_putmem_signal_block", core.dtype("int32"))
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     # Wait and Signal Operations
     @core.extern
-    def wait_until(ivar, cmp, cmp_val, _builder=None):  # type: ignore[no-untyped-def]
+    def wait_until(ivar, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
         """Wait until a condition is met on a symmetric variable."""
         return core.extern_elementwise(
             "",
@@ -140,11 +173,11 @@ if has_triton():
                 ): ("nvshmem_longlong_wait_until", core.dtype("int32"))
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     @core.extern
-    def signal_wait_until(sig_addr, cmp, cmp_val, _builder=None):  # type: ignore[no-untyped-def]
+    def signal_wait_until(sig_addr, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
         """Wait until a signal variable meets a condition."""
         return core.extern_elementwise(
             "",
@@ -158,11 +191,11 @@ if has_triton():
                 ): ("nvshmem_signal_wait_until", core.dtype("int32"))
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     @core.extern
-    def signal_op(sig_addr, signal, sig_op, pe, _builder=None):  # type: ignore[no-untyped-def]
+    def signal_op(sig_addr, signal, sig_op, pe, _semantic=None):  # type: ignore[no-untyped-def]
         """Perform a signal operation on a remote PE."""
         return core.extern_elementwise(
             "",
@@ -177,12 +210,12 @@ if has_triton():
                 ): ("nvshmemx_signal_op", core.dtype("int32"))
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     # Memory Ordering Operations
     @core.extern
-    def fence(_builder=None):  # type: ignore[no-untyped-def]
+    def fence(_semantic=None):  # type: ignore[no-untyped-def]
         """Ensure ordering of put operations."""
         return core.extern_elementwise(
             "",
@@ -192,11 +225,11 @@ if has_triton():
                 (): ("nvshmem_fence", core.dtype("int32")),
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     @core.extern
-    def quiet(_builder=None):  # type: ignore[no-untyped-def]
+    def quiet(_semantic=None):  # type: ignore[no-untyped-def]
         """Wait for completion of all outstanding put operations."""
         return core.extern_elementwise(
             "",
@@ -206,12 +239,12 @@ if has_triton():
                 (): ("nvshmem_quiet", core.dtype("int32")),
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     # PE Information Operations
     @core.extern
-    def my_pe(_builder=None):  # type: ignore[no-untyped-def]
+    def my_pe(_semantic=None):  # type: ignore[no-untyped-def]
         """Get the PE number of the calling PE."""
         return core.extern_elementwise(
             "",
@@ -219,11 +252,11 @@ if has_triton():
             [],
             {(): ("nvshmem_my_pe", core.dtype("int32"))},
             is_pure=True,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     @core.extern
-    def n_pes(_builder=None):  # type: ignore[no-untyped-def]
+    def n_pes(_semantic=None):  # type: ignore[no-untyped-def]
         """Get the total number of PEs."""
         return core.extern_elementwise(
             "",
@@ -231,12 +264,12 @@ if has_triton():
             [],
             {(): ("nvshmem_n_pes", core.dtype("int32"))},
             is_pure=True,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     # Synchronization Operations
     @core.extern
-    def barrier_all(_builder=None):  # type: ignore[no-untyped-def]
+    def barrier_all(_semantic=None):  # type: ignore[no-untyped-def]
         """Synchronize all PEs."""
         return core.extern_elementwise(
             "",
@@ -244,11 +277,11 @@ if has_triton():
             [],
             {(): ("nvshmem_barrier_all", core.dtype("int32"))},
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     @core.extern
-    def sync_all(_builder=None):  # type: ignore[no-untyped-def]
+    def sync_all(_semantic=None):  # type: ignore[no-untyped-def]
         """Synchronize all PEs (lightweight version, does not ensure completion of remote memory updates)."""
         return core.extern_elementwise(
             "",
@@ -256,12 +289,12 @@ if has_triton():
             [],
             {(): ("nvshmem_sync_all", core.dtype("int32"))},
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     # Collective Operations (mem-based APIs - sizes in bytes)
     @core.extern
-    def alltoallmem_block(team, dest, source, size_bytes, _builder=None):  # type: ignore[no-untyped-def]
+    def alltoallmem_block(team, dest, source, size_bytes, _semantic=None):  # type: ignore[no-untyped-def]
         """Perform alltoall operation on symmetric memory. size_bytes specifies the number of bytes to exchange per PE."""
         return core.extern_elementwise(
             "",
@@ -276,11 +309,11 @@ if has_triton():
                 ): ("nvshmemx_alltoallmem_block", core.dtype("int32"))
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     @core.extern
-    def broadcastmem_block(team, dest, source, size_bytes, pe_root, _builder=None):  # type: ignore[no-untyped-def]
+    def broadcastmem_block(team, dest, source, size_bytes, pe_root, _semantic=None):  # type: ignore[no-untyped-def]
         """Broadcast data from a root PE to all other PEs in a team. size_bytes specifies the size in bytes."""
         return core.extern_elementwise(
             "",
@@ -296,12 +329,12 @@ if has_triton():
                 ): ("nvshmemx_broadcastmem_block", core.dtype("int32"))
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     # Reduction Operations
     @core.extern
-    def sum_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
+    def sum_reduce(team, dest, source, nreduce, _semantic=None):  # type: ignore[no-untyped-def]
         """Sum reduction for int64. nreduce is number of elements in the dest and source arrays."""
         return core.extern_elementwise(
             "",
@@ -316,11 +349,11 @@ if has_triton():
                 ): ("nvshmem_int64_sum_reduce", core.dtype("int32"))
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     @core.extern
-    def max_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
+    def max_reduce(team, dest, source, nreduce, _semantic=None):  # type: ignore[no-untyped-def]
         """Max reduction for int64. nreduce is number of elements in the dest and source arrays."""
         return core.extern_elementwise(
             "",
@@ -335,11 +368,11 @@ if has_triton():
                 ): ("nvshmem_int64_max_reduce", core.dtype("int32"))
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
 
     @core.extern
-    def min_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
+    def min_reduce(team, dest, source, nreduce, _semantic=None):  # type: ignore[no-untyped-def]
         """Min reduction for int64. nreduce is number of elements in the dest and source arrays."""
         return core.extern_elementwise(
             "",
@@ -354,5 +387,5 @@ if has_triton():
                 ): ("nvshmem_int64_min_reduce", core.dtype("int32"))
             },
             is_pure=False,
-            _builder=_builder,
+            _semantic=_semantic,
         )
