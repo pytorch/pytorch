@@ -558,7 +558,7 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
     scalar_t& res = gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * c];
     if (t < input_length && (! zero_infinity || nll != INFINITY)) {
       scalar_t lp = log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * c];
-      res = (std::exp(lp)-std::exp(res + nll - lp)) * gr;
+      res = (-std::exp(res + nll - lp)) * gr;
     }
     else {
       res = 0.;
@@ -722,6 +722,10 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
        tg_batch_offsets.const_data_ptr<int64_t>(), tg_target_stride,
        batch_size, zero_infinity);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+    // subtract a factor of exp(log_probs) * output_gradient to cancel
+    // out effect of log-softmax, so have gradient wrt. raw input.
+    // FIXME there's probably a more optimal way to do this.
+    grad.sub_(log_probs.exp() * grad_out.view({1, batch_size, 1}));
   } else { // small problem, use naive algorithm
     // Still no block/grid configuration guru...
     int threads_input = max_threads;
