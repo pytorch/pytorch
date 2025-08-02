@@ -110,6 +110,11 @@ def put_and_signal_kernel(
 
 
 @triton.jit
+def fence_kernel():
+    nvshmem.fence()
+
+
+@triton.jit
 def put_with_fence_kernel(
     dst_ptr1,
     dst_ptr2,
@@ -666,6 +671,73 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                     [COMPLETION_FLAG_VAL], dtype=flag_dtype, device=self.device
                 ),
             )
+
+    @skipIfRocm
+    @requires_triton()
+    def test_triton_ring_broadcast_with_signal_op(self) -> None:
+        """Ring broadcast using signal_op / signal_wait_until + flag check."""
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        nvshmem_lib = nvshmem.enable_triton()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+        rank, world_size = self.rank, self.world_size
+        # configuration
+        dtype = torch.int32
+        msg_size_bytes = 16
+        numel = msg_size_bytes // dtype.itemsize
+        NVSHMEM_SIGNAL_SET = 0  # atomic‑set op
+        NVSHMEM_CMP_NE = 1  # not‑equal predicate
+        # buffers
+        data = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        data_hdl = symm_mem.rendezvous(data, group=group_name)
+        flag_dtype = torch.int64
+        flag = symm_mem.empty(1, dtype=flag_dtype, device=self.device).fill_(0)
+        flag_hdl = symm_mem.rendezvous(flag, group=group_name)
+        # Root initialises payload & its own flag.
+        if rank == 0:
+            for i in range(numel):
+                data[i] = i + 100
+            flag[0] = 1  # local store is fine for rank‑0
+        else:
+            data.fill_(0)
+        # ring algoirthm
+        next_pe = (rank + 1) % world_size
+        # 1) wait until our flag is non‑zero
+        local_sig_ptr = flag_hdl.buffer_ptrs[rank]
+        signal_wait_until_kernel[(1,)](
+            local_sig_ptr,
+            cmp_op=NVSHMEM_CMP_NE,
+            cmp_val=0,
+            extern_libs=nvshmem_lib,
+        )
+        # 2) forward payload + flag unless we are the last PE
+        if rank != world_size - 1:
+            dst_ptr = data_hdl.buffer_ptrs[next_pe]
+            src_ptr = data_hdl.buffer_ptrs[rank]
+            put_kernel[(1,)](
+                dst_ptr,
+                src_ptr,
+                msg_size_bytes,
+                next_pe,
+                extern_libs=nvshmem_lib,
+            )
+            # order before signaling
+            fence_kernel[(1,)](extern_libs=nvshmem_lib)
+            next_sig_ptr = flag_hdl.buffer_ptrs[next_pe]
+            signal_op_kernel[(1,)](
+                next_sig_ptr,
+                signal=1,
+                sig_op=NVSHMEM_SIGNAL_SET,
+                peer=next_pe,
+                extern_libs=nvshmem_lib,
+            )
+        dist.barrier()
+        expected = torch.tensor(
+            [i + 100 for i in range(numel)], dtype=dtype, device=self.device
+        )
+        # Check data
+        torch.testing.assert_close(data, expected)
 
     @skipIfRocm
     @requires_triton()
