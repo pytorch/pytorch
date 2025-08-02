@@ -300,6 +300,20 @@ class TypeMROSource(ChainedSource):
         return f"{self.base.name()}.__mro__"
 
 
+# Represents obj.__func__
+@dataclasses.dataclass(frozen=True)
+class FuncSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__func__"))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.__func__"
+
+
 @dataclasses.dataclass(frozen=True)
 class LocalCellSource(Source):
     """

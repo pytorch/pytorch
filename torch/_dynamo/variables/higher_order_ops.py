@@ -53,7 +53,7 @@ from ..exc import (
     unimplemented_v2,
     Unsupported,
 )
-from ..source import AttrSource, DictGetItemSource
+from ..source import AttrSource, DictGetItemSource, FuncSource
 from ..utils import proxy_args_kwargs, set_example_value
 from .base import VariableTracker
 from .dicts import ConstDictVariable
@@ -924,7 +924,7 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
             torch._dynamo.variables.UserDefinedObjectVariable(
                 self.value, source=self.source
             ),
-            source=AttrSource(AttrSource(self.source, "__call__"), "__func__"),
+            source=FuncSource(AttrSource(self.source, "__call__")),
         ).call_function(tx, args, kwargs)
 
 
