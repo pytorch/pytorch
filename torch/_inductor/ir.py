@@ -3707,9 +3707,10 @@ class Layout(OutputSpec):
         # do for dynamic shape.
         #
         # Skip padding the strides for dynamic shape for now.
+        # If outermost dim is dynamic, stride still can be fully static
         if not all(
             isinstance(s, (int, sympy.Integer))
-            for s in itertools.chain(in_strides, size)
+            for s in itertools.chain(in_strides, size[1:])
         ):
             return in_strides
 
@@ -3725,11 +3726,11 @@ class Layout(OutputSpec):
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
             stride = new_strides[prev_idx] * size[prev_idx]
-
-            if stride > config.padding_stride_threshold and stride % align != 0:
-                stride = ceildiv(stride, align) * align
-                padded = True
-            new_strides[idx] = stride
+            if isinstance(stride, (int, sympy.Integer)):
+                if stride > config.padding_stride_threshold and stride % align != 0:
+                    stride = ceildiv(stride, align) * align
+                    padded = True
+                new_strides[idx] = stride
 
         if not padded:
             # Consider a tensor with shape [256, 1, 5, 5]
