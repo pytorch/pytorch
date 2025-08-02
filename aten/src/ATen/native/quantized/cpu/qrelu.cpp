@@ -26,6 +26,10 @@
 #include <ATen/ops/relu_native.h>
 #endif
 
+#if defined(CPU_CAPABILITY_SVE) || defined(CPU_CAPABILITY_SVE128)
+#include <ATen/cpu/vec/sve/vec_common_sve.h>
+#endif
+
 #include <algorithm>
 
 namespace at::native {

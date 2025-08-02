@@ -74,6 +74,7 @@ float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
     }
   });
   const auto [t0, t1] = vec::convert_half_float(x[0]);
+
   return vec::vec_reduce_all<float>(
       std::plus<vec::Vectorized<float>>(),
       t0 + t1);
@@ -126,6 +127,7 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
 #endif // !defined(__aarch64__) || defined( __ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
 
 float reduce(vec::Vectorized<float> x) {
+
   return vec::vec_reduce_all<float>(
       std::plus<vec::Vectorized<float>>(),
       x);
@@ -185,8 +187,7 @@ dot_with_fp32_arith_main_inner_loop_bfdot(
   const auto temp_vec2 = vld1q_bf16(
       reinterpret_cast<const bfloat16_t*>(
           &vec2[registerPairIndex * vec::Vectorized<BFloat16>::size()]));
-  sum[registerPairIndex] =
-    vbfdotq_f32(sum[registerPairIndex], temp_vec1, temp_vec2);
+  sum[registerPairIndex].setNeon(vreinterpretq_p128_f32(vbfdotq_f32(vreinterpretq_f32_p128(sum[registerPairIndex].getNeon()), temp_vec1, temp_vec2)));
 }
 
 TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE
@@ -198,7 +199,7 @@ void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
   // See NOTE[Intrinsics in bfdot variant] above.
   const auto temp_vec1 = vld1q_bf16(reinterpret_cast<const bfloat16_t*>(&vec1[idx]));
   const auto temp_vec2 = vld1q_bf16(reinterpret_cast<const bfloat16_t*>(&vec2[idx]));
-  *tail_sum = vbfdotq_f32(*tail_sum, temp_vec1, temp_vec2);
+  tail_sum->setNeon(vreinterpretq_p128_f32(vbfdotq_f32(vreinterpretq_f32_p128(tail_sum->getNeon()), temp_vec1, temp_vec2)));
 }
 
 #else
@@ -212,8 +213,14 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
     const vec::Vectorized<c10::Half>& b,
     const vec::Vectorized<float>& acc_low,
     const vec::Vectorized<float>& acc_high) {
-#if defined(__ARM_FEATURE_FP16_FML) && !defined(CPU_CAPABILITY_SVE)
-  return std::make_pair(vfmlalq_low_f16(acc_low, a, b), vfmlalq_high_f16(acc_high, a, b));
+#if defined(__aarch64__) && ((defined(__ARM_FEATURE_FP16_FML) && !defined(__ARM_FEATURE_SVE)) || (defined(CPU_CAPABILITY_SVE128)))
+  float16x8_t aReg = vreinterpretq_f16_p128(a.getNeon());
+  float16x8_t bReg = vreinterpretq_f16_p128(b.getNeon());
+  vec::Vectorized<float> c;
+  vec::Vectorized<float> d;
+  c.setNeon(vreinterpretq_p128_f32(vfmlalq_low_f16(vreinterpretq_f32_p128(acc_low.getNeon()), aReg, bReg)));
+  d.setNeon(vreinterpretq_p128_f32(vfmlalq_high_f16(vreinterpretq_f32_p128(acc_high.getNeon()), aReg, bReg)));
+  return std::make_pair(c, d);
 #else
   const auto [a_float_low, a_float_high] = convert_half_float(a);
   const auto [b_float_low, b_float_high] = convert_half_float(b);
@@ -233,13 +240,18 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
 
 // Return a + b_low * c_low + b_high * c_high
 vec::Vectorized<float> fmadd(vec::Vectorized<float> a, vec::Vectorized<Half> b, vec::Vectorized<Half> c) {
-#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_FML) && !defined(__ARM_FEATURE_SVE)
+#if defined(__aarch64__) && ((defined(__ARM_FEATURE_FP16_FML) && !defined(__ARM_FEATURE_SVE)) || (defined(CPU_CAPABILITY_SVE128)))
   // NOTE: this instruction is an optional instruction in ARM v8.2 and
   // v8.3, but mandatory in v8.4 per
   // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
   // I'm not certain that I have the right feature test macro.
-  vec::Vectorized<float> first = vfmlalq_low_f16(a, b, c);
-  return vfmlalq_high_f16(first, b, c);
+  float32x4_t aReg = vreinterpretq_f32_p128(a.getNeon());
+  float32x4_t bReg = vreinterpretq_f32_p128(b.getNeon());
+  float16x8_t cReg = vreinterpretq_f16_p128(c.getNeon());
+  vec::Vectorized<float> res;
+  res.setNeon(vreinterpretq_p128_f32(vfmlalq_low_f16(aReg, bReg, cReg)));
+  res.setNeon(vreinterpretq_p128_f32(vfmlalq_high_f16(vreinterpretq_f32_p128(res.getNeon()), bReg, cReg)));
+  return res;
 #else
   const auto [b_float_low, b_float_high] = convert_half_float(b);
   const auto [c_float_low, c_float_high] = convert_half_float(c);

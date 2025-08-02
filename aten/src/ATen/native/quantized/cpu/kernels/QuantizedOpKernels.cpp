@@ -34,6 +34,9 @@
 #if defined(__ARM_NEON__) || defined(__aarch64__)
 #include <ATen/quantized/Quantizer.h>
 #include <arm_neon.h>
+#if defined(CPU_CAPABILITY_SVE) || defined(CPU_CAPABILITY_SVE128)
+#include <ATen/cpu/vec/sve/vec_common_sve.h>
+#endif
 #endif
 
 
