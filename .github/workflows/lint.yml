@@ -35,6 +35,21 @@ jobs:
   lintrunner-clang:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: [get-label-type, get-changed-files]
+    # Only run if there are changed files relevant to clangtidy / clangformat
+    if: |
+      github.repository_owner == 'pytorch' && (
+        needs.get-changed-files.outputs.changed-files == '*' ||
+        contains(needs.get-changed-files.outputs.changed-files, '.h') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cpp') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cc') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cxx') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.hpp') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.hxx') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cu') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cuh') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.mm') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.metal')
+      )
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
@@ -59,6 +74,13 @@ jobs:
   lintrunner-mypy:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: [get-label-type, get-changed-files]
+    # Only run if there are changed files relevant to mypy
+    if: |
+      github.repository_owner == 'pytorch' && (
+        needs.get-changed-files.outputs.changed-files == '*' ||
+        contains(needs.get-changed-files.outputs.changed-files, '.py') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.pyi')
+      )
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
