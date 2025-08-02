@@ -389,7 +389,7 @@ def _flatten_vts(vts):
     output = []
 
     while vts:
-        vt = vts.pop()
+        vt = vts.popleft()
 
         if not vt.is_realized() and vt.peek_type() in (dict, list, tuple):
             vt.realize()
@@ -397,8 +397,10 @@ def _flatten_vts(vts):
         if vt.is_realized():
             if isinstance(vt, ListVariable):
                 vts.extend(vt.items)
+                continue
             elif isinstance(vt, ConstDictVariable):
                 vts.extend(vt.items.values())
+                continue
 
         output.append(vt)
 
