@@ -31,7 +31,7 @@ jobs:
       opt_out_experiments: lf
 
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80:
-    name: cuda12.8-py3.12-gcc11-sm80
+    name: cuda12.8-py3.12-gcc11-sm80-vllm-test
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -46,7 +46,7 @@ jobs:
     secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build:
-    name: build-vllm-wheels
+    name: cuda12.8-py3.12-gcc11-sm80-vllm-test
     uses: ./.github/workflows/_linux-external-build-main.yml
     needs: [
       get-label-type,
@@ -62,7 +62,7 @@ jobs:
     secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-test:
-    name: cuda12.8-py3.12-gcc11-sm80
+    name: cuda12.8-py3.12-gcc11-sm80-vllm-test
     uses: ./.github/workflows/_linux-test.yml
     needs: [
       linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80,
