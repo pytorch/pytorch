@@ -207,6 +207,13 @@ Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value
   TORCH_CHECK(sequences_size > 0, "received an empty list of sequences");
   TORCH_CHECK(padding_side == "left" || padding_side == "right",
               "Expected padding_side to be one of left or right, but got ", padding_side, ".");
+  const Tensor& first_seq = sequences[0];
+  if (first_seq.scalar_type() == at::kLong) {
+    TORCH_CHECK(
+        padding_value <
+            static_cast<double>(std::numeric_limits<int64_t>::max()),
+        "Overflow for int64");
+  }
   IntArrayRef max_size = sequences[0].sizes();
   IntArrayRef trailing_dims = max_size.slice(1);
   int64_t max_len = std::max_element(
