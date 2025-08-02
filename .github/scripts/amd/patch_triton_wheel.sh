@@ -19,15 +19,13 @@ replace_needed_sofiles() {
     find $1 -name '*.so*' -o -name 'ld.lld' | while read sofile; do
         origname=$2
         patchedname=$3
-        if [[ "$origname" != "$patchedname" ]]; then
-            set +e
-            origname=$($PATCHELF_BIN --print-needed $sofile | grep "$origname.*")
-            ERRCODE=$?
-            set -e
-            if [ "$ERRCODE" -eq "0" ]; then
-                echo "patching $sofile entry $origname to $patchedname"
-                $PATCHELF_BIN --replace-needed $origname $patchedname $sofile
-            fi
+        set +e
+        origname=$($PATCHELF_BIN --print-needed $sofile | grep "$origname.*")
+        ERRCODE=$?
+        set -e
+        if [ "$ERRCODE" -eq "0" ]; then
+            echo "patching $sofile entry $origname to $patchedname"
+            $PATCHELF_BIN --replace-needed $origname $patchedname $sofile
         fi
     done
 }
