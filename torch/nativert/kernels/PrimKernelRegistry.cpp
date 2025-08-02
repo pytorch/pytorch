@@ -10,14 +10,14 @@
 
 namespace torch::nativert {
 
-C10_DEFINE_REGISTRY(PrimKernelRegistry, OpKernel, const Node*);
+C10_DEFINE_REGISTRY(PrimKernelRegistry, OpKernel, const Node*)
 
 namespace {
 
 class OpKernel_prim_listpack : public OpKernel {
  public:
   explicit OpKernel_prim_listpack(const Node* node)
-      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
+      : OpKernel(node, OpKernelKind::kPrimKernel) {
     auto listType = node->outputs()[0]->type();
     switch (listType.kind()) {
       case Type::Kind::TensorList:
@@ -65,18 +65,18 @@ REGISTER_PRIM_KERNEL("prim.ListUnpack", prim_listunpack, {
   for (const auto& [i, ivalue] : c10::enumerate(inputListRef)) {
     KernelOutput(i) = ivalue;
   }
-});
+})
 
 // Noop for input and output
-REGISTER_PRIM_KERNEL("prim.Input", prim_input, {});
-REGISTER_PRIM_KERNEL("prim.Output", prim_output, {});
+REGISTER_PRIM_KERNEL("prim.Input", prim_input, {})
+REGISTER_PRIM_KERNEL("prim.Output", prim_output, {})
 
 namespace {
 
 class OpKernel_variadic_concat : public OpKernel {
  public:
   explicit OpKernel_variadic_concat(const Node* node)
-      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
+      : OpKernel(node, OpKernelKind::kPrimKernel) {
     dim_ = node_->attributes().size() > 0
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;
@@ -121,7 +121,7 @@ namespace {
 class OpKernel_variadic_stack : public OpKernel {
  public:
   explicit OpKernel_variadic_stack(const Node* node)
-      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
+      : OpKernel(node, OpKernelKind::kPrimKernel) {
     dim_ = node_->attributes().size() > 0
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;

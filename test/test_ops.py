@@ -1109,7 +1109,22 @@ class TestCommon(TestCase):
                 if op.is_factory_function and sample.kwargs.get("dtype", None) is None:
                     op_out(out=out)
                 else:
-                    with self.assertRaises(RuntimeError, msg=msg_fail):
+                    # TODO: Remove me when all ops will raise type error on mismatched types
+                    exc_type = (
+                        TypeError
+                        if op.name
+                        in [
+                            "_chunk_cat",
+                            "cat",
+                            "column_stack",
+                            "dstack",
+                            "hstack",
+                            "vstack",
+                            "stack",
+                        ]
+                        else RuntimeError
+                    )
+                    with self.assertRaises(exc_type, msg=msg_fail):
                         op_out(out=out)
 
     @ops(
