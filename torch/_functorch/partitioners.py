@@ -2433,7 +2433,10 @@ def choose_saved_values_set(
                 saved_node_idxs=saved_node_idxs,
                 recomputable_node_idxs=recomputable_node_idxs,
                 expected_runtime=expected_runtime,
-                memories_banned_nodes=memories_banned_nodes,
+                memories_banned_nodes=[
+                    _size_of(i) for i in all_recomputable_banned_nodes
+                ],
+                normalized_memories_banned_nodes=memories_banned_nodes,
                 runtimes_banned_nodes=runtimes_banned_nodes,
                 min_cut_saved_values=saved_values,
             )
