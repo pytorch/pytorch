@@ -1354,6 +1354,22 @@ class TestPatternMatcher(TestCase):
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    def test_addmm_dtype_mismatch(self):
+        a = torch.nn.Linear(1024, 1024, bias=False).cuda()
+        a = a.to(dtype=torch.float16)
+
+        w = torch.randn(1024, 1024, device="cuda")
+
+        def func():
+            x = torch.ones(1024, 1024, device="cuda", dtype=torch.float16)
+            x = a(x)
+            x = x + w
+            return x
+
+        actual, (code) = run_and_get_code(torch.compile(func))
+        self.assertEqual(actual, func())
+        FileCheck().check_not("addmm").run(code[0])
+
     def test_replace_mul_zero(self):
         def test(x, y):
             return x + (y * 0)
