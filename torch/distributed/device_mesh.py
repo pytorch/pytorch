@@ -112,6 +112,8 @@ else:
             # keep track of the number of dims that have been flattened so we can get the correct slice_dim_idx in the
             # flattened mesh tensor.
             num_dims_flatten = 0
+            # Currently, this only allows slicing out a contiguous flattened dim.
+            # TODO: we need to handle reconstructing a non-contiguous flattened dim.
             for mesh_dim_indices, mesh_dim_name in zip(submesh_dims, submesh_dim_names):
                 if len(mesh_dim_indices) > 1:
                     # We need to move the start_dim and end_dim to the left if some dims are already flattened.
@@ -246,6 +248,9 @@ else:
             split_mesh_sizes: tuple[int, ...],
             mesh_dim_names: tuple[str, ...],
         ) -> "DeviceMesh":
+            # Since we only support split on a contiguous mesh, we relies on the accumulated numel
+            # to detect whether one dim_name has been split into a different shape before. And this
+            # includes both root mesh and all split meshes.
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
             root_numel_mapping = {}
             root_numel = 1
@@ -284,7 +289,6 @@ else:
                     else:
                         # Reuse the existing pg
                         unchanged_numel *= split_mesh_sizes[idx]
-                        split_numel_map[mesh_dim_name] = split_numel_in_root
                 else:
                     # This dim name has never been split into, and we need to create a new PG.
                     split_dims_numel *= split_mesh_sizes[idx]
@@ -440,18 +444,25 @@ else:
             self.mesh_dim_group_options[dim] = (backend, pg_options)
 
         def _find_mesh_to_slice(self, device_mesh, mesh_dim_names) -> "DeviceMesh":
-            # If user don't slice from root mesh, the mesh have to contain all mesh dim names.
+            # If user don't slice from root mesh, the mesh have to contain all sliced mesh dim names.
             if device_mesh != self.get_root_mesh(device_mesh):
                 return device_mesh
 
-            # If user slice from root mesh, we will swap to split mesh if users slice dims from split mesh.
+            # If user slice from root mesh, we will swap to split mesh if users specify any split dims.
             mesh_to_slice = self.root_to_split_mapping.get(device_mesh, {}).get(
                 mesh_dim_names[0], set()
             )
+            has_split_dim = False
             for mesh_dim_name in mesh_dim_names:
-                mesh_to_slice &= self.root_to_split_mapping.get(device_mesh, {}).get(
+                split_mesh_set = self.root_to_split_mapping.get(device_mesh, {}).get(
                     mesh_dim_name, set()
                 )
+                mesh_to_slice &= split_mesh_set
+                if len(split_mesh_set) > 0:
+                    has_split_dim = True
+
+            if not has_split_dim:
+                return device_mesh
 
             if len(mesh_to_slice) == 0:
                 raise RuntimeError(
@@ -1177,7 +1188,7 @@ else:
             DeviceMesh([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], mesh_dim_names=("dp", "cp", "tp")).
 
             After the split, to access the split dimension in mesh_1d, one can use the
-            existing slicing method to obtain the flattened mesh through calling mesh_1d["dp"].
+            existing slicing method to obtain the split mesh through calling mesh_1d["dp"].
             """
             if len(split_sizes) != len(mesh_dim_names):
                 raise RuntimeError(
