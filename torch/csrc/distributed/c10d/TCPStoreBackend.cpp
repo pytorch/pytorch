@@ -615,10 +615,11 @@ void TCPStoreMasterDaemon::run() {
 #endif
 
 std::unique_ptr<BackgroundThread> create_tcpstore_backend(
+    const std::string& host,
     const TCPStoreOptions& opts) {
   Socket socket = opts.masterListenFd.has_value()
       ? Socket::listenFromFd(*opts.masterListenFd, opts.port)
-      : Socket::listen(opts.port);
+      : Socket::listen(host, opts.port);
 
   return std::make_unique<TCPStoreMasterDaemon>(std::move(socket));
 }
