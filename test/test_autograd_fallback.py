@@ -6,7 +6,7 @@ import warnings
 import numpy as np
 
 import torch
-from torch.library import _scoped_library
+from torch.library import _scoped_library, Library
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -28,24 +28,20 @@ def autograd_fallback_mode(mode):
 class TestAutogradFallback(TestCase):
     test_ns = "_test_autograd_fallback"
 
-    def setUp(self):
-        super().setUp()
-        self.libraries = []
-
     def tearDown(self):
         if hasattr(torch.ops, self.test_ns):
             delattr(torch.ops, self.test_ns)
-        for lib in self.libraries:
-            lib._destroy()
-        del self.libraries
+        if hasattr(self, "lib"):
+            del self.lib.m
+            del self.lib
 
     def get_op(self, name):
         return getattr(getattr(torch.ops, self.test_ns), name).default
 
     def get_lib(self):
-        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
-        self.libraries.append(result)
-        return result
+        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        self.lib = lib
+        return lib
 
     @parametrize("mode", ("nothing", "warn"))
     def test_no_grad(self, mode):

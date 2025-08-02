@@ -1385,8 +1385,7 @@ struct IValuePacker<std::vector<T>> {
     }
     std::vector<T> result;
     auto lst = t.toList();
-    for (size_t i = 0; i < lst.size(); ++i) {
-      const at::IValue& elt = lst.get(i);
+    for (const at::IValue& elt : lst) {
       result.emplace_back(IValuePacker<T>::unpack(elt));
     }
     return result;

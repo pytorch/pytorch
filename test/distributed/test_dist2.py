@@ -208,15 +208,12 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
 
     def test_group_split(self) -> None:
         group = self.new_group()
-        subgroup = group.split_group(
-            [0], timeout=timedelta(seconds=30), group_name="subgroup_1"
-        )
+        subgroup = group.split_group([0], timeout=timedelta(seconds=30))
         if self.rank == 0:
             assert subgroup is not None
             self.assertEqual(subgroup.size(), 1)
             backend = subgroup._get_backend(self.device)
             self.assertEqual(backend.options._timeout, timedelta(seconds=30))
-            self.assertEqual(subgroup.group_name, "subgroup_1")
         else:
             self.assertEqual(subgroup, None)
 
@@ -238,7 +235,6 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
             self.assertEqual(merged_pg.size(), 2)
             backend = merged_pg._get_backend(self.device)
             self.assertEqual(backend.options._timeout, timedelta(seconds=40))
-            self.assertEqual(merged_pg.group_name, "merged_pg")
         else:
             assert subgroup_2 is not None
             tcp_store = dist.TCPStore(
@@ -253,7 +249,6 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
             self.assertEqual(merged_pg.size(), 2)
             backend = merged_pg._get_backend(self.device)
             self.assertEqual(backend.options._timeout, timedelta(seconds=40))
-            self.assertEqual(merged_pg.group_name, "merged_pg")
 
 
 class ProcessGroupGlooTest(Dist2MultiProcessTestCase):
