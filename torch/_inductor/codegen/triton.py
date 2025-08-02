@@ -1120,6 +1120,47 @@ class TritonOverrides(OpOverrides):
         allow_tf32 = torch.backends.cuda.matmul.allow_tf32
         assert torch._inductor.config.triton.enable_native_matmul
         
+        # TODO:
+        # 1. when there is broadcasting operands (A.repeat() @ B), adjust manually.
+        # 2. Not here, but remove tl.broadcast_to in index expression.
+        # 3. torch.bmm(a+1, b+2)+3 -> can't split?
+        # 4. fp16 vs fp32?
+
+        def is_where_needed(var):
+            # Skip if the variable doesn't have a reduction mask
+            if not 'r0_mask' in var.mask_vars:
+                return False 
+
+            # Skip if the variable is already zeroed outside the mask
+            # (e.g., from tl.load(..., other=0.0))
+            for k,v in V.kernel.cse._cache.items():
+                if (
+                    v == var
+                    and "tl.load" in k
+                    and "r0_mask" in k
+                    and "other=0.0" in k
+                ):
+                    return False
+
+            return True
+
+        def where_cond(var):
+            default = ir.Reduction.default_value("dot", var.dtype)
+            return TritonKernelOverrides.where("r0_mask", var, default)
+        
+        # When using a reduction mask and expressions like ((A+1) @ B), 
+        # we use tl.dot(tl.load(..., r0_mask, other=0.0)+1, B). 
+        # But this produces incorrect results. So before calling tl.dot, 
+        # we need to apply tl.where to zero out values properly.
+        # Optimize - We don't need both operands to be zeroed with tl.where
+        if is_where_needed(a) :
+            a = where_cond(a)
+        elif is_where_needed(b) :
+            b = where_cond(b)
+
+        # dtype cast
+        # CAUTION - don't miss the where condition above.
+
         # mm case
         if len(dense_sizes) == 3:
             Y = dense_sizes[0]
