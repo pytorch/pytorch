@@ -53,6 +53,7 @@ from torch._functorch._aot_autograd.subclass_parametrization import (
 )
 from torch._functorch.aot_autograd import (
     aot_export_module,
+    GraphOutputName,
     make_boxed_func,
     SerializableAOTDispatchCompiler,
 )
@@ -429,7 +430,7 @@ def _unlift_graph(
 
     from torch.export._unlift import _unlift
 
-    outputs = list(gm.graph.nodes)[-1].args[0]
+    outputs: tuple[torch.fx.Node, ...] = tuple(gm.graph.output_node().args[0])  # type: ignore[arg-type]
     mutated_outputs = []
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
@@ -438,10 +439,11 @@ def _unlift_graph(
         value: Optional[Union[FQN, GraphInputName]] = None
 
         if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
-            if out.name in buffer_mutations:
-                value = buffer_mutations[out.name]
-            elif out.name in user_input_mutations:
-                value = user_input_mutations[out.name]
+            name = GraphOutputName(out.name)
+            if name in buffer_mutations:
+                value = buffer_mutations[name]
+            elif name in user_input_mutations:
+                value = user_input_mutations[name]
 
         mutated_outputs.append(value)
 
@@ -451,8 +453,6 @@ def _unlift_graph(
         mutated_outputs,
         pytree.LeafSpec(),
         None,
-        state_dict,
-        {},
     )
     return unlifted_gm
 
@@ -909,10 +909,37 @@ def _compile_fx_inner(
             else:
                 log.debug("Failed to generate FX cache key")
 
+        if torch._functorch.config.bundled_autograd_cache:
+            assert mb_compiled_graph is None
+            assert cache_info is None
+            # When using bundled autograd cache, we still want
+            # to use the TritonBundler, but we don't want to save
+            # the results here. The results will get saved directly
+            # to AOTAutogradCache.
+            TritonBundler.begin_compile()
+            try:
+                mb_compiled_graph = fx_codegen_and_compile(
+                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                )
+                assert mb_compiled_graph is not None
+                (
+                    triton_bundle,
+                    triton_bundler_meta,
+                ) = TritonBundler.collect()
+                mb_compiled_graph.set_triton_bundle(triton_bundle)
+            except (ShortenTraceback, SkipFrame):
+                raise
+            except Exception as e:
+                raise InductorError(e, currentframe()).with_traceback(
+                    e.__traceback__
+                ) from None
+            finally:
+                TritonBundler.end_compile()
+
         # CACHE BYPASS: Compile the graph, don't save it to the cache
         # (this can happen either because cache was disabled, or we
         # determined the input is uncacheable)
-        if cache_info is None or cache_info["cache_state"] == "bypass":
+        elif cache_info is None or cache_info["cache_state"] == "bypass":
             assert mb_compiled_graph is None
             log.debug(
                 "FX cache bypass reason: %s",
@@ -1033,17 +1060,13 @@ def _compile_fx_inner(
         provenance_info = torch._inductor.debug.dump_inductor_provenance_info()
         # provenance_info might be None if trace.provenance_tracking is not set
         if provenance_info:
-            (
-                _,
-                node_mappings,
-            ) = provenance_info
             trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
                     "name": "inductor_provenance_tracking_node_mappings",
                     "encoding": "json",
                 },
-                payload_fn=lambda: json.dumps(node_mappings),
+                payload_fn=lambda: json.dumps(provenance_info),
             )
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
@@ -1299,8 +1322,13 @@ class _InProcessFxCompile(FxCompile):
                         },
                         payload_fn=lambda: json.dumps(provenance_tracking_json),
                     )
+                    from torch._inductor.debug import create_mapping_pre_post_grad_nodes
+
                     torch._inductor.debug._inductor_post_to_pre_grad_nodes = (
-                        provenance_tracking_json
+                        create_mapping_pre_post_grad_nodes(
+                            torch._inductor.debug._pre_grad_graph_id,
+                            provenance_tracking_json,
+                        )
                     )
 
                 metrics_context = get_metrics_context()
@@ -1494,6 +1522,9 @@ class _InProcessFxCompile(FxCompile):
                                 "node_runtimes": node_runtimes,
                             },
                         )
+
+                    # Collect and dump collective-op schedule for external diagnostics
+                    torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
 
                     if (
                         cudagraphs
@@ -1914,7 +1945,7 @@ def fw_compiler_freezing(
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
 
-    static_input_idxs = []
+    static_input_idxs: list[Any] = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]
@@ -2174,6 +2205,13 @@ def compile_fx(
             )
             torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
 
+            if config.trace.provenance_tracking:
+                for node in model_.graph.nodes:
+                    if node.stack_trace:
+                        torch._inductor.debug._inductor_pre_grad_node_stack_trace[
+                            node.name
+                        ] = node.stack_trace
+
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
             trace_structured(
                 "artifact",
@@ -2426,6 +2464,7 @@ def compile_fx(
                     if node.op == "get_attr" and "val" not in node.meta:
                         target = attrgetter(node.target)(gm)
                         if isinstance(target, torch.Tensor):
+                            assert fake_mode is not None
                             node.meta["val"] = fake_mode.from_tensor(
                                 target, static_shapes=True
                             )
