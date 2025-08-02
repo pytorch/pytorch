@@ -32,6 +32,11 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /v
   git config --global --add safe.directory /var/lib/jenkins/workspace
 fi
 
+# Set TORCH_CUDA_ARCH_LIST for sm89 env
+if [[ "$BUILD_ENVIRONMENT" == *sm89* ]]; then
+  TORCH_CUDA_ARCH_LIST=8.9
+fi
+
 echo "Environment variables:"
 env
 
