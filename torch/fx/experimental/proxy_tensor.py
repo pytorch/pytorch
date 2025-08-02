@@ -817,6 +817,34 @@ def _maybe_record_pointwise_barrier(
     last_node.meta["low_precision_pointwise_barrier"] = True
 
 
+in_export = False
+
+
+@contextmanager
+def _force_copy_on_aten_to_context(
+    func: Any, kwargs: dict[str, Any]
+) -> Generator[None, None, None]:
+    """
+    Context manager for handling torch.ops.aten.to.dtype_layout operations.
+
+    When used with torch.ops.aten.to.dtype_layout, this context manager temporarily
+    sets kwargs["copy"] = True for the duration of the operation, and then restores
+    the original value afterward.
+    """
+    if in_export and func == torch.ops.aten.to.dtype_layout:
+        previous_copy_kwarg = kwargs.get("copy", None)
+        kwargs["copy"] = True
+        try:
+            yield
+        finally:
+            if previous_copy_kwarg is None:
+                del kwargs["copy"]
+            else:
+                kwargs["copy"] = previous_copy_kwarg
+    else:
+        yield
+
+
 def proxy_call(
     proxy_mode: ProxyTorchDispatchMode,
     func: OpOverload,
@@ -970,7 +998,10 @@ def proxy_call(
         name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
     )
 
-    with _enable_thunkify(proxy_mode.tracer):
+    with (
+        _enable_thunkify(proxy_mode.tracer),
+        _force_copy_on_aten_to_context(func, kwargs),
+    ):
         out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor
@@ -1433,6 +1464,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             return node
             # Don't actually run the function! We just want to trace the calls
             # into a graph. We don't actually want to change global autograd state.
+        # Can't intercept here, too late
         return func(*args, **kwargs)
 
 
@@ -1488,6 +1520,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             if func in (prim.device.default,):
                 return func(*args, **kwargs)
 
+            # if func == torch.ops.aten.add_.Tensor:
+            #     breakpoint()
             return proxy_call(self, func, self.pre_dispatch, args, kwargs)
 
     def __enter__(self) -> Self:
