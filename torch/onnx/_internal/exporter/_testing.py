@@ -5,7 +5,7 @@ from __future__ import annotations
 
 __all__ = ["assert_onnx_program"]
 
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.utils import _pytree
@@ -23,7 +23,6 @@ def assert_onnx_program(
     args: tuple[Any, ...] | None = None,
     kwargs: dict[str, Any] | None = None,
     strategy: str | None = "TorchExportNonStrictStrategy",
-    backend: Literal["onnxruntime", "reference"] = "onnxruntime",
 ) -> None:
     """Assert that the ONNX model produces the same output as the PyTorch ExportedProgram.
 
@@ -38,8 +37,6 @@ def assert_onnx_program(
         strategy: Assert the capture strategy used to export the program. Values can be
             class names like "TorchExportNonStrictStrategy".
             If None, the strategy is not asserted.
-        backend: The backend to use for evaluating the ONNX program.
-            Supported values are "onnxruntime" and "reference".
     """
     if strategy is not None:
         if program._capture_strategy != strategy:
@@ -77,17 +74,7 @@ def assert_onnx_program(
             torch_outputs_adapted.append(torch.view_as_real(output))
         else:
             torch_outputs_adapted.append(output)
-
-    # Obtain the ONNX outputs using the specified backend
-    if backend == "onnxruntime":
-        onnx_outputs = program(*args, **kwargs)
-    elif backend == "reference":
-        onnx_outputs = program.call_reference(*args, **kwargs)
-    else:
-        raise ValueError(
-            f"Unsupported backend '{backend}'. Supported backends are 'onnxruntime' and 'reference'."
-        )
-
+    onnx_outputs = program(*args, **kwargs)
     # TODO(justinchuby): Include output names in the error message
     torch.testing.assert_close(
         tuple(onnx_outputs),

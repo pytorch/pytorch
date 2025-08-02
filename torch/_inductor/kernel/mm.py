@@ -284,6 +284,8 @@ persistent_tma_mm_template = TritonTemplate(
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
+    a_desc = a_desc_ptr
+    b_desc = b_desc_ptr
     {%- else %}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
@@ -462,6 +464,8 @@ device_tma = r"""
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
+    a_desc = a_desc_ptr
+    b_desc = a_desc_ptr
     {%- else %}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
