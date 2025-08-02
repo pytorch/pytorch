@@ -235,7 +235,7 @@ jobs:
           docker images
           START_TIME=$(date +%s)
           (
-            cd scripts/cli/
+            cd scripts/torch_cli
             python3 -m pip install -e .
           )
           python3 -m cli.run build external "$BUILD_TARGET" --artifact-dir shared --torch-whl-dir "./dist" --base-image "$DOCKER_IMAGE" run
