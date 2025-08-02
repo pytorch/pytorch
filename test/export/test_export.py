@@ -59,6 +59,7 @@ from torch.export.graph_signature import (
     OutputSpec,
     TensorArgument,
 )
+from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
@@ -15913,6 +15914,22 @@ def forward(self, x):
         self.assertEqual(
             len(list(new_ep.graph.nodes)[-1].args[0]), len(signature.output_specs)
         )
+
+    @requires_cuda
+    def test_assert_tensor_metadata_device_index(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x = x.float()
+                y = y.float()
+                return x + y
+
+        inp = (torch.randn(3, device="cuda"), torch.randn(3, device="cuda"))
+        ep = export(N(), inp)
+        ep = move_to_device_pass(ep, {"cuda:0": "cuda"})
+        ep.module()(torch.randn(3, device="cuda:0"), torch.randn(3, device="cuda:0"))
 
     def test_input_output_no_stacktrace(self):
         class M(torch.nn.Module):
