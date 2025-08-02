@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/csrc/utils/byte_order.h>
 #include <memory>
 
 namespace caffe2::serialize {
@@ -19,7 +20,9 @@ TORCH_API IValue readArchiveAndTensors(
     caffe2::serialize::PyTorchStreamReader& stream_reader,
     c10::TypePtr (*type_parser)(const std::string&) =
         Unpickler::defaultTypeParser,
-    std::shared_ptr<DeserializationStorageContext> storage_context = nullptr);
+    std::shared_ptr<DeserializationStorageContext> storage_context = nullptr,
+    const torch::utils::THPByteOrder& byte_order =
+        torch::utils::THP_nativeByteOrder());
 
 bool check_zip_file(
     const std::shared_ptr<caffe2::serialize::ReadAdapterInterface>& rai);
