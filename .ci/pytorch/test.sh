@@ -1633,7 +1633,7 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     ls
     (cd scriptss/cli && python -m pip install -e .)
     bash scripts/cli/lib/setup_vllm.sh
-    python -m test_cli.test external vllm --test-name "$TEST_CONFIG"
+    python -m cli.run test external vllm --test-name "$TEST_CONFIG"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
