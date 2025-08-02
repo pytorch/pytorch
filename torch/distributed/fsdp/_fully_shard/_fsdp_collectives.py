@@ -86,12 +86,27 @@ class DefaultAllGather(DefaultAllocMixin, AllGather):
         group: dist.ProcessGroup,
         async_op: bool = False,
     ) -> Optional[dist.Work]:
-        return dist.all_gather_into_tensor(
+        from logging import getLogger
+
+        logger = getLogger()
+        dist.barrier()
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        # for fp8 model, the input and output dtupe are torch.uint8
+        result = dist.all_gather_into_tensor(
             output_tensor,
             input_tensor,
             group=group,
             async_op=async_op,
         )
+        end_event.record()
+        torch.cuda.synchronize()
+        all_gather_time = start_event.elapsed_time(end_event)
+        if torch.distributed.get_rank() == 0:
+            logger.info(f"all_gather_time: {all_gather_time} ms")
+        dist.barrier()
+        return result
 
 
 class ProcessGroupAllocAllGather(ProcessGroupAllocMixin, AllGather):
@@ -495,9 +510,9 @@ def foreach_reduce(
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
             continue
-        assert unsharded_grad.size(shard_dim) % world_size == 0, (
-            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-        )
+        assert (
+            unsharded_grad.size(shard_dim) % world_size == 0
+        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
         chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
         unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(
