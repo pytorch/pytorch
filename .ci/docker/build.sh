@@ -111,6 +111,17 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     ;;
+    pytorch-linux-focal-cuda12.8-cudnn9-py3-gcc11)
+    CUDA_VERSION=12.8.1
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    TRITON=yes
+    ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.10
