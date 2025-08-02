@@ -58,6 +58,7 @@ time python tools/setup_helpers/generate_code.py \
 
 # Build the docs
 pushd docs/cpp
+pip install -e git+https://github.com/pytorch/pytorch_sphinx_theme.git@pytorch_sphinx_theme2#egg=pytorch_sphinx_theme2
 time make VERBOSE=1 html -j
 
 popd
