@@ -1675,6 +1675,8 @@ elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
+  install_transformers
+  pip_uninstall torchao
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
@@ -1700,11 +1702,19 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
+    # installing torchbench can install torchao and we don't want need torchao
+    # for inductor torchbench tests. It creates another unnecessary dependency
+    # on the transformers model.
+    pip_uninstall torchao
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
     checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_edgecnn \
       llama_v2_7b_16h resnet50 timm_efficientnet mobilenet_v3_large timm_resnest \
       functorch_maml_omniglot yolov3 mobilenet_v2 resnext50_32x4d densenet121 mnasnet1_0
+    # installing torchbench can install torchao and we don't want need torchao
+    # for inductor torchbench tests. It creates another unnecessary dependency
+    # on the transformers model.
+    pip_uninstall torchao
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
     checkout_install_torchbench
@@ -1715,6 +1725,12 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     # nightlies that torchbench may pull in
     if [[ "${TEST_CONFIG}" != *cpu* ]]; then
       install_torchrec_and_fbgemm
+    fi
+    # installing torchbench can install torchao and we don't want need torchao
+    # for inductor torchbench tests. It creates another unnecessary dependency
+    # on the transformers model.
+    if [[ "${TEST_CONFIG}" == *inductor* ]]; then
+      pip_uninstall torchao
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
