@@ -68,6 +68,7 @@ from .utils import (
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
     is_wait,
+    maybe_log_cudagraph_partition,
     sympy_product,
 )
 from .virtualized import V
@@ -2051,15 +2052,12 @@ class Scheduler:
     optimizations such as fusion, reorder, and graph partition.
     """
 
-    __dep_size_hint_cache: dict[Dep, int]
-
     def __init__(self, nodes: list[ir.Operation]) -> None:
         with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
 
     def _init(self, nodes: list[ir.Operation]) -> None:
         super().__init__()
-        self.__dep_size_hint_cache = {}
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
@@ -2133,13 +2131,20 @@ class Scheduler:
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
+
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
+
         self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.combo_kernels:
-            self.create_combo_kernel_nodes(num_ck_nodes=None)
+            with dynamo_timed(
+                "Scheduler.create_combo_kernel_nodes",
+                log_pt2_compile_event=True,
+                log_waitcounter=True,
+            ):
+                self.create_combo_kernel_nodes(num_ck_nodes=None)
 
         # Peak memory pass and overlap pass must run last, otherwise
         # other reordering passes could undo their effects.
@@ -2154,6 +2159,23 @@ class Scheduler:
                 OrderedSet(V.graph.get_output_names()),
             )
         if config.reorder_for_compute_comm_overlap:
+            from torch._logging import trace_structured
+
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "scheduler_nodes_before_comm_overlap",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: "\n\n".join(
+                    [
+                        f"snode[{i}]"
+                        + n.debug_str()
+                        + f" buffer_names:{n.get_buffer_names()}"
+                        for i, n in enumerate(self.nodes)
+                    ]
+                ),
+            )
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
 
@@ -2369,7 +2391,6 @@ class Scheduler:
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
-
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             assert node.node is not None
@@ -3505,6 +3526,14 @@ class Scheduler:
             return True
         return False
 
+    def fusion_accumulate_large_reads(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, threshold: int
+    ) -> bool:
+        all_reads = (node1.read_writes.reads | node2.read_writes.reads) - (
+            node1.read_writes.writes | node2.read_writes.writes
+        )
+        return sum(self.dep_size_hint(dep) for dep in all_reads) > threshold
+
     def are_long_distant_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -3914,7 +3943,7 @@ class Scheduler:
             if remaining:
                 for rd in remaining:
                     if self.fusable_read_and_write(rd, cd):
-                        remaining.remove(rd)
+                        remaining.remove(rd)  # noqa: B909
 
         remaining_deps = OrderedSet(
             dep.name
@@ -4010,20 +4039,7 @@ class Scheduler:
         return False
 
     def dep_size_hint(self, dep: Dep) -> int:
-        res = 0
-        if dep not in self.__dep_size_hint_cache:
-            try:
-                if not dep.has_unbacked_symbols():
-                    res = dep.numbytes_hint()
-            except KeyError:
-                # In at least one test (test/inductor/test_torchbind.py) we
-                # create a StarDep that doesn't exist in the graph and calling
-                # `has_unbacked_symbols()` throws an error.
-                pass
-            self.__dep_size_hint_cache[dep] = res
-        else:
-            res = self.__dep_size_hint_cache[dep]
-        return res
+        return V.graph.get_dep_size_hint(dep)
 
     def score_fusion_memory(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -4210,27 +4226,42 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
-    def should_partition(self, node: BaseSchedulerNode) -> bool:
+    def should_partition(
+        self, node: BaseSchedulerNode, should_log: bool = False
+    ) -> bool:
         """Return True if we should partition the inductor graph on this node"""
+
+        # avoid duplicating logs when should_partition is called multiple times
+        # on the same node
+        def noop_log(msg: str, node: Optional[BaseSchedulerNode]) -> None:
+            return
+
+        log_partition_reason = maybe_log_cudagraph_partition if should_log else noop_log
+
         if isinstance(node, FusedSchedulerNode):
             return any(self.should_partition(snode) for snode in node.snodes)
 
-        if not node.is_gpu():
-            return True
+        assert node.node is not None
 
-        if node.node is None:
+        if not node.is_gpu():
+            log_partition_reason("non gpu ops", node=node)
+
             return True
 
         if isinstance(node.node, ir.DeviceCopy):
+            log_partition_reason("DeviceCopy ops", node=node)
             return True
 
         if isinstance(node.node, ir.Conditional):
+            log_partition_reason("Conditional ops", node=node)
             return True
 
         if getattr(node.node, "unbacked_bindings", None):
+            log_partition_reason("unbacked binding ops", node=node)
             return True
 
         if is_cudagraph_unsafe_op(node.node):
+            log_partition_reason("CUDAGraph-unsafe custom ops", node=node)
             return True
 
         return False
@@ -4700,7 +4731,7 @@ class Scheduler:
         cur_partition: PartitionType = []
         skip_cudagraphs = []
         for node in self.nodes:
-            should_partition = self.should_partition(node)
+            should_partition = self.should_partition(node, should_log=True)
             if cur_partition and skip_cudagraph != should_partition:
                 partitions.append(cur_partition)
                 skip_cudagraphs.append(skip_cudagraph)
@@ -4777,6 +4808,10 @@ class Scheduler:
         each function.
         """
         partitions, signatures = self.graph_partition()
+
+        if len(partitions) > 1:
+            msg = f"cudagraph partition into {len(partitions)} partitions"
+            maybe_log_cudagraph_partition(msg=msg, prefix="")
 
         for partition, signature in zip(partitions, signatures):
             assert len(partition) >= 1, (

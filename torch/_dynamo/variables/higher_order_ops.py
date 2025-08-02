@@ -1241,8 +1241,28 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     cloned_carry.proxy.node.meta["example_value"].constant = None
                     return cloned_carry
 
-            new_operands_seq = [
-                unspecialize_carried_inputs(tx, carry) for carry in operands_seq
+            # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
+            cond_operands_seq = [
+                unspecialize_carried_inputs(
+                    tx,
+                    (
+                        carry.call_method(tx, "clone", args=(), kwargs={})
+                        if isinstance(carry, TensorVariable)
+                        else carry
+                    ),
+                )
+                for carry in operands_seq
+            ]
+            body_operands_seq = [
+                unspecialize_carried_inputs(
+                    tx,
+                    (
+                        carry.call_method(tx, "clone", args=(), kwargs={})
+                        if isinstance(carry, TensorVariable)
+                        else carry
+                    ),
+                )
+                for carry in operands_seq
             ]
 
         # create cond subgrpahs
@@ -1253,7 +1273,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             cond_fn,
-            new_operands_seq + additional_inputs_seq,
+            cond_operands_seq + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
@@ -1318,7 +1338,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             body_fn,
-            new_operands_seq + additional_inputs_seq,
+            body_operands_seq + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
@@ -1385,25 +1405,12 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 + additional_lifted_inputs
             ),
         )
-
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
-        unspecialized_flat_example_value = pytree.tree_map_only(
-            (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(
-                tx.output.fake_mode, ignore_fresh_unbacked_symbols=False
-            ),
-            flat_example_value,
-        )
         return _call_function_and_unflatten_output(
             tx,
             torch.ops.higher_order.while_loop,
             p_args,
             {},
-            unspecialized_flat_example_value,
+            None,
             body_treespec,
         )
 
@@ -1603,17 +1610,12 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             additional_inputs_proxy,
         )
 
-        with tx.fake_mode:
-            out_meta = tuple(
-                inp_proxy.node.meta["example_value"].clone() for inp_proxy in xs_proxy
-            )
-
         return _call_function_and_unflatten_output(
             tx,
             torch.ops.higher_order.associative_scan,
             p_args,
             {},
-            out_meta,
+            None,
             xs_treespec,
         )
 
@@ -1631,7 +1633,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from torch._higher_order_ops.scan import _extract_carry_and_out, stack_y
+        from torch._higher_order_ops.scan import _extract_carry_and_out
         from torch._higher_order_ops.utils import first_slice_copy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -1794,7 +1796,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_proxy = list(additional_inputs.as_proxy()) + list(
             combine_freevars_proxy
         )
-        y_proxies = [out_var.as_proxy() for out_var in out_vars]
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)
@@ -1806,19 +1807,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             additional_inputs_proxy,
         )
 
-        with tx.fake_mode:
-            example_carry = [
-                init_p.node.meta["example_value"].clone() for init_p in init_proxy
-            ]
-            # For the fake mode, we need to duplicate the init tensor along the dim
-            # to have the same size as the xs arguments
-            example_stacked_out = [
-                stack_y(y.node.meta["example_value"], scan_length) for y in y_proxies
-            ]
-            out_meta = [*example_carry, *example_stacked_out]
-
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.scan, p_args, {}, out_meta, _combine_treespec
+            tx, torch.ops.higher_order.scan, p_args, {}, None, _combine_treespec
         )
 
 
@@ -2793,6 +2783,11 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+        if can_dispatch_torch_function(tx, args, kwargs):
+            return dispatch_torch_function(tx, self, args, kwargs)
+
         from .builder import wrap_fx_proxy
 
         (

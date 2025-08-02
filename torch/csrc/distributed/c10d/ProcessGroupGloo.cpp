@@ -698,8 +698,9 @@ const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
+    const c10::intrusive_ptr<Store>& store,
     const std::vector<int>& ranks,
-    const c10::intrusive_ptr<Backend::Options> opts) {
+    const c10::intrusive_ptr<Backend::Options>& opts) {
   auto it = std::find(ranks.begin(), ranks.end(), rank_);
   int groupRank;
   if (it == ranks.end()) {
@@ -717,18 +718,14 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
     globalRanksInGroup.emplace_back(groupRanks()[rank]);
   }
   glooOpts->global_ranks_in_group = std::move(globalRanksInGroup);
-  auto store = std::dynamic_pointer_cast<GlooStore>(store_);
-  TORCH_CHECK(
-      store != nullptr,
-      "store inside ProcessGroupGloo not a ProcessGroupGloo::GlooStore.");
   auto pg = c10::make_intrusive<ProcessGroupGloo>(
-      store->_getStore()->clone(), groupRank, ranks.size(), glooOpts);
+      store->clone(), groupRank, ranks.size(), glooOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupGloo::merge(
     const c10::intrusive_ptr<Store>& store,
-    const c10::intrusive_ptr<Backend::Options> opts,
+    const c10::intrusive_ptr<Backend::Options>& opts,
     const int& rank,
     const int& size) {
   auto glooOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
@@ -1778,7 +1775,8 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
     }
 
     // Set single input tensor on all processes.
-    GENERATE_ALL_TYPES(scalarType, setInput, opts, inputs[0]);
+    at::Tensor flatInputTensor = flattenDenseTensors(inputs[0]);
+    GENERATE_ALL_TYPES(scalarType, setInput, opts, flatInputTensor);
     gloo::gather(opts);
 
     // Unflatten into output tensors on root process.
