@@ -3426,7 +3426,6 @@ class SliceView(View):
             if val is None:
                 # TODO(rec): can this really happen?
                 return default
-            val = cls.handle_negative_index(val, dim_size)
             return clamp(val, lower, upper)
 
         start = clamp_wrap(start, 0, dim_size, 0)
@@ -3443,14 +3442,6 @@ class SliceView(View):
         step: int = 1,
         clamp: bool = True,
     ) -> IRNode:
-        step = sympy.expand(step)
-        assert isinstance(step, Expr) or step > 0, step
-        try:
-            if start == 0 and end >= 2**63 - 1 and step == 1:
-                return x
-        except TypeError:
-            pass
-
         new_size = list(x.get_size())
 
         # NB: Ordinarily we default to clamping.
@@ -7048,6 +7039,7 @@ class DynamicSelectStorageOffset(ExternKernel):
         base_offset: Union[sympy.Symbol, int],
         base_dim_stride: Union[sympy.Symbol, int],
         size: Union[sympy.Symbol, int],
+        clamp: bool
     ) -> None:
         super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
         # This node codegen the following:
@@ -7057,6 +7049,7 @@ class DynamicSelectStorageOffset(ExternKernel):
         self.base_offset = base_offset
         self.base_dim_stride = base_dim_stride
         self.size = size
+        self.clamp = clamp
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.unbacked_offset_symbol])
@@ -7067,7 +7060,42 @@ class DynamicSelectStorageOffset(ExternKernel):
         return get_free_symbols(self.index, unbacked_only)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        wrapper.codegen_dynamic_select_index(self)
+        wrapper.codegen_dynamic_select_index(self, clamp=self.clamp)
+
+
+class DynamicSliceSize(ExternKernel):
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
+
+    def should_allocate(self) -> bool:
+        return False
+
+    def __init__(
+        self,
+        unbacked_size_symbol,
+        start,
+        end,
+        size,
+    ):
+        super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
+        # This node codegen
+        self.unbacked_size_symbol = unbacked_size_symbol
+        self.start = start
+        self.end = end
+        self.size = size
+
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet([self.unbacked_size_symbol])
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return get_free_symbols(self.start, unbacked_only).union(
+            get_free_symbols(self.end, unbacked_only)
+        )
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        wrapper.codegen_dynamic_slice_size(self)
 
 
 class DynamicScalar(ExternKernel):
