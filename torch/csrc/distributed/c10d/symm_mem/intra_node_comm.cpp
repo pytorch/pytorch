@@ -2,7 +2,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && defined(HAS_ROCM_SMI)
 #include <rocm_smi/rocm_smi.h>
 #endif
 
@@ -171,7 +171,7 @@ bool IntraNodeComm::rendezvous() {
   gethostname(devInfo.hostname, sizeof(devInfo.hostname));
   devInfo.deviceIdx = deviceIdx_;
 
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && defined(HAS_ROCM_SMI)
   auto ret = rsmi_init(0);
   if (ret != RSMI_STATUS_SUCCESS) {
     LOG(ERROR) << "IntraNodeComm:: rendezvous failed in rsmi_init, ret=" << ret;
