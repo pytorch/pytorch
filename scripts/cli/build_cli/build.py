@@ -11,7 +11,7 @@ class BuildApp(App):
     class Meta:
         label = "build"
         base_controller = "base"
-        handlers = [MainController] + ExternalBuildController
+        handlers = [MainController, ExternalBuildController]
 
 def main():
     with BuildApp() as app:
