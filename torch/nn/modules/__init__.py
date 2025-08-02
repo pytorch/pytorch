@@ -114,6 +114,7 @@ from .normalization import (
     LocalResponseNorm,
     RMSNorm,
 )
+from .fast_normalization import FastRMSNorm, enable_fast_rmsnorm, disable_fast_rmsnorm
 from .padding import (
     CircularPad1d,
     CircularPad2d,
@@ -284,6 +285,9 @@ __all__ = [
     "PixelUnshuffle",
     "PoissonNLLLoss",
     "RMSNorm",
+    "FastRMSNorm",
+    "enable_fast_rmsnorm",
+    "disable_fast_rmsnorm",
     "RNN",
     "RNNBase",
     "RNNCell",
