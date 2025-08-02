@@ -5332,6 +5332,7 @@ class TestMemPool(TestCase):
         segments = torch.cuda.memory._snapshot()["segments"]
         self.assertTrue(len(segments) > 0, "expected more than one segment")
 
+    @serialTest()
     def test_mempool_empty_cache_inactive(self):
         torch.cuda.empty_cache()
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
@@ -5561,6 +5562,7 @@ class TestMemPool(TestCase):
                 out_0 = torch.randn(nelem_1mb, device="cuda")
         torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
+    @serialTest()
     def test_mempool_ctx_multithread(self):
         torch.cuda.empty_cache()
         segments = torch.cuda.memory._snapshot()["segments"]
@@ -6480,6 +6482,7 @@ class TestCudaAutocast(TestAutocast):
                 for grad, grad_control in zip(grads, grads_control):
                     self.assertEqual(grad.half(), grad_control)
 
+    @serialTest()
     def test_autocast_cache_leak(self):
         # Reported at https://github.com/pytorch/pytorch/issues/48049
         # Test is used to check, if autocast recaches the same parameters
@@ -6494,7 +6497,7 @@ class TestCudaAutocast(TestAutocast):
                 first_iter_mem = torch.cuda.memory_allocated()
                 for _ in range(3):
                     out = linear(data)
-                self.assertTrue(first_iter_mem == torch.cuda.memory_allocated())
+                self.assertEqual(first_iter_mem, torch.cuda.memory_allocated())
 
     def test_autocast_checkpointing(self):
         model = torch.nn.Sequential(
