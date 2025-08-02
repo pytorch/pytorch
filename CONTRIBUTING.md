@@ -975,7 +975,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
 1. `CUDA_DEVICE_DEBUG=1` will enable CUDA device function debug symbols (`-g -G`).
     This will be particularly helpful in debugging device code. However, it will
     slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
-2. `cuda-gdb` and `cuda-memcheck` are your best CUDA debugging friends. Unlike`gdb`,
+2. `cuda-gdb` and `compute-sanitizer` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
 3. CUDA supports a lot of C++11/14 features such as, `std::numeric_limits`, `std::nextafter`,
    `std::tuple` etc. in device code. Many of such features are possible because of the
