@@ -1755,7 +1755,7 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False)
 
     # Note: do not truncate the list according to platforms. These tests should always raise errors.
-    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.CUDNN_ATTENTION])
     def test_invalid_inputs_different_datatypes(self, device, kernel: SDPBackend):
         with sdpa_kernel(backends=[kernel]):
             # Different datatypes
@@ -1766,7 +1766,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
     @onlyCUDA
-    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.CUDNN_ATTENTION])
     def test_invalid_inputs_different_devices(self, device, kernel: SDPBackend):
         # Different devices
         shape = (1, 4, 8, 16)
@@ -1775,7 +1775,7 @@ class TestSDPAFailureModes(NNTestCase):
         value = torch.randn(shape, dtype=torch.float16, device='cpu')
         self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
-    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.CUDNN_ATTENTION])
     def test_invalid_inputs_1_dimensional_inputs(self, device, kernel: SDPBackend):
         with sdpa_kernel(backends=[kernel]):
             # 1 dimensional input
@@ -1848,8 +1848,11 @@ class TestSDPAFailureModes(NNTestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
-    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
-                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("fused_kernel", (
+        ([SDPBackend.FLASH_ATTENTION] if PLATFORM_SUPPORTS_FLASH_ATTENTION else []) +
+        ([SDPBackend.CUDNN_ATTENTION] if PLATFORM_SUPPORTS_CUDNN_ATTENTION else []) +
+        [SDPBackend.EFFICIENT_ATTENTION]
+    ))
     def test_fused_kernels_seq_len_0_inputs(self, device, fused_kernel):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float16)
         batch, num_heads, head_dim = 32, 16, 64
@@ -2976,10 +2979,15 @@ class TestSDPACudaOnly(NNTestCase):
                 attn_mask=None, dropout_p=0.0, is_causal=False)
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=2e-3, rtol=1e-2)
 
+
+    # AARON NOTE: wtf do i do here
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
-    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
-                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("fused_kernel", (
+    ([SDPBackend.FLASH_ATTENTION] if PLATFORM_SUPPORTS_FLASH_ATTENTION else []) +
+    ([SDPBackend.CUDNN_ATTENTION] if PLATFORM_SUPPORTS_CUDNN_ATTENTION else []) +
+    [SDPBackend.EFFICIENT_ATTENTION]
+    ))
     def test_scaled_dot_product_attention_fused_kernels_packed_accuracy(self, device, type: str, fused_kernel: str):
         def rand_nt(shape):
             batch, seq_len, num_heads, head_dim = shape
@@ -3008,6 +3016,13 @@ class TestSDPACudaOnly(NNTestCase):
         query_lp = query_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key_lp = key_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         value_lp = value_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+        if type == "nested" and fused_kernel == SDPBackend.CUDNN_ATTENTION:
+            with sdpa_kernel(backends=[fused_kernel]):
+                with self.assertRaisesRegex(RuntimeError, "No available kernel. Aborting execution."):
+                    torch.nn.functional.scaled_dot_product_attention(
+                        query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
+            return
 
         with sdpa_kernel(backends=[fused_kernel]):
             actual = torch.nn.functional.scaled_dot_product_attention(
@@ -3841,9 +3856,13 @@ class TestSDPACudaOnly(NNTestCase):
                 }
             )
 
+    # AARON NOTE: cudnn no available kernels
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
-    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
-                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("fused_kernel", (
+        ([SDPBackend.FLASH_ATTENTION] if PLATFORM_SUPPORTS_FLASH_ATTENTION else []) +
+        ([SDPBackend.CUDNN_ATTENTION] if PLATFORM_SUPPORTS_CUDNN_ATTENTION else []) +
+        [SDPBackend.EFFICIENT_ATTENTION]
+    ))
     def test_fused_kernels_seq_len_1_inputs(self, device, fused_kernel):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float16)
         batch, num_heads, head_dim = 32, 16, 64
@@ -3862,17 +3881,23 @@ class TestSDPACudaOnly(NNTestCase):
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
 
-        with sdpa_kernel(backends=[fused_kernel]):
-            actual = torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
-        with sdpa_kernel(backends=[SDPBackend.MATH]):
-            math_ref = torch.nn.functional.scaled_dot_product_attention(
-                query.contiguous().to(torch.float32),
-                key.contiguous().to(torch.float32),
-                value.contiguous().to(torch.float32),
-                attn_mask=None, dropout_p=0.0, is_causal=False)
-
-        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(torch.float16), atol=1e-3, rtol=1e-2)
+        if fused_kernel == SDPBackend.CUDNN_ATTENTION:
+            with self.assertRaisesRegex(RuntimeError, "No available kernel. Aborting execution."):
+                with sdpa_kernel(backends=[fused_kernel]):
+                    torch.nn.functional.scaled_dot_product_attention(
+                        query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+        else:
+            with sdpa_kernel(backends=[fused_kernel]):
+                actual = torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+            with sdpa_kernel(backends=[SDPBackend.MATH]):
+                math_ref = torch.nn.functional.scaled_dot_product_attention(
+                    query.contiguous().to(torch.float32),
+                    key.contiguous().to(torch.float32),
+                    value.contiguous().to(torch.float32),
+                    attn_mask=None, dropout_p=0.0, is_causal=False)
+        
+            self.assertEqual(actual.contiguous(), math_ref.contiguous().to(torch.float16), atol=1e-3, rtol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
