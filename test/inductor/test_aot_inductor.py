@@ -39,6 +39,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     SM80OrLater,
+    tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
@@ -56,9 +57,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     MACOS_VERSION,
+    MI300_ARCH,
     parametrize,
     skipIfMPS,
     skipIfRocm,
+    skipIfRocmArch,
+    skipIfWindows,
     skipIfXpu,
     TEST_MPS,
     TEST_WITH_ROCM,
@@ -85,6 +89,7 @@ if HAS_GPU:
         add_kernel_autotuned_weird_param_order,
         add_kernel_on_device_tma_new_api,
         add_kernel_on_device_tma_old_api,
+        add_kernel_with_boolean_param,
         add_kernel_with_none_param_and_equal_to_1_arg,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
@@ -146,8 +151,11 @@ except (unittest.SkipTest, ImportError):
 
 
 class AOTInductorTestsTemplate:
+    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
+    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
+    @skipIfRocmArch(MI300_ARCH)
     def test_simple(self, embed_kernel_binary, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -188,6 +196,26 @@ class AOTInductorTestsTemplate:
             self.code_check_count(
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
+
+    def test_triton_kernel_bool_param(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                out = torch.zeros_like(x)
+                add_kernel_with_boolean_param[1,](
+                    in_ptr0=x,
+                    in_ptr1=x,
+                    out_ptr=out,
+                    n_elements=x.numel(),
+                    add_xy=True,
+                    BLOCK_SIZE=1,
+                )
+                return out
+
+        inputs = (torch.randn(4, device=self.device),)
+        self.check_model(Model(), inputs)
 
     @unittest.skipIf(
         IS_FBCODE,
@@ -723,6 +751,7 @@ class AOTInductorTestsTemplate:
         IS_FBCODE,
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
+    @tf32_on_and_off(0.005)
     def test_deconv_freezing(self):
         dtypes = [torch.float]
         if torch._C._has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported():
@@ -1124,6 +1153,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (x, y)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
+    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
     def test_large_dynamic_dim(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1366,6 +1396,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
     def test_foreach_multiple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1449,6 +1480,22 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.quantized.linear_dynamic_fp16_unpacked_weight(
                     x, self.weight, self.bias
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
+    @skipIfNoFBGEMM
+    def test_quantized_linear_bias_none(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+
+            def forward(self, x):
+                return torch.ops.quantized.linear_dynamic_fp16_unpacked_weight(
+                    x, self.weight, None
                 )
 
         example_inputs = (torch.randn(10, 10, device=self.device),)
@@ -1987,6 +2034,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
     @common_utils.parametrize("dynamic", [False, True])
     def test_cond_mismatched_branch_output(self, dynamic):
         inputs = (
@@ -2353,6 +2401,9 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, device=self.device),)
         self.check_model(Model(self.device), example_inputs)
 
+    @skipIfWindows(
+        msg="OpenMP crashed application on windows"
+    )  # TODO: (xuhancn) need to root cause and fix.
     def test_buffer_mutation_3(self):
         class KVCache(torch.nn.Module):
             def __init__(
@@ -4274,7 +4325,7 @@ class AOTInductorTestsTemplate:
             def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
                 return a[: b.item()]
 
-            @torch.library.impl_abstract("mylib::foo", lib=lib)
+            @torch.library.register_fake("mylib::foo", lib=lib)
             def foo_fake_impl(a, b):
                 ctx = torch.library.get_ctx()
                 u = ctx.new_dynamic_size()
@@ -4338,6 +4389,7 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(Exception, "run_func_(.*) API call failed "):
             optimized(*input2)
 
+    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
         with DeterministicGuard(True):
@@ -4796,7 +4848,10 @@ class AOTInductorTestsTemplate:
             )
             self.assertTrue(same(model(*example_input), actual))
 
+    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
+    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("max_autotune", [True, False])
+    @skipIfRocmArch(MI300_ARCH)
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -5397,6 +5452,9 @@ class AOTInductorTestsTemplate:
         self.check_model(sin_triton, none_inputs)
         self.check_model(sin_triton, not_none_inputs)
 
+    @skipIfWindows(
+        msg="OpenMP crashed application on windows"
+    )  # TODO: (xuhancn) need to root cause and fix.
     def test_issue_140766(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -5676,6 +5734,53 @@ class AOTInductorTestsTemplate:
             test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
         self.assertEqual(new_expected, new_output)
+
+    def test_update_constant_buffer_simple(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn((3, 3), device=device)
+
+            def forward(self, a):
+                return a + self.weight
+
+        model = Model(self.device)
+        a = torch.randn((3, 3), device=self.device)
+        example_inputs = (a,)
+
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+
+        # Let's check whether the model has correct constant name mapping.
+        expected_original_fqns = {
+            "L__self___weight": "L__self___weight",
+        }
+        self.assertEqual(
+            expected_original_fqns, runner.get_constant_names_to_original_fqns()
+        )
+
+        test_inputs = torch.randn((3, 3), device=self.device)
+        new_weight = torch.randn((3, 3), device=self.device)
+        model.weight = new_weight
+        attach_weights = {"L__self___weight": new_weight}
+        runner.update_constant_buffer(attach_weights, False, False, False)
+        expected = model(test_inputs)
+
+        def runner_call(*args, **kwargs):
+            call_spec = runner.get_call_spec()  # type: ignore[attr-defined]
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = pytree.tree_flatten((args, kwargs))[0]
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
 
     def test_update_inactive_constant_buffer(self):
         class Model(torch.nn.Module):
@@ -6635,6 +6740,25 @@ class AOTInductorLoggingTest(LoggingTestCase):
             torch._inductor.aot_compile(ep.module(), inputs)
         self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
 
+    @make_logging_test(dynamic=logging.DEBUG)
+    def test_shape_env_reuse_zero_consts_use_consts_asm_false(self, records):
+        # make sure ShapeEnv is only created once and reused afterwards
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        inputs = (torch.randn(4, 4),)
+        dynamic_shapes = {
+            "x": {0: Dim.AUTO, 1: Dim.AUTO},
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
+        with (
+            torch.no_grad(),
+            config.patch({"aot_inductor.use_consts_asm_build": False}),
+        ):
+            torch._inductor.aot_compile(ep.module(), inputs)
+        self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
+
 
 class TestAOTInductorConfig(TestCase):
     def test_no_compile_standalone(self):
@@ -6706,6 +6830,7 @@ GPU_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
+    "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
     # No scaled_dot_product_efficient_attention implementation for XPU yet.
     "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
     # No fft implementation for XPU yet.
@@ -6713,8 +6838,6 @@ GPU_TEST_FAILURES = {
 }
 
 MPS_TEST_FAILURES = {
-    # Expected supportedFloatingType(scalar_type) || scalar_type == kInt || scalar_type == kBool
-    "test_index_put_fallback": fail_mps(),
     # aten::_embedding_bag is not currently implemented for the MPS device.
     "test_embedding_bag": fail_mps(),
     # aten::_embedding_bag is not currently implemented for the MPS device.
@@ -6730,52 +6853,22 @@ MPS_TEST_FAILURES = {
     # MPS doesn't support float8
     "test_fp8": fail_mps(),
     "test_fp8_view_of_param": fail_mps(),
-    # Compilation Error
+    # unsupported operator: aten._scaled_dot_product_attention_math_for_mps.default
+    "test_issue_140766": fail_mps(),
+    # cannot initialize a parameter of type 'double' with an rvalue of type 'std::nullptr_t'
     "test_fallback_kernel_with_symexpr_output": fail_mps(),
-    "test_while_loop_with_mixed_device": fail_mps(),
+    # while-loop subgraph calls same kernel as outside. need to figure out how to
+    # either (1) tell outside to initialize a new kernel or (2) generate
+    # subgraph as a separate function, which would(?) cause (1) to happen automatically.
     "test_while_loop_nested": fail_mps(),
-    "test_assert_async": fail_mps(),
+    "test_cond_with_parameters": fail_mps(),
+    "test_cond_share_predicte": fail_mps(),
+    # correctness issue
     "test_index_put_with_none_index": fail_mps(),
-    "test_size_from_multi_ouptut": fail_mps(),
-    "test_simple_embed_kernel_binary_False": fail_mps(),
-    "test_while_loop_with_mixed_device_dynamic_False": fail_mps(),
-    "test_while_loop_with_mixed_device_dynamic_True": fail_mps(),
-    "test_simple_embed_cubin_False": fail_mps(is_skip=True),
-    "test_simple_embed_cubin_True": fail_mps(is_skip=True),
-    "test_simple_embed_kernel_binary_True": fail_mps(),
-    "test_missing_cubin": fail_mps(),
-    # Dynamism
-    "test_shifted_constraint_ranges": fail_mps(),
-    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_mps(),
-    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_mps(),
-    "test_cond_mismatched_branch_output_dynamic_True": fail_mps(),
-    "test_cond_unbacked_symint_closure_dynamic_True": fail_mps(),
-    "test_cond_non_tensor_predicates_dynamic_True": fail_mps(),
-    "test_zero_grid_with_unbacked_symbols": fail_mps(),
-    "test_reuse_kernel_dynamic": fail_mps(is_skip=True),
-    "test_while_loop_with_parameters": fail_mps(is_skip=True),
-    "test_cond_with_parameters": fail_mps(is_skip=True),
-    "test_cond_share_predicte": fail_mps(is_skip=True),
-    # SetStorage incorrect
-    "test_small_constant": fail_mps(is_skip=True),
-    "test_free_inactive_buffer": fail_mps(is_skip=True),
-    "test_extract_constants_map": fail_mps(is_skip=True),
-    "test_linear_freezing": fail_mps(is_skip=True),
-    "test_model_modified_weights": fail_mps(is_skip=True),
     # Error device may not be nil
     "test_zero_size_weight": fail_mps(is_skip=True),
-    # Constants update (segfault)
-    "test_update_inactive_constant_buffer": fail_mps(is_skip=True),
-    "test_update_constant_buffer": fail_mps(is_skip=True),
-    "test_so_without_weight": fail_mps(is_skip=True),
-    "test_constant_folding_with_update": fail_mps(is_skip=True),
-    "test_nested_tensor_from_jagged": fail_mps(is_skip=True),
-    "test_issue_140766": fail_mps(is_skip=True),
-    "test_buffer_mutation_and_force_mmap_weights": fail_mps(is_skip=True),
+    # RuntimeError: Cannot compare two tensors on different devices. Got: cpu and mps:0
     "test_aoti_constant_tensor_name_collision": fail_mps(is_skip=True),
-    "test_large_mmaped_weights": fail_mps(is_skip=True),
-    "test_subclasses": fail_mps(is_skip=True),
-    "test_autotune_with_constant_folding": fail_mps(is_skip=True),
     # MPS doesn't support triton
     "test_autotuning_args_reuse": fail_mps(),
     "test_triton_autotuning": fail_mps(),

@@ -126,11 +126,6 @@ if "%USE_CUDA%"=="1" (
   set CMAKE_CUDA_COMPILER_LAUNCHER=%TMP_DIR%/bin/randomtemp.exe;%TMP_DIR%\bin\sccache.exe
 )
 
-:: Install build-system requirements before running setup.py commands
-python -m pip install -r requirements-build.txt
-if errorlevel 1 goto fail
-if not errorlevel 0 goto fail
-
 :: Print all existing environment variable for debugging
 set
 
