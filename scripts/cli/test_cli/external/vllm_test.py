@@ -32,7 +32,7 @@ class VllmTestRunner:
 
     def _fetch_configs(self, path=""):
         base_dir = os.path.dirname(__file__)
-        file_path = path if path else os.path.join(base_dir, "test_config.yaml")
+        file_path = path if path else os.path.join(base_dir, "vllm_test_config.yaml")
         res = read_yaml_file(file_path)
         config_map = {}
         for item in res:

@@ -6,7 +6,9 @@ class ExternalTestController(Controller):
         stacked_on = "base"
         stacked_type = "nested"
         help = "tests vllm external libraries. notice this must be run from the root of the pytorch repo"
-        arguments = [
+
+    @ex(help="test vllm",
+    arguments = [
             (
                 ["--test-name"],
                 {
@@ -17,9 +19,7 @@ class ExternalTestController(Controller):
                     "required": True,
                 },
             )
-        ]
-
-    @ex(help="test vllm")
+        ])
     def vllm(self):
         pargs = self.app.pargs
         test_name = pargs.test_name
