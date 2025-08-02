@@ -23,6 +23,7 @@ from torch import fx as fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
 from torch._logging import getArtifactLogger
+from torch._logging._internal import trace_structured
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -316,6 +317,7 @@ def enable_aot_logging() -> Iterator[None]:
 _inductor_post_to_pre_grad_nodes: dict[str, Any] = {}
 _inductor_triton_kernel_to_post_grad_node_info: dict[str, Any] = {}
 _pre_grad_graph_id: Optional[int] = None
+_inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 
 
 @contextlib.contextmanager
@@ -692,6 +694,33 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
     V.debug.ir_post_fusion(nodes)
 
 
+def _dump_collective_schedule(schedule: list[Union[str, None]]) -> None:
+    try:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_collective_schedule",
+                "encoding": "json",
+            },
+            payload_fn=lambda: schedule,
+        )
+    except Exception:
+        log.debug(
+            "Failed to log inductor_collective_schedule via structured logging",
+            exc_info=True,
+        )
+
+
+def log_collective_schedule(nodes: Sequence[BaseSchedulerNode]) -> None:
+    schedule = [
+        getattr(op, "python_kernel_name", None)
+        for node in nodes
+        if isinstance(op := getattr(node, "node", None), ir._CollectiveKernel)
+    ]
+
+    _dump_collective_schedule(schedule)
+
+
 @dataclasses.dataclass
 class TensorMetadataHolder:
     tensor_metadata: TensorMetadata
@@ -701,23 +730,18 @@ class TensorMetadataHolder:
 save_args_cnt = itertools.count()
 
 
-def create_node_mapping(
-    pre_grad_graph_id: int,
+def create_mapping_pre_post_grad_nodes(
+    pre_grad_graph_id: Optional[int],
     post_to_pre_grad_nodes_json: dict[str, Any],
-    triton_kernel_to_post_grad_json: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """Create bidirectional mappings between:
-
-    - pre_grad graph nodes and post_grad graph code nodes, and vice versa
-    - triton kernel name and post_grad graph code nodes, and vice versa
     """
-
+    Create bidirectional mappings between pre_grad graph nodes
+    and post_grad graph code nodes, and vice versa.
+    """
     # return a dummy dict if there's any error
     empty_return: dict[str, dict[str, Any]] = {
         "preToPost": {},
         "postToPre": {},
-        "cppCodeToPost": {},
-        "postToCppCode": {},
     }
 
     log.info("Creating node mappings for provenance tracking")
@@ -726,30 +750,15 @@ def create_node_mapping(
         log.error("Provenance tacking error: post_to_pre_grad_nodes_json is not a dict")
         return empty_return
 
-    if not isinstance(triton_kernel_to_post_grad_json, dict):
-        log.error(
-            "Provenance tacking error: triton_kernel_to_post_grad_json is not a dict"
-        )
-        return empty_return
-
     if not isinstance(pre_grad_graph_id, int):
-        log.error("Provenance tacking error: pre_grad_graph_id is not an int")
+        # pre_grad_graph_id may be empty if there's no pre_grad graph
+        # and there's only a backward graph from backward pass engine
         return empty_return
 
     pre_to_post: dict[str, Any] = collections.defaultdict(OrderedSet)
     post_to_pre: dict[str, Any] = collections.defaultdict(OrderedSet)
 
-    post_to_cpp_code: dict[str, Any] = collections.defaultdict(OrderedSet)
-
     try:
-        for outer_key, node_array in triton_kernel_to_post_grad_json.items():
-            if not isinstance(node_array, list):
-                log.error(
-                    "Provenance tacking error: triton_kernel_to_post_grad_json value is not a list"
-                )
-                return empty_return
-            for curr_node in node_array:
-                post_to_cpp_code[curr_node].add(outer_key)
 
         def check_format(node: dict[str, Any]) -> bool:
             if not isinstance(node, dict):
@@ -799,10 +808,61 @@ def create_node_mapping(
         # convert to list because set is not JSON serializable
         convert_sets_to_lists(pre_to_post)
         convert_sets_to_lists(post_to_pre)
-        convert_sets_to_lists(post_to_cpp_code)
         return {
             "preToPost": pre_to_post,
             "postToPre": post_to_pre,
+        }
+    except Exception as e:
+        # Since this is just logging code, it should never interfere with regular
+        # program execution, so we use this try-except to guard against any error
+        log.error("Unexpected error in create_node_mapping: %s", e)
+        log.error("post_to_pre_grad_nodes_json:  %s", post_to_pre_grad_nodes_json)
+        log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)
+        log.error(traceback.format_exc())
+        return empty_return
+
+
+def create_node_mapping_kernel_to_post_grad(
+    triton_kernel_to_post_grad_json: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Create bidirectional mappings between triton kernel name and post_grad
+    graph code nodes, and vice versa.
+    """
+
+    # return a dummy dict if there's any error
+    empty_return: dict[str, dict[str, Any]] = {
+        "cppCodeToPost": {},
+        "postToCppCode": {},
+    }
+
+    log.info("Creating node mappings for provenance tracking")
+
+    if not isinstance(triton_kernel_to_post_grad_json, dict):
+        log.error(
+            "Provenance tacking error: triton_kernel_to_post_grad_json is not a dict"
+        )
+        return empty_return
+
+    post_to_cpp_code: dict[str, Any] = collections.defaultdict(OrderedSet)
+
+    try:
+        for outer_key, node_array in triton_kernel_to_post_grad_json.items():
+            if not isinstance(node_array, list):
+                log.error(
+                    "Provenance tacking error: triton_kernel_to_post_grad_json value is not a list"
+                )
+                return empty_return
+            for curr_node in node_array:
+                post_to_cpp_code[curr_node].add(outer_key)
+
+        def convert_sets_to_lists(d: dict[str, Any]) -> None:
+            for key in d:
+                d[key] = list(d[key])
+            d = dict(d)
+
+        # convert to list because set is not JSON serializable
+        convert_sets_to_lists(post_to_cpp_code)
+        return {
             "cppCodeToPost": triton_kernel_to_post_grad_json,
             "postToCppCode": post_to_cpp_code,
         }
@@ -810,37 +870,38 @@ def create_node_mapping(
         # Since this is just logging code, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
         log.error("Unexpected error in create_node_mapping: %s", e)
-        log.error("post_to_pre_grad_nodes_json:  %s", post_to_pre_grad_nodes_json)
         log.error(
             "triton_kernel_to_post_grad_json:  %s", triton_kernel_to_post_grad_json
         )
-        log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)
         log.error(traceback.format_exc())
         return empty_return
 
 
 def dump_inductor_provenance_info(
     filename: str = "inductor_generated_kernel_to_post_grad_nodes.json",
-) -> tuple[dict[str, list[str]], dict[str, Any]]:
+) -> dict[str, Any]:
     global _pre_grad_graph_id
     global _inductor_post_to_pre_grad_nodes
     global _inductor_triton_kernel_to_post_grad_node_info
-    debug_info = _inductor_triton_kernel_to_post_grad_node_info.copy()
     if config.trace.enabled:
         with V.debug.fopen(filename, "w") as fd:
             log.info("Writing provenance tracing debugging info to %s", fd.name)
-            json.dump(debug_info, fd)
+            json.dump(_inductor_triton_kernel_to_post_grad_node_info, fd)
     node_mapping = {}
     if _pre_grad_graph_id:
-        node_mapping = create_node_mapping(
-            _pre_grad_graph_id, _inductor_post_to_pre_grad_nodes, debug_info
+        node_mapping_kernel = create_node_mapping_kernel_to_post_grad(
+            _inductor_triton_kernel_to_post_grad_node_info
         )
+        node_mapping = {
+            **_inductor_post_to_pre_grad_nodes,
+            **node_mapping_kernel,
+        }
         if config.trace.enabled:
             with V.debug.fopen(
                 "inductor_provenance_tracking_node_mappings.json", "w"
             ) as fd:
                 json.dump(node_mapping, fd)
-    return debug_info, node_mapping
+    return node_mapping
 
 
 def set_kernel_post_grad_provenance_tracing(

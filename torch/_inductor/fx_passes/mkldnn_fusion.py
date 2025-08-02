@@ -1228,11 +1228,14 @@ if torch._C._has_mkldnn:
             torch.bfloat16,
             torch.float16,
         )
-        bf32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
-        use_bf16_for_fp32_weight = (
-            bf32_matmul_enabled and weight_meta_value.dtype == torch.float32
+        reduced_f32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision in [  # type: ignore[attr-defined]
+            "bf16",
+            "tf32",
+        ]
+        use_reduced_f32_for_fp32_weight = (
+            reduced_f32_matmul_enabled and weight_meta_value.dtype == torch.float32
         )
-        compute_with_lp = is_lp_weight or use_bf16_for_fp32_weight
+        compute_with_lp = is_lp_weight or use_reduced_f32_for_fp32_weight
         # on x86, for fp32, mkl should be enabled and batch_size should not be a free symbol.
         # on aarch64, use mkldnn op for fp32 as well if acl is enabled
         if (
@@ -1449,13 +1452,13 @@ if torch._C._has_mkldnn:
                     torch.bfloat16,
                     torch.float16,
                 )
-                bf32_matmul_enabled = (
-                    torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
+                reduced_f32_matmul_enabled = (
+                    torch.backends.mkldnn.matmul.fp32_precision in ["bf16", "tf32"]  # type: ignore[attr-defined]
                 )
-                use_bf16_for_fp32_weight = (
-                    bf32_matmul_enabled and weight_dtype == torch.float32
+                use_reduced_f32_for_fp32_weight = (
+                    reduced_f32_matmul_enabled and weight_dtype == torch.float32
                 )
-                compute_with_lp = is_lp_weight or use_bf16_for_fp32_weight
+                compute_with_lp = is_lp_weight or use_reduced_f32_for_fp32_weight
                 batch_size = input.meta.get("val").shape[0]
                 if has_free_symbols(batch_size):
                     assert compute_with_lp or mkldnn._is_mkldnn_acl_supported(), (

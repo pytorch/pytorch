@@ -73,6 +73,11 @@ static bool use_mkldnn_bf32_linear() {
       mkldnn_bf16_device_check();
 }
 
+static bool use_mkldnn_tf32_linear() {
+  return at::globalContext().float32Precision("mkldnn", "matmul") == "tf32" &&
+      cpuinfo_has_x86_amx_fp16();
+}
+
 Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight_t, const std::optional<Tensor>& bias_opt) {
@@ -259,6 +264,9 @@ Tensor mkldnn_linear_pointwise(
   if (use_mkldnn_bf32_linear() && input_t.scalar_type() == at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
+  if (use_mkldnn_tf32_linear() && input_t.scalar_type() == at::kFloat){
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
+  }
   if (mkldnn_bias.has_value()) {
     ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
@@ -350,6 +358,10 @@ Tensor mkldnn_linear_pointwise_binary(
 
   if (use_mkldnn_bf32_linear() && input_t.scalar_type() == at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
+
+  if (use_mkldnn_tf32_linear() && input_t.scalar_type() == at::kFloat){
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
 
   if (mkldnn_bias.has_value()) {

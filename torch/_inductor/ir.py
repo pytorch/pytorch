@@ -534,12 +534,23 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
 
 
 class IRNode:
+    """Base class for all intermediate representation (IR) nodes in TorchInductor.
+
+    Note:
+        This is an abstract base class. Most methods raise NotImplementedError
+        and must be overridden by concrete subclasses.
+    """
+
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
+    # traces back to where the IRNode is created in Inductor
     traceback: Optional[list[str]] = dataclasses.field(init=False)
     origin_node: Optional[torch.fx.Node] = dataclasses.field(init=False)
+    # trace backs to user model code
+    # a single IRNode could correspond to multiple lines of code
+    stack_traces: dict[str, str] = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -571,11 +582,40 @@ class IRNode:
         object.__setattr__(self, attr, value)
 
     def __post_init__(self) -> None:
-        self._post_init_setattr("origins", OrderedSet(self._current_origins))
+        origins = OrderedSet(self._current_origins)
+        self._post_init_setattr("origins", origins)
         self._post_init_setattr(
             "traceback", traceback.format_stack() if config.debug_ir_traceback else None
         )
         self._post_init_setattr("origin_node", None)
+
+        # Group nodes by their stack traces to deduplicate
+        nodes_to_stack_trace = {}
+        if config.trace.provenance_tracking:
+            for node in origins:
+                if node.stack_trace:
+                    # nodes in the backward graph don't have mapping to pre_grad_graph
+                    nodes_to_stack_trace["post_grad+" + node.name] = node.stack_trace
+                else:
+                    if (
+                        "postToPre"
+                        not in torch._inductor.debug._inductor_post_to_pre_grad_nodes
+                    ):
+                        continue
+                    node_names = torch._inductor.debug._inductor_post_to_pre_grad_nodes[
+                        "postToPre"
+                    ].get(node.name, None)
+                    if node_names:
+                        for node_name in node_names:
+                            stack_trace = torch._inductor.debug._inductor_pre_grad_node_stack_trace.get(
+                                node_name, None
+                            )
+                            if stack_trace:
+                                nodes_to_stack_trace["pre_grad+" + node_name] = (
+                                    stack_trace
+                                )
+
+        self._post_init_setattr("stack_traces", nodes_to_stack_trace)
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -594,7 +634,15 @@ class IRNode:
         if shorten and len(origins) > 64:
             # this can get *very* long
             origins = f"{origins[:61]}..."
-        return [origins]
+        if not self.stack_traces:
+            return [origins]
+
+        stack_trace_str = []
+        for stack_trace in self.stack_traces.values():
+            stack_trace_str.append("stack_traces = {{")
+            stack_trace_str += stack_trace.split("\n")
+            stack_trace_str.append("}")
+        return [origins] + stack_trace_str
 
     def str_helper(
         self, lines: Sequence[object], shorten: bool = True, multiline: bool = True
@@ -2821,7 +2869,7 @@ class ExpandView(BaseView):
                 assert old_size[i] is not None
                 new_size[i] = old_size[i]
             elif old_size[i] is None or V.graph.sizevars.shape_env.evaluate_expr(
-                sympy.Eq(old_size[i], 1), size_oblivious=True
+                sympy.Eq(old_size[i], 1), fallback_value=False
             ):
                 pass
             else:
@@ -2848,7 +2896,7 @@ class ExpandView(BaseView):
                 new_stride.append(
                     stride
                     if not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(size, 1), size_oblivious=True
+                        sympy.Eq(size, 1), fallback_value=False
                     )
                     else sympy.S.Zero
                 )
@@ -6058,7 +6106,7 @@ class ExternKernel(InputsKernel):
                 f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
             )
 
-    def codegen_alignment_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if config.alignment_asserts and not V.graph.cpp_wrapper:
             name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
@@ -6302,7 +6350,9 @@ class TMADescriptor(ExternKernel):
             cls._CACHE[key] = cls._create_impl(tensor, tma_meta)
         return cls._CACHE[key]
 
-    def __init__(self, tensor: IRNode, inputs, constant_args):  # type: ignore[no-untyped-def]
+    def __init__(
+        self, tensor: IRNode, inputs: Sequence[Any], constant_args: Sequence[Any]
+    ) -> None:
         super().__init__(
             None,
             # link back to the underlying tensor in terms of ownership
@@ -6418,14 +6468,14 @@ class SubgraphBuffer(ExternKernel):
 
         with V.set_graph_handler(self.subgraph):
             # Don't bother autotuning on Triton here
-            with inductor_config.patch(  # type: ignore[no-untyped-def]
+            with inductor_config.patch(
                 max_autotune=False,
                 max_autotune_gemm=False,
                 max_autotune_gemm_backends="ATEN",
             ):
                 self.subgraph.run(*self.example_inputs)
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         class CodegenGraph:
             def __init__(self, graph: GraphLowering):
                 self.graph = graph
@@ -7120,7 +7170,7 @@ class FallbackKernel(ExternKernelAlloc):
     inplace aten ops, and mutating ops that are auto-functionalizable.
     """
 
-    def __init__(  # type: ignore[no-untyped-def]
+    def __init__(
         self,
         layout: OutputSpec,
         kernel: _OpOverloads,
@@ -7672,7 +7722,7 @@ class MultiOutputLayout(OutputSpec):
 
 
 class MultiOutput(ExternKernel):
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_multi_output(self)
         if not self.skip_size_stride_alignment_checks:
             self.codegen_size_asserts(wrapper)
@@ -7927,17 +7977,21 @@ class StorageBox(MutableBox):
         ):
             self.realize()
 
-    def has_accumulated_enough_reads_by_size(self) -> bool:
+    def has_accumulated_enough_reads_by_size(self, threshold: int) -> bool:
         return (
-            sum(V.graph.get_dep_size_hint(dep) for dep in self.get_reads())
-            > config.realize_acc_reads_size_threshold
+            sum(V.graph.get_dep_size_hint(dep) for dep in self.get_reads()) > threshold
         )
 
     def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
             or self.has_large_inner_fn()
-            or self.has_accumulated_enough_reads_by_size()
+            or (
+                config.realize_acc_reads_size_threshold is not None
+                and self.has_accumulated_enough_reads_by_size(
+                    config.realize_acc_reads_size_threshold
+                )
+            )
         )
 
     def should_realize_on_reuse(self, users: int) -> bool:
@@ -8745,7 +8799,7 @@ class _AllReduce_Kernel(_CollectiveKernel):
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce_")
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 
@@ -8754,16 +8808,16 @@ class _AllReduce_Kernel(_CollectiveKernel):
 
 
 class _AllReduceKernel(_CollectiveKernel):
-    def __init__(  # type: ignore[no-untyped-def]
+    def __init__(
         self,
-        layout,
-        kernel,
-        tensor_args,
-        nontensor_args,
-        unflatten_args,
-        kwargs=None,
+        layout: OutputSpec,
+        kernel: _OpOverloads,
+        tensor_args: Sequence[IRNode],
+        nontensor_args: Sequence[Any],
+        unflatten_args: Callable[..., Any],
+        kwargs: Optional[dict[str, Any]] = None,
         *,
-        unbacked_bindings=None,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
             layout,
@@ -8776,7 +8830,7 @@ class _AllReduceKernel(_CollectiveKernel):
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce")
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 
@@ -8785,16 +8839,16 @@ class _AllReduceKernel(_CollectiveKernel):
 
 
 class _WaitKernel(_CollectiveKernel):
-    def __init__(  # type: ignore[no-untyped-def]
+    def __init__(
         self,
-        layout,
-        kernel,
-        tensor_args,
-        nontensor_args,
-        unflatten_args,
-        kwargs=None,
+        layout: OutputSpec,
+        kernel: _OpOverloads,
+        tensor_args: Sequence[IRNode],
+        nontensor_args: Sequence[Any],
+        unflatten_args: Callable[..., Any],
+        kwargs: Optional[dict[str, Any]] = None,
         *,
-        unbacked_bindings=None,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
             layout,
@@ -8807,7 +8861,7 @@ class _WaitKernel(_CollectiveKernel):
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_wait_tensor")
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 
