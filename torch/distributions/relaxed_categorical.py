@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import ClassVar, Optional
 
 import torch
 from torch import Tensor
@@ -127,7 +127,7 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     """
 
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
-    support = constraints.simplex
+    support: ClassVar[constraints.Simplex] = constraints.simplex  # type: ignore[assignment]
     has_rsample = True
     base_dist: ExpRelaxedCategorical
 
