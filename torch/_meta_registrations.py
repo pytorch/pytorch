@@ -7369,6 +7369,12 @@ def _meta_grouped_mm_common(
     mat_a_is_2d = mat_a.dim() == 2
     mat_b_is_2d = mat_b.dim() == 2
 
+    if not mat_a_is_2d or not mat_b_is_2d:
+        torch._check(
+            mat_a.size(-1) == mat_b.size(-2),
+            "contraction dimension of mat_a and mat_b must match",
+        )
+
     if scaled:
 
         def is_row_major(mat):
