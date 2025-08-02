@@ -11,3 +11,10 @@ packages = ["cli", "cli.build", "cli.test", "cli.lib"]
 
 [tool.setuptools.package-dir]
 cli = "cli"
+
+[tool.ruff.lint]
+# Enable preview mode for linting
+preview = true
+
+# Now you can select your preview rules, like RUF048
+extend-select = ["RUF048"]
