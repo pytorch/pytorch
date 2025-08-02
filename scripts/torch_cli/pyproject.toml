@@ -7,8 +7,7 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["build_cli", "test_cli", "lib"]
+packages = ["cli", "cli.build", "cli.test", "cli.lib"]
 
 [tool.setuptools.package-dir]
-build_cli = "build_cli"
-test_cli = "test_cli"
+cli = "cli"

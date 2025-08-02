@@ -1,7 +1,5 @@
 import os
-from pathlib import Path
-
-from lib.utils import read_yaml_file, run_shell
+from cli.lib.utils import read_yaml_file, run_shell
 import os
 
 class VllmTestRunner:
