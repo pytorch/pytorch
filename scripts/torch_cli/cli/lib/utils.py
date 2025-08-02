@@ -17,7 +17,7 @@ def run_shell(
     env: Optional[dict] = None,
 ):
     if logging:
-        print(f"[shell]{cmd}", flush=True)
+        print(f"[shell] {cmd}", flush=True)
     subprocess.run(
         cmd,
         shell=True,
@@ -29,6 +29,26 @@ def run_shell(
         cwd=cwd,
     )
 
+
+def run_cmd(
+    cmd: str,
+    logging: bool = True,
+    cwd: Optional[str] = None,
+    env: Optional[dict] = None,
+):
+    args = shlex.split(cmd)
+
+    if logging:
+        print(f"[cmd] {' '.join(args)}", flush=True)
+    subprocess.run(
+        args,
+        shell=False,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        check=True,
+        env=env,
+        cwd=cwd,
+    )
 
 # eliainwy
 def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> str:
@@ -105,9 +125,9 @@ def clone_vllm(commit: str):
     # delete the directory if it exists
     remove_dir(cwd)
     # Clone the repo & checkout commit
-    run_shell("git clone https://github.com/vllm-project/vllm.git")
-    run_shell(f"git checkout {commit}", cwd=cwd)
-    run_shell("git submodule update --init --recursive", cwd=cwd)
+    run_cmd("git clone https://github.com/vllm-project/vllm.git")
+    run_cmd(f"git checkout {commit}", cwd=cwd)
+    run_cmd("git submodule update --init --recursive", cwd=cwd)
 
 
 def read_yaml_file(file_path: str) -> dict:
