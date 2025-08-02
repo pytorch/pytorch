@@ -922,6 +922,24 @@ class AOTInductorTestsTemplate:
             with torch.amp.autocast(device_type=self.device):
                 self.check_model(fn, example_inputs)
 
+    def test_export_autocast_guard(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        inps = (torch.randn(4, 6), torch.randn(6, 8, dtype=torch.bfloat16))
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            ep = torch.export.export(Foo(), inps, strict=False)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            (
+                r"Current autocast state does not match export-time state.*"
+                r"autocast state .* dtype: BFloat16.*enabled: 1.*"
+                r"current state .* dtype: BFloat16.*enabled: 0.*"
+            ),
+        ):
+            torch._inductor.aot_compile(ep.module(), inps)
+
     def test_missing_output(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
