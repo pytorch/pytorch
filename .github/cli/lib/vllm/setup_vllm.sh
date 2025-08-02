@@ -10,7 +10,7 @@ echo "This script lives in: $SCRIPT_DIR"
 
 echo "Installing torch whls and vllm dependencies"
 
-pip install "$(echo dist/torch-*.whl)[opt_einsum]"
+#pip install "$(echo dist/torch-*.whl)[opt_einsum]"
 pip install dist/vision/torchvision*.whl
 pip install dist/audio/torchaudio*.whl
 pip install shared/wheels/xformers/xformers*.whl
