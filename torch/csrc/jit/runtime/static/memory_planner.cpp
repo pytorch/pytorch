@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
-#include <iterator>
 
 namespace torch::jit {
 
