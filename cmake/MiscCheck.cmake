@@ -1,24 +1,4 @@
-include(CheckCXXSourceCompiles)
-include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
-
-# ---[ Check if we want to turn off deprecated warning due to glog.
-if(USE_GLOG)
-  cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++17")
-  CHECK_CXX_SOURCE_COMPILES(
-      "#include <glog/stl_logging.h>
-      int main(int argc, char** argv) {
-        return 0;
-      }" CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING
-      FAIL_REGEX ".*-Wno-deprecated.*")
-
-  if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING AND NOT MSVC)
-    message(STATUS "Turning off deprecation warning due to glog.")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated")
-  endif()
-  cmake_pop_check_state()
-endif()
 
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
 if(NOT INTERN_BUILD_MOBILE)
@@ -71,13 +51,8 @@ if(CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
 endif()
 cmake_pop_check_state()
 
-# ---[ Checks if compiler supports -fvisibility=hidden
-check_cxx_compiler_flag("-fvisibility=hidden" COMPILER_SUPPORTS_HIDDEN_VISIBILITY)
-check_cxx_compiler_flag("-fvisibility-inlines-hidden" COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY)
-if(${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
-  set(CAFFE2_VISIBILITY_FLAG "-fvisibility-inlines-hidden")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_VISIBILITY_FLAG}")
-endif()
+# ---[ Set -fvisibility=hidden if compiler supports
+set(CXX_VISIBILITY_PRESET hidden)
 
 # ---[ Checks if linker supports -rdynamic. `-rdynamic` tells linker
 # -to add all (including unused) symbols into the dynamic symbol
