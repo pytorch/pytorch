@@ -9841,6 +9841,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
+    @expectedFailureXPU  # Incorrect XPU reference due to new driver.
     def test_argmax_argmin2(self):
         def fn(x):
             return (
