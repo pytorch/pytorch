@@ -587,33 +587,53 @@ class MemoryPlanningLine(WrapperLine):
         return f"{type(self).__name__}({', '.join(args)})"
 
 
-def get_scheduler_node_index(node: BufferLike) -> Optional[int]:
-    for idx, scheduler_node in enumerate(V.graph.scheduler.nodes):
-        if node in [e.node for e in scheduler_node.get_outputs()]:
-            return idx
-    return None
+class EfficientPeakEstimate:
+
+    def __init__(self):
+        self.scheduler_nodes = V.graph.scheduler.nodes
+        self.buffer_to_scheduler_node_index = {}
+        for idx, scheduler_node in enumerate(self.scheduler_nodes):
+            for node in scheduler_node.get_outputs():
+                self.buffer_to_scheduler_node_index[node.node.name] = idx
+
+        from ..memory import estimate_peak_memory
+
+        _, self.peak_per_scheduler_node = estimate_peak_memory(
+            V.graph.scheduler.nodes,
+            {},
+            OrderedSet(V.graph.get_output_names()),
+        )
+
+        from .segmented_tree import SegmentedTree
+        self.segmented_tree = SegmentedTree(self.peak_per_scheduler_node, operator.add, max, 0)
+
+    def max_between(self, start: BufferLike, end: BufferLike) -> Optional[int]:
+        start = self.buffer_to_scheduler_node_index.get(start.name, None)
+        end = self.buffer_to_scheduler_node_index.get(end.name, None)
+        if start is None or end is None:
+            return None
+        return self.segmented_tree.summarize_range(start, end)
+
+    def max_overall(self) -> Optional[int]:
+        return self.segmented_tree.summarize_range(0, len(self.scheduler_nodes))
+
+    def add_between(self, start: BufferLike, end: BufferLike, delta: int):
+        start = self.buffer_to_scheduler_node_index.get(start.name, None)
+        end = self.buffer_to_scheduler_node_index.get(end.name, None)
+        if start is None or end is None:
+            return
+        self.segmented_tree.update_range(start, end, delta)
 
 
 @dataclasses.dataclass
 class AllocateLine(MemoryPlanningLine):
     node: BufferLike
 
-    def should_reuse_buffer(self, free_line: FreeIfNotReusedLine) -> bool:
-        (overall_peak_memory, peak_memory_per_scheduler_node) = (
-            self.wrapper.estimated_peak
-        )
-        free_line_scheduler_node = get_scheduler_node_index(free_line.node)
-        self_scheduler_node = get_scheduler_node_index(self.node)
-        if free_line_scheduler_node is None or self_scheduler_node is None:
+    def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
+        overall_peak_memory = self.wrapper.estimate_peak.max_overall()
+        peak_memory_in_range = self.wrapper.estimate_peak.max_between(free_line.node, self.node)
+        if overall_peak_memory is None or peak_memory_in_range is None:
             return False
-        size = V.graph.sizevars.size_hint(
-            V.graph.get_allocation_storage_size(self.node), fallback=0
-        ) * get_dtype_size(self.node.get_dtype())
-        if free_line_scheduler_node >= self_scheduler_node:
-            return False
-        peak_memory_in_range = max(
-            peak_memory_per_scheduler_node[free_line_scheduler_node:self_scheduler_node]
-        )
         new_peak_memory = size + peak_memory_in_range
         return new_peak_memory <= overall_peak_memory
 
@@ -625,8 +645,12 @@ class AllocateLine(MemoryPlanningLine):
         key = buffer_reuse_key(self.node)
         if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
-            if self.should_reuse_buffer(free_line):
+            size = V.graph.sizevars.size_hint(
+                V.graph.get_allocation_storage_size(self.node), fallback=0
+            ) * get_dtype_size(self.node.get_dtype())
+            if self.should_reuse_buffer(free_line, size):
                 free_line.is_reused = True
+                self.wrapper.estimate_peak.add_between(free_line.node, self.node, size)
                 return ReuseLine(self.wrapper, free_line.node, self.node)
             else:
                 state.push(key, free_line)
@@ -1664,13 +1688,7 @@ class PythonWrapperCodegen(CodeGen):
         if is_inference and config.memory_planning:
             self.memory_plan()
         else:
-            from ..memory import estimate_peak_memory
-
-            self.estimated_peak = estimate_peak_memory(
-                V.graph.scheduler.nodes,
-                {},
-                OrderedSet(V.graph.get_output_names()),
-            )
+            self.estimate_peak = EfficientPeakEstimate()
             self.memory_plan_reuse()
 
     def codegen_input_symbol_assignment(
