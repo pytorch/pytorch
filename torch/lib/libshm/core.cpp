@@ -57,7 +57,7 @@ static void start_manager() {
     handle.append(buffer.data(), bytes_read);
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
-  if (handle.length() == 0) {
+  if (handle.empty()) {
     std::string msg("no response from torch_shm_manager at \"");
     msg += manager_executable_path;
     msg += "\"";

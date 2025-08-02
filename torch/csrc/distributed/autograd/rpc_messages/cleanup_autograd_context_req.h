@@ -16,7 +16,7 @@ class TORCH_API CleanupAutogradContextReq : public rpc::RpcCommandBase {
       const rpc::Message& message);
 
   // Retrieve the context id we are cleaning up with this message.
-  int64_t getContextId();
+  int64_t getContextId() const;
 
  private:
   int64_t context_id_;

@@ -245,7 +245,7 @@ struct python_error : public std::exception {
   }
 
   /** Sets the current Python error from this exception */
-  inline void restore() {
+  inline void restore() const {
     if (!type)
       return;
     // PyErr_Restore steals references

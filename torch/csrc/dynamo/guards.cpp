@@ -1534,7 +1534,7 @@ class GuardDebugInfo {
     verbose_code_parts.append(failed_reason);
   }
 
-  std::string to_string() {
+  std::string to_string() const {
     std::stringstream ss;
     ss << "GuardDebugInfo(\n"
        << "result=" << result << ",\n"
@@ -3861,7 +3861,7 @@ class DictGuardManager : public GuardManager {
     return ret;
   }
 
-  bool is_exact_dict_type() {
+  bool is_exact_dict_type() const {
     return _is_exact_dict_type;
   }
 
@@ -4812,7 +4812,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
     return clone_common<ListGetItemGuardAccessor>(cloned_root, clone_filter_fn);
   }
 
-  void clone_visitor(ListGetItemGuardAccessor* to) {
+  void clone_visitor(ListGetItemGuardAccessor* to) const {
     to->_index = _index;
   }
 
@@ -4960,7 +4960,7 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
         cloned_root, clone_filter_fn);
   }
 
-  void clone_visitor(TupleGetItemGuardAccessor* to) {
+  void clone_visitor(TupleGetItemGuardAccessor* to) const {
     to->_index = _index;
   }
 
@@ -5579,7 +5579,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
         cloned_root, clone_filter_fn);
   }
 
-  void clone_visitor(TupleIteratorGetItemAccessor* to) {
+  void clone_visitor(TupleIteratorGetItemAccessor* to) const {
     to->_index = _index;
   }
 
