@@ -396,7 +396,7 @@ def _check_has_working_nvml():
         return True
     except pynvml.NVMLError_NotSupported:
         return False
-    except ImportError:
+    except ModuleNotFoundError:
         return False
 
 HAS_WORKING_NVML = _check_has_working_nvml()
