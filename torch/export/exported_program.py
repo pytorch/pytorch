@@ -794,7 +794,8 @@ def _remove_unneccessary_copy_op_pass(
                 for out in args:
                     if (
                         isinstance(out, torch.fx.Node)
-                        and out.name in new_graph_signature.buffers_to_mutate
+                        and 
+                        (out.name in new_graph_signature.buffers_to_mutate or out.name in new_graph_signature.parameters_to_mutate)
                     ):
                         if (
                             out.op == "call_function"
