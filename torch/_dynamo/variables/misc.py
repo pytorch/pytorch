@@ -42,6 +42,7 @@ from ..source import (
     AttrSource,
     GenericAttrSource,
     GetItemSource,
+    TypeMROSource,
     TypeSource,
     WeakRefCallSource,
 )
@@ -134,9 +135,7 @@ class SuperVariable(VariableTracker):
                     # Equivalent of something like type(L['self']).__mro__[1].attr_name
                     if type_to_use_source:
                         source = AttrSource(
-                            GetItemSource(
-                                AttrSource(type_to_use_source, "__mro__"), index
-                            ),
+                            GetItemSource(TypeMROSource(type_to_use_source), index),
                             name,
                         )
                     return resolved_getattr, source
@@ -247,7 +246,7 @@ class SuperVariable(VariableTracker):
                 # different from type(self) with polymorphism.
                 cls_source = None
                 if self.objvar.source:
-                    cls_source = AttrSource(self.objvar.source, "__class__")
+                    cls_source = TypeSource(self.objvar.source)
                 cls_variable = VariableTracker.build(
                     tx, self.objvar.value_type, cls_source
                 )
