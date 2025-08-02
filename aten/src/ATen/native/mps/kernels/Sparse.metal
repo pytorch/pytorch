@@ -2,54 +2,107 @@
 #include <metal_atomic>
 using namespace metal;
 
-// Template kernel to coalesce sorted indices and sum duplicate values
-template <typename T>
-kernel void coalesce_kernel(
-    device const ulong* in_indices       [[buffer(0)]],  // flat indices array (length = nnz)
-    device const T*    in_values         [[buffer(1)]],  // values array (length = nnz)
-    device ulong*      out_indices       [[buffer(2)]],  // output unique indices (length <= nnz)
-    device T*          out_values        [[buffer(3)]],  // output summed values (length <= nnz)
-    constant uint&     nnz               [[buffer(4)]],  // number of input non-zero entries
-    device atomic_uint* unique_count     [[buffer(5)]],  // atomic counter for output length
-    uint gid                            [[thread_position_in_grid]]
-) {
-  uint i = gid;
-  if (i >= nnz) return;
-  
-  // Determine if this thread is at the start of a group of identical indices
-  bool is_group_start = (i == 0) || (in_indices[i] != in_indices[i - 1]);
-  if (!is_group_start) {
-    return;
-  }
-  
-  // This thread will accumulate all values for the index `current_index`
-  ulong current_index = in_indices[i];
-  float accumulator = 0.0f;  // accumulate in higher precision (float)
-  for (uint j = i; j < nnz && in_indices[j] == current_index; ++j) {
-    accumulator += (float)in_values[j];
-  }
-  
-  // Atomically reserve an output slot and write the result
-  uint out_pos = atomic_fetch_add_explicit(unique_count, 1, memory_order_relaxed);
-  out_indices[out_pos] = current_index;
-  out_values[out_pos]   = (T)accumulator;
+kernel void flatten_indices_kernel(
+    device const int64_t* indices    [[buffer(0)]],  // shape: (sparse_dim, nnz)
+    device const int64_t* strides    [[buffer(1)]],  // shape: (sparse_dim,)
+    device int64_t* flat_indices     [[buffer(2)]],  // shape: (nnz,)
+    constant uint& sparse_dim        [[buffer(3)]],
+    constant uint& nnz               [[buffer(4)]],
+    uint gid                         [[thread_position_in_grid]]
+) { 
+    flat_indices[gid] = (indices[gid] * strides[0] + indices[nnz + gid] * strides[1]);
 }
 
+// Kernel to mark unique positions (without counting)
+kernel void mark_unique_positions_kernel(
+    device const int64_t* indices    [[buffer(0)]],  // sorted flat indices
+    device bool* is_unique          [[buffer(1)]],  // output: true if start of unique group
+    constant uint& nnz              [[buffer(2)]],
+    uint gid                        [[thread_position_in_grid]]
+) {
+    if (gid >= nnz) return;
+    
+    // First element is always unique, others are unique if different from previous
+    bool unique = (gid == 0) || (indices[gid] != indices[gid - 1]);
+    is_unique[gid] = unique;
+}
 
-// Instantiate the kernel for the types we need (float, half, bool, bfloat16, etc.)
-#define INSTANTIATE_COALESCE(DTYPE) \
-  template [[host_name("coalesce_kernel_" #DTYPE)]] [[kernel]] void coalesce_kernel<DTYPE>( \
-      device const ulong* in_indices [[buffer(0)]], \
-      device const DTYPE*  in_values  [[buffer(1)]], \
-      device ulong*       out_indices[[buffer(2)]], \
-      device DTYPE*        out_values [[buffer(3)]], \
-      constant uint&      nnz        [[buffer(4)]], \
-      device atomic_uint* unique_count[[buffer(5)]], \
-      uint gid                      [[thread_position_in_grid]]);
+// Kernel to compute output positions via prefix sum
+kernel void compute_output_positions_kernel(
+    device const bool* is_unique     [[buffer(0)]],  // input: marks unique positions
+    device int* positions           [[buffer(1)]],  // output: position in output array
+    constant uint& nnz              [[buffer(2)]],
+    uint gid                        [[thread_position_in_grid]]
+) {
+    if (gid >= nnz) return;
+    
+    // Simple serial prefix sum - could be optimized with parallel scan
+    int pos = 0;
+    for (uint i = 0; i < gid; i++) {
+        if (is_unique[i]) pos++;
+    }
+    positions[gid] = pos;
+}
 
-INSTANTIATE_COALESCE(float);
-INSTANTIATE_COALESCE(half);
+// Coalesce kernel using precomputed positions
+template <typename T>
+kernel void coalesce_with_positions_kernel(
+    device const int64_t* flat_indices   [[buffer(0)]],  // sorted flat indices
+    device const int64_t* indices        [[buffer(1)]],  // original multi-dim indices (sparse_dim x nnz)
+    device const T* in_values            [[buffer(2)]],  // input values
+    device const bool* is_unique         [[buffer(3)]],  // marks start of unique groups
+    device const int* output_positions   [[buffer(4)]],  // precomputed output positions
+    device int64_t* out_indices          [[buffer(5)]],  // output indices (sparse_dim x newNnz)
+    device T* out_values                 [[buffer(6)]],  // output values
+    constant uint& nnz                   [[buffer(7)]],
+    constant uint& value_size            [[buffer(8)]],
+    constant uint& sparse_dim            [[buffer(9)]],
+    constant uint& total_unique          [[buffer(10)]], // total number of unique elements
+    uint gid                            [[thread_position_in_grid]]
+) {
+    if (gid >= nnz) return;
+    
+    // Only process if this is the start of a unique group
+    if (!is_unique[gid]) return;
+    
+    // Get output position from precomputed array
+    int out_pos = output_positions[gid];
+    
+    // Copy multi-dimensional indices
+    for (uint d = 0; d < sparse_dim; d++) {
+        out_indices[d * total_unique + out_pos] = indices[d * nnz + gid];
+    }
+    
+    // Accumulate values for this unique index
+    int64_t current_index = flat_indices[gid];
+    for (uint elem = 0; elem < value_size; elem++) {
+        T accumulator = 0;
+        for (uint j = gid; j < nnz && flat_indices[j] == current_index; j++) {
+            accumulator += in_values[j * value_size + elem];
+        }
+        out_values[out_pos * value_size + elem] = accumulator;
+    }
+}
+
+// Instantiate the kernels
+#define INSTANTIATE_COALESCE_WITH_POSITIONS(DTYPE) \
+  template [[host_name("coalesce_with_positions_kernel_" #DTYPE)]] [[kernel]] void coalesce_with_positions_kernel<DTYPE>( \
+      device const int64_t* flat_indices [[buffer(0)]], \
+      device const int64_t* indices     [[buffer(1)]], \
+      device const DTYPE* in_values     [[buffer(2)]], \
+      device const bool* is_unique      [[buffer(3)]], \
+      device const int* output_positions [[buffer(4)]], \
+      device int64_t* out_indices       [[buffer(5)]], \
+      device DTYPE* out_values          [[buffer(6)]], \
+      constant uint& nnz                [[buffer(7)]], \
+      constant uint& value_size         [[buffer(8)]], \
+      constant uint& sparse_dim         [[buffer(9)]], \
+      constant uint& total_unique       [[buffer(10)]], \
+      uint gid                         [[thread_position_in_grid]]);
+
+INSTANTIATE_COALESCE_WITH_POSITIONS(float);
+INSTANTIATE_COALESCE_WITH_POSITIONS(half);
 #if __METAL_VERSION__ >= 310
-INSTANTIATE_COALESCE(bfloat);  // bfloat16 supported on Metal 3.1+
+INSTANTIATE_COALESCE_WITH_POSITIONS(bfloat);
 #endif
-INSTANTIATE_COALESCE(bool);
+INSTANTIATE_COALESCE_WITH_POSITIONS(bool);
