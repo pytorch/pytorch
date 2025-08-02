@@ -1631,7 +1631,7 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     ls
-    pip install -e ./github/cli/.
+    pip install -e ./github/cli/
     ./.github/cli/lib/setup_vllm.sh
     python3 -m test-cli.cli vllm --test-name "$TEST_CONFIG"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
