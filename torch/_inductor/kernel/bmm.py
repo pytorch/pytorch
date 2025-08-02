@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
@@ -7,6 +8,7 @@ from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTempla
 
 from .. import ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
+from ..lookup_table import lookup_table_extract_choices, lookup_template_configs
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -198,8 +200,15 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     else:
         aten_func = aten_bmm.bind(kernel_inputs.nodes(), layout)
 
+    # Get template configs directly from the lookup table
+    aten_params = lookup_template_configs(kernel_inputs.nodes(), name, "aten")
     # options to tune from
-    choices = [aten_func] if use_aten_gemm_kernels() else []
+    choices: list[Any] = []
+    if use_aten_gemm_kernels():
+        if aten_params is None or len(aten_params) > 0:
+            # Either the lookup table asked for ATEN, or the lookup table is not
+            # in use in which case, we should add ATEN
+            choices = choices + [aten_func]
 
     if use_triton_template(layout):
         # TODO: add out_dtype support for Triton Template
@@ -239,6 +248,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
+
+    # Safe noop if lookup table is not in use
+    choices = lookup_table_extract_choices(choices, lambda: [aten_func])
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 

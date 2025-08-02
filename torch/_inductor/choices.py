@@ -10,6 +10,7 @@ import torch
 from . import config
 from .codecache import write_text
 from .kernel_inputs import KernelInputs  # noqa: TC001
+from .lookup_table import lookup_template_configs
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
@@ -100,6 +101,12 @@ class InductorChoices:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
 
+    def _get_configs_from_lookup_table(
+        self, input_nodes: list[Any], template_name: str, op_name: str
+    ) -> Optional[list[dict[str, Any]]]:
+        """Get configs from lookup table if available."""
+        return lookup_template_configs(input_nodes, op_name, template_name)
+
     def get_mm_configs(
         self,
         kernel_inputs: KernelInputs,
@@ -119,15 +126,22 @@ class InductorChoices:
         Yields:
             Template parameter dictionaries ready for maybe_append_choice
         """
-        input_tensors = kernel_inputs.nodes()
-        if len(input_tensors) < 2:
-            raise ValueError(f"Need at least 2 input tensors, got {len(input_tensors)}")
+        input_nodes = kernel_inputs.nodes()
+        if len(input_nodes) < 2:
+            raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
 
-        # Extract device_type from kernel_inputs
-        device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_mm_configs requires a valid device type"
+        # Try lookup table first
+        lookup_configs = self._get_configs_from_lookup_table(
+            input_nodes, template_name, op_name
+        )
+        if lookup_configs is not None:
+            yield from lookup_configs
+            return
+
         # Get the appropriate template-specific heuristic
-        heuristic = get_template_heuristic(template_name, device_type, op_name)
+        heuristic = get_template_heuristic(
+            template_name, kernel_inputs.device_type, op_name
+        )
 
         yield from heuristic.get_template_configs(kernel_inputs, layout, op_name)
 
