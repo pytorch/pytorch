@@ -581,10 +581,8 @@ def view_copy_dtype(
 
 
 def _get_shape_permutation_like(
-    self: torch.Tensor, layout: torch.layout
+    self: torch.Tensor,
 ) -> tuple[utils.ShapeType, utils.StrideType]:
-    assert layout == torch.strided
-
     physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(self)
     shape = [self.shape[l] for l in physical_layout]
 
@@ -624,7 +622,8 @@ def full_like(
         return result.to(memory_format=memory_format)
 
     else:
-        shape, permutation = _get_shape_permutation_like(self, layout)
+        assert layout == torch.strided
+        shape, permutation = _get_shape_permutation_like(self)
         result = torch.full(
             shape,
             fill_value,
@@ -644,29 +643,25 @@ def _rand_like(
     self: torch.Tensor,
     *,
     dtype: Optional[torch.dtype] = None,
-    layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     memory_format: torch.memory_format = torch.preserve_format,
     **kwargs: Any,
 ) -> torch.Tensor:
     dtype = self.dtype if dtype is None else dtype
-    layout = self.layout if layout is None else layout
     device = self.device if device is None else device
 
     if memory_format != torch.preserve_format:
         return rand_fn(
             self.shape,
             dtype=dtype,
-            layout=layout,
             device=device,
             **kwargs,
         ).to(memory_format=memory_format)
 
-    shape, permutation = _get_shape_permutation_like(self, layout)
+    shape, permutation = _get_shape_permutation_like(self)
     result = rand_fn(
         shape,
         dtype=dtype,
-        layout=layout,
         device=device,
         **kwargs,
     )
@@ -1159,3 +1154,25 @@ def rrelu_with_noise_functional(
     else:
         negative_slope = (lower + upper) / 2
         return aten.leaky_relu(self, negative_slope), torch.Tensor()
+
+
+@register_decomposition(aten.repeat_interleave.Tensor)
+def repeat_interleave_Tensor(
+    repeat: torch.Tensor,
+    output_size: Optional[int] = None,
+) -> torch.Tensor:
+    if config.triton.autotune_at_compile_time:
+        # We can't compile-time auto-tune this because
+        # it expects specific data in `repeat`
+        return NotImplemented
+    if output_size is None or type(output_size) is not int:
+        return NotImplemented
+    if repeat.device.type == "mps":
+        return NotImplemented
+    assert repeat.dtype in [torch.int32, torch.int64]
+    assert repeat.ndim == 1
+    cumsum = repeat.cumsum(0)
+    pos = torch.arange(output_size, device=repeat.device)
+    return torch.searchsorted(
+        cumsum, pos, out_int32=(repeat.dtype == torch.int32), right=True
+    )
