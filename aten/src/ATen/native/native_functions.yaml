@@ -7124,18 +7124,21 @@
   dispatch:
     CPU: _scaled_mm_cpu
     CUDA: _scaled_mm_cuda
+  tags: needs_exact_strides
 
 - func: _scaled_mm.out(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _scaled_mm_out_cpu
     CUDA: _scaled_mm_out_cuda
+  tags: needs_exact_strides
 
 
 - func: _scaled_grouped_mm(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? offs=None, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False) -> Tensor
   variants: function
   dispatch:
     CUDA: _scaled_grouped_mm_cuda
+  tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
   variants: function

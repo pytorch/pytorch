@@ -8556,64 +8556,15 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(seen_frames[1].name, "uwu_inline_me")
         self.assertEqual(seen_frames[2].line, "r2 = uwu_inline_me_deep(y, z)")
 
-    def test_recompile_on_disable_1(self):
-        # fix https://github.com/pytorch/pytorch/issues/157399
+    def test_error_on_recompile(self):
         @torch.compile(backend="eager")
-        def fn(x):
-            @torch._dynamo.disable
-            def inner(x):
-                return x + 10
-
-            return inner(x) + 1
-
-        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
-            try:
-                for i in range(5):
-                    fn(torch.rand(2, 3))
-            except torch._dynamo.exc.RecompileError as e:
-                self.fail("RecompileError raised unexpectedly: " + str(e))
-
-    def test_recompile_on_disable_2(self):
-        def outer(x, cond):
-            @torch._dynamo.disable()
-            def fn0(y):
-                return y + 1
-
-            @torch._dynamo.disable()
-            def fn1(y):
-                return y + 2
-
-            if cond:
-                f = fn0
-            else:
-                f = fn1
-
-            torch._dynamo.graph_break()
-            # there will be a resume function here
-            return f(x)
+        def fn(a, b):
+            return a + b
 
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             with self.assertRaises(torch._dynamo.exc.RecompileError):
-                x = torch.rand(2, 3)
-                self.assertEqual(outer(x, True), torch.compile(outer)(x, True))
-                self.assertEqual(outer(x, False), torch.compile(outer)(x, False))
-
-    def test_create_nested_fn_cache_clear(self):
-        def outer(x):
-            @torch._dynamo.disable()
-            def f(y):
-                return y + 2
-
-            return f(x) + 1
-
-        outer = torch.compile(outer)
-        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
-            with self.assertRaises(torch._dynamo.exc.RecompileError):
-                outer(torch.randn(3, 3))
-                from torch._dynamo.utils import create_nested_fn_cache
-
-                create_nested_fn_cache.clear()
-                outer(torch.randn(3, 3))
+                fn(torch.rand(2, 3), torch.rand(2, 3))
+                fn(torch.rand(2, 3), (1, 2, 3))
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
@@ -10566,6 +10517,78 @@ def ___make_guard_fn():
         actual = fn_opt(*inps)
         expected = fn(*inps)
 
+        self.assertEqual(actual, expected)
+
+    def test_frozen_dataclass_attr_access(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+            z: int
+            a: int
+
+        def inner_fn(dc):
+            return dc.x + dc.y + dc.a + dc.z
+
+        def fn(x, y):
+            dc = TestDataClass(x, y, z=5, a=2)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+
+    def test_frozen_dataclass_hashable(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: float
+            y: float
+            z: int
+            a: int
+
+        def inner_fn(dc, x, y):
+            d = {}
+            d[dc] = 2
+            return dc.x + dc.y + d[dc] + x + y
+
+        def fn(x, y):
+            dc = TestDataClass(x=3.2, y=2.5, z=5, a=2)
+            return inner_fn(dc, x, y)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
+
+    def test_nested_frozen_dataclass_hashable(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClassInner:
+            x: float
+            y: float
+
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            b: TestDataClassInner
+            z: int
+            a: int
+
+        def inner_fn(dc, x, y):
+            d = {}
+            d[dc] = 2
+            return dc.b.x + dc.b.y + d[dc] + x + y
+
+        def fn(x, y):
+            dc = TestDataClass(b=TestDataClassInner(2.4, 4.4), z=5, a=2)
+            return inner_fn(dc, x, y)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):

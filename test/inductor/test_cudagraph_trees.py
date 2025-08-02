@@ -2711,6 +2711,22 @@ if HAS_CUDA:
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_log_message(self):
+            def foo(x, y):
+                return (x + 1, y + 2)
+
+            foo = torch.compile(foo, mode="reduce-overhead")
+
+            with capture_stderr() as captured_output:
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            FileCheck().check_count(
+                "cudagraph partition due to non gpu ops. Found from", 1, exactly=True
+            ).check_count("return (x + 1, y + 2)", 1, exactly=True).check(
+                "cudagraph partition into 2 partitions"
+            ).run(captured_output[0])
+
+        @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_scalar1(self):
             def f(x, y):
                 return x + y
