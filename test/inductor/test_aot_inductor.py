@@ -6942,7 +6942,6 @@ MPS_TEST_FAILURES = {
     "test_none_args_aot_codegen": fail_mps(),
     "test_aoti_debug_printer_sym_inputs": fail_mps(),
     "test_aoti_debug_printer_user_defined_triton_kernel": fail_mps(),
-
 }
 
 
