@@ -1631,8 +1631,8 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     ls
-    (cd scriptss/cli && python -m pip install -e .)
-    bash scripts/cli/lib/setup_vllm.sh
+    (cd scripts/torch_cli && python -m pip install -e .)
+    bash scripts/torch_cli/cli/lib/setup_vllm.sh
     python -m cli.run test external vllm --test-name "$TEST_CONFIG"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
