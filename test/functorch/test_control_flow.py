@@ -7450,6 +7450,7 @@ def forward(self, l_inp_, l_tmp_):
         self.assertEqual(out, f(inp, tmp))
 
     @parametrize("requires_grad", [True, False])
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_symint_operands(self, requires_grad):
         backend = EagerAndRecordGraphs()
 

@@ -209,9 +209,9 @@ class GraphModule(torch.nn.Module):
             normalize_graph(bk.graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[3, 3]", L_y_: "f32[3, 3]"):
-        l_x_ = L_x_
+    def forward(self, L_y_: "f32[3, 3]", L_x_: "f32[3, 3]"):
         l_y_ = L_y_
+        l_x_ = L_x_
 
         subgraph_0 = self.subgraph_0
         invoke_quant_test = torch.ops.higher_order.invoke_quant_test(subgraph_0, l_x_, l_y_, scheme = 'nf4');  subgraph_0 = l_x_ = l_y_ = None
