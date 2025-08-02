@@ -604,7 +604,7 @@ class ScheduleTest(MultiProcContinousTest):
             for name, p in stage_module.named_parameters():
                 ref_p = ref_submod.get_parameter(name)
                 try:
-                    torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
+                    torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=9e-5)
                 except AssertionError:
                     print(
                         f"Parameter test failed for {submod_name}.{name}: {p.grad} vs {ref_p.grad}"

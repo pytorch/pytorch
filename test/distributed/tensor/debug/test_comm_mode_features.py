@@ -24,7 +24,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 
-
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_ATTENTION
+import unittest
 c10d_functional = torch.ops.c10d_functional
 
 
@@ -221,6 +222,7 @@ class TestCommModeFeatures(DTensorTestBase):
 
     @skip_unless_torch_gpu
     @with_comms
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     def test_transformer_module_tracing(self, is_seq_parallel=False):
         """
         tests module-level tracing for more complicated transformer module and
