@@ -1540,13 +1540,15 @@ def native_matmul_pass(graph: torch.fx.Graph):
         # (..., M, K) @ (..., K, N)
         M, K = mat1.shape[-2], mat1.shape[-1]
         K, N = mat2.shape[-2], mat2.shape[-1]
-        if M == 1 or K == 1 or N == 1 :
+
+        # Skip if size is zero or one.
+        if M <= 1 or K <= 1 or N <= 1 :
             return False
 
         # if shape is unbacked symint, skip
         if any([has_free_unbacked_symbols(var) for var in [M,K,N]]) :
             return False
-
+        
         return True
   
     @register_graph_pattern(
