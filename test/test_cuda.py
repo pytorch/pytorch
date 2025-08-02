@@ -1503,6 +1503,7 @@ except RuntimeError as e:
         )
 
     @largeTensorTest("20GB", "cuda")
+    @serialTest()
     def test_randint_generation_for_large_numel(self) -> None:
         numel = 2**31 + 1
         s = torch.randint(2, (numel,), device="cuda", dtype=torch.int8).sum()
@@ -3538,14 +3539,14 @@ exit(2)
             try:
                 with torch.cuda.stream(stream):
                     mem = torch.cuda.caching_allocator_alloc(1024)
-            except BaseException:
+            except BaseException:  # noqa: B036
                 if mem is None:
                     return
             try:
                 torch.cuda.caching_allocator_delete(mem)
                 mem = None
                 return None
-            except BaseException:
+            except BaseException:  # noqa: B036
                 pass
 
         def throws_on_cuda_event(capture_error_mode):
@@ -3697,6 +3698,39 @@ exit(2)
         ]
         self.assertEqual(len(x), 2)
         self.assertEqual(x[0], x[1])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_cuda_graph_tensor_item_not_allowed(self):
+        test_script = """\
+import torch
+import sys
+# Tensor.item() calls a synchronize which is not allowed in a cudagraph
+# Valid for CUDA and ROCm
+def my_func(a: torch.Tensor, b: torch.Tensor, perm: torch.Tensor):
+    idx = perm[0]
+    a[0] *= b[idx]  # should raise an error during capture
+    return a
+
+a = torch.rand(500, 500, device="cuda")
+b = torch.rand(500, 500, device="cuda")
+perm = torch.randint(0, 500, (500,), device="cuda")
+
+g = torch.cuda.CUDAGraph()
+
+with torch.cuda.graph(g):
+    output = my_func(a, b, perm)
+"""
+        with self.assertRaisesRegex(
+            subprocess.CalledProcessError,
+            "calls a synchronize which is not allowed in a cudagraph",
+        ):
+            r = (
+                subprocess.check_output([sys.executable, "-c", test_script])
+                .decode("ascii")
+                .strip()
+            )
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device="cuda")
