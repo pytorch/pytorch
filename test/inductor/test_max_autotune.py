@@ -673,7 +673,7 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
 
         # mm kernel, and cos kernel
-        count = 2 if using_triton_mm else 1
+        count = 2 if (using_triton_mm or config.triton.enable_native_matmul) else 1
         FileCheck().check(get_func_call()).check_count(
             get_kernel_launch(), count, exactly=True
         ).run(code[0])
@@ -892,6 +892,10 @@ class TestMaxAutotune(TestCase):
             torch.compile(lambda a, b: a.matmul(b))(a, b)
         self.assertIn("NoValidChoicesError", str(context.exception))
 
+    @unittest.skipIf(
+        config.triton.enable_native_matmul,
+        "Only test when template is being called"
+    )
     @parametrize("multi_template", (True, False))
     @config.patch(
         max_autotune=True,

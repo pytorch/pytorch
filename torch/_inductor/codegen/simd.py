@@ -415,6 +415,15 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         )
         self.no_x_dim = self.want_no_x_dim()
         self.code_hash: Optional[str] = None
+        
+        self.is_native_matmul = False
+        for node in self.features.node_schedule:
+            if isinstance(node, scheduler.SchedulerNode):
+                if (
+                    node.node.get_reduction_type() == "dot"
+                    and config.triton.enable_native_matmul
+                ):
+                    self.is_native_matmul = True
 
         # define this in a closure to make cache local to object
         @functools.cache
@@ -1434,7 +1443,7 @@ class SIMDScheduling(BaseScheduling):
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         node_schedule = kernel_features.node_schedule
-
+        
         tiling, tiling_score = self.get_tiling_and_scores(
             node_schedule,
             kernel_features.numel,
@@ -2427,6 +2436,19 @@ class SIMDScheduling(BaseScheduling):
 
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
+
+        # Force tiling compatible with matmul dimensions 
+        # when natively generating matmul without template calls.
+        if torch._inductor.config.triton.enable_native_matmul :
+            for node in EnableReduction.filter(node_schedule):
+                # A[M,K] @ B[K,N]
+                # force tiling to be {'y':M, 'x':N, 'r0_':K}
+                if node.node.get_reduction_type() == "dot" :
+                    node_ranges = node.get_ranges()
+                    range_y_x = node_ranges[0] #(M,N)
+                    range_r = node_ranges[1]   #(K)
+                    tiling =  cls.create_tiling(range_y_x, range_r)
+                    return tiling, None
 
         # # TODO: enable by default
         if (

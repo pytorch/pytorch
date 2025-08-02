@@ -1232,6 +1232,9 @@ class triton:
     # For best results, this should be used with prefer_nd_tiling.
     tile_reductions: bool = False
 
+    # Codegen matmul natively with tl.dot without calling template.
+    enable_native_matmul: bool = True
+
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
@@ -1327,7 +1330,7 @@ class triton:
     inject_relu_bug_TESTING_ONLY: Optional[str] = None
 
     # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
-    codegen_upcast_to_fp32 = True
+    codegen_upcast_to_fp32 = True 
 
     # Whether persistent matmul kernels should be enabled this flag only has effect when on h100
     # with a version of triton new enough to support TMA
