@@ -10,8 +10,72 @@
   - pytest -v -s basic_correctness/test_cpu_offload.py
   - VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 pytest -v -s basic_correctness/test_preemption.py
 
+- label: Regression Test # 5min
+  id: vllm_regression_test
+  dependent_packages: ['modelscope']
+  steps:
+  - pytest -v -s test_regression.py
+
+- label: Engine Test # 10min
+  id: vllm_engine_test
+  steps:
+  - pytest -v -s engine test_sequence.py test_config.py test_logger.py test_vllm_port.py
+  # OOM in the CI unless we run this separately
+  - pytest -v -s tokenization
+
+- label: PyTorch Fullgraph Test # 18min
+  id: vllm_pytorch_fullgraph_test
+  steps:
+  - pytest -v -s compile/test_full_graph.py
+
+- label: Kernels Attention Test %N
+  id: vllm_pytorch_fullgraph_test
+  steps:
+    - pytest -v -s kernels/attention --shard-id=$$BUILDKITE_PARALLEL_JOB --num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT
+  parallel: true # by default, if not set, it will be false
+  parallelism: 2
+
+- label: Entrypoints Test (LLM) # 40min
+  id: vllm_entrypoints_test_llm
+  steps:
+  - export VLLM_WORKER_MULTIPROC_METHOD=spawn
+  - pytest -v -s entrypoints/llm --ignore=entrypoints/llm/test_lazy_outlines.py --ignore=entrypoints/llm/test_generate.py --ignore=entrypoints/llm/test_generate_multiple_loras.py --ignore=entrypoints/llm/test_collective_rpc.py
+  - pytest -v -s entrypoints/llm/test_lazy_outlines.py # it needs a clean process
+  - pytest -v -s entrypoints/llm/test_generate.py # it needs a clean process
+  - pytest -v -s entrypoints/llm/test_generate_multiple_loras.py # it needs a clean process
+  - VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode # Needs to avoid interference with other tests
+
+- label: Entrypoints Test (API Server) # 40min
+  id: vllm_entrypoints_test_api_server
+  steps:
+  - export VLLM_WORKER_MULTIPROC_METHOD=spawn
+  - pytest -v -s entrypoints/openai --ignore=entrypoints/openai/test_chat_with_tool_reasoning.py --ignore=entrypoints/openai/test_oot_registration.py --ignore=entrypoints/openai/test_tensorizer_entrypoint.py --ignore=entrypoints/openai/correctness/
+  - pytest -v -s entrypoints/test_chat_utils.py
+
+- label: PyTorch Compilation Unit Tests
+  id: vllm_pytorch_compilation_unit_tests
+  steps:
+    - pytest -v -s compile/test_pass_manager.py
+    - pytest -v -s compile/test_fusion.py
+    - pytest -v -s compile/test_fusion_attn.py
+    - pytest -v -s compile/test_silu_mul_quant_fusion.py
+    - pytest -v -s compile/test_sequence_parallelism.py
+    - pytest -v -s compile/test_async_tp.py
+    - pytest -v -s compile/test_fusion_all_reduce.py
+
+- label: Basic Models Test # 24min
+  id: vllm_basic_models_test
+  source_file_dependencies:
+  steps:
+    - pytest -v -s models/test_transformers.py
+    - pytest -v -s models/test_registry.py
+    - pytest -v -s models/test_utils.py
+    - pytest -v -s models/test_vision.py
+    - pytest -v -s models/test_initialization.py
+
 - label: LoRA Test
   id: vllm_lora_test
   steps:
    - pytest -v -s lora --shard-id=$$SHARD_ID --num-shards=$$TEST_SHARDS --ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py
+  parallel: true # by default, if not set, it will be false
   parallelism: 4
