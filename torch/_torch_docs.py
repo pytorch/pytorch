@@ -4741,7 +4741,8 @@ Keyword args:
     edge_order (``int``, optional): 1 or 2, for `first-order
         <https://www.ams.org/journals/mcom/1988-51-184/S0025-5718-1988-0935077-0/S0025-5718-1988-0935077-0.pdf>`_ or
         `second-order <https://www.ams.org/journals/mcom/1988-51-184/S0025-5718-1988-0935077-0/S0025-5718-1988-0935077-0.pdf>`_
-        estimation of the boundary ("edge") values, respectively.
+        estimation of the boundary ("edge") values, respectively. Note that when :attr:`edge_order` is specified, each
+        dimension size of :attr:`input` should be at least edge_order+1
 
 Examples::
 
