@@ -366,13 +366,14 @@ class save_on_cpu(saved_tensors_hooks):
         def pack_to_cpu(tensor: torch.Tensor) -> tuple[torch.device, torch.Tensor]:
             if not pin_memory:
                 return (tensor.device, tensor.cpu())
+            actually_pin_memory = device_module.is_available() and not tensor.is_sparse
             packed = torch.empty(
                 tensor.size(),
                 dtype=tensor.dtype,
                 layout=tensor.layout,
-                pin_memory=(device_module.is_available() and not tensor.is_sparse),
+                pin_memory=actually_pin_memory,
             )
-            packed.copy_(tensor)
+            packed.copy_(tensor, non_blocking=actually_pin_memory)
             return (tensor.device, packed)
 
         def unpack_from_cpu(packed: tuple[torch.device, torch.Tensor]) -> torch.Tensor:
