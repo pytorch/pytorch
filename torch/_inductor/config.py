@@ -428,6 +428,11 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
 
+# Report the autotune choices and their benchmark results. Default is True.
+max_autotune_report_choices_stats = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_REPORT_CHOICES_STATS", "1") == "1"
+)
+
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
 graph_partition = False
 
