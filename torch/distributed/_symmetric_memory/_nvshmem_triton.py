@@ -2,8 +2,11 @@ import os
 import subprocess
 import sysconfig
 from typing import Optional
+
 import triton
+
 from torch.utils._triton import has_triton
+
 
 # will remove this, just for testing
 print(f"[DEBUG] Triton version: {triton.__version__}")
@@ -14,16 +17,19 @@ def _find_nvshmem_device_library() -> str:
 
     try:
         import torch
+
         torch_lib = os.path.dirname(torch.__file__) + "/lib"
         so_path = os.path.join(torch_lib, "libtorch_nvshmem.so")
 
         if os.path.exists(so_path):
-            result = subprocess.run(["readelf", "-d", so_path], capture_output=True, text=True, check=False)
-            for line in result.stdout.split('\n'):
-                if ('RPATH' in line or 'RUNPATH' in line) and '[' in line:
-                    rpath = line.split('[')[1].split(']')[0]
-                    for p in rpath.split(':'):
-                        p = p.strip().replace('$ORIGIN', torch_lib)
+            result = subprocess.run(
+                ["readelf", "-d", so_path], capture_output=True, text=True, check=False
+            )
+            for line in result.stdout.split("\n"):
+                if ("RPATH" in line or "RUNPATH" in line) and "[" in line:
+                    rpath = line.split("[")[1].split("]")[0]
+                    for p in rpath.split(":"):
+                        p = p.strip().replace("$ORIGIN", torch_lib)
                         if p and p not in paths:
                             paths.append(p)
     except Exception:
@@ -51,7 +57,6 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
         dict[str, str]: A dictionary containing the NVSHMEM device library name
         and path.
     """
-    from triton.runtime.jit import JITFunction
 
     from torch._C._distributed_c10d import _nvshmemx_cumodule_init
 
