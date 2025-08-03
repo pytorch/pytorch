@@ -154,9 +154,7 @@ def bench_scan(
 
 
 def main() -> None:
-    dtypes = [torch.float16, torch.float32]
-    if torch.backends.mps.is_macos_or_newer(14, 0):
-        dtypes.append(torch.bfloat16)
+    dtypes = [torch.float16, torch.float32, torch.bfloat16]
 
     # Profile index ops
     B = 11
