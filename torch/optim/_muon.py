@@ -4,8 +4,9 @@
 
 import math
 import warnings
+from collections.abc import Iterable, MutableMapping
 from dataclasses import dataclass
-from typing import Callable, cast, Iterable, MutableMapping, Optional
+from typing import Callable, cast, Optional
 from typing_extensions import TypeAlias
 
 import torch
@@ -14,14 +15,12 @@ from torch import Tensor
 from .optimizer import _get_scalar_dtype, _to_scalar, Optimizer, ParamsT
 
 
-__all__ = ["Muon", "muon"]
+__all__ = ["Muon"]
 
 
 @dataclass
 class BaseMsignFnConfig:
     """Configuration used by :func:`msign_fn`."""
-
-    pass
 
 
 @dataclass
@@ -103,7 +102,11 @@ class Muon(Optimizer):
         msign_fn_config: BaseMsignFnConfig = NewtonSchulzConfig(),
         adjust_lr_fn: AdjustLrFn = default_adjust_lr,
     ) -> None:
-        named_params = list(params) if params is not None else []
+        named_params = list(
+            cast(Iterable[tuple[str, torch.Tensor]], params)
+            if params is not None
+            else []
+        )
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:

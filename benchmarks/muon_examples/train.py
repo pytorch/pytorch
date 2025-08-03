@@ -2,17 +2,11 @@
 Training script adopted from https://github.com/MoonshotAI/Moonlight.
 """
 
+import logging
 import math
 import os
 
-import torch
 from datasets import load_dataset
-from loguru import logger
-
-from torch.optim import Muon as torch_muon
-from torch.utils.data import DataLoader, Dataset
-
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import (
     get_cosine_schedule_with_warmup,
@@ -20,6 +14,15 @@ from transformers import (
     Qwen2ForCausalLM,
     Qwen2Tokenizer,
 )
+
+import torch
+from torch.optim import Muon as torch_muon
+from torch.utils.data import DataLoader, Dataset
+from torch.utils.tensorboard import SummaryWriter
+
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 
 class MoonDataset(Dataset):
@@ -55,28 +58,15 @@ class MoonDataset(Dataset):
 # This code snippet is a modified version adapted from the following GitHub repository:
 # https://github.com/KellerJordan/Muon/blob/master/muon.py
 def zeropower_via_newtonschulz5(G, steps):
-    """
-    Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
-    quintic iteration whose coefficients are selected to maximize the slope at zero. For the purpose
-    of minimizing steps, it turns out to be empirically effective to keep increasing the slope at
-    zero even beyond the point where the iteration no longer converges all the way to one everywhere
-    on the interval. This iteration therefore does not produce UV^T but rather something like US'V^T
-    where S' is diagonal with S_{ii}' ~ Uniform(0.5, 1.5), which turns out not to hurt model
-    performance at all relative to UV^T, where USV^T = G is the SVD.
-    """
     assert len(G.shape) == 2
     a, b, c = (3.4445, -4.7750, 2.0315)
     X = G.bfloat16()
     if G.size(0) > G.size(1):
         X = X.T
-    # Ensure spectral norm is at most 1
     X = X / (X.norm() + 1e-7)
-    # Perform the NS iterations
     for _ in range(steps):
         A = X @ X.T
-        B = (
-            b * A + c * A @ A
-        )  # adapted from suggestion by @jxbz, @leloykun, and @YouJiacheng
+        B = b * A + c * A @ A
         X = a * X + B @ X
 
     if G.size(0) > G.size(1):
@@ -123,7 +113,6 @@ class MoonshotMuon(torch.optim.Optimizer):
         adamw_betas=(0.9, 0.95),
         adamw_eps=1e-8,
     ):
-
         defaults = dict(
             lr=lr,
             wd=wd,
@@ -138,19 +127,14 @@ class MoonshotMuon(torch.optim.Optimizer):
         adamw_params = list(adamw_params) if adamw_params is not None else []
         params.extend(adamw_params)
         super().__init__(params, defaults)
-        # Sort parameters into those for which we will use Muon, and those for which we will not
         for p in muon_params:
-            # Use Muon for every parameter in muon_params which is >= 2D and doesn't look like an embedding or head layer
             assert p.ndim == 2, p.ndim
             self.state[p]["use_muon"] = True
         for p in adamw_params:
-            # Do not use Muon for parameters in adamw_params
             self.state[p]["use_muon"] = False
 
     def adjust_lr_for_muon(self, lr, param_shape):
         A, B = param_shape[:2]
-        # We adjust the learning rate and weight decay based on the size of the parameter matrix
-        # as describted in the paper
         adjusted_ratio = 0.2 * math.sqrt(max(A, B))
         adjusted_lr = lr * adjusted_ratio
         return adjusted_lr
@@ -168,7 +152,6 @@ class MoonshotMuon(torch.optim.Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-
             ############################
             #           Muon           #
             ############################
@@ -178,9 +161,7 @@ class MoonshotMuon(torch.optim.Optimizer):
             wd = group["wd"]
             momentum = group["momentum"]
 
-            # generate weight updates in distributed fashion
             for p in params:
-                # sanity check
                 g = p.grad
                 if g is None:
                     continue
@@ -188,7 +169,6 @@ class MoonshotMuon(torch.optim.Optimizer):
                     g = g.view(g.size(0), -1)
                 assert g is not None
 
-                # calc update
                 state = self.state[p]
                 if "momentum_buffer" not in state:
                     state["momentum_buffer"] = torch.zeros_like(g)
@@ -199,14 +179,8 @@ class MoonshotMuon(torch.optim.Optimizer):
                 else:
                     g = buf
                 u = zeropower_via_newtonschulz5(g, steps=group["ns_steps"])
-
-                # scale update
                 adjusted_lr = self.adjust_lr_for_muon(lr, p.shape)
-
-                # apply weight decay
                 p.data.mul_(1 - lr * wd)
-
-                # apply update
                 p.data.add_(u, alpha=-adjusted_lr)
 
             ############################
@@ -341,22 +315,22 @@ if __name__ == "__main__":
     parser.add_argument("--log_dir", type=str, default="/home/czhuge/muon_exp_logs")
     parser.add_argument("--experiment", type=str, default="pytorch_muon")
     args = parser.parse_args()
-    logger.add(f"logs/train_{args.model}_{args.optimizer}_lr{args.lr}.log")
 
     fqn_file = f"{args.model}_muon_param_fqns.txt"
     fqn_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), fqn_file)
     if not os.path.isfile(fqn_file):
         raise FileNotFoundError(f"Muon FQNs file: {fqn_file} not found")
 
-    with open(fqn_file, "r") as f:
+    with open(fqn_file) as f:
         muon_param_fqns = [line.strip() for line in f if line.strip()]
-
-    for fqn in muon_param_fqns:
-        print(f"Found muon param: {fqn}")
 
     model, train_loader = get_model_and_dataloader(
         args.model, args.dataset, args.hidden_size
     )
+
+    logger.info("num_train_steps: %s", len(train_loader))
+    for fqn in muon_param_fqns:
+        logger.info("muon param: %s", fqn)
 
     optimizer = get_optimizer(
         args.optimizer, model, lr=args.lr, muon_param_fqns=muon_param_fqns
@@ -374,7 +348,7 @@ if __name__ == "__main__":
         num_cycles=0.5,
     )
     tb_writer = SummaryWriter(log_dir=os.path.join(args.log_dir, args.experiment))
-    for epoch in range(epoch):
+    for e in range(epoch):
         for step, batch in enumerate(train_loader):
             # total number of steps: 13299
             batch = batch.to(device)
@@ -390,7 +364,11 @@ if __name__ == "__main__":
                 "train/lr", optimizer.param_groups[0]["lr"], global_step=step
             )
             logger.info(
-                f"Epoch: {epoch} Step: {step} LR: {optimizer.param_groups[0]['lr']} Training loss: {loss.item()}"
+                "Epoch: %s Step: %s LR: %.6f Training loss: %.6f",
+                e,
+                step,
+                optimizer.param_groups[0]["lr"],
+                loss.item(),
             )
 
     tb_writer.flush()
