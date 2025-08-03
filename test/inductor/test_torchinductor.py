@@ -69,6 +69,7 @@ from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
+    IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
@@ -13563,7 +13564,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @config.patch("min_num_split", 256)
-    @xfail_if_mps  # TypeError: cannot determine truth value of Relational
     def test_split_reduction_dynamic_shape(self):
         from torch._dynamo.decorators import mark_dynamic
 
@@ -13653,6 +13653,31 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
+
+    @parametrize("dtype", [torch.int32, torch.int64])
+    def test_repeat_interleave_Tensor_decomp(self, dtype):
+        # https://github.com/pytorch/pytorch/issues/147160
+        def f(input, repeats):
+            return torch.repeat_interleave(input, repeats, dim=0, output_size=3) + 1
+
+        input = torch.tensor([[1, 2], [3, 4]], dtype=dtype, device=self.device)
+        repeat = torch.tensor([1, 2], device=self.device)
+
+        if input.device.type == "mps" and dtype == torch.int64:
+            raise unittest.SkipTest(
+                "torch.compile fails this test with mps & int64, "
+                "see https://github.com/pytorch/pytorch/issues/159408"
+            )
+
+        f_compiled = torch.compile(f)
+        output, (code,) = run_and_get_code(f_compiled, input, repeat)
+        reference = f(input, repeat)
+        self.assertEqual(output, reference)
+        # we don't lower when the cpp_wrapper is used because it cannot generate
+        # proper examples during autotune
+        can_lower = (not config.cpp_wrapper) and (input.device.type != "mps")
+        has_lowered = not re.search(r"repeat_interleave.Tensor", code)
+        self.assertEqual(has_lowered, can_lower)
 
 
 @dataclasses.dataclass
@@ -14523,11 +14548,11 @@ if RUN_GPU:
             else:
                 self.assertTrue("Graph fragment" in code)
                 self.assertTrue(
-                    "%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]"
+                    '%sin : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.sin.default]'
                     in code
                 )
                 self.assertTrue(
-                    "%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]"
+                    '%relu : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.relu.default]'
                     in code
                 )
 
@@ -15277,6 +15302,61 @@ if RUN_GPU:
 
             if not config.cpp_wrapper:
                 FileCheck().check("def partition_0(args):").run(code[0])
+
+        @unittest.skipIf(TEST_WITH_ROCM or not IS_SM90, "no scaled_grouped_mm support")
+        def test_respect_scaled_grouped_mm_layout_tag(self):
+            # scaled_grouped_mm needs `mat2` to be column-major
+            M, K, N = 128, 64, 32  # K and N must be divisible by 16
+            num_groups = 2
+            E = num_groups  # B_t batch size must match number of groups
+            group_size = M // num_groups
+
+            A = torch.randn(
+                M, K, dtype=torch.bfloat16, device=GPU_TYPE
+            )  # Row-major by default
+
+            # Create B_t with proper column-major layout
+            B_t_transposed = torch.randn(
+                E, N, K, dtype=torch.bfloat16, device=GPU_TYPE
+            ).contiguous()
+            B_t = B_t_transposed.transpose(-2, -1)  # (E, K, N)
+            B_t = B_t.transpose(-2, -1).contiguous().transpose(-2, -1)
+
+            # Verify column-major layout
+            def _is_column_major(x: torch.Tensor) -> bool:
+                """Check if tensor is column-major (stride(-2) == 1 and stride(-1) > 1)"""
+                assert x.ndim == 2 or x.ndim == 3, "input tensor must be 2D or 3D"
+                return x.stride(-2) == 1 and x.stride(-1) > 1
+
+            self.assertTrue(_is_column_major(B_t))
+
+            offs = torch.tensor([group_size, M], dtype=torch.int32, device=GPU_TYPE)
+            out_dtype = torch.bfloat16
+
+            @torch.compile
+            def fn():
+                A_scales = torch.ones(M, dtype=torch.float32, device=GPU_TYPE)
+                A_scaled = A.to(torch.float32) * A_scales.unsqueeze(-1)
+                A_fp8_row_major = A_scaled.to(torch.float8_e4m3fn)
+
+                B_t_scales = torch.ones(E, N, dtype=torch.float32, device=GPU_TYPE)
+                B_t_scaled = B_t.to(torch.float32) * B_t_scales.unsqueeze(1)
+                B_t_fp8_col_major = B_t_scaled.to(torch.float8_e4m3fn)
+
+                A_scales_reciprocal = A_scales.reciprocal()
+                B_t_scales_reciprocal = B_t_scales.reciprocal()
+
+                return torch.ops.aten._scaled_grouped_mm(
+                    A_fp8_row_major,
+                    B_t_fp8_col_major,
+                    A_scales_reciprocal,
+                    B_t_scales_reciprocal,
+                    offs,
+                    out_dtype=out_dtype,
+                    use_fast_accum=True,
+                )
+
+            fn()
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
