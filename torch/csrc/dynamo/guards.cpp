@@ -5512,6 +5512,118 @@ class TypeGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represent x.__dict__ accessor, where x is type object.
+ */
+class TypeDictGuardAccessor : public GuardAccessor {
+ public:
+  // name = __type_dict_accessor__, a unique string used as attribute name.
+  TypeDictGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    PyObject* x = ((PyTypeObject*)obj)->tp_dict; // borrowed ref
+    if (x == nullptr) {
+      return false;
+    }
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = ((PyTypeObject*)obj)->tp_dict; // borrowed ref
+    if (x == nullptr) {
+      return GuardDebugInfo(false, "null type dict on " + repr(), 0);
+    }
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "TypeDictGuardAccessor";
+  }
+
+ public: // cloning functions
+  TypeDictGuardAccessor(
+      GuardManager* guard_manager,
+      TypeDictGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<TypeDictGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(TypeDictGuardAccessor* to) {}
+};
+
+/**
+ * Represent x.__mro__ accessor, where x is type object.
+ */
+class TypeMROGuardAccessor : public GuardAccessor {
+ public:
+  // name = __type_mro_accessor__, a unique string used as attribute name.
+  TypeMROGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "TypeMROGuardAccessor";
+  }
+
+ public: // cloning functions
+  TypeMROGuardAccessor(GuardManager* guard_manager, TypeMROGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<TypeMROGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(TypeMROGuardAccessor* to) {}
+};
+
+/**
  * Getitem tuple_iterator accessor.
  */
 class TupleIteratorGetItemAccessor : public GuardAccessor {
@@ -6434,6 +6546,16 @@ PyObject* torch_c_dynamo_guards_init() {
       std::unique_ptr<TypeGuardAccessor>>(py_m, "TypeGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
+      TypeDictGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<TypeDictGuardAccessor>>(py_m, "TypeDictGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      TypeMROGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<TypeMROGuardAccessor>>(py_m, "TypeMROGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
       WeakRefCallGuardAccessor,
       GuardAccessor,
       std::unique_ptr<WeakRefCallGuardAccessor>>(
@@ -6902,6 +7024,46 @@ PyObject* torch_c_dynamo_guards_init() {
             // A unique key is used to save as the accessor key.
             py::str unique_key("__type_accessor__");
             return self.get_child_manager<TypeGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "type_dict_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__type_dict_accessor__");
+            return self.get_child_manager<TypeDictGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "type_mro_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__type_mro_accessor__");
+            return self.get_child_manager<TypeMROGuardAccessor>(
                 std::move(unique_key),
                 std::move(source),
                 example_value,
