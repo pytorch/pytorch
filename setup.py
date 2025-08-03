@@ -1679,6 +1679,8 @@ def main() -> None:
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
+        "_inductor/codegen/cuda/cutlass_lib_extensions/*.py",
+        "_inductor/codegen/cuda/cutlass_lib_extensions/**/*.py",
         "_inductor/script.ld",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
