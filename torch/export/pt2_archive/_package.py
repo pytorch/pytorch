@@ -76,9 +76,9 @@ class PT2ArchiveWriter:
     """
 
     def __init__(self, archive_path_or_buffer: FileLike):
-        self.archive_file = torch._C.PyTorchFileWriter(
-            normalize_path_separator(archive_path_or_buffer)
-        )  # type: ignore[arg-type]
+        if isinstance(archive_path_or_buffer, str):
+            archive_path_or_buffer = normalize_path_separator(archive_path_or_buffer)
+        self.archive_file = torch._C.PyTorchFileWriter(archive_path_or_buffer)  # type: ignore[arg-type]
         # NOTICE: version here is different from the archive_version
         # this is the version of zip file format, which is used by PyTorchFileWriter, which write to /.data/version
         # archive_version is the version of the PT2 archive spec, which write to /archive_version
@@ -172,9 +172,9 @@ class PT2ArchiveReader:
     """
 
     def __init__(self, archive_path_or_buffer: FileLike):
-        self.archive_file = torch._C.PyTorchFileReader(
-            normalize_path_separator(archive_path_or_buffer)
-        )  # type: ignore[arg-type]
+        if isinstance(archive_path_or_buffer, str):
+            archive_path_or_buffer = normalize_path_separator(archive_path_or_buffer)
+        self.archive_file = torch._C.PyTorchFileReader(archive_path_or_buffer)  # type: ignore[arg-type]
         assert self.read_string(ARCHIVE_FORMAT_PATH) == ARCHIVE_FORMAT_VALUE, (
             "Invalid archive format"
         )
