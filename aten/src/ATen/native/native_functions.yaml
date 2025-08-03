@@ -7356,8 +7356,8 @@
 - func: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMPS: sparse_to_dense
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrMPS: sparse_compressed_to_dense
+    SparseCPU, SparseCUDA: sparse_to_dense
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sparse_compressed_to_dense
     MkldnnCPU: mkldnn_to_dense
   autogen: _to_dense.out
 
@@ -7561,8 +7561,8 @@
 - func: _to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
-    CPU, CUDA, MPS: dense_to_sparse_csr
-    SparseCPU, SparseCUDA, SparseMPS: coo_to_sparse_csr
+    CPU, CUDA: dense_to_sparse_csr
+    SparseCPU, SparseCUDA: coo_to_sparse_csr
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sparse_compressed_to_sparse_csr
   autogen: _to_sparse_csr.out
 
