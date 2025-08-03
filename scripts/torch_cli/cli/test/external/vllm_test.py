@@ -27,9 +27,15 @@ class VllmTestRunner:
         steps = config["steps"]
         sub_path = config.get("path", "tests")
         print(f"running test config: {testid}")
+        envs = os.environ.copy()
+        envs["HF_TOKEN"] = os.environ.get("HUGGING_FACE_HUB_TOKEN", "")
+        if os.environ.get("HUGGING_FACE_HUB_TOKEN", ""):
+            print("found HUGGING_FACE_HUB_TOKEN in env")
+        else:
+            print("HUGGING_FACE_HUB_TOKEN not found in env")
         for step in steps:
             # todo : replace with run_cmd with envrirnment
-            run_shell(step, cwd=sub_path, env=os.environ.copy())
+            run_shell(step, cwd=sub_path, env=envs)
 
     def _fetch_configs(self, path=""):
         base_dir = os.path.dirname(__file__)
