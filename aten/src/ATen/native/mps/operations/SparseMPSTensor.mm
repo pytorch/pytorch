@@ -52,16 +52,8 @@ static Tensor flatten_indices(const Tensor& indices, IntArrayRef size) {
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pipeline];
 
-      const uint32_t maxThreadsPerGroup = pipeline.maxTotalThreadsPerThreadgroup;
-      const uint32_t numThreads = static_cast<uint32_t>(nnz);
-      const uint32_t threadsPerTG = std::min(numThreads, maxThreadsPerGroup);
-
-      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-      MTLSize threadgroupSize = MTLSizeMake(threadsPerTG, 1, 1);
-
       mtl_setArgs(encoder, indices, strides, flat_indices, sparse_dim, nnz);
-
-      [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+      mtl_dispatch1DJob(encoder, pipeline, nnz);
     }
   });
 
@@ -86,7 +78,7 @@ static Tensor compute_output_positions(const Tensor& is_unique) {
       [encoder setComputePipelineState:pipeline];
 
       mtl_setArgs(encoder, is_unique, positions);
-      mtl_dispatch1DJob(encoder, nnz);
+      mtl_dispatch1DJob(encoder, pipeline, nnz);
     }
   });
 
@@ -118,16 +110,8 @@ static Tensor compute_output_positions_parallel(const Tensor& is_unique) {
         auto encoder = stream->commandEncoder();
         [encoder setComputePipelineState:pipeline];
 
-        const uint32_t maxThreadsPerGroup = pipeline.maxTotalThreadsPerThreadgroup;
-        const uint32_t numThreads = static_cast<uint32_t>(nnz);
-        const uint32_t threadsPerTG = std::min(numThreads, maxThreadsPerGroup);
-
-        MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-        MTLSize threadgroupSize = MTLSizeMake(threadsPerTG, 1, 1);
-
-        mtl_setArgs(encoder, positions, positions_cloned, nnz, stride);
-
-        [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+        mtl_setArgs(encoder, positions, positions_cloned, stride);
+        mtl_dispatch1DJob(encoder, pipeline, nnz);
       }
     });
     std::swap(positions, positions_cloned);
@@ -139,16 +123,8 @@ static Tensor compute_output_positions_parallel(const Tensor& is_unique) {
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pipeline];
 
-      const uint32_t maxThreadsPerGroup = pipeline.maxTotalThreadsPerThreadgroup;
-      const uint32_t numThreads = static_cast<uint32_t>(nnz);
-      const uint32_t threadsPerTG = std::min(numThreads, maxThreadsPerGroup);
-
-      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-      MTLSize threadgroupSize = MTLSizeMake(threadsPerTG, 1, 1);
-
       mtl_setArgs(encoder, positions, positions_cloned);
-
-      [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+      mtl_dispatch1DJob(encoder, pipeline, nnz);
     }
   });
 
@@ -174,7 +150,7 @@ static std::pair<Tensor, int32_t> mark_unique_and_count(const Tensor& flat_indic
       [encoder setComputePipelineState:pipeline];
 
       mtl_setArgs(encoder, flat_indices, is_unique, count_result);
-      mtl_dispatch1DJob(encoder, nnz);
+      mtl_dispatch1DJob(encoder, pipeline, nnz);
     }
   });
 
@@ -223,6 +199,7 @@ SparseTensor _coalesce_sparse_mps(const SparseTensor& self) {
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pipeline];
 
+      const uint32_t numThreads = static_cast<uint32_t>(nnz);
       const uint32_t valueSize = static_cast<uint32_t>(values.numel() / nnz);
       mtl_setArgs(encoder,
                   flat_indices_sorted,
@@ -236,7 +213,7 @@ SparseTensor _coalesce_sparse_mps(const SparseTensor& self) {
                   valueSize,
                   sparse_dim,
                   newNnz);
-      [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+      mtl_dispatch1DJob(encoder, pipeline, nnz);
     }
   });
 

@@ -45,8 +45,7 @@ kernel void mark_unique_positions_and_count_kernel(
 kernel void kogge_stone_step(
     device const int* input [[buffer(0)]],
     device int* output [[buffer(1)]],
-    constant uint& size [[buffer(2)]],
-    constant uint& stride [[buffer(3)]],
+    constant uint& stride [[buffer(2)]],
     uint gid [[thread_position_in_grid]]) {
   int val = input[gid];
   if (gid >= stride) {
@@ -120,5 +119,7 @@ kernel void coalesce_with_positions_kernel(
 
 INSTANTIATE_COALESCE_WITH_POSITIONS(float);
 INSTANTIATE_COALESCE_WITH_POSITIONS(half);
+#if __METAL_VERSION__ >= 310
 INSTANTIATE_COALESCE_WITH_POSITIONS(bfloat);
+#endif
 INSTANTIATE_COALESCE_WITH_POSITIONS(bool);
