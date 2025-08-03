@@ -653,6 +653,8 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+<<<<<<< HEAD
+=======
     def test_triton_ring_broadcast_with_signal_op(self) -> None:
         """Ring broadcast using signal_op / signal_wait_until + flag check."""
         torch.manual_seed(42 + self.rank)
@@ -723,6 +725,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+>>>>>>> 6791d9afccc ([SymmMem]  Standardize NVSHMEM Triton wrappers on byte-based APIs + improve code clarity)
     def test_triton_fence(self) -> None:
         """
         Rank 0 performs two put operations into Rank 1's buffers with a fence
