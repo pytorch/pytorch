@@ -62,7 +62,6 @@ from .utils import (
     get_gpu_dram_gbps,
     GraphPartitionMap,
     IndentedBuffer,
-    is_collective,
     is_cudagraph_unsafe_op,
     is_gpu,
     is_multi_outputs_template,
@@ -818,7 +817,7 @@ class BaseSchedulerNode:
             return 0
 
         # Collective kernels
-        if is_collective(self.node):
+        if isinstance(self.node, ir._CollectiveKernel):
             assert isinstance(self.node, ir.IRNode)
             try:
                 return estimate_nccl_collective_runtime(self.node)
