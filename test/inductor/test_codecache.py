@@ -28,6 +28,7 @@ from torch._inductor.codecache import (
     PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
+    WritableTempFile,
 )
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
@@ -2550,9 +2551,7 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test the get_hash_for_files helper.
         """
-        # delete=True does not work on Windows.
-        # See https://docs.python.org/3.12/library/tempfile.html#tempfile.NamedTemporaryFile
-        with tempfile.NamedTemporaryFile(delete=False) as temp:
+        with WritableTempFile() as temp:
             try:
                 temp.write(b"contents")
                 temp.flush()
