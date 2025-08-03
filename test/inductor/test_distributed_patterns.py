@@ -707,7 +707,7 @@ def forward(self, primals_1, primals_2, primals_3):
     wait_tensor_1 = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
     t = torch.ops.aten.t.default(_to_copy_3);  _to_copy_3 = None
     t_1 = torch.ops.aten.t.default(div_2);  div_2 = None
-    _scaled_mm = torch.ops.aten._scaled_mm.default(wait_tensor, t, wait_tensor_1, t_1, None, None, torch.bfloat16);  wait_tensor = t = wait_tensor_1 = t_1 = None  # noqa: B950
+    _scaled_mm = torch.ops.aten._scaled_mm.default(wait_tensor, t, wait_tensor_1, t_1, None, None, torch.bfloat16);  wait_tensor = t = wait_tensor_1 = t_1 = None
     relu = torch.ops.aten.relu.default(_scaled_mm);  _scaled_mm = None
     abs_3 = torch.ops.aten.abs.default(relu)
     amax_2 = torch.ops.aten.amax.default(abs_3, [-1], True);  abs_3 = None
@@ -725,13 +725,13 @@ def forward(self, primals_1, primals_2, primals_3):
     _to_copy_7 = torch.ops.aten._to_copy.default(div_7, dtype = torch.float8_e4m3fn);  div_7 = None
     t_2 = torch.ops.aten.t.default(_to_copy_7);  _to_copy_7 = None
     t_3 = torch.ops.aten.t.default(div_6);  div_6 = None
-    _scaled_mm_1 = torch.ops.aten._scaled_mm.default(_to_copy_5, t_2, div_4, t_3, None, None, torch.bfloat16);  _to_copy_5 = t_2 = div_4 = t_3 = None  # noqa: B950
+    _scaled_mm_1 = torch.ops.aten._scaled_mm.default(_to_copy_5, t_2, div_4, t_3, None, None, torch.bfloat16);  _to_copy_5 = t_2 = div_4 = t_3 = None
     reduce_scatter_tensor = torch.ops._c10d_functional.reduce_scatter_tensor.default(_scaled_mm_1, 'sum', 2, '0');  _scaled_mm_1 = None
     wait_tensor_2 = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor);  reduce_scatter_tensor = None
     t_5 = torch.ops.aten.t.default(amax_3);  amax_3 = None
     amax_5 = torch.ops.aten.amax.default(t_5, [-1], True);  t_5 = None
     unsqueeze_1 = torch.ops.aten.unsqueeze.default(amax_5, 1);  amax_5 = None
-    return (wait_tensor_2, primals_1, primals_3, relu, unsqueeze_1)"""
+    return (wait_tensor_2, primals_1, primals_3, relu, unsqueeze_1)"""  # noqa: B950
             "",
         )
 
