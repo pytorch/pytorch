@@ -4712,7 +4712,7 @@ class ShapeEnv:
         self,
         sym: sympy.Expr,
         *,
-        hint: Optional[int | float | bool],
+        hint: Optional[int],
         source: Optional[Source] = None,
     ) -> FloatLikeType:
         """Create a SymFloat value from a symbolic expression"""

@@ -13564,6 +13564,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @config.patch("min_num_split", 256)
+    @xfail_if_mps  # TypeError: cannot determine truth value of Relational
     def test_split_reduction_dynamic_shape(self):
         from torch._dynamo.decorators import mark_dynamic
 
@@ -14548,11 +14549,11 @@ if RUN_GPU:
             else:
                 self.assertTrue("Graph fragment" in code)
                 self.assertTrue(
-                    '%sin : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.sin.default]'
+                    "%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]"
                     in code
                 )
                 self.assertTrue(
-                    '%relu : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.relu.default]'
+                    "%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]"
                     in code
                 )
 
