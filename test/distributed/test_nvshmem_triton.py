@@ -34,7 +34,7 @@ device_module = torch.get_device_module(device_type)
 
 # Shared Triton JIT kernels
 @triton.jit
-def putmem_block_kernel(
+def nvshmem_putmem_block_kernel(
     dst_ptr,
     src_ptr,
     size_bytes,
@@ -44,7 +44,7 @@ def putmem_block_kernel(
 
 
 @triton.jit
-def getmem_block_kernel(
+def nvshmem_getmem_block_kernel(
     dst_ptr,
     src_ptr,
     size_bytes,
@@ -54,7 +54,7 @@ def getmem_block_kernel(
 
 
 @triton.jit
-def putmem_signal_block_kernel(
+def nvshmem_putmem_signal_block_kernel(
     dst_ptr,
     src_ptr,
     size_bytes,
@@ -69,12 +69,12 @@ def putmem_signal_block_kernel(
 
 
 @triton.jit
-def signal_wait_until_kernel(sig_ptr, cmp_op, cmp_val):
+def nvshmem_signal_wait_until_kernel(sig_ptr, cmp_op, cmp_val):
     nvshmem.signal_wait_until(sig_ptr, cmp_op, cmp_val)
 
 
 @triton.jit
-def signal_op_kernel(
+def nvshmem_signal_op_kernel(
     sig_addr,
     signal,
     sig_op,
@@ -84,7 +84,7 @@ def signal_op_kernel(
 
 
 @triton.jit
-def wait_until_kernel(
+def nvshmem_wait_until_kernel(
     ivar_ptr,
     cmp_op,
     cmp_val,
@@ -93,12 +93,12 @@ def wait_until_kernel(
 
 
 @triton.jit
-def fence_kernel():
+def nvshmem_fence_kernel():
     nvshmem.fence()
 
 
 @triton.jit
-def put_with_fence_kernel(
+def nvshmem_put_with_fence_kernel(
     dst_ptr1,
     dst_ptr2,
     src_ptr1,
@@ -121,7 +121,7 @@ def put_with_fence_kernel(
 
 
 @triton.jit
-def put_with_quiet_kernel(
+def nvshmem_put_with_quiet_kernel(
     dst_ptr,
     src_ptr,
     flag_dst_ptr,
@@ -139,7 +139,7 @@ def put_with_quiet_kernel(
 
 
 @triton.jit
-def barrier_test_kernel(
+def nvshmem_barrier_test_kernel(
     dst_ptr,
     src_ptr,
     size_bytes,
@@ -173,12 +173,12 @@ def barrier_test_kernel(
 
 
 @triton.jit
-def barrier_all_kernel():
+def nvshmem_barrier_all_kernel():
     nvshmem.barrier_all()
 
 
 @triton.jit
-def sync_test_kernel(
+def nvshmem_sync_test_kernel(
     dst_ptr,
     src_ptr,
     size_bytes,
@@ -209,7 +209,7 @@ def sync_test_kernel(
 
 
 @triton.jit
-def alltoallmem_block_kernel(
+def nvshmem_alltoallmem_block_kernel(
     team_handle,
     dest_ptr,
     src_ptr,
@@ -219,7 +219,7 @@ def alltoallmem_block_kernel(
 
 
 @triton.jit
-def broadcastmem_block_kernel(
+def nvshmem_broadcastmem_block_kernel(
     team_handle,
     dest_ptr,
     src_ptr,
@@ -230,7 +230,7 @@ def broadcastmem_block_kernel(
 
 
 @triton.jit
-def sum_reduce_kernel(
+def nvshmem_sum_reduce_kernel(
     team_handle,
     dest_ptr,
     src_ptr,
@@ -240,7 +240,7 @@ def sum_reduce_kernel(
 
 
 @triton.jit
-def max_reduce_kernel(
+def nvshmem_max_reduce_kernel(
     team_handle,
     dest_ptr,
     src_ptr,
@@ -250,7 +250,7 @@ def max_reduce_kernel(
 
 
 @triton.jit
-def min_reduce_kernel(
+def nvshmem_min_reduce_kernel(
     team_handle,
     dest_ptr,
     src_ptr,
@@ -301,7 +301,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         if rank == 0:
             dst_ptr = out_hdl.buffer_ptrs[rank]
             src_ptr = inp_hdl.buffer_ptrs[rank]
-            putmem_block_kernel[(1, 1, 1)](
+            nvshmem_putmem_block_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
                 size_bytes=msg_size_bytes,
@@ -341,7 +341,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             # Rank 1 gets data from rank 0
             dst_ptr = out_hdl.buffer_ptrs[rank]
             src_ptr = inp_hdl.buffer_ptrs[rank]
-            getmem_block_kernel[(1, 1, 1)](
+            nvshmem_getmem_block_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
                 size_bytes=msg_size_bytes,
@@ -382,7 +382,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # All ranks execute the get operation
         dst_ptr = out_hdl.buffer_ptrs[rank]
         src_ptr = inp_hdl.buffer_ptrs[rank]
-        getmem_block_kernel[(1, 1, 1)](
+        nvshmem_getmem_block_kernel[(1, 1, 1)](
             dst_ptr,
             src_ptr,
             size_bytes=msg_size_bytes,
@@ -432,7 +432,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             dst_ptr = out_hdl.buffer_ptrs[peer]
             src_ptr = inp_hdl.buffer_ptrs[rank]
             sig_ptr = out_hdl.signal_pad_ptrs[peer]
-            putmem_signal_block_kernel[(1, 1, 1)](
+            nvshmem_putmem_signal_block_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
                 size_bytes=msg_size_bytes,
@@ -446,7 +446,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         if rank == 1:
             # Wait until signal flag is set by Rank 0
             sig_ptr_local = out_hdl.signal_pad_ptrs[rank]
-            signal_wait_until_kernel[(1,)](
+            nvshmem_signal_wait_until_kernel[(1,)](
                 sig_ptr_local,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=SIGNAL_VAL,
@@ -497,7 +497,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             dst_ptr = out_hdl.buffer_ptrs[peer]
             src_ptr = inp_hdl.buffer_ptrs[rank]
             sig_ptr = out_hdl.signal_pad_ptrs[peer]
-            putmem_signal_block_kernel[(1, 1, 1)](
+            nvshmem_putmem_signal_block_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
                 size_bytes=msg_size_bytes,
@@ -510,7 +510,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
         if rank == 1:
             sig_ptr_local = out_hdl.signal_pad_ptrs[rank]
-            signal_wait_until_kernel[(1, 1, 1)](
+            nvshmem_signal_wait_until_kernel[(1, 1, 1)](
                 sig_ptr_local,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=SIGNAL_VAL,
@@ -545,12 +545,12 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         )
         flag_hdl = symm_mem.rendezvous(flag, group=group_name)
 
-        barrier_all_kernel[(1,)](extern_libs=nvshmem_lib)
+        nvshmem_barrier_all_kernel[(1,)](extern_libs=nvshmem_lib)
 
         if rank == 0:
             # Rank 0 (the waiter)
             ivar_ptr = flag_hdl.buffer_ptrs[rank]
-            wait_until_kernel[(1,)](
+            nvshmem_wait_until_kernel[(1,)](
                 ivar_ptr,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=FLAG_FINAL_VALUE,
@@ -573,7 +573,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             dst_ptr = flag_hdl.buffer_ptrs[rank]
 
             # Launch a kernel to put the value to Rank 0.
-            putmem_block_kernel[(1,)](
+            nvshmem_putmem_block_kernel[(1,)](
                 dst_ptr,  # Destination pointer on the remote PE
                 val_to_put.data_ptr(),  # Source data pointer (local)
                 size_bytes=8,  # Size of one int64
@@ -581,7 +581,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 extern_libs=nvshmem_lib,
             )
 
-        barrier_all_kernel[(1,)](extern_libs=nvshmem_lib)
+        nvshmem_barrier_all_kernel[(1,)](extern_libs=nvshmem_lib)
 
     @skipIfRocm
     @requires_triton()
@@ -621,7 +621,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             dst_ptr = out_hdl.buffer_ptrs[peer]
             src_ptr = inp_hdl.buffer_ptrs[rank]
             sig_ptr = out_hdl.signal_pad_ptrs[peer]
-            putmem_signal_block_kernel[(1, 1, 1)](
+            nvshmem_putmem_signal_block_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
                 size_bytes=msg_size_bytes,
@@ -634,7 +634,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         elif rank == 1:
             # Consumer (rank 1): Waits on the signal variable using `signal_wait_until`.
             sig_ptr = out_hdl.signal_pad_ptrs[rank]
-            signal_wait_until_kernel[(1, 1, 1)](
+            nvshmem_signal_wait_until_kernel[(1, 1, 1)](
                 sig_ptr,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=COMPLETION_FLAG_VAL,
@@ -703,7 +703,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             flag_ptr = out2_hdl.signal_pad_ptrs[rank]
             flag_src_ptr = flag_update_val.data_ptr()
 
-            put_with_fence_kernel[(1, 1, 1)](
+            nvshmem_put_with_fence_kernel[(1, 1, 1)](
                 dst_ptr1,
                 dst_ptr2,
                 src_ptr1,
@@ -717,7 +717,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         elif rank == 1:
             # Wait until flag is set by Rank 0.
             ivar_ptr = out2_hdl.signal_pad_ptrs[rank]
-            wait_until_kernel[(1, 1, 1)](
+            nvshmem_wait_until_kernel[(1, 1, 1)](
                 ivar_ptr,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=flag_val,
@@ -763,7 +763,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         if rank == 0:
             # Rank 0 waits for flag from Rank 1
             ivar_ptr = out_hdl.signal_pad_ptrs[rank]
-            wait_until_kernel[(1, 1, 1)](
+            nvshmem_wait_until_kernel[(1, 1, 1)](
                 ivar_ptr,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=flag_val,
@@ -783,7 +783,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 [flag_val], dtype=torch.int64, device=self.device
             )
             flag_src_ptr = flag_update_val.data_ptr()
-            put_with_quiet_kernel[(1, 1, 1)](
+            nvshmem_put_with_quiet_kernel[(1, 1, 1)](
                 dst_ptr,
                 src_ptr,
                 flag_dst_ptr,
@@ -811,7 +811,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         src_hdl = symm_mem.rendezvous(src, group=group_name)
         dst_hdl = symm_mem.rendezvous(dst, group=group_name)
         # Launch kernel with cooperative grid
-        barrier_test_kernel[(1,)](
+        nvshmem_barrier_test_kernel[(1,)](
             dst_hdl.buffer_ptrs[rank],
             src_hdl.buffer_ptrs[rank],
             size_bytes=size_bytes,
@@ -850,7 +850,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         src_hdl = symm_mem.rendezvous(src, group=group_name)
         dst_hdl = symm_mem.rendezvous(dst, group=group_name)
         # Launch kernel with cooperative grid
-        sync_test_kernel[(1,)](
+        nvshmem_sync_test_kernel[(1,)](
             dst_hdl.buffer_ptrs[rank],
             src_hdl.buffer_ptrs[rank],
             size_bytes=size_bytes,
@@ -901,7 +901,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         dist.barrier()
         team_handle = 0  # NVSHMEM_TEAM_WORLD handle is 0
         # Launch the kernel
-        alltoallmem_block_kernel[(1,)](
+        nvshmem_alltoallmem_block_kernel[(1,)](
             team_handle,
             dst_hdl.buffer_ptrs[rank],
             src_hdl.buffer_ptrs[rank],
@@ -950,7 +950,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         dist.barrier()
         # Execute broadcast
         team_handle = 0  # NVSHMEM_TEAM_WORLD
-        broadcastmem_block_kernel[(1,)](
+        nvshmem_broadcastmem_block_kernel[(1,)](
             team_handle,
             dst_hdl.buffer_ptrs[rank],
             src_hdl.buffer_ptrs[rank],
@@ -998,7 +998,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         dist.barrier()
         # Execute reduction
         team_handle = 0  # NVSHMEM_TEAM_WORLD
-        sum_reduce_kernel[(1,)](
+        nvshmem_sum_reduce_kernel[(1,)](
             team_handle,
             dst_hdl.buffer_ptrs[rank],
             src_hdl.buffer_ptrs[rank],
@@ -1061,7 +1061,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         dist.barrier()
         # Execute MIN reduction
         team_handle = 0
-        min_reduce_kernel[(1,)](
+        nvshmem_min_reduce_kernel[(1,)](
             team_handle,
             dst_min_hdl.buffer_ptrs[rank],
             src_min_hdl.buffer_ptrs[rank],
@@ -1070,7 +1070,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             launch_cooperative_grid=True,
         )
         # Execute MAX reduction
-        max_reduce_kernel[(1,)](
+        nvshmem_max_reduce_kernel[(1,)](
             team_handle,
             dst_max_hdl.buffer_ptrs[rank],
             src_max_hdl.buffer_ptrs[rank],

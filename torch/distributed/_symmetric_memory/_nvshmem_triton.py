@@ -8,10 +8,6 @@ import triton
 from torch.utils._triton import has_triton
 
 
-# will remove this, just for testing
-print(f"[DEBUG] Triton version: {triton.__version__}")
-
-
 def _find_nvshmem_device_library() -> str:
     paths = [sysconfig.get_path("purelib") + "/nvidia/nvshmem/lib"]
 
@@ -48,6 +44,12 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
     Enable NVSHMEM device functions for Triton. It performs a NVSHMEM
     device-side initialization on the kernel module created by Triton.
 
+    This function sets a global hook that initializes NVSHMEM for Triton
+    kernels. To avoid unnecessary initializations, the hook only acts on
+    kernels that have "nvshmem" in their function name. Therefore, it is
+    required that all Triton kernels using NVSHMEM primitives follow this
+    naming convention.
+
     Args:
         lib_dir (Optional[str]): The directory where the NVSHMEM device library
         is located. If not provided, it will use the default path where NVSHMEM
@@ -74,13 +76,17 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
 
     # A hook function to initialize NVSHMEM in Triton
     def nvshmem_init_hook(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
-        key = kwargs["key"]
-        device = kwargs["compile"]["device"]
         jit_function = kwargs["fn"].jit_function
-        kernel_cache, _, _, _ = jit_function.device_caches[device]
-        kernel = kernel_cache.get(key, None)
-        kernel.run
-        _nvshmemx_cumodule_init(kernel.module)
+        # Only initialize NVSHMEM module for kernels containing "nvshmem" in their name
+        if "nvshmem" in jit_function.fn.__name__:
+            key = kwargs["key"]
+            device = kwargs["compile"]["device"]
+            jit_function = kwargs["fn"].jit_function
+            kernel_cache, _, _, _ = jit_function.device_caches[device]
+            kernel = kernel_cache.get(key, None)
+            if kernel is not None:
+                kernel.run
+                _nvshmemx_cumodule_init(kernel.module)
 
     # Register the function as a post-compile hook
     triton.knobs.runtime.jit_post_compile_hook = nvshmem_init_hook
