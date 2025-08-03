@@ -719,6 +719,7 @@
   dispatch:
     CPU, CUDA: all_out
     MPS: all_out_mps
+    MTIA: all_out_mtia
 
 - func: all.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
