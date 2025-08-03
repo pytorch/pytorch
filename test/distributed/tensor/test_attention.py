@@ -594,6 +594,9 @@ class RingFlexAttentionTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
     def test_ring_flex_attention(self) -> None:
         self.run_subtests(
             {"qkv_size": [128 * self.world_size, 2048]},
