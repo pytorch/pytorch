@@ -288,28 +288,28 @@ class LocalCellSource(Source):
 # Represents obj.__code__ where object is type object
 @dataclasses.dataclass(frozen=True)
 class CodeSource(ChainedSource):
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__code__"))
 
-    def guard_source(self):
+    def guard_source(self) -> GuardSource:
         return self.base.guard_source()
 
-    def name(self):
+    def name(self) -> str:
         return f"{self.base.name()}.__code__"
 
 
 # Represents obj.__closure__ where object is type object
 @dataclasses.dataclass(frozen=True)
 class ClosureSource(ChainedSource):
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__closure__"))
 
-    def guard_source(self):
+    def guard_source(self) -> GuardSource:
         return self.base.guard_source()
 
-    def name(self):
+    def name(self) -> str:
         return f"{self.base.name()}.__closure__"
 
 
