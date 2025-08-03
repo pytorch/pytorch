@@ -32,11 +32,7 @@ kernel void mark_unique_positions_and_count_kernel(
     device const int64_t* flat_indices [[buffer(0)]],
     device bool* is_unique [[buffer(1)]],
     device atomic_int* count [[buffer(2)]],
-    constant int64_t& size [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  if (tid >= size)
-    return;
-
   bool unique = (tid == 0) || (flat_indices[tid] != flat_indices[tid - 1]);
   is_unique[tid] = unique;
 
@@ -63,7 +59,6 @@ kernel void kogge_stone_step(
 kernel void shift_right_kernel(
     device const int* input [[buffer(0)]],
     device int* output [[buffer(1)]],
-    constant uint& size [[buffer(2)]],
     uint gid [[thread_position_in_grid]]) {
   output[gid] = (gid == 0) ? 0 : input[gid - 1];
 }

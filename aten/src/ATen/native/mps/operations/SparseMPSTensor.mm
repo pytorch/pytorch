@@ -154,7 +154,7 @@ static Tensor compute_output_positions_parallel(const Tensor& is_unique) {
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       MTLSize threadgroupSize = MTLSizeMake(threadsPerTG, 1, 1);
 
-      mtl_setArgs(encoder, positions, positions_cloned, nnz);
+      mtl_setArgs(encoder, positions, positions_cloned);
 
       [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
     }
@@ -188,7 +188,7 @@ static std::pair<Tensor, int32_t> mark_unique_and_count(const Tensor& flat_indic
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       MTLSize threadgroupSize = MTLSizeMake(threadsPerTG, 1, 1);
 
-      mtl_setArgs(encoder, flat_indices, is_unique, count_result, nnz);
+      mtl_setArgs(encoder, flat_indices, is_unique, count_result);
 
       [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
     }
