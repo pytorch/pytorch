@@ -8,7 +8,7 @@ from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import IS_MACOS, skipIf, skipIfRocm, skipIfXpu
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
 
@@ -530,6 +530,7 @@ class DistributedPatternTests(TestCase):
         self._assert_same_grad(out1, out2)
 
 
+@skipIf(not dist.is_available(), "requires distributed")
 class FakeDistributedTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super(
