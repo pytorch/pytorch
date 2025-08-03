@@ -1,7 +1,7 @@
 import os
 from cli.lib.utils import read_yaml_file, run_shell
 import os
-
+import sys
 
 class VllmTestRunner:
     def __init__(self, file_path="") -> None:
@@ -28,11 +28,14 @@ class VllmTestRunner:
         sub_path = config.get("path", "tests")
         print(f"running test config: {testid}")
         envs = os.environ.copy()
-        envs["HF_TOKEN"] = os.environ.get("HUGGING_FACE_HUB_TOKEN", "")
-        if os.environ.get("HUGGING_FACE_HUB_TOKEN", ""):
-            print("found HUGGING_FACE_HUB_TOKEN in env")
+        if os.environ.get("VLLM_TEST_HUGGING_FACE_TOKEN", ""):
+            print("found VLLM_TEST_HUGGING_FACE_TOKEN in env",flush=True)
+            sys.stdout.flush()
         else:
-            print("HUGGING_FACE_HUB_TOKEN not found in env")
+            print("VLLM_TEST_HUGGING_FACE_TOKEN not found in env",flush=True)
+            sys.stdout.flush()
+
+        envs["HF_TOKEN"] = os.environ.get("VLLM_TEST_HUGGING_FACE_TOKEN", "")
         for step in steps:
             # todo : replace with run_cmd with envrirnment
             run_shell(step, cwd=sub_path, env=envs)
