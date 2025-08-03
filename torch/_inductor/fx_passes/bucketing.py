@@ -133,10 +133,10 @@ def greedy_bucket_collective_by_mb(
             assert "val" in node.meta
             n_val = node.meta["val"]
             out_size_bytes = n_val.numel() * n_val.element_size()
-            if (
-                cur_bucket_size_bytes + out_size_bytes > bucket_size_bytes
-                and cur_bucket
-            ):
+            n_input_val = node.all_input_nodes[0].meta["val"]
+            in_size_bytes = n_input_val.numel() * n_input_val.element_size()
+            size_bytes = max(out_size_bytes, in_size_bytes)
+            if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
                 # Current bucket is full, create new bucket
                 if len(cur_bucket) > 1:
                     buckets.append(cur_bucket)
@@ -144,7 +144,7 @@ def greedy_bucket_collective_by_mb(
                 cur_bucket_size_bytes = 0
                 cur_bucket_id += 1
                 cur_bucket_successors = OrderedSet()
-            cur_bucket_size_bytes += out_size_bytes
+            cur_bucket_size_bytes += size_bytes
             cur_bucket.append(node)
             cur_bucket_successors |= nodes_successors[node]
         if len(cur_bucket) > 1:
