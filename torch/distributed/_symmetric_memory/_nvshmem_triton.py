@@ -56,6 +56,7 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
     lib_path = _find_nvshmem_device_library()
     extern_libs = {"libnvshmem_device": lib_path}
 
+    # A hook function to initialize NVSHMEM in Triton
     def nvshmem_init_hook(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         key = kwargs["key"]
         device = kwargs["compile"]["device"]
