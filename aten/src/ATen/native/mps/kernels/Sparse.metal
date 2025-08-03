@@ -17,8 +17,8 @@ kernel void flatten_indices_kernel(
 }
 
 kernel void compute_output_positions_kernel(
-    device const bool* is_unique [[buffer(0)]], // input: marks unique positions
-    device int* positions [[buffer(1)]], // output: position in output array
+    device const bool* is_unique [[buffer(0)]],
+    device int* positions [[buffer(1)]],
     uint gid [[thread_position_in_grid]]) {
   int pos = 0;
   for (uint i = 0; i < gid; i++) {
