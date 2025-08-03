@@ -1047,6 +1047,26 @@ else:
     )
 
 
+# See Note [Recomputing collectives in the partitioner]
+@contextlib.contextmanager
+def treat_collectives_as_safe_to_dce():
+    if (
+        torch.ops._c10d_functional.wait_tensor.default
+        not in torch.fx.node._side_effectful_functions
+    ):
+        yield
+        return
+    torch.fx.node._side_effectful_functions.remove(
+        torch.ops._c10d_functional.wait_tensor.default
+    )
+    try:
+        yield
+    finally:
+        torch.fx.node._side_effectful_functions.add(
+            torch.ops._c10d_functional.wait_tensor.default
+        )
+
+
 """
 Dynamo Remappings allow seamless translation from non-functional collectives of supportable form into
 functional collective calls followed by inplace copy ops, allowing them to be traced into a functional graph.
