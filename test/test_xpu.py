@@ -3,12 +3,12 @@
 import re
 import subprocess
 import sys
-import tempfile
 import time
 import unittest
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
+from torch._inductor.codecache import WritableTempFile
 from torch.testing import make_tensor
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
@@ -433,7 +433,7 @@ if __name__ == "__main__":
         x = torch.randn(5, 5).xpu()
         y = torch.zeros(2, 5, dtype=torch.int, device="xpu")
         q = [x, y, x, y.storage()]
-        with tempfile.NamedTemporaryFile() as f:
+        with WritableTempFile() as f:
             torch.save(q, f)
             f.seek(0)
             q_copy = torch.load(f)
@@ -454,7 +454,7 @@ if __name__ == "__main__":
             torch.randn(4, 4).xpu(),
             torch.tensor([], dtype=torch.float, device=torch.device("xpu")),
         ]
-        with tempfile.NamedTemporaryFile() as f:
+        with WritableTempFile() as f:
             torch.save(x, f)
             f.seek(0)
             x_copy = torch.load(f)
