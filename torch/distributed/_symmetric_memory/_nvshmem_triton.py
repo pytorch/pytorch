@@ -32,7 +32,7 @@ def _find_nvshmem_device_library() -> str:
         raise RuntimeError("NVSHMEM device library not found in RPATH")
 
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Failed to read RPATH from {so_path}: {e}")
+        raise RuntimeError(f"Failed to read RPATH from {so_path}: {e}") from e
 
 
 def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
