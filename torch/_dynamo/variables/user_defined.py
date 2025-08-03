@@ -138,6 +138,14 @@ def is_forbidden_context_manager(ctx):
     return ctx in f_ctxs
 
 
+def is_cython_function(obj):
+    return (
+        callable(obj)
+        and hasattr(type(obj), "__name__")
+        and type(obj).__name__ == "cython_function_or_method"
+    )
+
+
 class UserDefinedVariable(VariableTracker):
     value: object
 
@@ -1536,9 +1544,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source = self._wrap_source(source)
 
         if subobj is not NO_SUCH_SUBOBJ:
-            if is_wrapper_or_member_descriptor(
-                subobj
-            ) or torch._C._dynamo.utils.is_instancemethod(subobj):
+            if (
+                is_wrapper_or_member_descriptor(subobj)
+                or torch._C._dynamo.utils.is_instancemethod(subobj)
+                or is_cython_function(subobj)
+            ):
                 options = {"source": source}
                 return variables.GetAttrVariable(self, name, **options)
             if source:
@@ -1583,6 +1593,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
+    class HashWrapper:
+        """This class is hashed if a dataclass is used as a key in a dict.
+        It's necessary to avoid side effects from calling the __init__ of the dataclass class when hashing"""
+
+        def __init__(self, c, fields):
+            self.cls = c
+            self.fields = tuple(fields.items())
+
+        def __eq__(self, other):
+            return (
+                type(self) == type(other)
+                and self.cls == other.cls
+                and self.fields == other.fields
+            )
+
+        def __hash__(self):
+            return hash((self.cls, self.fields))
+
     @staticmethod
     def create(tx, value, source):
         from dataclasses import fields
