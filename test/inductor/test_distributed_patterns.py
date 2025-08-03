@@ -122,30 +122,31 @@ def steps(m, inp):
     return out
 
 
-fw_graph = [None]
-bw_graph = [None]
+class GraphCaptureBackend:
+    def __init__(self):
+        self.fw_graph = None
+        self.bw_graph = None
 
+    def __call__(self, gm, args):
+        from functorch.compile import min_cut_rematerialization_partition
+        from torch._functorch.aot_autograd import aot_module_simplified
 
-def aot_graph_capture_backend(gm, args):
-    from functorch.compile import min_cut_rematerialization_partition
-    from torch._functorch.aot_autograd import aot_module_simplified
+        def fw_compiler(gm, _):
+            self.fw_graph = gm
+            return gm
 
-    def fw_compiler(gm, _):
-        fw_graph[0] = gm
-        return gm
+        def bw_compiler(gm, _):
+            self.bw_graph = gm
+            return gm
 
-    def bw_compiler(gm, _):
-        bw_graph[0] = gm
-        return gm
-
-    return aot_module_simplified(
-        gm,
-        args,
-        fw_compiler,
-        bw_compiler,
-        partition_fn=min_cut_rematerialization_partition,
-        keep_inference_input_mutations=True,
-    )
+        return aot_module_simplified(
+            gm,
+            args,
+            fw_compiler,
+            bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+            keep_inference_input_mutations=True,
+        )
 
 
 class DistributedPatternTests(TestCase):
@@ -560,6 +561,9 @@ class FakeDistributedTests(torch._dynamo.test_case.TestCase):
     def test_partitioner_saves_primal_instead_of_allgathered_primal(self):
         import torch.distributed._functional_collectives as funcol
 
+        # Create graph capture backend instance for this test
+        graph_capture_backend = GraphCaptureBackend()
+
         def scale(
             t: torch.Tensor, amax_t: torch.Tensor
         ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -652,7 +656,7 @@ class FakeDistributedTests(torch._dynamo.test_case.TestCase):
 
                 return grad_a, grad_b, None
 
-        @torch.compile(backend=aot_graph_capture_backend)
+        @torch.compile(backend=graph_capture_backend)
         def ffn(x: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor) -> torch.Tensor:
             x = Fp8LinearFn.apply(x, w1, "col")
             x = torch.nn.functional.relu(x)
@@ -660,17 +664,17 @@ class FakeDistributedTests(torch._dynamo.test_case.TestCase):
             return x
 
         in_ = torch.randn(
-            (3072 // WORLD_SIZE, 4096), device="cuda", dtype=torch.bfloat16
+            (3072 // WORLD_SIZE, 4096), device=self.device_type, dtype=torch.bfloat16
         )
         w1 = torch.randn(
             (8192 // WORLD_SIZE, 4096),
-            device="cuda",
+            device=self.device_type,
             dtype=torch.bfloat16,
             requires_grad=True,
         )
         w2 = torch.randn(
             (4096, 8192 // WORLD_SIZE),
-            device="cuda",
+            device=self.device_type,
             dtype=torch.bfloat16,
             requires_grad=True,
         )
@@ -680,7 +684,7 @@ class FakeDistributedTests(torch._dynamo.test_case.TestCase):
         #  in the backward graph, we all_gather(primals_1),
         #  instead of saving its result for backward
         self.assertExpectedInline(
-            str(fw_graph[0].code.strip()),
+            str(graph_capture_backend.fw_graph.code.strip()),
             """\
 def forward(self, primals_1, primals_2, primals_3):
     abs_1 = torch.ops.aten.abs.default(primals_1)
