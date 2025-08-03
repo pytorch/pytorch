@@ -1333,8 +1333,8 @@ class TestMaxAutotune(TestCase):
             if not TEST_WITH_ROCM:
                 expected = """{
                     'input_nodes':[
-                        "[[s77,s17],[s17,1],torch.float32,device(type='cuda',index=0),0]",
-                        "[[s17,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
+                        "[[s77,s27],[s27,1],torch.float32,device(type='cuda',index=0),0]",
+                        "[[s27,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','kwargs':{'EVEN_K':False,'ALLOW_TF32':True,
