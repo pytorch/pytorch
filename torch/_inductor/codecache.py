@@ -359,6 +359,36 @@ def get_hash(
     raise AssertionError(f"Unknown hash type {hash_type}")
 
 
+class WritableTempFile:
+    """
+    Avoid "Permission denied error" on Windows:
+      with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
+        # Not writable on Windows:
+        # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
+
+    Example:
+        with WritableTempFile("w", suffix=".gv") as temp_file:
+            tree.to_dotfile(temp_file.name)
+    """
+
+    def __init__(
+        self, mode: str = "w", *, encoding: Any = None, suffix: Any = None
+    ) -> None:
+        self.mode = mode
+        self.encoding = encoding
+        self.suffix = suffix
+
+    def __enter__(self) -> Any:
+        self.temp_file = tempfile.NamedTemporaryFile(
+            self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
+        )
+        return self.temp_file
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.temp_file.close()
+        os.unlink(self.temp_file.name)
+
+
 def write(
     content: Union[str, bytes],
     extension: str,
@@ -1620,36 +1650,6 @@ class CudaKernelParamCache:
     @classmethod
     def get_keys(cls) -> KeysView[str]:
         return cls.cache.keys()
-
-
-class WritableTempFile:
-    """
-    Avoid "Permission denied error" on Windows:
-      with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
-        # Not writable on Windows:
-        # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
-
-    Example:
-        with WritableTempFile("w", suffix=".gv") as temp_file:
-            tree.to_dotfile(temp_file.name)
-    """
-
-    def __init__(
-        self, mode: str = "w", *, encoding: Any = None, suffix: Any = None
-    ) -> None:
-        self.mode = mode
-        self.encoding = encoding
-        self.suffix = suffix
-
-    def __enter__(self) -> Any:
-        self.temp_file = tempfile.NamedTemporaryFile(
-            self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
-        )
-        return self.temp_file
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self.temp_file.close()
-        os.unlink(self.temp_file.name)
 
 
 class AotCodeCompiler:
