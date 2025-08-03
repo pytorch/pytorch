@@ -5512,273 +5512,6 @@ class TypeGuardAccessor : public GuardAccessor {
 };
 
 /**
-<<<<<<< HEAD
-=======
- * Represent x.__dict__ accessor, where x is type object.
- */
-class TypeDictGuardAccessor : public GuardAccessor {
- public:
-  // name = __type_dict_accessor__, a unique string used as attribute name.
-  TypeDictGuardAccessor(
-      RootGuardManager* root,
-      py::str name,
-      std::string source,
-      py::handle example_value,
-      py::handle guard_manager_enum)
-      : GuardAccessor(
-            root,
-            std::move(name),
-            std::move(source),
-            example_value,
-            guard_manager_enum) {}
-
-  // NB: Intentional duplication between check_nopybind and
-  // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
-      override { // borrowed ref
-    PyObject* x = ((PyTypeObject*)obj)->tp_dict; // borrowed ref
-    if (x == nullptr) {
-      return false;
-    }
-    return _guard_manager->check_nopybind(x);
-  }
-
-  GuardDebugInfo check_verbose_nopybind(
-      PyObject* obj) override { // borrowed ref
-    PyObject* x = ((PyTypeObject*)obj)->tp_dict; // borrowed ref
-    if (x == nullptr) {
-      return GuardDebugInfo(false, "null type dict on " + repr(), 0);
-    }
-    return _guard_manager->check_verbose_nopybind(x);
-  }
-
-  std::string repr() const override {
-    return "TypeDictGuardAccessor";
-  }
-
- public: // cloning functions
-  TypeDictGuardAccessor(
-      GuardManager* guard_manager,
-      TypeDictGuardAccessor* from)
-      : GuardAccessor(guard_manager, from) {
-    from->clone_visitor(this);
-  }
-
-  GuardAccessor* clone(
-      RootGuardManager* cloned_root,
-      const py::function& clone_filter_fn) override {
-    return clone_common<TypeDictGuardAccessor>(cloned_root, clone_filter_fn);
-  }
-
-  void clone_visitor(TypeDictGuardAccessor* to) {}
-};
-
-/**
- * Represent x.__mro__ accessor, where x is type object.
- */
-class TypeMROGuardAccessor : public GuardAccessor {
- public:
-  // name = __type_mro_accessor__, a unique string used as attribute name.
-  TypeMROGuardAccessor(
-      RootGuardManager* root,
-      py::str name,
-      std::string source,
-      py::handle example_value,
-      py::handle guard_manager_enum)
-      : GuardAccessor(
-            root,
-            std::move(name),
-            std::move(source),
-            example_value,
-            guard_manager_enum) {}
-
-  // NB: Intentional duplication between check_nopybind and
-  // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
-      override { // borrowed ref
-    PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
-    return _guard_manager->check_nopybind(x);
-  }
-
-  GuardDebugInfo check_verbose_nopybind(
-      PyObject* obj) override { // borrowed ref
-    PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
-    return _guard_manager->check_verbose_nopybind(x);
-  }
-
-  std::string repr() const override {
-    return "TypeMROGuardAccessor";
-  }
-
- public: // cloning functions
-  TypeMROGuardAccessor(GuardManager* guard_manager, TypeMROGuardAccessor* from)
-      : GuardAccessor(guard_manager, from) {
-    from->clone_visitor(this);
-  }
-
-  GuardAccessor* clone(
-      RootGuardManager* cloned_root,
-      const py::function& clone_filter_fn) override {
-    return clone_common<TypeMROGuardAccessor>(cloned_root, clone_filter_fn);
-  }
-
-  void clone_visitor(TypeMROGuardAccessor* to) {}
-};
-
-/**
- * Represent x.__code__
- */
-class CodeGuardAccessor : public GuardAccessor {
- public:
-  // name = __type_mro_accessor__, a unique string used as attribute name.
-  CodeGuardAccessor(
-      RootGuardManager* root,
-      py::str name,
-      std::string source,
-      py::handle example_value,
-      py::handle guard_manager_enum)
-      : GuardAccessor(
-            root,
-            std::move(name),
-            std::move(source),
-            example_value,
-            guard_manager_enum) {}
-
-  // NB: Intentional duplication between check_nopybind and
-  // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
-      override { // borrowed ref
-    PyObject* func = obj;
-    if (PyMethod_Check(obj)) {
-      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
-    } else if (PyInstanceMethod_Check(obj)) {
-      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
-    }
-    PyObject* x = PyFunction_GetCode(func); // borrowed ref
-    if (x == nullptr) {
-      PyErr_Clear();
-      return false;
-    }
-    return _guard_manager->check_nopybind(x);
-  }
-
-  GuardDebugInfo check_verbose_nopybind(
-      PyObject* obj) override { // borrowed ref
-    PyObject* func = obj;
-    if (PyMethod_Check(obj)) {
-      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
-    } else if (PyInstanceMethod_Check(obj)) {
-      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
-    }
-    PyObject* x = PyFunction_GetCode(func);
-    if (x == nullptr) {
-      PyErr_Clear();
-      return GuardDebugInfo(
-          false,
-          std::string(repr() + ": Not a function on ") + get_source(),
-          0);
-    }
-
-    return _guard_manager->check_verbose_nopybind(x);
-  }
-
-  std::string repr() const override {
-    return "CodeGuardAccessor";
-  }
-
- public: // cloning functions
-  CodeGuardAccessor(GuardManager* guard_manager, CodeGuardAccessor* from)
-      : GuardAccessor(guard_manager, from) {
-    from->clone_visitor(this);
-  }
-
-  GuardAccessor* clone(
-      RootGuardManager* cloned_root,
-      const py::function& clone_filter_fn) override {
-    return clone_common<CodeGuardAccessor>(cloned_root, clone_filter_fn);
-  }
-
-  void clone_visitor(CodeGuardAccessor* to) {}
-};
-
-/**
- * Represent x.__closure__
- */
-class ClosureGuardAccessor : public GuardAccessor {
- public:
-  // name = __type_mro_accessor__, a unique string used as attribute name.
-  ClosureGuardAccessor(
-      RootGuardManager* root,
-      py::str name,
-      std::string source,
-      py::handle example_value,
-      py::handle guard_manager_enum)
-      : GuardAccessor(
-            root,
-            std::move(name),
-            std::move(source),
-            example_value,
-            guard_manager_enum) {}
-
-  // NB: Intentional duplication between check_nopybind and
-  // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
-      override { // borrowed ref
-    PyObject* func = obj;
-    if (PyMethod_Check(obj)) {
-      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
-    } else if (PyInstanceMethod_Check(obj)) {
-      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
-    }
-    PyObject* x = PyFunction_GetClosure(func); // borrowed ref
-    if (x == nullptr) {
-      PyErr_Clear();
-      return false;
-    }
-    return _guard_manager->check_nopybind(x);
-  }
-
-  GuardDebugInfo check_verbose_nopybind(
-      PyObject* obj) override { // borrowed ref
-    PyObject* func = obj;
-    if (PyMethod_Check(obj)) {
-      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
-    } else if (PyInstanceMethod_Check(obj)) {
-      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
-    }
-    PyObject* x = PyFunction_GetClosure(func);
-    if (x == nullptr) {
-      PyErr_Clear();
-      return GuardDebugInfo(
-          false,
-          std::string(repr() + ": Not a function on ") + get_source(),
-          0);
-    }
-
-    return _guard_manager->check_verbose_nopybind(x);
-  }
-
-  std::string repr() const override {
-    return "ClosureGuardAccessor";
-  }
-
- public: // cloning functions
-  ClosureGuardAccessor(GuardManager* guard_manager, ClosureGuardAccessor* from)
-      : GuardAccessor(guard_manager, from) {
-    from->clone_visitor(this);
-  }
-
-  GuardAccessor* clone(
-      RootGuardManager* cloned_root,
-      const py::function& clone_filter_fn) override {
-    return clone_common<ClosureGuardAccessor>(cloned_root, clone_filter_fn);
-  }
-
-  void clone_visitor(ClosureGuardAccessor* to) {}
-};
-
-/**
->>>>>>> 5b80ced3190 ([dynamo][source] Add special source for __code__ and __closure__)
  * Getitem tuple_iterator accessor.
  */
 class TupleIteratorGetItemAccessor : public GuardAccessor {
@@ -6051,6 +5784,158 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
   }
 
   void clone_visitor(WeakRefCallGuardAccessor* to) {}
+};
+
+/**
+ * Represent x.__code__
+ */
+class CodeGuardAccessor : public GuardAccessor {
+ public:
+  // name = __type_mro_accessor__, a unique string used as attribute name.
+  CodeGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetCode(func); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetCode(func);
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false,
+          std::string(repr() + ": Not a function on ") + get_source(),
+          0);
+    }
+
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "CodeGuardAccessor";
+  }
+
+ public: // cloning functions
+  CodeGuardAccessor(GuardManager* guard_manager, CodeGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<CodeGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(CodeGuardAccessor* to) {}
+};
+
+/**
+ * Represent x.__closure__
+ */
+class ClosureGuardAccessor : public GuardAccessor {
+ public:
+  // name = __type_mro_accessor__, a unique string used as attribute name.
+  ClosureGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetClosure(func); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetClosure(func);
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false,
+          std::string(repr() + ": Not a function on ") + get_source(),
+          0);
+    }
+
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "ClosureGuardAccessor";
+  }
+
+ public: // cloning functions
+  ClosureGuardAccessor(GuardManager* guard_manager, ClosureGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<ClosureGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(ClosureGuardAccessor* to) {}
 };
 
 /**
@@ -6701,29 +6586,6 @@ PyObject* torch_c_dynamo_guards_init() {
       std::unique_ptr<TypeGuardAccessor>>(py_m, "TypeGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
-<<<<<<< HEAD
-=======
-      TypeDictGuardAccessor,
-      GuardAccessor,
-      std::unique_ptr<TypeDictGuardAccessor>>(py_m, "TypeDictGuardAccessor");
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<
-      TypeMROGuardAccessor,
-      GuardAccessor,
-      std::unique_ptr<TypeMROGuardAccessor>>(py_m, "TypeMROGuardAccessor");
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<
-      CodeGuardAccessor,
-      GuardAccessor,
-      std::unique_ptr<CodeGuardAccessor>>(py_m, "CodeGuardAccessor");
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<
-      ClosureGuardAccessor,
-      GuardAccessor,
-      std::unique_ptr<ClosureGuardAccessor>>(py_m, "ClosureGuardAccessor");
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<
->>>>>>> 5b80ced3190 ([dynamo][source] Add special source for __code__ and __closure__)
       WeakRefCallGuardAccessor,
       GuardAccessor,
       std::unique_ptr<WeakRefCallGuardAccessor>>(
@@ -6740,6 +6602,16 @@ PyObject* torch_c_dynamo_guards_init() {
       GuardAccessor,
       std::unique_ptr<TupleIteratorGetItemAccessor>>(
       py_m, "TupleIteratorGetItemAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      CodeGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<CodeGuardAccessor>>(py_m, "CodeGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      ClosureGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<ClosureGuardAccessor>>(py_m, "ClosureGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       GlobalWeakRefGuardAccessor,
