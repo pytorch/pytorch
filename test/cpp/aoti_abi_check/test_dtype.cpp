@@ -1,12 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/BFloat16-math.h>
-#include <c10/util/BFloat16.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/complex.h>
+#include <torch/headeronly/util/BFloat16.h>
 #include <torch/headeronly/util/Float4_e2m1fn_x2.h>
 
 #include <torch/headeronly/util/Half.h>
@@ -18,12 +17,12 @@
 #include <torch/headeronly/util/quint8.h>
 
 TEST(TestDtype, TestBFloat16) {
-  c10::BFloat16 a = 1.0f;
-  c10::BFloat16 b = 2.0f;
-  c10::BFloat16 add = 3.0f;
-  c10::BFloat16 sub = -1.0f;
-  c10::BFloat16 mul = 2.0f;
-  c10::BFloat16 div = 0.5f;
+  torch::headeronly::BFloat16 a = 1.0f;
+  torch::headeronly::BFloat16 b = 2.0f;
+  torch::headeronly::BFloat16 add = 3.0f;
+  torch::headeronly::BFloat16 sub = -1.0f;
+  torch::headeronly::BFloat16 mul = 2.0f;
+  torch::headeronly::BFloat16 div = 0.5f;
 
   EXPECT_EQ(a + b, add);
   EXPECT_EQ(a - b, sub);
