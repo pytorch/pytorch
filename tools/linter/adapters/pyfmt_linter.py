@@ -1,3 +1,12 @@
+# /// script
+# dependencies = [
+#   "black==23.12.1",
+#   "usort==1.0.8.post1",
+#   "isort==6.0.1",
+#   "ruff==0.12.2",
+# ]
+# ///
+
 from __future__ import annotations
 
 import argparse
@@ -11,7 +20,7 @@ import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import black
 import isort
@@ -114,8 +123,7 @@ def run_isort(content: str, path: Path) -> str:
 
 def run_usort(content: str, path: Path) -> str:
     usort_config = usort.Config.find(path)
-
-    return usort.usort_string(content, path=path, config=usort_config)
+    return cast(str, usort.usort_string(content, path=path, config=usort_config))
 
 
 def run_black(content: str, path: Path) -> str:

@@ -1,5 +1,11 @@
 """Adapter for https://github.com/charliermarsh/ruff."""
 
+# /// script
+# dependencies = [
+#   "ruff==0.12.2",
+# ]
+# ///
+
 from __future__ import annotations
 
 import argparse
