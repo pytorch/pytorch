@@ -202,8 +202,8 @@ class TestCutlassBackend(TestCase):
 
     def test_check_paths(self):
         cutlass_mock_imports_path = os.path.join(
-                os.path.dirname(torch.__file__),
-                "_inductor/codegen/cuda/cutlass_lib_extensions/cutlass_mock_imports"
+            os.path.dirname(torch.__file__),
+            "_inductor/codegen/cuda/cutlass_lib_extensions/cutlass_mock_imports",
         )
         cutlass_mock_cuda_path = os.path.join(cutlass_mock_imports_path, "cuda")
         cutlass_mock_pydot_path = os.path.join(cutlass_mock_imports_path, "pydot")
