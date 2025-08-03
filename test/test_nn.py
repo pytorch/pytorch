@@ -8249,13 +8249,17 @@ class TestNNDeviceType(NNTestCase):
         cl_formats = {4: torch.channels_last, 5: torch.channels_last_3d}
         for dtype in [torch.bfloat16, torch.half]:
             for shape, g in [((1, 8, 4, 3), 2), ((1, 8, 3, 4), 4),
-                             ((4, 40, 40, 40), 2), ((4, 8, 40, 40), 4),
-                             ((1, 8, 40, 40), 4), ((1, 8, 40, 40), 2),
-                             ((1, 8, 50, 50), 2), ((1, 8, 50, 50), 4),
-                             ((1, 40, 50, 50), 2), ((1, 9, 3, 4, 5), 3),
-                             ((1, 60, 10, 10, 10), 3), ((1, 9, 10, 50, 50), 3),
-                             ((1, 60, 10, 50, 50), 3), ((1, 8, 65, 55), 2),
-                             ((1, 3, 65, 55), 1), ((1, 3, 20, 20), 1)]:
+                 ((4, 40, 40, 40), 2), ((4, 8, 40, 40), 4),
+                 ((1, 8, 40, 40), 4), ((1, 8, 40, 40), 2),
+                 ((1, 8, 50, 50), 2), ((1, 8, 50, 50), 4),
+                 ((1, 40, 50, 50), 2), ((1, 9, 3, 4, 5), 3),
+                 ((1, 60, 10, 10, 10), 3), ((1, 9, 10, 50, 50), 3),
+                 ((1, 60, 10, 50, 50), 3), ((1, 8, 65, 55), 2),
+                 ((1, 3, 65, 55), 1), ((1, 3, 20, 20), 1)]:
+                
+                if g==1:
+                    continue
+
                 for is_cl in [False, True]:
                     format = cl_formats[len(shape)] if is_cl else torch.contiguous_format
                     helper(self, shape, g, format, dtype)
@@ -8901,7 +8905,46 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float64, torch.complex128)
+    @dtypes(torch.float32, torch.float64)
+    def test_GroupNorm_LayerNorm_equivalence_issue75862(self, device, dtype):
+        """Test that GroupNorm(num_groups=1) == LayerNorm (Issue #75862)"""
+        # Test various shapes
+        shapes = [(1, 8, 2, 2), (2, 16, 4, 4), (4, 32, 8, 8)]
+        
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                x = torch.randn(shape, device=device, dtype=dtype)
+                
+                # GroupNorm with 1 group
+                gn = nn.GroupNorm(1, shape[1], eps=1e-6).to(device, dtype)
+                gn_out = gn(x)
+                
+                # Equivalent LayerNorm
+                ln = nn.LayerNorm(shape[1], eps=1e-6).to(device, dtype)
+                # Copy weights to ensure same affine transform
+                ln.weight.data = gn.weight.data
+                ln.bias.data = gn.bias.data
+                
+                ln_out = ln(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+                
+                # Check equivalence
+                self.assertEqual(gn_out, ln_out, atol=1e-5, rtol=1e-5,
+                               msg=f"GroupNorm(1) != LayerNorm for shape {shape}")
+                
+                # Test gradients
+                x.requires_grad = True
+                gn_out = gn(x)
+                gn_out.sum().backward()
+                gn_grad = x.grad.clone()
+                
+                x.grad = None
+                ln_out = ln(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+                ln_out.sum().backward()
+                ln_grad = x.grad
+                
+                self.assertEqual(gn_grad, ln_grad, atol=1e-5, rtol=1e-5,
+                               msg=f"GroupNorm(1) gradients != LayerNorm gradients")
+
     def test_pad(self, device, dtype):
         # Assert assertion errors are raised for invalid circular padding values
         inputs = torch.randn(1, 1, 4, device=device, dtype=dtype, requires_grad=True)

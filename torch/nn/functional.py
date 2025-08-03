@@ -2935,6 +2935,19 @@ def group_norm(
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
+
+    # Fix for issue #75862
+    if (num_groups == 1 and input.dim() == 4 and 
+        input.dtype in [torch.float32, torch.float64] and
+        (weight is None or weight.dtype == input.dtype) and
+        (bias is None or bias.dtype == input.dtype)):
+        # Special case: num_groups=1 should be equivalent to LayerNorm
+        # Only apply for float32/float64 with matching parameter dtypes
+        N, C, H, W = input.shape
+        x = input.permute(0, 2, 3, 1).contiguous()
+        x = layer_norm(x, [C], weight, bias, eps)
+        return x.permute(0, 3, 1, 2).contiguous()
+
     if has_torch_function_variadic(input, weight, bias):
         return handle_torch_function(
             group_norm,
