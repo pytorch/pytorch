@@ -145,7 +145,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
             co.co_name,
             co.co_qualname,  # type: ignore[attr-defined]
             co.co_firstlineno,
-            co.co_lnotab,
+            co.co_linetable,
             co.co_exceptiontable,  # type: ignore[attr-defined]
             co.co_freevars,
             co.co_cellvars,
