@@ -5,8 +5,9 @@ Python polyfills for itertools
 from __future__ import annotations
 
 import itertools
+import operator
 import sys
-from typing import Callable, overload, TYPE_CHECKING, TypeVar
+from typing import Callable, Optional, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeAlias
 
 from ..decorators import substitute_in_graph
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "accumulate",
     "chain",
     "chain_from_iterable",
     "compress",
@@ -39,6 +41,35 @@ _T2 = TypeVar("_T2")
 def chain(*iterables: Iterable[_T]) -> Iterator[_T]:
     for iterable in iterables:
         yield from iterable
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.accumulate
+@substitute_in_graph(itertools.accumulate, is_embedded_type=True)  # type: ignore[arg-type]
+def accumulate(
+    iterable: Iterable[_T],
+    func: Optional[Callable[[_T, _T], _T]] = None,
+    *,
+    initial: Optional[_T] = None,
+) -> Iterator[_T]:
+    # call iter outside of the generator to match cypthon behavior
+    iterator = iter(iterable)
+    if func is None:
+        func = operator.add
+
+    def _accumulate(iterator: Iterator[_T]) -> Iterator[_T]:
+        total = initial
+        if total is None:
+            try:
+                total = next(iterator)
+            except StopIteration:
+                return
+
+        yield total
+        for element in iterator:
+            total = func(total, element)
+            yield total
+
+    return _accumulate(iterator)
 
 
 @substitute_in_graph(itertools.chain.from_iterable)  # type: ignore[arg-type]
