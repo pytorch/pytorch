@@ -5512,6 +5512,8 @@ class TypeGuardAccessor : public GuardAccessor {
 };
 
 /**
+<<<<<<< HEAD
+=======
  * Represent x.__dict__ accessor, where x is type object.
  */
 class TypeDictGuardAccessor : public GuardAccessor {
@@ -5776,6 +5778,7 @@ class ClosureGuardAccessor : public GuardAccessor {
 };
 
 /**
+>>>>>>> 5b80ced3190 ([dynamo][source] Add special source for __code__ and __closure__)
  * Getitem tuple_iterator accessor.
  */
 class TupleIteratorGetItemAccessor : public GuardAccessor {
@@ -6698,6 +6701,8 @@ PyObject* torch_c_dynamo_guards_init() {
       std::unique_ptr<TypeGuardAccessor>>(py_m, "TypeGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
+<<<<<<< HEAD
+=======
       TypeDictGuardAccessor,
       GuardAccessor,
       std::unique_ptr<TypeDictGuardAccessor>>(py_m, "TypeDictGuardAccessor");
@@ -6718,6 +6723,7 @@ PyObject* torch_c_dynamo_guards_init() {
       std::unique_ptr<ClosureGuardAccessor>>(py_m, "ClosureGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
+>>>>>>> 5b80ced3190 ([dynamo][source] Add special source for __code__ and __closure__)
       WeakRefCallGuardAccessor,
       GuardAccessor,
       std::unique_ptr<WeakRefCallGuardAccessor>>(
@@ -7198,86 +7204,6 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
-          "type_dict_manager",
-          [](GuardManager& self,
-             std::string source,
-             py::handle example_value,
-             py::handle guard_manager_enum) -> GuardManager* {
-            // A unique key is used to save as the accessor key.
-            py::str unique_key("__type_dict_accessor__");
-            return self.get_child_manager<TypeDictGuardAccessor>(
-                std::move(unique_key),
-                std::move(source),
-                example_value,
-                guard_manager_enum);
-          },
-          py::arg("source"),
-          py::arg("example_value"),
-          py::arg("guard_manager_enum"),
-          py::return_value_policy::reference)
-      // return by reference because GuardManager has the ownership of accessors
-      // and guard managers
-      .def(
-          "type_mro_manager",
-          [](GuardManager& self,
-             std::string source,
-             py::handle example_value,
-             py::handle guard_manager_enum) -> GuardManager* {
-            // A unique key is used to save as the accessor key.
-            py::str unique_key("__type_mro_accessor__");
-            return self.get_child_manager<TypeMROGuardAccessor>(
-                std::move(unique_key),
-                std::move(source),
-                example_value,
-                guard_manager_enum);
-          },
-          py::arg("source"),
-          py::arg("example_value"),
-          py::arg("guard_manager_enum"),
-          py::return_value_policy::reference)
-      // return by reference because GuardManager has the ownership of accessors
-      // and guard managers
-      .def(
-          "code_manager",
-          [](GuardManager& self,
-             std::string source,
-             py::handle example_value,
-             py::handle guard_manager_enum) -> GuardManager* {
-            // A unique key is used to save as the accessor key.
-            py::str unique_key("__code_accessor__");
-            return self.get_child_manager<CodeGuardAccessor>(
-                std::move(unique_key),
-                std::move(source),
-                example_value,
-                guard_manager_enum);
-          },
-          py::arg("source"),
-          py::arg("example_value"),
-          py::arg("guard_manager_enum"),
-          py::return_value_policy::reference)
-      // return by reference because GuardManager has the ownership of accessors
-      // and guard managers
-      .def(
-          "closure_manager",
-          [](GuardManager& self,
-             std::string source,
-             py::handle example_value,
-             py::handle guard_manager_enum) -> GuardManager* {
-            // A unique key is used to save as the accessor key.
-            py::str unique_key("__closure_accessor__");
-            return self.get_child_manager<ClosureGuardAccessor>(
-                std::move(unique_key),
-                std::move(source),
-                example_value,
-                guard_manager_enum);
-          },
-          py::arg("source"),
-          py::arg("example_value"),
-          py::arg("guard_manager_enum"),
-          py::return_value_policy::reference)
-      // return by reference because GuardManager has the ownership of accessors
-      // and guard managers
-      .def(
           "weakref_call_manager",
           [](GuardManager& self,
              std::string source,
@@ -7329,6 +7255,46 @@ PyObject* torch_c_dynamo_guards_init() {
           "set_getitem_manager",
           &GuardManager::get_child_manager<SetGetItemGuardAccessor>,
           py::arg("index"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "code_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__code_accessor__");
+            return self.get_child_manager<CodeGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "closure_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__closure_accessor__");
+            return self.get_child_manager<ClosureGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
           py::arg("source"),
           py::arg("example_value"),
           py::arg("guard_manager_enum"),
