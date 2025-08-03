@@ -80,6 +80,7 @@ from .higher_order_ops import (
 )
 from .iter import (
     CountIteratorVariable,
+    CycleIteratorVariable,
     FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
@@ -168,6 +169,7 @@ __all__ = [
     "CreateTMADescriptorExperimentalVariable",
     "CreateTMADescriptorStableVariable",
     "CUDADeviceVariable",
+    "CycleIteratorVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",

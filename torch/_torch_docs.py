@@ -5653,11 +5653,11 @@ Examples::
     >>> torch.is_nonzero(torch.tensor([1, 3, 5]))
     Traceback (most recent call last):
     ...
-    RuntimeError: Boolean value of Tensor with more than one value is ambiguous
+    RuntimeError: bool value of Tensor with more than one value is ambiguous
     >>> torch.is_nonzero(torch.tensor([]))
     Traceback (most recent call last):
     ...
-    RuntimeError: Boolean value of Tensor with no values is ambiguous
+    RuntimeError: bool value of Tensor with no values is ambiguous
 """.format(**common_args),
 )
 

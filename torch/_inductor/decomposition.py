@@ -581,8 +581,10 @@ def view_copy_dtype(
 
 
 def _get_shape_permutation_like(
-    self: torch.Tensor,
+    self: torch.Tensor, layout: torch.layout
 ) -> tuple[utils.ShapeType, utils.StrideType]:
+    assert layout == torch.strided
+
     physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(self)
     shape = [self.shape[l] for l in physical_layout]
 
@@ -622,8 +624,7 @@ def full_like(
         return result.to(memory_format=memory_format)
 
     else:
-        assert layout == torch.strided
-        shape, permutation = _get_shape_permutation_like(self)
+        shape, permutation = _get_shape_permutation_like(self, layout)
         result = torch.full(
             shape,
             fill_value,
@@ -643,25 +644,29 @@ def _rand_like(
     self: torch.Tensor,
     *,
     dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     memory_format: torch.memory_format = torch.preserve_format,
     **kwargs: Any,
 ) -> torch.Tensor:
     dtype = self.dtype if dtype is None else dtype
+    layout = self.layout if layout is None else layout
     device = self.device if device is None else device
 
     if memory_format != torch.preserve_format:
         return rand_fn(
             self.shape,
             dtype=dtype,
+            layout=layout,
             device=device,
             **kwargs,
         ).to(memory_format=memory_format)
 
-    shape, permutation = _get_shape_permutation_like(self)
+    shape, permutation = _get_shape_permutation_like(self, layout)
     result = rand_fn(
         shape,
         dtype=dtype,
+        layout=layout,
         device=device,
         **kwargs,
     )
