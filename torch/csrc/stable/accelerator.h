@@ -27,7 +27,7 @@ class DeviceGuard {
     guard_.reset(ptr);
   }
 
-  void set_index(int32_t device_index) {
+  void set_index(DeviceIndex device_index) {
     AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_device_guard_set_index(guard_.get(), device_index));
   }
