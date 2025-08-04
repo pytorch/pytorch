@@ -5,7 +5,9 @@ import unittest
 from sympy import Symbol, sympify
 
 import torch
-from torch._inductor.fx_utils import count_flops_fx, countable_fx
+from torch._dynamo.testing import EagerAndRecordGraphs
+from torch._export.utils import _detect_fake_mode_from_gm
+from torch._inductor.fx_utils import count_flops_fx, countable_fx, FakeTensorUpdater
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
@@ -202,6 +204,74 @@ class TestUtils(TestCase):
 
 
 instantiate_device_type_tests(TestUtils, globals())
+
+
+class TestFakeTensorUpdater(TestCase):
+    def _common_impl(self, gm: torch.fx.GraphModule) -> None:
+        """Assumes that gm is a GraphModule with a single-dimensioned tensor output
+        whose size will grow proportionally to the input size."""
+
+        def add_cat_to_inputs(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+            """Transforms input GraphModule by concatenating all inputs with
+            themselves."""
+            for node in gm.graph.find_nodes(op="placeholder"):
+                with gm.graph.inserting_after(node):
+                    cat_node = gm.graph.call_function(
+                        torch.ops.aten.cat, ([node, node],)
+                    )
+                    node.replace_all_uses_with(cat_node, lambda n: n != cat_node)
+            gm.graph.eliminate_dead_code()
+            gm.graph.lint()
+            return gm
+
+        def get_output_size(gm: torch.fx.GraphModule) -> torch.Size:
+            output_node: torch.fx.Node = gm.graph.output_node().args[0][0]  # type: ignore[arg-type]
+            if "val" in output_node.meta:
+                return output_node.meta["val"].size()
+            return output_node.meta["example_value"].size()
+
+        output_size = get_output_size(gm)
+        updater = FakeTensorUpdater(gm)
+        for _ in range(5):
+            gm = add_cat_to_inputs(gm)
+            with V.set_fake_mode(_detect_fake_mode_from_gm(gm)):
+                updater.incremental_update()
+
+            # We could check the graph more thoroughly, but it should be sufficient to
+            # check the meta for the output node alone.
+            output_size = torch.Size((output_size[0] * 2,))
+            self.assertEqual(get_output_size(gm), output_size)
+
+    def test_hop_no_subgraph_inputs(self):
+        pass
+
+    def test_hop_subgraph_inputs(self):
+        """Test propagation of FakeTensor into the invoke_subgraph HOP.  Modifying the
+        tested subgraph itself is not supported by the current implementation of
+        invoke_subgraph FakeTensor caching."""
+
+        @torch.compiler.nested_compile_region
+        def nested_section(a: torch.Tensor) -> torch.Tensor:
+            return torch.sin(a)
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            x = nested_section(a)
+            y = nested_section(b)
+            return x + y
+
+        a = torch.randn(32)
+        b = torch.randn(32)
+
+        fn(a, b)
+
+        # Test propagation of FakeTensor _into_ subgraph HOP.  Modifying the subgraph
+        # itself is not supported by the current implementation of invoke_subgraph
+        # FakeTensor caching.
+        self._common_impl(backend.graphs[0])
+
 
 if __name__ == "__main__":
     run_tests()
