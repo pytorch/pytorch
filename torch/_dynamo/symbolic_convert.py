@@ -145,7 +145,6 @@ from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
-    IteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
@@ -4222,7 +4221,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if isinstance(tos, (IteratorVariable, LocalGeneratorObjectVariable)) or (
+        if isinstance(tos, (ListIteratorVariable, LocalGeneratorObjectVariable)) or (
             isinstance(tos, UserDefinedObjectVariable)
             and isinstance(tos.value, collections.abc.Iterator)
         ):
