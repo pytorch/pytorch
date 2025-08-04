@@ -106,6 +106,15 @@ if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_
     # https://github.com/pytorch/pytorch/issues/149422
     python /pytorch/.ci/pytorch/smoke_test/check_gomp.py
   fi
+
+  # Check if package size exceeds the limit
+  if[[ "\$DESIRED_CUDA" == *cu* ]]; then
+    MAX_BIN_SIZE=$(python /pytorch/.github/scripts/get_ci_variable.py --get-bin-size "linux-${DESIRED_CUDA}")
+    if [[ "\$torch_pkg_size" -gt \$MAX_BIN_SIZE ]]; then
+      echo "ERROR: package exceeds the limit of \$MAX_BIN_SIZE bytes"
+      exit 1
+    fi
+  fi
 fi
 
 # Clean temp files

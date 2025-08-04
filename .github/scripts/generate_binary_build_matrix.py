@@ -40,6 +40,14 @@ CPU_S390X_ARCH = ["cpu-s390x"]
 
 CUDA_AARCH64_ARCHES = ["12.9-aarch64"]
 
+# current binary limits for each platform released to PyPI
+BINARY_LIMITS = {
+     "linux-cu128": 860000000,
+     "linux-cu129": 1200000000,
+     "windows-cpu": 250000000,
+     "linux-aarch64-cpu": 120000000,
+     "macos": 90000000
+}
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
