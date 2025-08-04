@@ -2077,10 +2077,10 @@ communication mechanism.
               "merge_remote_group",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const c10::intrusive_ptr<::c10d::Store>& store,
-                 int size,
-                 std::chrono::milliseconds timeout,
-                 std::optional<std::string> groupName,
-                 std::optional<std::string> groupDesc) {
+                 const int& size,
+                 const std::chrono::milliseconds& timeout,
+                 const std::optional<std::string>& groupName,
+                 const std::optional<std::string>& groupDesc) {
                 ::c10d::ProcessGroup::MergeOptions opts;
                 opts.timeout = timeout;
                 opts.group_name = groupName;

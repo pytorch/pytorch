@@ -1373,9 +1373,7 @@ class BuiltinVariable(VariableTracker):
             if (
                 self.fn is tuple
                 and len(args) == 2
-                and tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.is_iterable), [args[1]], {}
-                ).value
+                and args[1].has_force_unpack_var_sequence(tx)
                 and not kwargs
             ):
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
@@ -1811,7 +1809,18 @@ class BuiltinVariable(VariableTracker):
             # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
             # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
             # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
-            return obj.call_method(tx, "__iter__", args, kwargs)
+            # If the object implements a __getitem__ method, iter(...) will call obj.__getitem__()
+            # with an integer argument starting at 0, until __getitem__ raises IndexError
+            ret = variables.UserFunctionVariable(
+                polyfills.builtins.iter_
+            ).call_function(tx, [obj, *args], {})
+
+            if len(args):
+                # iter(obj, sentinel) returns an object that implements
+                # __iter__ and __next__ methods (UserDefinedObjectVariable)
+                # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
+                # that forwards the next_variable call to the object.
+                ret = variables.ObjectIteratorVariable(ret)
         return ret
 
     call_tuple = _call_tuple_list

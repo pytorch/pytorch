@@ -1593,8 +1593,8 @@ class TestMaxAutotune(TestCase):
 
         for i in range(90, 100):
             torch._dynamo.reset()
-            a = torch.randn((i, 1), device="cuda", dtype=torch.float32)
-            b = torch.randn((1, i), device="cuda", dtype=torch.float32)
+            a = torch.randn((i, 1), device=GPU_TYPE, dtype=torch.float32)
+            b = torch.randn((1, i), device=GPU_TYPE, dtype=torch.float32)
             compiled_f = torch.compile(mm)
 
             out, code = run_and_get_code(compiled_f, a, b)
