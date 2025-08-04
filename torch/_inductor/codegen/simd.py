@@ -778,7 +778,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
             f"failed to set ranges {remaining} {lengths}"
         )
-        breakpoint()
         return new_ranges, return_getters_groups
 
     @classmethod
