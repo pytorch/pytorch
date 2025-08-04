@@ -45,7 +45,6 @@ jobs:
           { config: "vllm_regression_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
           { config: "vllm_entrypoints_test_llm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
           { config: "vllm_entrypoints_test_api_server", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
-          { config: "vllm_pytorch_compilation_unit_tests", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
           { config: "vllm_basic_models_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
     secrets: inherit

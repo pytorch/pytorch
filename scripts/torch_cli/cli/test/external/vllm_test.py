@@ -35,7 +35,6 @@ class VllmTestRunner:
         else:
             print("VLLM_TEST_HUGGING_FACE_TOKEN not found in env",flush=True)
             sys.stdout.flush()
-
         envs["HF_TOKEN"] = os.environ.get("VLLM_TEST_HUGGING_FACE_TOKEN", "")
         for step in steps:
             # todo : replace with run_cmd with envrirnment
@@ -51,6 +50,4 @@ class VllmTestRunner:
                 config_map[item["id"]] = item
             else:
                 raise ValueError(f"Missing 'id' in config: {item}")
-
-        print(f"config_map: {config_map}")
         return config_map
