@@ -141,7 +141,6 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
-    FrozenDataClassVariable,
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
