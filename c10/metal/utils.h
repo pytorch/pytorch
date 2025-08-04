@@ -330,11 +330,5 @@ inline float log1p(float x) {
   return rc;
 }
 
-template <typename T1, typename T2 = T1>
-struct pair {
-  T1 first;
-  T2 second;
-};
-
 } // namespace metal
 } // namespace c10
