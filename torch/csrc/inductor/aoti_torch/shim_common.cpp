@@ -402,6 +402,15 @@ AOTITorchError aoti_torch_is_contiguous(
   });
 }
 
+AOTITorchError aoti_torch_is_defined(
+    AtenTensorHandle tensor,
+    bool* ret_is_defined) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_defined = t->defined();
+  });
+}
+
 AOTITorchError aoti_torch_new_tensor_handle(
     AtenTensorHandle orig_handle,
     AtenTensorHandle* new_handle) {

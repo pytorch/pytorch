@@ -124,6 +124,12 @@ class Tensor {
     return size;
   }
 
+  bool defined() const {
+    bool defined;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
+    return defined;
+  }
+
   // =============================================================================
   // END of C-shimified TensorBase APIs
   // =============================================================================

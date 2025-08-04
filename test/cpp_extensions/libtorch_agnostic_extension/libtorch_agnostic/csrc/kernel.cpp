@@ -291,11 +291,10 @@ void boxed_fill_infinity(
   stack[0] = from(res);
 }
 
-Tensor my_pad(
-    Tensor t,
-    std::vector<int64_t> padding,
-    std::string mode,
-    double value) {
+Tensor my_pad(Tensor t) {
+  std::vector<int64_t> padding = {1, 2, 2, 1};
+  std::string mode = "constant";
+  double value = 0.0;
   return pad(t, padding, mode, value);
 }
 
@@ -303,11 +302,7 @@ void boxed_my_pad(
     StableIValue* stack,
     uint64_t num_args,
     uint64_t num_outputs) {
-  auto res = my_pad(
-      to<Tensor>(stack[0]),
-      to<std::vector<int64_t>>(stack[1]),
-      to<std::string>(stack[2]),
-      to<double>(stack[3]));
+  auto res = my_pad(to<Tensor>(stack[0]));
   stack[0] = from(res);
 }
 
@@ -331,7 +326,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
   m.def("my_empty_like(Tensor t) -> Tensor");
   m.def("fill_infinity(Tensor(a!) t) -> Tensor(a!)");
-  m.def("my_pad(Tensor t, int[] pad, str mode, float value) -> Tensor");
+  m.def("my_pad(Tensor t) -> Tensor");
   m.def("my_narrow(Tensor t, int dim, int start, int length) -> Tensor");
 }
 
@@ -345,7 +340,6 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeImplicitAutograd, m) {
   m.impl("my_pad", &boxed_my_pad);
   m.impl("my_narrow", &boxed_my_narrow);
 }
-
 
 Tensor my_zero_(Tensor t) {
   return zero_(t);
@@ -362,4 +356,39 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("my_zero_", &boxed_my_zero_);
+}
+
+bool test_default_constructor(bool defined) {
+  Tensor out;
+  if (defined) {
+    AtenTensorHandle defined_ath;
+    int64_t sizes[] = {2, 3};
+    int64_t strides[] = {3, 1};
+    aoti_torch_empty_strided(
+        2,
+        sizes,
+        strides,
+        aoti_torch_dtype_float32(),
+        aoti_torch_device_type_cpu(),
+        0,
+        &defined_ath);
+    out = Tensor(defined_ath);
+  }
+  return out.defined();
+}
+
+void boxed_test_default_constructor(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  bool res = test_default_constructor(to<bool>(stack[0]));
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("test_default_constructor(bool undefined) -> bool");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("test_default_constructor", &boxed_test_default_constructor);
 }
