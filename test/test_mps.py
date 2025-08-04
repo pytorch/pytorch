@@ -9484,7 +9484,10 @@ def create_sdpa_meta_test():
     """
     Creates a new class which takes every test in TestSDPA and adds the
     TestSDPAMetaDispatchMode context in order to test the
-    scaled_dot_product_attention_for_mps meta kernel
+    scaled_dot_product_attention_for_mps meta kernel. This allows us to test all
+    the branches for the sdpa op. If there are changes to the sdpa kernel
+    without changing the meta kernel, a torch.compile guard will catch the issue
+    but not necessarily export.
     """
     orig_test_cls = TestSDPA
 
