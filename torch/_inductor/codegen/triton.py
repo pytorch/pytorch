@@ -1123,7 +1123,6 @@ class TritonOverrides(OpOverrides):
         # TODO:
         # 1. when there is broadcasting operands (A.repeat() @ B), adjust manually.
         # 2. Not here, but remove tl.broadcast_to in index expression.
-        # 3. torch.bmm(a+1, b+2)+3 -> can't split?
         # 4. fp16 vs fp32?
 
         def is_where_needed(var):
@@ -1148,11 +1147,18 @@ class TritonOverrides(OpOverrides):
             default = ir.Reduction.default_value("dot", var.dtype)
             return TritonKernelOverrides.where("r0_mask", var, default)
         
-        # When using a reduction mask and expressions like ((A+1) @ B), 
-        # we use tl.dot(tl.load(..., r0_mask, other=0.0)+1, B). 
-        # But this produces incorrect results. So before calling tl.dot, 
-        # we need to apply tl.where to zero out values properly.
-        # Optimize - We don't need both operands to be zeroed with tl.where
+        # When computing expressions like ((A+1) @ (B+2)), 
+        # native codegen will do 
+        #
+        # a = tl.load(..., r0_mask, other=0.0) 
+        # b = tl.load(..., r0_mask, other=0.0) 
+        # tmp0 = a+1
+        # tmp1 = b+2
+        # tmp2 = tl.dot(tmp0, tmp1)
+        #
+        # This produces incorrect results because outside of r0_mask is not zero. 
+        # So before calling tl.dot, apply tl.where to zero out values properly.
+        # Optimize - We don't need both operands to be zeroed 
         if is_where_needed(a) :
             a = where_cond(a)
         elif is_where_needed(b) :

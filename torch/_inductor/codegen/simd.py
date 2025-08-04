@@ -663,7 +663,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         new_ranges: list[list[sympy.Expr]] = [[] for _ in groups]
         remaining = [sv.simplify(g) for g in groups]
         var_count = itertools.count()
-
+        
         def add_range(i: int, expr: sympy.Expr) -> int:
             expr = sv.simplify(expr)
             if not sv.statically_known_multiple_of(remaining[i], expr):
@@ -674,10 +674,19 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return next(var_count)
 
         def make_combined(
-            size: sympy.Expr, idx1: int, idx2: int
+            sizes: list[sympy.Expr], idxs: list[int]
         ) -> Callable[[list[sympy.Expr]], sympy.Expr]:
+            """
+            Builds the nested expression:
+              ((...((s1*v[i1] + v[i2]) * s2 + v[i3]) ... ) * sk + v[i(k+1)])
+            """
+            assert len(idxs) == len(sizes) + 1
+
             def getter(flat_vars: list[sympy.Expr]) -> sympy.Expr:
-                return size * flat_vars[idx1] + flat_vars[idx2]
+                expr = flat_vars[idxs[0]]
+                for s, idx in zip(sizes, idxs[1:]):
+                    expr = s * expr + flat_vars[idx]
+                return expr
 
             return getter
 
@@ -697,7 +706,43 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     # scroll to next group with remaining elements
                     current_group += 1
 
-                if current_group + 1 < len(remaining) and sv.statically_known_gt(
+                # During native matmul on bmm, we enforce tiling order (z, y, x, r).
+                # When fusing a bmm node with loop (z, y, x, r) with a pw node
+                # of shape (z*y*x, 1), we need to split the pw iteration range
+                # into three dimensions.
+                # The group becomes [z, y, x, r], with lengths ([z*y*x], []).
+                # In this case, we decompose the combined size z*y*x into three
+                # consecutive groups. Previously, _split_iteration_ranges supported 
+                # splitting into at most two dimensions, but we now extend it to do 
+                # three splits when the total size is divisible by all three.
+                if current_group + 2 < len(remaining) and sv.statically_known_gt(
+                    size, remaining[current_group] * remaining[current_group + 1]
+                ):
+                    # need to break size in three
+                    if not sv.statically_known_multiple_of(
+                        size, remaining[current_group] * remaining[current_group + 1]
+                    ):
+                        raise CantSplit
+                    
+                    size1 = remaining[current_group]
+                    size2 = remaining[current_group + 1]
+                    size3 = FloorDiv(size, size1*size2)
+                    return_getters.append(
+                        make_combined(
+                            [ 
+                                size2,
+                                size3
+                            ],
+                            [
+                                add_range(current_group, size1),
+                                add_range(current_group + 1, size2),
+                                add_range(current_group + 2, size3),
+                            ]
+                        )
+                    )
+
+                # Two-dimensional tiling
+                elif current_group + 1 < len(remaining) and sv.statically_known_gt(
                     size, remaining[current_group]
                 ):
                     # need to break size in two
@@ -708,11 +753,16 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
+                    
                     return_getters.append(
                         make_combined(
-                            size2,
-                            add_range(current_group, size1),
-                            add_range(current_group + 1, size2),
+                            [
+                                size2,
+                            ],
+                            [
+                                add_range(current_group, size1),
+                                add_range(current_group + 1, size2),
+                            ]
                         )
                     )
                 else:
@@ -821,7 +871,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             for x, g in zip(lengths, groups)
         ):
             return set_ranges(*lengths)
-
+        
         new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
         itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
