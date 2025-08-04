@@ -579,6 +579,22 @@ class TestNN(NNTestCase):
         m.buffer_name = Buffer(buffer3)
         self.assertEqual(m.buffer_name, Buffer(buffer3))
 
+    def test_register_buffer_allows_tensor_like_object(self):
+        class TensorLike:
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                raise NotImplementedError(f"TensorLike.__torch_function__: {func}")
+
+        buffer1 = TensorLike()
+        buffer2 = TensorLike()
+        m = nn.Module()
+        m.register_buffer('buffer_name', buffer1)
+        self.assertEqual(m.buffer_name, buffer1)
+        self.assertEqual(m.get_buffer('buffer_name'), buffer1)
+        m.buffer_name = buffer2
+        self.assertEqual(m.buffer_name, buffer2)
+        self.assertEqual(m.get_buffer('buffer_name'), buffer2)
+
     def test_get_buffer(self):
         m = nn.Module()
         buffer1 = torch.randn(2, 3)
@@ -7627,6 +7643,13 @@ def add_test(test, decorator=None):
         else:
             add(cuda_test_name, with_tf32_off)
 
+if __name__ == '__main__':
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+
+    # The value of the SEED depends on command line arguments so make sure they're parsed
+    # before instantiating tests because some modules as part of get_new_module_tests() will call torch.randn
+    parse_cmd_line_args()
+
 for test_params in module_tests + get_new_module_tests():
     # TODO: CUDA is not implemented yet
     if 'constructor' not in test_params:
@@ -8745,6 +8768,30 @@ class TestNNDeviceType(NNTestCase):
 
         Y = torch.nn.functional.rms_norm(X, shape, w, 0.5)
         Y_ref = rms_norm_reference_fn(X, shape, w, 0.5)
+
+        self.assertEqual(Y_ref, Y)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_rmsnorm_epsilon(self, device, dtype):
+        def rms_norm_reference_fn(i, normalized_shape):
+            eps = torch.finfo(i.dtype).eps
+            ndim = i.ndim
+            dims = [ndim - i - 1 for i in range(len(normalized_shape))]
+            if i.dtype is not torch.float64:
+                upcasted_i = i.float()
+            else:
+                upcasted_i = i
+            result = upcasted_i * torch.rsqrt(
+                upcasted_i.pow(2).mean(dim=dims, keepdim=True) + eps
+            )
+            return result.type_as(i)
+
+        shape = (2, 2)
+        X = torch.tensor([[1e-12, -1e-12], [1e-12, -1e-12]], dtype=dtype, device=device)
+
+        Y = torch.nn.functional.rms_norm(X, shape)
+        Y_ref = rms_norm_reference_fn(X, shape)
 
         self.assertEqual(Y_ref, Y)
 
