@@ -1195,16 +1195,10 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile requires the `nested_compile_region` decorated function to be capturable into a single graph",
-        ) as cm:
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Encountered aliasing during higher order op tracing",
+        ):
             opt_fn(x, y)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered aliasing during higher order op tracing" in str(cause)
-        )
 
     def test_input_input_aliasing(self):
         @nested_compile_region
@@ -1219,16 +1213,10 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile requires the `nested_compile_region` decorated function to be capturable into a single graph",
-        ) as cm:
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Encountered aliasing during higher order op tracing",
+        ):
             opt_fn(x)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered aliasing during higher order op tracing" in str(cause)
-        )
 
     def test_output_output_aliasing(self):
         @nested_compile_region
@@ -1244,16 +1232,10 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.compile requires the `nested_compile_region` decorated function to be capturable into a single graph",
-        ) as cm:
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Encountered aliasing during higher order op tracing",
+        ):
             opt_fn(x)
-
-        cause = cm.exception.__cause__
-        self.assertIsInstance(cause, torch._dynamo.exc.Unsupported)
-        self.assertTrue(
-            "Encountered aliasing during higher order op tracing" in str(cause)
-        )
 
     def test_mod_attr_aliasing(self):
         class MutateParam(torch.nn.Module):
