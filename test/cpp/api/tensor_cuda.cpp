@@ -127,6 +127,9 @@ TEST(TensorTest, MagmaInitializesCorrectly_CUDA) {
   }
 }
 
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAConfig.h>
+#if AT_CUDNN_ENABLED()
 TEST(CuDNNBatchNormTest, OutVariantMatchesFunctional) {
   if (!torch::cuda::is_available()) {
     GTEST_SKIP() << "CUDA is not available";
@@ -181,3 +184,5 @@ TEST(CuDNNBatchNormTest, OutVariantMatchesFunctional) {
   ASSERT_TRUE(torch::allclose(save_var, std::get<2>(ref_outputs)));
   ASSERT_TRUE(torch::equal(reserve, std::get<3>(ref_outputs)));
 }
+#endif // AT_CUDNN_ENABLED()
+#endif // USE_CUDA
