@@ -38,7 +38,7 @@ pip freeze | grep -E 'torch|xformers|torchvision|torchaudio|flashinfer'
 bash "$SCRIPT_DIR/clean_test_in.sh"
 
 echo "Installing test dependencies"
-uv pip compile  requirements/test.in -o  test.txt --index-strategy unsafe-best-match
+uv pip compile requirements/test.in -o requirements/test.txt --index-strategy unsafe-best-match --torch-backend cu128
 uv pip install --system -r test.txt
 
 #95d8aba8a8c75aedcaa6143713b11e745e7cd0d9
