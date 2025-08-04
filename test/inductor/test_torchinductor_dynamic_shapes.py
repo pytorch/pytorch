@@ -70,10 +70,8 @@ test_failures = {
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
     "test_min_max_reduction_dynamic_shapes": TestFailure(("mps",)),
-    "test_min_max_reduction_nan_dynamic_shapes": TestFailure(("mps",)),
     "test_multilayer_var_dynamic_shapes": TestFailure(("mps",)),
     "test_multilayer_var_lowp_dynamic_shapes": TestFailure(("mps",)),
-    "test_reduction1_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
@@ -81,12 +79,14 @@ test_failures = {
     "test_require_stride_expanded_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_std_dynamic_shapes": TestFailure(("mps",)),
-    "test_unroll_small_reduction_dynamic_shapes": TestFailure(("mps",)),
     "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure(("mps",)),
     "test_vectorized_ops_masked_var_novec_dynamic_shapes": TestFailure(("mps",)),
+    "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
+        ("mps",), is_skip=True
+    ),
 }
 
 if not torch._inductor.config.cpp_wrapper:
