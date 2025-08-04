@@ -1,12 +1,12 @@
 import math
 from collections.abc import Iterator
 from typing import Optional, TypeVar
+from collections.abc import Sequence
 
 import torch
 import torch.distributed as dist
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.sampler import Sampler
-
 
 __all__ = ["DistributedSampler", "WeightedDistributedSampler"]
 
@@ -169,47 +169,70 @@ class WeightedDistributedSampler(DistributedSampler):
         replacement: Whether to sample with replacement
         generator: Torch generator object
     """
+
     def __init__(
         self,
         dataset,
         num_replicas=None,
         rank=None,
+        shuffle=True,
         seed=0,
         drop_last=False,
-        weights=None,
+        weights: Optional[Sequence[float]] = None,
         replacement=True,
-        generator=torch.Generator(),
     ):
         super().__init__(
-            dataset, num_replicas, rank, shuffle=False, drop_last=drop_last
+            dataset, num_replicas, rank, seed=seed, shuffle=shuffle, drop_last=drop_last
         )
         self.weights = weights
         self.replacement = replacement
-        self.generator = generator
 
     def __iter__(self) -> Iterator[_T_co]:
+        if self.shuffle:
+            # deterministically shuffle based on epoch and seed
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+            indices = torch.randperm(len(self.dataset), generator=g).tolist()
+        else:
+            indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
+
         weights = self.weights
 
         if not self.drop_last:
             # add extra samples to make it evenly divisible
-            padding_size = self.total_size - len(weights)
-            if padding_size <= len(weights):
+            padding_size = self.total_size - len(indices)
+            if padding_size <= len(indices):
+                indices += indices[:padding_size]
                 weights += weights[:padding_size]
             else:
-                weights += (weights * math.ceil(padding_size / len(weights)))[
+                indices += (indices * math.ceil(padding_size / len(indices)))[
                     :padding_size
                 ]
+                weights += (weights * math.ceil(padding_size / len(indices)))[
+                    :padding_size
+                ]
+
         else:
             # remove tail of data to make it evenly divisible.
+            indices = indices[: self.total_size]
             weights = weights[: self.total_size]
 
+        assert len(indices) == self.total_size
         assert len(weights) == self.total_size
 
         # subsample
-        weights = weights[self.rank : self.total_size : self.num_replicas]
-        assert len(weights) == self.num_samples
+        indices = indices[self.rank : self.total_size : self.num_replicas]
+        assert len(indices) == self.num_samples
+
+        weights = [weights[i] for i in indices]
+        weights_tensor = torch.as_tensor(weights, dtype=torch.double)
 
         rand_tensor = torch.multinomial(
-            torch.FloatTensor(weights), self.num_samples, self.replacement, generator=self.generator
+            weights_tensor,
+            self.num_samples,
+            self.replacement,
+            generator=g,
         )
-        yield from iter(rand_tensor.tolist())
+
+        # map sampled positions back to actual dataset indices
+        yield from (indices[i] for i in rand_tensor.tolist())
