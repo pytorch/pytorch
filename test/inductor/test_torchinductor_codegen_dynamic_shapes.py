@@ -177,6 +177,7 @@ test_failures = {
     "test_bucketize_int_int64_int64_dynamic_shapes": TestFailure(("cpu",)),
     "test_searchsorted_dynamic_shapes": TestFailure(("cpu",)),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_like_rands_sliced_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
