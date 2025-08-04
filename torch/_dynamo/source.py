@@ -269,14 +269,14 @@ class GenericAttrSource(ChainedSource):
 # Represents obj.__dict__ where obj is a type object
 @dataclasses.dataclass(frozen=True)
 class TypeDictSource(ChainedSource):
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__dict__"))
 
-    def guard_source(self):
+    def guard_source(self) -> GuardSource:
         return self.base.guard_source()
 
-    def name(self):
+    def name(self) -> str:
         # type(ob).__dict__ can return a proxy of the dict. But in the C++
         # guard accessor, we are use type->tp_dict which is a dict. So,
         # forcefully pass a dict object to ensure that the GuardManager
@@ -287,14 +287,14 @@ class TypeDictSource(ChainedSource):
 # Represents obj.__mro__ where object is type object
 @dataclasses.dataclass(frozen=True)
 class TypeMROSource(ChainedSource):
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__mro__"))
 
-    def guard_source(self):
+    def guard_source(self) -> GuardSource:
         return self.base.guard_source()
 
-    def name(self):
+    def name(self) -> str:
         return f"{self.base.name()}.__mro__"
 
 
@@ -315,6 +315,34 @@ class LocalCellSource(Source):
 
     # All the other methods are intentionally unimplemented because e.g., a
     # local cell object should never be used for guards.
+
+
+# Represents obj.__code__ where object is type object
+@dataclasses.dataclass(frozen=True)
+class CodeSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__code__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"{self.base.name()}.__code__"
+
+
+# Represents obj.__closure__ where object is type object
+@dataclasses.dataclass(frozen=True)
+class ClosureSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__closure__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"{self.base.name()}.__closure__"
 
 
 # Represents tensor.grad source. It could be represented by AttrSource as well.
