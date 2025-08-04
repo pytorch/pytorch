@@ -230,6 +230,7 @@ Recurrent Layers
     nn.RNNCell
     nn.LSTMCell
     nn.GRUCell
+    nn.GradBank
 
 Transformer Layers
 ----------------------------------
