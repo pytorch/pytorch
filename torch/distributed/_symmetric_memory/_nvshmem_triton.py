@@ -1,38 +1,48 @@
 import os
 import subprocess
+import sysconfig
 from typing import Optional
 
 from torch.utils._triton import has_triton
 
 
 def _find_nvshmem_device_library() -> str:
+    paths = [os.path.join(sysconfig.get_path("purelib"), "nvidia", "nvshmem", "lib")]
+
     try:
         import torch
 
         torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
         so_path = os.path.join(torch_lib, "libtorch_nvshmem.so")
 
-        if not os.path.exists(so_path):
-            raise RuntimeError(f"libtorch_nvshmem.so not found at {so_path}")
+        if os.path.exists(so_path):
+            try:
+                result = subprocess.run(
+                    ["readelf", "-d", so_path],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
 
-        result = subprocess.run(
-            ["readelf", "-d", so_path], capture_output=True, text=True, check=True
-        )
+                for line in result.stdout.splitlines():
+                    if ("RPATH" in line or "RUNPATH" in line) and "[" in line:
+                        rpath = line.split("[", 1)[1].split("]", 1)[0]
+                        for p in rpath.split(":"):
+                            p = p.strip().replace("$ORIGIN", torch_lib)
+                            if p and p not in paths:
+                                paths.append(p)
+            except subprocess.CalledProcessError:
+                pass
 
-        for line in result.stdout.splitlines():
-            if "RPATH" in line and "[" in line:
-                rpath = line.split("[", 1)[1].split("]", 1)[0]
-                for path in rpath.split(":"):
-                    path = path.strip().replace("$ORIGIN", torch_lib)
-                    if path:
-                        device_lib = os.path.join(path, "libnvshmem_device.bc")
-                        if os.path.exists(device_lib):
-                            return device_lib
+    except ImportError:
+        pass
 
-        raise RuntimeError("NVSHMEM device library not found in RPATH")
+    for path in paths:
+        device_lib = os.path.join(path, "libnvshmem_device.bc")
+        if os.path.exists(device_lib):
+            return device_lib
 
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Failed to read RPATH from {so_path}: {e}") from e
+    raise RuntimeError(f"NVSHMEM device library not found. Searched: {paths}")
 
 
 def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
@@ -59,7 +69,16 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
 
     from torch._C._distributed_c10d import _nvshmemx_cumodule_init
 
-    lib_path = _find_nvshmem_device_library()
+    if lib_dir is not None:
+        lib_path = os.path.join(lib_dir, "libnvshmem_device.bc")
+        if not os.path.exists(lib_path):
+            raise RuntimeError(
+                f"NVSHMEM device library not found at specified path: {lib_path}"
+            )
+    else:
+        # Otherwise, search for the library automatically.
+        lib_path = _find_nvshmem_device_library()
+
     extern_libs = {"libnvshmem_device": lib_path}
 
     # A hook function to initialize NVSHMEM in Triton
