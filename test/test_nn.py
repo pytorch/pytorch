@@ -579,6 +579,22 @@ class TestNN(NNTestCase):
         m.buffer_name = Buffer(buffer3)
         self.assertEqual(m.buffer_name, Buffer(buffer3))
 
+    def test_register_buffer_allows_tensor_like_object(self):
+        class TensorLike:
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                raise NotImplementedError(f"TensorLike.__torch_function__: {func}")
+
+        buffer1 = TensorLike()
+        buffer2 = TensorLike()
+        m = nn.Module()
+        m.register_buffer('buffer_name', buffer1)
+        self.assertEqual(m.buffer_name, buffer1)
+        self.assertEqual(m.get_buffer('buffer_name'), buffer1)
+        m.buffer_name = buffer2
+        self.assertEqual(m.buffer_name, buffer2)
+        self.assertEqual(m.get_buffer('buffer_name'), buffer2)
+
     def test_get_buffer(self):
         m = nn.Module()
         buffer1 = torch.randn(2, 3)
@@ -7626,6 +7642,13 @@ def add_test(test, decorator=None):
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
             add(cuda_test_name, with_tf32_off)
+
+if __name__ == '__main__':
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+
+    # The value of the SEED depends on command line arguments so make sure they're parsed
+    # before instantiating tests because some modules as part of get_new_module_tests() will call torch.randn
+    parse_cmd_line_args()
 
 for test_params in module_tests + get_new_module_tests():
     # TODO: CUDA is not implemented yet

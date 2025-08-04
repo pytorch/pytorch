@@ -96,7 +96,7 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        if: ${{ matrix.runner != 'B200' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ !contains(matrix.runner, 'b200') && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -109,7 +109,7 @@ jobs:
           no-sudo: true
 
       - name: Setup Python
-        if: matrix.runner == 'B200'
+        if: contains(matrix.runner, 'b200')
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
@@ -117,7 +117,7 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && matrix.runner != 'B200'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(matrix.runner, 'b200')
 
       - name: configure aws credentials
         if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
@@ -128,7 +128,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Login to Amazon ECR
-        if: ${{ inputs.aws-role-to-assume != '' && matrix.runner == 'B200' }}
+        if: ${{ inputs.aws-role-to-assume != '' && contains(matrix.runner, 'b200') }}
         id: login-ecr
         continue-on-error: true
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
@@ -166,17 +166,17 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         with:
           driver-version: ${{ matrix.config == 'legacy_nvidia_driver' && '525.105.17' || '570.133.07' }}
-        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' && matrix.runner != 'B200' }}
+        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' && !contains(matrix.runner, 'b200') }}
 
       - name: Setup GPU_FLAG for docker run
         id: setup-gpu-flag
         run: echo "GPU_FLAG=--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all" >> "${GITHUB_ENV}"
-        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && (steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' || matrix.runner == 'B200') }}
+        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && (steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' || contains(matrix.runner, 'b200')) }}
 
       - name: Setup SCCACHE_SERVER_PORT environment for docker run when on container
         id: setup-sscache-port-flag
         run: echo "SCCACHE_SERVER_PORT_DOCKER_FLAG=-e SCCACHE_SERVER_PORT=$((RUNNER_UID + 4226))" >> "${GITHUB_ENV}"
-        if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' && matrix.runner != 'B200' }}
+        if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' && !contains(matrix.runner, 'b200') }}
 
       - name: Lock NVIDIA A100 40GB Frequency
         run: |
@@ -277,8 +277,8 @@ jobs:
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
           # Do not set SCCACHE_S3_KEY_PREFIX to share the cache between all build jobs
-          SCCACHE_BUCKET: ${{ matrix.runner != 'B200' && 'ossci-compiler-cache-circleci-v2' || '' }}
-          SCCACHE_REGION: ${{ matrix.runner != 'B200' && 'us-east-1' || '' }}
+          SCCACHE_BUCKET: ${{ !contains(matrix.runner, 'b200') && 'ossci-compiler-cache-circleci-v2' || '' }}
+          SCCACHE_REGION: ${{ !contains(matrix.runner, 'b200') && 'us-east-1' || '' }}
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
@@ -403,7 +403,7 @@ jobs:
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Authenticate with AWS
-        if: ${{ matrix.runner == 'B200' }}
+        if: ${{ contains(matrix.runner, 'b200') }}
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
