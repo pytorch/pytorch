@@ -298,6 +298,9 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   Strides tensor_StrideA = make_strides(mat_a.strides());
   Strides tensor_StrideB = make_strides(mat_b.strides());
   Strides tensor_StrideOutput = make_strides(out.strides());
+  Strides tensor_ShapeA = make_strides(mat_a.sizes());
+  Strides tensor_ShapeB = make_strides(mat_b.sizes());
+
   // scale stride will be used inside the kernel only if needed,
   // so for 1d scales the "1" assigned here won't be used
   int64_t a_scale_stride = scale_a.stride(0);
@@ -325,6 +328,8 @@ void f8f8bf16_grouped_gemm_impl_sm90(
       tensor_StrideA,
       tensor_StrideB,
       tensor_StrideOutput,
+      tensor_ShapeA,
+      tensor_ShapeB,
       a_scale_stride,
       b_scale_stride);
 
