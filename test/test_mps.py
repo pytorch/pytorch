@@ -12504,11 +12504,10 @@ class TestMetalLibrary(TestCaseMPS):
         if not dtype.is_floating_point:
             return
 
-        idx = 25
-        x[idx] = torch.nan
+        x[5] = torch.nan
         lib.do_max(z0, z1, x)
-        self.assertTrue(z0.isnan().all().item(), f"results are {z0}, but all elements shold have been nan")
-        self.assertTrue((z1 == idx).all().item(), f"results are {z1}, but all elements shold have been {idx}")
+        self.assertTrue(z0.isnan().all().item(), "results are {z0}, but all elements shold have been nan")
+        self.assertTrue((z1 == 5).all().item(), "results are {z1}, but all elements shold have been 5")
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.bfloat16])
     def test_atomic_add(self, dtype):
