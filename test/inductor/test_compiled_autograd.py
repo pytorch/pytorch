@@ -200,9 +200,12 @@ main()
             if is_msvc_cl():
                 return "Cache miss due to new autograd node: struct "
             else:
-                self.fail("Compilers other than msvc have not yet been verified on Windows.")
+                self.fail(
+                    "Compilers other than msvc have not yet been verified on Windows."
+                )
+                return ""
         else:
-            "Cache miss due to new autograd node: "
+            return "Cache miss due to new autograd node: "
 
     def test_reset(self):
         compiled_autograd.compiled_autograd_enabled = True
@@ -3391,7 +3394,9 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             self.check_output_and_recompiles(fn)
 
         patterns1 = [
-            r".*" + self.gen_cache_miss_log_prefix() + r"torch::autograd::GraphRoot \(NodeCall 0\) with key size (\d+), previous key sizes=\[\]\n",
+            r".*"
+            + self.gen_cache_miss_log_prefix()
+            + r"torch::autograd::GraphRoot \(NodeCall 0\) with key size (\d+), previous key sizes=\[\]\n",
         ]
 
         all_logs = logs.getvalue()
@@ -3428,7 +3433,8 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         actual_logs = logs.getvalue()
         expected_logs = [
-            self.gen_cache_miss_log_prefix() + "torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
+            self.gen_cache_miss_log_prefix()
+            + "torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
         ]
         for expected in expected_logs:
             self.assertTrue(expected in actual_logs)
