@@ -415,15 +415,16 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         )
         self.no_x_dim = self.want_no_x_dim()
         self.code_hash: Optional[str] = None
-        
+
         self.is_native_matmul = False
         for node in self.features.node_schedule:
             if isinstance(node, scheduler.SchedulerNode):
-                if (
-                    node.node.get_reduction_type() == "dot"
-                    and config.triton.enable_native_matmul
-                ):
-                    self.is_native_matmul = True
+                if isinstance(node.node, ir.ComputedBuffer):
+                    if (
+                        node.node.get_reduction_type() == "dot"
+                        and config.triton.enable_native_matmul
+                    ):
+                        self.is_native_matmul = True
 
         # define this in a closure to make cache local to object
         @functools.cache
@@ -662,7 +663,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         new_ranges: list[list[sympy.Expr]] = [[] for _ in groups]
         remaining = [sv.simplify(g) for g in groups]
         var_count = itertools.count()
-        
+
         def add_range(i: int, expr: sympy.Expr) -> int:
             expr = sv.simplify(expr)
             if not sv.statically_known_multiple_of(remaining[i], expr):
@@ -704,42 +705,43 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 ):
                     # scroll to next group with remaining elements
                     current_group += 1
-                
+
                 # During native matmul on bmm, we enforce tiling order (z, y, x, r).
                 # When fusing a bmm node with loop (z, y, x, r) with a pw node
                 # of shape (z*y*x, 1), we need to split the pw iteration range
                 # into three dimensions.
                 # The group becomes [z, y, x, 1], with lengths ([z*y*x], []).
                 # In this case, we decompose the combined size z*y*x into three
-                # consecutive groups. Previously, _split_iteration_ranges supported 
-                # splitting into at most two dimensions, but we now extend it to do 
+                # consecutive groups. Previously, _split_iteration_ranges supported
+                # splitting into at most two dimensions, but we now extend it to do
                 # three splits when the total size is divisible by all three.
 
                 # is group having (z,y,x,r=1) form?
                 is_bmm_then_pw = len(remaining) == 4 and remaining[-1] == 1
-                if current_group + 2 < len(remaining) and sv.statically_known_gt(
-                    size, remaining[current_group] * remaining[current_group + 1]
-                ) and is_bmm_then_pw:
+                if (
+                    current_group + 2 < len(remaining)
+                    and sv.statically_known_gt(
+                        size, remaining[current_group] * remaining[current_group + 1]
+                    )
+                    and is_bmm_then_pw
+                ):
                     # need to break size in three
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group] * remaining[current_group + 1]
                     ):
                         raise CantSplit
-                    
+
                     size1 = remaining[current_group]
                     size2 = remaining[current_group + 1]
-                    size3 = FloorDiv(size, size1*size2)
+                    size3 = FloorDiv(size, size1 * size2)
                     return_getters.append(
                         make_combined(
-                            [ 
-                                size2,
-                                size3
-                            ],
+                            [size2, size3],
                             [
                                 add_range(current_group, size1),
                                 add_range(current_group + 1, size2),
                                 add_range(current_group + 2, size3),
-                            ]
+                            ],
                         )
                     )
 
@@ -755,7 +757,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
-                    
+
                     return_getters.append(
                         make_combined(
                             [
@@ -764,7 +766,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                             [
                                 add_range(current_group, size1),
                                 add_range(current_group + 1, size2),
-                            ]
+                            ],
                         )
                     )
                 else:
@@ -872,7 +874,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             for x, g in zip(lengths, groups)
         ):
             return set_ranges(*lengths)
-        
+
         new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
         itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
@@ -1495,7 +1497,7 @@ class SIMDScheduling(BaseScheduling):
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         node_schedule = kernel_features.node_schedule
-        
+
         tiling, tiling_score = self.get_tiling_and_scores(
             node_schedule,
             kernel_features.numel,
@@ -2495,17 +2497,20 @@ class SIMDScheduling(BaseScheduling):
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
 
-        # Force tiling compatible with matmul dimensions 
+        # Force tiling compatible with matmul dimensions
         # when natively generating matmul without template calls.
-        if torch._inductor.config.triton.enable_native_matmul :
-            for node in EnableReduction.filter(node_schedule):
-                # A[M,K] @ B[K,N]
-                # force tiling to be {'y':M, 'x':N, 'r0_':K}
-                if node.node.get_reduction_type() == "dot" :
+        for node in EnableReduction.filter(node_schedule):
+            if isinstance(node.node, ir.ComputedBuffer):
+                if (
+                    node.node.get_reduction_type() == "dot"
+                    and config.triton.enable_native_matmul
+                ):
+                    # A[M,K] @ B[K,N]
+                    # force tiling to be {'y':M, 'x':N, 'r0_':K}
                     node_ranges = node.get_ranges()
-                    range_y_x = node_ranges[0] #(M,N)
-                    range_r = node_ranges[1]   #(K)
-                    tiling =  cls.create_tiling(range_y_x, range_r)
+                    range_y_x = node_ranges[0]  # (M,N)
+                    range_r = node_ranges[1]  # (K)
+                    tiling = cls.create_tiling(range_y_x, range_r)
                     return tiling, None
 
         # # TODO: enable by default
