@@ -15,7 +15,6 @@ class TorchCli(App):
         base_controller = "base"
         handlers = [MainController] + TEST_CONTROLLERS + BUILD_CONTROLLERS
 
-
 def main():
     with TorchCli() as app:
         app.run()
