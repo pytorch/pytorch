@@ -29,6 +29,7 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
+from .mm_common import mm_config_kwargs
 
 
 if TYPE_CHECKING:
@@ -58,6 +59,13 @@ def conv3d_grid(n, c, d, h, w, meta, *, cdiv):
         cdiv(c, meta["BLOCK_N"]),
         meta["GROUPS"],
     )
+
+
+def _is_large_block_for_cpu(m, n, k):
+    # Thresholds are experimentally determined to reduce Triton CPU compile times
+    if m > 256 or n > 256 or k > 256:
+        return True
+    return m * n * k > 2**17
 
 
 LOOP_BODY_2D = """
@@ -595,6 +603,7 @@ def convolution(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
             in_chan,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
         ):
             if ndim == 2:
                 conv2d_template.maybe_append_choice(
