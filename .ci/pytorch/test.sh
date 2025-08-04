@@ -7,8 +7,7 @@
 set -ex -o pipefail
 
 # Suppress ANSI color escape sequences
-
-TERM=vt100
+export TERM=vt100
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
