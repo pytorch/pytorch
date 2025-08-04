@@ -619,7 +619,9 @@ class CompiledOptimizerParityTests(TestCase):
                 opt_compiled = optim_cls(
                     model_compiled.named_parameters(), **deepcopy(kwargs)
                 )
-                opt_eager = optim_cls(model_eager.named_parameters(), **deepcopy(kwargs))
+                opt_eager = optim_cls(
+                    model_eager.named_parameters(), **deepcopy(kwargs)
+                )
                 if scheduler_cls:
                     scheduler_compiled = create_scheduler(scheduler_cls, opt_compiled)
                     scheduler_eager = create_scheduler(scheduler_cls, opt_eager)
