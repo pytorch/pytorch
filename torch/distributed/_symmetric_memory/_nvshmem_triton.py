@@ -104,6 +104,8 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
 
 if has_triton():
     from triton.language import core
+    import triton
+    import triton.language as tl
 
     # RMA Operations (mem-based APIs - sizes in bytes)
     @core.extern
@@ -715,47 +717,40 @@ if has_triton():
         )
 
     # Collective Operations (mem-based APIs - sizes in bytes)
-    @core.extern
-    def alltoallmem_block(team, dest, source, size_bytes, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit
+    def alltoall(team, dest, source, nelems_per_pe):
         """
-        Perform alltoall collective operation on symmetric memory.
+        All-to-all tensor exchange between PEs in a team.
 
-        This function implements an all-to-all collective communication pattern where
-        each PE sends a portion of its data to every other PE, and receives data from
-        every other PE. The operation exchanges size_bytes of data between each pair of PEs.
+        This high-level function provides a tensor-aware interface for NVSHMEM alltoall
+        operations. Each PE sends nelems_per_pe elements to every other PE and receives
+        the same amount from every other PE.
 
         Args:
-            team (int64): Team handle for the collective operation. Use 0 for NVSHMEM_TEAM_WORLD
-                         (all PEs in the job).
-            dest (int64): Symmetric address of the destination buffer. Must be large enough
-                         to hold size_bytes * n_pes total bytes.
-            source (int64): Symmetric address of the source buffer containing data to send.
-                           Must contain size_bytes * n_pes total bytes.
-            size_bytes (int64): Number of bytes to exchange with each PE. Must be positive.
-            _semantic: Optional semantic information for Triton compilation.
-
-        Returns:
-            int32: Status code (0 for success).
-
-        Data Layout:
-            - Source buffer layout: [data_for_pe0, data_for_pe1, ..., data_for_pe(n-1)]
-            - Destination buffer layout: [data_from_pe0, data_from_pe1, ..., data_from_pe(n-1)]
-            - Each segment is size_bytes in length
+            team: Team handle for the collective operation. Use 0 for NVSHMEM_TEAM_WORLD.
+            dest: Destination tensor. Must be large enough for nelems_per_pe * n_pes elements.
+            source: Source tensor containing data for all PEs. Must contain nelems_per_pe * n_pes elements.
+            nelems_per_pe: Number of elements to exchange with each PE.
 
         Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - Automatically calculates byte size from tensor type and element count.
             - This is a collective operation - all PEs in the team must participate.
-            - Must be called from kernels launched with cooperative launch.
-            - The source and destination buffers must not overlap.
-            - All PEs must call with the same size_bytes value.
-            - Provides efficient many-to-many data exchange pattern.
+            - Data layout: source=[data_for_pe0, data_for_pe1, ...], dest=[data_from_pe0, data_from_pe1, ...]
 
         Example:
             ```
-            # Each PE sends 1024 bytes to every other PE
-            team_world = 0
-            nvshmem.alltoallmem_block(team_world, dest_ptr, src_ptr, 1024)
+            # Each PE exchanges 10 elements with every other PE
+            nvshmem.alltoall(0, dest_tensor, src_tensor, 10)
             ```
         """
+        tl.static_assert(dest.type == source.type)
+        size_bytes_per_pe = nelems_per_pe * dest.type.element_ty.itemsize
+        return alltoallmem_block_extern_wrapper(team, dest.to(tl.int64), source.to(tl.int64), size_bytes_per_pe)
+
+    @core.extern
+    def alltoallmem_block_extern_wrapper(team, dest, source, size_bytes, _semantic=None):  # type: ignore[no-untyped-def]
+        """Low-level extern wrapper for NVSHMEM alltoall"""
         return core.extern_elementwise(
             "",
             "",
@@ -772,46 +767,41 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    @core.extern
-    def broadcastmem_block(team, dest, source, size_bytes, pe_root, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit
+    def broadcast(team, dest, source, nelems, pe_root):
         """
-        Broadcast data from a root PE to all other PEs in a team.
+        Broadcast tensor data from a root PE to all other PEs in a team.
 
-        This function implements a collective broadcast operation where the root PE
-        sends its data to all other PEs in the team. All PEs (including the root)
-        receive a copy of the data from the root PE in their destination buffer.
+        This high-level function provides a tensor-aware interface for NVSHMEM broadcast
+        operations. It automatically handles type checking and size calculations, making
+        the API more ergonomic and type-safe.
 
         Args:
-            team (int64): Team handle for the collective operation. Use 0 for NVSHMEM_TEAM_WORLD
-                         (all PEs in the job).
-            dest (int64): Symmetric address of the destination buffer on all PEs.
-                         Must be large enough to hold size_bytes.
-            source (int64): Symmetric address of the source buffer on the root PE.
-                           Only the root PE's source buffer is used.
-            size_bytes (int64): Number of bytes to broadcast. Must be positive.
-            pe_root (int64): PE number of the root PE that provides the source data.
-            _semantic: Optional semantic information for Triton compilation.
-
-        Returns:
-            int32: Status code (0 for success).
+            team: Team handle for the collective operation. Use 0 for NVSHMEM_TEAM_WORLD.
+            dest: Destination tensor with type information. All PEs receive data here.
+            source: Source tensor on the root PE. Type must match dest.
+            nelems: Number of elements to broadcast.
+            pe_root: PE number of the root PE that provides the source data.
 
         Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - Automatically calculates byte size from tensor type and element count.
             - This is a collective operation - all PEs in the team must participate.
             - Must be called from kernels launched with cooperative launch.
-            - Only the root PE's source buffer is read; other PEs' source buffers are ignored.
-            - All PEs (including root) receive the data in their destination buffer.
-            - All PEs must call with the same team, size_bytes, and pe_root values.
-            - The source and destination buffers must not overlap on any PE.
-            - Efficient one-to-many communication pattern.
 
         Example:
             ```
-            # PE 0 broadcasts 1024 bytes to all PEs in the team
-            team_world = 0
-            root_pe = 0
-            nvshmem.broadcastmem_block(team_world, dest_ptr, src_ptr, 1024, root_pe)
+            # Broadcast 100 elements from PE 0 to all PEs
+            nvshmem.broadcast(0, dest_tensor, src_tensor, 100, 0)
             ```
         """
+        tl.static_assert(dest.type == source.type)
+        nbytes = nelems * dest.type.element_ty.itemsize
+        return broadcastmem_block_extern_wrapper(team, dest.to(tl.int64), source.to(tl.int64), nbytes, pe_root)
+
+    @core.extern
+    def broadcastmem_block_extern_wrapper(team, dest, source, size_bytes, pe_root, _semantic=None):  # type: ignore[no-untyped-def]
+        """Low-level extern wrapper for NVSHMEM broadcast"""
         return core.extern_elementwise(
             "",
             "",

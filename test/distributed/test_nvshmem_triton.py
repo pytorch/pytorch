@@ -2,12 +2,11 @@
 # To run:
 # python test/distributed/test_nvshmem_triton.py
 
-import triton.language as tl
-
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed._symmetric_memory._nvshmem_triton as nvshmem
+import triton.language as tl
 from torch._inductor.runtime.triton_compat import triton
 from torch.testing._internal.common_distributed import MultiProcContinousTest
 from torch.testing._internal.common_utils import (
@@ -210,24 +209,24 @@ def nvshmem_sync_test_kernel(
 
 
 @triton.jit
-def nvshmem_alltoallmem_block_kernel(
+def nvshmem_alltoall_kernel(
     team_handle,
-    dest_ptr,
-    src_ptr,
-    size_bytes_per_pe,
+    dst,
+    src,
+    nelems_per_pe,
 ):
-    nvshmem.alltoallmem_block(team_handle, dest_ptr, src_ptr, size_bytes_per_pe)
+    nvshmem.alltoall(team_handle, dst, src, nelems_per_pe)
 
 
 @triton.jit
-def nvshmem_broadcastmem_block_kernel(
+def nvshmem_broadcast_kernel(
     team_handle,
-    dest_ptr,
-    src_ptr,
-    size_bytes,
+    dest,
+    src,
+    nelems,
     pe_root,
 ):
-    nvshmem.broadcastmem_block(team_handle, dest_ptr, src_ptr, size_bytes, pe_root)
+    nvshmem.broadcast(team_handle, dest, src, nelems, pe_root)
 
 
 @triton.jit
@@ -866,7 +865,6 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # Each PE will send 2 int64 elements to every other PE
         nelems_per_pe = 2
         dtype = torch.int64
-        size_bytes_per_pe = nelems_per_pe * dtype.itemsize
         # Source buffer: contains data for all PEs
         # Layout: [data_for_pe0, data_for_pe1, ...]
         src_size = nelems_per_pe * world_size
@@ -878,17 +876,17 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             src[i * nelems_per_pe : (i + 1) * nelems_per_pe] = value
         # Destination buffer
         dst = symm_mem.empty(src_size, dtype=dtype, device=self.device).fill_(-1)
-        src_hdl = symm_mem.rendezvous(src, group=group_name)
-        dst_hdl = symm_mem.rendezvous(dst, group=group_name)
+        symm_mem.rendezvous(src, group=group_name)
+        symm_mem.rendezvous(dst, group=group_name)
         # Synchronize before alltoall
         dist.barrier()
         team_handle = 0  # NVSHMEM_TEAM_WORLD handle is 0
-        # Launch the kernel
-        nvshmem_alltoallmem_block_kernel[(1,)](
+        # Launch the kernel using new tensor-aware API
+        nvshmem_alltoall_kernel[(1,)](
             team_handle,
-            dst_hdl.buffer_ptrs[rank],
-            src_hdl.buffer_ptrs[rank],
-            size_bytes_per_pe=size_bytes_per_pe,
+            dst,
+            src,
+            nelems_per_pe,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
@@ -911,13 +909,17 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
+
         # Configuration
         nelems = 4  # number of elements
         dtype = torch.int64
-        size_bytes = nelems * dtype.itemsize
+
         # Source buffer - only root will have meaningful data
         pe_root = 0  # PE 0 will be the root
         src = symm_mem.empty(nelems, dtype=dtype, device=self.device)
+        # Destination buffer
+        dst = symm_mem.empty(nelems, dtype=dtype, device=self.device).fill_(-999)
+
         if rank == pe_root:
             # Root fills with specific pattern
             for i in range(nelems):
@@ -925,25 +927,28 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         else:
             # Non-root PEs have dummy data
             src.fill_(-1)
-        # Destination buffer
-        dst = symm_mem.empty(nelems, dtype=dtype, device=self.device).fill_(-999)
-        src_hdl = symm_mem.rendezvous(src, group=group_name)
-        dst_hdl = symm_mem.rendezvous(dst, group=group_name)
+
+        symm_mem.rendezvous(src, group=group_name)
+        symm_mem.rendezvous(dst, group=group_name)
+
         # Synchronize before broadcast
         dist.barrier()
+
         # Execute broadcast
         team_handle = 0  # NVSHMEM_TEAM_WORLD
-        nvshmem_broadcastmem_block_kernel[(1,)](
+        nvshmem_broadcast_kernel[(1,)](
             team_handle,
-            dst_hdl.buffer_ptrs[rank],
-            src_hdl.buffer_ptrs[rank],
-            size_bytes=size_bytes,
-            pe_root=pe_root,
+            dst,
+            src,
+            nelems,
+            pe_root,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
+
         # Synchronize after broadcast
         dist.barrier()
+
         # Verify results - all ranks should have the root's data
         expected = [100 + i for i in range(nelems)]
         torch.testing.assert_close(
