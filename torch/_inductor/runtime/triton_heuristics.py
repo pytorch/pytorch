@@ -1061,6 +1061,7 @@ class CachingAutotuner(KernelInterface):
             "def_args": launcher.def_args,
             "call_args": launcher.call_args,
             "global_scratch": launcher.global_scratch,
+            "profile_scratch": launcher.profile_scratch,
         }
         from torch._inductor.codecache import CudaKernelParamCache
 
@@ -1756,6 +1757,9 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             kernel_metadata = getattr(self.kernel, "metadata", None)
             launcher.global_scratch = getattr(
                 kernel_metadata, "global_scratch_size", None
+            )
+            launcher.profile_scratch = getattr(
+                kernel_metadata, "profile_scratch_size", None
             )
         return launcher
 
