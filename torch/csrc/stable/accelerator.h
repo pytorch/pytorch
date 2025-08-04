@@ -14,8 +14,8 @@ inline void delete_device_guard(void* ptr) {
 
 } // namespace
 
-using DeviceIndex = int8_t;  // this is from c10/core/Device.h
-using StreamId = int64_t;  // this is from c10/core/Stream.h
+using DeviceIndex = int8_t; // this is from c10/core/Device.h
+using StreamId = int64_t; // this is from c10/core/Stream.h
 
 class DeviceGuard {
  public:
