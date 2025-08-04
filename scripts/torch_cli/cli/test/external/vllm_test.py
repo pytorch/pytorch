@@ -36,6 +36,7 @@ class VllmTestRunner:
             sys.stdout.flush()
 
         envs["HF_TOKEN"] = os.environ.get("VLLM_TEST_HUGGING_FACE_TOKEN", "")
+        os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
         for step in steps:
             # todo : replace with run_cmd with envrirnment
             run_shell(step, cwd=sub_path, env=envs)
