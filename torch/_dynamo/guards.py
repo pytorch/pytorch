@@ -105,6 +105,8 @@ from .source import (
     CallFunctionNoArgsSource,
     CallMethodItemSource,
     ChainedSource,
+    ClosureSource,
+    CodeSource,
     ConstantSource,
     ConstDictKeySource,
     DataclassFieldsSource,
@@ -1495,6 +1497,20 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, CodeSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.code_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ClosureSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.closure_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         else:
             raise AssertionError(
                 f"missing guard manager builder {source} - {source.name()}"
@@ -1568,7 +1584,10 @@ class GuardBuilder(GuardBuilderBase):
         return name
 
     def _guard_on_attribute(self, guard: Guard, attr_name: str, guard_fn):
-        attr_source = AttrSource(guard.originating_source, attr_name)
+        if attr_name == "__code__":
+            attr_source = CodeSource(guard.originating_source)
+        else:
+            attr_source = AttrSource(guard.originating_source, attr_name)  # type: ignore[assignment]
         # Copy the stack info
         new_guard = Guard(
             attr_source, guard_fn, stack=guard.stack, user_stack=guard.user_stack
@@ -1580,6 +1599,9 @@ class GuardBuilder(GuardBuilderBase):
         source = guard.originating_source
         if isinstance(source, NNModuleSource):
             source = source.base
+        if isinstance(source, CodeSource):
+            # No need to guard that a function has a __code__ attribute
+            return
         assert isinstance(source, AttrSource), f"invalid source {guard.name}"
         base_source = source.base
         base = base_source.name()

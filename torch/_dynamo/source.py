@@ -285,6 +285,34 @@ class LocalCellSource(Source):
     # local cell object should never be used for guards.
 
 
+# Represents obj.__code__ where object is type object
+@dataclasses.dataclass(frozen=True)
+class CodeSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__code__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"{self.base.name()}.__code__"
+
+
+# Represents obj.__closure__ where object is type object
+@dataclasses.dataclass(frozen=True)
+class ClosureSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("__closure__"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"{self.base.name()}.__closure__"
+
+
 # Represents tensor.grad source. It could be represented by AttrSource as well.
 # But, we could access grad field on tensor directly in C++ without going
 # through the Python bytecodes. Therefore, we use a separate source for grad
