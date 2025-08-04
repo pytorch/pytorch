@@ -35,6 +35,7 @@ from collections.abc import Generator
 from dataclasses import dataclass, field as dc_field
 from types import CodeType
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing_extensions import ParamSpec, TypeVar
 
 import sympy
 
@@ -2308,14 +2309,17 @@ def check_pt2_compliant_op(
 
 _compile_id_counter = itertools.count()
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
 
 class LazyProxy:
     def __init__(
         self,
         tracer: "SubgraphTracer",
-        fn: Callable[..., Any],
-        *args: Any,
-        **kwargs: Any,
+        fn: Callable[P, R],
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> None:
         self.tracer = tracer
         self.fn = fn
