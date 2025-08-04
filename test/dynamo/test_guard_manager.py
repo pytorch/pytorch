@@ -880,8 +880,9 @@ num_guards_executed=0)
             counter += 1
 
         class Bar:
-            x = 4
-            y = torch.randn(4)
+            def __init__(self):
+                self.x = 4
+                self.y = torch.randn(4)
 
         bar = Bar()
 
