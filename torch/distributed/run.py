@@ -713,6 +713,11 @@ def determine_local_world_size(nproc_per_node: str):
             else:
                 num_proc = os.cpu_count()
                 device_type = "cpu"
+            ### CI ERROR DEBUG CODE BEGIN ###
+            print(f"nproc_per_node=auto: {device_type = }, {num_proc = }, {os.cpu_count() = }")
+            if torch.cuda.is_available():
+                print(f"{torch.cuda.device_count() = }")
+            ### CI ERROR DEBUG CODE END ###
         else:
             raise ValueError(
                 f"Unsupported nproc_per_node value: {nproc_per_node}"
