@@ -320,3 +320,38 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("my_zero_", &boxed_my_zero_);
 }
+
+bool test_default_constructor(bool defined) {
+  Tensor out;
+  if (defined) {
+    AtenTensorHandle defined_ath;
+    int64_t sizes[] = {2, 3};
+    int64_t strides[] = {3, 1};
+    aoti_torch_empty_strided(
+        2,
+        sizes,
+        strides,
+        aoti_torch_dtype_float32(),
+        aoti_torch_device_type_cpu(),
+        0,
+        &defined_ath);
+    out = Tensor(defined_ath);
+  }
+  return out.defined();
+}
+
+void boxed_test_default_constructor(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  bool res = test_default_constructor(to<bool>(stack[0]));
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("test_default_constructor(bool undefined) -> bool");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("test_default_constructor", &boxed_test_default_constructor);
+}
