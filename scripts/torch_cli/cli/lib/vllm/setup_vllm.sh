@@ -10,6 +10,7 @@ echo "This script lives in: $SCRIPT_DIR"
 
 echo "Installing torch whls and vllm dependencies"
 
+# local testing to install torch whl
 #pip install "$(echo dist/torch-*.whl)[opt_einsum]"
 pip install dist/vision/torchvision*.whl
 pip install dist/audio/torchaudio*.whl
@@ -41,6 +42,7 @@ cp requirements/test.txt snapshot_constraint.txt
 
 echo "Installing test dependencies"
 
+# must add --torch-backend cu128 to generate identical results with pip version as the stable
 uv pip compile requirements/test.in -o test.txt \
   --index-strategy unsafe-best-match \
   --constraint snapshot_constraint.txt \
