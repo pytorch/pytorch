@@ -41,6 +41,14 @@
 #include <c10/util/copysign.h>
 #include <c10/util/irange.h>
 
+#ifdef __aarch64__ 
+#include <arm_neon.h>
+#if defined(CPU_CAPABILITY_SVE128)
+#include <arm_sve.h>
+#include <arm_neon_sve_bridge.h>
+#endif
+#endif
+
 #if defined(__GNUC__)
 #define __FORCE_INLINE __attribute__((always_inline)) inline
 #elif defined(_MSC_VER)
@@ -87,6 +95,7 @@ Windows llvm will not have this definition.
 #define __at_align__
 #endif
 #define VECTOR_WIDTH 16
+#define int_vector poly128_t
 #else
 // Fallback: define default alignment and vector width
 #if defined(__GNUC__)
@@ -194,6 +203,26 @@ struct Vectorized {
   static constexpr size_type size() {
     return kSize;
   }
+
+#ifdef __aarch64__ 
+  inline poly128_t getNeon() const {
+    return vldrq_p128(reinterpret_cast<const poly128_t*>(&values));
+  } 
+
+  inline void setNeon(poly128_t p) {
+    return vstrq_p128(reinterpret_cast<poly128_t*>(&values), p);
+  }
+#if defined(CPU_CAPABILITY_SVE128)
+  inline svuint64_t getSve() const {
+    return svset_neonq(svundef_u64(), vreinterpretq_u64_p128(getNeon()));
+  } 
+
+  inline void setSve(svuint64_t p){
+    return setNeon(vreinterpretq_p128_u64(svget_neonq(p)));
+  }
+#endif
+#endif
+
   Vectorized() : values{static_cast<T>(0)} {}
   Vectorized(T val) {
     for (int i = 0; i != size(); i++) {
@@ -392,9 +421,33 @@ struct Vectorized {
               !c10::is_complex<other_t_abs>::value,
           int> = 0>
   Vectorized<T> abs() const {
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    Vectorized<T> c;
+    if constexpr (std::is_same_v<T, int8_t>) {
+      c.setNeon(vreinterpretq_p128_s8(vabsq_s8(vreinterpretq_s8_p128(getNeon()))));
+    } else if constexpr (std::is_same_v<T, int16_t>) {
+      c.setNeon(vreinterpretq_p128_s16(vabsq_s16(vreinterpretq_s16_p128(getNeon()))));
+    } else if constexpr (std::is_same_v<T, int32_t>) {
+      c.setNeon(vreinterpretq_p128_s32(vabsq_s32(vreinterpretq_s32_p128(getNeon()))));
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+      c.setNeon(vreinterpretq_p128_s64(vabsq_s64(vreinterpretq_s64_p128(getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint8_t>) {
+      c.setNeon(getNeon());
+    } else if constexpr (std::is_same_v<T, uint16_t>) {
+      c.setNeon(getNeon());
+    } else if constexpr (std::is_same_v<T, uint32_t>) {
+      c.setNeon(getNeon());
+    } else if constexpr (std::is_same_v<T, uint64_t>) {
+      c.setNeon(getNeon());
+    } else {
+#endif
     // other_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same_v<other_t_abs, T>, "other_t_abs must be T");
     return map([](T x) -> T { return x < static_cast<T>(0) ? -x : x; });
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    }
+    return c;
+#endif
   }
   template <
       typename float_t_abs = T,
@@ -678,13 +731,55 @@ struct Vectorized {
     return map(std::lgamma);
   }
   Vectorized<T> sqrt() const {
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    Vectorized<T> c;
+    if constexpr (std::is_same_v<T, at::Half>) {
+      c.setNeon(vreinterpretq_p128_f16(vsqrtq_f16(vreinterpretq_f16_p128(getNeon()))));
+    } else if constexpr (std::is_same_v<T, float>) {
+      c.setNeon(vreinterpretq_p128_f32(vsqrtq_f32(vreinterpretq_f32_p128(getNeon()))));
+    } else if constexpr (std::is_same_v<T, double>) {
+      c.setNeon(vreinterpretq_p128_f64(vsqrtq_f64(vreinterpretq_f64_p128(getNeon()))));
+    } else {
+#endif
     return map(std::sqrt);
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    }
+    return c;
+#endif
   }
   Vectorized<T> reciprocal() const {
-    return map([](T x) { return (T)(1) / x; });
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    Vectorized<T> c;
+    if constexpr (std::is_same_v<T, at::Half>) {
+      c.setNeon(vreinterpretq_p128_f16(vrecpeq_f16(vreinterpretq_f16_p128(getNeon()))));
+    } else if constexpr (std::is_same_v<T, float>) {
+      c.setNeon(vreinterpretq_p128_f32(vrecpeq_f32(vreinterpretq_f32_p128(getNeon()))));
+    } else if constexpr (std::is_same_v<T, double>) {
+      c.setNeon(vreinterpretq_p128_f64(vrecpeq_f64(vreinterpretq_f64_p128(getNeon()))));
+    } else {
+#endif
+      return map([](T x) { return (T)(1) / x; });
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    }
+    return c;
+#endif
   }
   Vectorized<T> rsqrt() const {
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    Vectorized<T> c;
+    if constexpr (std::is_same_v<T, at::Half>) {
+      c.setNeon(vreinterpretq_p128_f16(vrsqrteq_f16(vreinterpretq_f16_p128(getNeon()))));
+    } else if constexpr (std::is_same_v<T, float>) {
+      c.setNeon(vreinterpretq_p128_f32(vrsqrteq_f32(vreinterpretq_f32_p128(getNeon()))));
+    } else if constexpr (std::is_same_v<T, double>) {
+      c.setNeon(vreinterpretq_p128_f64(vrsqrteq_f64(vreinterpretq_f64_p128(getNeon()))));
+    } else {
+#endif
     return map([](T x) { return (T)1 / std::sqrt(x); });
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    }
+    return c;
+#endif
   }
   Vectorized<T> pow(const Vectorized<T>& exp) const {
     Vectorized<T> ret;
@@ -749,28 +844,230 @@ struct Vectorized {
 
  public:
   Vectorized<T> eq(const Vectorized<T>& other) const {
-    return binary_pred_bool(other, std::equal_to<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    Vectorized<T> c;
+    if constexpr (std::is_same_v<T, at::Half>) {
+      c.setNeon(vreinterpretq_p128_u16(vceqq_f16(vreinterpretq_f16_p128(getNeon()), vreinterpretq_f16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, float>) {
+      c.setNeon(vreinterpretq_p128_u32(vceqq_f32(vreinterpretq_f32_p128(getNeon()), vreinterpretq_f32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, double>) {
+      c.setNeon(vreinterpretq_p128_u64(vceqq_f64(vreinterpretq_f64_p128(getNeon()), vreinterpretq_f64_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vceqq_s8(vreinterpretq_s8_p128(getNeon()), vreinterpretq_s8_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vceqq_s16(vreinterpretq_s16_p128(getNeon()), vreinterpretq_s16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vceqq_s32(vreinterpretq_s32_p128(getNeon()), vreinterpretq_s32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+      c.setNeon(vreinterpretq_p128_u64(vceqq_s64(vreinterpretq_s64_p128(getNeon()), vreinterpretq_s64_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vceqq_u8(vreinterpretq_u8_p128(getNeon()), vreinterpretq_u8_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vceqq_u16(vreinterpretq_u16_p128(getNeon()), vreinterpretq_u16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vceqq_u32(vreinterpretq_u32_p128(getNeon()), vreinterpretq_u32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint64_t>) {
+      c.setNeon(vreinterpretq_p128_u64(vceqq_u64(vreinterpretq_u64_p128(getNeon()), vreinterpretq_u64_p128(other.getNeon()))));
+    } else {
+#endif
+      return binary_pred_bool(other, std::equal_to<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    }
+    return c;
+#endif
   }
   Vectorized<T> ne(const Vectorized<T>& other) const {
-    return binary_pred_bool(other, std::not_equal_to<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    Vectorized<T> c;
+    if constexpr (std::is_same_v<T, at::Half>) {
+      c.setNeon(vreinterpretq_p128_u16(vmvnq_u8(vceqq_f16(vreinterpretq_f16_p128(getNeon()), vreinterpretq_f16_p128(other.getNeon())))));
+    } else if constexpr (std::is_same_v<T, float>) {
+      c.setNeon(vreinterpretq_p128_u32(vmvnq_u32(vceqq_f32(vreinterpretq_f32_p128(getNeon()), vreinterpretq_f32_p128(other.getNeon())))));
+    } else if constexpr (std::is_same_v<T, double>) {
+      c.setSve(svnot_u64_x(svptrue_b8(), svset_neonq(svundef_u64(), vceqq_f64(vreinterpretq_f64_p128(getNeon()), vreinterpretq_f64_p128(other.getNeon())))));
+    } else if constexpr (std::is_same_v<T, int8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vmvnq_u8(vceqq_s8(vreinterpretq_s8_p128(getNeon()), vreinterpretq_s8_p128(other.getNeon())))));
+    } else if constexpr (std::is_same_v<T, int16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vmvnq_u16(vceqq_s16(vreinterpretq_s16_p128(getNeon()), vreinterpretq_s16_p128(other.getNeon())))));
+    } else if constexpr (std::is_same_v<T, int32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vmvnq_u32(vceqq_s32(vreinterpretq_s32_p128(getNeon()), vreinterpretq_s32_p128(other.getNeon())))));
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+      c.setSve(svnot_u64_x(svptrue_b8(), svset_neonq(svundef_u64(), vceqq_s64(vreinterpretq_s64_p128(getNeon()), vreinterpretq_s64_p128(other.getNeon())))));
+    } else if constexpr (std::is_same_v<T, uint8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vmvnq_u8(vceqq_u8(vreinterpretq_u8_p128(getNeon()), vreinterpretq_u8_p128(other.getNeon())))));
+    } else if constexpr (std::is_same_v<T, uint16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vmvnq_u16(vceqq_u16(vreinterpretq_u16_p128(getNeon()), vreinterpretq_u16_p128(other.getNeon())))));
+    } else if constexpr (std::is_same_v<T, uint32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vmvnq_u32(vceqq_u32(vreinterpretq_u32_p128(getNeon()), vreinterpretq_u32_p128(other.getNeon())))));
+    } else if constexpr (std::is_same_v<T, uint64_t>) {
+      c.setSve(svnot_u64_x(svptrue_b8(), svset_neonq(svundef_u64(), vceqq_u64(vreinterpretq_u64_p128(getNeon()), vreinterpretq_u64_p128(other.getNeon())))));
+    } else {
+#endif
+      return binary_pred_bool(other, std::not_equal_to<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    }
+    return c;
+#endif
   }
   Vectorized<T> gt(const Vectorized<T>& other) const {
-    return binary_pred_bool(other, std::greater<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    Vectorized<T> c;
+    if constexpr (std::is_same_v<T, at::Half>) {
+      c.setNeon(vreinterpretq_p128_u16(vcgtq_f16(vreinterpretq_f16_p128(getNeon()), vreinterpretq_f16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, float>) {
+      c.setNeon(vreinterpretq_p128_u32(vcgtq_f32(vreinterpretq_f32_p128(getNeon()), vreinterpretq_f32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, double>) {
+      c.setNeon(vreinterpretq_p128_u64(vcgtq_f64(vreinterpretq_f64_p128(getNeon()), vreinterpretq_f64_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vcgtq_s8(vreinterpretq_s8_p128(getNeon()), vreinterpretq_s8_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vcgtq_s16(vreinterpretq_s16_p128(getNeon()), vreinterpretq_s16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vcgtq_s32(vreinterpretq_s32_p128(getNeon()), vreinterpretq_s32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+      c.setNeon(vreinterpretq_p128_u64(vcgtq_s64(vreinterpretq_s64_p128(getNeon()), vreinterpretq_s64_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vcgtq_u8(vreinterpretq_u8_p128(getNeon()), vreinterpretq_u8_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vcgtq_u16(vreinterpretq_u16_p128(getNeon()), vreinterpretq_u16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vcgtq_u32(vreinterpretq_u32_p128(getNeon()), vreinterpretq_u32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint64_t>) {
+      c.setNeon(vreinterpretq_p128_u64(vcgtq_u64(vreinterpretq_u64_p128(getNeon()), vreinterpretq_u64_p128(other.getNeon()))));
+    } else {
+#endif
+      return binary_pred_bool(other, std::greater<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    }
+    return c;
+#endif
   }
   Vectorized<T> ge(const Vectorized<T>& other) const {
-    return binary_pred_bool(other, std::greater_equal<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    Vectorized<T> c;
+    if constexpr (std::is_same_v<T, at::Half>) {
+      c.setNeon(vreinterpretq_p128_u16(vcgeq_f16(vreinterpretq_f16_p128(getNeon()), vreinterpretq_f16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, float>) {
+      c.setNeon(vreinterpretq_p128_u32(vcgeq_f32(vreinterpretq_f32_p128(getNeon()), vreinterpretq_f32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, double>) {
+      c.setNeon(vreinterpretq_p128_u64(vcgeq_f64(vreinterpretq_f64_p128(getNeon()), vreinterpretq_f64_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vcgeq_s8(vreinterpretq_s8_p128(getNeon()), vreinterpretq_s8_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vcgeq_s16(vreinterpretq_s16_p128(getNeon()), vreinterpretq_s16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vcgeq_s32(vreinterpretq_s32_p128(getNeon()), vreinterpretq_s32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+      c.setNeon(vreinterpretq_p128_u64(vcgeq_s64(vreinterpretq_s64_p128(getNeon()), vreinterpretq_s64_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vcgeq_u8(vreinterpretq_u8_p128(getNeon()), vreinterpretq_u8_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vcgeq_u16(vreinterpretq_u16_p128(getNeon()), vreinterpretq_u16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vcgeq_u32(vreinterpretq_u32_p128(getNeon()), vreinterpretq_u32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint64_t>) {
+      c.setNeon(vreinterpretq_p128_u64(vcgeq_u64(vreinterpretq_u64_p128(getNeon()), vreinterpretq_u64_p128(other.getNeon()))));
+    } else {
+#endif
+      return binary_pred_bool(other, std::greater_equal<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    }
+    return c;
+#endif
   }
   Vectorized<T> lt(const Vectorized<T>& other) const {
-    return binary_pred_bool(other, std::less<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    Vectorized<T> c;
+    if constexpr (std::is_same_v<T, at::Half>) {
+      c.setNeon(vreinterpretq_p128_u16(vcltq_f16(vreinterpretq_f16_p128(getNeon()), vreinterpretq_f16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, float>) {
+      c.setNeon(vreinterpretq_p128_u32(vcltq_f32(vreinterpretq_f32_p128(getNeon()), vreinterpretq_f32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, double>) {
+      c.setNeon(vreinterpretq_p128_u64(vcltq_f64(vreinterpretq_f64_p128(getNeon()), vreinterpretq_f64_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vcltq_s8(vreinterpretq_s8_p128(getNeon()), vreinterpretq_s8_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vcltq_s16(vreinterpretq_s16_p128(getNeon()), vreinterpretq_s16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vcltq_s32(vreinterpretq_s32_p128(getNeon()), vreinterpretq_s32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+      c.setNeon(vreinterpretq_p128_u64(vcltq_s64(vreinterpretq_s64_p128(getNeon()), vreinterpretq_s64_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vcltq_u8(vreinterpretq_u8_p128(getNeon()), vreinterpretq_u8_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vcltq_u16(vreinterpretq_u16_p128(getNeon()), vreinterpretq_u16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vcltq_u32(vreinterpretq_u32_p128(getNeon()), vreinterpretq_u32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint64_t>) {
+      c.setNeon(vreinterpretq_p128_u64(vcltq_u64(vreinterpretq_u64_p128(getNeon()), vreinterpretq_u64_p128(other.getNeon()))));
+    } else {
+#endif
+      return binary_pred_bool(other, std::less<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    }
+    return c;
+#endif
   }
   Vectorized<T> le(const Vectorized<T>& other) const {
-    return binary_pred_bool(other, std::less_equal<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    Vectorized<T> c;
+    if constexpr (std::is_same_v<T, at::Half>) {
+      c.setNeon(vreinterpretq_p128_u16(vcleq_f16(vreinterpretq_f16_p128(getNeon()), vreinterpretq_f16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, float>) {
+      c.setNeon(vreinterpretq_p128_u32(vcleq_f32(vreinterpretq_f32_p128(getNeon()), vreinterpretq_f32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, double>) {
+      c.setNeon(vreinterpretq_p128_u64(vcleq_f64(vreinterpretq_f64_p128(getNeon()), vreinterpretq_f64_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vcleq_s8(vreinterpretq_s8_p128(getNeon()), vreinterpretq_s8_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vcleq_s16(vreinterpretq_s16_p128(getNeon()), vreinterpretq_s16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vcleq_s32(vreinterpretq_s32_p128(getNeon()), vreinterpretq_s32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+      c.setNeon(vreinterpretq_p128_u64(vcleq_s64(vreinterpretq_s64_p128(getNeon()), vreinterpretq_s64_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint8_t>) {
+      c.setNeon(vreinterpretq_p128_u8(vcleq_u8(vreinterpretq_u8_p128(getNeon()), vreinterpretq_u8_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint16_t>) {
+      c.setNeon(vreinterpretq_p128_u16(vcleq_u16(vreinterpretq_u16_p128(getNeon()), vreinterpretq_u16_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint32_t>) {
+      c.setNeon(vreinterpretq_p128_u32(vcleq_u32(vreinterpretq_u32_p128(getNeon()), vreinterpretq_u32_p128(other.getNeon()))));
+    } else if constexpr (std::is_same_v<T, uint64_t>) {
+      c.setNeon(vreinterpretq_p128_u64(vcleq_u64(vreinterpretq_u64_p128(getNeon()), vreinterpretq_u64_p128(other.getNeon()))));
+    } else {
+#endif
+      return binary_pred_bool(other, std::less_equal<T>());
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    }
+    return c;
+#endif
   }
 };
 
 template <class T>
 Vectorized<T> inline operator-(const Vectorized<T>& a) {
-  return a.neg();
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    Vectorized<T> c;
+    if constexpr (std::is_same_v<T, at::Half>) {
+      c.setNeon(vreinterpretq_p128_f16(vnegq_f16(vreinterpretq_f16_p128(a.getNeon()))));
+    } else if constexpr (std::is_same_v<T, float>) {
+      c.setNeon(vreinterpretq_p128_f32(vnegq_f32(vreinterpretq_f32_p128(a.getNeon()))));
+    } else if constexpr (std::is_same_v<T, double>) {
+      c.setNeon(vreinterpretq_p128_f64(vnegq_f64(vreinterpretq_f64_p128(a.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int8_t>) {
+      c.setNeon(vreinterpretq_p128_s8(vnegq_s8(vreinterpretq_s8_p128(a.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int16_t>) {
+      c.setNeon(vreinterpretq_p128_s16(vnegq_s16(vreinterpretq_s16_p128(a.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int32_t>) {
+      c.setNeon(vreinterpretq_p128_s32(vnegq_s32(vreinterpretq_s32_p128(a.getNeon()))));
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+      c.setNeon(vreinterpretq_p128_s64(vnegq_s64(vreinterpretq_s64_p128(a.getNeon()))));
+    } else {
+#endif
+    return a.neg();
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+    }
+    return c;
+#endif
 }
 
 // There is an implicit conversion that would make this work if
@@ -795,9 +1092,37 @@ Vectorized<T> inline operator-(const Vectorized<T>& a) {
 template <class T>
 Vectorized<T> inline operator+(const Vectorized<T>& a, const Vectorized<T>& b) {
   Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] + b[i];
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  if constexpr (std::is_same_v<T, at::Half>) {
+    c.setNeon(vreinterpretq_p128_f16(vaddq_f16(vreinterpretq_f16_p128(a.getNeon()), vreinterpretq_f16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, float>) {
+    c.setNeon(vreinterpretq_p128_f32(vaddq_f32(vreinterpretq_f32_p128(a.getNeon()), vreinterpretq_f32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, double>) {
+    c.setNeon(vreinterpretq_p128_f64(vaddq_f64(vreinterpretq_f64_p128(a.getNeon()), vreinterpretq_f64_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int8_t>) {
+    c.setNeon(vreinterpretq_p128_s8(vaddq_s8(vreinterpretq_s8_p128(a.getNeon()), vreinterpretq_s8_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int16_t>) {
+    c.setNeon(vreinterpretq_p128_s16(vaddq_s16(vreinterpretq_s16_p128(a.getNeon()), vreinterpretq_s16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int32_t>) {
+    c.setNeon(vreinterpretq_p128_s32(vaddq_s32(vreinterpretq_s32_p128(a.getNeon()), vreinterpretq_s32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int64_t>) {
+    c.setNeon(vreinterpretq_p128_s64(vaddq_s64(vreinterpretq_s64_p128(a.getNeon()), vreinterpretq_s64_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint8_t>) {
+    c.setNeon(vreinterpretq_p128_u8(vaddq_u8(vreinterpretq_u8_p128(a.getNeon()), vreinterpretq_u8_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint16_t>) {
+    c.setNeon(vreinterpretq_p128_u16(vaddq_u16(vreinterpretq_u16_p128(a.getNeon()), vreinterpretq_u16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint32_t>) {
+    c.setNeon(vreinterpretq_p128_u32(vaddq_u32(vreinterpretq_u32_p128(a.getNeon()), vreinterpretq_u32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint64_t>) {
+    c.setNeon(vreinterpretq_p128_u64(vaddq_u64(vreinterpretq_u64_p128(a.getNeon()), vreinterpretq_u64_p128(b.getNeon()))));
+  } else {
+#endif
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      c[i] = a[i] + b[i];
+    }
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
   }
+#endif
   return c;
 }
 
@@ -806,9 +1131,37 @@ VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(+)
 template <class T>
 Vectorized<T> inline operator-(const Vectorized<T>& a, const Vectorized<T>& b) {
   Vectorized<T> c;
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  if constexpr (std::is_same_v<T, at::Half>) {
+    c.setNeon(vreinterpretq_p128_f16(vsubq_f16(vreinterpretq_f16_p128(a.getNeon()), vreinterpretq_f16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, float>) {
+    c.setNeon(vreinterpretq_p128_f32(vsubq_f32(vreinterpretq_f32_p128(a.getNeon()), vreinterpretq_f32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, double>) {
+    c.setNeon(vreinterpretq_p128_f64(vsubq_f64(vreinterpretq_f64_p128(a.getNeon()), vreinterpretq_f64_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int8_t>) {
+    c.setNeon(vreinterpretq_p128_s8(vsubq_s8(vreinterpretq_s8_p128(a.getNeon()), vreinterpretq_s8_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int16_t>) {
+    c.setNeon(vreinterpretq_p128_s16(vsubq_s16(vreinterpretq_s16_p128(a.getNeon()), vreinterpretq_s16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int32_t>) {
+    c.setNeon(vreinterpretq_p128_s32(vsubq_s32(vreinterpretq_s32_p128(a.getNeon()), vreinterpretq_s32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int64_t>) {
+    c.setNeon(vreinterpretq_p128_s64(vsubq_s64(vreinterpretq_s64_p128(a.getNeon()), vreinterpretq_s64_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint8_t>) {
+    c.setNeon(vreinterpretq_p128_u8(vsubq_u8(vreinterpretq_u8_p128(a.getNeon()), vreinterpretq_u8_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint16_t>) {
+    c.setNeon(vreinterpretq_p128_u16(vsubq_u16(vreinterpretq_u16_p128(a.getNeon()), vreinterpretq_u16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint32_t>) {
+    c.setNeon(vreinterpretq_p128_u32(vsubq_u32(vreinterpretq_u32_p128(a.getNeon()), vreinterpretq_u32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint64_t>) {
+    c.setNeon(vreinterpretq_p128_u64(vsubq_u64(vreinterpretq_u64_p128(a.getNeon()), vreinterpretq_u64_p128(b.getNeon()))));
+  } else {
+#endif
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] - b[i];
   }
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  }
+#endif
   return c;
 }
 
@@ -817,9 +1170,37 @@ VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP(-)
 template <class T>
 Vectorized<T> inline operator*(const Vectorized<T>& a, const Vectorized<T>& b) {
   Vectorized<T> c;
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  if constexpr (std::is_same_v<T, at::Half>) {
+    c.setNeon(vreinterpretq_p128_f16(vmulq_f16(vreinterpretq_f16_p128(a.getNeon()), vreinterpretq_f16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, float>) {
+    c.setNeon(vreinterpretq_p128_f32(vmulq_f32(vreinterpretq_f32_p128(a.getNeon()), vreinterpretq_f32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, double>) {
+    c.setNeon(vreinterpretq_p128_f64(vmulq_f64(vreinterpretq_f64_p128(a.getNeon()), vreinterpretq_f64_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int8_t>) {
+    c.setNeon(vreinterpretq_p128_s8(vmulq_s8(vreinterpretq_s8_p128(a.getNeon()), vreinterpretq_s8_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int16_t>) {
+    c.setNeon(vreinterpretq_p128_s16(vmulq_s16(vreinterpretq_s16_p128(a.getNeon()), vreinterpretq_s16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int32_t>) {
+    c.setNeon(vreinterpretq_p128_s32(vmulq_s32(vreinterpretq_s32_p128(a.getNeon()), vreinterpretq_s32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int64_t>) {
+    c.setSve(svreinterpret_u64_s64(svmul_s64_x(svptrue_b8(), svreinterpret_s64_u64(a.getSve()), svreinterpret_s64_u64(b.getSve()))));
+  } else if constexpr (std::is_same_v<T, uint8_t>) {
+    c.setNeon(vreinterpretq_p128_u8(vmulq_u8(vreinterpretq_u8_p128(a.getNeon()), vreinterpretq_u8_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint16_t>) {
+    c.setNeon(vreinterpretq_p128_u16(vmulq_u16(vreinterpretq_u16_p128(a.getNeon()), vreinterpretq_u16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint32_t>) {
+    c.setNeon(vreinterpretq_p128_u32(vmulq_u32(vreinterpretq_u32_p128(a.getNeon()), vreinterpretq_u32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint64_t>) {
+    c.setSve(svmul_u64_x(svptrue_b8(), a.getSve(), b.getSve()));
+  } else {
+#endif
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] * b[i];
   }
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  }
+#endif
   return c;
 }
 
@@ -829,9 +1210,29 @@ template <class T>
 Vectorized<T> inline operator/(const Vectorized<T>& a, const Vectorized<T>& b)
     __ubsan_ignore_float_divide_by_zero__ {
   Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] / b[i];
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  if constexpr (std::is_same_v<T, at::Half>) {
+    c.setNeon(vreinterpretq_p128_f16(vdivq_f16(vreinterpretq_f16_p128(a.getNeon()), vreinterpretq_f16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, float>) {
+    c.setNeon(vreinterpretq_p128_f32(vdivq_f32(vreinterpretq_f32_p128(a.getNeon()), vreinterpretq_f32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, double>) {
+    c.setNeon(vreinterpretq_p128_f64(vdivq_f64(vreinterpretq_f64_p128(a.getNeon()), vreinterpretq_f64_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int32_t>) {
+    c.setSve(svreinterpret_u64_s32(svdiv_s32_x(svptrue_b8(), svreinterpret_s32_u64(a.getSve()), svreinterpret_s32_u64(b.getSve()))));
+  } else if constexpr (std::is_same_v<T, int64_t>) {
+    c.setSve(svreinterpret_u64_s64(svdiv_s64_x(svptrue_b8(), svreinterpret_s64_u64(a.getSve()), svreinterpret_s64_u64(b.getSve()))));
+  } else if constexpr (std::is_same_v<T, uint32_t>) {
+    c.setSve(svreinterpret_u64_u32(svdiv_u32_x(svptrue_b8(), svreinterpret_u32_u64(a.getSve()), svreinterpret_u32_u64(b.getSve()))));
+  } else if constexpr (std::is_same_v<T, uint64_t>) {
+    c.setSve(svdiv_u64_x(svptrue_b8(), a.getSve(), b.getSve()));
+  } else {
+#endif
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      c[i] = a[i] / b[i];
+    }
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
   }
+#endif
   return c;
 }
 
@@ -865,15 +1266,57 @@ template <
     typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
 Vectorized<T> inline maximum(const Vectorized<T>& a, const Vectorized<T>& b) {
   Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = (a[i] > b[i]) ? a[i] : b[i];
-    if (_isnan(a[i])) {
-      // If either input is NaN, propagate a NaN.
-      // NOTE: The case where b[i] was NaN is handled correctly by the naive
-      // ternary operator above.
-      c[i] = a[i];
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+if constexpr (std::is_same_v<T, at::Half>) {
+    svfloat16_t firstReg = svreinterpret_f16_u64(a.getSve());
+    svfloat16_t secondReg = svreinterpret_f16_u64(b.getSve());
+    svbool_t nansInB = svcmpuo_f16(svptrue_b8(), secondReg, secondReg);
+    svbool_t nansInAB = svcmpuo_f16(svptrue_b8(), firstReg, secondReg);
+    svfloat16_t firstRegWithNans = svsel_f16(nansInB, secondReg, firstReg);
+    svbool_t nonNans = svnot_b_z(svptrue_b8(), nansInAB);
+    c.setSve(svreinterpret_u64_f16(svmax_f16_m(nonNans, firstRegWithNans, secondReg)));
+  } else if constexpr (std::is_same_v<T, float>) {
+    svfloat32_t firstReg = svreinterpret_f32_u64(a.getSve());
+    svfloat32_t secondReg = svreinterpret_f32_u64(b.getSve());
+    svbool_t nansInB = svcmpuo_f32(svptrue_b8(), secondReg, secondReg);
+    svbool_t nansInAB = svcmpuo_f32(svptrue_b8(), firstReg, secondReg);
+    svfloat32_t firstRegWithNans = svsel_f32(nansInB, secondReg, firstReg);
+    svbool_t nonNans = svnot_b_z(svptrue_b8(), nansInAB);
+    c.setSve(svreinterpret_u64_f32(svmax_f32_m(nonNans, firstRegWithNans, secondReg)));
+  } else if constexpr (std::is_same_v<T, double>) {
+    svfloat64_t firstReg = svreinterpret_f64_u64(a.getSve());
+    svfloat64_t secondReg = svreinterpret_f64_u64(b.getSve());
+    svbool_t nansInB = svcmpuo_f64(svptrue_b8(), secondReg, secondReg);
+    svbool_t nansInAB = svcmpuo_f64(svptrue_b8(), firstReg, secondReg);
+    svfloat64_t firstRegWithNans = svsel_f64(nansInB, secondReg, firstReg);
+    svbool_t nonNans = svnot_b_z(svptrue_b8(), nansInAB);
+    c.setSve(svreinterpret_u64_f64(svmax_f64_m(nonNans, firstRegWithNans, secondReg)));
+  } else if constexpr (std::is_same_v<T, int8_t>) {
+    c.setNeon(vreinterpretq_p128_s8(vmaxq_s8(vreinterpretq_s8_p128(a.getNeon()), vreinterpretq_s8_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int16_t>) {
+    c.setNeon(vreinterpretq_p128_s16(vmaxq_s16(vreinterpretq_s16_p128(a.getNeon()), vreinterpretq_s16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int32_t>) {
+    c.setNeon(vreinterpretq_p128_s32(vmaxq_s32(vreinterpretq_s32_p128(a.getNeon()), vreinterpretq_s32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint8_t>) {
+    c.setNeon(vreinterpretq_p128_u8(vmaxq_u8(vreinterpretq_u8_p128(a.getNeon()), vreinterpretq_u8_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint16_t>) {
+    c.setNeon(vreinterpretq_p128_u16(vmaxq_u16(vreinterpretq_u16_p128(a.getNeon()), vreinterpretq_u16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint32_t>) {
+    c.setNeon(vreinterpretq_p128_u32(vmaxq_u32(vreinterpretq_u32_p128(a.getNeon()), vreinterpretq_u32_p128(b.getNeon()))));
+  } else {
+#endif
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      c[i] = (a[i] > b[i]) ? a[i] : b[i];
+      if (_isnan(a[i])) {
+        // If either input is NaN, propagate a NaN.
+        // NOTE: The case where b[i] was NaN is handled correctly by the naive
+        // ternary operator above.
+        c[i] = a[i];
+      }
     }
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
   }
+#endif
   return c;
 }
 
@@ -903,15 +1346,57 @@ template <
     typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
 Vectorized<T> inline minimum(const Vectorized<T>& a, const Vectorized<T>& b) {
   Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = (a[i] < b[i]) ? a[i] : b[i];
-    if (_isnan(a[i])) {
-      // If either input is NaN, propagate a NaN.
-      // NOTE: The case where b[i] was NaN is handled correctly by the naive
-      // ternary operator above.
-      c[i] = a[i];
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  if constexpr (std::is_same_v<T, at::Half>) {
+    svfloat16_t firstReg = svreinterpret_f16_u64(a.getSve());
+    svfloat16_t secondReg = svreinterpret_f16_u64(b.getSve());
+    svbool_t nansInB = svcmpuo_f16(svptrue_b8(), secondReg, secondReg);
+    svbool_t nansInAB = svcmpuo_f16(svptrue_b8(), firstReg, secondReg);
+    svfloat16_t firstRegWithNans = svsel_f16(nansInB, secondReg, firstReg);
+    svbool_t nonNans = svnot_b_z(svptrue_b8(), nansInAB);
+    c.setSve(svreinterpret_u64_f16(svmin_f16_m(nonNans, firstRegWithNans, secondReg)));
+  } else if constexpr (std::is_same_v<T, float>) {
+    svfloat32_t firstReg = svreinterpret_f32_u64(a.getSve());
+    svfloat32_t secondReg = svreinterpret_f32_u64(b.getSve());
+    svbool_t nansInB = svcmpuo_f32(svptrue_b8(), secondReg, secondReg);
+    svbool_t nansInAB = svcmpuo_f32(svptrue_b8(), firstReg, secondReg);
+    svfloat32_t firstRegWithNans = svsel_f32(nansInB, secondReg, firstReg);
+    svbool_t nonNans = svnot_b_z(svptrue_b8(), nansInAB);
+    c.setSve(svreinterpret_u64_f32(svmin_f32_m(nonNans, firstRegWithNans, secondReg)));
+  } else if constexpr (std::is_same_v<T, double>) {
+    svfloat64_t firstReg = svreinterpret_f64_u64(a.getSve());
+    svfloat64_t secondReg = svreinterpret_f64_u64(b.getSve());
+    svbool_t nansInB = svcmpuo_f64(svptrue_b8(), secondReg, secondReg);
+    svbool_t nansInAB = svcmpuo_f64(svptrue_b8(), firstReg, secondReg);
+    svfloat64_t firstRegWithNans = svsel_f64(nansInB, secondReg, firstReg);
+    svbool_t nonNans = svnot_b_z(svptrue_b8(), nansInAB);
+    c.setSve(svreinterpret_u64_f64(svmin_f64_m(nonNans, firstRegWithNans, secondReg)));
+  } else if constexpr (std::is_same_v<T, int8_t>) {
+    c.setNeon(vreinterpretq_p128_s8(vminq_s8(vreinterpretq_s8_p128(a.getNeon()), vreinterpretq_s8_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int16_t>) {
+    c.setNeon(vreinterpretq_p128_s16(vminq_s16(vreinterpretq_s16_p128(a.getNeon()), vreinterpretq_s16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, int32_t>) {
+    c.setNeon(vreinterpretq_p128_s32(vminq_s32(vreinterpretq_s32_p128(a.getNeon()), vreinterpretq_s32_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint8_t>) {
+    c.setNeon(vreinterpretq_p128_u8(vminq_u8(vreinterpretq_u8_p128(a.getNeon()), vreinterpretq_u8_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint16_t>) {
+    c.setNeon(vreinterpretq_p128_u16(vminq_u16(vreinterpretq_u16_p128(a.getNeon()), vreinterpretq_u16_p128(b.getNeon()))));
+  } else if constexpr (std::is_same_v<T, uint32_t>) {
+    c.setNeon(vreinterpretq_p128_u32(vminq_u32(vreinterpretq_u32_p128(a.getNeon()), vreinterpretq_u32_p128(b.getNeon()))));
+  } else {
+#endif
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      c[i] = (a[i] < b[i]) ? a[i] : b[i];
+      if (_isnan(a[i])) {
+        // If either input is NaN, propagate a NaN.
+        // NOTE: The case where b[i] was NaN is handled correctly by the naive
+        // ternary operator above.
+        c[i] = a[i];
+      }
     }
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
   }
+#endif
   return c;
 }
 
@@ -1016,7 +1501,7 @@ VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(clamp_min)
 
 struct Vectorizedi;
 
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || (defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128))
 template <class T, typename Op>
 static inline Vectorized<T> bitwise_binary_op(
     const Vectorized<T>& a,
@@ -1033,16 +1518,26 @@ static inline Vectorized<T> bitwise_binary_op(
       _mm512_load_si512(reinterpret_cast<const int_vector*>((const T*)a));
   int_vector b_buffer =
       _mm512_load_si512(reinterpret_cast<const int_vector*>((const T*)b));
+#elif defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  int_vector a_buffer = a.getNeon();
+  int_vector b_buffer = b.getNeon();
 #endif
-  buffer = op(a_buffer, b_buffer);
-  __at_align__ T results[Vectorized<T>::size()];
 
+  buffer = op(a_buffer, b_buffer);
+
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  Vectorized<T> c;
+  c.setNeon(buffer);
+  return c;
+#else
+__at_align__ T results[Vectorized<T>::size()];
 #if defined(CPU_CAPABILITY_AVX2)
   _mm256_store_si256(reinterpret_cast<int_vector*>(results), buffer);
 #elif defined(CPU_CAPABILITY_AVX512)
   _mm512_store_si512(reinterpret_cast<int_vector*>(results), buffer);
 #endif
   return Vectorized<T>::loadu(results);
+#endif
 }
 
 template <
@@ -1053,7 +1548,10 @@ template <
 inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
   // We enclose _mm512_and_si512 or _mm256_and_si256 with lambda because it is
   // always_inline
-#if defined(CPU_CAPABILITY_AVX2)
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  return bitwise_binary_op(
+      a, b, [](int_vector a, int_vector b) { return vreinterpretq_p128_u8(vandq_u8(vreinterpretq_u8_p128(a), vreinterpretq_u8_p128(b))); });
+#elif defined(CPU_CAPABILITY_AVX2)
   return bitwise_binary_op(
       a, b, [](int_vector a, int_vector b) { return _mm256_and_si256(a, b); });
 #elif defined(CPU_CAPABILITY_AVX512)
@@ -1069,7 +1567,10 @@ template <
 inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
   // We enclose _mm512_or_si512 or _mm256_or_si256 with lambda because it is
   // always_inline
-#if defined(CPU_CAPABILITY_AVX2)
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  return bitwise_binary_op(
+      a, b, [](int_vector a, int_vector b) { return vreinterpretq_p128_u8(vorrq_u8(vreinterpretq_u8_p128(a), vreinterpretq_u8_p128(b))); });
+#elif defined(CPU_CAPABILITY_AVX2)
   return bitwise_binary_op(
       a, b, [](int_vector a, int_vector b) { return _mm256_or_si256(a, b); });
 #elif defined(CPU_CAPABILITY_AVX512)
@@ -1085,7 +1586,10 @@ template <
 inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
   // We enclose _mm512_xor_si512 or _mm256_xor_si256 with lambda because it is
   // always_inline
-#if defined(CPU_CAPABILITY_AVX2)
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  return bitwise_binary_op(
+      a, b, [](int_vector a, int_vector b) { return vreinterpretq_p128_u8(veorq_u8(vreinterpretq_u8_p128(a), vreinterpretq_u8_p128(b))); });
+#elif defined(CPU_CAPABILITY_AVX2)
   return bitwise_binary_op(
       a, b, [](int_vector a, int_vector b) { return _mm256_xor_si256(a, b); });
 #elif defined(CPU_CAPABILITY_AVX512)
@@ -1177,15 +1681,15 @@ Vectorized<T> inline operator<<(
     const Vectorized<T>& b) {
   constexpr T max_shift = sizeof(T) * CHAR_BIT;
   Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    T shift = b[i];
-    if ((static_cast<std::make_signed_t<T>>(shift) < 0) ||
-        (shift >= max_shift)) {
-      c[i] = 0;
-    } else {
-      c[i] = static_cast<std::make_unsigned_t<T>>(a[i]) << shift;
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      T shift = b[i];
+      if ((static_cast<std::make_signed_t<T>>(shift) < 0) ||
+          (shift >= max_shift)) {
+        c[i] = 0;
+      } else {
+        c[i] = static_cast<std::make_unsigned_t<T>>(a[i]) << shift;
+      }
     }
-  }
   return c;
 }
 
@@ -1196,15 +1700,15 @@ Vectorized<T> inline operator>>(
   // right shift value to retain sign bit for signed and no bits for unsigned
   constexpr T max_shift = sizeof(T) * CHAR_BIT - std::is_signed_v<T>;
   Vectorized<T> c;
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    T shift = b[i];
-    if ((static_cast<std::make_signed_t<T>>(shift) < 0) ||
-        (shift >= max_shift)) {
-      c[i] = a[i] >> max_shift;
-    } else {
-      c[i] = a[i] >> shift;
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      T shift = b[i];
+      if ((static_cast<std::make_signed_t<T>>(shift) < 0) ||
+          (shift >= max_shift)) {
+        c[i] = a[i] >> max_shift;
+      } else {
+        c[i] = a[i] >> shift;
+      }
     }
-  }
   return c;
 }
 
@@ -1251,7 +1755,21 @@ inline Vectorized<T> fmadd(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     const Vectorized<T>& c) {
-  return a * b + c;
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  Vectorized<T> r;
+  if constexpr (std::is_same_v<T, at::Half>) {
+    r.setNeon(vreinterpretq_p128_f16(vfmaq_f16(vreinterpretq_f16_p128(a.getNeon()), vreinterpretq_f16_p128(b.getNeon()), vreinterpretq_f16_p128(c.getNeon()))));
+  } else if constexpr (std::is_same_v<T, float>) {
+    r.setNeon(vreinterpretq_p128_f32(vfmaq_f32(vreinterpretq_f32_p128(a.getNeon()), vreinterpretq_f32_p128(b.getNeon()), vreinterpretq_f32_p128(c.getNeon()))));
+  } else if constexpr (std::is_same_v<T, double>) {
+    r.setNeon(vreinterpretq_p128_f64(vfmaq_f64(vreinterpretq_f64_p128(a.getNeon()), vreinterpretq_f64_p128(b.getNeon()), vreinterpretq_f64_p128(c.getNeon()))));
+  } else {
+#endif
+    return a * b + c;
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  }
+  return r;
+#endif
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmadd)
@@ -1271,7 +1789,21 @@ inline Vectorized<T> fmsub(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     const Vectorized<T>& c) {
-  return a * b - c;
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  Vectorized<T> r;
+  if constexpr (std::is_same_v<T, at::Half>) {
+    r.setNeon(vreinterpretq_p128_f16(vfmsq_f16(vreinterpretq_f16_p128(a.getNeon()), vreinterpretq_f16_p128(b.getNeon()), vreinterpretq_f16_p128(c.getNeon()))));
+  } else if constexpr (std::is_same_v<T, float>) {
+    r.setNeon(vreinterpretq_p128_f32(vfmsq_f32(vreinterpretq_f32_p128(a.getNeon()), vreinterpretq_f32_p128(b.getNeon()), vreinterpretq_f32_p128(c.getNeon()))));
+  } else if constexpr (std::is_same_v<T, double>) {
+    r.setNeon(vreinterpretq_p128_f64(vfmsq_f64(vreinterpretq_f64_p128(a.getNeon()), vreinterpretq_f64_p128(b.getNeon()), vreinterpretq_f64_p128(c.getNeon()))));
+  } else {
+#endif
+    return a * b - c;
+#if defined(__aarch64__) && defined(CPU_CAPABILITY_SVE128)
+  }
+  return r;
+#endif
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmsub)
