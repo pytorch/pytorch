@@ -30,6 +30,7 @@ from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
 from functools import lru_cache, partial
 from pathlib import Path
+from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
 from typing import (
@@ -108,7 +109,6 @@ from torch.compiler._cache import (
 from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
-from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
@@ -379,7 +379,7 @@ class WritableTempFile:
         self.encoding = encoding
         self.suffix = suffix
 
-    def __enter__(self) -> FileLike:
+    def __enter__(self) -> _TemporaryFileWrapper[Any]:
         self.temp_file = tempfile.NamedTemporaryFile(
             self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
         )
