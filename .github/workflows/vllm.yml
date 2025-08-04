@@ -1,13 +1,10 @@
 name: vllm
 
 on:
-  pull_request:
   push:
     branches:
       - main
       - release/*
-    tags:
-      - ciflow/inductor/*
   workflow_dispatch:
 
 concurrency:
