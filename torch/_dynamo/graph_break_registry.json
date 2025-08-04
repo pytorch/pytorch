@@ -2647,9 +2647,6 @@
         "Try to construct `torch.nn.Parameter()` outside the compiled region.",
         "If this is not possible, turn `graph_break_on_nn_param_ctor` off",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ],
-      "Additional_Info": [
-        "Try to construct nn.Parameter() outside the compiled region.  If this is not possible, turn `graph_break_on_nn_param_ctor` off"
       ]
     }
   ],
