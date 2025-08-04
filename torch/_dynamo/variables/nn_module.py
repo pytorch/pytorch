@@ -101,7 +101,13 @@ def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
         proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
         fake_args = [convert_to_fake(arg) for arg in proxy_args]
         fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
-        mod._infer_parameters(mod, fake_args, fake_kwargs)
+        try:
+            mod._infer_parameters(mod, fake_args, fake_kwargs)
+        except AttributeError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+            )
 
 
 @contextmanager
@@ -983,7 +989,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     fn = self.value_type.forward
 
         if self.source:
-            source = AttrSource(AttrSource(self.source, "__class__"), name)
+            source = self.get_source_by_walking_mro(name)
         else:
             source = None
 
@@ -1011,7 +1017,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
             if self.source:
-                source = AttrSource(AttrSource(self.source, "__class__"), name)
+                source = self.get_source_by_walking_mro(name)
             else:
                 source = None
 
@@ -1026,9 +1032,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = None
 
             if isinstance(method, staticmethod):
-                source = AttrSource(
-                    AttrSource(AttrSource(self.source, "__class__"), name), "__func__"
-                )
+                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(method.__func__, source=source),
                     args,
