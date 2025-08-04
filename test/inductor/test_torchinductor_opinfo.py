@@ -286,8 +286,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {f32, f64},
     "linalg.eig": {f32, f64},
-    # Double and complex datatype matmul is not supported in oneDNN
-    "byte": {f16, f32},
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
@@ -295,9 +293,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # not implemented for 'Half'
-    "sort": {b8},
-    "argsort": {b8},
 }
 
 

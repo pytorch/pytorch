@@ -76,7 +76,8 @@ jobs:
           pytorch-linux-jammy-py3-clang12-onnx,
           pytorch-linux-jammy-linter,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter,
-          pytorch-linux-jammy-py3-clang12-executorch,
+          # Executorch pin needs update
+          # pytorch-linux-jammy-py3-clang12-executorch,
           pytorch-linux-jammy-py3.12-triton-cpu
         ]
         include:

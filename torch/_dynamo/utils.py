@@ -3967,7 +3967,7 @@ def is_compile_supported(device_type):
     compile_supported = is_dynamo_supported()
     if type == "cpu":
         pass
-    elif type in ["cuda", "xpu"] and compile_supported:
+    elif type in ["cuda", "xpu", "mtia"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -4771,22 +4771,3 @@ def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()
-
-
-class CreateNestedFnCache:
-    cache: dict[str, types.FunctionType] = {}
-
-    @classmethod
-    def get(cls, key):
-        return cls.cache.get(key, None)
-
-    @classmethod
-    def set(cls, key, value):
-        cls.cache[key] = value
-
-    @classmethod
-    def clear(cls):
-        cls.cache.clear()
-
-
-create_nested_fn_cache: CreateNestedFnCache = CreateNestedFnCache()
