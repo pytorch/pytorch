@@ -36,6 +36,8 @@ from ._fsdp_extensions import (
     FSDPExtensions,
 )
 
+from typing_extensions import override
+
 
 __all__ = [
     "FlatParameter",
@@ -2840,14 +2842,17 @@ class FrozenParamHandle(FlatParamHandle):
         self._skip_optimizer_state = True
         self._skip_grad_ops = True
     
+    @override
     def needs_gradient_sync(self) -> bool:
         """Frozen parameters never need gradient synchronization."""
         return False
     
+    @override
     def prepare_gradient_for_backward(self) -> None:
         """Skip gradient preparation for frozen parameters."""
         pass
     
+    @override
     def prepare_gradient_for_optim(self) -> None:
         """Skip gradient preparation for optimizer step."""
         pass
