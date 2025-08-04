@@ -2851,6 +2851,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 """
             )
 
+
+        reduction_type_search = reduction_type
+        reduction_analog_map = {
+    
+            "max":"argmax"
+        }
+        if reduction_type_search in list(reduction_analog_map.keys()):
+              reduction_type =   reduction_analog_map[reduction_type_search]
+
         cache_key = (src_dtype, reduction_type, value)
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
