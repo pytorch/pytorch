@@ -58,6 +58,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_FBGEMM_GENAI=1
+#     enables the FBGEMM GenAI kernels to build
+#
 #   USE_KINETO=0
 #     disables usage of libkineto library for profiling
 #
@@ -1325,6 +1328,7 @@ def main() -> None:
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
         "_dynamo/graph_break_registry.json",
+        "tools/dynamo/gb_id_mapping.py",
     ]
 
     if not BUILD_LIBTORCH_WHL:

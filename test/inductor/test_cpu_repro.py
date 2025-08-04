@@ -4065,6 +4065,16 @@ class CPUReproTests(TestCase):
         )
         self.assertEqual(metrics.generated_kernel_count, 1)
 
+    def test_relu_permute_reshape_reinterpret_view(self):
+        def fn(x):
+            n, c, h, w = x.shape
+            return torch.relu(x).permute(0, 2, 3, 1).reshape(n, h * w, c)
+
+        x = torch.randn(2, 32, 4, 4).to(memory_format=torch.channels_last)
+        metrics.reset()
+        self.common(fn, (x,))
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
     def test_attention_size_mismatch(self):
         class Attention(torch.nn.Module):
             def __init__(self, hidden_size, num_heads):
