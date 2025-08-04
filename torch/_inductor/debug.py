@@ -722,23 +722,6 @@ def log_collective_schedule(nodes: Sequence[BaseSchedulerNode]) -> None:
     _dump_collective_schedule(schedule)
 
 
-def _dump_tlparse_runtime(data: dict[str, Any]) -> None:
-    try:
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_tlparse_runtime",
-                "encoding": "json",
-            },
-            payload_fn=lambda: data,
-        )
-    except Exception:
-        log.debug(
-            "Failed to log inductor_tlparse_runtime via structured logging",
-            exc_info=True,
-        )
-
-
 def log_runtime_estimates(nodes: Sequence[BaseSchedulerNode]) -> None:
     ops = [
         {
@@ -748,7 +731,14 @@ def log_runtime_estimates(nodes: Sequence[BaseSchedulerNode]) -> None:
         }
         for s in nodes
     ]
-    _dump_tlparse_runtime({"ops": ops})
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "inductor_tlparse_runtime",
+            "encoding": "json",
+        },
+        payload_fn=lambda: {"ops": ops},
+    )
 
 
 @dataclasses.dataclass
