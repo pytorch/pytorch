@@ -2792,3 +2792,62 @@ def _same_storage_size(a: torch.Tensor, b: int):
 def _storage_size_allocated(tensor: Tensor):
     storage_size: int = tensor.untyped_storage().size()
     return storage_size > 0
+
+
+class FrozenParamHandle(FlatParamHandle):
+    """
+    Specialized handle for frozen parameters in FSDP to optimize memory usage.
+    This handle skips optimizer state allocation and unnecessary CPU-GPU transfers.
+    """
+    
+    def __init__(
+        self,
+        params: List[nn.Parameter],
+        fully_sharded_module: nn.Module,
+        device: torch.device,
+        sharding_strategy: HandleShardingStrategy,
+        offload_params: bool,
+        mp_policy: MixedPrecisionPolicy,
+        mp_param_dtype: Optional[torch.dtype],
+        mp_reduce_dtype: Optional[torch.dtype],
+        keep_low_precision_grads: bool,
+        process_group: dist.ProcessGroup,
+        use_orig_params: bool,
+        *,
+        fsdp_extension: Optional[FSDPExtensions],
+    ):
+        # All parameters should be frozen
+        assert all(not p.requires_grad for p in params), \
+            "FrozenParamHandle should only manage frozen parameters"
+        
+        super().__init__(
+            params,
+            fully_sharded_module,
+            device,
+            sharding_strategy,
+            offload_params,
+            mp_policy,
+            mp_param_dtype,
+            mp_reduce_dtype,
+            keep_low_precision_grads,
+            process_group,
+            use_orig_params,
+            fsdp_extension=fsdp_extension,
+        )
+        
+        # Mark this handle as managing frozen parameters
+        self._is_frozen = True
+        self._skip_optimizer_state = True
+        self._skip_grad_ops = True
+    
+    def needs_gradient_sync(self) -> bool:
+        """Frozen parameters never need gradient synchronization."""
+        return False
+    
+    def prepare_gradient_for_backward(self) -> None:
+        """Skip gradient preparation for frozen parameters."""
+        pass
+    
+    def prepare_gradient_for_optim(self) -> None:
+        """Skip gradient preparation for optimizer step."""
+        pass

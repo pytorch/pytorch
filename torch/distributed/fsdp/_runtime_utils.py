@@ -443,7 +443,7 @@ def _post_forward(
     Runs the post-forward logic. This includes an opportunity to reshard
     currently unsharded parameters such as those used in the current forward
     and registering pre-backward hooks on the forward outputs.
-
+    
     Args:
         handles (List[FlatParamHandle]): Handles giving the parameters used in
             the current forward.
@@ -456,16 +456,22 @@ def _post_forward(
         input (Any): Unused; expected by the hook signature.
         output (Any): Forward pass output; pre-backward hooks are registered on
             the tensors that require gradients in this output.
-
+    
     Postcondition: Each ``FlatParameter`` 's data points to the sharded flat
     parameter.
     """
+    # NEW: Skip post-forward for frozen parameters
+    if handle and hasattr(handle, '_is_frozen') and handle._is_frozen:
+        # Frozen params stay on CPU, no need to reshard
+        return output
+    
+    # EXISTING CODE CONTINUES BELOW...
     with torch.profiler.record_function("FullyShardedDataParallel._post_forward"):
         # For `fully_shard` + `checkpoint`, skip post-forward logic in the
         # recomputed forward
         if handle and handle._training_state == HandleTrainingState.BACKWARD_PRE:
             return output
-
+        
         state._exec_order_data.record_post_forward(handle)
         if reshard_fn is not None:
             reshard_fn(state, handle)

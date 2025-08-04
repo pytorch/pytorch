@@ -631,19 +631,43 @@ def _init_param_handle_from_params(
 ):
     if len(params) == 0:
         return
-    handle = FlatParamHandle(
-        params,
-        fully_sharded_module,
-        state.compute_device,
-        SHARDING_STRATEGY_MAP[state.sharding_strategy],
-        state.cpu_offload.offload_params,
-        state.mixed_precision.param_dtype,
-        state.mixed_precision.reduce_dtype,
-        state.mixed_precision.keep_low_precision_grads,
-        state.process_group,
-        state._use_orig_params,
-        fsdp_extension=state._fsdp_extension,
-    )
+    
+    # NEW: Check if all parameters are frozen
+    all_frozen = all(not p.requires_grad for p in params)
+    
+    # NEW: Import FrozenParamHandle
+    from torch.distributed.fsdp.flat_param import FrozenParamHandle
+    
+    # NEW: Choose the right handle class
+    if all_frozen:
+        handle = FrozenParamHandle(
+            params,
+            fully_sharded_module,
+            state.compute_device,
+            SHARDING_STRATEGY_MAP[state.sharding_strategy],
+            state.cpu_offload.offload_params,
+            state.mixed_precision.param_dtype,
+            state.mixed_precision.reduce_dtype,
+            state.mixed_precision.keep_low_precision_grads,
+            state.process_group,
+            state._use_orig_params,
+            fsdp_extension=state._fsdp_extension,
+        )
+    else:
+        handle = FlatParamHandle(
+            params,
+            fully_sharded_module,
+            state.compute_device,
+            SHARDING_STRATEGY_MAP[state.sharding_strategy],
+            state.cpu_offload.offload_params,
+            state.mixed_precision.param_dtype,
+            state.mixed_precision.reduce_dtype,
+            state.mixed_precision.keep_low_precision_grads,
+            state.process_group,
+            state._use_orig_params,
+            fsdp_extension=state._fsdp_extension,
+        )
+    
     handle.shard()
     assert not state._handle
     state.params.append(handle.flat_param)
