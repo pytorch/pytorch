@@ -12,6 +12,7 @@ from torch._inductor.runtime.triton_compat import triton
 from torch.testing._internal.common_distributed import MultiProcContinousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
@@ -230,33 +231,45 @@ def nvshmem_broadcastmem_block_kernel(
 
 
 @triton.jit
-def nvshmem_sum_reduce_kernel(
+def nvshmem_reduce_kernel(
     team_handle,
     dest_ptr,
     src_ptr,
     nreduce,
+    operation: tl.constexpr,
+    dtype_id: tl.constexpr,
 ):
-    nvshmem.sum_reduce(team_handle, dest_ptr, src_ptr, nreduce)
+    nvshmem.reduce(team_handle, dest_ptr, src_ptr, nreduce, operation, dtype_id)
 
 
-@triton.jit
-def nvshmem_max_reduce_kernel(
-    team_handle,
-    dest_ptr,
-    src_ptr,
-    nreduce,
-):
-    nvshmem.max_reduce(team_handle, dest_ptr, src_ptr, nreduce)
+# @triton.jit
+# def nvshmem_sum_reduce_kernel(
+#     team_handle,
+#     dest_ptr,
+#     src_ptr,
+#     nreduce,
+# ):
+#     nvshmem.sum_reduce(team_handle, dest_ptr, src_ptr, nreduce)
 
 
-@triton.jit
-def nvshmem_min_reduce_kernel(
-    team_handle,
-    dest_ptr,
-    src_ptr,
-    nreduce,
-):
-    nvshmem.min_reduce(team_handle, dest_ptr, src_ptr, nreduce)
+# @triton.jit
+# def nvshmem_max_reduce_kernel(
+#     team_handle,
+#     dest_ptr,
+#     src_ptr,
+#     nreduce,
+# ):
+#     nvshmem.max_reduce(team_handle, dest_ptr, src_ptr, nreduce)
+
+
+# @triton.jit
+# def nvshmem_min_reduce_kernel(
+#     team_handle,
+#     dest_ptr,
+#     src_ptr,
+#     nreduce,
+# ):
+#     nvshmem.min_reduce(team_handle, dest_ptr, src_ptr, nreduce)
 
 
 @instantiate_parametrized_tests
@@ -969,7 +982,21 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
-    def test_triton_sum_reduce(self) -> None:
+    @parametrize(
+        "dtype",
+        [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+        ],
+    )
+    def test_triton_sum_reduce(self, dtype) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
@@ -979,7 +1006,6 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         rank = self.rank
         # Configuration
         nreduce = 3  # number of separate reductions
-        dtype = torch.int64
         # Source buffer - each rank contributes different values
         src = symm_mem.empty(nreduce, dtype=dtype, device=self.device)
         for i in range(nreduce):
@@ -994,20 +1020,26 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             # Sum across all ranks: sum((rank+1)*(i+1) for rank in range(world_size))
             total = sum((r + 1) * (i + 1) for r in range(world_size))
             expected.append(total)
+
         # Synchronize before reduction
         dist.barrier()
-        # Execute reduction
+
+        # Execute sum reduction across all ranks
         team_handle = 0  # NVSHMEM_TEAM_WORLD
-        nvshmem_sum_reduce_kernel[(1,)](
+        nvshmem_reduce_kernel[(1,)](
             team_handle,
             dst_hdl.buffer_ptrs[rank],
             src_hdl.buffer_ptrs[rank],
             nreduce,
+            operation="sum",
+            dtype_id=src.dtype,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
+
         # Synchronize after reduction
         dist.barrier()
+
         # Verify results
         torch.testing.assert_close(
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
@@ -1015,7 +1047,20 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
-    def test_triton_minmax_reduce(self) -> None:
+    @parametrize(
+        "dtype",
+        [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+        ],
+    )
+    def test_triton_minmax_reduce(self, dtype) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
@@ -1025,7 +1070,6 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         rank = self.rank
         # Configuration
         nreduce = 2  # number of values to reduce
-        dtype = torch.int64
         # Source buffers for min and max
         src_min = symm_mem.empty(nreduce, dtype=dtype, device=self.device)
         src_max = symm_mem.empty(nreduce, dtype=dtype, device=self.device)
@@ -1061,20 +1105,24 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         dist.barrier()
         # Execute MIN reduction
         team_handle = 0
-        nvshmem_min_reduce_kernel[(1,)](
+        nvshmem_reduce_kernel[(1,)](
             team_handle,
             dst_min_hdl.buffer_ptrs[rank],
             src_min_hdl.buffer_ptrs[rank],
             nreduce,
+            operation="min",
+            dtype_id=src_min.dtype,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
         # Execute MAX reduction
-        nvshmem_max_reduce_kernel[(1,)](
+        nvshmem_reduce_kernel[(1,)](
             team_handle,
             dst_max_hdl.buffer_ptrs[rank],
             src_max_hdl.buffer_ptrs[rank],
             nreduce,
+            operation="max",
+            dtype_id=src_max.dtype,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
@@ -1085,6 +1133,90 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         )
         torch.testing.assert_close(
             dst_max, torch.tensor(expected_max, device=self.device, dtype=dtype)
+        )
+
+    @skipIfRocm
+    @requires_triton()
+    @parametrize(
+        "dtype",
+        [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+        ],
+    )
+    def test_triton_prod_reduce(self, dtype) -> None:
+        torch.manual_seed(42 + self.rank)
+        self._init_device()
+        nvshmem_lib = nvshmem.enable_triton()
+        group_name = dist.distributed_c10d._get_default_group().group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+        world_size = dist.get_world_size()
+        rank = self.rank
+        # Configuration
+        nreduce = 3  # number of separate reductions
+        # Source buffer - each rank contributes different values
+        # Use very small values to avoid overflow, especially for small integer types
+        src = symm_mem.empty(nreduce, dtype=dtype, device=self.device)
+        for i in range(nreduce):
+            # Use values that won't overflow even for int8: all values 1 or 2
+            if i == 0:
+                # For first element: rank 0,2,4... gets 1, rank 1,3,5... gets 2
+                src[i] = 1 if rank % 2 == 0 else 2
+            elif i == 1:
+                # For second element: all get 1 (no multiplication effect)
+                src[i] = 1
+            else:
+                # For third element: rank 0,1 get 1, rank 2,3 get 2, etc. (groups of 2)
+                src[i] = 1 if (rank // 2) % 2 == 0 else 2
+        # Destination buffer
+        dst = symm_mem.empty(nreduce, dtype=dtype, device=self.device).fill_(-1)
+        src_hdl = symm_mem.rendezvous(src, group=group_name)
+        dst_hdl = symm_mem.rendezvous(dst, group=group_name)
+        # Calculate expected results
+        expected = []
+        for i in range(nreduce):
+            # Product across all ranks
+            product = 1
+            for r in range(world_size):
+                if i == 0:
+                    # rank 0,2,4... contributes 1, rank 1,3,5... contributes 2
+                    product *= 1 if r % 2 == 0 else 2  # 2^(world_size//2)
+                elif i == 1:
+                    # all ranks contribute 1
+                    product *= 1  # result is 1
+                else:
+                    # rank 0,1 contribute 1, rank 2,3 contribute 2, etc.
+                    product *= 1 if (r // 2) % 2 == 0 else 2
+            expected.append(product)
+
+        # Synchronize before reduction
+        dist.barrier()
+
+        # Execute product reduction across all ranks
+        team_handle = 0  # NVSHMEM_TEAM_WORLD
+        nvshmem_reduce_kernel[(1,)](
+            team_handle,
+            dst_hdl.buffer_ptrs[rank],
+            src_hdl.buffer_ptrs[rank],
+            nreduce,
+            operation="prod",
+            dtype_id=src.dtype,
+            extern_libs=nvshmem_lib,
+            launch_cooperative_grid=True,
+        )
+
+        # Synchronize after reduction
+        dist.barrier()
+
+        # Verify results
+        torch.testing.assert_close(
+            dst, torch.tensor(expected, device=self.device, dtype=dtype)
         )
 
 
