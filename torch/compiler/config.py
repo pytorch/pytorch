@@ -66,6 +66,18 @@ Tag to be included in the cache key generation for all torch compile caching.
 A common use case for such a tag is to break caches.
 """
 
+force_disable_caches: bool = Config(
+    justknob="pytorch/remote_cache:force_disable_caches",
+    env_name_force=[
+        "TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+        "TORCH_COMPILE_FORCE_DISABLE_CACHES",
+    ],
+    default=False,
+)
+"""
+Force disables all caching -- This will take precedence over and override any other caching flag
+"""
+
 dynamic_sources: str = Config(
     env_name_default="TORCH_COMPILE_DYNAMIC_SOURCES", default=""
 )
@@ -87,5 +99,13 @@ models with graph breaks where you need intermediate tensors marked unbacked.
 This whitelist is dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
 and force_parameter_static_shapes.
 """
+
+# force a python GC before recording cudagraphs
+force_cudagraph_gc: bool = Config(env_name_default="TORCH_CUDAGRAPH_GC", default=False)
+"""
+If True (the backward-compatible behavior) then gc.collect() before recording
+any cudagraph.
+"""
+
 
 install_config_module(sys.modules[__name__])

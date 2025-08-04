@@ -1275,7 +1275,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             extern_kernel.get_kernel_name(), args, device
         )
 
-        if not is_inplace:
+        if (
+            extern_kernel.python_kernel_name
+            == "torch.ops._c10d_functional.wait_tensor.default"
+        ):
+            # wait_tensor returns its input, and the returned tensor is not used anywhere,
+            # so we can delete the returned AtenTensorHandle to reduce its lifetime.
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object({output_handle_name}));"
+            )
+        elif not is_inplace:
             self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
     def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
@@ -1451,6 +1460,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.sym))
+
+    def codegen_dynamic_select_index(self, node):
+        index_cpp_str = self.val_to_arg_str_for_prim_type(node.index, int)
+
+        index_compute_str = (
+            f"{index_cpp_str} < 0 ? {index_cpp_str} + "
+            f"{self.val_to_arg_str_for_prim_type(node.size, int)}:  {index_cpp_str}"
+        )
+        self.writeline(
+            f"auto {node.unbacked_offset_symbol} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
+            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * ({index_compute_str});"
+        )
+        # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
+        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
 
     def make_buffer_free(self, buffer):
         return (

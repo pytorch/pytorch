@@ -124,6 +124,13 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
     case ScalarType::ComplexFloat:
       checkSupportsComplex();
       return MPSDataTypeComplexFloat32;
+    // Unsigned types
+    case ScalarType::UInt64:
+      return MPSDataTypeUInt64;
+    case ScalarType::UInt32:
+      return MPSDataTypeUInt32;
+    case ScalarType::UInt16:
+      return MPSDataTypeUInt16;
     default:
       TORCH_CHECK_TYPE(
           false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
@@ -202,6 +209,13 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
     case ScalarType::ComplexFloat:
       checkSupportsComplex();
       return MPSDataTypeComplexFloat32;
+    // Unsigned types
+    case ScalarType::UInt64:
+      return MPSDataTypeUInt64;
+    case ScalarType::UInt32:
+      return MPSDataTypeUInt32;
+    case ScalarType::UInt16:
+      return MPSDataTypeUInt16;
     default:
       TORCH_CHECK_TYPE(
           false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
@@ -234,6 +248,13 @@ std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
       return short_name ? "c16" : "ComplexFloat16";
     case ScalarType::ComplexFloat:
       return short_name ? "c32" : "ComplexFloat32";
+    // Unsigned types
+    case ScalarType::UInt64:
+      return short_name ? "u64" : "UInt64";
+    case ScalarType::UInt32:
+      return short_name ? "u32" : "UInt32";
+    case ScalarType::UInt16:
+      return short_name ? "u16" : "UInt16";
     default:
       return "Undefined";
   }
@@ -264,6 +285,13 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
       return "half2";
     case ScalarType::ComplexFloat:
       return "float2";
+    // Unsigned types
+    case ScalarType::UInt64:
+      return "ulong";
+    case ScalarType::UInt32:
+      return "uint";
+    case ScalarType::UInt16:
+      return "ushort";
     default:
       TORCH_CHECK(false, "Undefined type ", scalar_type);
       return "Undefined";
@@ -651,6 +679,11 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
     case ScalarType::ComplexFloat:
     case ScalarType::ComplexDouble:
       return {.size = sizeof(int64_t), .type = type, .value.cf = scalar.to<c10::complex<float>>()};
+    // Unsigned types
+    case ScalarType::UInt32:
+      return {.size = sizeof(uint32_t), .type = type, .value.i = scalar.to<uint32_t>()};
+    case ScalarType::UInt16:
+      return {.size = sizeof(uint16_t), .type = type, .value.i = scalar.to<uint16_t>()};
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported scalar type '", type, "' on MPS backend.");
   }
@@ -920,8 +953,7 @@ class BundledShaderLibary : public MetalShaderLibrary {
     if (C10_UNLIKELY(!library)) {
       auto device = MPSDevice::getInstance()->device();
       NSError* error = nil;
-      auto section_name = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? "metal_bfloat" : "metal_basic";
-      library = [device newLibraryWithData:getSectionData(section_name) error:&error];
+      library = [device newLibraryWithData:getSectionData("metal_basic") error:&error];
       TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
     }
     return library;
