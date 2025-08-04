@@ -599,7 +599,6 @@ libtorch_nativert_sources = [
     "torch/nativert/graph/GraphSignature.cpp",
     "torch/nativert/graph/Serialization.cpp",
     "torch/nativert/graph/TensorMeta.cpp",
-    "torch/nativert/graph/GraphUtils.cpp",
     "torch/nativert/executor/DelegateExecutor.cpp",
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
