@@ -109,14 +109,15 @@ if torch._C._has_mkldnn:
             # depends on the alignment of internally-stored metadata.
             # In aot mode, we need to firstly save the packed weight, when loading it,
             # it will be in a different address which doesn't work.
-            # Disable MKL prepack linear in AOT mode
+            # Disable MKL prepack linear in AOT mode.
+            # Disable MKL prepack linear when batch_size has free symbols.
             packed_weight_op = (
                 mkldnn._reorder_linear_weight
                 if (
-                    has_free_symbols(batch_size)
-                    or is_lp_weight
+                    is_lp_weight
                     or mkldnn._is_mkldnn_acl_supported()
                     or V.aot_compilation
+                    or has_free_symbols(batch_size)
                 )
                 else torch.ops.mkl._mkl_reorder_linear_weight
             )
@@ -130,10 +131,10 @@ if torch._C._has_mkldnn:
             packed_linear_inputs: tuple[Any, ...] = (input, packed_weight_node)
             transpose_weight_node = packed_weight_node.args[0]
             if (
-                has_free_symbols(batch_size)
-                or is_lp_weight
+                is_lp_weight
                 or mkldnn._is_mkldnn_acl_supported()
                 or V.aot_compilation
+                or has_free_symbols(batch_size)
             ):
                 packed_linear_inputs += (bias, "none", [], "")
                 packed_linear_op: Callable[..., Any] = mkldnn._linear_pointwise.default

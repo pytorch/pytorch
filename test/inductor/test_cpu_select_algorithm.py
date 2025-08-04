@@ -312,12 +312,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             # Several scenarios where epilogue fusion is not counted in:
             # 1. For bfloat16, the epilogue fusion is part of the template,
             #    not fused via scheduler. This will also be true for float16 when
-            #    hardware has the float16 instruction. The exception is mul or
-            #    div fusion which is not supported for oneDNN linear.
+            #    hardware has the float16 instruction. And this will also be true
+            #    for float32 dynamic mode. The exception is mul or div fusion
+            #    which is not supported for oneDNN linear.
             # 2. For bfloat16/float16, when oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
-            # 3. For float32, when mkl linear is not applied, linear w/o bias
-            #    plus epilogue add is treated as addmm.
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
