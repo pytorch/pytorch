@@ -5,7 +5,8 @@ set -euo pipefail
 TARGET_FILE="requirements/test.in"
 TMP_HEAD=$(mktemp)
 
-PKGS=("torch" "torchvision" "torchaudio" "xformers" "mamba_ssm" "schemathesis")
+PKGS=("torch" "torchvision" "torchaudio" "xformers" "mamba_ssm" )
+# "schemathesis"
 
 echo "[INFO] Scanning and removing the following local packages from $TARGET_FILE:"
 for pkg in "${PKGS[@]}"; do
@@ -27,8 +28,9 @@ done
 
 echo "[INFO] Done."
 
+# workaround for schemathesis dependency, it only works with 3.39.15 now
 pip freeze | grep -iE '^(torch|torchvision|torchaudio)\s+@ file://' > "$TMP_HEAD"
-echo "schemathesis==3.39.15" >> "$TMP_HEAD"
+#echo "schemathesis==3.39.15" >> "$TMP_HEAD"
 
 
 echo "" >> "$TMP_HEAD"
