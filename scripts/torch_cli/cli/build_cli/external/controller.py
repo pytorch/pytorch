@@ -14,7 +14,7 @@ class ExternalBuildController(Controller):
         )
 
     @ex(
-        help=f"Build vLLM external library with docker image, environment variables:{generate_dataclass_help(VllmBuildConfig)}",
+        help=f"Build external vllm library with docker build command, environment variables:{generate_dataclass_help(VllmBuildConfig)}",
         arguments=[
             (
                 ["--torch-whl-dir"],

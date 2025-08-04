@@ -37,14 +37,18 @@ pip freeze | grep -E 'torch|xformers|torchvision|torchaudio|flashinfer'
 # clean the test.in file
 bash "$SCRIPT_DIR/clean_test_in.sh"
 
+cp requirements/test.txt snapshot_constraint.txt
+
 echo "Installing test dependencies"
-uv pip compile requirements/test.in -o requirements/test.txt --index-strategy unsafe-best-match --torch-backend cu128
+
+uv pip compile requirements/test.in -o test.txt \
+  --index-strategy unsafe-best-match \
+  --constraint snapshot_constraint.txt
+
 uv pip install --system -r test.txt
 
 #95d8aba8a8c75aedcaa6143713b11e745e7cd0d9
 uv pip install --system --no-build-isolation "git+https://github.com/state-spaces/mamba@v2.2.4"
 
-export TORCH_CUDA_ARCH_LIST="8.0"
-python3 -c "from torch.utils.cpp_extension import _get_cuda_arch_flags as f; print(f())"
 
 pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
