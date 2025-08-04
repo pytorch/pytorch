@@ -10244,6 +10244,7 @@
   dispatch:
     CPU, CUDA: any_all_out
     MPS: any_all_out_mps
+    MTIA: any_all_out_mtia
 
 - func: renorm.out(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
