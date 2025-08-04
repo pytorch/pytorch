@@ -256,7 +256,6 @@ class PackedSequenceTest(TestCase):
         with self.assertRaisesRegex(RuntimeError, r'cannot be exactly represented as int64_t'):
             rnn_utils.pad_sequence([torch.tensor([1, 2, 3]), torch.tensor([4, 5])], padding_value=torch.iinfo(torch.int64).max-511)
 
-
     def test_unpad_sequence(self):
         # single dimensional
         a = torch.tensor([1, 2, 3])
