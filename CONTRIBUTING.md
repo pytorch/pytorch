@@ -114,7 +114,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
   pip uninstall torch
   ```
 
-  Next run `rm -rf build/ torch*.egg-info dist/ && git clean -xfd`. After that, you can install in editable mode again.
+  Next run `rm -rf build/ && git clean -xfd`. After that, you can install in editable mode again.
 
 * If you run into errors when running `python -m pip install -e . -v --no-build-isolation`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
@@ -127,7 +127,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
       ```bash
       git submodule deinit -f .
       git clean -xdf
-      rm -rf build/ torch*.egg-info dist/
+      rm -rf build/ 
       git submodule update --init --recursive
       python -m pip install --group dev
       python -m pip install --no-build-isolation -v -e .
