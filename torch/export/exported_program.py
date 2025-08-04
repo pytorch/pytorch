@@ -653,7 +653,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         shape_env = _get_shape_env(gm)
         if shape_env is not None:
             with _set_node_metadata_hook(
-                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+                gm,
+                functools.partial(
+                    _node_metadata_hook, metadata={"stack_trace": stack_trace}
+                ),
             ):
                 insert_deferred_runtime_asserts(
                     gm,
