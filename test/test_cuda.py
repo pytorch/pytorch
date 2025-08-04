@@ -1015,7 +1015,7 @@ print(t.is_pinned())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
-    def test_stream_event_repr1(self):
+    def test_stream_event_repr(self):
         s = torch.cuda.current_stream()
         self.assertTrue("torch.cuda.Stream" in s.__repr__())
         e = torch.cuda.Event()
@@ -1503,7 +1503,6 @@ except RuntimeError as e:
         )
 
     @largeTensorTest("20GB", "cuda")
-    @serialTest()
     def test_randint_generation_for_large_numel(self) -> None:
         numel = 2**31 + 1
         s = torch.randint(2, (numel,), device="cuda", dtype=torch.int8).sum()
@@ -3703,34 +3702,22 @@ exit(2)
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_cuda_graph_tensor_item_not_allowed(self):
-        test_script = """\
-import torch
-import sys
-# Tensor.item() calls a synchronize which is not allowed in a cudagraph
-# Valid for CUDA and ROCm
-def my_func(a: torch.Tensor, b: torch.Tensor, perm: torch.Tensor):
-    idx = perm[0]
-    a[0] *= b[idx]  # should raise an error during capture
-    return a
+        # Tesnor.item() calls a synchronize which is not allowed in a cudagraph
+        # Valid for CUDA and ROCm
+        def my_func(a: torch.Tensor, b: torch.Tensor, perm: torch.Tensor):
+            idx = perm[0]
+            a[0] *= b[idx]  # should raise an error during capture
+            return a
 
-a = torch.rand(500, 500, device="cuda")
-b = torch.rand(500, 500, device="cuda")
-perm = torch.randint(0, 500, (500,), device="cuda")
+        a = torch.rand(500, 500, device="cuda")
+        b = torch.rand(500, 500, device="cuda")
+        perm = torch.randint(0, 500, (500,), device="cuda")
 
-g = torch.cuda.CUDAGraph()
+        g = torch.cuda.CUDAGraph()
 
-with torch.cuda.graph(g):
-    output = my_func(a, b, perm)
-"""
-        with self.assertRaisesRegex(
-            subprocess.CalledProcessError,
-            "calls a synchronize which is not allowed in a cudagraph",
-        ):
-            r = (
-                subprocess.check_output([sys.executable, "-c", test_script])
-                .decode("ascii")
-                .strip()
-            )
+        with self.assertRaises(RuntimeError):
+            with torch.cuda.graph(g):
+                output = my_func(a, b, perm)
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device="cuda")

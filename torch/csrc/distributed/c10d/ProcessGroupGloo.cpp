@@ -1775,8 +1775,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
     }
 
     // Set single input tensor on all processes.
-    at::Tensor flatInputTensor = flattenDenseTensors(inputs[0]);
-    GENERATE_ALL_TYPES(scalarType, setInput, opts, flatInputTensor);
+    GENERATE_ALL_TYPES(scalarType, setInput, opts, inputs[0]);
     gloo::gather(opts);
 
     // Unflatten into output tensors on root process.
