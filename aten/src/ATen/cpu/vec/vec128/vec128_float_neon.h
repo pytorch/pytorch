@@ -7,7 +7,7 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 
-#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#if defined(__aarch64__) && (defined(AT_BUILD_ARM_VEC256_WITH_SLEEF) || defined(AT_BUILD_ARM_VECSVE_WITH_SLEEF))
 #include <sleef.h>
 #endif
 
@@ -35,7 +35,7 @@ inline namespace CPU_CAPABILITY {
 #error "Big endian is not supported."
 #endif
 
-#if defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#if defined(AT_BUILD_ARM_VEC256_WITH_SLEEF) || defined(AT_BUILD_ARM_VECSVE_WITH_SLEEF)
 #define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
 #else
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code

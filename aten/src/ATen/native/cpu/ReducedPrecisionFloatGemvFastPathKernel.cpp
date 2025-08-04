@@ -74,6 +74,7 @@ float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
     }
   });
   const auto [t0, t1] = vec::convert_half_float(x[0]);
+
   return vec::vec_reduce_all<float>(
       std::plus<vec::Vectorized<float>>(),
       t0 + t1);
@@ -126,6 +127,7 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
 #endif // !defined(__aarch64__) || defined( __ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
 
 float reduce(vec::Vectorized<float> x) {
+
   return vec::vec_reduce_all<float>(
       std::plus<vec::Vectorized<float>>(),
       x);
