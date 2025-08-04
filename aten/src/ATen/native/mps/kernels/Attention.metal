@@ -590,9 +590,7 @@ kernel void attention(
 
 INSTANTIATE_SDPA_VECTOR_HEADS(float);
 INSTANTIATE_SDPA_VECTOR_HEADS(half);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_SDPA_VECTOR_HEADS(bfloat);
-#endif
 
 #define INSTANTIATE_ATTN(DTYPE, bq, bk, bd, wm, wn)                      \
   template [[host_name("attention_" #DTYPE "_bq" #bq "_bk" #bk "_bd" #bd \
@@ -621,6 +619,4 @@ INSTANTIATE_SDPA_VECTOR_HEADS(bfloat);
 
 INSTANTIATE_ATTN_SHAPES_HELPER(float);
 INSTANTIATE_ATTN_SHAPES_HELPER(half);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_ATTN_SHAPES_HELPER(bfloat);
-#endif

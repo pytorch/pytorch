@@ -411,6 +411,28 @@ class FxirTestCase(InductorTestCase):
         )
         self.assertIn("ks0", triton_node.kwargs["kwargs"])
 
+    def test_dynamic_launch_grid_calc(self):
+        """
+        Test the dyanmic launch grid calculation for Triton kernel wrapper
+        """
+        func = torch.add
+        args = [torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]]
+        (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
+
+        # Check for the precomputed size arg.
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+        self.assertIn("grid", triton_node.kwargs)
+        self.assertIn("xnumel", triton_node.kwargs["kwargs"])
+        self.assertIn("XBLOCK", triton_node.kwargs["kwargs"])
+        grid = triton_node.kwargs["grid"][0]
+        xblock = triton_node.kwargs["kwargs"]["XBLOCK"]
+        xnumel = triton_node.kwargs["kwargs"]["xnumel"]
+        self.assertEqual(grid[0].node.expr, ((xnumel + xblock - 1) // xblock))
+        self.assertEqual(grid[1], 1)
+        self.assertEqual(grid[2], 1)
+
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
     def test_debug(self, mock_output_code):
