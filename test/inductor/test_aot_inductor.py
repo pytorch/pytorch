@@ -5496,6 +5496,43 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
         self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
 
+    @requires_gpu
+    def test_d2h_copy(self):
+        # device to copy host should always have the same stride
+        if "cuda" not in self.device:
+            raise unittest.SkipTest("This test is only for CUDA")
+
+        class ToCpuModel(nn.Module):
+            def forward(self, x):
+                predictions = x.permute(1, 0)
+                predictions = torch.nan_to_num(
+                    predictions, nan=0.0, posinf=0.0, neginf=0.0
+                )
+                predictions = predictions.to("cpu", non_blocking=True)
+                p = predictions[0]
+                ones = p.new_ones(1)
+                return p, ones
+
+        model = ToCpuModel().to(GPU_TYPE)
+        input_tensor = torch.randn(5, 10, device=GPU_TYPE).to(dtype=torch.float16)
+        ep = torch.export.export(model, (input_tensor,))
+        package_path = torch._inductor.aoti_compile_and_package(ep)
+
+        aoti_model = torch._inductor.aoti_load_package(package_path)
+
+        expect_res = model(input_tensor)
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
+            true_res = aoti_model(input_tensor)
+
+        self.assertEqual(expect_res, true_res)
+        all_ops = [event.key for event in prof.key_averages()]
+        self.assertTrue(not any("aten::contiguous" in op for op in all_ops))
+
     def test_so_without_weight(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
