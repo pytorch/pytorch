@@ -1,7 +1,7 @@
 sphinx==5.3.0
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 5.3.0
--e git+https://github.com/pytorch/pytorch_sphinx_theme.git@pytorch_sphinx_theme2#egg=pytorch_sphinx_theme2
+-e git+https://github.com/pytorch/pytorch_sphinx_theme.git@722b7e6f9ca512fcc526ad07d62b3d28c50bb6cd#egg=pytorch_sphinx_theme2
 
 # TODO: sphinxcontrib.katex 0.9.0 adds a local KaTeX server to speed up pre-rendering
 # but it doesn't seem to work and hangs around idly. The initial thought that it is probably
@@ -50,7 +50,7 @@ IPython==8.12.0
 #Pinned versions: 8.12.0
 
 myst-nb==0.17.2
-#Description: This is used to generate PyTorch functorch and torch.compile docs
+#Description: This is used to generate PyTorch functorch and torch.compile docs.
 #Pinned versions: 0.17.2
 
 # The following are required to build torch.distributed.elastic.rendezvous.etcd* docs
