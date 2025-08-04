@@ -2,8 +2,7 @@
 
 PyTorch provides a flexible and efficient platform for building deep
 learning models, offering dynamic computation graphs and a rich
-ecosystem of tools and libraries. Whether you are a beginner or an
-experienced practitioner, this guide will help you harness the power
+ecosystem of tools and libraries. This guide will help you harness the power
 of PyTorch to create and deploy machine learning models effectively.
 
 ```{note}
