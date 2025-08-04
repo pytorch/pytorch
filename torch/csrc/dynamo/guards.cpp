@@ -834,6 +834,7 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
 
 static std::unordered_map<PyObject*, uint64_t> dict_version_map;
 static int dict_version_watcher_id;
+static int dict_recursive_tag_watcher_id;
 static uint64_t global_dict_version_id = 1;
 static int dict_version_watch_callback(
     PyDict_WatchEvent event,
@@ -1152,22 +1153,6 @@ std::string get_exception_message() {
   Py_XDECREF(pvalue);
   Py_XDECREF(ptraceback);
   return exc_message;
-}
-
-bool is_nn_module(py::handle example_value) {
-  py::object torch_module_cls = py::module_::import("torch.nn").attr("Module");
-  return py::isinstance(example_value, torch_module_cls);
-}
-
-std::string get_type_str(py::handle example_value) {
-  std::string type_name;
-  try {
-    type_name = py::str(py::type::of(example_value)).cast<std::string>();
-  } catch (const py::error_already_set& e) {
-    // Fallback that never throws in release builds
-    type_name = "<unprintable-type>";
-  }
-  return type_name;
 }
 
 bool is_immutable_object(py::handle example_value) {
@@ -1560,6 +1545,27 @@ class GuardDebugInfo {
 class GuardManager;
 class RootGuardManager;
 class DictGuardManager;
+
+// Global registry used by the *recursive-dict-tag* optimisation.
+//
+// Key   : `PyObject*` pointing to a watched `dict`
+// Value : list of `GuardManager*` instances that have recorded that dict
+//
+// Why is this global?
+// -------------------
+// * CPython allows only a small, fixed number of dict-watcher IDs (≈64).
+//   All `GuardManager`s therefore share a single watcher callback.
+// * A “tag-safe root” in one compilation frame may observe the **same** object
+//   as another frame.  Consequently multiple `GuardManager`s can end up
+//   watching the exact same dictionary pointer.
+//
+// Expected size
+// -------------
+// Every compilation frame contributes its tag-safe dicts to this registry, so
+// the container can grow large over the lifetime of the process.  That’s
+// acceptable: lookup is by pointer (hash/equals = identity) and each entry
+// stores only lightweight pointers.
+std::unordered_map<PyObject*, std::list<GuardManager*>> dict_to_guard_manager;
 
 /**
  * Base class for the leaf guard in the GuardManager hierarchy.
@@ -2611,15 +2617,13 @@ class GuardManager {
       : _root(root),
         _source(std::move(source)),
         _is_dict(py::isinstance<py::dict>(example_value)),
-        _is_immutable(is_immutable_object(example_value)),
-        _is_nn_module(is_nn_module(example_value)),
-        _is_tensor(THPVariable_Check(example_value.ptr())),
-        _type_str(get_type_str(example_value)) {
+        _is_immutable(is_immutable_object(example_value)) {
     if (_is_dict) {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
-      _is_empty_dict = PyDict_Size(example_value.ptr()) == 0;
     }
-
+    py::object typ = py::type::of(example_value);
+    py::object weakref_mod = py::module_::import("weakref");
+    _weak_type = weakref_mod.attr("ref")(typ);
     py::object config_module = py::module_::import("torch._dynamo.config");
     _max_saved_pointers_for_recursive_dict_tags_check =
         config_module.attr("max_saved_pointers_for_recursive_dict_tags_check")
@@ -2631,6 +2635,7 @@ class GuardManager {
 
   virtual ~GuardManager() {
     cleanup_tag_safe_entries();
+    unwatch_dict_pointers();
   }
 
   void cleanup_tag_safe_entries() {
@@ -2681,28 +2686,19 @@ class GuardManager {
     return _is_immutable;
   }
 
-  bool is_guarded_value_nn_module() {
-    return _is_nn_module;
-  }
-
-  bool is_guarded_value_dict() {
-    return _is_dict;
-  }
-
-  bool is_guarded_value_empty_dict() {
-    return _is_empty_dict;
-  }
-
-  bool is_guarded_value_tensor() {
-    return _is_tensor;
-  }
-
-  std::string type_of_guarded_value() {
-    return _type_str;
-  }
-
   bool is_recursive_dict_tag_matching_disabled() {
     return _disable_dict_tag_matching;
+  }
+
+  py::object get_type_of_guarded_value() {
+    if (!_weak_type || _weak_type.is_none()) {
+      return py::type::of(py::none());
+    }
+
+    if (!PyCallable_Check(_weak_type.ptr())) {
+      throw std::runtime_error("_weak_type is not callable");
+    }
+    return _weak_type();
   }
 
  public:
@@ -2742,25 +2738,23 @@ class GuardManager {
     _tensor_pointers[value] = tensor_pointers;
   }
 
+  void disable_recursive_dict_tag_optimization() {
+    _disable_dict_tag_matching = true;
+  }
+
  public:
   // For cloning
   GuardManager(
       RootGuardManager* root,
       std::string source,
       bool is_dict,
-      bool is_empty_dict,
       bool is_immutable,
-      bool is_nn_module,
-      bool is_tensor,
-      std::string type_str)
+      py::object weak_type)
       : _root(root),
         _source(std::move(source)),
         _is_dict(is_dict),
-        _is_empty_dict(is_empty_dict),
         _is_immutable(is_immutable),
-        _is_nn_module(is_nn_module),
-        _is_tensor(is_tensor),
-        _type_str(std::move(type_str)) {}
+        _weak_type(weak_type) {}
 
   void clone_common(
       RootGuardManager* cloned_root,
@@ -2792,14 +2786,7 @@ class GuardManager {
       return nullptr;
     }
     GuardManager* cloned_mgr = new GuardManager(
-        cloned_root,
-        _source,
-        _is_dict,
-        _is_empty_dict,
-        _is_immutable,
-        _is_nn_module,
-        _is_tensor,
-        _type_str);
+        cloned_root, _source, _is_dict, _is_immutable, _weak_type);
     if (is_tag_safe()) {
       cloned_mgr->mark_tag_safe();
       if (is_tag_safe_root()) {
@@ -2861,6 +2848,10 @@ class GuardManager {
   }
 
   bool check_dict_pointer_tags(PyObject* value) {
+    if (_dict_callback_installed) {
+      // This means that for 3.12+, there are callbacks watching dict pointers.
+      return true;
+    }
     for (auto& kv : _dict_pointers[value]) {
       PyObject* dict_pointer = kv.first;
       uint64_t old_tag = kv.second;
@@ -2975,7 +2966,7 @@ class GuardManager {
         // This is a tag safe node, record the dict pointer
         if (_is_dict) {
           record_dict_pointer(_root, value);
-        } else if (_is_tensor && _has_no_tensor_aliasing_guard) {
+        } else if (_has_no_tensor_aliasing_guard) {
           record_tensor_pointer(_root, value);
         }
       }
@@ -2991,6 +2982,11 @@ class GuardManager {
           throw std::runtime_error(
               "Could not register a callback for recursive dict tag optimization");
         }
+#if IS_PYTHON_3_12_PLUS
+        // Ideally we don't need to even register a weakref callback for value.
+        // But it does not hurt to be more cautious
+        _dict_callback_installed = watch_dict_pointers(value);
+#endif
       }
     }
     if (!result) {
@@ -3007,8 +3003,16 @@ class GuardManager {
     }
     GuardManager* guard_manager = static_cast<GuardManager*>(
         PyCapsule_GetPointer(self_capsule, "GuardManager*"));
-    if (guard_manager)
+    if (guard_manager) {
       guard_manager->_disable_dict_tag_matching = true;
+      // When the entry for a given value in _dict_pointers becomes invalid, it
+      // can only be because that value itself has been garbage-collected.  At
+      // that moment every dictionary it referenced has also been reclaimed, and
+      // the dict-watch callback triggered during their finalisation has already
+      // invoked unwatch_dict_pointers.  In short, by the time we reach this
+      // code the dict pointers have been unwatched automatically, so no further
+      // action is needed.
+    }
     Py_RETURN_NONE;
   }
 
@@ -3057,6 +3061,59 @@ class GuardManager {
     // These will be decrefed in destructor
     _tag_safe_entries.push_back({wr, capsule});
     return true;
+  }
+
+  bool watch_dict_pointers(PyObject* value) {
+#if IS_PYTHON_3_12_PLUS
+    // -----------------------------------------------------------------------------
+    // CPython 3.12 dict-watcher integration
+    // -----------------------------------------------------------------------------
+    //
+    // We register a single watcher on all every dictionary pointer recorded by
+    // a tag-safe root.  The watcher callback fires *once* for any structural
+    // change to those dictionaries
+    //
+    // Fast-path benefit
+    // -----------------
+    // In steady state we no longer need to iterate over the recorded
+    // dictionaries and compare their `ma_version_tag`s (the
+    // “are-tags-unchanged” loop that used to dominate the fast-path guard
+    // evaluation).  The presence of an *active watcher* is itself a guarantee
+    // that none of the dicts has mutated; if one **does** mutate, the callback
+    // simply flips `_disable_dict_tag_matching = true`, causing the next guard
+    // evaluation to skip the recursive-dict-tag optimisation entirely.
+    for (auto& kv : _dict_pointers[value]) {
+      PyObject* dict_pointer = kv.first;
+      int rc = PyDict_Watch(dict_recursive_tag_watcher_id, dict_pointer);
+      if (rc != 0) {
+        PyErr_Clear();
+        return false;
+      }
+      dict_to_guard_manager[dict_pointer].push_back(this);
+    }
+#endif
+    return true;
+  }
+
+  void unwatch_dict_pointers() {
+#if IS_PYTHON_3_12_PLUS
+    if (!_dict_callbacks_unwatched && !_disable_dict_tag_matching) {
+      for (auto& value_stashed_pointers : _dict_pointers) {
+        auto stashed_pointers = value_stashed_pointers.second;
+
+        for (auto& stashed_pointer : stashed_pointers) {
+          PyObject* dict_pointer = stashed_pointer.first;
+          PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+          auto it = std::find(
+              dict_to_guard_manager[dict_pointer].begin(),
+              dict_to_guard_manager[dict_pointer].end(),
+              this);
+          dict_to_guard_manager[dict_pointer].erase(it);
+        }
+      }
+    }
+    _dict_callbacks_unwatched = true;
+#endif
   }
 
   virtual bool check_nopybind(FrameLocalsMapping* value) {
@@ -3285,11 +3342,7 @@ class GuardManager {
   bool _has_no_tensor_aliasing_guard = false;
 
   bool _is_dict = false;
-  bool _is_empty_dict = false;
   bool _is_immutable = false;
-  bool _is_nn_module = false;
-  bool _is_tensor = false;
-  std::string _type_str;
   uint64_t _dict_tag{0};
   uint64_t _max_saved_pointers_for_recursive_dict_tags_check = 0;
 
@@ -3301,6 +3354,17 @@ class GuardManager {
       _dict_pointers;
   std::unordered_map<PyObject*, std::vector<PyObject*>> _tensor_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
+
+  // 3.12+ related helper
+  bool _dict_callback_installed = false;
+#if IS_PYTHON_3_12_PLUS
+  bool _dict_callbacks_unwatched = false;
+#endif
+
+ protected:
+  // weakref to the type of guarded value
+  // protected because it is used for cloning by DictGuardManager
+  py::object _weak_type;
 };
 
 GuardAccessor::GuardAccessor(
@@ -3873,17 +3937,13 @@ class DictGuardManager : public GuardManager {
       PyTypeObject* expected_type,
       bool is_exact_dict_type,
       std::vector<Py_ssize_t> indices,
-      std::string type_of,
-      bool is_empty_dict)
+      py::object weak_type)
       : GuardManager(
             cloned_root,
             std::move(source),
             true, // _is_dict
-            is_empty_dict,
             false, // _is_immutable
-            false, // _is_nn_module
-            false, // _is_tensor
-            std::move(type_of)),
+            weak_type),
         _size(size),
         _expected_type(expected_type),
         _is_exact_dict_type(is_exact_dict_type),
@@ -3903,8 +3963,7 @@ class DictGuardManager : public GuardManager {
         _expected_type,
         _is_exact_dict_type,
         _indices,
-        type_of_guarded_value(),
-        is_guarded_value_empty_dict());
+        _weak_type);
     if (is_tag_safe()) {
       cloned_mgr->mark_tag_safe();
       if (is_tag_safe_root()) {
@@ -3988,6 +4047,24 @@ void add_relational_guard_resetter_to_cloned_root(
     std::shared_ptr<RelationalGuard> guard) {
   root->add_relational_guard_resetter(std::move(guard));
 }
+
+#if IS_PYTHON_3_12_PLUS
+static int dict_recursive_tag_watch_callback(
+    PyDict_WatchEvent event,
+    PyObject* dict,
+    PyObject* key,
+    PyObject* new_value) noexcept {
+  auto it = dict_to_guard_manager.find(dict);
+  if (it != dict_to_guard_manager.end()) {
+    auto guard_managers = it->second;
+    for (auto& guard_manager : guard_managers) {
+      guard_manager->unwatch_dict_pointers();
+      guard_manager->disable_recursive_dict_tag_optimization();
+    }
+  }
+  return 0; // keep watching
+}
+#endif
 
 std::unique_ptr<GuardManager> make_guard_manager(
     RootGuardManager* root,
@@ -4286,6 +4363,10 @@ class GetAttrGuardAccessor : public GuardAccessor {
     // Helpful when printing GuardManager tree structure.
     return "GetAttrGuardAccessor(" + py::str(_attr_name).cast<std::string>() +
         ")";
+  }
+
+  std::string get_attr_name() {
+    return py::str(_attr_name).cast<std::string>();
   }
 
  public: // cloning functions
@@ -6628,11 +6709,11 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardAccessor, std::unique_ptr<GuardAccessor>>(
       py_m, "GuardAccessor")
       .def("repr", &GuardAccessor::repr);
-  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       GetAttrGuardAccessor,
       GuardAccessor,
-      std::unique_ptr<GetAttrGuardAccessor>>(py_m, "GetAttrGuardAccessor");
+      std::unique_ptr<GetAttrGuardAccessor>>(py_m, "GetAttrGuardAccessor")
+      .def("get_attr_name", &GetAttrGuardAccessor::get_attr_name);
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       GenericGetAttrGuardAccessor,
@@ -6752,23 +6833,16 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "is_guarded_value_immutable",
           &GuardManager::is_guarded_value_immutable)
-      .def(
-          "is_guarded_value_nn_module",
-          &GuardManager::is_guarded_value_nn_module)
-      .def("is_guarded_value_dict", &GuardManager::is_guarded_value_dict)
-      .def(
-          "is_guarded_value_empty_dict",
-          &GuardManager::is_guarded_value_empty_dict)
-      .def("is_guarded_value_tensor", &GuardManager::is_guarded_value_tensor)
       .def("has_no_accessors", &GuardManager::has_no_accessors)
       .def("mark_tag_safe", &GuardManager::mark_tag_safe)
       .def("mark_tag_safe_root", &GuardManager::mark_tag_safe_root)
       .def("is_tag_safe", &GuardManager::is_tag_safe)
       .def("is_tag_safe_root", &GuardManager::is_tag_safe_root)
-      .def("type_of_guarded_value", &GuardManager::type_of_guarded_value)
       .def(
           "is_recursive_dict_tag_matching_disabled",
           &GuardManager::is_recursive_dict_tag_matching_disabled)
+      .def(
+          "get_type_of_guarded_value", &GuardManager::get_type_of_guarded_value)
       .def(
           "get_accessors",
           &GuardManager::get_accessors,
@@ -7591,6 +7665,13 @@ PyObject* torch_c_dynamo_guards_init() {
   dict_version_watcher_id = PyDict_AddWatcher(dict_version_watch_callback);
   if (dict_version_watcher_id == -1) {
     throw std::runtime_error("Failed to install dict_version_watch_callback");
+  }
+
+  dict_recursive_tag_watcher_id =
+      PyDict_AddWatcher(dict_recursive_tag_watch_callback);
+  if (dict_recursive_tag_watcher_id == -1) {
+    throw std::runtime_error(
+        "Failed to install dict_recursive_tag_watch_callback");
   }
 
 #endif
