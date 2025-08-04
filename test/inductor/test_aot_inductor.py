@@ -6834,27 +6834,16 @@ MPS_TEST_FAILURES = {
     # MPS doesn't support float8
     "test_fp8": fail_mps(),
     "test_fp8_view_of_param": fail_mps(),
-    # unsupported operator: aten._scaled_dot_product_attention_math_for_mps.default
-    "test_issue_140766": fail_mps(),
     # cannot initialize a parameter of type 'double' with an rvalue of type 'std::nullptr_t'
     "test_fallback_kernel_with_symexpr_output": fail_mps(),
     # while-loop subgraph calls same kernel as outside. need to figure out how to
     # either (1) tell outside to initialize a new kernel or (2) generate
     # subgraph as a separate function, which would(?) cause (1) to happen automatically.
     "test_while_loop_nested": fail_mps(),
+    "test_cond_with_parameters": fail_mps(),
+    "test_cond_share_predicte": fail_mps(),
     # correctness issue
     "test_index_put_with_none_index": fail_mps(),
-    # Dynamism
-    "test_shifted_constraint_ranges": fail_mps(),
-    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_mps(),
-    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_mps(),
-    "test_cond_mismatched_branch_output_dynamic_True": fail_mps(),
-    "test_cond_unbacked_symint_closure_dynamic_True": fail_mps(),
-    "test_cond_non_tensor_predicates_dynamic_True": fail_mps(),
-    "test_zero_grid_with_unbacked_symbols": fail_mps(),
-    "test_reuse_kernel_dynamic": fail_mps(is_skip=True),
-    "test_cond_with_parameters": fail_mps(is_skip=True),
-    "test_cond_share_predicte": fail_mps(is_skip=True),
     # Error device may not be nil
     "test_zero_size_weight": fail_mps(is_skip=True),
     # RuntimeError: Cannot compare two tensors on different devices. Got: cpu and mps:0
