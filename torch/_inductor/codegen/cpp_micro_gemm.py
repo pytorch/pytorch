@@ -156,8 +156,10 @@ inline void {{kernel_name}}(
         ldc = kernel.stride(C, 0)
         res = IndentedBuffer()
         res.writeline(
-            f"{self.name}<{value_to_cpp(accum, 'bool')}, {value_to_cpp(horizontal_transverse, 'bool')},"
-            "{value_to_cpp(prefetch, 'bool')}>("
+            f"{self.name}<"
+            f"{value_to_cpp(accum, 'bool')}, "
+            f"{value_to_cpp(horizontal_transverse, 'bool')}, "
+            f"{value_to_cpp(prefetch, 'bool')}>("
         )
         with res.indent():
             kwargs_for_extra_args.update({"kernel": kernel})
