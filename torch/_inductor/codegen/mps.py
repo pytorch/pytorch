@@ -535,7 +535,7 @@ class MetalKernel(SIMDKernel):
         var_def = "threadgroup " if is_threadgroup else ""
         var_def += f"{dtype} {var_name}"
         if elem_count:
-            var_def += f"[{self.sexpr(elem_count)}]"
+            var_def += f"[{elem_count}]"
         if default_value is not None:
             assert not is_threadgroup, "Thread group var can not have default value"
             var_def += f" = {default_value}"
@@ -657,7 +657,7 @@ class MetalKernel(SIMDKernel):
                 )
             return self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size_str})",
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {val}, {reduction_idx}, {acc_buf_size})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["argmin", "argmax"]:
@@ -693,7 +693,7 @@ class MetalKernel(SIMDKernel):
             return self.cse.generate(
                 self.stores,
                 f"c10::metal::threadgroup_{reduction_type}({data_acc_buf}, {idx_acc_buf}, "
-                f"{val}, {idx_val}, {reduction_idx}, {acc_buf_size_str})",
+                f"{val}, {idx_val}, {reduction_idx}, {acc_buf_size})",
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
@@ -702,7 +702,7 @@ class MetalKernel(SIMDKernel):
                 self.compute.splice(f"{acc_buf}[{reduction_idx}] = {value};")
                 wf_res = self.cse.generate(
                     self.compute,
-                    f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size_str})",
+                    f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
                     dtype=torch.float32,
                 )
                 return _unwrap_helper(wf_res)
@@ -733,7 +733,7 @@ class MetalKernel(SIMDKernel):
                 self.compute.writeline(f"{acc_thread_var} = {inp_value};")
             wf_res = self.cse.generate(
                 self.stores if self.multistage_reduction_entry else self.compute,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size_str})",
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
                 dtype=torch.float32,
             )
             return _unwrap_helper(wf_res)
