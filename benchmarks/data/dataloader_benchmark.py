@@ -8,34 +8,29 @@ This script measures:
 3. CPU memory utilization
 
 Usage:
-    python dataloader_benchmark.py --data_path /path/to/dataset --worker_method thread --batch_size 32 --num_workers 4
+    python dataloader_benchmark.py --data_path /path/to/dataset --batch_size 32 --num_workers 4
 """
+
 import argparse
 import copy
 import gc
-import os
-import sys
-import threading
 import time
 
 import psutil
+import torchvision
+import torchvision.transforms as transforms
+from torchvision.models import resnet18
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
-import torchvision
-import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import ConcatDataset
-from torchvision.models import resnet18
 
 
-def get_memory_usage(include_children=True):
+def get_memory_usage():
     """
-    Get current memory usage in MB.
-
-    Args:
-        include_children: If True, include memory of child processes
+    Get current memory usage in MB. This includes all child processes.
 
     Returns:
         Total memory usage in MB
@@ -44,21 +39,16 @@ def get_memory_usage(include_children=True):
 
     main_memory = process.memory_full_info().pss
 
-    # If requested, add memory of all child processes
-    if include_children:
-        for child in process.children(recursive=True):
-            try:
-                child_mem = child.memory_full_info().pss
-                main_memory += child_mem
-            except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-                # Process might have terminated or doesn't support PSS
-                try:
-                    # Fall back to USS
-                    print(f"Failed to get PSS for {child}, falling back to USS")
-                    child_mem = child.memory_info().uss
-                    main_memory += child_mem
-                except:
-                    pass
+    # Add memory usage of all child processes
+    for child in process.children(recursive=True):
+        try:
+            child_mem = child.memory_full_info().pss
+            main_memory += child_mem
+        except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+            # Process might have terminated or doesn't support PSS, fall back to USS
+            print(f"Failed to get PSS for {child}, falling back to USS")
+            child_mem = child.memory_info().uss
+            main_memory += child_mem
 
     return main_memory / (1024 * 1024)
 
@@ -77,7 +67,7 @@ def print_detailed_memory():
         print(
             f"  RSS (Resident Set Size): {process.memory_info().rss / (1024 * 1024):.2f} MB"
         )
-    except:
+    except Exception:
         print("  Detailed memory info not available")
 
 
@@ -91,17 +81,20 @@ def benchmark_dataloader(
     dataset,
     batch_size,
     num_workers,
-    worker_method,
     num_epochs=1,
     max_batches=10,
     multiprocessing_context=None,
+    logging_freq=10,
 ):
     """Benchmark a dataloader with specific configuration."""
-    print(f"\n--- Benchmarking DataLoader with worker_method={worker_method} ---")
+    print("\n--- Benchmarking DataLoader ---")
 
     # Clear memory before starting
     gc.collect()
     torch.cuda.empty_cache()
+
+    # Create model
+    model = create_model()
 
     # Measure memory before dataloader creation
     memory_before = get_memory_usage()
@@ -109,19 +102,18 @@ def benchmark_dataloader(
     print_detailed_memory()
 
     # Measure dataloader initialization time
-    start = time.time()
+    start = time.perf_counter()
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        worker_method=worker_method,
         pin_memory=torch.cuda.is_available(),
         prefetch_factor=2 if num_workers > 0 else None,
         multiprocessing_context=multiprocessing_context,
     )
     it = iter(dataloader)
-    dataloader_init_time = time.time() - start
+    dataloader_init_time = time.perf_counter() - start
 
     # Measure memory after dataloader creation
     memory_after = get_memory_usage()
@@ -130,7 +122,7 @@ def benchmark_dataloader(
 
     # Create model and optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = create_model().to(device)
+    model = model.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 
@@ -139,7 +131,7 @@ def benchmark_dataloader(
     total_batches = 0
     total_samples = 0
     total_time = 0
-    start_time = time.time()
+    total_data_load_time = 0
 
     # Measure peak memory during training
     peak_memory = memory_after
@@ -149,16 +141,20 @@ def benchmark_dataloader(
     )
 
     for epoch in range(num_epochs):
-        batch_times = []
-
         while total_batches < max_batches:
-            batch_start = time.time()
+            batch_start = time.perf_counter()
 
-            inputs, labels = next(it)
+            try:
+                inputs, labels = next(it)
+            except StopIteration:
+                break
 
             # Move data to device
             inputs = inputs.to(device)
             labels = labels.to(device)
+
+            # Capture data fetch time (including sending to device)
+            data_load_time = time.perf_counter() - batch_start
 
             # Forward pass
             outputs = model(inputs)
@@ -169,12 +165,12 @@ def benchmark_dataloader(
             loss.backward()
             optimizer.step()
 
-            batch_end = time.time()
-            batch_time = batch_end - batch_start
-            batch_times.append(batch_time)
+            # Capture batch time
+            batch_time = time.perf_counter() - batch_start
 
             total_batches += 1
             total_samples += inputs.size(0)
+            total_data_load_time += data_load_time
             total_time += batch_time
 
             # Update peak memory and log memory usage periodically
@@ -182,37 +178,39 @@ def benchmark_dataloader(
                 # Force garbage collection before measuring memory
                 gc.collect()
                 current_memory = get_memory_usage()
-                elapsed = time.time() - start_time
 
                 if current_memory > peak_memory:
                     peak_memory = current_memory
 
-            if total_batches % 10 == 0:
+            if total_batches % logging_freq == 0:
                 print(
-                    f"Epoch {epoch+1}, Batch {total_batches}, "
+                    f"Epoch {epoch + 1}, Batch {total_batches}, "
                     f"Time: {batch_time:.4f}s, "
                     f"Memory: {current_memory:.2f} MB"
                 )
 
     # Calculate statistics
+    avg_data_load_time = (
+        total_data_load_time / total_batches if total_batches > 0 else 0
+    )
     avg_batch_time = total_time / total_batches if total_batches > 0 else 0
     samples_per_second = total_samples / total_time if total_time > 0 else 0
 
     results = {
         "dataloader_init_time": dataloader_init_time,
-        "worker_method": worker_method,
         "num_workers": num_workers,
         "batch_size": batch_size,
         "total_batches": total_batches,
         "avg_batch_time": avg_batch_time,
+        "avg_data_load_time": avg_data_load_time,
         "samples_per_second": samples_per_second,
         "peak_memory_mb": peak_memory,
         "memory_increase_mb": peak_memory - memory_before,
     }
 
     print("\nResults:")
-    print(f"  Worker method: {worker_method}")
     print(f"  DataLoader init time: {dataloader_init_time:.4f} seconds")
+    print(f"  Average data loading time: {avg_data_load_time:.4f} seconds")
     print(f"  Average batch time: {avg_batch_time:.4f} seconds")
     print(f"  Samples per second: {samples_per_second:.2f}")
     print(f"  Peak memory usage: {peak_memory:.2f} MB")
@@ -244,12 +242,6 @@ def main():
     )
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of epochs")
     parser.add_argument(
-        "--worker_method",
-        choices=["thread", "multiprocessing"],
-        default="multiprocessing",
-        help="Worker method to use (thread or multiprocessing)",
-    )
-    parser.add_argument(
         "--multiprocessing_context",
         choices=["fork", "spawn", "forkserver"],
         default="forkserver",
@@ -260,6 +252,12 @@ def main():
         type=int,
         default=1,
         help="Number of copies of the dataset to concatenate (for testing memory usage)",
+    )
+    parser.add_argument(
+        "--logging_freq",
+        type=int,
+        default=10,
+        help="Frequency of logging memory usage during training",
     )
     args = parser.parse_args()
 
@@ -303,18 +301,14 @@ def main():
     print(f"Dataset size: {len(dataset)}")
 
     # Run benchmark with specified worker method
-    results = benchmark_dataloader(
+    benchmark_dataloader(
         dataset,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        multiprocessing_context=(
-            args.multiprocessing_context
-            if args.worker_method == "multiprocessing"
-            else None
-        ),
-        worker_method=args.worker_method,
+        multiprocessing_context=args.multiprocessing_context,
         num_epochs=args.num_epochs,
         max_batches=args.max_batches,
+        logging_freq=args.logging_freq,
     )
 
 
