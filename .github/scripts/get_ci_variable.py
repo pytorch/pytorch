@@ -31,7 +31,7 @@ def main(args: list[str]) -> None:
         return print(generate_binary_build_matrix.CUDA_STABLE)
     if options.min_python_version:
         return print(generate_binary_build_matrix.FULL_PYTHON_VERSIONS[0])
-    if options.get_bin_size !=:
+    if options.get_bin_size != "":
         return print(generate_binary_build_matrix.BINARY_LIMITS[options.get_bin_size])
 
 
