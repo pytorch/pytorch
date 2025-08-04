@@ -1306,7 +1306,7 @@ class GraphLowering(torch.fx.Interpreter):
                     default_tag: torch._C.Tag = get_layout_constraint_tag(
                         target, with_default=True
                     )
-                    decided_constraint = tag_to_layout_constraint(default_tag)
+                    decided_constraint = tag_to_layout_constraint(default_tag)  # type: ignore[assignment]
 
                 make_fallback(target, layout_constraint=decided_constraint)
 
