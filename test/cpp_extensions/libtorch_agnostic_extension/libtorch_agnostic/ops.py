@@ -173,7 +173,7 @@ def test_device_guard(device_index) -> Tensor:
     Args:
         device_index: Device index to set the guard to
 
-    Returns: A 3x3 empty tensor created on the device specified by device_index
+    Returns: result of cudaGetDevice() as an integer after using the guard
     """
     return torch.ops.libtorch_agnostic.test_device_guard.default(device_index)
 
