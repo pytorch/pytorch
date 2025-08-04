@@ -71,7 +71,6 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    "test_min_max_reduction_dynamic_shapes": TestFailure(("mps",)),
     "test_multilayer_var_dynamic_shapes": TestFailure(("mps",)),
     "test_multilayer_var_lowp_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
