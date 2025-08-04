@@ -242,36 +242,6 @@ def nvshmem_reduce_kernel(
     nvshmem.reduce(team_handle, dest_ptr, src_ptr, nreduce, operation, dtype_id)
 
 
-# @triton.jit
-# def nvshmem_sum_reduce_kernel(
-#     team_handle,
-#     dest_ptr,
-#     src_ptr,
-#     nreduce,
-# ):
-#     nvshmem.sum_reduce(team_handle, dest_ptr, src_ptr, nreduce)
-
-
-# @triton.jit
-# def nvshmem_max_reduce_kernel(
-#     team_handle,
-#     dest_ptr,
-#     src_ptr,
-#     nreduce,
-# ):
-#     nvshmem.max_reduce(team_handle, dest_ptr, src_ptr, nreduce)
-
-
-# @triton.jit
-# def nvshmem_min_reduce_kernel(
-#     team_handle,
-#     dest_ptr,
-#     src_ptr,
-#     nreduce,
-# ):
-#     nvshmem.min_reduce(team_handle, dest_ptr, src_ptr, nreduce)
-
-
 @instantiate_parametrized_tests
 @requires_nvshmem()
 class NVSHMEMTritonTest(MultiProcContinousTest):
