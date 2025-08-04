@@ -34,38 +34,35 @@ device_module = torch.get_device_module(device_type)
 
 # Shared Triton JIT kernels
 @triton.jit
-def nvshmem_putmem_block_kernel(
-    dst_ptr,
-    src_ptr,
-    size_bytes,
-    peer,
+def nvshmem_put_kernel(
+    dest,
+    src,
+    nelems,
+    pe,
 ):
-    nvshmem.putmem_block(dst_ptr, src_ptr, size_bytes, peer)
+    nvshmem.put(dest, src, nelems, pe)
 
 
 @triton.jit
-def nvshmem_getmem_block_kernel(
-    dst_ptr,
-    src_ptr,
-    size_bytes,
-    peer,
+def nvshmem_get_kernel(
+    dest,
+    src,
+    nelems,
+    pe,
 ):
-    nvshmem.getmem_block(dst_ptr, src_ptr, size_bytes, peer)
-
+    nvshmem.get(dest, src, nelems, pe)
 
 @triton.jit
-def nvshmem_putmem_signal_block_kernel(
-    dst_ptr,
-    src_ptr,
-    size_bytes,
-    sig_ptr,
+def nvshmem_put_signal_kernel(
+    dest,
+    src,
+    nelems,
+    sig_addr,
     signal_val,
     sig_op,
-    peer,
+    pe,
 ):
-    nvshmem.putmem_signal_block(
-        dst_ptr, src_ptr, size_bytes, sig_ptr, signal_val, sig_op, peer
-    )
+    nvshmem.put_signal(dest, src, nelems, sig_addr, signal_val, sig_op, pe)
 
 
 @triton.jit
@@ -221,12 +218,12 @@ def nvshmem_alltoall_kernel(
 @triton.jit
 def nvshmem_broadcast_kernel(
     team_handle,
-    dest,
+    dst,
     src,
     nelems,
     pe_root,
 ):
-    nvshmem.broadcast(team_handle, dest, src, nelems, pe_root)
+    nvshmem.broadcast(team_handle, dst, src, nelems, pe_root)
 
 
 @triton.jit
@@ -269,32 +266,45 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
 
-        msg_size_bytes = 8
-        dtype = torch.int8
-        numel = msg_size_bytes // dtype.itemsize
+        # Configuration
+        nelems = 5  # number of elements to transfer
+        dtype = torch.int64
+        val = 42 + rank  # Each rank has different data
 
-        val = 5
-        inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val)
-        out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
-        inp_hdl = symm_mem.rendezvous(inp, group=group_name)
-        out_hdl = symm_mem.rendezvous(out, group=group_name)
+        # Create symmetric tensors
+        src = symm_mem.empty(nelems, dtype=dtype, device=self.device)
+        dst = symm_mem.empty(nelems, dtype=dtype, device=self.device).fill_(-999)
+
+        # Fill source tensor with rank-specific pattern
+        for i in range(nelems):
+            src[i] = val * 10 + i  # Rank 0: [420, 421, 422, 423, 424], Rank 1: [430, 431, ...]
+
+        # Rendezvous
+        symm_mem.rendezvous(src, group=group_name)
+        symm_mem.rendezvous(dst, group=group_name)
+
+        # Synchronize before operation
+        dist.barrier()
 
         peer = 1 - rank
         if rank == 0:
-            dst_ptr = out_hdl.buffer_ptrs[rank]
-            src_ptr = inp_hdl.buffer_ptrs[rank]
-            nvshmem_putmem_block_kernel[(1, 1, 1)](
-                dst_ptr,
-                src_ptr,
-                size_bytes=msg_size_bytes,
-                peer=peer,
+            # Rank 0 puts its data to Rank 1
+            nvshmem_put_kernel[(1,)](
+                dst,
+                src,
+                nelems,
+                peer,
                 extern_libs=nvshmem_lib,
             )
 
+        # Synchronize after operation
         dist.barrier()
+
         if rank == 1:
+            # Verify that rank 1 received rank 0's data
+            expected = [420 + i for i in range(nelems)]
             torch.testing.assert_close(
-                out, val * torch.ones(numel, dtype=dtype, device=self.device)
+                dst, torch.tensor(expected, device=self.device, dtype=dtype)
             )
 
     @skipIfRocm
@@ -307,27 +317,29 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
-        msg_size_bytes = 8
+
+        # Configuration
+        numel = 8
         dtype = torch.int8
-        numel = msg_size_bytes // dtype.itemsize
         val = 7
+
+        # Create symmetric tensors
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(
             val if rank == 0 else -1
         )
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
-        inp_hdl = symm_mem.rendezvous(inp, group=group_name)
-        out_hdl = symm_mem.rendezvous(out, group=group_name)
+        symm_mem.rendezvous(inp, group=group_name)
+        symm_mem.rendezvous(out, group=group_name)
+
         dist.barrier()
         peer = 1 - rank
         if rank == 1:
-            # Rank 1 gets data from rank 0
-            dst_ptr = out_hdl.buffer_ptrs[rank]
-            src_ptr = inp_hdl.buffer_ptrs[rank]
-            nvshmem_getmem_block_kernel[(1, 1, 1)](
-                dst_ptr,
-                src_ptr,
-                size_bytes=msg_size_bytes,
-                peer=peer,
+            # Rank 1 gets data from rank 0 using tensor-aware API
+            nvshmem_get_kernel[(1,)](
+                out,
+                inp,
+                numel,
+                peer,
                 extern_libs=nvshmem_lib,
             )
         if rank == 1:
@@ -346,29 +358,29 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         world_size = dist.get_world_size()
-        msg_size_bytes = 8
+
+        # Configuration
+        numel = 8
         dtype = torch.int8
-        numel = msg_size_bytes // dtype.itemsize
 
         # Each rank fills its input buffer with its own rank value
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(rank)
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
-        inp_hdl = symm_mem.rendezvous(inp, group=group_name)
-        out_hdl = symm_mem.rendezvous(out, group=group_name)
+        symm_mem.rendezvous(inp, group=group_name)
+        symm_mem.rendezvous(out, group=group_name)
+
         dist.barrier()
 
         # Ring topology: each rank gets data from the rank to its left
         # rank 0 gets from rank (world_size-1), rank 1 gets from rank 0, etc.
         peer = (rank - 1) % world_size
 
-        # All ranks execute the get operation
-        dst_ptr = out_hdl.buffer_ptrs[rank]
-        src_ptr = inp_hdl.buffer_ptrs[rank]
-        nvshmem_getmem_block_kernel[(1, 1, 1)](
-            dst_ptr,
-            src_ptr,
-            size_bytes=msg_size_bytes,
-            peer=peer,
+        # All ranks execute the get operation using tensor-aware API
+        nvshmem_get_kernel[(1,)](
+            out,
+            inp,
+            numel,
+            peer,
             extern_libs=nvshmem_lib,
         )
 

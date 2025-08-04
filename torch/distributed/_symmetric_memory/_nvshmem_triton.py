@@ -103,108 +103,111 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
 
 
 if has_triton():
-    from triton.language import core
     import triton
     import triton.language as tl
+    from triton.language import core
 
-    # RMA Operations (mem-based APIs - sizes in bytes)
-    @core.extern
-    def putmem_block(dst, src, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit
+    def put(dest, source, nelems, pe):
         """
-        Put data to remote PE using block-scoped operation.
+        Put tensor data from local PE to a remote PE.
 
-        This function copies a contiguous block of data from the local PE's memory
-        to a symmetric data object on the remote PE. The operation is performed at
-        thread block scope, meaning all threads in the block cooperate to perform
-        the transfer efficiently.
+        This high-level function provides a tensor-aware interface for NVSHMEM put
+        operations. It automatically handles type checking and size calculations, making
+        the API more ergonomic and type-safe.
 
         Args:
-            dst (int64): Symmetric address of the destination data object on the remote PE.
-                        Must be a pointer to symmetric memory allocated via NVSHMEM.
-            src (int64): Local address of the source data object containing data to be copied.
-                        Can be any valid local memory address.
-            size_bytes (int64): Number of bytes to transfer. Must be positive.
-            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
-            _semantic: Optional semantic information for Triton compilation.
-
-        Returns:
-            int32: Status code (0 for success).
+            dest: Destination tensor on the remote PE. Type must match source.
+            source: Source tensor on the local PE containing data to be copied.
+            nelems: Number of elements to transfer.
+            pe: PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
 
         Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - Automatically calculates byte size from tensor type and element count.
             - This is a blocking operation that returns after data has been copied out
               of the source array on the local PE.
             - The operation does not guarantee delivery to the destination PE.
               Use nvshmem_fence() for ordering or nvshmem_quiet() for completion.
-            - All threads in the block should call this function with the same parameters.
-            - The source memory remains valid for use immediately after the call returns.
 
         Example:
-            ```python
-            # Transfer 1024 bytes from local buffer to PE 1
-            nvshmem.putmem_block(remote_ptr, local_ptr, 1024, 1)
+            ```
+            # Transfer 100 elements to PE 1
+            nvshmem.put(dest_tensor, src_tensor, 100, 1)
             ```
         """
+        tl.static_assert(dest.type == source.type)
+        nbytes = nelems * dest.type.element_ty.itemsize
+        return putmem_block_extern_wrapper(
+            dest.to(tl.int64), source.to(tl.int64), nbytes, pe
+        )
+
+    @core.extern
+    def putmem_block_extern_wrapper(dest, source, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
+        """Low-level extern wrapper for NVSHMEM put"""
         return core.extern_elementwise(
             "",
             "",
-            [dst, src, size_bytes, pe],
+            [dest, source, size_bytes, pe],
             {
                 (
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int64"),  # size in bytes
+                    core.dtype("int64"),  # pe number
                 ): ("nvshmemx_putmem_block", core.dtype("int32"))
             },
             is_pure=False,
             _semantic=_semantic,
         )
 
-    @core.extern
-    def getmem_block(dst, src, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit
+    def get(dest, source, nelems, pe):
         """
-        Get data from remote PE using block-scoped operation.
+        Get tensor data from a remote PE to local PE.
 
-        This function copies a contiguous block of data from a symmetric data object
-        on the remote PE to the local PE's memory. The operation is performed at
-        thread block scope, meaning all threads in the block cooperate to perform
-        the transfer efficiently.
+        This high-level function provides a tensor-aware interface for NVSHMEM get
+        operations. It automatically handles type checking and size calculations, making
+        the API more ergonomic and type-safe.
 
         Args:
-            dst (int64): Local address of the destination data object to be updated.
-                        Can be any valid local memory address.
-            src (int64): Symmetric address of the source data object on the remote PE.
-                        Must be a pointer to symmetric memory allocated via NVSHMEM.
-            size_bytes (int64): Number of bytes to transfer. Must be positive.
-            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
-            _semantic: Optional semantic information for Triton compilation.
-
-        Returns:
-            int32: Status code (0 for success).
+            dest: Destination tensor on the local PE. Type must match source.
+            source: Source tensor on the remote PE containing data to be copied.
+            nelems: Number of elements to transfer.
+            pe: PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
 
         Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - Automatically calculates byte size from tensor type and element count.
             - This is a blocking operation that returns after data has been delivered
               to the destination array on the local PE.
-            - All threads in the block should call this function with the same parameters.
             - The destination data is guaranteed to be available for use after the call returns.
-            - Provides method for copying contiguous symmetric data from different PE.
 
         Example:
             ```
-            # Get 1024 bytes from PE 0 into local buffer
-            nvshmem.getmem_block(local_ptr, remote_ptr, 1024, 0)
+            # Get 100 elements from PE 0
+            nvshmem.get(dest_tensor, src_tensor, 100, 0)
             ```
         """
+        tl.static_assert(dest.type == source.type)
+        nbytes = nelems * dest.type.element_ty.itemsize
+        return getmem_block_extern_wrapper(
+            dest.to(tl.int64), source.to(tl.int64), nbytes, pe
+        )
+
+    @core.extern
+    def getmem_block_extern_wrapper(dest, source, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
+        """Low-level extern wrapper for NVSHMEM get"""
         return core.extern_elementwise(
             "",
             "",
-            [dst, src, size_bytes, pe],
+            [dest, source, size_bytes, pe],
             {
                 (
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int64"),  # size in bytes
+                    core.dtype("int64"),  # pe number
                 ): ("nvshmemx_getmem_block", core.dtype("int32"))
             },
             is_pure=False,
@@ -746,7 +749,9 @@ if has_triton():
         """
         tl.static_assert(dest.type == source.type)
         size_bytes_per_pe = nelems_per_pe * dest.type.element_ty.itemsize
-        return alltoallmem_block_extern_wrapper(team, dest.to(tl.int64), source.to(tl.int64), size_bytes_per_pe)
+        return alltoallmem_block_extern_wrapper(
+            team, dest.to(tl.int64), source.to(tl.int64), size_bytes_per_pe
+        )
 
     @core.extern
     def alltoallmem_block_extern_wrapper(team, dest, source, size_bytes, _semantic=None):  # type: ignore[no-untyped-def]
@@ -797,7 +802,9 @@ if has_triton():
         """
         tl.static_assert(dest.type == source.type)
         nbytes = nelems * dest.type.element_ty.itemsize
-        return broadcastmem_block_extern_wrapper(team, dest.to(tl.int64), source.to(tl.int64), nbytes, pe_root)
+        return broadcastmem_block_extern_wrapper(
+            team, dest.to(tl.int64), source.to(tl.int64), nbytes, pe_root
+        )
 
     @core.extern
     def broadcastmem_block_extern_wrapper(team, dest, source, size_bytes, pe_root, _semantic=None):  # type: ignore[no-untyped-def]
