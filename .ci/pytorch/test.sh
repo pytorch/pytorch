@@ -1631,9 +1631,7 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   build_xla
   test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
-    ls
     (cd scripts/torch_cli && python -m pip install -e .)
-    # testing vllm to set TORCH_CUDA_ARCH_LIST
     export TORCH_CUDA_ARCH_LIST="8.0"
     bash scripts/torch_cli/cli/lib/vllm/setup_vllm.sh
     python -m cli.run test external vllm --test-name "$TEST_CONFIG"
