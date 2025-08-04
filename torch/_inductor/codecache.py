@@ -108,6 +108,7 @@ from torch.compiler._cache import (
 from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
+from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
@@ -378,7 +379,7 @@ class WritableTempFile:
         self.encoding = encoding
         self.suffix = suffix
 
-    def __enter__(self) -> Any:
+    def __enter__(self) -> FileLike:
         self.temp_file = tempfile.NamedTemporaryFile(
             self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
         )
