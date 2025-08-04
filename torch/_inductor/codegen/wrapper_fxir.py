@@ -22,7 +22,7 @@ from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import CeilDiv
 
 from .. import config, ir
 from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
@@ -485,12 +485,19 @@ class FxConverter:
     def _generate_multi_output(self, line: WrapperLine) -> None:
         assert isinstance(line, MultiOutputLine)
 
+        arg_node = self.buffer_to_node[line.arg_name]
+
+        # For non-tuple / non-list outputs, map the
+        # output to the same node as the input.
+        if len(line.indices) == 0:
+            self.buffer_to_node[line.result_name] = arg_node
+            return
+
         # Extract the index for tuple access.
         inds = line.indices[0][1:]
         assert len(inds) == 1, f"Cannot convert {inds} to an index."
         idx = inds[0]
 
-        arg_node = self.buffer_to_node[line.arg_name]
         node = self.gm.graph.call_function(operator.getitem, args=(arg_node, idx))
         node.meta["val"] = arg_node.meta["val"][idx]
         node.name = line.result_name
@@ -574,8 +581,8 @@ class FxConverter:
                 assert V.graph.sizevars.statically_known_equals(new_expr, expr), (
                     f"Unsound replacement: '{new_expr}' != '{expr}'"
                 )
-
-                return FloorDiv(numerator, denominator)
+                # Undo the python division trick and replace with explicit CeilDiv
+                return -CeilDiv(-numerator, denominator)
             else:
                 return sympy.floor(expr)
 
