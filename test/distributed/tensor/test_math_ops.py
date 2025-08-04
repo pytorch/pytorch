@@ -278,7 +278,9 @@ class DistMathOpsTest(DTensorTestBase):
             norm_types.append(torch.nn.RMSNorm)
 
         test_config_list = list(
-            itertools.product(norm_types, shard_dims, norm_shape_idx_list, elementwise_affine_list)
+            itertools.product(
+                norm_types, shard_dims, norm_shape_idx_list, elementwise_affine_list
+            )
         )
 
         # normalized shape is a torch.Size object
@@ -343,7 +345,9 @@ class DistMathOpsTest(DTensorTestBase):
             norm_types.append(torch.nn.RMSNorm)
 
         test_config_list = list(
-            itertools.product(norm_types, shard_dims, norm_shape_idx_list, elementwise_affine_list)
+            itertools.product(
+                norm_types, shard_dims, norm_shape_idx_list, elementwise_affine_list
+            )
         )
 
         # normalized shape is a torch.Size object
@@ -474,8 +478,11 @@ class DistMathOpsTest(DTensorTestBase):
         subtest_cfgs = list(
             filter(
                 valid_filter,
-                [SubTest(norm_type, *cfg) for norm_type in norm_types
-                 for cfg in itertools.product(*(((False, True),) * 5))],
+                [
+                    SubTest(norm_type, *cfg)
+                    for norm_type in norm_types
+                    for cfg in itertools.product(*(((False, True),) * 5))
+                ],
             )
         )
 
@@ -598,7 +605,6 @@ class DistMathOpsTest(DTensorTestBase):
         assert not subtest_fails, (
             f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
         )
-
 
     @with_comms
     def test_topk(self):
