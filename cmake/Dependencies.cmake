@@ -260,7 +260,7 @@ endif()
 # Determine if blas was compiled with the f2c conventions
 if(BLAS_LIBRARIES AND BLAS_CHECK_F2C)
   include(cmake/BLAS_ABI.cmake)
-endif(BLAS_LIBRARIES)
+endif()
 
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_SEQUENTIAL 0)
