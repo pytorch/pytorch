@@ -203,3 +203,15 @@ def my_narrow(t, dim, start, length) -> Tensor:
     Returns: Narrowed tensor
     """
     return torch.ops.libtorch_agnostic.my_narrow.default(t, dim, start, length)
+
+
+def my_new_empty(t) -> Tensor:
+    """
+    Returns a new empty tensor with shape [2, 5] and dtype bfloat16
+
+    Args:
+        t: Input tensor used as a reference for device and other properties
+
+    Returns: New empty tensor with shape [2, 5] and dtype bfloat16
+    """
+    return torch.ops.libtorch_agnostic.my_new_empty.default(t)

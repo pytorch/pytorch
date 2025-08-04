@@ -6,6 +6,9 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
+#include <c10/core/ScalarType.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
+
 namespace torch::stable {
 
 using DeviceIndex =
@@ -128,6 +131,19 @@ class Tensor {
     bool defined;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
     return defined;
+  }
+
+  // Temporarily add a dtype() API here for fa3, pending header only-ness
+  caffe2::TypeMeta dtype() const {
+    int32_t dtype;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
+    return c10::scalarTypeToTypeMeta(static_cast<c10::ScalarType>(dtype));
+  }
+
+  c10::ScalarType scalar_type() const {
+    int32_t dtype;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
+    return static_cast<c10::ScalarType>(dtype);
   }
 
   // =============================================================================
