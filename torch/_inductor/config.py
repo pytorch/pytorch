@@ -1489,6 +1489,9 @@ class aot_inductor:
 
     compile_standalone: bool = False
 
+    # If set to "windows", we will compile from WSL and generate a C++ project file for Windows
+    cross_target_platform: Optional[str] = None
+
     # Whether to enable link-time-optimization
     enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
 
