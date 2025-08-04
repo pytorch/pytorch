@@ -261,7 +261,7 @@ The above listing contains the file that declares the `STUB` operator, where you
 
 ::::
 
-From the signature, we can see that the input of `abs_stub` is `TensorIteratorBase`, a powerful helper class provided by PyTorch that contains all input and output operators, as well as some other auxiliary methods. Based on it, we cann develop the `abs_kernel` operator and then call `REGISTER_PRIVATEUSE1_DISPATCH` to specify `abs_stub` to complete the registration.
+From the signature, we can see that the input of `abs_stub` is `TensorIteratorBase`, a powerful helper class provided by PyTorch that contains all input and output operators, as well as some other auxiliary methods. Based on it, we can develop the `abs_kernel` operator and then call `REGISTER_PRIVATEUSE1_DISPATCH` to specify `abs_stub` to complete the registration.
 
 #### Custom Operators
 
