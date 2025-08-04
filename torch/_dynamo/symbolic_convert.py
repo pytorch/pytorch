@@ -1175,13 +1175,17 @@ class InstructionTranslatorBase(
         return self._cell_and_freevars
 
     def prune_dead_locals(self):
+        # keep cell and freevar references alive
+        self.post_prune_cell_and_freevars = {
+            k: v
+            for k, v in self.symbolic_locals.items()
+            if k in self.cell_and_freevars()
+        }
         # Only keep the locals that must remain on the stack.
         reads = livevars_analysis(self.instructions, self.current_instruction)
         self.symbolic_locals = {
             k: v for k, v in self.symbolic_locals.items() if k in reads
         }
-        # "Garbage collect the heap".
-        self.output.side_effects.prune_dead_object_new(self)
 
     def call_function(
         self,
@@ -2588,17 +2592,18 @@ class InstructionTranslatorBase(
 
         # load first resume function (to be called this frame)
         if resume_codes[-1].co_freevars:
-            cg.make_function_with_closure(resume_names[-1], resume_codes[-1], True, 1)
+            cg.make_function_with_closure(
+                txes[-1], resume_names[-1], resume_codes[-1], True, 1
+            )
         else:
             cg.extend_output(cg.load_function_name(resume_names[-1], True, 1))
 
         # load all other resume functions (to be called later)
         resume_names.pop()
         resume_codes.pop()
-        for name, code in zip(resume_names, resume_codes):
+        for tx, name, code in zip(txes, resume_names, resume_codes):
             if code.co_freevars:
-                assert not config.nested_graph_breaks, "NYI"
-                cg.make_function_with_closure(name, code, False, 0)
+                cg.make_function_with_closure(tx, name, code, False, 0)
             else:
                 cg.extend_output(cg.load_function_name(name, False, 0))
         cg.extend_output(
@@ -3567,6 +3572,9 @@ class InstructionTranslatorBase(
         self.symbolic_locals = symbolic_locals
         self.symbolic_globals = symbolic_globals
         self.symbolic_torch_function_state = symbolic_torch_function_state
+        # used to keep cell/freevars alive after pruning symbolic_locals (prune_dead_locals)
+        # in order to generate any nested closures
+        self.post_prune_cell_and_freevars: Optional[dict[str, VariableTracker]] = None
         self.stack = []
         self.instruction_pointer = 0
         self.start_point = None
