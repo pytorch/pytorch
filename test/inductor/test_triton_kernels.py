@@ -21,7 +21,6 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
-
 from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_dict
 from torch._library import capture_triton
 from torch.testing import FileCheck
