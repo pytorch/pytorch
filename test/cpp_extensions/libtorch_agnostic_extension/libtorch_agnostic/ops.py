@@ -166,19 +166,28 @@ def fill_infinity(t) -> Tensor:
     return torch.ops.libtorch_agnostic.fill_infinity.default(t)
 
 
-def my_pad(t, pad, mode="constant", value=0.0) -> Tensor:
+def test_default_constructor(undefined) -> bool:
     """
-    Pads the input tensor according to the specified padding, mode, and value.
+    Tests the default constructor for torch::stable::Tensor.
+
+    Args:
+        undefined: bool - if True, tests defined tensor; if False, tests undefined tensor
+
+    Returns: bool - result of calling .defined() on the tensor
+    """
+    return torch.ops.libtorch_agnostic.test_default_constructor.default(undefined)
+
+
+def my_pad(t) -> Tensor:
+    """
+    Pads the input tensor with hardcoded padding parameters.
 
     Args:
         t: Input tensor
-        pad: List of padding values for each dimension [left, right, top, bottom, ...]
-        mode: Padding mode ('constant', 'reflect', 'replicate')
-        value: Fill value for 'constant' padding
 
-    Returns: Padded tensor
+    Returns: Padded tensor with padding [1, 2, 2, 1], mode "constant", value 0.0
     """
-    return torch.ops.libtorch_agnostic.my_pad.default(t, pad, mode, value)
+    return torch.ops.libtorch_agnostic.my_pad.default(t)
 
 
 def my_narrow(t, dim, start, length) -> Tensor:

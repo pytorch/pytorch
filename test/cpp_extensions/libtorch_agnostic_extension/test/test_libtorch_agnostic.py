@@ -218,15 +218,22 @@ if not IS_WINDOWS:
             expected = torch.full_like(t, math.inf)
             self.assertEqual(out, expected)
 
+        @onlyCPU
+        def test_default_constructor(self):
+            import libtorch_agnostic
+
+            is_defined_defined = libtorch_agnostic.ops.test_default_constructor(True)
+            self.assertTrue(is_defined_defined)
+
+            is_undefined_defined = libtorch_agnostic.ops.test_default_constructor(False)
+            self.assertFalse(is_undefined_defined)
+
         def test_my_pad(self, device):
             import libtorch_agnostic
 
             t = torch.rand(2, 3, device=device)
-            pad = [1, 2, 2, 1]
-            mode = "constant"
-            value = 0.0
-            out = libtorch_agnostic.ops.my_pad(t, pad, mode, value)
-            expected = torch.nn.functional.pad(t, pad, mode, value)
+            out = libtorch_agnostic.ops.my_pad(t)
+            expected = torch.nn.functional.pad(t, [1, 2, 2, 1], "constant", 0.0)
             self.assertEqual(out, expected)
 
         def test_my_narrow(self, device):

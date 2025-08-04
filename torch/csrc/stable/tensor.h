@@ -127,6 +127,12 @@ class Tensor {
     return size;
   }
 
+  bool defined() const {
+    bool defined;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
+    return defined;
+  }
+
   // Temporarily add a dtype() API here for fa3, pending header only-ness
   caffe2::TypeMeta dtype() const {
     int32_t dtype;
