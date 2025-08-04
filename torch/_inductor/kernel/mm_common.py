@@ -152,6 +152,11 @@ def mm_args(
     Common arg processing for mm,bmm,addmm,etc
     """
     mat1, mat2 = realize_inputs(mat1, mat2)
+
+    # Freeze layouts to prevent changes to strides
+    mat1.freeze_layout()
+    mat2.freeze_layout()
+
     *b1, m, k1 = mat1.get_size()
     if mat2_transposed:
         *b2, n, k2 = mat2.get_size()
