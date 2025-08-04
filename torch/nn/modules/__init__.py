@@ -75,6 +75,7 @@ from .dropout import (
 )
 from .flatten import Flatten, Unflatten
 from .fold import Fold, Unfold
+from .gradbank import GradBank
 from .instancenorm import (
     InstanceNorm1d,
     InstanceNorm2d,
@@ -217,6 +218,7 @@ __all__ = [
     "FractionalMaxPool2d",
     "FractionalMaxPool3d",
     "GELU",
+    "GradBank",
     "GLU",
     "GRU",
     "GRUCell",
