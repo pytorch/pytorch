@@ -43,7 +43,8 @@ echo "Installing test dependencies"
 
 uv pip compile requirements/test.in -o test.txt \
   --index-strategy unsafe-best-match \
-  --constraint snapshot_constraint.txt
+  --constraint snapshot_constraint.txt \
+  --torch-backend cu128
 
 uv pip install --system -r test.txt
 
