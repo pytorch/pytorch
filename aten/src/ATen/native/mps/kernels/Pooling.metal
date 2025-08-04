@@ -168,6 +168,16 @@ PoolOffsets find_pool_offsets(
           leading_dims,
           return_indices,
           tid);
+    case 3:
+      return find_pool_offsets_dim_specific<3>(
+          output_sizes,
+          output_strides,
+          indices_strides,
+          input_strides,
+          pooling_dim_indices,
+          leading_dims,
+          return_indices,
+          tid);
   }
   return PoolOffsets();
 }
@@ -289,6 +299,68 @@ kernel void max_pool_backward(
       grad_input_sizes + leading_dims,
       grad_input_strides + leading_dims,
       offsets.input_leading,
+      pooling_dims);
+}
+
+template <typename T>
+void max_unpool_impl(
+    device T* output,
+    T input_element,
+    int32_t input_index,
+    constant int32_t* output_sizes,
+    constant int32_t* output_strides,
+    int32_t pooling_dims) {
+  int32_t size_prod = 1;
+  int32_t pool_offset = 0;
+
+  for (auto dim = pooling_dims - 1; dim >= 0; dim--) {
+    auto next_size_prod = output_sizes[dim] * size_prod;
+    pool_offset +=
+        output_strides[dim] * ((input_index % next_size_prod) / size_prod);
+    size_prod *= output_sizes[dim];
+  }
+
+  output[pool_offset] = input_element;
+}
+
+// Kernel computes one element of the grad input per kernel call.
+template <typename T>
+kernel void max_unpool(
+    device T* output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant int64_t* indices [[buffer(2)]],
+    constant MaxUnpoolingParams<5>& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  auto pooling_dims = params.pooling_dims;
+  auto dims = params.dims;
+  auto input_sizes = params.input_sizes.data();
+  auto input_strides = params.input_strides.data();
+  auto output_sizes = params.output_sizes.data();
+  auto output_strides = params.output_strides.data();
+  auto indices_strides = params.indices_strides.data();
+
+  auto leading_dims = dims - pooling_dims;
+
+  // NOTE: Since we're doing unpooling, the variable names "input" and "output"
+  // are reversed compared to the pooling operations. So in `find_pool_offsets`,
+  // we need to map "input" -> "output" and "output" -> "input".
+  PoolOffsets offsets = find_pool_offsets(
+      /*output_sizes=*/input_sizes,
+      /*output_strides=*/input_strides,
+      indices_strides,
+      /*input_strides=*/output_strides,
+      /*pooling_dim_indices=*/nullptr,
+      dims,
+      leading_dims,
+      /*return_indices=*/true,
+      tid);
+
+  max_unpool_impl<T>(
+      output + offsets.input_leading,
+      input[offsets.output],
+      indices[offsets.indices],
+      output_sizes + leading_dims,
+      output_strides + leading_dims,
       pooling_dims);
 }
 
@@ -428,18 +500,25 @@ kernel void avg_pool(
       params.divisor_override);
 }
 
-#define REGISTER_POOL_OP(DTYPE)                                           \
-  template [[host_name("max_pool_" #DTYPE)]] kernel void max_pool<DTYPE>( \
-      constant DTYPE * input [[buffer(0)]],                               \
-      device DTYPE * output [[buffer(1)]],                                \
-      device int64_t* indices [[buffer(2)]],                              \
-      constant PoolingParams<5>& params [[buffer(3)]],                    \
-      uint tid [[thread_position_in_grid]]);                              \
-                                                                          \
-  template [[host_name("avg_pool_" #DTYPE)]] kernel void avg_pool<DTYPE>( \
-      constant DTYPE * input [[buffer(0)]],                               \
-      device DTYPE * output [[buffer(1)]],                                \
-      constant AvgPoolingParams<5> & params [[buffer(2)]],                \
+#define REGISTER_POOL_OP(DTYPE)                                               \
+  template [[host_name("max_pool_" #DTYPE)]] kernel void max_pool<DTYPE>(     \
+      constant DTYPE * input [[buffer(0)]],                                   \
+      device DTYPE * output [[buffer(1)]],                                    \
+      device int64_t* indices [[buffer(2)]],                                  \
+      constant PoolingParams<5>& params [[buffer(3)]],                        \
+      uint tid [[thread_position_in_grid]]);                                  \
+                                                                              \
+  template [[host_name("max_unpool_" #DTYPE)]] kernel void max_unpool<DTYPE>( \
+      device DTYPE * output [[buffer(0)]],                                    \
+      constant DTYPE * input [[buffer(1)]],                                   \
+      constant int64_t* indices [[buffer(2)]],                                \
+      constant MaxUnpoolingParams<5>& params [[buffer(3)]],                   \
+      uint tid [[thread_position_in_grid]]);                                  \
+                                                                              \
+  template [[host_name("avg_pool_" #DTYPE)]] kernel void avg_pool<DTYPE>(     \
+      constant DTYPE * input [[buffer(0)]],                                   \
+      device DTYPE * output [[buffer(1)]],                                    \
+      constant AvgPoolingParams<5> & params [[buffer(2)]],                    \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_MAX_POOL_BACKWARD_OP(DTYPE)                   \

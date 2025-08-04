@@ -253,6 +253,9 @@ class WorkspaceArg(CodegenSymbol):
     def get_name(self) -> str:
         return self.outer_name
 
+    def get_is_pinned(self) -> bool:
+        return False
+
     def get_inputs_that_alias_output(self) -> list[str]:
         return []
 
