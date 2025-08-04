@@ -9,7 +9,7 @@ from ..ir import GraphPartitionSignature
 from ..virtualized import V
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .cpp_wrapper_gpu import CppWrapperGpu
-from .wrapper import PythonWrapperCodegen
+from .wrapper import KernelCallLine, PythonWrapperCodegen
 
 
 class CppWrapperMps(CppWrapperGpu):
@@ -47,8 +47,6 @@ class CppWrapperMps(CppWrapperGpu):
         """
         Generates MPS kernel call code. It should look something like:
         ```
-        auto mps_lib_0_func = mps_lib_0.getKernelFunction("generated_kernel");
-        auto mps_lib_0_func_handle = AOTIMetalKernelFunctionHandle(mps_lib_0_func.get());
         mps_lib_0_func->runCommandBlock([&] {
             mps_lib_0_func->startEncoding();
             aoti_torch_mps_set_arg(mps_lib_0_func_handle, 0, buf0);
@@ -113,18 +111,9 @@ class CppWrapperMps(CppWrapperGpu):
             self.write_mps_kernel_call(kernel_name, new_args)
 
     def write_mps_kernel_call(self, name: str, call_args: list[str]) -> None:
-        # Only add handle definition if the kernel is not already used
-        lib_name = name[: -len("_func")]
-        if name not in self._used_kernel_names:
-            self._used_kernel_names.add(name)
-
-            self.writeline(
-                f'auto {name} = {lib_name}.getKernelFunction("generated_kernel");'
-            )
-            self.writeline(
-                f"auto {name}_handle = AOTIMetalKernelFunctionHandle({name}.get());"
-            )
-
+        # Initialization of the kernel function and kernel function handle
+        # variables have already been done at the beginning, which was
+        # codegen-ed in `codegen_mps_func_init`
         self.writeline(f"{name}->runCommandBlock([&] {{")
         self.writeline(f"    {name}->startEncoding();")
         for call_arg in call_args:
@@ -138,3 +127,38 @@ class CppWrapperMps(CppWrapperGpu):
             "#include <torch/csrc/inductor/aoti_include/mps.h>\n"
             "#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>"
         )
+
+    def codegen_inputs(self) -> None:
+        super().codegen_inputs()
+        self.codegen_mps_func_init()
+
+    def codegen_mps_func_init(self) -> None:
+        """
+        We want to codegen the mps kernel function variable initializations
+        ahead of time.  This is so that if we reuse kernels within subgraphs, we
+        don't need to worry about the scope in which we're initializing the
+        variables. Instead we will just initialize the variables all at the top
+        level.
+
+        The kernel function variable initializations should look something like:
+        ```
+        auto mps_lib_0_func = mps_lib_0.getKernelFunction("generated_kernel");
+        auto mps_lib_0_func_handle = AOTIMetalKernelFunctionHandle(mps_lib_0_func.get());
+        ```
+        """
+
+        for line in self.lines:
+            if not isinstance(line, KernelCallLine):
+                continue
+
+            # Only add handle definition once
+            if line.kernel_name not in self._used_kernel_names:
+                self._used_kernel_names.add(line.kernel_name)
+
+                lib_name = line.kernel_name[: -len("_func")]
+                self.prefix.writeline(
+                    f'auto {line.kernel_name} = {lib_name}.getKernelFunction("generated_kernel");'
+                )
+                self.prefix.writeline(
+                    f"auto {line.kernel_name}_handle = AOTIMetalKernelFunctionHandle({line.kernel_name}.get());"
+                )
