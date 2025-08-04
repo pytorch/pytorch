@@ -3063,8 +3063,8 @@ class GuardManager {
     return true;
   }
 
-#if IS_PYTHON_3_12_PLUS
   bool watch_dict_pointers(PyObject* value) {
+#if IS_PYTHON_3_12_PLUS
     // -----------------------------------------------------------------------------
     // CPython 3.12 dict-watcher integration
     // -----------------------------------------------------------------------------
@@ -3091,10 +3091,12 @@ class GuardManager {
       }
       dict_to_guard_manager[dict_pointer].push_back(this);
     }
+#endif
     return true;
   }
 
   void unwatch_dict_pointers() {
+#if IS_PYTHON_3_12_PLUS
     if (!_dict_callbacks_unwatched && !_disable_dict_tag_matching) {
       for (auto& value_stashed_pointers : _dict_pointers) {
         auto stashed_pointers = value_stashed_pointers.second;
@@ -3111,8 +3113,8 @@ class GuardManager {
       }
     }
     _dict_callbacks_unwatched = true;
-  }
 #endif
+  }
 
   virtual bool check_nopybind(FrameLocalsMapping* value) {
     return check_nopybind_template(value);
@@ -3355,7 +3357,9 @@ class GuardManager {
 
   // 3.12+ related helper
   bool _dict_callback_installed = false;
+#if IS_PYTHON_3_12_PLUS
   bool _dict_callbacks_unwatched = false;
+#endif
 
  protected:
   // weakref to the type of guarded value
