@@ -523,6 +523,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   }
 
   // Extract all files within the zipfile to a temporary directory
+  if (!file_exists(model_package_path)) {
+    throw std::runtime_error("Model package not found: " + model_package_path);
+  }
   RAIIMinizArchive zip_archive{model_package_path};
   auto found_filenames{zip_archive.get_filenames()};
   if (found_filenames.empty()) {

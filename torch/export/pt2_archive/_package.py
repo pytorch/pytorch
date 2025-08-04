@@ -244,6 +244,13 @@ def _package_aoti_files(
         weights_configs[model_name] = {}
 
         for file in files:
+            if os.path.isdir(file):
+                # If the file is a directory, write all files in the directory
+                archive_writer.write_folder(
+                    os.path.join(AOTINDUCTOR_DIR, model_name), file
+                )
+                continue
+
             if file == "":
                 continue
 
