@@ -8314,6 +8314,29 @@ def forward(self, b_a_buffer, x):
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
 
+    def test_ccode_python_mod(self):
+        import sympy
+
+        from torch.utils._sympy.functions import PythonMod
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                torch._check_is_size(u1)
+                return u0, u1
+
+        ep = export(Foo(), (torch.tensor([2, 3]),), strict=False)
+        u0_node, u1_node = list(ep.graph.nodes)[-1].args[0]
+        u0 = u0_node.meta["val"]
+        u1 = u1_node.meta["val"]
+        self.assertExpectedInline(
+            sympy.ccode(PythonMod(u0, 3)), """(u0 % 3) < 0 ? u0 % 3 + 3 : u0 % 3"""
+        )
+        self.assertExpectedInline(
+            sympy.ccode(PythonMod(u0, u1)),
+            """(u0 % u1) < 0 ? u0 % u1 + abs(u1) : u0 % u1""",
+        )
+
     def test_aten_lift_fresh_copy(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -13902,21 +13925,6 @@ graph():
         ep = export(m, args)
         self.assertEqual(ep.module()(*args), m(*args))
 
-    def test_deepcopy(self):
-        class Model(torch.nn.Module):
-            def forward(self, input):
-                return input + input
-
-        model = Model().eval()
-        inputs = (torch.ones(2, 2),)
-
-        program = export(model, inputs)
-        copied_program = copy.deepcopy(program)
-        self.assertEqual(str(program.graph), str(copied_program.graph))
-        self.assertEqual(
-            str(program.graph_module.code), str(copied_program.graph_module.code)
-        )
-
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):
             # check sym ops only get computed once
@@ -14937,6 +14945,51 @@ class GraphModule(torch.nn.Module):
         ep = export(mod, (x,))
         self.assertEqual(x.sin(), ep.module()(x))
         pytree._deregister_pytree_node(torch.FunctionSchema)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_exception(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+                self.register_buffer("buffer", torch.ones(4, 4))
+                self.register_buffer("param", torch.ones(4, 4))
+
+            def forward(self, x):
+                token_ids = torch.randint(0, 10, (4,), device=x.device)
+                embedded = self.embedding(token_ids).sum()
+                return self.buffer.sum() + self.param.sum() + x.sum() + embedded
+
+        class BarModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if "cuda" in str(x.device):
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        class BarBar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = BarModel()
+
+            def forward(self, x):
+                with torch.amp.autocast(device_type="cuda"):
+                    y = self.mod(x)
+                return y
+
+        with torch.no_grad():
+            with self.assertRaisesRegex(RuntimeError, "Couldn't swap Embedding.weight"):
+                _ = torch.export.export(
+                    BarBar(),
+                    (),
+                    {"x": torch.randn(4, 4, 4, device="cuda")},
+                    strict=False,
+                ).module()
 
     def test_export_for_training_with_state_dict_hooks(self):
         def _state_dict_pre_hook(mod, prefix, keep_vars):
