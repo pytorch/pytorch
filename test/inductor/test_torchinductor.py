@@ -8852,7 +8852,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                (a.add_(b[0] * c * e),)
+                _ = (a.add_(b[0] * c * e),)
                 if d is not None:
                     d.add_(b[1])
 
@@ -8925,7 +8925,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
 
             def impl(a, b, c, d, e=2):
-                (a.add_(b[0] * c * e),)
+                _ = (a.add_(b[0] * c * e),)
                 if d is not None:
                     d.add_(b[1])
                 return b[0] + b[1]
