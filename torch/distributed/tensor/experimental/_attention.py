@@ -1449,7 +1449,8 @@ def context_parallel(
         no_restore_buffers (Optional[Set[torch.Tensor]]): buffers in these set
             won't be restored after the context exits. This set must be a subset
             of ``buffers``. If the buffers won't be used after the context exits,
-            these buffers can be put in this list to avoid extra restore time.
+            these buffers can be put in this set to avoid extra restore time.
+            Be sure to pass in a Set and not a List.
 
     .. warning::
         `torch.distributed.tensor.experimental.context_parallel` is a
