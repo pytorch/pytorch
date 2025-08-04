@@ -81,8 +81,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         reduction = [
             n
             for n in group_per_dim
-            if kernel_map[n].inside_reduction
-            and not (kernel_map[n].persistent_reduction and kernel_map[n].no_x_dim)
+            if kernel_map[n].inside_reduction and not kernel_map[n].persistent_reduction
         ]
         not_reduction = [n for n in group_per_dim if n not in reduction]
         # rnumel > 2048 usually has long execution time
@@ -307,6 +306,7 @@ class ComboKernel(Kernel):
         ) -> None:
             x_numels_list = kernel.x_numels_list
             for i in range(len(x_numels_list)):
+                # TODO(davidberard98) do we need to remove no_x_dim here...
                 xnumels, no_x_dim = (
                     (x_numels_list[i], False)
                     if isinstance(x_numels_list[i], str)
@@ -448,9 +448,6 @@ class ComboKernel(Kernel):
                 code.writeline(f"R0_BLOCK_{num}: tl.constexpr = {val}")
                 uniquify_block_sizes.append("R0_BLOCK")
 
-            if tree.prefix == "x" and sub_kernel.no_x_dim:
-                code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
-                uniquify_block_sizes.append("XBLOCK")
         self.grids.append(grid)
         return uniquify_block_sizes
 
@@ -468,18 +465,6 @@ class ComboKernel(Kernel):
                     x_numels = int(simplified_tree_numel)
                 else:
                     x_numels = f"{tree.prefix}numel_{num}"
-                if sub_kernel.no_x_dim:
-                    min_x_blocks = x_numels
-                    x_numels = (
-                        -min_x_blocks
-                        if isinstance(x_numels, int)
-                        else "-" + cast(str, x_numels)
-                    )
-                else:
-                    if isinstance(simplified_tree_numel, (Integer, int)):
-                        x_numels = int(simplified_tree_numel)
-                    else:
-                        x_numels = f"{tree.prefix}numel_{num}"
         self.min_x_blocks_list.append(min_x_blocks)
         self.x_numels_list.append(x_numels)
 
@@ -566,8 +551,7 @@ class ComboKernel(Kernel):
             # str in x_numels_list means a dynamic shape
             self.dispatch_class = ComboKernel.SequentialDispatch
             return
-        # A negative x_blocks_list element means the kernel is not tunable,
-        # i.e., no_x_dim = True
+        # A negative x_blocks_list element means the kernel is not tunable.
         x_numels_list = [abs(cast(int, e)) for e in self.x_numels_list]
         total = max(x_numels_list) * len(x_numels_list)
         needed = sum(x_numels_list)
@@ -679,8 +663,6 @@ class ComboKernel(Kernel):
                 if tree.is_reduction and (
                     not sub_kernel.inside_reduction or sub_kernel.persistent_reduction
                 ):
-                    continue
-                if tree.prefix == "x" and sub_kernel.no_x_dim:
                     continue
                 block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
         self.block_args = list(block_names.keys())
@@ -966,7 +948,6 @@ class ComboKernel(Kernel):
         }
 
         for num, sub_kernel in enumerate(self.sub_kernels):
-            meta[f"no_x_dim_{num}"] = sub_kernel.no_x_dim
             for i, tree in enumerate(sub_kernel.range_trees):
                 if not tree.is_reduction:
                     numel_name = f"{tree.prefix}numel_{num}"

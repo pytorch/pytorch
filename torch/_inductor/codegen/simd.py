@@ -413,7 +413,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if override_persistent_reduction is not None
             else self.should_use_persistent_reduction()
         )
-        self.no_x_dim = self.want_no_x_dim()
         self.code_hash: Optional[str] = None
 
         # define this in a closure to make cache local to object
@@ -444,16 +443,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def index_dtype(self) -> str:
         return self.dtype_to_str(self.get_index_dtype_as_torch_dtype())
 
-    def want_no_x_dim(self) -> bool:
-        return False
-
     def construct_range_trees(
         self,
         pid_cache: Optional[dict[str, str]],
         inside_reduction: bool,
         is_reduction: bool,
         numels: dict[str, sympy.Expr],
-        no_x_dim: bool,
     ) -> list[IterationRangesRoot]:
         active_prefixes = OrderedSet(
             prefix for prefix in all_prefixes if prefix in numels
@@ -468,9 +463,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         grid_dims = ["x", "y", "z"]
         pointwise_tensor_dims = list(reversed(grid_dims))
         reduction_dims = ["r0_", "r1_"]
-        if no_x_dim:
-            tensor_dims = reduction_dims
-        elif no_r_dim:
+        if no_r_dim:
             tensor_dims = pointwise_tensor_dims
         else:
             tensor_dims = pointwise_tensor_dims + reduction_dims
@@ -508,7 +501,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             self.inside_reduction,
             self.features.is_reduction(),
             self.numels,
-            self.no_x_dim,
         )
         self.range_trees.extend(range_trees)
 
