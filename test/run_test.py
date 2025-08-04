@@ -239,7 +239,6 @@ S390X_BLOCKLIST = [
     # some false errors
     "doctests",
     # new failures to investigate and fix
-    "cpp_extensions/libtorch_agnostic_extension/test/test_libtorch_agnostic",
     "test_tensorboard",
     # onnx + protobuf failure, see
     # https://github.com/protocolbuffers/protobuf/issues/22104
