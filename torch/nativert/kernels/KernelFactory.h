@@ -31,8 +31,7 @@ class KernelFactoryHandler {
           const Node&,
           std::shared_ptr<Weights> weights,
           const torch::nativert::ExecutorConfig& executorConfig,
-          caffe2::serialize::PyTorchStreamReader* pytorchStreamReader,
-          c10::Device targetDevice)>;
+          caffe2::serialize::PyTorchStreamReader* pytorchStreamReader)>;
 
   KernelFactoryHandler(Matcher matcher, Callback callback)
       : matcher_(matcher), callback_(callback) {}
@@ -53,10 +52,8 @@ class KernelFactoryHandler {
       const Node& node,
       std::shared_ptr<Weights> weights,
       const torch::nativert::ExecutorConfig& executorConfig,
-      caffe2::serialize::PyTorchStreamReader* pytorchStreamReader,
-      c10::Device targetDevice) const {
-    return callback_(
-        node, weights, executorConfig, pytorchStreamReader, targetDevice);
+      caffe2::serialize::PyTorchStreamReader* pytorchStreamReader) const {
+    return callback_(node, weights, executorConfig, pytorchStreamReader);
   }
 
  private:

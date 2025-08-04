@@ -23,6 +23,7 @@ from torch import fx as fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
 from torch._logging import getArtifactLogger
+from torch._logging._internal import trace_structured
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -693,6 +694,33 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
     V.debug.ir_post_fusion(nodes)
 
 
+def _dump_collective_schedule(schedule: list[Union[str, None]]) -> None:
+    try:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_collective_schedule",
+                "encoding": "json",
+            },
+            payload_fn=lambda: schedule,
+        )
+    except Exception:
+        log.debug(
+            "Failed to log inductor_collective_schedule via structured logging",
+            exc_info=True,
+        )
+
+
+def log_collective_schedule(nodes: Sequence[BaseSchedulerNode]) -> None:
+    schedule = [
+        getattr(op, "python_kernel_name", None)
+        for node in nodes
+        if isinstance(op := getattr(node, "node", None), ir._CollectiveKernel)
+    ]
+
+    _dump_collective_schedule(schedule)
+
+
 @dataclasses.dataclass
 class TensorMetadataHolder:
     tensor_metadata: TensorMetadata
@@ -723,7 +751,8 @@ def create_mapping_pre_post_grad_nodes(
         return empty_return
 
     if not isinstance(pre_grad_graph_id, int):
-        log.error("Provenance tacking error: pre_grad_graph_id is not an int")
+        # pre_grad_graph_id may be empty if there's no pre_grad graph
+        # and there's only a backward graph from backward pass engine
         return empty_return
 
     pre_to_post: dict[str, Any] = collections.defaultdict(OrderedSet)
