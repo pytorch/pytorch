@@ -401,7 +401,6 @@ class CUDATemplateKernel(CUDAKernel):
         if V.graph.cpp_wrapper:
             arg_types.append("uint8_t*")
 
-        breakpoint()
         wrapper.generate_kernel_call(
             name,
             call_args,
