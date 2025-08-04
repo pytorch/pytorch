@@ -719,6 +719,7 @@
   dispatch:
     CPU, CUDA: all_out
     MPS: all_out_mps
+    MTIA: all_out_mtia
 
 - func: all.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -808,6 +809,7 @@
     CPU, Meta: arange_out
     CUDA: arange_cuda_out
     MPS: arange_mps_out
+    MTIA: arange_mtia_out
   cpp_no_default_args: ['step']
 
 # This function is a temporary hack to allow tracing of arange like constructs with dynamic
