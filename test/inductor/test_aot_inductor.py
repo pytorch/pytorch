@@ -6723,7 +6723,7 @@ class AOTInductorTestsTemplate:
         self.assertEqual(aot_inductor_module(*example_inputs), model(*example_inputs))
 
     def test_copy_non_blocking_is_pinned(self):
-        if self.device == "cpu":
+        if self.device == "cpu" or self.device == "mps":
             raise unittest.SkipTest("only matters for device-to-cpu copy")
 
         class Model(torch.nn.Module):
@@ -6746,7 +6746,6 @@ class AOTInductorTestsTemplate:
         package_path, code = run_and_get_cpp_code(
             AOTIRunnerUtil.compile, model, example_inputs
         )
-        # print(code)
         FileCheck().check("pinned").run(code)
         model_aoti = torch._inductor.aoti_load_package(package_path)
         outputs_aoti = model_aoti(*example_inputs)
