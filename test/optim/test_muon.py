@@ -7,7 +7,12 @@ import torch
 from torch import nn
 from torch.nn import Linear, MSELoss
 from torch.optim import AdamW, Muon
-from torch.testing._internal.common_utils import load_tests, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    load_tests,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -99,6 +104,7 @@ class MoonshotReferenceMuon(torch.optim.Optimizer):
 
 
 class TestMuon(TestCase):
+    @skipIfTorchDynamo("MoonshotReferenceMuon compile issue.")
     def test_muon_fqn_set_empty_equals_to_adamw(self):
         model0 = nn.Linear(5, 5)
         model1 = copy.deepcopy(model0)
@@ -142,6 +148,7 @@ class TestMuon(TestCase):
                 "Muon did not match AdamW for empty-FQN case",
             )
 
+    @skipIfTorchDynamo("MoonshotReferenceMuon compile issue.")
     def test_muon_implementation_equivalency(self):
         torch.manual_seed(0)
 
