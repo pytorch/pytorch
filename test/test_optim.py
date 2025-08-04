@@ -8,11 +8,11 @@ from itertools import product
 from typing import Any
 from unittest.mock import patch
 
-import torch
-
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
+
+import torch
 from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -52,17 +52,17 @@ FP16_REDUCED_PRECISION = {"atol": 1e-5, "rtol": 1e-4}
 
 
 def rosenbrock(tensor):
-    assert tensor.size() == torch.Size(
-        [2]
-    ), f"Requires tensor with 2 scalars but got {tensor.size()}"
+    assert tensor.size() == torch.Size([2]), (
+        f"Requires tensor with 2 scalars but got {tensor.size()}"
+    )
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x**2) ** 2
 
 
 def drosenbrock(tensor):
-    assert tensor.size() == torch.Size(
-        [2]
-    ), f"Requires tensor with 2 scalars but got {tensor.size()}"
+    assert tensor.size() == torch.Size([2]), (
+        f"Requires tensor with 2 scalars but got {tensor.size()}"
+    )
     x, y = tensor
     return torch.stack((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 

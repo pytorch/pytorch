@@ -617,9 +617,9 @@ class CompiledOptimizerParityTests(TestCase):
                         param.grad = param.grad.to_sparse()
 
                 opt_compiled = optim_cls(
-                    model_compiled.parameters(), **deepcopy(kwargs)
+                    model_compiled.named_parameters(), **deepcopy(kwargs)
                 )
-                opt_eager = optim_cls(model_eager.parameters(), **deepcopy(kwargs))
+                opt_eager = optim_cls(model_eager.named_parameters(), **deepcopy(kwargs))
                 if scheduler_cls:
                     scheduler_compiled = create_scheduler(scheduler_cls, opt_compiled)
                     scheduler_eager = create_scheduler(scheduler_cls, opt_eager)
