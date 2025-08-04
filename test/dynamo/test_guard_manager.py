@@ -1008,6 +1008,12 @@ class TagSafetyChecks(RecursiveDictTagTests):
             from torch._dynamo.source import AttrSource, LocalSource
 
             foo_source = LocalSource("foo")
+            foo_mgr = builder.get_guard_manager_from_source(foo_source)
+            for accessor in foo_mgr.get_accessors():
+                if isinstance(accessor, GetAttrGuardAccessor):
+                    self.assertTrue(
+                        accessor.get_attr_name() in ("a", "b", "c", "d", "e")
+                    )
 
             # Check types of foo.a
             foo_a_source = AttrSource(foo_source, "a")

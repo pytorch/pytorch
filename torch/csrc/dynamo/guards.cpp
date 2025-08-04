@@ -4244,6 +4244,10 @@ class GetAttrGuardAccessor : public GuardAccessor {
         ")";
   }
 
+  std::string get_attr_name() {
+    return py::str(_attr_name).cast<std::string>();
+  }
+
  public: // cloning functions
   GetAttrGuardAccessor(GuardManager* guard_manager, GetAttrGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
@@ -6584,11 +6588,11 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardAccessor, std::unique_ptr<GuardAccessor>>(
       py_m, "GuardAccessor")
       .def("repr", &GuardAccessor::repr);
-  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       GetAttrGuardAccessor,
       GuardAccessor,
-      std::unique_ptr<GetAttrGuardAccessor>>(py_m, "GetAttrGuardAccessor");
+      std::unique_ptr<GetAttrGuardAccessor>>(py_m, "GetAttrGuardAccessor")
+      .def("get_attr_name", &GetAttrGuardAccessor::get_attr_name);
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       GenericGetAttrGuardAccessor,
