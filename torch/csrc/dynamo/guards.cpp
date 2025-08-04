@@ -2721,11 +2721,13 @@ class GuardManager {
       RootGuardManager* root,
       std::string source,
       bool is_dict,
-      bool is_immutable)
+      bool is_immutable,
+      py::object weak_type)
       : _root(root),
         _source(std::move(source)),
         _is_dict(is_dict),
-        _is_immutable(is_immutable) {}
+        _is_immutable(is_immutable),
+        _weak_type(weak_type) {}
 
   void clone_common(
       RootGuardManager* cloned_root,
@@ -2756,8 +2758,8 @@ class GuardManager {
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
     }
-    GuardManager* cloned_mgr =
-        new GuardManager(cloned_root, _source, _is_dict, _is_immutable);
+    GuardManager* cloned_mgr = new GuardManager(
+        cloned_root, _source, _is_dict, _is_immutable, _weak_type);
     if (is_tag_safe()) {
       cloned_mgr->mark_tag_safe();
       if (is_tag_safe_root()) {
@@ -3207,6 +3209,9 @@ class GuardManager {
   // False. This is used for sorting optimization.
   int64_t _fail_count{0};
 
+  // protected because it is used for cloning by DictGuardManager
+  py::object _weak_type; // weakref to the type of guarded value
+
  private:
   // Root of the guard manager, this is the used to install the relational
   // guard resetters.
@@ -3246,7 +3251,6 @@ class GuardManager {
   bool _is_immutable = false;
   uint64_t _dict_tag{0};
   uint64_t _max_saved_pointers_for_recursive_dict_tags_check = 0;
-  py::object _weak_type; // weakref to the type of guarded value
 
   // tag safe markers
   bool _is_tag_safe = false;
@@ -3256,6 +3260,11 @@ class GuardManager {
       _dict_pointers;
   std::unordered_map<PyObject*, std::vector<PyObject*>> _tensor_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
+
+ protected:
+  // weakref to the type of guarded value
+  // protected because it is used for cloning by DictGuardManager
+  py::object _weak_type;
 };
 
 GuardAccessor::GuardAccessor(
@@ -3827,12 +3836,14 @@ class DictGuardManager : public GuardManager {
       Py_ssize_t size,
       PyTypeObject* expected_type,
       bool is_exact_dict_type,
-      std::vector<Py_ssize_t> indices)
+      std::vector<Py_ssize_t> indices,
+      py::object weak_type)
       : GuardManager(
             cloned_root,
             std::move(source),
             true, // _is_dict
-            false), // _is_immutable
+            false, // _is_immutable
+            weak_type),
         _size(size),
         _expected_type(expected_type),
         _is_exact_dict_type(is_exact_dict_type),
@@ -3851,7 +3862,8 @@ class DictGuardManager : public GuardManager {
         _size,
         _expected_type,
         _is_exact_dict_type,
-        _indices);
+        _indices,
+        _weak_type);
     if (is_tag_safe()) {
       cloned_mgr->mark_tag_safe();
       if (is_tag_safe_root()) {
