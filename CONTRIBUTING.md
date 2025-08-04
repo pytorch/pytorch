@@ -119,7 +119,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 * If you run into errors when running `python -m pip install -e . -v --no-build-isolation`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
-  2. Nuke your `build` directory. The `python -m pip install --no-build-isolation -v -e .` build step compiles binaries into the `build` folder and caches many
+  2. Nuke your `build` directory. The build process compiles binaries into the `build` folder and caches many
   details along the way, which saves time the next time you build. If you're running into issues, you can always
   `rm -rf build` from the toplevel `pytorch` directory and start over.
   3. If you have made edits to the PyTorch repo, commit any change you'd like to keep and clean the repo with the
@@ -248,7 +248,7 @@ dependencies as well as the nightly binaries into the repo directory.
   frontend module structure.
   * [csrc](torch/csrc) - C++ files composing the PyTorch library. Files
     in this directory tree are a mix of Python binding code, and C++
-    heavy lifting. Consult `CMakeLists.txt` for the canonical list of Python
+    heavy lifting. Consult `setup.py` or `pyproject.toml` for the canonical list of Python
     binding files; conventionally, they are often prefixed with
     `python_`. [README](torch/csrc/README.md)
     * [jit](torch/csrc/jit) - Compiler and frontend for TorchScript JIT
@@ -1260,7 +1260,7 @@ are Caffe2/PyTorch specific. Here they are:
   `scripts` are Caffe2-specific. Don't put PyTorch code in them without
   extra coordination.
 
-- `mypy*`, `requirements.txt`, `pyproject.toml`, `test`, `tools` are
+- `mypy*`, `requirements.txt`, `setup.py`, `pyproject.toml`, `test`, `tools` are
   PyTorch-specific. Don't put Caffe2 code in them without extra
   coordination.
 
