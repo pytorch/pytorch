@@ -809,6 +809,7 @@
     CPU, Meta: arange_out
     CUDA: arange_cuda_out
     MPS: arange_mps_out
+    MTIA: arange_mtia_out
   cpp_no_default_args: ['step']
 
 # This function is a temporary hack to allow tracing of arange like constructs with dynamic

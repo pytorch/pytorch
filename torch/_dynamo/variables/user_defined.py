@@ -138,6 +138,14 @@ def is_forbidden_context_manager(ctx):
     return ctx in f_ctxs
 
 
+def is_cython_function(obj):
+    return (
+        callable(obj)
+        and hasattr(type(obj), "__name__")
+        and type(obj).__name__ == "cython_function_or_method"
+    )
+
+
 class UserDefinedVariable(VariableTracker):
     value: object
 
@@ -1536,9 +1544,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source = self._wrap_source(source)
 
         if subobj is not NO_SUCH_SUBOBJ:
-            if is_wrapper_or_member_descriptor(
-                subobj
-            ) or torch._C._dynamo.utils.is_instancemethod(subobj):
+            if (
+                is_wrapper_or_member_descriptor(subobj)
+                or torch._C._dynamo.utils.is_instancemethod(subobj)
+                or is_cython_function(subobj)
+            ):
                 options = {"source": source}
                 return variables.GetAttrVariable(self, name, **options)
             if source:
