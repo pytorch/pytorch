@@ -12500,24 +12500,28 @@
   dispatch:
     CPU: max_unpooling2d_forward_out_cpu
     CUDA: max_unpooling2d_forward_out_cuda
+    MPS: max_unpooling2d_forward_out_mps
 
 - func: max_unpool2d(Tensor self, Tensor indices, SymInt[2] output_size) -> Tensor
   python_module: nn
   dispatch:
     CPU: max_unpooling2d_forward_cpu
     CUDA: max_unpooling2d_forward_cuda
+    MPS: max_unpooling2d_forward_mps
 
 - func: max_unpool3d.out(Tensor self, Tensor indices, SymInt[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_forward_out_cpu
     CUDA: max_unpooling3d_forward_out_cuda
+    MPS: max_unpooling3d_forward_out_mps
 
 - func: max_unpool3d(Tensor self, Tensor indices, SymInt[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_forward_cpu
     CUDA: max_unpooling3d_forward_cuda
+    MPS: max_unpooling3d_forward_mps
 
 - func: reflection_pad1d.out(Tensor self, SymInt[2] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
