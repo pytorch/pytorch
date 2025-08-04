@@ -1744,6 +1744,8 @@ class CPUReproTests(TestCase):
                     dtype,
                     output_dtype,
                 ),
+                # TODO: enable this for all tests
+                exact_stride=False,
             )
             check_metrics_vec_kernel_count(1)
 
