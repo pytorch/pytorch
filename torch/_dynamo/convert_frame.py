@@ -1217,6 +1217,7 @@ def _compile(
                     BisectValidationException,
                     ShortenTraceback,
                     PackageError,
+                    ResumePrologueTracingError,
                 ),
             ):
                 raise
