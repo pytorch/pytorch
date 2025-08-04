@@ -34,7 +34,6 @@ class TestMemTracker(TestCase):
     @unittest.skipIf(
         not TEST_CUDA and not TEST_XPU, "Neither CUDA or XPU is not available"
     )
-
     @skipIfRocm()
     def test_accelerator_tracker_equivalence(
         self,
@@ -86,7 +85,7 @@ class TestMemTracker(TestCase):
         self.assertAlmostEqual(accuracy, 1.0, delta=0.1)
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Neither CUDA or XPU is not available")
     def test_tracker_with_activation_checkpointing(
         self,
     ):
