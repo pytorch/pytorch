@@ -1332,6 +1332,8 @@ class TestInductorOpInfo(TestCase):
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                # TODO: Default to True
+                                exact_stride=False,
                             )
                         else:
                             self.check_model(
@@ -1339,6 +1341,8 @@ class TestInductorOpInfo(TestCase):
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                # TODO: Default to True
+                                exact_stride=False,
                             )
 
         except Exception as e:
