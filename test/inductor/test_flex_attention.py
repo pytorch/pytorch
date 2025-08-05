@@ -1582,6 +1582,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
     def test_skip_odd_keys(self, device, dtype: torch.dtype):
         def score_mod(score, b, h, q, kv):
@@ -1608,6 +1609,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
     def test_captured_buffers_all_dims(self, device, dtype: torch.dtype):
         head_scale = torch.randn(H, device=device)
@@ -1650,6 +1652,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     def test_load_from_bias_seq_batch(self, device, dtype):
         bias = torch.randn(B, S, S, device=device, dtype=dtype)
@@ -1709,6 +1712,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, device, dtype):
         bias = torch.randn(B, H, S, S, device=device, dtype=dtype)
@@ -1733,6 +1737,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     def test_dependent_causal_bidirectional(self, device, dtype):
         num_bidirectional = torch.randint(0, S, (B,), device=device, dtype=torch.int32)
@@ -1832,6 +1837,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     def test_padded_dense_causal(self, device, dtype):
         seq_len = torch.arange(B, device=device, dtype=torch.int32) + 1
@@ -1850,6 +1856,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     def test_captured_scale(self, device, dtype):
         scale = torch.ones((), device=device, dtype=torch.int32)
@@ -1883,6 +1890,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @expectedFailure  # If we capture a tensor then we can perform a reduction on it, and that shouldn't be allowed
     @skip_on_cpu
+    @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     def test_captured_reduction(self, device, dtype):
         scale = torch.randn((B, 8), device=device)
@@ -2346,6 +2354,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
     def test_njt_causal(self, device, dtype):
         offsets = torch.tensor(
@@ -2502,6 +2511,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @skip_on_cpu
+    @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(_rel_bias, dtype, device, B, H, S, head_dim, B, H, S, head_dim)
@@ -2566,6 +2576,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
     def test_logsumexp_correctness(self, device, dtype, score_mod):
