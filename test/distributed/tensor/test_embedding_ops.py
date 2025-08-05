@@ -13,7 +13,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     with_comms,
 )
 
@@ -29,7 +29,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 funcol = torch.ops.c10d_functional
 
 
-class TestEmbeddingOp(DTensorTestBase):
+class TestEmbeddingOp(DTensorContinuousTestBase):
     def _apply_sharding(self, embedding_mod, shard_dim, device_mesh):
         def shard_embedding_fn(name, module, device_mesh):
             for name, param in module.named_parameters():
@@ -136,8 +136,6 @@ class TestEmbeddingOp(DTensorTestBase):
             **kwargs,
         )
         self.assertEqual(local_output, sharded_output.full_tensor())
-
-    @with_comms
     def test_sharded_embedding_colwise(self):
         mesh = self.build_device_mesh()
         self._run_embedding_op_test(mesh, 1, [5, 4], 17, 12)
@@ -147,8 +145,6 @@ class TestEmbeddingOp(DTensorTestBase):
         self._run_embedding_op_test(mesh, 1, [4], 15, 14)
         self._run_embedding_op_test(mesh, 1, [34], 15, 14, padding_idx=10)
         self._run_embedding_op_test(mesh, 1, [8, 6, 5, 4], 23, 13, padding_idx=12)
-
-    @with_comms
     def test_sharded_embedding_colwise_max_norm_errors(self):
         mesh = self.build_device_mesh()
         with self.assertRaisesRegex(
@@ -158,8 +154,6 @@ class TestEmbeddingOp(DTensorTestBase):
             self._run_embedding_op_test(
                 mesh, 1, [8, 6, 5, 4], 23, 13, padding_idx=12, max_norm=2.0
             )
-
-    @with_comms
     def test_sharded_embedding_rowwise(self):
         mesh = self.build_device_mesh()
         # test correctness
@@ -183,8 +177,6 @@ class TestEmbeddingOp(DTensorTestBase):
             output.full_tensor()
             self.assertEqual(comm_mode.get_total_counts(), 1)
             self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
-
-    @with_comms
     def test_multiple_embeddings_rowwise(self):
         mesh = self.build_device_mesh()
 

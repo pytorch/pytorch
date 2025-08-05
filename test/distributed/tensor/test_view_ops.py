@@ -28,16 +28,14 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import Placement
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     with_comms,
 )
 from torch.utils import _pytree as pytree
 
 
-class TestViewOps(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        return 6
+class TestViewOps(DTensorContinuousTestBase):
+    world_size = 6
 
     def test_view_groups(self):
         self.assertEqual(
@@ -188,8 +186,6 @@ class TestViewOps(DTensorTestBase):
         rules = dim_maps[op](*args)
         self.assertEqual(rules, expected_rule_output)
         self.call_dt_test(op, args, {}, self.device_mesh)
-
-    @with_comms
     def test_illegal_views(self):
         device_mesh = self.build_device_mesh()
         # 1D mesh [6] (see above)
@@ -213,8 +209,6 @@ class TestViewOps(DTensorTestBase):
             RuntimeError, "Attempted to flatten unevenly sharded dimension"
         ):
             shard.view(-1)
-
-    @with_comms
     def test_view_ops(self):
         self.device_mesh = DeviceMesh(
             self.device_type, torch.arange(dist.get_world_size()).view(-1, 2)
@@ -511,7 +505,6 @@ class TestViewOps(DTensorTestBase):
     #         Split(InputDim(1), (13, 2), 1),
     #     ),
     # )
-    @with_comms
     def test_complex_view_ops(self):
         self.device_mesh = DeviceMesh(
             self.device_type, torch.arange(dist.get_world_size()).view(-1, 2)
@@ -555,8 +548,6 @@ class TestViewOps(DTensorTestBase):
                 comm_mode.get_total_counts(), 0, "Expected no redistribution."
             )
             self.assertEqual(out, out_dt.full_tensor())
-
-    @with_comms
     def test_dtensor_view_op_uneven(self):
         """
         When the sharded dimension is unchanged, the view op should not trigger any communication.
@@ -598,8 +589,6 @@ class TestViewOps(DTensorTestBase):
                     view.to_local().data_ptr(), dtensor.to_local().data_ptr()
                 )
                 self.assertEqual(len(comm_mode.get_comm_counts()), 0)
-
-    @with_comms
     def test_view_redistribution(self):
         """
         This test is added to demonstrate "incorrect" view ops behavior if redistribution happens.

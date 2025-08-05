@@ -7,7 +7,7 @@ import torch.distributed as dist
 from torch.distributed.tensor import distribute_tensor, Replicate
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     with_comms,
 )
 
@@ -16,13 +16,11 @@ ITER_TIME = 10
 LR = 0.001
 
 
-class DistOtherOpsTest(DTensorTestBase):
+class DistOtherOpsTest(DTensorContinuousTestBase):
     @property
     def world_size(self) -> int:
         # hard code world size to 2
         return 2
-
-    @with_comms
     def test_slice(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Replicate()]
@@ -72,8 +70,6 @@ class DistOtherOpsTest(DTensorTestBase):
                 grad_mse_rel <= 1e-6,
                 f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
-
-    @with_comms
     def test_bernoulli(self):
         rank = dist.get_rank()
         device_mesh = self.build_device_mesh()
@@ -135,8 +131,6 @@ class DistOtherOpsTest(DTensorTestBase):
                 grad_mse_rel <= 1e-6,
                 f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
-
-    @with_comms
     def test_nll(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Replicate()]

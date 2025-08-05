@@ -9,13 +9,13 @@ from torch.distributed.tensor.parallel.style import ColwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     MLPModule,
     with_comms,
 )
 
 
-class TensorParallelRandomStateTests(DTensorTestBase):
+class TensorParallelRandomStateTests(DTensorContinuousTestBase):
     def get_tensor_slice(self, idx, n, large_tensor):
         shape = large_tensor.shape
         assert shape[0] % n == 0
@@ -34,8 +34,6 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                     self.get_tensor_slice(self_rank, size, gathered_tensors),
                     self.get_tensor_slice(other_rank, size, gathered_tensors),
                 )
-
-    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_model_init(self):
         dp_size = 2

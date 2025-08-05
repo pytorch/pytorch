@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (
     TEST_HPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     MLPModule,
     with_comms,
 )
@@ -107,9 +107,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def device_type(self) -> str:
         return "cuda" if TEST_CUDA else "hpu" if TEST_HPU else "cpu"
 
-    @property
-    def world_size(self) -> int:
-        return 2
+    world_size = 2
 
     def test_dtensor_basic(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -913,10 +911,8 @@ def forward(self, primals_1):
 
 
 @instantiate_parametrized_tests
-class TestDTensorCompileE2E(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
+class TestDTensorCompileE2E(DTensorContinuousTestBase):
+    world_size = 4
 
     # multiprocess relies on pickling the source code
     # so compiled autograd tests can't dynamically wrap this class
@@ -924,8 +920,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
         if not use_ca:
             return contextlib.nullcontext()
         return torch._dynamo.compiled_autograd._enable(torch.compile)
-
-    @with_comms
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("use_ca", [True, False])
     def test_tp_compile_fullgraph(self, is_seq_parallel, use_ca):
@@ -986,8 +980,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
             compiled_out.sum().backward()
         self.assertEqual(compiled_out, out)
         self.assertEqual(cnt.frame_count, 1)
-
-    @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
     def test_2d_fsdp_tp_compile(self, use_ca):
@@ -1038,8 +1030,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         self.assertEqual(out, compiled_output)
         self.assertEqual(cnt.frame_count, 1)
-
-    @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
     def test_2d_fsdp_tp_ac_compile(self, use_ca):
@@ -1093,8 +1083,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
         # compare the gradients:
         for n, p in zip(fsdp_2d.parameters(), compiled_2d.parameters()):
             self.assertEqual(n.grad, p.grad)
-
-    @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
     def test_compile_dtensor_redistribute_backward(self, use_ca):

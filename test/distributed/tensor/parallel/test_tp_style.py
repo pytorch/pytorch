@@ -19,7 +19,7 @@ from torch.distributed.tensor.parallel.style import (
 from torch.distributed.tensor.placement_types import _Partial
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     NUM_DEVICES,
     RMSNormPython,
     with_comms,
@@ -29,12 +29,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 c10d_functional = torch.ops.c10d_functional
 
 
-class TensorParallelStyleTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return NUM_DEVICES
-
-    @with_comms
+class TensorParallelStyleTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
     def test_colwise_parallel_style(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
@@ -74,8 +70,6 @@ class TensorParallelStyleTest(DTensorTestBase):
                 comm_mode.get_comm_counts()[c10d_functional.reduce_scatter_tensor], 1
             )
             self.assertEqual(comm_mode.get_total_counts(), 2)
-
-    @with_comms
     def test_colwise_parallel_embedding(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
@@ -95,8 +89,6 @@ class TensorParallelStyleTest(DTensorTestBase):
             out.sum().backward()
             # no comm in bwd
             self.assertEqual(comm_mode.get_total_counts(), 0)
-
-    @with_comms
     def test_rowwise_parallel_style(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
@@ -138,8 +130,6 @@ class TensorParallelStyleTest(DTensorTestBase):
                 comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1
             )
             self.assertEqual(comm_mode.get_total_counts(), 2)
-
-    @with_comms
     def test_rowwise_parallel_embedding(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
@@ -184,8 +174,6 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(
                 comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1
             )
-
-    @with_comms
     def test_prepare_module_input(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
@@ -199,8 +187,6 @@ class TensorParallelStyleTest(DTensorTestBase):
         allgather_mod = parallelize_module(model, mesh, prepare_inp_style)
         output = allgather_mod(tensor).full_tensor()
         self.assertEqual(output, expected_tensor)
-
-    @with_comms
     def test_prepare_module_input_multiple_inputs(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
@@ -251,8 +237,6 @@ class TensorParallelStyleTest(DTensorTestBase):
             ),
         )
         self.assertEqual(output.shape, (self.world_size * 2, 8 // self.world_size))
-
-    @with_comms
     def test_prepare_module_kwargs_input(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
@@ -322,8 +306,6 @@ class TensorParallelStyleTest(DTensorTestBase):
 
         self.assertEqual(comm_mode.get_total_counts(), 2)
         self.assertEqual(output.shape, (1 * self.world_size, 8))
-
-    @with_comms
     def test_prepare_module_output(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
@@ -337,8 +319,6 @@ class TensorParallelStyleTest(DTensorTestBase):
         chunk_mod = parallelize_module(model, mesh, prepare_out_style)
         output = chunk_mod(tensor)
         self.assertEqual(output, expected_tensor)
-
-    @with_comms
     def test_sequence_parallel_style(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         # early init RNG tracker

@@ -26,14 +26,14 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     skip_if_lt_x_gpu,
     skip_unless_torch_gpu,
     with_comms,
 )
 
 
-class DistTensorRandomInitTest(DTensorTestBase):
+class DistTensorRandomInitTest(DTensorContinuousTestBase):
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -70,8 +70,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
                     )
                     # other rank should have a different local tensor
                     self.assertNotEqual(dtensor.full_tensor()[slice_idx], local_tensor)
-
-    @with_comms
     def test_init_ops(self):
         self._run_init_op(
             torch.nn.init.kaiming_uniform_,
@@ -86,8 +84,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self._run_init_op(torch.rand_like, dtype=dtype)
             self._run_init_op(torch.randn_like, dtype=dtype)
             self._run_init_op(torch.randint_like, low=0, high=100, dtype=dtype)
-
-    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_meta_tensor_init(self):
         # test suite sets each rank's seed to the same value but in actual
@@ -152,8 +148,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
                 self.assertNotEqual(
                     local_tensor[self_slice, :], local_tensor[other_slice, :]
                 )
-
-    @with_comms
     @skip_unless_torch_gpu
     def test_tp_model_meta_init(self):
         # initialize the 1-d device mesh for TP
@@ -199,8 +193,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
                     weight_local,
                     weight_gather[other_rank : other_rank + 1, :],
                 )
-
-    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_fsdp_tp_model_meta_init(self):
         # initialize the 2-d device mesh
@@ -254,8 +246,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
                 )
 
 
-class DistTensorRandomOpTest(DTensorTestBase):
-    @with_comms
+class DistTensorRandomOpTest(DTensorContinuousTestBase):
     @skip_unless_torch_gpu
     def test_rng_tracker_init(self):
         torch.manual_seed(self.rank)
@@ -276,8 +267,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
         # random op call
         dt.uniform_(0, 1)
         self.assertEqual(seed_from_rank_0, random._rng_tracker.get_seed("parallel-rng"))
-
-    @with_comms
     @skip_unless_torch_gpu
     def test_manual_seed(self):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -301,8 +290,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
             self.assertEqual(1234, random._rng_tracker.get_seed("parallel-rng"))
 
         self.assertEqual(comm_mode.get_total_counts(), 0)
-
-    @with_comms
     @skip_unless_torch_gpu
     def test_manual_seed_submesh(self):
         # the current rank is not a part of the mesh
@@ -314,8 +301,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
             "manual_seed requires the current rank to be a part of the device mesh",
         ):
             manual_seed(self.rank, single_rank_device_mesh)
-
-    @with_comms
     @skip_unless_torch_gpu
     def test_pipeline_parallel_manual_seed(self):
         # This test is to verify the `manual_seed` API works as expected in the
@@ -355,8 +340,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     spmd_dtensor.to_local(),
                     tensor_gather[2 * other_rank : 2 * (other_rank + 1), :],
                 )
-
-    @with_comms
     @skip_unless_torch_gpu
     def test_deterministic_dropout_1d(self):
         # test suite sets each rank's seed to the same value but in actual
@@ -396,8 +379,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     local_tensor[self_slice, :],
                     local_tensor[other_slice, :],
                 )
-
-    @with_comms
     @skip_unless_torch_gpu
     def test_deterministic_rand_1d(self):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -439,8 +420,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
                         local_tensor[self_slice, :],
                         local_tensor[other_slice, :],
                     )
-
-    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_deterministic_uniform_2d(self):
         mesh = torch.arange(self.world_size).reshape(2, 2)
@@ -545,12 +524,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     self.assertNotEqual(full_tensor[tuple(slice_idx)], local_tensor)
 
 
-class DistTensorRandomOpsTest3D(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 8
-
-    @with_comms
+class DistTensorRandomOpsTest3D(DTensorContinuousTestBase):
+    world_size = 8
     @skip_if_lt_x_gpu(8)
     def test_hsdp_tp_model_meta_init(self):
         # initialize the 3-d device mesh

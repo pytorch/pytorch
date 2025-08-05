@@ -16,7 +16,7 @@ from torch.distributed.tensor import (
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -40,13 +40,11 @@ def _conv_fn(
         module.register_parameter(name, dist_param)
 
 
-class DistConvolutionOpsTest(DTensorTestBase):
+class DistConvolutionOpsTest(DTensorContinuousTestBase):
     @property
     def world_size(self) -> int:
         # hard code world size to 2
         return 2
-
-    @with_comms
     def test_downsampling_convolution(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(3)]
@@ -115,7 +113,6 @@ class DistConvolutionOpsTest(DTensorTestBase):
 
     # TODO: test_depthwise_convolution is broken in CI with gloo backend.
     # Temporarily disable it to unblock CI.
-    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_depthwise_convolution(self):
         device_mesh = self.build_device_mesh()
@@ -182,8 +179,6 @@ class DistConvolutionOpsTest(DTensorTestBase):
             bias_mse_rel <= 1e-6,
             f"Too large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
         )
-
-    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_conv_backward_none_grad_inp(self):
         device_mesh = self.build_device_mesh()

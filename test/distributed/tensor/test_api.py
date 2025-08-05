@@ -14,7 +14,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     with_comms,
 )
 
@@ -37,12 +37,8 @@ class MyModel(nn.Module):
 c10d_ops = torch.ops.c10d
 
 
-class DTensorAPITest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        # hard code world size to 4 as we need to test
-        # at least with 2d mesh
-        return 4
+class DTensorAPITest(DTensorContinuousTestBase):
+    world_size = 4  # hard code world size to 4 as we need to test at least with 2d mesh
 
     @with_comms
     def test_distribute_tensor_rank(self):
