@@ -26,6 +26,7 @@ from torch.optim.lr_scheduler import (
     MultiplicativeLR,
     MultiStepLR,
     OneCycleLR,
+    ParamwiseScheduler,
     PolynomialLR,
     ReduceLROnPlateau,
     SequentialLR,
@@ -871,6 +872,190 @@ class TestLRScheduler(TestCase):
         scheduler = ChainedScheduler(schedulers)
         self._test(scheduler, targets, epochs)
         self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
+
+    def test_paramwise_init_errors(self):
+        """Test initialization raises errors for invalid configurations."""
+        # Case 1: Mismatched number of schedulers (1) and param_groups (2)
+        with self.assertRaisesRegex(ValueError, "Number of schedulers must match"):
+            schedulers = [StepLR(self.opt, step_size=1)]
+            ParamwiseScheduler(schedulers)
+
+        # Case 2: Schedulers attached to different optimizers
+        with self.assertRaisesRegex(
+            ValueError, "All schedulers must use the same optimizer"
+        ):
+            optimizer2 = SGD(self.net.parameters(), lr=0.1)
+            schedulers = [
+                StepLR(self.opt, step_size=1),
+                StepLR(optimizer2, step_size=1),
+            ]
+            ParamwiseScheduler(schedulers)
+
+    def test_paramwise_state_dict_resumption(self):
+        """Test if the scheduler can be resumed from a state_dict."""
+        schedulers1 = [
+            StepLR(self.opt, step_size=3, gamma=0.1),
+            ExponentialLR(self.opt, gamma=0.9),
+        ]
+        scheduler1 = ParamwiseScheduler(schedulers1)
+        for _ in range(3):
+            scheduler1.step()
+
+        state_dict = scheduler1.state_dict()
+        last_lrs1 = scheduler1.get_last_lr()
+
+        opt_old = self.opt
+
+        # Create a new, identical setup and load state
+        self.setUp()  # Re-initialize optimizer and model
+        schedulers2 = [
+            StepLR(self.opt, step_size=3, gamma=0.1),
+            ExponentialLR(self.opt, gamma=0.9),
+        ]
+        scheduler2 = ParamwiseScheduler(schedulers2)
+        scheduler2.load_state_dict(state_dict)
+
+        self.opt.load_state_dict(opt_old.state_dict())
+
+        self.assertEqual(last_lrs1, scheduler2.get_last_lr())
+        for epoch in range(5):
+            scheduler1.step()
+            scheduler2.step()
+            self.assertEqual(
+                scheduler1.get_last_lr(),
+                scheduler2.get_last_lr(),
+                msg="LR is wrong in epoch {}: expected {}, got {}".format(
+                        epoch, scheduler1.get_last_lr(), scheduler2.get_last_lr()
+                    ),
+            )
+
+    def test_get_last_lr_paramwise(self):
+        """Test that get_last_lr() returns the correct LRs before and after step."""
+        schedulers = [
+            StepLR(self.opt, step_size=2, gamma=0.1),
+            ExponentialLR(self.opt, gamma=0.9),
+        ]
+        scheduler = ParamwiseScheduler(schedulers)
+
+        self.assertEqual(scheduler.get_last_lr(), [0.05, 0.5])
+        scheduler.step()
+        expected_lrs = [0.05, 0.5 * 0.9]  # 0.45
+        self.assertEqual(scheduler.get_last_lr(), expected_lrs)
+        self.assertEqual([g["lr"] for g in self.opt.param_groups], expected_lrs)
+
+    def test_paramwise_lr1(self):
+        """Test with a combination of simple schedulers: StepLR, ExpLR."""
+        epochs = 5
+        schedulers = [
+            StepLR(self.opt, step_size=3, gamma=0.1),  # Group 0
+            ExponentialLR(self.opt, gamma=0.9),  # Group 1
+        ]
+        scheduler = ParamwiseScheduler(schedulers)
+
+        # Expected LRs for 2 groups over 5 epochs
+        targets = [
+            [0.05, 0.05, 0.05, 0.005, 0.005],  # StepLR (initial=0.05)
+            [0.5, 0.45, 0.405, 0.3645, 0.32805],  # ExpLR (initial=0.5)
+        ]
+        self._test(scheduler, targets, epochs)
+
+    def test_paramwise_lr2(self):
+        """Test with a complex SequentialLR as one of the sub-schedulers."""
+        epochs = 5
+
+        seq_scheduler = SequentialLR(
+            self.opt,
+            schedulers=[
+                LinearLR(self.opt, start_factor=0.1, end_factor=1.0, total_iters=3),
+                StepLR(self.opt, step_size=1, gamma=0.1),
+            ],
+            milestones=[4],
+        )
+
+        schedulers = [
+            ExponentialLR(self.opt, gamma=0.95),  # Group 0
+            seq_scheduler,  # Group 1
+        ]
+        scheduler = ParamwiseScheduler(schedulers)
+
+        # Expected LRs for 2 groups over 5 epochs
+        targets = [
+            # Group 0: ExpLR (initial=0.05, gamma=0.95)
+            [0.05, 0.0475, 0.045125, 0.04286875, 0.0407253125],
+            # Group 1: SequentialLR (initial=0.5) -> Linear for 3, then Step
+            # Linear Phase (on 0.5): 0.5*0.4=0.2, 0.5*0.7=0.35, 0.5*1.0=0.5
+            # Step Phase (on 0.5): 0.5, 0.5*0.1=0.05
+            [0.05, 0.2, 0.35, 0.5, 0.05],
+        ]
+        self._test(scheduler, targets, epochs)
+
+    def test_paramwise_lr3(self):
+        """Test more complex model with a combination of several schedulers    This test requires a 3-group optimizer, so it creates its own locally."""
+
+        class DummyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(10, 10)
+                self.linear2 = torch.nn.Linear(10, 1)
+                self.linear3 = torch.nn.Linear(1, 1)
+
+        model = DummyModel()
+        optimizer = SGD(
+            [
+                {"params": model.linear1.parameters(), "lr": 0.1},
+                {"params": model.linear2.parameters(), "lr": 0.1},
+                {"params": model.linear3.parameters(), "lr": 0.1},
+            ]
+        )
+
+        scheduler1 = StepLR(optimizer, step_size=2, gamma=0.5)
+        scheduler2 = SequentialLR(
+            optimizer,
+            schedulers=[
+                LinearLR(optimizer, start_factor=1 / 3, end_factor=1.0, total_iters=3),
+                ConstantLR(optimizer, factor=1.0, total_iters=2),
+                StepLR(optimizer, step_size=2, gamma=0.1),
+            ],
+            milestones=[4, 6],
+        )
+        scheduler3 = ExponentialLR(optimizer, gamma=0.9)
+        paramwise_scheduler = ParamwiseScheduler([scheduler1, scheduler2, scheduler3])
+
+        # We must use the local optimizer for this test's helper call.
+        original_opt = self.opt
+        self.opt = optimizer
+
+        targets = [
+            [0.1, 0.1, 0.05, 0.05, 0.025, 0.025, 0.0125, 0.0125, 0.00625, 0.00625],
+            [
+                0.1 * (1 / 3),
+                0.1 * (1 / 3 + (1 - 1 / 3) * 1 / 3),
+                0.1 * (1 / 3 + (1 - 1 / 3) * 2 / 3),
+                0.1,
+                0.1,
+                0.1,
+                0.1,
+                0.01,
+                0.01,
+                0.001,
+            ],
+            [
+                0.1,
+                0.09,
+                0.081,
+                0.0729,
+                0.06561,
+                0.059049,
+                0.0531441,
+                0.04782969,
+                0.043046721,
+                0.0387420489,
+            ],
+        ]
+        self._test(paramwise_scheduler, targets, 10)
+
+        # Restore the original optimizer for other tests
+        self.opt = original_opt
 
     def test_compound_step_and_multistep_lr(self):
         epochs = 10
