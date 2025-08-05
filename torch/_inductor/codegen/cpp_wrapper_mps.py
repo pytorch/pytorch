@@ -154,6 +154,8 @@ class CppWrapperMps(CppWrapperGpu):
         for line in self.lines:
             if not isinstance(line, KernelCallLine):
                 continue
+            if line.device.type != "mps":
+                continue
 
             # Only add handle definition once
             if line.kernel_name not in self._used_kernel_names:
