@@ -1,12 +1,10 @@
 name: vllm
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
     tags:
-      - ciflow/vllm/*
+       ciflow/vllm/*
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
