@@ -7643,13 +7643,6 @@ def add_test(test, decorator=None):
         else:
             add(cuda_test_name, with_tf32_off)
 
-if __name__ == '__main__':
-    from torch.testing._internal.common_utils import parse_cmd_line_args
-
-    # The value of the SEED depends on command line arguments so make sure they're parsed
-    # before instantiating tests because some modules as part of get_new_module_tests() will call torch.randn
-    parse_cmd_line_args()
-
 for test_params in module_tests + get_new_module_tests():
     # TODO: CUDA is not implemented yet
     if 'constructor' not in test_params:
