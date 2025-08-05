@@ -319,7 +319,7 @@ def get_promoted_dtype(
     return dtype
 
 
-def get_overloads(aten_fn: Union[list[Any], tuple[Any], Any]) -> list[Any]:
+def get_overloads(aten_fn):
     if not isinstance(aten_fn, (list, tuple)):
         aten_fn = [aten_fn]
     else:
@@ -448,7 +448,7 @@ def transform_args(
 
 
 def _register_foreach_lowering(
-    aten_fn: torch._ops.OpOverloadPacket, decomp_fn: Callable[..., Any]
+    aten_fn: torch._ops.OpOverload, decomp_fn: Callable[..., Any]
 ) -> Callable[..., Any]:
     """
     Add a foreach lowering to lowerings dict.
@@ -476,11 +476,11 @@ def _register_foreach_lowering(
 
 def _register_lowering(
     aten_fn,
-    decomp_fn,
-    broadcast,
+    decomp_fn: Callable[..., Any],
+    broadcast: bool,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
-    convert_input_to_bool,
-    lowering_dict,
+    convert_input_to_bool: bool,
+    lowering_dict: dict[torch._ops.OpOverload, Callable[..., Any]],
 ):
     """
     Add a lowering to lowerings dict
