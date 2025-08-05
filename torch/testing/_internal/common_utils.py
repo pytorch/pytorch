@@ -1647,7 +1647,6 @@ if TEST_WITH_TORCHDYNAMO:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
 
-
 # seems like this is only used in test/torch_np
 def xpassIfTorchDynamo_np(func):
     # numpy 2.0+ is causing issues
