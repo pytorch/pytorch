@@ -735,7 +735,7 @@ def process_env_var_string_for_windows(env_var_str: str) -> str:
     On Linux, it shows as:
         declare -x SSH_TTY="/dev/pts/0"
         declare -x TERM="xterm"
-        declare -x TORCH_LOGS="not_an_existing_log_artifact_should_error"
+        declare -x TORCH_LOGS="+schedule,+inductor,+output_code"
         declare -x USER="xu"
 
     On Windows, it shows as:
