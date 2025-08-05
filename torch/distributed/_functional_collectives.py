@@ -815,10 +815,6 @@ def _are_we_tracing() -> bool:
     # If fake mode is turned on, we are almost definitely compiling/tracing.
     if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is not None:
         return True
-
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_initial_trace:
-        return True
-
     return get_proxy_mode() is not None
 
 
