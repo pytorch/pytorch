@@ -29,41 +29,72 @@ def is_available() -> bool:
 if is_available() and not torch._C._c10d_init():
     raise RuntimeError("Failed to initialize torch.distributed")
 
-# Custom Runtime Errors thrown from the distributed package
-DistError = torch._C._DistError
-DistBackendError = torch._C._DistBackendError
-DistNetworkError = torch._C._DistNetworkError
-DistStoreError = torch._C._DistStoreError
-QueueEmptyError = torch._C._DistQueueEmptyError
+# Import from _distributed_c10d module which handles distributed availability internally
+from torch.distributed._distributed_c10d import (
+    _Backend,
+    _broadcast_coalesced,
+    _compute_bucket_assignment_by_size,
+    _ControlCollectives,
+    _DEFAULT_FIRST_BUCKET_BYTES,
+    _make_nccl_premul_sum,
+    _register_builtin_comm_hook,
+    _register_comm_hook,
+    _StoreCollectives,
+    _test_python_store,
+    _verify_params_across_processes,
+    _Work,
+    Backend,
+    BuiltinCommHookType,
+    DebugLevel,
+    FileStore,
+    get_debug_level,
+    GradBucket,
+    HAS_DISTRIBUTED,
+    Logger,
+    PrefixStore,
+    ProcessGroup,
+    ReduceOp,
+    Reducer,
+    set_debug_level,
+    set_debug_level_from_env,
+    Store,
+    TCPStore,
+)
 
-if is_available():
-    from torch._C._distributed_c10d import (
-        _broadcast_coalesced,
-        _compute_bucket_assignment_by_size,
-        _ControlCollectives,
-        _DEFAULT_FIRST_BUCKET_BYTES,
-        _make_nccl_premul_sum,
-        _register_builtin_comm_hook,
-        _register_comm_hook,
-        _StoreCollectives,
-        _test_python_store,
-        _verify_params_across_processes,
-        Backend as _Backend,
-        BuiltinCommHookType,
-        DebugLevel,
-        FileStore,
-        get_debug_level,
-        GradBucket,
-        Logger,
-        PrefixStore,
-        ProcessGroup as ProcessGroup,
-        Reducer,
-        set_debug_level,
-        set_debug_level_from_env,
-        Store,
-        TCPStore,
-        Work as _Work,
-    )
+
+# Create Work alias for backward compatibility
+Work = _Work
+
+# Import platform-specific components
+if sys.platform != "win32":
+    from torch.distributed._distributed_c10d import HashStore
+
+# Custom Runtime Errors thrown from the distributed package
+if HAS_DISTRIBUTED:
+    DistError = torch._C._DistError
+    DistBackendError = torch._C._DistBackendError
+    DistNetworkError = torch._C._DistNetworkError
+    DistStoreError = torch._C._DistStoreError
+    QueueEmptyError = torch._C._DistQueueEmptyError
+else:
+    # Fallback for non-distributed builds
+    class DistError(Exception):
+        pass
+
+    class DistBackendError(Exception):
+        pass
+
+    class DistNetworkError(Exception):
+        pass
+
+    class DistStoreError(Exception):
+        pass
+
+    class QueueEmptyError(Exception):
+        pass
+
+
+if HAS_DISTRIBUTED:
 
     class _DistributedPdb(pdb.Pdb):
         """
@@ -125,9 +156,6 @@ if is_available():
             torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
             del guard
 
-    if sys.platform != "win32":
-        from torch._C._distributed_c10d import HashStore
-
     from .device_mesh import DeviceMesh, init_device_mesh
 
     # Variables prefixed with underscore are not auto imported
@@ -155,13 +183,32 @@ if is_available():
     set_debug_level_from_env()
 
 else:
-    # This stub is sufficient to get
-    #   python test/test_public_bindings.py -k test_correct_module_names
-    # working even when USE_DISTRIBUTED=0.  Feel free to add more
-    # stubs as necessary.
-    # We cannot define stubs directly because they confuse pyre
 
-    class _ProcessGroupStub:
-        pass
+    def batch_isend_irecv(*args, **kwargs):
+        """Mock batch_isend_irecv function."""
+        return []
 
-    sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]
+    # Add _remote_device stub
+    _remote_device = str
+
+    def init_process_group(
+        backend=None,
+        init_method=None,
+        timeout=None,
+        world_size=None,
+        rank=None,
+        store=None,
+        group_name="",
+    ):
+        """Mock init_process_group function."""
+
+    # Add simple group stub class for compatibility
+    class group:
+        """Group class. Placeholder for non-distributed builds."""
+
+        WORLD = None  # Will be set to the default ProcessGroup
+
+    import sys
+
+    sys.modules["torch.distributed"].ProcessGroup = ProcessGroup  # type: ignore[attr-defined]
+    sys.modules["torch.distributed"].group = group  # type: ignore[attr-defined]

@@ -19,13 +19,28 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
-from torch._C import _DistStoreError as DistStoreError
-from torch._C._distributed_c10d import (
+
+
+try:
+    from torch._C import _DistStoreError as DistStoreError
+except ImportError:
+
+    class _DistStoreError(Exception):
+        pass
+
+    DistStoreError = _DistStoreError
+
+from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
+
+# Import from centralized fallback module - no ImportError handling needed
+from torch.distributed._distributed_c10d import (
+    _Backend,
     _DistributedBackendOptions,
     _register_process_group,
     _resolve_process_group,
     _unregister_all_process_groups,
     _unregister_process_group,
+    _Work as Work,
     AllgatherOptions,
     AllreduceCoalescedOptions,
     AllreduceOptions,
@@ -42,9 +57,7 @@ from torch._C._distributed_c10d import (
     ReduceScatterOptions,
     ScatterOptions,
     Store,
-    Work,
 )
-from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from torch.monitor import _WaitCounter
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._typing_utils import not_none
@@ -1957,7 +1970,7 @@ def _new_process_group_helper(
 
     if device_id:
         pg.bound_device_id = device_id
-    backend_class: torch._C._distributed_c10d.Backend
+    backend_class: _Backend
     for device, backend_str in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
         # a single store can be reused by multiple groups.
@@ -4906,7 +4919,7 @@ def monitored_barrier(
 
 
 def _create_process_group_wrapper(
-    wrapped_pg: torch._C._distributed_c10d.Backend,
+    wrapped_pg: _Backend,
     store_prefix: str,
     store: Store,
     rank: int,

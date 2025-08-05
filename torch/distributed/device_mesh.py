@@ -28,30 +28,131 @@ if not is_available():
     class _DeviceMeshStub:
         pass
 
-    def _init_device_mesh_stub():
-        pass
+    def _init_device_mesh_stub(device_type, mesh_shape, **kwargs):
+        # Mock DeviceMesh creation for testing
+        import torch
+
+        class MockDeviceMesh:
+            def __init__(self, device_type, mesh_shape):
+                self.device_type = device_type
+                self.mesh_shape = mesh_shape
+                # Create a mock mesh tensor for compatibility
+                self.mesh = torch.arange(torch.prod(torch.tensor(mesh_shape))).reshape(
+                    mesh_shape
+                )
+
+            def size(self, dim=None):
+                if dim is None:
+                    return self.mesh.size()
+                return self.mesh.size(dim)
+
+            def get_rank(self):
+                return 0
+
+            def get_coordinate(self):
+                # Return a mock coordinate tuple
+                return tuple(0 for _ in self.mesh_shape)
+
+            @property
+            def ndim(self):
+                return len(self.mesh_shape)
+
+        return MockDeviceMesh(device_type, mesh_shape)
+
+    def _get_device_handle_stub(device_type: str = "cuda"):
+        return getattr(torch, device_type, None)
+
+    class _MockMeshResources:
+        def num_devices_per_host(self, device_type):
+            return 1
+
+        def get_root_mesh(self, mesh):
+            return mesh
+
+    _mock_mesh_resources = _MockMeshResources()
 
     sys.modules["torch.distributed.device_mesh"].DeviceMesh = _DeviceMeshStub  # type: ignore[attr-defined]
     sys.modules[
         "torch.distributed.device_mesh"
     ].init_device_mesh = _init_device_mesh_stub  # type: ignore[attr-defined]
+    sys.modules["torch.distributed.device_mesh"]._mesh_resources = _mock_mesh_resources  # type: ignore[attr-defined]
+    sys.modules[
+        "torch.distributed.device_mesh"
+    ]._get_device_handle = _get_device_handle_stub  # type: ignore[attr-defined]
 
 
 else:
-    from torch._C._distributed_c10d import Backend as C10dBackend
-    from torch.distributed.distributed_c10d import (
-        _get_default_group,
-        _resolve_process_group,
-        get_backend,
-        get_process_group_ranks,
-        get_rank,
-        get_world_size,
-        init_process_group,
-        is_initialized,
-        new_group,
-        ProcessGroup,
-        split_group,
-    )
+    try:
+        from torch.distributed._distributed_c10d import Backend as C10dBackend
+        from torch.distributed.distributed_c10d import (
+            _get_default_group,
+            _resolve_process_group,
+            get_backend,
+            get_process_group_ranks,
+            get_rank,
+            get_world_size,
+            init_process_group,
+            is_initialized,
+            new_group,
+            ProcessGroup,
+            split_group,
+        )
+    except ImportError:
+        # Fallback for non-distributed builds - use centralized fallback module
+        import sys
+
+        from torch.distributed._distributed_c10d import ProcessGroup
+
+        # Create C10dBackend stub that wraps the centralized Backend
+        class _C10dBackendStub:
+            class Options:
+                pass
+
+        C10dBackend = _C10dBackendStub
+
+        # Stub functions for distributed operations
+        def _get_default_group():
+            return ProcessGroup()
+
+        def _resolve_process_group(group_name):
+            return ProcessGroup()
+
+        def get_backend(group=None):
+            return "gloo"
+
+        def get_process_group_ranks(group):
+            return [0]
+
+        def get_rank(group=None):
+            return 0
+
+        def get_world_size():
+            return 1
+
+        def init_process_group(**kwargs):
+            pass
+
+        def is_initialized():
+            return True
+
+        def new_group(**kwargs):
+            return ProcessGroup()
+
+        def split_group(**kwargs):
+            return ProcessGroup()
+
+        # Update the module's __all__ to include stubs
+        sys.modules[__name__]._get_default_group = _get_default_group
+        sys.modules[__name__]._resolve_process_group = _resolve_process_group
+        sys.modules[__name__].get_backend = get_backend
+        sys.modules[__name__].get_process_group_ranks = get_process_group_ranks
+        sys.modules[__name__].get_rank = get_rank
+        sys.modules[__name__].get_world_size = get_world_size
+        sys.modules[__name__].init_process_group = init_process_group
+        sys.modules[__name__].is_initialized = is_initialized
+        sys.modules[__name__].new_group = new_group
+        sys.modules[__name__].ProcessGroup = ProcessGroup
+        sys.modules[__name__].split_group = split_group
 
     logger = logging.getLogger(__name__)
 

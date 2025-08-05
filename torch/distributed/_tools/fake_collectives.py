@@ -2,12 +2,27 @@ import random
 from typing import Any
 
 import torch
-from torch._C._distributed_c10d import (
+
+# Import centralized distributed components
+from torch.distributed._distributed_c10d import (
     _resolve_process_group,
-    FakeWork,
+    _Work as Work,
+    HAS_DISTRIBUTED,
     ProcessGroup,
-    Work,
 )
+
+
+# In distributed builds, assume operators always exist
+OPERATORS_AVAILABLE = HAS_DISTRIBUTED
+
+
+# Use centralized FakeWork implementation
+class FakeWork(Work):
+    def __init__(self):
+        super().__init__()
+        self.seq_id = 0
+
+
 from torch.utils._pytree import tree_map_only
 
 
@@ -63,9 +78,148 @@ _META_FUNCTIONS = {
     "recv_any_source_": lambda *args: create_fakework(args, return_first_arg=False),
 }
 
-lib_impl = torch.library.Library("c10d", "IMPL")  # noqa: TOR901
-for op, meta_func in _META_FUNCTIONS.items():
-    lib_impl.impl(op, meta_func, "Meta")
+
+# Register operators when C++ implementations are not available
+def _create_fake_op_impl(op_name, default_impl):
+    """Create a fake implementation for an operator that raises a descriptive error."""
+
+    def _impl(*args, **kwargs):
+        try:
+            return default_impl(*args, **kwargs)
+        except Exception:
+            raise RuntimeError(
+                f"Distributed collective operation '{op_name}' is not available in non-distributed builds"
+            )
+
+    return _impl
+
+
+# First, try to define the missing c10d operators
+try:
+    # Check if operators exist, if not define them
+    torch.ops.c10d.broadcast_
+except (AttributeError, RuntimeError):
+    # Define missing c10d operators
+    try:
+        lib_def = torch.library.Library("c10d", "DEF")
+
+        # Define basic signatures for the operators we need
+        op_signatures = {
+            "broadcast_": 'broadcast_(Tensor[] tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "allreduce_": 'allreduce_(Tensor[] tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "allgather_": 'allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "_allgather_base_": '_allgather_base_(Tensor output, Tensor input, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "reduce_scatter_": 'reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "_reduce_scatter_base_": '_reduce_scatter_base_(Tensor output, Tensor input, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "reduce_": 'reduce_(Tensor[] tensors, int dst, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "gather_": 'gather_(Tensor[][] output_tensors, Tensor[] input_tensors, int dst, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "scatter_": 'scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "alltoall_": 'alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "alltoall_base_": 'alltoall_base_(Tensor output, Tensor input, SymInt[]? output_split_sizes=None, SymInt[]? input_split_sizes=None, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "barrier": 'barrier(str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "monitored_barrier_": 'monitored_barrier_(str? tag="", SymInt[]? ranks=None, int group_size=0, bool wait_all_ranks=False) -> ()',
+            "send": 'send(Tensor[] tensors, int dst, str? tag="") -> ()',
+            "recv_": 'recv_(Tensor[] tensors, int src, str? tag="") -> ()',
+            "recv_any_source_": 'recv_any_source_(Tensor[] tensors, str? tag="") -> ()',
+        }
+
+        for op_name, signature in op_signatures.items():
+            try:
+                lib_def.define(signature)
+            except Exception:
+                # Skip if already defined or can't define
+                pass
+    except Exception:
+        # Failed to create library, continue
+        pass
+
+# Register functional collective operators when not available
+try:
+    # Check if _c10d_functional operators are available
+    torch.ops._c10d_functional.wait_tensor
+except (AttributeError, RuntimeError):
+    # Register the operators from Python when C++ is not built
+    try:
+        functional_lib_def = torch.library.Library("_c10d_functional", "DEF")
+
+        # Core functional collective operators (same as in _functional_collectives.py)
+        functional_lib_def.define(
+            "all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor"
+        )
+        functional_lib_def.define(
+            "all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)"
+        )
+        functional_lib_def.define(
+            "all_reduce_coalesced(Tensor[] inputs, str reduce_op, str group_name) -> Tensor[]"
+        )
+        functional_lib_def.define(
+            "all_reduce_coalesced_(Tensor[](a!) inputs, str reduce_op, str group_name) -> Tensor[](a!)"
+        )
+        functional_lib_def.define(
+            "all_gather_into_tensor_out(Tensor input, int group_size, str group_name, *, Tensor(a!) out) -> Tensor(a!)"
+        )
+        functional_lib_def.define(
+            "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
+        )
+        functional_lib_def.define(
+            "all_gather_into_tensor_coalesced(Tensor[] inputs, int group_size, str group_name) -> Tensor[]"
+        )
+        functional_lib_def.define(
+            "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
+        )
+        functional_lib_def.define(
+            "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduce_op, int group_size, str group_name) -> Tensor[]"
+        )
+        functional_lib_def.define(
+            "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
+        )
+        functional_lib_def.define(
+            "broadcast(Tensor input, int src, str group_name) -> Tensor"
+        )
+        functional_lib_def.define(
+            "broadcast_(Tensor(a!) input, int src, str group_name) -> Tensor(a!)"
+        )
+        functional_lib_def.define("wait_tensor(Tensor tensor) -> Tensor")
+    except Exception:
+        pass
+
+# Register DTensor operators when not available
+try:
+    torch.ops._dtensor.shard_dim_alltoall
+except (AttributeError, RuntimeError):
+    try:
+        dtensor_lib_def = torch.library.Library("_dtensor", "DEF")
+        dtensor_lib_def.define(
+            "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
+        )
+    except Exception:
+        pass
+
+# Register autograd operators when not available
+try:
+    torch.ops._c10d_functional_autograd.all_to_all_single
+except (AttributeError, RuntimeError):
+    try:
+        autograd_lib_def = torch.library.Library("_c10d_functional_autograd", "DEF")
+        autograd_lib_def.define(
+            "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
+        )
+        autograd_lib_def.define(
+            "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
+        )
+        autograd_lib_def.define(
+            "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
+        )
+    except Exception:
+        pass
+
+try:
+    lib_impl = torch.library.Library("c10d", "IMPL")  # noqa: TOR901
+    for op, meta_func in _META_FUNCTIONS.items():
+        lib_impl.impl(op, meta_func, "Meta")
+except (RuntimeError, AttributeError):
+    # Skip library registration in non-distributed builds
+    pass
 
 # List of collective operation functions including functional collectives
 # Note: The following collectives might be deprecated soon hence not adding them
@@ -93,31 +247,39 @@ non_functional_collectives: set[torch._ops.OpOverload] = {
     c10d.barrier.default,
     c10d.monitored_barrier_.default,
 }
-functional_collectives: set[torch._ops.OpOverload] = {
-    _c10d_functional.broadcast.default,
-    _c10d_functional.all_reduce.default,
-    _c10d_functional.all_gather_into_tensor.default,
-    _c10d_functional.reduce_scatter_tensor.default,
-    _c10d_functional.all_to_all_single.default,
-    _c10d_functional_autograd.all_to_all_single.default,
-    _c10d_functional.wait_tensor.default,
-    _c10d_functional.all_reduce_.default,
-    _c10d_functional.all_reduce_coalesced.default,
-    _c10d_functional.all_reduce_coalesced_.default,
-    _c10d_functional.all_gather_into_tensor_out.default,
-    _c10d_functional.all_gather_into_tensor_coalesced.default,
-    _c10d_functional_autograd.all_gather_into_tensor.default,
-    _c10d_functional.reduce_scatter_tensor_coalesced.default,
-    _c10d_functional_autograd.reduce_scatter_tensor.default,
-    _c10d_functional.broadcast_.default,
-    _dtensor.shard_dim_alltoall.default,
-}
+try:
+    functional_collectives: set[torch._ops.OpOverload] = {
+        _c10d_functional.broadcast.default,
+        _c10d_functional.all_reduce.default,
+        _c10d_functional.all_gather_into_tensor.default,
+        _c10d_functional.reduce_scatter_tensor.default,
+        _c10d_functional.all_to_all_single.default,
+        _c10d_functional_autograd.all_to_all_single.default,
+        _c10d_functional.wait_tensor.default,
+        _c10d_functional.all_reduce_.default,
+        _c10d_functional.all_reduce_coalesced.default,
+        _c10d_functional.all_reduce_coalesced_.default,
+        _c10d_functional.all_gather_into_tensor_out.default,
+        _c10d_functional.all_gather_into_tensor_coalesced.default,
+        _c10d_functional_autograd.all_gather_into_tensor.default,
+        _c10d_functional.reduce_scatter_tensor_coalesced.default,
+        _c10d_functional_autograd.reduce_scatter_tensor.default,
+        _c10d_functional.broadcast_.default,
+        _dtensor.shard_dim_alltoall.default,
+    }
+except (AttributeError, RuntimeError):
+    # Fallback for non-distributed builds
+    functional_collectives: set[torch._ops.OpOverload] = set()
 
-sync_ops: set[torch._ops.OpOverload] = {
-    c10d.barrier.default,
-    c10d.monitored_barrier_.default,
-    _c10d_functional.wait_tensor.default,
-}
+try:
+    sync_ops: set[torch._ops.OpOverload] = {
+        c10d.barrier.default,
+        c10d.monitored_barrier_.default,
+        _c10d_functional.wait_tensor.default,
+    }
+except (AttributeError, RuntimeError):
+    # Fallback for non-distributed builds
+    sync_ops: set[torch._ops.OpOverload] = set()
 
 collective_ops = set.union(functional_collectives, non_functional_collectives)
 
@@ -149,18 +311,19 @@ class CollectiveOp:
         # c10d.reduce_scatter_tensor_coalesced_.default
     }
 
-    PG_ARG_3 = {
-        _c10d_functional.broadcast.default,
-        _c10d_functional.broadcast_.default,
-        _c10d_functional.all_reduce.default,
-        _c10d_functional.all_reduce_.default,
-        _c10d_functional.all_reduce_coalesced.default,
-        _c10d_functional.all_reduce_coalesced_.default,
-        _c10d_functional.all_gather_into_tensor.default,
-        _c10d_functional.all_gather_into_tensor_out.default,
-        _c10d_functional_autograd.all_gather_into_tensor.default,
-        _c10d_functional.all_gather_into_tensor_coalesced.default,
-    }
+    if OPERATORS_AVAILABLE:
+        PG_ARG_3 = {
+            _c10d_functional.broadcast.default,
+            _c10d_functional.broadcast_.default,
+            _c10d_functional.all_reduce.default,
+            _c10d_functional.all_reduce_.default,
+            _c10d_functional.all_reduce_coalesced.default,
+            _c10d_functional.all_reduce_coalesced_.default,
+            _c10d_functional.all_gather_into_tensor.default,
+            _c10d_functional.all_gather_into_tensor_out.default,
+            _c10d_functional_autograd.all_gather_into_tensor.default,
+            _c10d_functional.all_gather_into_tensor_coalesced.default,
+        }
 
     PG_ARG_4 = {
         _c10d_functional.reduce_scatter_tensor.default,

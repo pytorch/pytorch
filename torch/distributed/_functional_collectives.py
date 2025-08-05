@@ -7,6 +7,10 @@ from typing import Any, cast, Optional, TYPE_CHECKING, Union
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
+from torch.distributed._distributed_c10d import (
+    _allow_inflight_collective_as_graph_input,
+    _set_allow_inflight_collective_as_graph_input,
+)
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
@@ -857,15 +861,13 @@ def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
     will be registered in the work registry, and the wait_tensor() in compiled region called on
     the output tensor of the collective will wait on the correct work object.
     """
-    previous = torch._C._distributed_c10d._allow_inflight_collective_as_graph_input()
+    previous = _allow_inflight_collective_as_graph_input()
 
     try:
-        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(value)
+        _set_allow_inflight_collective_as_graph_input(value)
         yield
     finally:
-        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(
-            previous
-        )
+        _set_allow_inflight_collective_as_graph_input(previous)
 
 
 def _make_all_gather_out_tensor(input, group_size):
@@ -979,58 +981,252 @@ def _reduce_scatter_tensor_coalesced_native_meta(
     ]
 
 
-# Library MUST be defined at module scope or it doesn't work
-lib_impl = torch.library.Library("_c10d_functional", "IMPL")
-lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
-lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
-lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
-lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
-lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
-lib_impl.impl(
-    "all_gather_into_tensor_out", _all_gather_into_tensor_out_native_meta, "Meta"
-)
-lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
-lib_impl.impl(
-    "all_gather_into_tensor_coalesced",
-    _all_gather_into_tensor_coalesced_native_meta,
-    "Meta",
-)
-lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
-lib_impl.impl(
-    "reduce_scatter_tensor_coalesced",
-    _reduce_scatter_tensor_coalesced_native_meta,
-    "Meta",
-)
-lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
-lib_impl.impl("broadcast", _broadcast_meta, "Meta")
-lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
+# Register operators in Python when C++ implementations are not available
+try:
+    # Check if C++ operators are available
+    torch.ops._c10d_functional.wait_tensor
+except (AttributeError, RuntimeError):
+    # Register the operators from Python when C++ is not built
 
-# mark these ops has side effect so that they won't be removed by DCE
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
-torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
+    def _raise_not_implemented(op_name):
+        def _impl(*args, **kwargs):
+            raise RuntimeError(
+                f"Distributed collective operation '{op_name}' is not available in non-distributed builds"
+            )
+
+        return _impl
+
+    # Define the operator library and schemas based on C++ implementation
+    try:
+        lib_def = torch.library.Library("_c10d_functional", "DEF")
+
+        # Core collective operators
+        lib_def.define(
+            "all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor"
+        )
+        lib_def.define(
+            "all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)"
+        )
+        lib_def.define(
+            "all_reduce_coalesced(Tensor[] inputs, str reduce_op, str group_name) -> Tensor[]"
+        )
+        lib_def.define(
+            "all_reduce_coalesced_(Tensor[](a!) inputs, str reduce_op, str group_name) -> Tensor[](a!)"
+        )
+
+        lib_def.define(
+            "all_gather_into_tensor_out(Tensor input, int group_size, str group_name, *, Tensor(a!) out) -> Tensor(a!)"
+        )
+        lib_def.define(
+            "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
+        )
+        lib_def.define(
+            "all_gather_into_tensor_coalesced(Tensor[] inputs, int group_size, str group_name) -> Tensor[]"
+        )
+
+        lib_def.define(
+            "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
+        )
+        lib_def.define(
+            "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduce_op, int group_size, str group_name) -> Tensor[]"
+        )
+
+        lib_def.define(
+            "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
+        )
+
+        lib_def.define("broadcast(Tensor input, int src, str group_name) -> Tensor")
+        lib_def.define(
+            "broadcast_(Tensor(a!) input, int src, str group_name) -> Tensor(a!)"
+        )
+
+        lib_def.define("wait_tensor(Tensor tensor) -> Tensor")
+
+        # Register implementations that raise errors
+        lib_impl_fallback = torch.library.Library("_c10d_functional", "IMPL")
+        lib_impl_fallback.impl(
+            "all_reduce",
+            _raise_not_implemented("all_reduce"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "all_reduce_",
+            _raise_not_implemented("all_reduce_"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "all_reduce_coalesced",
+            _raise_not_implemented("all_reduce_coalesced"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "all_reduce_coalesced_",
+            _raise_not_implemented("all_reduce_coalesced_"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "all_gather_into_tensor_out",
+            _raise_not_implemented("all_gather_into_tensor_out"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "all_gather_into_tensor",
+            _raise_not_implemented("all_gather_into_tensor"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "all_gather_into_tensor_coalesced",
+            _raise_not_implemented("all_gather_into_tensor_coalesced"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "reduce_scatter_tensor",
+            _raise_not_implemented("reduce_scatter_tensor"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "reduce_scatter_tensor_coalesced",
+            _raise_not_implemented("reduce_scatter_tensor_coalesced"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "all_to_all_single",
+            _raise_not_implemented("all_to_all_single"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "broadcast",
+            _raise_not_implemented("broadcast"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "broadcast_",
+            _raise_not_implemented("broadcast_"),
+            "CompositeExplicitAutograd",
+        )
+        lib_impl_fallback.impl(
+            "wait_tensor",
+            _raise_not_implemented("wait_tensor"),
+            "CompositeExplicitAutograd",
+        )
+
+    except Exception:
+        # If library registration fails, continue silently
+        pass
+
+# Also register DTensor operators
+try:
+    # Check if DTensor operators are available
+    torch.ops._dtensor.shard_dim_alltoall
+except (AttributeError, RuntimeError):
+    try:
+        dtensor_lib_def = torch.library.Library("_dtensor", "DEF")
+        dtensor_lib_def.define(
+            "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
+        )
+
+        dtensor_lib_impl = torch.library.Library("_dtensor", "IMPL")
+        dtensor_lib_impl.impl(
+            "shard_dim_alltoall",
+            _raise_not_implemented("shard_dim_alltoall"),
+            "CompositeExplicitAutograd",
+        )
+    except Exception:
+        pass
+
+# Register autograd operators
+try:
+    torch.ops._c10d_functional_autograd.all_to_all_single
+except (AttributeError, RuntimeError):
+    try:
+        autograd_lib_def = torch.library.Library("_c10d_functional_autograd", "DEF")
+        autograd_lib_def.define(
+            "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
+        )
+        autograd_lib_def.define(
+            "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
+        )
+        autograd_lib_def.define(
+            "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
+        )
+
+        autograd_lib_impl = torch.library.Library("_c10d_functional_autograd", "IMPL")
+        autograd_lib_impl.impl(
+            "all_to_all_single", _raise_not_implemented("all_to_all_single"), "Autograd"
+        )
+        autograd_lib_impl.impl(
+            "reduce_scatter_tensor",
+            _raise_not_implemented("reduce_scatter_tensor"),
+            "Autograd",
+        )
+        autograd_lib_impl.impl(
+            "all_gather_into_tensor",
+            _raise_not_implemented("all_gather_into_tensor"),
+            "Autograd",
+        )
+    except Exception:
+        pass
+
+# Library MUST be defined at module scope or it doesn't work
+try:
+    lib_impl = torch.library.Library("_c10d_functional", "IMPL")
+    lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
+    lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
+    lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
+    lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
+    lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+    lib_impl.impl(
+        "all_gather_into_tensor_out", _all_gather_into_tensor_out_native_meta, "Meta"
+    )
+    lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
+    lib_impl.impl(
+        "all_gather_into_tensor_coalesced",
+        _all_gather_into_tensor_coalesced_native_meta,
+        "Meta",
+    )
+    lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
+    lib_impl.impl(
+        "reduce_scatter_tensor_coalesced",
+        _reduce_scatter_tensor_coalesced_native_meta,
+        "Meta",
+    )
+    lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
+    lib_impl.impl("broadcast", _broadcast_meta, "Meta")
+    lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
+
+    # mark these ops has side effect so that they won't be removed by DCE
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
+    torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
+except (RuntimeError, AttributeError):
+    # Skip library registration in non-distributed builds
+    pass
 
 # Register legacy ops for backward compatibility
 # TODO(yifu): remove these in functional collective beta release
-legacy_lib = torch.library.Library("c10d_functional", "DEF")
-legacy_lib_impl = torch.library.Library("c10d_functional", "IMPL")
-ops_defs = [
-    "broadcast(Tensor self, int src, str tag, int[] ranks, int group_size) -> Tensor",
-    "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
-    "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
-    "wait_tensor(Tensor self) -> Tensor",
-    "all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor",
-    "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
-    "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
-    "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
-    "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
-]
+try:
+    legacy_lib = torch.library.Library("c10d_functional", "DEF")
+    legacy_lib_impl = torch.library.Library("c10d_functional", "IMPL")
+    ops_defs = [
+        "broadcast(Tensor self, int src, str tag, int[] ranks, int group_size) -> Tensor",
+        "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
+        "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
+        "wait_tensor(Tensor self) -> Tensor",
+        "all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor",
+        "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
+        "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
+        "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
+        "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
+    ]
 
-my_module = sys.modules[__name__]
-for op_def in ops_defs:
-    op_name = op_def[0 : op_def.index("(")]
-    backend_impl = getattr(fun_col_impl, f"_{op_name}")
-    legacy_lib.define(op_def, tags=torch.Tag.pt2_compliant_tag)
-    legacy_lib_impl.impl(op_name, backend_impl, "CompositeImplicitAutograd")
+    my_module = sys.modules[__name__]
+    for op_def in ops_defs:
+        op_name = op_def[0 : op_def.index("(")]
+        backend_impl = getattr(fun_col_impl, f"_{op_name}")
+        legacy_lib.define(op_def, tags=torch.Tag.pt2_compliant_tag)
+        legacy_lib_impl.impl(op_name, backend_impl, "CompositeImplicitAutograd")
+except (RuntimeError, AttributeError):
+    # Skip legacy library registration in non-distributed builds
+    pass
 
 
 """
