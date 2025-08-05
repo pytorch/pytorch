@@ -28,6 +28,14 @@ endif()
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
 
+if(DEFINED ENV{USE_ROCM})
+  include(CheckIncludeFile)
+  check_include_file("rocm_smi/rocm_smi.h" HAS_ROCM_SMI_H)
+  if(NOT HAS_ROCM_SMI_H)
+    message(FATAL_ERROR "rocm_smi.h not found. Please install the rocm-smi-lib package.")
+  endif()
+endif()
+
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
 else()
@@ -1395,13 +1403,4 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
   endif()
   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
-endif()
-
-if(USE_ROCM)
-  include(CheckIncludeFile)
-  check_include_file("rocm_smi/rocm_smi.h" HAS_ROCM_SMI_H)
-  message(STATUS "HAS_ROCM_SMI_H = ${HAS_ROCM_SMI_H}")
-  if(HAS_ROCM_SMI_H)
-    add_definitions(-DHAS_ROCM_SMI)
-  endif()
 endif()
