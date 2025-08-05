@@ -564,7 +564,7 @@ if(MSVC)
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   if(MSVC_Z7_OVERRIDE)
     # CMake set debug flags to use /Z7
-    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT Embedded)
+    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
   endif()
   foreach(
     flag_var
