@@ -1270,7 +1270,7 @@ class ParamwiseScheduler(LRScheduler):
         >>> scheduler.step()
     """
 
-    def __init__(self, schedulers: Sequence[LRScheduler]):
+    def __init__(self, schedulers: Sequence[LRScheduler]) -> None:
         self._schedulers = schedulers
         self.optimizer = schedulers[0].optimizer  # Assuming all schedulers use the same optimizer
 
@@ -1297,7 +1297,7 @@ class ParamwiseScheduler(LRScheduler):
 
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
 
-    def recursive_undo(self, sched=None):
+    def recursive_undo(self, sched=None) -> None:
         """
         Recursively undo any step performed by the initialisation of
         schedulers.
@@ -1310,7 +1310,7 @@ class ParamwiseScheduler(LRScheduler):
         elif hasattr(scheds, "last_epoch"):
             scheds.last_epoch -= 1
 
-    def step(self):  # type: ignore[override]
+    def step(self) -> None:  # type: ignore[override]
         """Perform a step."""
         # Backup learning rates
         lrs = [group["lr"] for group in self.optimizer.param_groups]
