@@ -52,6 +52,7 @@ from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
+    ObservedKeyError,
     raise_observed_exception,
     unimplemented_v2,
 )
@@ -91,7 +92,7 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
+from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
@@ -1874,7 +1875,20 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         method = self._maybe_get_baseclass_method(name)
         if method in self._dict_methods:
-            return self._dict_vt.call_method(tx, name, args, kwargs)
+            # Dict subclasses can override __missing__ to provide fallback
+            # behavior instead of raising a KeyError. This is used, for example,
+            # by collections.Counter.
+            try:
+                return self._dict_vt.call_method(tx, name, args, kwargs)
+            except ObservedKeyError:
+                if (
+                    name == "__getitem__"
+                    and issubclass(self.python_type(), dict)
+                    and self._maybe_get_baseclass_method("__missing__")
+                ):
+                    return self.call_method(tx, "__missing__", args, kwargs)
+                else:
+                    raise
         return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(self, tx):
@@ -2042,7 +2056,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             from torch._dynamo.symbolic_convert import InstructionTranslator
 
             tx = InstructionTranslator.current_tx()
-            elems = init_args[0].unpack_var_sequence(tx)
+            elems = init_args[0].force_unpack_var_sequence(tx)
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
             )
@@ -2073,7 +2087,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
-        self.mutation_type = AttributeMutationExisting()
+        self.mutation_type = AttributeMutationNew()
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # A common pattern in the init code of MutableMapping objects is to
