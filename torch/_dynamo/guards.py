@@ -468,6 +468,7 @@ class GuardManagerWrapper:
                             "__kwdefaults__",
                             "__code__",
                             "__closure__",
+                            "__annotations__",
                         )
 
                 if is_subtree_tag_safe:
@@ -486,6 +487,7 @@ class GuardManagerWrapper:
                 and (
                     "__closure__" in node.get_source()
                     or "__defaults__" in node.get_source()
+                    or "__mro__" in node.get_source()
                 )
                 and config.assume_function_dunder_attributes_remain_unchanged
             ):
@@ -501,7 +503,7 @@ class GuardManagerWrapper:
                 is_subtree_tag_safe = check_tag_safety(node, TupleGetItemGuardAccessor)
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
-            elif node.get_type_of_guarded_value() is type:
+            elif node.get_type_of_guarded_value() in (type, torch._C._TensorMeta):
                 is_subtree_tag_safe = check_tag_safety(
                     node, (TypeDictGuardAccessor, TypeMROGuardAccessor)
                 )
