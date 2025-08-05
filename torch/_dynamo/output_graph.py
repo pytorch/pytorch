@@ -96,6 +96,7 @@ from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import AttributeMutationExisting, SideEffects
 from .source import (
+    _get_source_debug_name,
     AttrSource,
     BackwardStateSource,
     ConstantSource,
@@ -1445,6 +1446,21 @@ class OutputGraph(OutputGraphGuardsState):
                 # a graph break
                 self.run_compiler_collective()
             self.add_output_instructions(output + pass2.get_instructions())
+
+            if self.export:
+                potential_side_effects = [
+                    var
+                    for var in self.side_effects._get_modified_vars()
+                    if var.source != None
+                ]
+                side_effect_refs = [
+                    _get_source_debug_name(var.source) for var in potential_side_effects
+                ]
+                if len(side_effect_refs):
+                    raise RuntimeError(
+                        f"While exporting, we found certain side effects happened in the model.forward. "
+                        f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                    )
 
         # restore all the live local vars of the root
         local_restore_cg = PyCodegen(
