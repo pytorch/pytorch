@@ -1120,6 +1120,7 @@ class CppFlexAttentionTemplate(CppTemplate):
     code synthesis according to user-defined score and mask modifications
     and configuration settings.
     """
+
     def __init__(
         self,
         input_nodes,
