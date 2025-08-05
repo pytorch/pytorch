@@ -82,11 +82,11 @@ def nvshmem_signal_op_kernel(
 
 @triton.jit
 def nvshmem_wait_until_kernel(
-    ivar_ptr,
+    ivar,
     cmp_op,
     cmp_val,
 ):
-    nvshmem.wait_until(ivar_ptr, cmp_op, cmp_val)
+    nvshmem.wait_until(ivar, cmp_op, cmp_val)
 
 
 @triton.jit
@@ -96,50 +96,50 @@ def nvshmem_fence_kernel():
 
 @triton.jit
 def nvshmem_put_with_fence_kernel(
-    dst_ptr1,
-    dst_ptr2,
-    src_ptr1,
-    src_ptr2,
-    flag_ptr,
-    flag_src_ptr,
-    size_bytes,
+    dst1,
+    src1,
+    dst2,
+    src2,
+    flag_dst,
+    flag_src,
+    nelems,
     peer,
 ):
     # First put
-    nvshmem.putmem_block(dst_ptr1, src_ptr1, size_bytes, peer)
+    nvshmem.put(dst1, src1, nelems, peer)
     # Ensure the first put is ordered before the next.
     nvshmem.fence()
     # Second put
-    nvshmem.putmem_block(dst_ptr2, src_ptr2, size_bytes, peer)
+    nvshmem.put(dst2, src2, nelems, peer)
     # Order the second put before flag update.
     nvshmem.fence()
     # Write the flag (single int64) to signal completion.
-    nvshmem.putmem_block(flag_ptr, flag_src_ptr, 8, peer)  # 8 bytes for int64
+    nvshmem.put(flag_dst, flag_src, 1, peer)
 
 
 @triton.jit
 def nvshmem_put_with_quiet_kernel(
-    dst_ptr,
-    src_ptr,
-    flag_dst_ptr,
-    flag_src_ptr,
-    size_bytes,
+    dst,
+    src,
+    flag_dst,
+    flag_src,
+    nelems,
     peer,
 ):
     # Put data
-    nvshmem.putmem_block(dst_ptr, src_ptr, size_bytes, peer)
+    nvshmem.put(dst, src, nelems, peer)
     # Call quiet to ensure put is complete
     nvshmem.quiet()
     # Only after quiet, set the completion flag
     # This ensures the data put is complete before flag is set
-    nvshmem.putmem_block(flag_dst_ptr, flag_src_ptr, 8, peer)  # 8 bytes for int64
+    nvshmem.put(flag_dst, flag_src, 1, peer)
 
 
 @triton.jit
 def nvshmem_barrier_test_kernel(
-    dst_ptr,
-    src_ptr,
-    size_bytes,
+    dst,
+    src,
+    nelems,
 ):
     # Testing barrier_all() requires coordinated operations across PEs within
     # the same kernel execution. Unlike other kernels that just wrap NVSHMEM
@@ -151,12 +151,12 @@ def nvshmem_barrier_test_kernel(
     # Rank 0 broadcasts its value to all other ranks
     if my_pe == 0:
         # Write initial value
-        p_src = src_ptr.to(tl.pointer_type(tl.int32))
+        p_src = src.to(tl.pointer_type(tl.int32))
         tl.store(p_src, 42)
         # Put to all other ranks
         i = 1
         while i < n_pes:
-            nvshmem.putmem_block(dst_ptr, src_ptr, size_bytes, i)
+            nvshmem.put(dst, src, nelems, i)
             i += 1
 
     # Synchronize all PEs
@@ -164,7 +164,7 @@ def nvshmem_barrier_test_kernel(
 
     # Non-zero ranks increment the received value
     if my_pe != 0:
-        p_dst = dst_ptr.to(tl.pointer_type(tl.int32))
+        p_dst = dst.to(tl.pointer_type(tl.int32))
         received = tl.load(p_dst)
         tl.store(p_dst, received + 1)
 
@@ -176,33 +176,29 @@ def nvshmem_barrier_all_kernel():
 
 @triton.jit
 def nvshmem_sync_test_kernel(
-    dst_ptr,
-    src_ptr,
-    size_bytes,
+    local_data,
+    remote_data,
+    nelems,
 ):
     my_pe = nvshmem.my_pe()
     n_pes = nvshmem.n_pes()
 
-    # Rank 0 broadcasts its value to all other ranks
-    if my_pe == 0:
-        # Write initial value
-        p_src = src_ptr.to(tl.pointer_type(tl.int32))
-        tl.store(p_src, 42)
-        # Put to all other ranks
-        i = 1
-        while i < n_pes:
-            nvshmem.putmem_block(dst_ptr, src_ptr, size_bytes, i)
-            i += 1
+    # Each PE writes a unique value to its local memory
+    p_local = local_data.to(tl.pointer_type(tl.int32))
+    unique_value = my_pe + 100  # PE 0 writes 100, PE 1 writes 101, etc.
+    tl.store(p_local, unique_value)
 
-    # Synchronize all PEs (this is more lightweight than barrier_all() b/c it only ensures local store visibility
-    # and doesn't wait for remote ops to complete)
+    # sync_all() ensures local stores are visible to other PEs
+    # but doesn't guarantee completion of any remote operations
     nvshmem.sync_all()
 
-    # Non-zero ranks increment the received value
-    if my_pe != 0:
-        p_dst = dst_ptr.to(tl.pointer_type(tl.int32))
-        received = tl.load(p_dst)
-        tl.store(p_dst, received + 1)
+    # Now each PE reads from the next PE's memory to verify visibility
+    # PE 0 reads from PE 1, PE 1 reads from PE 2, ..., PE n-1 reads from PE 0
+    next_pe = (my_pe + 1) % n_pes
+    nvshmem.get(remote_data, local_data, nelems, next_pe)
+
+    # The get should now see the value that the next PE wrote locally
+    # because sync_all() made those local stores visible
 
 
 @triton.jit
@@ -277,7 +273,9 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
         # Fill source tensor with rank-specific pattern
         for i in range(nelems):
-            src[i] = val * 10 + i  # Rank 0: [420, 421, 422, 423, 424], Rank 1: [430, 431, ...]
+            src[i] = (
+                val * 10 + i
+            )  # Rank 0: [420, 421, 422, 423, 424], Rank 1: [430, 431, ...]
 
         # Rendezvous
         symm_mem.rendezvous(src, group=group_name)
@@ -537,15 +535,14 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         flag = symm_mem.empty(1, dtype=torch.int64, device=self.device).fill_(
             FLAG_INITIAL_VALUE
         )
-        flag_hdl = symm_mem.rendezvous(flag, group=group_name)
+        symm_mem.rendezvous(flag, group=group_name)
 
         nvshmem_barrier_all_kernel[(1,)](extern_libs=nvshmem_lib)
 
         if rank == 0:
             # Rank 0 (the waiter)
-            ivar_ptr = flag_hdl.buffer_ptrs[rank]
             nvshmem_wait_until_kernel[(1,)](
-                ivar_ptr,
+                flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=FLAG_FINAL_VALUE,
                 extern_libs=nvshmem_lib,
@@ -563,15 +560,12 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 [FLAG_FINAL_VALUE], dtype=torch.int64, device=self.device
             )
 
-            # The destination is Rank 0's flag buffer.
-            dst_ptr = flag_hdl.buffer_ptrs[rank]
-
-            # Launch a kernel to put the value to Rank 0.
-            nvshmem_putmem_block_kernel[(1,)](
-                dst_ptr,  # Destination pointer on the remote PE
-                val_to_put.data_ptr(),  # Source data pointer (local)
-                size_bytes=8,  # Size of one int64
-                peer=peer,  # The target PE (Rank 0)
+            # Launch a kernel to put the value to Rank 0's flag tensor.
+            nvshmem_put_kernel[(1,)](
+                flag,  # Destination symmetric tensor on the remote PE
+                val_to_put,  # Source data tensor (local)
+                1,  # Number of elements
+                peer,  # The target PE (Rank 0)
                 extern_libs=nvshmem_lib,
             )
 
@@ -656,7 +650,6 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         its arrival implies that both preceding puts have been delivered in
         order.
         """
-
         torch.manual_seed(42 + self.rank)
         self._init_device()
         nvshmem_lib = nvshmem.enable_triton()
@@ -665,9 +658,8 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         rank = self.rank
         peer = 1 - rank
         # Message configuration
-        msg_size_bytes = 8
         dtype = torch.int8
-        numel = msg_size_bytes // dtype.itemsize
+        numel = 8
 
         val1 = 10
         val2 = 20
@@ -677,42 +669,35 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         inp2 = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val2)
         out1 = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
         out2 = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
-        inp1_hdl = symm_mem.rendezvous(inp1, group=group_name)
-        inp2_hdl = symm_mem.rendezvous(inp2, group=group_name)
-        out1_hdl = symm_mem.rendezvous(out1, group=group_name)
-        out2_hdl = symm_mem.rendezvous(out2, group=group_name)
+        symm_mem.rendezvous(inp1, group=group_name)
+        symm_mem.rendezvous(inp2, group=group_name)
+        symm_mem.rendezvous(out1, group=group_name)
+        symm_mem.rendezvous(out2, group=group_name)
 
-        # Flag buffer resides in the signal pad of out2.
-        flag = out2_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
+        # Use regular symmetric memory tensor for flag
+        flag = symm_mem.empty(1, dtype=torch.int64, device=self.device).fill_(0)
+        symm_mem.rendezvous(flag, group=group_name)
         flag_update_val = torch.tensor(
             [flag_val], dtype=torch.int64, device=self.device
         )
         NVSHMEM_CMP_EQ = 0  # compare equal
 
         if rank == 0:
-            dst_ptr1 = out1_hdl.buffer_ptrs[rank]
-            dst_ptr2 = out2_hdl.buffer_ptrs[rank]
-            src_ptr1 = inp1_hdl.buffer_ptrs[rank]
-            src_ptr2 = inp2_hdl.buffer_ptrs[rank]
-            flag_ptr = out2_hdl.signal_pad_ptrs[rank]
-            flag_src_ptr = flag_update_val.data_ptr()
-
-            nvshmem_put_with_fence_kernel[(1, 1, 1)](
-                dst_ptr1,
-                dst_ptr2,
-                src_ptr1,
-                src_ptr2,
-                flag_ptr,
-                flag_src_ptr,
-                size_bytes=msg_size_bytes,
+            nvshmem_put_with_fence_kernel[(1,)](
+                out1,
+                inp1,
+                out2,
+                inp2,
+                flag,
+                flag_update_val,
+                nelems=numel,
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
         elif rank == 1:
-            # Wait until flag is set by Rank 0.
-            ivar_ptr = out2_hdl.signal_pad_ptrs[rank]
-            nvshmem_wait_until_kernel[(1, 1, 1)](
-                ivar_ptr,
+            # Wait until flag is set by Rank 0
+            nvshmem_wait_until_kernel[(1,)](
+                flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=flag_val,
                 extern_libs=nvshmem_lib,
@@ -734,58 +719,52 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
     def test_triton_quiet(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
-        # Enable NVSHMEM for Triton
         nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
-        msg_size_bytes = 8
-        dtype = torch.int8
-        numel = msg_size_bytes // dtype.itemsize
+        peer = 1 - rank
 
-        # Data buffers
+        dtype = torch.int8
+        numel = 8
         val = 15
+        flag_val = 42
+
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val)
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
-        inp_hdl = symm_mem.rendezvous(inp, group=group_name)
-        out_hdl = symm_mem.rendezvous(out, group=group_name)
-        # Use signal pad as completion flag
-        flag_val = 42
-        peer = 1 - rank
+        flag = symm_mem.empty(1, dtype=torch.int64, device=self.device).fill_(0)
+        flag_update_val = torch.tensor(
+            [flag_val], dtype=torch.int64, device=self.device
+        )
+
+        symm_mem.rendezvous(inp, group=group_name)
+        symm_mem.rendezvous(out, group=group_name)
+        symm_mem.rendezvous(flag, group=group_name)
+
         NVSHMEM_CMP_EQ = 0
 
-        if rank == 0:
-            # Rank 0 waits for flag from Rank 1
-            ivar_ptr = out_hdl.signal_pad_ptrs[rank]
-            nvshmem_wait_until_kernel[(1, 1, 1)](
-                ivar_ptr,
+        dist.barrier()
+        if rank == 1:
+            nvshmem_put_with_quiet_kernel[(1,)](
+                out,
+                inp,
+                flag,
+                flag_update_val,
+                nelems=numel,
+                peer=peer,
+                extern_libs=nvshmem_lib,
+            )
+        elif rank == 0:
+            nvshmem_wait_until_kernel[(1,)](
+                flag,
                 cmp_op=NVSHMEM_CMP_EQ,
                 cmp_val=flag_val,
                 extern_libs=nvshmem_lib,
             )
-            # After flag is set, data should be complete due to quiet
             torch.testing.assert_close(
                 out, val * torch.ones(numel, dtype=dtype, device=self.device)
             )
-        if rank == 1:
-            # Rank 1 puts data and flag with quiet in between
-            dst_ptr = out_hdl.buffer_ptrs[rank]
-            src_ptr = inp_hdl.buffer_ptrs[rank]
-            flag_dst_ptr = out_hdl.signal_pad_ptrs[rank]
-            # Create a tensor for the flag value
-            flag_update_val = torch.tensor(
-                [flag_val], dtype=torch.int64, device=self.device
-            )
-            flag_src_ptr = flag_update_val.data_ptr()
-            nvshmem_put_with_quiet_kernel[(1, 1, 1)](
-                dst_ptr,
-                src_ptr,
-                flag_dst_ptr,
-                flag_src_ptr,
-                size_bytes=msg_size_bytes,
-                peer=peer,
-                extern_libs=nvshmem_lib,
-            )
+        dist.barrier()
 
     @skipIfRocm
     @requires_triton()
@@ -798,30 +777,27 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         rank = self.rank
         numel = 1
         dtype = torch.int32
-        size_bytes = numel * dtype.itemsize
-        # Create symmetric buffers
+
         src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
         dst = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
-        src_hdl = symm_mem.rendezvous(src, group=group_name)
-        dst_hdl = symm_mem.rendezvous(dst, group=group_name)
-        # Launch kernel with cooperative grid
+        symm_mem.rendezvous(src, group=group_name)
+        symm_mem.rendezvous(dst, group=group_name)
+
         nvshmem_barrier_test_kernel[(1,)](
-            dst_hdl.buffer_ptrs[rank],
-            src_hdl.buffer_ptrs[rank],
-            size_bytes=size_bytes,
+            dst,
+            src,
+            nelems=numel,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
             num_ctas=1,
         )
-        # Verify results
-        # Rank 0 should have 42, and then the rest should have incremented + 1 to 43
+        dist.barrier()
+
         if rank == 0:
-            # Rank 0 should have its original value (42) in src
             torch.testing.assert_close(
                 src, torch.tensor([42], device=self.device, dtype=dtype)
             )
         else:
-            # Other ranks should have received 42 and incremented to 43
             torch.testing.assert_close(
                 dst, torch.tensor([43], device=self.device, dtype=dtype)
             )
@@ -831,38 +807,45 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
     def test_triton_sync(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
+
         nvshmem_lib = nvshmem.enable_triton()
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
         numel = 1
         dtype = torch.int32
-        size_bytes = numel * dtype.itemsize
+
         # Create symmetric buffers
-        src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
-        dst = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
-        src_hdl = symm_mem.rendezvous(src, group=group_name)
-        dst_hdl = symm_mem.rendezvous(dst, group=group_name)
+        local_data = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
+        remote_data = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(0)
+        symm_mem.rendezvous(local_data, group=group_name)
+        symm_mem.rendezvous(remote_data, group=group_name)
+
         # Launch kernel with cooperative grid
         nvshmem_sync_test_kernel[(1,)](
-            dst_hdl.buffer_ptrs[rank],
-            src_hdl.buffer_ptrs[rank],
-            size_bytes=size_bytes,
+            local_data,
+            remote_data,
+            nelems=numel,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
             num_ctas=1,
         )
+        
         # Verify results
-        if rank == 0:
-            # Rank 0 should have its original value (42) in src
-            torch.testing.assert_close(
-                src, torch.tensor([42], device=self.device, dtype=dtype)
-            )
-        else:
-            # Other ranks should have received 42 and incremented to 43
-            torch.testing.assert_close(
-                dst, torch.tensor([43], device=self.device, dtype=dtype)
-            )
+        # Each PE should have written rank + 100 to its local_data
+        expected_local = rank + 100
+        torch.testing.assert_close(
+            local_data, torch.tensor([expected_local], device=self.device, dtype=dtype)
+        )
+
+        # Each PE should have read (next_rank + 100) into its remote_data
+        # PE 0 reads from PE 1, PE 1 reads from PE 2, ..., PE n-1 reads from PE 0
+        next_rank = (rank + 1) % self.world_size
+        expected_remote = next_rank + 100
+        torch.testing.assert_close(
+            remote_data,
+            torch.tensor([expected_remote], device=self.device, dtype=dtype),
+        )
 
     @skipIfRocm
     @requires_triton()

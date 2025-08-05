@@ -282,46 +282,48 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    # Wait and Signal Operations
-    @core.extern
-    def wait_until(ivar, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
-        """
-        Wait until a condition is met on a symmetric variable.
 
-        This function blocks the calling thread until the value at the specified
-        symmetric memory location satisfies the given comparison condition. This
-        provides a mechanism for point-to-point synchronization between PEs.
+    # Wait and Signal Operations
+    @triton.jit
+    def wait_until(ivar, cmp_op, cmp_val):
+        """
+        Wait until a tensor variable meets a specified condition.
+
+        This high-level function provides a tensor-aware interface for NVSHMEM wait_until
+        operations. It automatically handles tensor address extraction, making
+        the API more ergonomic and type-safe.
 
         Args:
-            ivar (int64): Symmetric address of the variable to monitor. Must be a
-                         pointer to symmetric memory (typically int64/uint64).
-            cmp (int64): Comparison operator. Common values:
-                        - NVSHMEM_CMP_EQ (0): Wait until ivar == cmp_val
-                        - NVSHMEM_CMP_NE (1): Wait until ivar != cmp_val
-                        - NVSHMEM_CMP_GT (2): Wait until ivar > cmp_val
-                        - NVSHMEM_CMP_GE (3): Wait until ivar >= cmp_val
-                        - NVSHMEM_CMP_LT (4): Wait until ivar < cmp_val
-                        - NVSHMEM_CMP_LE (5): Wait until ivar <= cmp_val
-            cmp_val (int64): Value to compare against.
-            _semantic: Optional semantic information for Triton compilation.
-
-        Returns:
-            int32: Status code (0 for success).
+            ivar_tensor: Tensor to monitor (typically int64/uint64) in symmetric memory.
+            cmp: Comparison operator. Common values:
+                 - NVSHMEM_CMP_EQ (0): Wait until ivar == cmp_val
+                 - NVSHMEM_CMP_NE (1): Wait until ivar != cmp_val
+                 - NVSHMEM_CMP_GT (2): Wait until ivar > cmp_val
+                 - NVSHMEM_CMP_GE (3): Wait until ivar >= cmp_val
+                 - NVSHMEM_CMP_LT (4): Wait until ivar < cmp_val
+                 - NVSHMEM_CMP_LE (5): Wait until ivar <= cmp_val
+            cmp_val: Value to compare against.
 
         Notes:
             - This is a blocking operation that will wait indefinitely until the
               condition is satisfied.
-            - The variable must be in symmetric memory and accessible from other PEs.
-            - Updates to the variable from remote PEs will eventually become visible.
-            - Can be used with put operations from other PEs for synchronization.
+            - The tensor must be in symmetric memory and accessible from other PEs.
 
         Example:
             ```
-            # Wait until flag becomes 1 (set by another PE)
+            # Wait until flag tensor becomes 1 (set by another PE)
             NVSHMEM_CMP_EQ = 0
-            nvshmem.wait_until(flag_ptr, NVSHMEM_CMP_EQ, 1)
+            nvshmem.wait_until_tensor(flag_tensor, NVSHMEM_CMP_EQ, 1)
             ```
         """
+        tl.static_assert(
+            ivar.type.element_ty.itemsize == 8,
+            "wait_until expects a 64-bit type for the synchronization variable",
+        )
+        return wait_until_extern_wrapper(ivar.to(tl.int64), cmp_op, cmp_val)
+
+    @core.extern
+    def wait_until_extern_wrapper(ivar, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
         return core.extern_elementwise(
             "",
             "",
@@ -477,9 +479,9 @@ if has_triton():
         Example:
             ```
             # Ensure first put completes before second put to same PE
-            nvshmem.putmem_block(dst1, src1, size, target_pe)
+            nvshmem.put(dst, src, nelems, target_pe)
             nvshmem.fence()  # Enforce ordering
-            nvshmem.putmem_block(dst2, src2, size, target_pe)
+            nvshmem.put(dst2, src2, nelems, target_pe)
             ```
         """
         return core.extern_elementwise(
