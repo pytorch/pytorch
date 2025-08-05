@@ -661,11 +661,11 @@ def lazy_init():
         extra_check=prepare_softmax_extra_check,
     )
 
-    # register_addmm_activation_fusion()
+    register_addmm_activation_fusion()
 
 
 @functools.cache
-def _addmm_activation_init():
+def register_addmm_activation_fusion():
     shapes = [(5,), (3, 4), (4, 5)]
     args_fp32 = [torch.empty(shape) for shape in shapes]
     args_bf16 = [torch.empty(shape, dtype=torch.bfloat16) for shape in shapes]
@@ -694,10 +694,6 @@ def _addmm_activation_init():
                 pass_dicts=pass_patterns[2],
                 extra_check=is_valid_addmm_activation_fusion,
             )
-
-
-def register_addmm_activation_fusion():
-    _addmm_activation_init()
 
 
 def is_valid_addmm_activation_fusion(match):
