@@ -16,12 +16,12 @@ from pathlib import Path
 from typing import *  # noqa: F403
 
 import numpy as np
+import yaml
 
 import torch._custom_ops as custom_ops
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
-import yaml
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
@@ -4290,12 +4290,14 @@ Please use `add.register_fake` to add an fake impl.""",
         lib = torch.library.Library("test_invalid_kernel", "DEF")
         lib.define("cpu_only_op(Tensor x) -> Tensor")
         lib.impl("cpu_only_op", lambda x: x * 2, "CPU")
-        
+
         cpu_kernel = torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CPU")
         self.assertIsNotNone(cpu_kernel)
-        
+
         # CUDA should fail at the isValid() check since no CUDA kernel exists
-        with self.assertRaisesRegex(RuntimeError, "no kernel for CUDA for test_invalid_kernel::cpu_only_op"):
+        with self.assertRaisesRegex(
+            RuntimeError, "no kernel for CUDA for test_invalid_kernel::cpu_only_op"
+        ):
             torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
 
 
