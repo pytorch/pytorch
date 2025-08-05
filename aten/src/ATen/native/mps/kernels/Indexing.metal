@@ -240,9 +240,7 @@ REGISTER_INDEX_OP(put_accumulate, short, short);
 REGISTER_INDEX_OP(put_accumulate, char, char);
 REGISTER_INDEX_OP(put_accumulate, uchar, uchar);
 REGISTER_INDEX_OP(put_accumulate, bool, bool);
-#if __METAL_VERSION__ >= 310
 REGISTER_INDEX_OP(put_accumulate, bfloat, bfloat);
-#endif
 
 template <typename StridesT, typename DataT>
 kernel void kernel_index_offsets(
@@ -477,10 +475,8 @@ INSTANTIATE_INDEX_COPY(char, long);
 INSTANTIATE_INDEX_COPY(uchar, int);
 INSTANTIATE_INDEX_COPY(uchar, long);
 
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_INDEX_COPY(bfloat, int);
 INSTANTIATE_INDEX_COPY(bfloat, long);
-#endif
 INSTANTIATE_INDEX_COPY(float2, int);
 INSTANTIATE_INDEX_COPY(float2, long);
 INSTANTIATE_INDEX_COPY(half2, int);
