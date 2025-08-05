@@ -12,7 +12,7 @@
 
 - label: Regression Test # 5min
   id: vllm_regression_test
-  dependent_packages: ['modelscope']
+  dependent_packages: ['modelscope'] # modelscope is a dependency of vllm
   steps:
   - pip install modelscope
   - pytest -v -s test_regression.py
