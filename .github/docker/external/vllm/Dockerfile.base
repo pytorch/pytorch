@@ -307,7 +307,6 @@ ENV UV_INDEX_STRATEGY="unsafe-best-match"
 
 # Default mount file as placeholder, this just avoid the mount error
 ARG TORCH_WHEELS_PATH="./requirements"
-
 # Install torch, torchaudio and torchvision
 # if TORCH_WHEELS_PATH is default "./requirements", it will pull the nightly versions using pip using torch_build_versions.txt
 # otherwise, it will use the whls from TORCH_WHEELS_PATH from the host machine
