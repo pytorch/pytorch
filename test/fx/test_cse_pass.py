@@ -239,35 +239,35 @@ class TestCSEPass(TestCase):
         check(self, f, t, 0, P=P_ban_add)  # check that add is banned
         check(self, f, t, 1)  # check that add is not banned by default
 
-def test_rand_like(self):
-    # Test 1: Default behavior (non-deterministic)
-    def f_default(x):
-        a = torch.rand_like(x)
-        b = torch.rand_like(x)
-        return a + b
-
-    # Test 2: Deterministic behavior using generator
-    def f_with_generator(x):
-        gen = torch.Generator().manual_seed(1234)
-        a = torch.rand_like(x, generator=gen)
-        gen = torch.Generator().manual_seed(1234)
-        b = torch.rand_like(x, generator=gen)
-        return a + b
-
-    # Prepare input
-    t = torch.randn(2, 2)
-
-    # Check default behavior (skip value checking because it's random)
-    check(self, f_default, t, 0, check_val=False)
-
-    def test_rand_n(self):
-        def f(x):
-            a = torch.randn(4)
-            b = torch.randn(4)
+    def test_rand_like(self):
+        # Test 1: Default behavior (non-deterministic)
+        def f_default(x):
+            a = torch.rand_like(x)
+            b = torch.rand_like(x)
             return a + b
 
+        # Test 2: Deterministic behavior using generator
+        def f_with_generator(x):
+            gen = torch.Generator().manual_seed(1234)
+            a = torch.rand_like(x, generator=gen)
+            gen = torch.Generator().manual_seed(1234)
+            b = torch.rand_like(x, generator=gen)
+            return a + b
+
+        # Prepare input
         t = torch.randn(2, 2)
-        check(self, f, t, 0, check_val=False)
+
+        # Check default behavior (skip value checking because it's random)
+        check(self, f_default, t, 0, check_val=False)
+
+        def test_rand_n(self):
+            def f(x):
+                a = torch.randn(4)
+                b = torch.randn(4)
+                return a + b
+
+            t = torch.randn(2, 2)
+            check(self, f, t, 0, check_val=False)
 
 
 if __name__ == "__main__":
