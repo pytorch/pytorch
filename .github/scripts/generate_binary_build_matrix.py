@@ -332,7 +332,9 @@ def generate_wheels_matrix(
 
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
-            python_build_name = f"py{python_version}" if not use_sequential else "sequential"
+            python_build_name = (
+                f"py{python_version}" if not use_sequential else "sequential"
+            )
 
             if (
                 arch_version in ["12.9", "12.8", "12.6"]
