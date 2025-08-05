@@ -130,7 +130,7 @@ void nvshmem_put(at::Tensor& tensor, int64_t peer) {
 void nvshmem_wait_for_signal(at::Tensor& tensor, int64_t peer) {
   auto hdl = c10d::symmetric_memory::rendezvous(tensor, "0");
   auto rank = hdl->get_rank();
-  void* signal_ptr = hdl->get_signal_pad_ptrs()[peer];
+  void* signal_ptr = hdl->get_signal_pad_ptrs()[rank];
 
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
