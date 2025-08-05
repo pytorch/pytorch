@@ -12,6 +12,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen.cuda.cutlass_cache import maybe_fetch_ops
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.select_algorithm import create_inputs_key
@@ -918,6 +919,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 "Skipping due to alignment mismatch. op: %s", op.configuration_name()
             )
             return None
+
+        # only use stream k for static shape
+        if op.tile_scheduler.name == "StreamK":
+            static_shape = PythonWrapperCodegen.statically_known_list_of_ints_or_none(
+                tuple(X.get_size()) + tuple(W.get_size())
+            )
+            if not static_shape:
+                return None
 
         # Update op.
         op = copy.deepcopy(op)
