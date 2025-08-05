@@ -17,30 +17,65 @@ torch.dtype
 A :class:`torch.dtype` is an object that represents the data type of a
 :class:`torch.Tensor`. PyTorch has several different data types:
 
-========================== ===========================================   ===========================
-Data type                  dtype                                         Legacy Constructors
-========================== ===========================================   ===========================
-32-bit floating point      ``torch.float32`` or ``torch.float``          ``torch.*.FloatTensor``
-64-bit floating point      ``torch.float64`` or ``torch.double``         ``torch.*.DoubleTensor``
-32-bit complex             ``torch.complex32`` or ``torch.chalf``
-64-bit complex             ``torch.complex64`` or ``torch.cfloat``
-128-bit complex            ``torch.complex128`` or ``torch.cdouble``
-16-bit floating point [1]_ ``torch.float16`` or ``torch.half``           ``torch.*.HalfTensor``
-16-bit floating point [2]_ ``torch.bfloat16``                            ``torch.*.BFloat16Tensor``
-8-bit integer (unsigned)   ``torch.uint8``                               ``torch.*.ByteTensor``
-8-bit integer (signed)     ``torch.int8``                                ``torch.*.CharTensor``
-16-bit integer (signed)    ``torch.int16`` or ``torch.short``            ``torch.*.ShortTensor``
-32-bit integer (signed)    ``torch.int32`` or ``torch.int``              ``torch.*.IntTensor``
-64-bit integer (signed)    ``torch.int64`` or ``torch.long``             ``torch.*.LongTensor``
-Boolean                    ``torch.bool``                                ``torch.*.BoolTensor``
-========================== ===========================================   ===========================
+**Floating point dtypes**
 
-.. [1] Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
-  significand bits. Useful when precision is important.
+=========================================  ===============================
+dtype                                      description
+=========================================  ===============================
+``torch.float32`` or ``torch.float``       32-bit floating point, as defined in https://en.wikipedia.org/wiki/IEEE_754
+``torch.float64`` or ``torch.double``      64-bit floating point, as defined in https://en.wikipedia.org/wiki/IEEE_754
+``torch.float16`` or ``torch.half``        16-bit floating point, as defined in https://en.wikipedia.org/wiki/IEEE_754, S-E-M 1-5-10
+``torch.bfloat16``                         16-bit floating point, sometimes referred to as Brain floating point, S-E-M 1-8-7
+``torch.complex32`` or ``torch.chalf``     32-bit complex with two `float16` components
+``torch.complex64`` or ``torch.cfloat``    64-bit complex with two `float32` components
+``torch.complex128`` or ``torch.cdouble``  128-bit complex with two `float64` components
+``torch.float8_e4m3fn`` [shell]_, [1]_     8-bit floating point, S-E-M 1-4-3, from https://arxiv.org/abs/2209.05433
+``torch.float8_e5m2`` [shell]_             8-bit floating point, S-E-M 1-5-2, from https://arxiv.org/abs/2209.05433
+``torch.float8_e4m3fnuz`` [shell]_, [1]_   8-bit floating point, S-E-M 1-4-3, from https://arxiv.org/pdf/2206.02915
+``torch.float8_e5m2fnuz`` [shell]_, [1]_   8-bit floating point, S-E-M 1-5-2, from https://arxiv.org/pdf/2206.02915
+``torch.float8_e8m0fnu`` [shell]_, [1]_    8-bit floating point, S-E-M 0-8-0, from https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+``torch.float4_e2m1fn_x2`` [shell]_, [1]_  packed 4-bit floating point, S-E-M 1-2-1, from https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+=========================================  ===============================
 
-.. [2] Sometimes referred to as Brain Floating Point: use 1 sign, 8 exponent and 7
-  significand bits. Useful when range is important, since it has the same
-  number of exponent bits as ``float32``
+**Integer dtypes**
+
+=========================================  ===============================
+dtype                                      description
+=========================================  ===============================
+``torch.uint8``                            8-bit integer (unsigned)
+``torch.int8``                             8-bit integer (signed)
+``torch.uint16`` [shell]_, [2]_            16-bit integer (unsigned)
+``torch.int16`` or ``torch.short``         16-bit integer (signed)
+``torch.uint32`` [shell]_, [2]_            32-bit integer (unsigned)
+``torch.int32`` or ``torch.int``           32-bit integer (signed)
+``torch.uint64`` [shell]_, [2]_            64-bit integer (unsigned)
+``torch.int64`` or ``torch.long``          64-bit integer (signed)
+``torch.bool``                             Boolean
+=========================================  ===============================
+
+.. [shell] a shell dtype a specialized dtype with limited op and backend support.
+  Specifically, ops that support tensor creation (``torch.empty``, ``torch.fill``, ``torch.zeros``)
+  and operations which do not peek inside the data elements (``torch.cat``, ``torch.view``, ``torch.reshape``)
+  are supported.  Ops that peek inside the data elements such as casting,
+  matrix multiplication, nan/inf checks are supported only on a case by
+  case basis, depending on maturity and presence of hardware accelerated kernels
+  and established use cases.
+
+.. [1] The "fn", "fnu" and "fnuz" dtype suffixes mean:
+  "f" - finite value encodings only, no infinity;
+  "n" - nan value encodings differ from the IEEE spec;
+  "uz" - "unsigned zero" only, i.e. no negative zero encoding
+
+.. [2]
+  Unsigned types asides from ``uint8`` are currently planned to only have
+  limited support in eager mode (they primarily exist to assist usage with
+  torch.compile); if you need eager support and the extra range is not needed,
+  we recommend using their signed variants instead.  See
+  https://github.com/pytorch/pytorch/issues/58734 for more details.
+
+**Note**: legacy constructors such as ``torch.*.FloatTensor``, ``torch.*.DoubleTensor``, ``torch.*.HalfTensor``,
+``torch.*.BFloat16Tensor``, ``torch.*.ByteTensor``, ``torch.*.CharTensor``, ``torch.*.ShortTensor``, ``torch.*.IntTensor``,
+``torch.*.LongTensor``, ``torch.*.BoolTensor`` only remain for backwards compatibility and should no longer be used.
 
 To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
 can be used, which returns ``True`` if the data type is a floating point data type.
@@ -64,8 +99,8 @@ by finding the minimum dtype that satisfies the following rules:
 
 A floating point scalar operand has dtype `torch.get_default_dtype()` and an integral
 non-boolean scalar operand has dtype `torch.int64`. Unlike numpy, we do not inspect
-values when determining the minimum `dtypes` of an operand.  Quantized and complex types
-are not yet supported.
+values when determining the minimum `dtypes` of an operand.  Complex types
+are not yet supported. Promotion for shell dtypes is not defined.
 
 Promotion Examples::
 

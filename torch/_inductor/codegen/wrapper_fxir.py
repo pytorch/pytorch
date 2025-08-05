@@ -17,12 +17,12 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
-from torch._inductor.utils import sympy_product
+from torch._inductor.utils import sympy_product, sympy_subs
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import CeilDiv
 
 from .. import config, ir
 from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
@@ -155,6 +155,9 @@ class FxConverter:
             Optional[str], torch.fx.Node
         ] = {}  # Symbol table for codegen.
         self.kernels: dict[str, TritonKernel] = {}  # Table to store Triton kernels.
+        self.symbolic_arg_defs: dict[
+            sympy.Symbol, sympy.Expr
+        ] = {}  # Call arg definitions.
         self._unique_symbol_ids: Counter[str] = Counter()
 
     def _import_kernel(self, code: str, kernel_name: str) -> CachingAutotuner:
@@ -482,12 +485,19 @@ class FxConverter:
     def _generate_multi_output(self, line: WrapperLine) -> None:
         assert isinstance(line, MultiOutputLine)
 
+        arg_node = self.buffer_to_node[line.arg_name]
+
+        # For non-tuple / non-list outputs, map the
+        # output to the same node as the input.
+        if len(line.indices) == 0:
+            self.buffer_to_node[line.result_name] = arg_node
+            return
+
         # Extract the index for tuple access.
         inds = line.indices[0][1:]
         assert len(inds) == 1, f"Cannot convert {inds} to an index."
         idx = inds[0]
 
-        arg_node = self.buffer_to_node[line.arg_name]
         node = self.gm.graph.call_function(operator.getitem, args=(arg_node, idx))
         node.meta["val"] = arg_node.meta["val"][idx]
         node.name = line.result_name
@@ -571,17 +581,20 @@ class FxConverter:
                 assert V.graph.sizevars.statically_known_equals(new_expr, expr), (
                     f"Unsound replacement: '{new_expr}' != '{expr}'"
                 )
-
-                return FloorDiv(numerator, denominator)
+                # Undo the python division trick and replace with explicit CeilDiv
+                return -CeilDiv(-numerator, denominator)
             else:
                 return sympy.floor(expr)
 
-        def expr_to_symint(expr: Union[int, sympy.Expr]) -> Union[int, sympy.Expr]:
-            return (
-                convert_to_symint(expr.replace(sympy.floor, replace_floor_div))
-                if isinstance(expr, sympy.Expr)
-                else expr
-            )
+        def expr_to_symint(
+            expr: Union[int, torch.fx.Node, sympy.Expr],
+        ) -> Union[int, torch.fx.Node, sympy.Expr]:
+            if not isinstance(expr, sympy.Expr):
+                return expr
+
+            expr = expr.replace(sympy.floor, replace_floor_div)
+            expr = sympy_subs(expr, self.symbolic_arg_defs)
+            return convert_to_symint(expr)
 
         # Convert sympy expressions to symints.
         # Use FloorDiv over sympy.floor, so we can get nicer Python code from FX.
@@ -627,6 +640,7 @@ class FxConverter:
         """
 
         # Get FX nodes corresponding to the call args.
+        assert ir.is_node_sequence(kernel.inputs)
         tensor_nodes = tuple(self._generate_buffer(arg) for arg in kernel.inputs)
         args = tensor_nodes + tuple(kernel.constant_args)
 
@@ -690,4 +704,6 @@ class FxConverter:
 
     def _generate_symbolic_call_arg(self, line: WrapperLine) -> None:
         assert isinstance(line, SymbolicCallArgLine)
-        # No need for an FX node, as we will pass the arg to kernels via a SymInt.
+        # Store the arg: expr mapping for later use.
+        arg = line.arg
+        self.symbolic_arg_defs[arg.inner] = arg.inner_expr

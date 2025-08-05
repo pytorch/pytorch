@@ -144,10 +144,10 @@ class TestCommModeFeatures(DTensorTestBase):
         model2 = MLPStacked(self.device_type)
 
         parallelize_plan = {
-            "MLPStacked.layers.0.net1": ColwiseParallel(),
-            "MLPStacked.layers.0.net2": RowwiseParallel(),
-            "MLPStacked.layers.1.net1": ColwiseParallel(),
-            "MLPStacked.layers.1.net2": RowwiseParallel(),
+            "layers.0.net1": ColwiseParallel(),
+            "layers.0.net2": RowwiseParallel(),
+            "layers.1.net1": ColwiseParallel(),
+            "layers.1.net2": RowwiseParallel(),
         }
 
         model2 = parallelize_module(model2, device_mesh, parallelize_plan)

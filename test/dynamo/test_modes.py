@@ -12,9 +12,14 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class TestMode(BaseTorchFunctionMode):
@@ -24,6 +29,23 @@ class TestMode(BaseTorchFunctionMode):
 
         if func == torch.add:
             return torch.zeros(2, 2)
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class HopDetectionError(Exception):
+    pass
+
+
+class TestModeRaises(BaseTorchFunctionMode):
+    def __torch_function__(self, func, types, args, kwargs=None):
+        if not kwargs:
+            kwargs = {}
+
+        import torch._higher_order_ops
+
+        if func == torch._higher_order_ops.flex_attention:
+            raise HopDetectionError("test")
 
         return super().__torch_function__(func, types, args, kwargs)
 
@@ -227,7 +249,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Popping from an empty torch function mode stack",
+            "Attempted to pop from empty torch function mode stack",
             lambda: fn(torch.ones(2, 2)),
         )
 
@@ -499,11 +521,13 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     # Needs larger cache size since we recompile for each op
     @patch.object(torch._dynamo.config, "recompile_limit", 48)
     def test_builtin_equivalent_funcs(self):
+        from torch._dynamo.variables.builtin import (
+            BUILTIN_TO_TENSOR_FN_MAP,
+            BUILTIN_TO_TENSOR_RFN_MAP,
+        )
         from torch._dynamo.variables.torch_function import (
             bin_int_ops,
             bin_ops,
-            BUILTIN_TO_TENSOR_FN_MAP,
-            BUILTIN_TO_TENSOR_RFN_MAP,
             tensor_and_int_ops,
             un_int_ops,
             un_ops,
@@ -613,12 +637,12 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
             func(torch.randn(3))
 
-    @requires_cuda
+    @requires_gpu
     def test_flex_attention(self):
         import torch
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
-        torch.set_default_device("cuda")
+        torch.set_default_device(device_type)
 
         flex_attention = torch.compile(flex_attention, dynamic=False)
 
@@ -628,7 +652,9 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return prefix_lengths[b] >= kv
 
         # This runs in fullgraph already
-        create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
+        create_block_mask(
+            prefix_lm, 8, None, 512, 512, _compile=True, device=device_type
+        )
 
     def test_register_hook(self):
         import functools
@@ -650,6 +676,49 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         with torch.device("cpu"):
             torch.compile(mod, fullgraph=True)(x)
+
+    @requires_gpu
+    def test_hop(self):
+        import torch
+        import torch._higher_order_ops
+        from torch.nn.attention.flex_attention import (
+            flex_attention as flex_attention_eager,
+        )
+
+        with torch.device("cuda"):
+            flex_attention = torch.compile(flex_attention_eager, dynamic=False)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+            ):
+                # This runs in fullgraph already
+                with TestModeRaises():
+                    flex_attention(
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                    )
+
+    @requires_gpu
+    def test_hop_eager(self):
+        import torch
+        import torch._higher_order_ops
+        from torch.nn.attention.flex_attention import (
+            flex_attention as flex_attention_eager,
+        )
+
+        with torch.device("cuda"):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+            ):
+                with TestModeRaises():
+                    flex_attention_eager(
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                    )
 
 
 if __name__ == "__main__":

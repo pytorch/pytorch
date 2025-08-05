@@ -798,6 +798,9 @@ def get_tma_stores(
             elif op.name == "tt.experimental_descriptor_store":
                 assert len(op.args) >= 1
                 result.add(op.args[0])
+            elif op.name == "tt.descriptor_store":
+                assert len(op.args) >= 1
+                result.add(op.args[0])
 
     for val in list(result):
         if val in ops:
@@ -847,9 +850,6 @@ def analyze_kernel_mutations(
             # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
             if op.name in UNKNOWN_OPS:
                 if op.name == "tt.elementwise_inline_asm" and op.is_pure:
-                    log.warning(
-                        "TTIR mutation analysis: Skipping pure tt.elementwise_inline_asm op (is_pure=True)"
-                    )
                     continue
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
@@ -1037,7 +1037,7 @@ def triton_kernel_wrapper_mutation_dense(
         # as we need to launch the kernel here, we "unwrap" the
         # tma_descriptor_metadata, create the TMA descriptors
         # from it, and replace the tensors in the kwargs by the
-        # correspoinding TMA descriptors before launching
+        # corresponding TMA descriptors before launching
         kwargs = kwargs.copy()
         for k, v in tma_descriptor_metadata.items():
             tensor = kwargs[k]

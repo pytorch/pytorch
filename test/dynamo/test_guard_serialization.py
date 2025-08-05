@@ -254,7 +254,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
 
         self._frame_state = _FrameState(
             f_locals=dict(frame.f_locals),
-            f_globals=dict(frame.f_globals),
+            f_globals=frame.f_globals,
             f_code=frame.f_code,
             f_builtins=frame.f_builtins,
         )
@@ -305,6 +305,9 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             nonlocal ref_gm
             nonlocal loaded_gm
 
+            torch._dynamo.convert_frame.initial_global_state = (
+                torch._C._dynamo.guards.GlobalStateGuard()
+            )
             tracer = InstructionTranslator(
                 instructions,
                 self._frame_state.f_code,
@@ -333,14 +336,21 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             ):
                 tracer.run()
 
+                ref_gm = CheckFunctionManager(
+                    self._frame_state.f_code,
+                    tracer.output,
+                    guard_filter_fn=guard_filter_fn,
+                ).guard_manager
+
                 check_fn_manager = CheckFunctionManager(
                     self._frame_state.f_code,
                     tracer.output,
                     guard_filter_fn=guard_filter_fn,
                     guards_serialization_mode="save",
                 )
-                ref_gm = check_fn_manager.guard_manager
                 guards_state = check_fn_manager.guards_state
+                self._cached_guards_state = guards_state
+                self._cached_f_code = self._frame_state.f_code
                 self.assertIsNotNone(guards_state)
                 guards_state = pickle.loads(guards_state)
 
@@ -349,12 +359,14 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                     guards_state.output_graph,
                     guards_serialization_mode="load",
                     shape_code_parts=guards_state.shape_code_parts,
+                    runtime_global_scope=self._frame_state.f_globals,
                 )
                 loaded_gm = check_fn_manager.guard_manager
 
         try:
             transform_code_object(self._frame_state.f_code, transform)
         finally:
+            torch._dynamo.convert_frame.initial_global_state = None
             self._frame_state = None
 
         self.assertIsNotNone(ref_gm)
@@ -866,6 +878,23 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         ):
             self._test_serialization("ID_MATCH", fn, torch.randn(3))
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_id_match_with_config(self):
+        def fn(x):
+            return x + id(x)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
+        def fn(x):
+            # usage of this context manager installs a FUNCTION_MATCH guard
+            with torch.no_grad():
+                y = x * 2
+            return y
+
+        ref, loaded = self._test_serialization("FUNCTION_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
     def test_dispatch_key_set_match(self):
         def fn(x, dks):
             if dks.has("CPU"):
@@ -1037,10 +1066,10 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return x + x_
 
         x = torch.randn(3, 2)
-        with self.assertRaisesRegex(
-            PackageError, "DUPLICATE_INPUT guard cannot be serialized"
-        ):
-            self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+        ref, loaded = self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+
+        self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
 
     def test_weakref_alive(self):
         mod = torch.nn.Linear(10, 10, bias=False)
@@ -1137,6 +1166,25 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             self._test_check_fn(ref, loaded, {"x": x}, False)
         with torch.enable_grad():
             self._test_check_fn(ref, loaded, {"x": x}, True)
+
+    def test_grad_mode_loading(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        with torch.enable_grad():
+            ref, _ = self._test_serialization("GRAD_MODE", fn, x)
+        with torch.no_grad():
+            # Ensure guards state loading is not affected by the current global grad mode.
+            guards_state = pickle.loads(self._cached_guards_state)
+            check_fn_manager = CheckFunctionManager(
+                self._cached_f_code,
+                guards_state.output_graph,
+                guards_serialization_mode="load",
+                shape_code_parts=guards_state.shape_code_parts,
+            )
+            loaded = check_fn_manager.guard_manager
+            self._test_check_fn(ref, loaded, {"x": x}, False)
 
     def test_deterministic_algorithms(self):
         def fn(x):
@@ -1252,6 +1300,30 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 10, 2)}, True)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 11, 2)}, False)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 2, 2)}, False)
+
+    def test_builtin_match(self):
+        def fn(x):
+            # usage of getattr() here installs a BUILTIN_MATCH guard
+            s = getattr(x, "shape")  # noqa: B009
+            return x + s[0]
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("BUILTIN_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        getattr_original = getattr
+
+        def getattr_new(*args, **kwargs):
+            return getattr_original(*args, **kwargs)
+
+        builtins_dict = (
+            __builtins__ if isinstance(__builtins__, dict) else __builtins__.__dict__
+        )
+        builtins_dict["getattr"] = getattr_new
+        try:
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+        finally:
+            builtins_dict["getattr"] = getattr_original
 
 
 if __name__ == "__main__":
