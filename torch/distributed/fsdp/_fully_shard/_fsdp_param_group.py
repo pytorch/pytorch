@@ -358,13 +358,15 @@ class FSDPParamGroup:
             # directly initialize unsharded parameters from sharded parameters
 
             for fsdp_param in self.fsdp_params:
-                sharded_data = fsdp_param._sharded_param_data
+                # Use all_gather_inputs which already handles conversion to param_dtype
+                # This is consistent with the world_size > 1 path
+                all_gather_input = fsdp_param.all_gather_inputs[0]
 
                 # Make sure the all_gather_outputs has proper storage size before using it
                 # First ensure we have at least one tensor in all_gather_outputs
                 fsdp_param.init_all_gather_outputs(
-                    [sharded_data.numel()],
-                    [sharded_data.dtype],
+                    [all_gather_input.numel()],
+                    [all_gather_input.dtype],
                     1,
                     self.device,
                     force_recreate=False,
@@ -375,7 +377,7 @@ class FSDPParamGroup:
 
                 # find alternative way to check if tensor.is_inference
                 with torch.autograd._unsafe_preserve_version_counter(tensor):
-                    tensor.copy_(sharded_data)
+                    tensor.copy_(all_gather_input)
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
