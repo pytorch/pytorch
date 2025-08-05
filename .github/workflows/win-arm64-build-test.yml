@@ -2,8 +2,8 @@ name: windows-arm64-build-test
 
 on:
   schedule:
-    # Runs every 8 hours: at 00:00, 08:00 and 16:00 UTC
-    - cron: '0 */8 * * *'
+    # Runs every hour
+    - cron: '0 * * * *'
   push:
     tags:
       - ciflow/win-arm64/*
