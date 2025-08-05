@@ -98,10 +98,8 @@ class OpKernel {
  public:
   explicit OpKernel(
       const Node* node,
-      std::optional<c10::Device> device = std::nullopt,
-      torch::nativert::OpKernelKind kind =
-          torch::nativert::OpKernelKind::kInterpreterFallbackKernel)
-      : node_(node), device_(device), kind_(kind) {
+      OpKernelKind kind = OpKernelKind::kInterpreterFallbackKernel)
+      : node_(node), kind_(kind) {
     VLOG(1) << "Initializing kernel for node: " << *node_;
   }
 
@@ -110,16 +108,17 @@ class OpKernel {
   }
   void compute(ExecutionFrame& executionFrame) const;
 
-  torch::nativert::OpKernelKind kind() const {
+  OpKernelKind kind() const {
     return kind_;
   }
 
   bool hasPrimKernel() const {
-    return kind() == torch::nativert::OpKernelKind::kPrimKernel;
+    return kind() == OpKernelKind::kPrimKernel;
   }
 
   bool hasStaticDispatch() const {
-    return kind() == torch::nativert::OpKernelKind::kStaticDispatchKernel;
+    return kind() == OpKernelKind::kStaticDispatchKernel ||
+        kind() == OpKernelKind::kNativeStaticDispatchKernel;
   }
 
   size_t numInputs() const {
@@ -150,10 +149,9 @@ class OpKernel {
   virtual void computeInternal(ExecutionFrame& executionFrame) const = 0;
 
   const Node* node_;
-  std::optional<c10::Device> device_;
   const static bool blockingEnabled_;
   // this should be set in the ctor!
-  const torch::nativert::OpKernelKind kind_;
+  const OpKernelKind kind_;
 };
 
 } // namespace torch::nativert

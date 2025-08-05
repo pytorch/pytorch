@@ -944,7 +944,8 @@ def define_buck_targets(
             [
                 ("torch/csrc/api/include", "torch/**/*.h"),
                 ("", "torch/csrc/**/*.h"),
-                ("", "torch/standalone/**/*.h"),
+                ("", "torch/nativert/**/*.h"),
+                ("", "torch/headeronly/**/*.h"),
                 ("", "torch/script.h"),
                 ("", "torch/library.h"),
                 ("", "torch/custom_class.h"),
@@ -1244,6 +1245,7 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/parse_operators.cpp",
             "torch/csrc/jit/mobile/upgrader_mobile.cpp",
             "torch/csrc/jit/serialization/import_read.cpp",
+            "torch/csrc/jit/serialization/pickler_helper.cpp",
             "torch/csrc/jit/serialization/unpickler.cpp",
         ],
         header_namespace = "",

@@ -1004,7 +1004,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 0, 0)
 
-        # cat and split lenghts are different
+        # cat and split lengths are different
         def fn(a, b, c):
             cat = torch.ops.aten.cat.default([a, b, c], 1)
             split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [5, 5], 1)
@@ -1158,15 +1158,19 @@ class TestPatternMatcher(TestCase):
             torch.randn(5, 5, device=GPU_TYPE),
         ]
 
-        with unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.config.pre_grad_fusion_options",
-            {"test": {}},
-        ), unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_FUSIONS",
-            [],
-        ), unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_PATTERNS",
-            {"test": test_pass},
+        with (
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.config.pre_grad_fusion_options",
+                {"test": {}},
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.PRE_GRAD_FUSIONS",
+                [],
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.PRE_GRAD_PATTERNS",
+                {"test": test_pass},
+            ),
         ):
             for fn in (fn0, fn1, fn2, fn3, fn4, fn5):
                 counter = 0
@@ -1349,6 +1353,22 @@ class TestPatternMatcher(TestCase):
                 torch.testing.assert_close(actual, expected)
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_addmm_dtype_mismatch(self):
+        a = torch.nn.Linear(1024, 1024, bias=False).cuda()
+        a = a.to(dtype=torch.float16)
+
+        w = torch.randn(1024, 1024, device="cuda")
+
+        def func():
+            x = torch.ones(1024, 1024, device="cuda", dtype=torch.float16)
+            x = a(x)
+            x = x + w
+            return x
+
+        actual, (code) = run_and_get_code(torch.compile(func))
+        self.assertEqual(actual, func())
+        FileCheck().check_not("addmm").run(code[0])
 
     def test_replace_mul_zero(self):
         def test(x, y):

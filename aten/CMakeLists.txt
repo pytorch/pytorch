@@ -10,7 +10,8 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules
-  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public)
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
 
 cmake_policy(SET CMP0012 NEW)
 

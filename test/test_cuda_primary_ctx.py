@@ -42,7 +42,7 @@ class TestCudaPrimaryCtx(TestCase):
         self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
         torch.cuda.set_device(0)
         if _get_torch_cuda_version() >= (12, 0):
-            # Now after the device was set, the contex should present in CUDA 12.
+            # Now after the device was set, the context should present in CUDA 12.
             self.assertTrue(torch._C._cuda_hasPrimaryContext(0))
         else:
             # In CUDA 11 the context should not be created.

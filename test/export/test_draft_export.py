@@ -181,9 +181,12 @@ class TestDraftExport(TestCase):
             self.assertEqual(len(report.op_profiles), 1)
             self.assertEqual(len(report.op_profiles["mylib.foo8.default"]), 1)
 
-            with torch._library.fake_profile.unsafe_generate_fake_kernels(
-                report.op_profiles
-            ), FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
+            with (
+                torch._library.fake_profile.unsafe_generate_fake_kernels(
+                    report.op_profiles
+                ),
+                FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()),
+            ):
                 torch.ops.mylib.foo8(*new_inp)
 
                 # Existing registration has been updated to match the new

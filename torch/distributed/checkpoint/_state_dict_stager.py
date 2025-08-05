@@ -1,19 +1,14 @@
 # mypy: allow-untyped-defs
-import logging
 import types
+import warnings
 import weakref
 from copyreg import dispatch_table
-from logging import getLogger
 from typing import Any
 
 import torch
 import torch.cuda._pin_memory_utils as pin_memory_utils
 from torch.storage import UntypedStorage
 from torch.utils.weak import WeakIdKeyDictionary
-
-
-logger = getLogger()
-logger.setLevel(logging.INFO)
 
 
 class StateDictStager:
@@ -33,9 +28,10 @@ class StateDictStager:
 
     def __init__(self, pin_memory: bool = False, share_memory: bool = False):
         if pin_memory and not torch.cuda.is_available():
-            logger.warning(
+            warnings.warn(
                 "Ignoring pin_memory flag for checkpoint staging as pinning memory"
-                "requires CUDA, but CUDA is not available. "
+                "requires CUDA, but CUDA is not available. ",
+                stacklevel=2,
             )
             self.pin_memory = False
         else:
@@ -182,8 +178,9 @@ class StateDictStager:
         Returns:
             A CPU copy of the tensor with optimized storage
         """
-        # Create a new empty tensor on CPU
-        y = x.new_empty([], device="cpu")
+        # if data_ptr is not 0, we allocate a new storage below. so we can skip
+        # memory allocation by using [] for size.
+        y = x.new_empty([] if x.data_ptr() != 0 else x.size(), device="cpu")
 
         # Store in memo dict early to handle recursive references
         d = id(x)
@@ -221,6 +218,16 @@ class StateDictStager:
                     )
 
         return y
+
+    def close(self):
+        """
+        Clean up all cached storages and release associated resources.
+
+        This method clears the internal storage cache, allowing garbage collection
+        of cached CPU storages. Any pinned memory associated with cached storages
+        will be automatically unpinned through weak reference finalizers.
+        """
+        self._cached_storage_mapping.clear()
 
     @torch.no_grad()
     def deepcopy_with_tensor_offload(self, x, memo=None, _nil=[], non_blocking=False):  # noqa: B006

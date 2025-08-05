@@ -90,6 +90,7 @@ if TYPE_CHECKING:
 
     from torch._guards import CompileId
     from torch._inductor.utils import InputType
+    from torch.cuda import _POOL_HANDLE
     from torch.types import _bool
 
 StorageWeakRefPointer = int
@@ -346,6 +347,17 @@ def get_manager(
     return get_container(device_index).tree_manager
 
 
+def is_cudagraph_capture_sizes(int_key: Union[int, tuple[int, ...]]) -> bool:
+    """
+    Returns true if all dynamic shapes should be captured or the dynamic shape
+    int_key should be captured.
+    """
+    return (
+        config.triton.cudagraph_capture_sizes is None
+        or int_key in config.triton.cudagraph_capture_sizes
+    )
+
+
 def cudagraphify_impl(
     model: ModelType,
     inputs: list[InputType],
@@ -367,6 +379,10 @@ def cudagraphify_impl(
         nonlocal has_warn
 
         int_key = get_ints(inputs)
+
+        if not is_cudagraph_capture_sizes(int_key):
+            return model(inputs)
+
         fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
@@ -802,7 +818,7 @@ class CUDAGraphNode:
         id: GraphID,
         parent: Optional[CUDAGraphNode],
         inputs: list[InputType],
-        cuda_graphs_pool: tuple[int, int],
+        cuda_graphs_pool: _POOL_HANDLE,
         device_index: int,
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
@@ -1213,6 +1229,7 @@ class CUDAGraphNode:
 
     def _record(self, model: ModelType, inputs: list[InputType]) -> OutputType:
         "Record the model"
+        assert self.graph is not None
 
         def static_input_iter() -> Generator[torch.Tensor, None, None]:
             for i in self.wrapped_function.static_input_idxs:
@@ -1295,13 +1312,11 @@ class CUDAGraphNode:
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
 
-            (
-                torch._check(
-                    o.is_cuda or o.untyped_storage().data_ptr() == 0,
-                    lambda: (
-                        "Expected all cuda outputs in cuda graph recording. Non cuda output "
-                        f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
-                    ),
+            torch._check(
+                o.is_cuda or o.untyped_storage().data_ptr() == 0,
+                lambda: (
+                    "Expected all cuda outputs in cuda graph recording. Non cuda output "
+                    f"from {self.stack_traces[i] if self.stack_traces else '(unknown)'}"
                 ),
             )
 

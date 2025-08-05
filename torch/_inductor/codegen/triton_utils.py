@@ -71,6 +71,8 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
             return "fp32"
+        elif isinstance(arg.expr, bool):
+            return "i1"
 
         # if this is a integer
         if size_dtype == "tl.int32":
@@ -81,7 +83,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             # no hint: we'll see if we know that this is a 32-bit int, and guard if possible.
             int_max = torch.iinfo(torch.int32).max
             if expr_fits_within_32bit(arg.expr):
-                V.graph.sizevars.guard_leq(arg.expr, int_max)
+                V.graph.sizevars.check_leq(arg.expr, int_max)
                 return "i32"
             else:
                 return "i64"

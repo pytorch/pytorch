@@ -5,7 +5,6 @@ import dataclasses
 import functools
 import threading
 import typing
-import warnings
 import weakref
 from abc import abstractmethod
 from contextlib import AbstractContextManager, contextmanager
@@ -81,8 +80,7 @@ def safe_is_leaf(t: Union[MetaTensorDesc, torch.Tensor]) -> bool:
 
 
 def safe_grad(t: _TensorLikeT) -> Optional[_TensorLikeT]:
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+    with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return t.grad
 
 
@@ -357,7 +355,9 @@ class MetaTensorDescriber:
 
         maybe_functorch_stack = None
         if is_functorch_wrapped:
-            with torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack() as maybe_functorch_stack:
+            with (
+                torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack()
+            ) as maybe_functorch_stack:
                 pass
 
         attrs = None
@@ -517,8 +517,7 @@ class ViewFunc(Generic[_TensorT]):
         new_base: _TensorT,
         symint_visitor_fn: Optional[Callable[[int], int]] = None,
         tensor_visitor_fn: Optional[Callable[[torch.Tensor], _TensorT]] = None,
-    ) -> _TensorT:
-        ...
+    ) -> _TensorT: ...
 
     @staticmethod
     def from_tensor(t: torch.Tensor) -> ViewFunc:
@@ -574,8 +573,7 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
 class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
     def __call__(
         self, arg: Callable[[], torch.Tensor], /, *, device: Union[torch.device, str]
-    ) -> _TensorT_cov:
-        ...
+    ) -> _TensorT_cov: ...
 
 
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
@@ -592,8 +590,7 @@ class _MetaTensorCallbackOptDevice(Protocol, Generic[_TensorT_cov]):
         arg: Callable[[], torch.Tensor],
         /,
         **kwargs: Unpack[_MetaTensorCallbackKwargs],
-    ) -> _TensorT_cov:
-        ...
+    ) -> _TensorT_cov: ...
 
 
 @dataclass(frozen=True)
@@ -785,9 +782,9 @@ class MetaConverter(Generic[_TensorT]):
         ] = weakref.WeakValueDictionary()
         # Maps MetaTensorId to torch.Tensor (typically a meta tensor or
         # FakeTensor)
-        self.tensor_memo: weakref.WeakValueDictionary[
-            MetaTensorId, _TensorT
-        ] = weakref.WeakValueDictionary()
+        self.tensor_memo: weakref.WeakValueDictionary[MetaTensorId, _TensorT] = (
+            weakref.WeakValueDictionary()
+        )
         self.hit = 0
         self.miss = 0
         self.del_hook = None
@@ -1644,7 +1641,7 @@ class MetaConverter(Generic[_TensorT]):
                                 with torch.enable_grad():
                                     r = view_from_base(base, t)
 
-                                # NB: We don't actaully faithfully replicate
+                                # NB: We don't actually faithfully replicate
                                 # autograd connectivity, but that doesn't matter
                                 # today. See following for more info:
                                 # https://gist.github.com/soulitzer/e03f015b314c3f5fcf80888c69390913
@@ -1669,6 +1666,8 @@ class MetaConverter(Generic[_TensorT]):
                         torch._C._dispatch_tls_set_dispatch_key_excluded(
                             torch._C.DispatchKey.ADInplaceOrView, old_exclude
                         )
+
+                    r.fake_device = t.device  # type: ignore[attr-defined]
 
                 else:
                     is_leaf = t.is_leaf
@@ -1772,9 +1771,9 @@ class MetaConverter(Generic[_TensorT]):
                         # subclasses.  Relevant test is
                         # DynamicShapesFunctionTests::test_add_dynamic_shapes in
                         # test/dynamo/test_dynamic_shapes.py
-                        maybe_fake_mgr: AbstractContextManager[
-                            None
-                        ] = contextlib.nullcontext()
+                        maybe_fake_mgr: AbstractContextManager[None] = (
+                            contextlib.nullcontext()
+                        )
                         from torch._subclasses.fake_tensor import (
                             in_kernel_invocation_manager,
                             maybe_get_fake_mode,

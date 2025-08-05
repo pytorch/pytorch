@@ -89,6 +89,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
         "/usr/local/cuda/lib64/libcusparseLt.so.0",
         "/usr/local/cuda/lib64/libcusolver.so.11",
         "/usr/local/cuda/lib64/libcurand.so.10",
+        "/usr/local/cuda/lib64/libnccl.so.2",
         "/usr/local/cuda/lib64/libnvJitLink.so.12",
         "/usr/local/cuda/lib64/libnvrtc.so.12",
         "/usr/local/cuda/lib64/libcudnn_adv.so.9",

@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_cmath.py b/test/dynamo/cpython/3_13/test_cmath.py
-index a96a5780b31..883e87a0733 100644
+index a96a5780b31..37fb665d97d 100644
 --- a/test/dynamo/cpython/3_13/test_cmath.py
 +++ b/test/dynamo/cpython/3_13/test_cmath.py
-@@ -1,5 +1,55 @@
+@@ -1,5 +1,58 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_cmath.py
 +
 +import sys
 +import torch
@@ -59,7 +62,7 @@ index a96a5780b31..883e87a0733 100644
  from test.test_math import parse_testfile, test_file
  import test.test_math as test_math
  import unittest
-@@ -50,7 +100,7 @@ complex_nans = [complex(x, y) for x, y in [
+@@ -50,7 +103,7 @@ complex_nans = [complex(x, y) for x, y in [
          (INF, NAN)
          ]]
  
@@ -68,7 +71,7 @@ index a96a5780b31..883e87a0733 100644
      # list of all functions in cmath
      test_functions = [getattr(cmath, fname) for fname in [
              'acos', 'acosh', 'asin', 'asinh', 'atan', 'atanh',
-@@ -66,6 +116,39 @@ class CMathTests(ComplexesAreIdenticalMixin, unittest.TestCase):
+@@ -66,6 +119,39 @@ class CMathTests(ComplexesAreIdenticalMixin, unittest.TestCase):
      def tearDown(self):
          self.test_values.close()
  
@@ -108,7 +111,7 @@ index a96a5780b31..883e87a0733 100644
      def rAssertAlmostEqual(self, a, b, rel_err = 2e-15, abs_err = 5e-323,
                             msg=None):
          """Fail if the two floating-point numbers are not almost equal.
-@@ -590,4 +673,4 @@ class IsCloseTests(test_math.IsCloseTests):
+@@ -590,4 +676,4 @@ class IsCloseTests(test_math.IsCloseTests):
  
  
  if __name__ == "__main__":

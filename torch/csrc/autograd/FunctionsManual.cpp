@@ -894,7 +894,8 @@ Tensor logcumsumexp_backward(
   // Reference:
   // https://github.com/tensorflow/tensorflow/blob/2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
 
-  auto scalar_min = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+  auto scalar_min = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half,
       at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
@@ -5022,6 +5023,103 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 }
 
+std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
+    const Tensor& dY,
+    const Tensor& drstd,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& rstd,
+    const std::optional<Tensor>& weight_opt,
+    std::array<bool, 2> grad_input_mask) {
+  c10::MaybeOwned<at::Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
+  const auto input_shape = input.sizes();
+  const auto input_ndim = input.dim();
+  const int normalized_ndim = normalized_shape.size();
+  const int axis = input_ndim - normalized_ndim;
+
+  int64_t N_rms = 1;
+  for (int i = 0; i < normalized_ndim; ++i) {
+    N_rms *= input_shape[axis + i];
+  }
+
+  Tensor dX;
+  Tensor dgamma;
+
+  std::vector<int64_t> rstd_view_shape = rstd.sizes().vec();
+  for (int i = 0;
+       i < std::max(static_cast<int>(normalized_ndim - rstd.dim()), 0);
+       ++i) {
+    rstd_view_shape.push_back(1);
+  }
+  Tensor rstd_broadcast = rstd.view(rstd_view_shape);
+  Tensor rstd_pow3 = rstd_broadcast.pow(3);
+  Tensor grad_x_hat;
+
+  if (dY.defined()) {
+    if (weight.defined()) {
+      grad_x_hat = dY * weight;
+    } else {
+      grad_x_hat = dY;
+    }
+  }
+
+  if (grad_input_mask[0]) {
+    Tensor dX_from_dY_path;
+    Tensor dX_from_drstd_path;
+
+    std::vector<int64_t> inner_sum_dims;
+    inner_sum_dims.reserve(normalized_ndim);
+    for (int i = 0; i < normalized_ndim; ++i) {
+      inner_sum_dims.push_back(axis + i);
+    }
+
+    if (dY.defined() && grad_x_hat.defined()) {
+      Tensor sum_input_times_grad_x_hat =
+          sum(input * grad_x_hat, inner_sum_dims, /*keepdim=*/true);
+      dX_from_dY_path = rstd_broadcast * grad_x_hat -
+          (input * rstd_pow3 / static_cast<double>(N_rms)) *
+              sum_input_times_grad_x_hat;
+    }
+
+    if (drstd.defined()) {
+      Tensor drstd_broadcast = drstd.view(rstd_view_shape);
+      dX_from_drstd_path =
+          -(input * rstd_pow3 / static_cast<double>(N_rms)) * drstd_broadcast;
+    }
+
+    if (dX_from_dY_path.defined() && dX_from_drstd_path.defined()) {
+      dX = dX_from_dY_path + dX_from_drstd_path;
+    } else if (dX_from_dY_path.defined()) {
+      dX = dX_from_dY_path;
+    } else if (dX_from_drstd_path.defined()) {
+      dX = dX_from_drstd_path;
+    }
+  }
+
+  if (grad_input_mask[1] && weight.defined()) {
+    if (dY.defined()) {
+      Tensor x_hat = input * rstd_broadcast;
+      Tensor dgamma_full_shape = dY * x_hat;
+
+      if (axis > 0) {
+        std::vector<int64_t> outer_sum_dims;
+        outer_sum_dims.reserve(axis);
+        for (int i = 0; i < axis; ++i) {
+          outer_sum_dims.push_back(i);
+        }
+        dgamma = sum(dgamma_full_shape, outer_sum_dims, /*keepdim=*/false);
+      } else {
+        dgamma = dgamma_full_shape;
+      }
+    }
+  }
+
+  return std::make_tuple(dX, dgamma);
+}
+
 std::tuple<Tensor, Tensor, Tensor>
 infinitely_differentiable_native_group_norm_backward(
     const Tensor& dY,
@@ -6374,6 +6472,98 @@ Tensor layer_norm_jvp(
       weight_p.defined() ? weight_p.view(view_size_affine) : weight_p,
       weight_t.defined() ? weight_t.view(view_size_affine) : weight_t,
       bias_t.defined() ? bias_t.view(view_size_affine) : bias_t);
+}
+
+Tensor rms_norm_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape) {
+  auto dims = std::vector<int64_t>{};
+  auto view_size = input_t.sizes().vec();
+  auto view_size_affine = input_t.sizes().vec();
+
+  int64_t numel = 1;
+  for (const auto i : c10::irange(view_size.size())) {
+    if (i < view_size.size() - normalized_shape.size()) {
+      view_size_affine[i] = 1;
+    } else {
+      numel *= input_t.size(static_cast<int64_t>(i));
+      view_size[i] = 1;
+      dims.push_back(static_cast<int64_t>(i));
+    }
+  }
+
+  auto rstd_p = saved_rstd.view(view_size);
+
+  Tensor rstd_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
+  } else {
+    rstd_t = input_t * input_p;
+    rstd_t *= -rstd_p.pow(3);
+  }
+  rstd_t = rstd_t.sum(dims, true);
+  rstd_t /= numel;
+
+  Tensor result_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    result_t = (input_t)*rstd_p + (input_p)*rstd_t;
+  } else {
+    result_t = input_t * rstd_p;
+    auto temp = input_p * rstd_t;
+    result_t += temp;
+  }
+
+  std::optional<Tensor> result_p = std::nullopt;
+  if (weight_p.defined()) {
+    result_p = std::optional<Tensor>(input_p * rstd_p);
+  }
+
+  return _affine_jvp(
+      result_p,
+      result_t,
+      weight_p.defined() ? weight_p.view(view_size_affine) : weight_p,
+      weight_t.defined() ? weight_t.view(view_size_affine) : weight_t,
+      Tensor());
+}
+
+Tensor rms_norm_rstd_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape) {
+  auto dims = std::vector<int64_t>{};
+  auto view_size = input_t.sizes().vec();
+  auto view_size_affine = input_t.sizes().vec();
+
+  int64_t numel = 1;
+  for (const auto i : c10::irange(view_size.size())) {
+    if (i < view_size.size() - normalized_shape.size()) {
+      view_size_affine[i] = 1;
+    } else {
+      numel *= input_t.size(static_cast<int64_t>(i));
+      view_size[i] = 1;
+      dims.push_back(static_cast<int64_t>(i));
+    }
+  }
+
+  auto rstd_p = saved_rstd.view(view_size);
+  Tensor rstd_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
+  } else {
+    rstd_t = input_t * input_p;
+    rstd_t *= -rstd_p.pow(3);
+  }
+  rstd_t = rstd_t.sum(dims, true);
+  rstd_t /= numel;
+  return rstd_t;
 }
 
 Tensor group_norm_jvp(

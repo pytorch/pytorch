@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ctypes
 import functools
 import math
 import os
@@ -20,8 +21,14 @@ from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, Sy
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import config, ir
-from ..utils import _align, DeferredLineBase, LineContext, normalize_name
+from .. import config, cpp_builder, ir
+from ..utils import (
+    _align,
+    aoti_model_name_from_config,
+    DeferredLineBase,
+    LineContext,
+    normalize_name,
+)
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -57,6 +64,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.device = "cpu"
         # must be initialized prior to calling super().__init__()
         self.included_devices: OrderedSet[str] = OrderedSet()
+        self.model_class_name_suffix = ""
+        if config.aot_inductor.compile_standalone:
+            self.model_class_name_suffix = aoti_model_name_from_config()
+        self.aoti_model_class_name = f"AOTInductorModel{self.model_class_name_suffix}"
         super().__init__()
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
@@ -108,7 +119,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # e.g. const double** is possible, but not const double* const*.  This means
         # that an array containing pointers must _already_ be properly const-qualified
         # by the c_type, and not add additional const-ness.
-        ptr_call = "data()" if force_mutable or c_type.endswith("*") else "cbegin()"
+        # MSVC does not support implicitly converting a const iterator to a const pointer.
+        ptr_call = (
+            "data()"
+            if force_mutable or c_type.endswith("*") or cpp_builder.is_msvc_cl()
+            else "cbegin()"
+        )
         return (
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
@@ -207,10 +223,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.add_device_include(self.device)
 
         if V.graph.aot_mode:
-            with open(
-                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
-            ) as f:
-                self.header.splice(f.read())
+            if not config.aot_inductor.compile_standalone:
+                with open(
+                    os.path.join(
+                        os.path.dirname(__file__), "aoti_runtime", "interface.cpp"
+                    )
+                ) as f:
+                    self.header.splice(f.read())
+            else:
+                # we produce a separate model header for each model in static linkage
+                self.header.splice(f"""#include \"{self.model_class_name_suffix}.h\"""")
             self.header.splice("\n")
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
@@ -405,12 +427,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                             """
                         )
                     if not math.isinf(sym_range.upper):
+                        # Limit upper bound to max C long long value (2^63 - 1)
+                        max_long_long = ctypes.c_longlong(2**63 - 1).value
+                        upper_bound = min(sym_range.upper, max_long_long)
                         self.prefix.splice(
                             f"""
-                                if ({name}_size[{dim_idx}] > {sym_range.upper}) {{
+                                if ({name}_size[{dim_idx}] > {upper_bound}) {{
                                     std::stringstream ss;
                                     ss << "{handle_kind}[{idx}]: dim value is too large at {dim_idx}, "
-                                       << "expected to be <= {sym_range.upper}, " << "but got: "
+                                       << "expected to be <= {upper_bound}, " << "but got: "
                                        << {name}_size[{dim_idx}] << "\\n";
                                     throw std::runtime_error(ss.str());
                                 }}
@@ -504,12 +529,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             if V.graph.is_const_graph:
                 self.prefix.splice(
-                    """
-                    void AOTInductorModel::_const_run_impl(
+                    f"""
+                    void {self.aoti_model_class_name}::_const_run_impl(
                         std::vector<AtenTensorHandle>& output_handles,
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
-                    ) {
+                    ) {{
                     """
                 )
             else:
@@ -517,18 +542,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # If we do not split the constant graph, we'll just create
                     # an empty implementation when wrapping the main module.
                     self.prefix.splice(
-                        """
-                        void AOTInductorModel::_const_run_impl(
+                        f"""
+                        void {self.aoti_model_class_name}::_const_run_impl(
                             std::vector<AtenTensorHandle>& output_handles,
                             DeviceStreamType stream,
                             AOTIProxyExecutorHandle proxy_executor
-                        ) {}
+                        ) {{}}
 
                         """
                     )
 
-                run_impl_proto = """
-                    void AOTInductorModel::run_impl(
+                run_impl_proto = f"""
+                    void {self.aoti_model_class_name}::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
                                             // are stolen; the array itself is borrowed
@@ -538,7 +563,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                             // borrowed
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
-                    ) {
+                    ) {{
                         __check_inputs_outputs(input_handles, output_handles);
                     """
 
@@ -610,10 +635,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
-                    # Weights are stored in constants_ and owned by RAIIAtenTensorHandle there.
+                    # Weights are stored in constants_ and owned by ConstantHandle there.
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     self.prefix.writeline(
-                        f"""[[maybe_unused]] auto {constants_key} = constants_->at({idx});"""
+                        f"""[[maybe_unused]] auto& {constants_key} = constants_->at({idx});"""
                     )
                 else:
                     # Append constants as inputs to the graph
@@ -730,7 +755,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
         self.prefix.splice(
             f"""
-            AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
+            {self.aoti_model_class_name}::{self.aoti_model_class_name}(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
                                                const std::string& device_str,
                                                std::optional<std::string> cubin_dir)
@@ -887,12 +912,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """
 
         self.prefix.splice(
-            """
-            std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
+            f"""
+            std::unordered_map<std::string, AtenTensorHandle> {self.aoti_model_class_name}::const_run_impl(
                 DeviceStreamType stream,
                 AOTIProxyExecutorHandle proxy_executor,
                 bool initialization
-            ) {
+            ) {{
             """
         )
         if not config.aot_inductor.use_runtime_constant_folding:
@@ -1041,6 +1066,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
+                assert isinstance(output_storage, (ir.BaseView, ir.MutableBox))
                 if isinstance(output_storage.data, ir.ConstantBuffer):
                     is_constant_buffer = True
 
@@ -1074,7 +1100,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_before_suffix(self, result):
         if not V.graph.is_const_graph:
             if V.graph.aot_mode:
-                result.writeline("} // AOTInductorModel::run_impl")
+                result.writeline(f"}} // {self.aoti_model_class_name}::run_impl")
             else:
                 result.writeline("} // inductor_entry_impl")
 
@@ -1082,7 +1108,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """Generates the end of the code block, and any code needed to call it."""
         if V.graph.aot_mode:
             if V.graph.is_const_graph:
-                result.writeline("} // AOTInductorModel::_const_run_impl")
+                result.writeline(f"}} // {self.aoti_model_class_name}::_const_run_impl")
             else:
                 result.writeline("} // namespace torch::aot_inductor\n\n\n")
             return
@@ -1249,7 +1275,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             extern_kernel.get_kernel_name(), args, device
         )
 
-        if not is_inplace:
+        if (
+            extern_kernel.python_kernel_name
+            == "torch.ops._c10d_functional.wait_tensor.default"
+        ):
+            # wait_tensor returns its input, and the returned tensor is not used anywhere,
+            # so we can delete the returned AtenTensorHandle to reduce its lifetime.
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object({output_handle_name}));"
+            )
+        elif not is_inplace:
             self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
     def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
@@ -1426,6 +1461,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.sym))
 
+    def codegen_dynamic_select_index(self, node):
+        index_cpp_str = self.val_to_arg_str_for_prim_type(node.index, int)
+
+        index_compute_str = (
+            f"{index_cpp_str} < 0 ? {index_cpp_str} + "
+            f"{self.val_to_arg_str_for_prim_type(node.size, int)}:  {index_cpp_str}"
+        )
+        self.writeline(
+            f"auto {node.unbacked_offset_symbol} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
+            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * ({index_compute_str});"
+        )
+        # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
+        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
+
     def make_buffer_free(self, buffer):
         return (
             ""
@@ -1499,12 +1548,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # This is why writeline needs to explicitly passed in as a parameter.
         var = f"int_array_{next(self.int_array_id)}"
         ctype = "int64_t"
-        if var not in self.declared_int_array_vars:
-            self.declared_int_array_vars.add(var)
+        if int_array == "{}":
+            #  An array of unknown bound cannot be initialized with {}.
             if known_statically:
-                writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                writeline(f"static constexpr {ctype} *{var}=nullptr;")
             else:
-                writeline(f"const {ctype} {var}[] = {int_array};")
+                writeline(f"const {ctype} *{var}=nullptr;")
+        else:
+            if var not in self.declared_int_array_vars:
+                self.declared_int_array_vars.add(var)
+                if known_statically:
+                    writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                else:
+                    writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
     def make_buffer_allocation(self, buffer):
@@ -1725,7 +1781,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # ```
         return final_tensor_str
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         """This function is overridden by cpp_wrapper_cpu_array_ref, so we don't need to
         handle cases where dst is not an AtenTensorHandle."""
         self.writeline(

@@ -564,7 +564,7 @@ if(MSVC)
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   if(MSVC_Z7_OVERRIDE)
     # CMake set debug flags to use /Z7
-    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT Embedded)
+    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
   endif()
   foreach(
     flag_var
@@ -872,6 +872,14 @@ cmake_dependent_option(
   "USE_CUDA OR USE_ROCM;NOT MSVC"
   OFF)
 
+cmake_dependent_option(
+  USE_FBGEMM_GENAI
+  "Whether to build FBGEMM GenAI quantized GEMM kernels.\
+  Will be disabled if not supported by the platform"
+  OFF
+  "USE_CUDA OR USE_ROCM"
+  OFF)
+
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
 cmake_dependent_option(
@@ -903,6 +911,10 @@ endif(DEBUG_CUDA)
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
+endif()
+
+if(USE_FBGEMM_GENAI)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM_GENAI")
 endif()
 
 if(USE_PYTORCH_QNNPACK)
@@ -1190,10 +1202,6 @@ if(APPLE)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
 endif()
 
-if(USE_XPU)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_XPU")
-endif()
-
 if(EMSCRIPTEN)
   string(
     APPEND
@@ -1245,6 +1253,7 @@ if(USE_MIMALLOC AND USE_MIMALLOC_ON_MKL)
 endif()
 
 # ---[ Main build
+add_subdirectory(torch/headeronly)  # headeronly headers
 add_subdirectory(c10)
 add_subdirectory(caffe2)
 
@@ -1302,7 +1311,11 @@ if(BUILD_SHARED_LIBS)
     DESTINATION share/cmake/Caffe2/public
     COMPONENT dev)
   install(
-    FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDNN.cmake
+    DIRECTORY ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
+    DESTINATION share/cmake/Caffe2/
+    COMPONENT dev)
+  install(
+    FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
     DESTINATION share/cmake/Caffe2/
     COMPONENT dev)
   install(
