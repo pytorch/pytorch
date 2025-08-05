@@ -214,7 +214,7 @@ jobs:
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
-          MAX_JOBS: 64
+          MAX_JOBS: 89 # TODO(elainewy): make this configurable
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           BUILD_TARGET: ${{ inputs.build-target }}
         run: |
@@ -235,9 +235,9 @@ jobs:
         run: |
           zip -1 -r artifacts.zip shared/
 
-      # by default it will upload the artifacts to <github_org>/<github_repo>/<workflow_id>/<name>-vllm-build
+      # By default it will upload the artifacts to <github_org>/<github_repo>/<workflow_id>/<name>-<target>-additional-build/
       # to avoid override the pytorch build artifacts
-      - name: Store Vllm Build Artifacts on S3
+      - name: Store External Build Artifacts on S3
         if: ${{ inputs.build-generates-artifacts }}
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         with:
