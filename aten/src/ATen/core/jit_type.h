@@ -374,7 +374,7 @@ struct TORCH_API SymbolicShape {
   // Unranked shape constructor.
   SymbolicShape() : dims_(std::nullopt) {}
 
-  // Known rank but unknown dimentions.
+  // Known rank but unknown dimensions.
   SymbolicShape(std::optional<size_t> rank) : dims_(std::nullopt) {
     if(!rank) {
       return;
@@ -891,10 +891,10 @@ struct TORCH_API ListType
 
   // global singleton
   // Given an inner type T and an identifier,
-  // this function wil return the global singleton type pointer
+  // this function will return the global singleton type pointer
   // the type List<T>.
-  // The extra "identifier" argument is needed beccause we have multiple container types
-  // that all re-use this function (List<T>, array<T, N>, etc.)
+  // The extra "identifier" argument is needed because we have multiple container types
+  // that all reuse this function (List<T>, array<T, N>, etc.)
   static TypePtr get(const std::string& identifier, TypePtr inner);
 
   // common cast List[Tensor]
@@ -992,7 +992,7 @@ struct TORCH_API DictType : public SharedType {
   // this function will return the global singleton type pointer
   // the type List<T>.
   // The extra "identifier" argument is needed because we have multiple container types
-  // that all re-use this function (Dict<K, V> and unordered_map<K, V>)
+  // that all reuse this function (Dict<K, V> and unordered_map<K, V>)
   static TypePtr get(const std::string& identifier, TypePtr key, TypePtr val);
 
  private:
@@ -1234,7 +1234,7 @@ struct TORCH_API TupleType : public NamedType {
   std::shared_ptr<FunctionSchema> schema_;
 };
 
-// the common supertype of all Enums, only used in operator registraion.
+// the common supertype of all Enums, only used in operator registration.
 // EnumType <: AnyEnumType for all Enums
 struct AnyEnumType;
 using AnyEnumTypePtr = SingletonTypePtr<AnyEnumType>;
