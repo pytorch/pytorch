@@ -355,7 +355,7 @@ class GuardManagerWrapper:
         def visit_dict_manager(node):
             # Just recurse through the key and value dict managers and check if
             # all of them are tag safe nodes.
-            assert node.is_guarded_value_dict()
+            assert issubclass(node.get_type_of_guarded_value(), dict)
 
             tag_safe_roots = []
             is_subtree_tag_safe = True
@@ -394,12 +394,12 @@ class GuardManagerWrapper:
                 # If the node guards a tensor, mark it tag safe only if there
                 # are no accessors. Presence of accessors means presence of
                 # symbolic shape guards.
-                if node.is_guarded_value_tensor():
+                if issubclass(node.get_type_of_guarded_value(), torch.Tensor):
                     if node.has_no_accessors() and not node.has_object_aliasing_guard():
                         node.mark_tag_safe()
                 else:
                     node.mark_tag_safe()
-            elif node.is_guarded_value_dict():
+            elif issubclass(node.get_type_of_guarded_value(), dict):
                 accessors = node.get_accessors()
                 child_mgrs = node.get_child_managers()
                 is_subtree_tag_safe = all(
@@ -408,7 +408,7 @@ class GuardManagerWrapper:
                 )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
-            elif node.is_guarded_value_nn_module():
+            elif issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
                 accessors = node.get_accessors()
                 child_mgrs = node.get_child_managers()
                 is_subtree_tag_safe = all(
@@ -434,7 +434,7 @@ class GuardManagerWrapper:
 
         tag_safe_roots = visit(self.root)
         for node in tag_safe_roots:
-            if node.is_guarded_value_nn_module():
+            if issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
                 node.mark_tag_safe_root()
 
     def populate_diff_guard_manager(self):
@@ -468,7 +468,7 @@ class GuardManagerWrapper:
         s = t + ": source=" + source
         if accessor_str:
             s += ", " + accessor_str
-        s += f", type={guard_manager.type_of_guarded_value()}"
+        s += f", type={guard_manager.get_type_of_guarded_value()}"
         s += f", tag_safe=({guard_manager.is_tag_safe()}, {guard_manager.is_tag_safe_root()})"
         return s
 
