@@ -138,6 +138,21 @@ fi
 
 echo "Calling setup.py bdist at $(date)"
 
+setup_ccache() {
+    CCACHE_DIR=/opt/ccache/bin/
+    echo "Installing ccache"
+    retry dnf install -y ccache
+
+    mkdir -p "${CCACHE_DIR}"
+    COMPILERS=("gcc" "g++" "cc" "c++" "clang" "clang++" "nvcc" "icx" "icpx")
+    ccache_path=$(which ccache)
+    for compiler in "${COMPILERS[@]}"; do
+        ln -sf "${ccache_path}" "${CCACHE_DIR}/${compiler}"
+    done
+
+    export PATH="${CCACHE_DIR}:${PATH}"
+}
+
 if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
     echo "Calling setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
     time EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
@@ -153,6 +168,10 @@ if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
     CMAKE_FRESH=1 python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
     echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
+elif [[ "${USE_SEQUENTIAL:-0}" = "1" ]]; then
+    setup_ccache
+
+    python3 tools/packaging/build_wheel.py --find-python manylinux -d "/tmp/${WHEELHOUSE_DIR}"
 else
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
         EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
