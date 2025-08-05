@@ -8766,6 +8766,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float16, torch.bfloat16, torch.float32)
     def test_rmsnorm_epsilon(self, device, dtype):
         def rms_norm_reference_fn(i, normalized_shape):
             eps = torch.finfo(i.dtype).eps
