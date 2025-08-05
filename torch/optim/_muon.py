@@ -33,6 +33,7 @@ class NewtonSchulzConfig(BaseMsignFnConfig):
     # """Configuration used by :func:`zeropower_via_newtonschulz`."""
 
     coefficients: tuple[float, float, float] = (DEFAULT_A, DEFAULT_B, DEFAULT_C)
+    eps: float = EPS
     ns_steps: int = 5
 
 
@@ -55,6 +56,7 @@ def zeropower_via_newtonschulz(G: Tensor, ns_config: BaseMsignFnConfig) -> Tenso
     """
     ns_config = cast(NewtonSchulzConfig, ns_config)
     steps = ns_config.ns_steps
+    eps = ns_config.eps
     coefficients = ns_config.coefficients
     assert steps < 100, (
         "Number of steps must be less than 100 for computational efficiency"
@@ -66,7 +68,7 @@ def zeropower_via_newtonschulz(G: Tensor, ns_config: BaseMsignFnConfig) -> Tenso
     if G.size(0) > G.size(1):
         X = X.T
     # Ensure spectral norm is at most 1
-    X = X / (X.norm() + EPS)
+    X = X / (X.norm() + eps)
     # Perform the NS iterations
     for _ in range(steps):
         A = X @ X.T
