@@ -68,7 +68,7 @@ Windows llvm will not have this definition.
 #define VECTOR_WIDTH 64
 #define int_vector __m512i
 #elif defined(__aarch64__) && \
-    !defined(CPU_CAPABILITY_SVE) // CPU_CAPABILITY_AVX512
+    !defined(CPU_CAPABILITY_SVE) && !defined(CPU_CAPABILITY_SVE256) // CPU_CAPABILITY_AVX512
 // SVE code expects 256-vectors; leave that set for SVE?
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(16)))
@@ -1403,7 +1403,9 @@ inline Vectorized<T> convert_to_fp_of_same_size(
 //                                      Vectorized<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
 // clang-format on
 template <typename T>
-inline std::enable_if_t<true, std::pair<Vectorized<T>, Vectorized<T>>>
+inline std::enable_if_t<
+    true,
+    std::pair<Vectorized<T>, Vectorized<T>>>
 deinterleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
   static constexpr int size = Vectorized<T>::size();
   static constexpr int half_size = size / 2;
@@ -1423,26 +1425,6 @@ deinterleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
       Vectorized<T>::loadu(static_cast<void*>(buffer1)),
       Vectorized<T>::loadu(static_cast<void*>(buffer2)));
 }
-// template <typename T>
-// inline std::enable_if_t<Vectorized<T>::size() % 2 == 0, std::pair<Vectorized<T>, Vectorized<T>>>
-// deinterleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
-//   static constexpr int size = Vectorized<T>::size();
-//   static constexpr int half_size = size / 2;
-//   T a_arr[size];
-//   T b_arr[size];
-//   T buffer1[size];
-//   T buffer2[size];
-//   a.store(static_cast<void*>(a_arr));
-//   b.store(static_cast<void*>(b_arr));
-//   for (const auto i : c10::irange(half_size)) {
-//     buffer1[i] = a_arr[i * 2];
-//     buffer1[half_size + i] = b_arr[i * 2];
-//     buffer2[i] = a_arr[i * 2 + 1];
-//     buffer2[half_size + i] = b_arr[i * 2 + 1];
-//   }
-//   return std::make_pair(Vectorized<T>::loadu(static_cast<void*>(buffer1)),
-//                         Vectorized<T>::loadu(static_cast<void*>(buffer2)));
-// }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(deinterleave2)
 
@@ -1460,7 +1442,9 @@ VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(deinterleave2)
 //                           Vectorized<float>   = {a4, b4, a5, b5, a6, b6, a7, b7}
 // clang-format on
 template <typename T>
-inline std::enable_if_t<true, std::pair<Vectorized<T>, Vectorized<T>>>
+inline std::enable_if_t<
+    true,
+    std::pair<Vectorized<T>, Vectorized<T>>>
 interleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
   static constexpr int size = Vectorized<T>::size();
   static constexpr int half_size = size / 2;
@@ -1486,11 +1470,12 @@ VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(interleave2)
 #undef VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC
 #undef VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_OP
 #undef VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC
-// template <typename T>
-// inline std::enable_if_t<Vectorized<T>::size() % 2 == 0, std::pair<Vectorized<T>, Vectorized<T>>>
-// interleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
-//   static constexpr int size = Vectorized<T>::size();
-//   static constexpr int half_size = size / 2;
+
+template <typename src_T, typename dst_T>
+inline void convert(const src_T* src, dst_T* dst, int64_t n) {
+#ifndef _MSC_VER
+#pragma unroll
+#endif
   for ([[maybe_unused]] const auto i : c10::irange(n)) {
     *dst = c10::convert<dst_T>(c10::load(src));
     src++;

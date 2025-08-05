@@ -4,7 +4,7 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE256)
 
 // Define the data type of VLS(vector-length specific).
 typedef svbool_t vls_pred_t
@@ -34,6 +34,27 @@ typedef svfloat32_t vls_float32_t
 typedef svfloat64_t vls_float64_t
     __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 8)));
 
+#endif // defined(CPU_CAPABILITY_SVE256)
+
+#if defined(CPU_CAPABILITY_SVE)
+
+// Define the data type of VLS(vector-length specific).
+typedef svbool_t vls_pred_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+typedef svint8_t vls_int8_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+typedef svint16_t vls_int16_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+typedef svint32_t vls_int32_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+typedef svint64_t vls_int64_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+typedef svuint8_t vls_uint8_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+typedef svuint16_t vls_uint16_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+typedef svuint32_t vls_uint32_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+typedef svuint64_t vls_uint64_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+typedef svfloat16_t vls_float16_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+typedef svfloat32_t vls_float32_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+typedef svfloat64_t vls_float64_t __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 4)));
+
+#endif // defined(CPU_CAPABILITY_SVE)
+
+#if defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)
 #define ptrue svptrue_b8()
 #define ZERO_S8 svdup_n_s8(0)
 #define ZERO_S16 svdup_n_s16(0)
@@ -77,4 +98,4 @@ typedef svfloat64_t vls_float64_t
 #define ALL_F64_TRUE_MASK svreinterpret_f64_s64(ALL_S64_TRUE_MASK)
 #define ALL_F64_FALSE_MASK svreinterpret_f64_s64(ALL_S64_FALSE_MASK)
 
-#endif // defined(CPU_CAPABILITY_SVE)
+#endif // defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)

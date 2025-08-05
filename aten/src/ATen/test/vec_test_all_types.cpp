@@ -2122,7 +2122,7 @@ namespace {
       ASSERT_TRUE(vec_pinf.has_inf_nan()) << "Test failed for positive Infinity\n";
       ASSERT_TRUE(vec_ninf.has_inf_nan()) << "Test failed for negative Infinity\n";
     }
-#if !defined(CPU_CAPABILITY_SVE)
+#if !defined(CPU_CAPABILITY_SVE256)
     template <typename vec, typename dst_t>
     void test_convert_to(const char* dst_t_name) {
       using src_t = ValueType<vec>;
@@ -2287,7 +2287,7 @@ namespace {
     #undef TEST_MASK_LOAD
     #undef TEST_MASK_LOAD_N
     }
-#if !defined(CPU_CAPABILITY_SVE)
+#if !defined(CPU_CAPABILITY_SVE256)
     TYPED_TEST(VecMaskTests, MaskedCheck) {
       using VT = ValueType<TypeParam>;
       using vec = TypeParam;
@@ -2312,7 +2312,7 @@ namespace {
     #undef TEST_MASK_CHECK_N
     }
 #endif
-#if !defined(CPU_CAPABILITY_SVE)
+#if !defined(CPU_CAPABILITY_SVE256)
     TYPED_TEST(VecMaskTests, ToFrom) {
       using vec = TypeParam;
       using VT = ValueType<TypeParam>;
@@ -2339,7 +2339,7 @@ namespace {
       }
     }
 #endif
-#if !defined(CPU_CAPABILITY_SVE)
+#if !defined(CPU_CAPABILITY_SVE256)
     TYPED_TEST(VecMaskTests, Cast) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
