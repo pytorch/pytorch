@@ -92,6 +92,9 @@ jobs:
       {%- if config["gpu_arch_type"] == "cuda-aarch64" %}
       timeout-minutes: 420
       {%- endif %}
+      {%- if use_sequential %}
+      USE_SEQUENTIAL: 1
+      {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 

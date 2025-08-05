@@ -83,6 +83,11 @@ on:
         type: string
         description: Extra install requirements
         default: ""
+      USE_SEQUENTIAL:
+        required: false
+        type: string
+        description: Build wheels sequentially
+        default: "0"
     secrets:
       github-token:
         required: true
@@ -118,6 +123,7 @@ jobs:
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
       USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
+      USE_SEQUENTIAL: ${{ inputs.USE_SEQUENTIAL }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
