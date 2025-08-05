@@ -6918,12 +6918,6 @@ MPS_TEST_FAILURES = {
     "test_fp8_view_of_param": fail_mps(),
     # cannot initialize a parameter of type 'double' with an rvalue of type 'std::nullptr_t'
     "test_fallback_kernel_with_symexpr_output": fail_mps(),
-    # while-loop subgraph calls same kernel as outside. need to figure out how to
-    # either (1) tell outside to initialize a new kernel or (2) generate
-    # subgraph as a separate function, which would(?) cause (1) to happen automatically.
-    "test_while_loop_nested": fail_mps(),
-    "test_cond_with_parameters": fail_mps(),
-    "test_cond_share_predicte": fail_mps(),
     # correctness issue
     "test_index_put_with_none_index": fail_mps(),
     # Error device may not be nil
