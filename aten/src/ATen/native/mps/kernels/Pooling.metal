@@ -430,7 +430,6 @@ void avg_pool_3d_input_iter(
   auto divisor = has_divisor_override
       ? divisor_override
       : (bounds0.count) * (bounds1.count) * (bounds2.count);
-  auto size12 = input_sizes[1] * input_sizes[2];
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0++) {
     auto offset0 = input_strides[0] * i0;
@@ -488,7 +487,6 @@ void avg_pool_backward_3d_input_iter(
       ? divisor_override
       : (bounds0.count) * (bounds1.count) * (bounds2.count);
   auto grad_val = *grad_output / static_cast<T>(divisor);
-  auto size12 = grad_input_sizes[1] * grad_input_sizes[2];
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0++) {
     auto offset0 = grad_input_strides[0] * i0;
