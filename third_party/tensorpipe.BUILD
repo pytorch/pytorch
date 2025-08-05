@@ -7,6 +7,7 @@ LIBUV_COMMON_SRCS = [
     "third_party/libuv/src/inet.c",
     "third_party/libuv/src/random.c",
     "third_party/libuv/src/strscpy.c",
+    "third_party/libuv/src/strtok.c",
     "third_party/libuv/src/threadpool.c",
     "third_party/libuv/src/timer.c",
     "third_party/libuv/src/uv-common.c",
