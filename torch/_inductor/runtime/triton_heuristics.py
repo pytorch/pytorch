@@ -1086,6 +1086,13 @@ class CachingAutotuner(KernelInterface):
         Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
+        if (
+            self.heuristic_type == HeuristicType.TEMPLATE
+            or self.heuristic_type == HeuristicType.USER_AUTOTUNE
+        ):
+            # skip triton template
+            return launcher
+
         with dynamo_timed(
             "CachingAutotuner.coordinate_descent_tuning",
             # These generate too many pt2_compile_event logs:
@@ -1100,13 +1107,6 @@ class CachingAutotuner(KernelInterface):
             return self._coordinate_descent_tuning(launcher, *args, **kwargs)
 
     def _coordinate_descent_tuning(self, launcher, *args, **kwargs):
-        if (
-            self.heuristic_type == HeuristicType.TEMPLATE
-            or self.heuristic_type == HeuristicType.USER_AUTOTUNE
-        ):
-            # skip triton template
-            return launcher
-
         config2launcher = {launcher.config: launcher}
 
         # TODO: should we just load the kernels ahead of time if we know we're going to call this?
