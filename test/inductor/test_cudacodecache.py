@@ -10,10 +10,10 @@ from torch._inductor.codegen.cuda.cuda_env import nvcc_exist
 from torch._inductor.exc import CUDACompileError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
 
 
 _SOURCE_CODE = r"""
