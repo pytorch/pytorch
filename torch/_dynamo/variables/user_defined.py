@@ -1094,7 +1094,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ]
         return super().unpack_var_sequence(tx)
 
-    def has_force_unpack_var_sequence(self, tx):
+    def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         try:
             variables.BuiltinVariable(iter).call_function(tx, [self], {})
             return True
