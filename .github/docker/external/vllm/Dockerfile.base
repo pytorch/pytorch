@@ -67,11 +67,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
 
-# Workaround for https://github.com/openai/triton/issues/2507 and
-# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
-# this won't be needed for future versions of this docker image
-# or future versions of triton.
-RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 #################### TORCH NIGHTLY  BASE IMAGE ####################
 
 
@@ -81,15 +76,19 @@ RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 FROM ${BUILD_BASE_IMAGE} AS base
 USER root
 
+# Workaround for https://github.com/openai/triton/issues/2507 and
+# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
+# this won't be needed for future versions of this docker image
+# or future versions of triton.
 RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
-ENV UV_HTTP_TIMEOUT=500
-ENV UV_INDEX_STRATEGY="unsafe-best-match"
 
-# install uv for faster pip installs if not existed
+# Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
     if ! python3 -m uv --version >/dev/null 2>&1; then \
         python3 -m pip install uv==0.8.4; \
     fi
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
 
 WORKDIR /workspace
 
@@ -282,33 +281,32 @@ RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHO
    && python3 --version && python3 -m pip --version
 
 
-# Get the torch version used in previous stagtes for consistency
+# Get the torch versions, and whls used in previous stagtes for consistency
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
-
 RUN echo "[DEBUG] Listing current directory before torch install step:" && \
     ls -al && \
     echo "[DEBUG] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
-
-# install uv for faster pip installs if not existed
-RUN --mount=type=cache,target=/root/.cache/uv \
-    if ! python3 -m uv --version > /dev/null 2>&1; then \
-        python3 -m pip install uv==0.8.4; \
-    fi
-
-ENV UV_HTTP_TIMEOUT=500
-ENV UV_INDEX_STRATEGY="unsafe-best-match"
-
-# Default mount file as placeholder, this just avoid the mount error
-ARG TORCH_WHEELS_PATH="./requirements"
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
 # https://github.com/pytorch/pytorch/issues/107960 -- hopefully
 # this won't be needed for future versions of this docker image
 # or future versions of triton.
 RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
+
+
+# Install uv for faster pip installs if not existed
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if ! python3 -m uv --version > /dev/null 2>&1; then \
+        python3 -m pip install uv==0.8.4; \
+    fi
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+
+# Default mount file as placeholder, this just avoid the mount error
+ARG TORCH_WHEELS_PATH="./requirements"
 
 # Install torch, torchaudio and torchvision
 # if TORCH_WHEELS_PATH is default "./requirements", it will pull the nightly versions using pip using torch_build_versions.txt
