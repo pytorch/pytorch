@@ -1460,10 +1460,14 @@ class CppFlexAttentionTemplate(CppTemplate):
                 and self.partition_size % self.kv_block_size == 0
             ):
                 # use flash decoding when qSize == 1
-                return self._template_from_string(FLEX_DECODING_TEMPLATE).render(**options)
+                return self._template_from_string(FLEX_DECODING_TEMPLATE).render(
+                    **options
+                )
             else:
                 # use flash attention when qSize > 1
-                return self._template_from_string(FLEX_ATTENTION_TEMPLATE).render(**options)
+                return self._template_from_string(FLEX_ATTENTION_TEMPLATE).render(
+                    **options
+                )
 
     def codegen_softmax_fusion(self, kernel_name: str):
         # TODO: use inductor IR to rewrite those fusions
