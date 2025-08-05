@@ -588,41 +588,65 @@ class MemoryPlanningLine(WrapperLine):
 
 
 class EfficientPeakEstimate:
-
     def __init__(self):
-        self.scheduler_nodes = V.graph.scheduler.nodes
-        self.buffer_to_scheduler_node_index = {}
-        for idx, scheduler_node in enumerate(self.scheduler_nodes):
-            for node in scheduler_node.get_outputs():
-                self.buffer_to_scheduler_node_index[node.node.name] = idx
-
         from ..memory import estimate_peak_memory
 
-        _, self.peak_per_scheduler_node = estimate_peak_memory(
+        self.overall_peak_memory, _ = estimate_peak_memory(
             V.graph.scheduler.nodes,
             {},
             OrderedSet(V.graph.get_output_names()),
         )
 
         from .segmented_tree import SegmentedTree
-        self.segmented_tree = SegmentedTree(self.peak_per_scheduler_node, operator.add, max, 0)
 
-    def max_between(self, start: BufferLike, end: BufferLike) -> Optional[int]:
-        start = self.buffer_to_scheduler_node_index.get(start.name, None)
-        end = self.buffer_to_scheduler_node_index.get(end.name, None)
-        if start is None or end is None:
-            return None
-        return self.segmented_tree.summarize_range(start, end)
+        self.segmented_tree = SegmentedTree(
+            [0] * (2 + len(V.graph.wrapper_code.lines)), operator.add, max, 0
+        )
+        self.current_position = 0
+        self.current_value = 0
+        self.free_line_indices = {}
 
-    def max_overall(self) -> Optional[int]:
-        return self.segmented_tree.summarize_range(0, len(self.scheduler_nodes))
+    def _get_size(self, node: BufferLike) -> int:
+        return V.graph.sizevars.size_hint(
+            V.graph.get_allocation_storage_size(node), fallback=0
+        ) * get_dtype_size(node.get_dtype())
 
-    def add_between(self, start: BufferLike, end: BufferLike, delta: int):
-        start = self.buffer_to_scheduler_node_index.get(start.name, None)
-        end = self.buffer_to_scheduler_node_index.get(end.name, None)
-        if start is None or end is None:
-            return
-        self.segmented_tree.update_range(start, end, delta)
+    def register_allocation(self, line: AllocateLine | int):
+        if isinstance(line, AllocateLine):
+            line = self._get_size(line.node)
+
+        self.current_position += 1
+        self.current_value += line
+        assert self.current_position <= self.segmented_tree.n
+        self.segmented_tree.update_range(
+            self.current_position, self.current_position, self.current_value
+        )
+
+    def register_deallocation(self, line: FreeIfNotReusedLine | int):
+        if isinstance(line, FreeIfNotReusedLine):
+            self.free_line_indices[line.node.get_name()] = self.current_position + 1
+            line = self._get_size(line.node)
+
+        self.current_position += 1
+        self.current_value -= line
+        assert self.current_position <= self.segmented_tree.n
+        # graphs may reuse inputs, so their overall "current_value" may be negative
+        # assert self.current_value >= 0
+        self.segmented_tree.update_range(
+            self.current_position, self.current_position, self.current_value
+        )
+
+    def peak_since(self, line: FreeIfNotReusedLine):
+        return self.segmented_tree.summarize_range(
+            self.free_line_indices[line.node.get_name()], self.segmented_tree.n - 1
+        )
+
+    def deregister_deallocation(self, line: FreeIfNotReusedLine):
+        value = self._get_size(line.node)
+        self.current_value += value
+        return self.segmented_tree.update_range(
+            self.free_line_indices[line.node.get_name()], self.current_position, value
+        )
 
 
 @dataclasses.dataclass
@@ -630,10 +654,9 @@ class AllocateLine(MemoryPlanningLine):
     node: BufferLike
 
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
-        overall_peak_memory = self.wrapper.estimate_peak.max_overall()
-        peak_memory_in_range = self.wrapper.estimate_peak.max_between(free_line.node, self.node)
-        if overall_peak_memory is None or peak_memory_in_range is None:
-            return False
+        # return True
+        overall_peak_memory = self.wrapper.estimate_peak.overall_peak_memory
+        peak_memory_in_range = self.wrapper.estimate_peak.peak_since(free_line)
         new_peak_memory = size + peak_memory_in_range
         return new_peak_memory <= overall_peak_memory
 
@@ -650,10 +673,11 @@ class AllocateLine(MemoryPlanningLine):
             ) * get_dtype_size(self.node.get_dtype())
             if self.should_reuse_buffer(free_line, size):
                 free_line.is_reused = True
-                self.wrapper.estimate_peak.add_between(free_line.node, self.node, size)
+                self.wrapper.estimate_peak.deregister_deallocation(free_line)
                 return ReuseLine(self.wrapper, free_line.node, self.node)
             else:
                 state.push(key, free_line)
+                self.wrapper.estimate_peak.register_allocation(self)
                 return self
 
         if self.node.get_device_or_error().type == "cpu":
@@ -663,6 +687,7 @@ class AllocateLine(MemoryPlanningLine):
                     functools.reduce(operator.mul, static_shape, 1)
                 )
 
+        self.wrapper.estimate_peak.register_allocation(self)
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
@@ -689,6 +714,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
             return NullLine(self.wrapper)
         if config.allow_buffer_reuse:
             state.push(buffer_reuse_key(self.node), self)
+        self.wrapper.estimate_peak.register_deallocation(self)
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
@@ -2606,10 +2632,16 @@ class PythonWrapperCodegen(CodeGen):
         original_fxnode_name=None,
     ):
         device = device or V.graph.get_current_device_or_throw()
-        if not (
-            triton or device.type not in ("cpu", "mps")
-        ):  # TODO: Fix me, MPS does not expose streams now
-            self.writeline(self.wrap_kernel_call(kernel_name, call_args))
+        if not triton:
+            if device.type == "cpu":
+                self.writeline(self.wrap_kernel_call(kernel_name, call_args))
+            elif device.type == "mps":
+                # TODO: Fix me, MPS does not expose streams now
+                self.writeline(
+                    self.wrap_kernel_call(f"{kernel_name}.generated_kernel", call_args)
+                )
+            else:
+                raise RuntimeError(f"device {device.type} nyi")
             return
 
         call_args_str = self.prepare_triton_kernel_call(call_args)

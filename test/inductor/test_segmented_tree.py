@@ -1,6 +1,10 @@
+# Owner(s): ["module: inductor"]
+
 import pytest
 from hypothesis import given, strategies as st
+
 from torch._inductor.codegen.segmented_tree import SegmentedTree
+from torch.testing._internal.common_utils import run_tests
 
 
 # Helper functions for operations
@@ -59,9 +63,9 @@ def test_max_query_matches_naive(values):
         for end in range(start, len(values)):
             expected = naive_range_max(values, start, end)
             actual = tree.summarize_range(start, end)
-            assert (
-                actual == expected
-            ), f"Range [{start}:{end}] expected {expected}, got {actual}"
+            assert actual == expected, (
+                f"Range [{start}:{end}] expected {expected}, got {actual}"
+            )
 
 
 @given(values=positive_integers, range_indices=st.data(), update_value=update_values)
@@ -84,9 +88,9 @@ def test_range_update(values, range_indices, update_value):
         for j in range(i, len(values)):
             expected = naive_range_max(naive_values, i, j)
             actual = tree.summarize_range(i, j)
-            assert (
-                actual == expected
-            ), f"After update, range [{i}:{j}] expected {expected}, got {actual}"
+            assert actual == expected, (
+                f"After update, range [{i}:{j}] expected {expected}, got {actual}"
+            )
 
 
 @given(values=positive_integers, range_data=st.data())
@@ -105,9 +109,9 @@ def test_multiple_operations(values, range_data):
         if operation_type == "query":
             expected = naive_range_max(naive_values, start, end)
             actual = tree.summarize_range(start, end)
-            assert (
-                actual == expected
-            ), f"Range query [{start}:{end}] expected {expected}, got {actual}"
+            assert actual == expected, (
+                f"Range query [{start}:{end}] expected {expected}, got {actual}"
+            )
         else:  # update
             update_value = range_data.draw(update_values)
             tree.update_range(start, end, update_value)
@@ -119,9 +123,9 @@ def test_single_element_ranges():
     tree = SegmentedTree(values, add_op, max_op, 0)
 
     for i in range(len(values)):
-        assert (
-            tree.summarize_range(i, i) == values[i]
-        ), f"Single element range at index {i} failed"
+        assert tree.summarize_range(i, i) == values[i], (
+            f"Single element range at index {i} failed"
+        )
 
 
 def test_full_array_range():
@@ -210,9 +214,9 @@ def test_overlapping_updates():
         for j in range(i, len(values)):
             expected = naive_range_max(naive_values, i, j)
             actual = tree.summarize_range(i, j)
-            assert (
-                actual == expected
-            ), f"After overlapping updates, range [{i}:{j}] expected {expected}, got {actual}"
+            assert actual == expected, (
+                f"After overlapping updates, range [{i}:{j}] expected {expected}, got {actual}"
+            )
 
 
 def test_sequential_updates_and_queries():
@@ -242,13 +246,16 @@ def test_sequential_updates_and_queries():
                 for j in range(i, len(values)):
                     expected = naive_range_max(naive_values, i, j)
                     actual = tree.summarize_range(i, j)
-                    assert (
-                        actual == expected
-                    ), f"After update ({start}, {end}, {value}), query [{i}:{j}] expected {expected}, got {actual}"
+                    assert actual == expected, (
+                        f"After update ({start}, {end}, {value}), query [{i}:{j}] expected {expected}, got {actual}"
+                    )
         else:  # query
             _, start, end = op
             expected = naive_range_max(naive_values, start, end)
-            assert (
-                tree.summarize_range(start, end) == expected
-            ), f"Query [{start}:{end}] expected {expected}, got {tree.summarize_range(start, end)}"
+            assert tree.summarize_range(start, end) == expected, (
+                f"Query [{start}:{end}] expected {expected}, got {tree.summarize_range(start, end)}"
+            )
 
+
+if __name__ == "__main__":
+    run_tests()
