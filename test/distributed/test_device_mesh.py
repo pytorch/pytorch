@@ -774,43 +774,40 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(_mesh_resources.get_root_mesh(dp_cp_mesh), mesh_4d)
 
     @with_comms
-    def test_split_mesh_3d(self):
+    def test_unflatten_mesh_3d(self):
         mesh_shape = (4, 2)
         mesh_dim_names = ("dp", "tp")
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
-        split_mesh = mesh_2d._split((2, 2, 2), ("dp_shard", "dp_replicate", "tp"))
-        self.assertEqual(split_mesh.mesh_dim_names, ["dp_shard", "dp_replicate", "tp"])
-        self.assertEqual(mesh_2d["tp"].mesh, split_mesh["tp"].mesh)
-        self.assertEqual(mesh_2d["dp_shard"].mesh, split_mesh["dp_shard"].mesh)
-        # Existing split dim name should not create a new pg.
+        unflatten_mesh = mesh_2d._unflatten(0, (2, 2), ("dp_shard", "dp_replicate"))
         self.assertEqual(
-            mesh_2d["tp"]._dim_group_names, split_mesh["tp"]._dim_group_names
+            unflatten_mesh.mesh_dim_names, ["dp_shard", "dp_replicate", "tp"]
+        )
+        self.assertEqual(mesh_2d["tp"].mesh, unflatten_mesh["tp"].mesh)
+        self.assertEqual(mesh_2d["dp_shard"].mesh, unflatten_mesh["dp_shard"].mesh)
+        # Existing unflatten dim name should not create a new pg.
+        self.assertEqual(
+            mesh_2d["tp"]._dim_group_names, unflatten_mesh["tp"]._dim_group_names
         )
 
-        # Not supporting flatten a split.
+        # Not supporting flatten a unflattened mesh.
         with self.assertRaises(NotImplementedError):
             mesh_2d["dp_shard", "dp_replicate"]._flatten()
 
-        # Not supporting split into a different shape for the same dim name.
+        # Not supporting unflatten into a different shape for the same dim name.
         with self.assertRaises(RuntimeError):
-            mesh_2d._split((2, 2, 2), ("dp", "cp", "tp"))
+            mesh_2d._unflatten(0, (2, 2), ("dp", "cp"))
 
-        # TODO: this is an error case that we should cover as well.
-        # with self.assertRaises(RuntimeError):
-        #     mesh_2d._split((2, 4), ("dp", "cp", "tp"))
-
-        # Test split from a dummy world mesh, which is the case we need for Expert Parallelism(EP).
+        # Test unflatten from a dummy world mesh, which is the case we need for Expert Parallelism(EP).
         global_mesh = init_device_mesh(
             self.device_type,
             (8,),
             mesh_dim_names=("world",),
-            _init_backend=False,
         )
         self.assertFalse(hasattr(global_mesh.mesh_dim_names, "_dim_group_names"))
-        global_mesh._split((2, 2, 2), ("dp", "cp", "tp"))
-        global_mesh._split((2, 2, 2), ("dp", "ep", "ep_tp"))
+        global_mesh._unflatten(0, (2, 2, 2), ("dp", "cp", "tp"))
+        global_mesh._unflatten(0, (2, 2, 2), ("dp", "ep", "ep_tp"))
         self.assertEqual(global_mesh["cp"].mesh, global_mesh["ep"].mesh)
         self.assertEqual(global_mesh["tp"].mesh, global_mesh["ep_tp"].mesh)
 
