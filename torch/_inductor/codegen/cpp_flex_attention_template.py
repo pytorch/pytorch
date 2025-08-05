@@ -1111,6 +1111,11 @@ extern "C"
 """
 
 
+"""
+FlexAttention CPP Template is based on CPP template.
+The implementation can support broad attention variants,
+with applying flash attention or flash decoding.
+"""
 class CppFlexAttentionTemplate(CppTemplate):
     def __init__(
         self,
