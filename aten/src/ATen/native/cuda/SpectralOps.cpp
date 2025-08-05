@@ -222,7 +222,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   const CuFFTConfig * config = nullptr;
 
   // Workaround for gh-63152, gh-58724
-  // Bluestein plans in CUDA 11.1 (cufft 10.3) cannot be re-used
+  // Bluestein plans in CUDA 11.1 (cufft 10.3) cannot be reused
   // Bluestein's algorithm is only used when a size has large prime factors,
   // sizes with only small prime factors can still be cached
   bool use_caching = true;

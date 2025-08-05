@@ -311,7 +311,7 @@ void GroupNormKernelImplChannelsLastInternal(
   const bool gamma_null = (gamma_data == nullptr);
   const bool beta_null = beta_data == nullptr;
 
-  // NB: About algorithm choosen:
+  // NB: About algorithm chosen:
   //
   // On channels last, GroupNorm has a input shape of {N, H, W, GD},
   // Mean and rstd are collected per each n and g, which involves reduction
