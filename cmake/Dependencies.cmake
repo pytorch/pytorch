@@ -1143,7 +1143,7 @@ if(USE_UCC)
 endif()
 
 # ---[ CUB
-if(USE_CUDA)
+if(USE_CUDA AND CUDA_VERSION VERSION_LESS 13.0)
   find_package(CUB)
   if(NOT CUB_FOUND)
     message(FATAL_ERROR "Cannot find CUB.")
