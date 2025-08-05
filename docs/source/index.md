@@ -26,6 +26,7 @@ The APIs and performance characteristics of these features may change.
 Install PyTorch <https://pytorch.org/get-started/locally/>
 user_guide/index
 pytorch-api
+notes
 community/index
 ```
 
