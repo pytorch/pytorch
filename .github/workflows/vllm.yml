@@ -1,4 +1,4 @@
-name: vllm-unittest
+name: vllm
 
 on:
   workflow_dispatch:
