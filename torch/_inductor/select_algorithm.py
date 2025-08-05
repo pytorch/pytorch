@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import asyncio
 import contextlib
 import dataclasses
 import functools
@@ -2280,7 +2281,9 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
         precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
+        best_config_future=None,
     ):
+
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         # Run preprocessing functions on choices
@@ -2387,6 +2390,31 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
             autotune_start_ts = time.time()
+
+            if best_config_future is not None:
+                loop = asyncio.get_event_loop()
+                best_config = loop.run_until_complete(best_config_future)
+                important_keys = [
+                    'ACC_TYPE',
+                    'ALLOW_TF32',
+                    'BLOCK_K',
+                    'BLOCK_M',
+                    'BLOCK_N',
+                    'EVEN_K',
+                    'GROUP_M',
+                    'USE_FAST_ACCUM',
+                    'num_stages',
+                    'num_warps',
+                    'num_consumer_groups',
+                    'num_buffers_warp_spec',
+                ]
+                choices = [
+                    choice for choice in choices
+                    if all(f"{k}={best_config[k]}" in choice.description for k in important_keys)
+                    for k in important_keys
+                ]
+                log.info(f"Filtered to {len(choices)} choices based on best_config")
+
             timings = self.lookup(
                 choices,
                 name,

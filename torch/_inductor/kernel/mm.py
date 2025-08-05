@@ -7,6 +7,7 @@ import sympy
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
@@ -840,7 +841,12 @@ def tuned_mm(mat1, mat2, *, layout=None):
     for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
 
-    return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
+
+    best_config_future = None
+    if torch._inductor.config.remote_gemm_autotune_cache:
+        best_config_future = gen_best_config(mat1, mat2)
+
+    return autotune_select_algorithm(name, choices, [mat1, mat2], layout, best_config_future=best_config_future)
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)

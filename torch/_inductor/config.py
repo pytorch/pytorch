@@ -91,6 +91,8 @@ fx_graph_cache: bool = Config(
     default=True,
 )
 
+remote_gemm_autotune_cache: bool = False
+
 # use remote fx aot graph codegen cache
 # False: Disables the cache
 # True: Enables the cache
