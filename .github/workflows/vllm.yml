@@ -3,7 +3,7 @@ name: vllm
 on:
   push:
     tags:
-       ciflow/vllm/*
+      - ciflow/inductor/*
   workflow_dispatch:
 
 concurrency:
