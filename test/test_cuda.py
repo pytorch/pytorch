@@ -1503,6 +1503,7 @@ except RuntimeError as e:
         )
 
     @largeTensorTest("20GB", "cuda")
+    @serialTest()
     def test_randint_generation_for_large_numel(self) -> None:
         numel = 2**31 + 1
         s = torch.randint(2, (numel,), device="cuda", dtype=torch.int8).sum()
@@ -3702,22 +3703,34 @@ exit(2)
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_cuda_graph_tensor_item_not_allowed(self):
-        # Tesnor.item() calls a synchronize which is not allowed in a cudagraph
-        # Valid for CUDA and ROCm
-        def my_func(a: torch.Tensor, b: torch.Tensor, perm: torch.Tensor):
-            idx = perm[0]
-            a[0] *= b[idx]  # should raise an error during capture
-            return a
+        test_script = """\
+import torch
+import sys
+# Tensor.item() calls a synchronize which is not allowed in a cudagraph
+# Valid for CUDA and ROCm
+def my_func(a: torch.Tensor, b: torch.Tensor, perm: torch.Tensor):
+    idx = perm[0]
+    a[0] *= b[idx]  # should raise an error during capture
+    return a
 
-        a = torch.rand(500, 500, device="cuda")
-        b = torch.rand(500, 500, device="cuda")
-        perm = torch.randint(0, 500, (500,), device="cuda")
+a = torch.rand(500, 500, device="cuda")
+b = torch.rand(500, 500, device="cuda")
+perm = torch.randint(0, 500, (500,), device="cuda")
 
-        g = torch.cuda.CUDAGraph()
+g = torch.cuda.CUDAGraph()
 
-        with self.assertRaises(RuntimeError):
-            with torch.cuda.graph(g):
-                output = my_func(a, b, perm)
+with torch.cuda.graph(g):
+    output = my_func(a, b, perm)
+"""
+        with self.assertRaisesRegex(
+            subprocess.CalledProcessError,
+            "calls a synchronize which is not allowed in a cudagraph",
+        ):
+            r = (
+                subprocess.check_output([sys.executable, "-c", test_script])
+                .decode("ascii")
+                .strip()
+            )
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device="cuda")
@@ -4471,28 +4484,28 @@ class TestCudaMallocAsync(TestCase):
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings(
                 "garbage_collection_threshold:1.2"
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("max_split_size_mb:2")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings(
                 "pinned_use_cuda_host_register:none"
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings(
                 "pinned_num_register_threads:none"
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings(
                 "pinned_num_register_threads:1024"
             )
@@ -5319,6 +5332,7 @@ class TestMemPool(TestCase):
         segments = torch.cuda.memory._snapshot()["segments"]
         self.assertTrue(len(segments) > 0, "expected more than one segment")
 
+    @serialTest()
     def test_mempool_empty_cache_inactive(self):
         torch.cuda.empty_cache()
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
@@ -5548,6 +5562,7 @@ class TestMemPool(TestCase):
                 out_0 = torch.randn(nelem_1mb, device="cuda")
         torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
+    @serialTest()
     def test_mempool_ctx_multithread(self):
         torch.cuda.empty_cache()
         segments = torch.cuda.memory._snapshot()["segments"]
@@ -6467,6 +6482,7 @@ class TestCudaAutocast(TestAutocast):
                 for grad, grad_control in zip(grads, grads_control):
                     self.assertEqual(grad.half(), grad_control)
 
+    @serialTest()
     def test_autocast_cache_leak(self):
         # Reported at https://github.com/pytorch/pytorch/issues/48049
         # Test is used to check, if autocast recaches the same parameters
@@ -6481,7 +6497,7 @@ class TestCudaAutocast(TestAutocast):
                 first_iter_mem = torch.cuda.memory_allocated()
                 for _ in range(3):
                     out = linear(data)
-                self.assertTrue(first_iter_mem == torch.cuda.memory_allocated())
+                self.assertEqual(first_iter_mem, torch.cuda.memory_allocated())
 
     def test_autocast_checkpointing(self):
         model = torch.nn.Sequential(

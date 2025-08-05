@@ -172,7 +172,9 @@ class OpDispatcher:
                 # on args first, which could potentially modify args (i.e. allgather certain arg)
                 assert output_sharding.redistribute_schema is not None
                 self.redistribute_local_args(
-                    op_info, output_sharding.redistribute_schema
+                    op_info,
+                    output_sharding.redistribute_schema,
+                    output_sharding.use_val_from_redistribute_schema,
                 )
 
             local_tensor_args = (
@@ -267,11 +269,9 @@ class OpDispatcher:
             if output_sharding.output_spec is not None:
                 # NOTE: the inplace argument's tensor meta may change
                 # after the op call, similar to out_variant op.
-                from torch.distributed.tensor._api import DTensor
-
                 output_spec = output_sharding.output_spec
                 assert isinstance(output_spec, DTensorSpec)
-                assert isinstance(args[0], DTensor)
+                assert isinstance(args[0], dtensor.DTensor)
                 args[0]._spec = output_spec
                 return args[0]
             else:
@@ -301,6 +301,7 @@ class OpDispatcher:
     def redistribute_local_args(
         op_info: OpInfo,
         suggested_input_schema: OpSchema,
+        use_val_from_redistribute_schema: bool,
     ) -> None:
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
         if op_info.args_tree_spec is not None:
@@ -323,7 +324,12 @@ class OpDispatcher:
                 else:
                     new_local_args.append(local_tensor)
             else:
-                new_local_args.append(reshard_arg_spec)
+                if use_val_from_redistribute_schema:
+                    # args can be updated for view related ops, we refer to the
+                    # update in redistribute_schema.
+                    new_local_args.append(reshard_arg_spec)
+                else:
+                    new_local_args.append(arg_spec)
 
         op_info.local_args = tuple(new_local_args)
 

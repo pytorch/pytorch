@@ -627,6 +627,16 @@ class TestViewOps(DTensorTestBase):
             dist_x,
             0,
         )
+        self.assertEqual(dist_x.shape, torch.Size([8]))
+        # TODO: change to ``assertEqual`` once https://github.com/pytorch/pytorch/pull/158954 is merged
+        # ``dist_x.stride()`` is (8, 1) due to the current discrepancy between DTensor metadata and
+        # ``DTensor._spec.tensor_meta``. Adding ``return_and_correct_aliasing`` in DTensor dispatch
+        # should ensure the outer aliasing matches the inner aliasing.
+        self.assertNotEqual(
+            dist_x.stride(),
+            (1,),
+        )
+        self.assertEqual(dist_x.placements, [Partial(), Shard(0)])
 
 
 if __name__ == "__main__":
