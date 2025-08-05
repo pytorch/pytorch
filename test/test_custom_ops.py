@@ -4291,7 +4291,9 @@ Please use `add.register_fake` to add an fake impl.""",
             lib.define("cpu_only_op(Tensor x) -> Tensor")
             lib.impl("cpu_only_op", lambda x: x * 2, "CPU")
 
-            cpu_kernel = torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CPU")
+            cpu_kernel = torch.library.get_kernel(
+                "test_invalid_kernel::cpu_only_op", "CPU"
+            )
             self.assertIsNotNone(cpu_kernel)
 
             # CUDA should fail at the isValid() check since no CUDA kernel exists
