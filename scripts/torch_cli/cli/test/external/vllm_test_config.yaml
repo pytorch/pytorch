@@ -14,6 +14,7 @@
   id: vllm_regression_test
   dependent_packages: ['modelscope']
   steps:
+  - pip install modelscope
   - pytest -v -s test_regression.py
 
 - label: Engine Test # 10min
