@@ -1,7 +1,6 @@
 name: windows-arm64-build-test
 
 on:
-  on:
   schedule:
     # Runs every hour
     - cron: '0 * * * *'
