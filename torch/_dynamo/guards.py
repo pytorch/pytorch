@@ -65,7 +65,9 @@ from torch._C._dynamo.guards import (
     profile_guard_manager,
     RootGuardManager,
     TupleGetItemGuardAccessor,
+    TypeDictGuardAccessor,
     TypeGuardAccessor,
+    TypeMROGuardAccessor,
 )
 from torch._dynamo.source import (
     get_global_source_name,
@@ -455,8 +457,19 @@ class GuardManagerWrapper:
                         ClosureGuardAccessor,
                         FuncDefaultsGuardAccessor,
                         FuncKwDefaultsGuardAccessor,
+                        GetAttrGuardAccessor,
                     ),
                 )
+
+                for accessor in node.get_accessors():
+                    if isinstance(accessor, GetAttrGuardAccessor):
+                        is_subtree_tag_safe &= accessor.get_attr_name() in (
+                            "__defaults__",
+                            "__kwdefaults__",
+                            "__code__",
+                            "__closure__",
+                        )
+
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
             elif issubclass(node.get_type_of_guarded_value(), types.CellType):
@@ -486,6 +499,12 @@ class GuardManagerWrapper:
                 # Therefore only tuples from __closure__ / __defaults__ participate in the
                 # recursive-dict-tag optimization; all others are ignored.
                 is_subtree_tag_safe = check_tag_safety(node, TupleGetItemGuardAccessor)
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+            elif node.get_type_of_guarded_value() is type:
+                is_subtree_tag_safe = check_tag_safety(
+                    node, (TypeDictGuardAccessor, TypeMROGuardAccessor)
+                )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
 
