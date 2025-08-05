@@ -3134,6 +3134,7 @@ class TestDictDataLoader(TestCase):
             self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
 
     @skipIfXpu
+    @skipIfRocm
     @unittest.skipIf(TEST_CUDA, "Test for when CUDA is not available")
     def test_pin_memory_no_cuda(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
