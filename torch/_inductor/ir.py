@@ -1308,7 +1308,7 @@ class Reduction(Loops):
             # We don't support unbacked symints
             return ReductionHint.DEFAULT, 1
 
-        if reduction_type == "dot" :
+        if reduction_type == "dot":
             # Don't split when doing native matmul
             return ReductionHint.DEFAULT, 1
 
@@ -1602,7 +1602,7 @@ class Reduction(Loops):
                 return split
 
         split = _maybe_increase_split(split)
-        
+
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available
@@ -4691,9 +4691,27 @@ class ComputedBuffer(OperationBuffer):
             Callable[[Sequence[int]], Sequence[int]],
             Callable[[Sequence[int]], Sequence[int]],
         ]:
-            sizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, support_vars, sizes, memory_addrs
-            )
+            # When doing native matmul, the codegen assumes the following loop order
+            #
+            # for z:
+            #  for y:
+            #   for x:
+            #    for r:
+            #      C[z,y,x] += A[z,y,r] * B[z,r,x]
+            #
+            # For now, the tiling and the loop order is fixed. This may not be the
+            # optimal loop order when strides does not align with this default order.
+            # Maybe sth we should modify tl.dot codegen to support random loop order
+            if self.get_reduction_type() == "dot":
+                order = list(range(len(sizes)))
+                sizes = sizes
+                reindex0 = same_reorder(order)
+                reindex1 = inverse_reorder(order)
+            else:
+                sizes, reindex0, reindex1 = self._apply_loop_reordering(
+                    x_vars, support_vars, sizes, memory_addrs
+                )
+
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
 

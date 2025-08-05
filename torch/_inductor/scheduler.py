@@ -1030,6 +1030,7 @@ class SchedulerNode(BaseSchedulerNode):
         recompute_sizes_body_func: Optional[Callable[_P, _T]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
+
         self._sizes, body = self.node.simplify_and_reorder(
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,

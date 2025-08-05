@@ -19,9 +19,9 @@ from torch._inductor.virtualized import ops
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.experimental.symbolic_shapes import (
-    statically_known_true, 
-    sym_eq, 
     has_free_unbacked_symbols,
+    statically_known_true,
+    sym_eq,
 )
 from torch.utils._ordered_set import OrderedSet
 
@@ -29,7 +29,7 @@ from .. import config, ir, pattern_matcher
 from ..codegen.common import custom_backend_passes
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
-from ..lowering import lowerings as L
+from ..lowering import lowerings as L, make_pointwise, make_reduction, transform_args
 from ..pattern_matcher import (
     _return_true,
     Arg,
@@ -67,11 +67,7 @@ from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
-from ..lowering import (
-    make_pointwise,
-    make_reduction,
-    transform_args
-)
+
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -133,7 +129,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
             # Concat linear optimization for WOQ int4
             concat_linear_woq_int4(gm)
-    
+
     if config.pattern_matcher:
         lazy_init()
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
@@ -187,9 +183,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.triton.enable_native_matmul:
         GraphTransformObserver(gm, "native_matmul_pass").apply_graph_pass(
-            native_matmul_pass 
+            native_matmul_pass
         )
-
 
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
         GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
@@ -758,18 +753,18 @@ def is_valid_mm_plus_mm(match: Match):
 
     if m1 != m2 or n1 != n2:
         return False
-    
+
     if config.triton.enable_native_matmul:
         shapes = [m1, m2, k1, k2, k3, k4, n1, n2]
         # if shape is unbacked symint, skip
-        if any([has_free_unbacked_symbols(var) for var in shapes]) :
+        if any([has_free_unbacked_symbols(var) for var in shapes]):
             return False
 
         if (
             match.kwargs["mat1"].meta["val"].device.type == "cuda"
             and config.cuda_backend == "triton"
         ):
-           return False
+            return False
 
     return True
 
@@ -1480,18 +1475,13 @@ def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
-    
+
     output = match.output_node()
     return all(is_pointwise_use(use) for use in output.users)
 
 
 @register_graph_pattern(
-    CallFunction(
-      aten.addmm, 
-      KeywordArg("inp"), 
-      KeywordArg("mat1"), 
-      KeywordArg("mat2")
-    ),
+    CallFunction(aten.addmm, KeywordArg("inp"), KeywordArg("mat1"), KeywordArg("mat2")),
     pass_dict=pass_patterns[1],
     extra_check=should_prefer_unfused_addmm,
 )
@@ -1500,6 +1490,7 @@ def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
         return x1 @ x2 + inp
 
     match.replace_by_example(repl, [inp, mat1, mat2])
+
 
 def native_matmul_pass(graph: torch.fx.Graph):
     graph_pass = [
@@ -1513,28 +1504,29 @@ def native_matmul_pass(graph: torch.fx.Graph):
         return pattern_matcher.register_lowering_pattern(
             pattern, extra_check, pass_dict=pass_dict
         )
-    
+
     def native_matmul_extra_check(match):
         mat1 = match.kwargs["mat1"].meta["val"]
         mat2 = match.kwargs["mat2"].meta["val"]
- 
+
         if not config.triton.enable_native_matmul:
             return False
-       
+
         # Currently only enable native matmul for triton on GPU.
-        if not (
-            mat1.device.type == "cuda" 
-            and config.cuda_backend == "triton"
-        ) :
+        if not (mat1.device.type == "cuda" and config.cuda_backend == "triton"):
             return False
-       
+
         # Currently, tl.dot only supports following dtypes
         triton_supported_dtype = [
-            torch.int8, torch.uint8, torch.float16, torch.bfloat16, torch.float32
+            torch.int8,
+            torch.uint8,
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
         ]
-        if not mat1.dtype in triton_supported_dtype :
+        if mat1.dtype not in triton_supported_dtype:
             return False
-        if not mat2.dtype in triton_supported_dtype :
+        if mat2.dtype not in triton_supported_dtype:
             return False
 
         # (..., M, K) @ (..., K, N)
@@ -1542,21 +1534,18 @@ def native_matmul_pass(graph: torch.fx.Graph):
         K, N = mat2.shape[-2], mat2.shape[-1]
 
         # Skip if size is zero or one.
-        if M <= 1 or K <= 1 or N <= 1 :
+        if M <= 1 or K <= 1 or N <= 1:
             return False
 
         # if shape is unbacked symint, skip
-        if any([has_free_unbacked_symbols(var) for var in [M,K,N]]) :
+        if any([has_free_unbacked_symbols(var) for var in [M, K, N]]):
             return False
-        
+
         return True
-  
+
     @register_graph_pattern(
         CallFunction(
-          aten.addmm, 
-          KeywordArg("inp"), 
-          KeywordArg("mat1"), 
-          KeywordArg("mat2")
+            aten.addmm, KeywordArg("inp"), KeywordArg("mat1"), KeywordArg("mat2")
         ),
         pass_dict=graph_pass[0],
         extra_check=native_matmul_extra_check,
@@ -1580,12 +1569,14 @@ def native_matmul_pass(graph: torch.fx.Graph):
             kwargs={},
             broadcast=True,
             type_promotion_kind=None,
-            convert_input_to_bool=False
-        ) # Handles broadcasting the arguments
+            convert_input_to_bool=False,
+        )  # Handles broadcasting the arguments
         mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(mul_pointwise, 1,)
+        dot_reduction = make_reduction("dot")(
+            mul_pointwise,
+            1,
+        )
         return dot_reduction
-
 
     @register_lowering_pattern(
         CallFunction(aten.bmm, KeywordArg("mat1"), KeywordArg("mat2")),
@@ -1600,10 +1591,13 @@ def native_matmul_pass(graph: torch.fx.Graph):
             kwargs={},
             broadcast=True,
             type_promotion_kind=None,
-            convert_input_to_bool=False
-        ) # Handles broadcasting the arguments
+            convert_input_to_bool=False,
+        )  # Handles broadcasting the arguments
         mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(mul_pointwise, 2,)
+        dot_reduction = make_reduction("dot")(
+            mul_pointwise,
+            2,
+        )
         return dot_reduction
 
     graph_pass[0].apply(graph)
