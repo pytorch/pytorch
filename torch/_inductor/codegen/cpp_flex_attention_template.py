@@ -684,6 +684,433 @@ extern "C"
 """
 
 
+FLEX_DECODING_TEMPLATE = r"""
+{{template.header().getvalue()}}
+#include <ATen/native/cpu/utils.h>
+#include <ATen/native/CPUBlas.h>
+#include <ATen/Context.h>
+{{template.codegen_micro_gemm(kernel.kernel_name)}}
+{{template.codegen_softmax_fusion(kernel.kernel_name)}}
+{%- set kernel_args = {"query": query, "key": key, "value": value,
+                       "kv_num_blocks": kv_num_blocks, "kv_indices": kv_indices,
+                       "full_kv_num_blocks": full_kv_num_blocks, "full_kv_indices": full_kv_indices } %}
+{%- set kernel_args = template.update_kernel_args(kernel_args) %}
+
+extern "C"
+{{kernel.def_kernel(inputs=kernel_args, outputs={"output": output}, extra_sizevars=template.extra_sizevars)}}
+{
+  {{ kernel.maybe_codegen_profile() }}
+  int64_t qBlockSize = {{qBlockSize}};
+  int64_t kvBlockSize = {{kvBlockSize}};
+  int64_t num_thread = {{num_thread}};
+
+  // dtypes of kernel and internal buffers
+  using scalar_t = {{kernel.dtype(query)}};
+  constexpr bool is_reduced_type = c10::is_reduced_floating_point_v<scalar_t>;
+  using accum_t = at::opmath_type<{{kernel.dtype(query)}}>;
+  using Vec = at::vec::Vectorized<accum_t>;
+  accum_t scaling_factor = {{scale}};
+  int64_t PARTITION_SIZE = {{PARTITION_SIZE}};
+  int64_t batchSize = {{kernel.size(query, 0)}};
+  int64_t qSize = {{kernel.size(query, 1)}};
+  int64_t num_head = {{kernel.size(query, 2)}};
+  int64_t headSize = {{kernel.size(query, 3)}};
+  int64_t batchSize_k = {{kernel.size(key, 0)}};
+  int64_t num_head_k = {{kernel.size(key, 2)}};
+  int64_t headSize_v = {{kernel.size(value, 3)}};
+  bool is_broadcast_bs_kv = batchSize != batchSize_k;
+  bool is_broadcast_head_kv = num_head != num_head_k;
+  int64_t gqa_shards = num_head / num_head_k;
+  int64_t bs_shards = batchSize / batchSize_k;
+
+  int64_t batchSize_kvi = {{kernel.size(kv_indices, 0)}};
+  int64_t num_head_kvi = {{kernel.size(kv_indices, 1)}};
+  int64_t block_num_kvi = {{kernel.size(kv_indices, 3)}};
+  bool is_broadcast_bs_kvi = batchSize != batchSize_kvi;
+  bool is_broadcast_head_kvi = num_head != num_head_kvi;
+  int64_t gqa_shards_kvi = num_head / num_head_kvi;
+  int64_t bs_shards_kvi = batchSize / batchSize_kvi;
+
+  int64_t kviStrideB = {{kernel.stride(kv_indices, 0)}};
+  int64_t kviStrideH = {{kernel.stride(kv_indices, 1)}};
+  int64_t kviStrideQ = {{kernel.stride(kv_indices, 2)}};
+
+  int64_t num_kviStrideB = {{kernel.stride(kv_num_blocks, 0)}};
+  int64_t num_kviStrideH = {{kernel.stride(kv_num_blocks, 1)}};
+
+{%- if has_full_kv_block %}
+  int64_t full_kviStrideB = {{kernel.stride(full_kv_indices, 0)}};
+  int64_t full_kviStrideH = {{kernel.stride(full_kv_indices, 1)}};
+  int64_t full_kviStrideQ = {{kernel.stride(full_kv_indices, 2)}};
+
+  int64_t full_num_kviStrideB = {{kernel.stride(full_kv_num_blocks, 0)}};
+  int64_t full_num_kviStrideH = {{kernel.stride(full_kv_num_blocks, 1)}};
+  auto full_kv_indices_data = full_kv_indices;
+  auto full_kv_num_blocks_data = full_kv_num_blocks;
+{%- endif %}
+
+  auto kv_num_blocks_data = kv_num_blocks;
+  auto kv_indices_data = kv_indices;
+
+  // Strides
+  int64_t qStrideB = {{kernel.stride(query, 0)}};
+  int64_t qStrideM = {{kernel.stride(query, 1)}};
+  int64_t qStrideH = {{kernel.stride(query, 2)}};
+  int64_t kStrideB = {{kernel.stride(key, 0)}};
+  int64_t kStrideN = {{kernel.stride(key, 1)}};
+  int64_t kStrideH = {{kernel.stride(key, 2)}};
+  int64_t vStrideB = {{kernel.stride(value, 0)}};
+  int64_t vStrideN = {{kernel.stride(value, 1)}};
+  int64_t vStrideH = {{kernel.stride(value, 2)}};
+  int64_t oStrideB = {{kernel.stride(output, 0)}};
+  int64_t oStrideM = {{kernel.stride(output, 2)}};
+  int64_t oStrideH = {{kernel.stride(output, 1)}};
+
+  int64_t kvSize = {{kernel.size(key, 1)}};
+
+  int64_t qSplitSize = qBlockSize;
+  int64_t kvSplitSize = kvBlockSize;
+
+  qSplitSize = qSplitSize > qSize ? qSize : qSplitSize;
+  kvSplitSize = kvSplitSize > kvSize ? kvSize : kvSplitSize;
+  int64_t qSlice = (qSize + qSplitSize - 1) / qSplitSize;
+  int64_t kvSlice = (kvSize + kvSplitSize - 1) / kvSplitSize;
+  int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
+
+  // Inputs/outputs buffers
+  const scalar_t* q_data = query;
+  const scalar_t* k_data = key;
+  const scalar_t* v_data = value;
+  scalar_t* out_data = output;
+
+  auto num_partitions =
+      (kvSize + PARTITION_SIZE - 1) / PARTITION_SIZE;
+
+  // Allocate temp buf (accumulate type)
+  int64_t _accum_buff_size =
+      /* max_logits_ptr */ batchSize * num_head * num_partitions +
+      /* exp_sum_ptr    */ batchSize * num_head * num_partitions +
+      /* tmp_out_ptr    */ batchSize * num_head * num_partitions * headSize_v +
+      /* logits_ptrs    */ num_thread * PARTITION_SIZE;
+
+  {{template.codegen_allocate_buffer("buf_data", "accum_t", "_accum_buff_size")}}
+  accum_t* max_logits_ptr = buf_data;
+  accum_t* exp_sum_ptr = max_logits_ptr + batchSize * num_head * num_partitions;
+  accum_t* tmp_out_ptr = exp_sum_ptr + batchSize * num_head * num_partitions;
+  accum_t* logits_ptrs = tmp_out_ptr + batchSize * num_head * num_partitions * headSize_v;
+  {{template.codegen_allocate_buffer("logits_reduced_ptrs", "scalar_t", "num_thread * PARTITION_SIZE")}}
+
+  auto max_logits_strideN = num_head * num_partitions;
+  auto max_logits_strideH = num_partitions;
+  auto exp_sum_strideN = num_head * num_partitions;
+  auto exp_sum_strideH = num_partitions;
+  auto tmp_out_strideN = num_head * num_partitions * headSize_v;
+  auto tmp_out_strideH = num_partitions * headSize_v;
+  auto tmp_out_strideS = headSize_v;
+
+  // Attention loop
+  at::parallel_for(0, batchSize * num_head * num_partitions, 1, [&](int64_t begin, int64_t end) {
+    int64_t i = 0, j = 0, partition_id = 0;
+    at::native::data_index_init(begin, i, batchSize, j, num_head, partition_id, num_partitions);
+    int ompIdx = at::get_thread_num();
+    accum_t* logits = logits_ptrs + ompIdx * PARTITION_SIZE;
+    scalar_t* logits_reduced =
+        is_reduced_type
+            ? logits_reduced_ptrs + ompIdx * PARTITION_SIZE
+            : nullptr;
+
+    for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
+      auto partition_start = partition_id * PARTITION_SIZE;
+      auto partition_end =
+              std::min(partition_start + PARTITION_SIZE, kvSize);
+
+      auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
+      auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
+      auto kv_logical_num_data = kv_num_blocks_data + i_kvi * num_kviStrideB +
+                              j_kvi * num_kviStrideH;
+      int kv_indice_num = *kv_logical_num_data;
+      std::vector<int> kv_indice_list(kv_indice_num);
+      for(int kv_i = 0; kv_i < kv_indice_num; kv_i++){
+        auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
+                                  j_kvi * kviStrideH + kv_i;
+        kv_indice_list[kv_i] = *kv_logical_data;
+      }
+{%- if has_full_kv_block %}
+      auto full_kv_logical_num_data = full_kv_num_blocks_data + i_kvi * num_kviStrideB +
+                              j_kvi * num_kviStrideH;
+      int full_kv_indice_num = *full_kv_logical_num_data;
+      std::vector<int> full_kv_indice_list(full_kv_indice_num);
+      for(int kv_i = 0; kv_i < full_kv_indice_num; kv_i++){
+        auto full_kv_logical_data = full_kv_indices_data + i_kvi * full_kviStrideB +
+                                  j_kvi * full_kviStrideH + kv_i;
+        full_kv_indice_list[kv_i] = *full_kv_logical_data;
+      }
+{%- endif %}
+      int64_t cur_qSplitSize = 1;
+      auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
+      auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
+      accum_t* tmp_out = tmp_out_ptr + i * tmp_out_strideN +
+            j * tmp_out_strideH + partition_id * tmp_out_strideS;
+
+      // Initialize logits
+      {{kernel.kernel_name}}_fill_stub(logits,
+            static_cast<accum_t>(0), PARTITION_SIZE);
+      if (is_reduced_type) {
+        {{kernel.kernel_name}}_fill_stub(logits_reduced,
+            static_cast<scalar_t>(0), PARTITION_SIZE);
+      }
+
+
+      // 1) calculate the matmul(query, key) for this partition
+      int64_t token_num = 0;
+{%- if has_full_kv_block %}
+      for (int64_t n_idx = 0; n_idx < kv_indice_num + full_kv_indice_num ; n_idx += 1) {
+        auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
+{%- else %}
+      for (int64_t n_idx = 0; n_idx < kv_indice_num ; n_idx += 1) {
+        auto n = kv_indice_list[n_idx]*kvSplitSize;
+{%- endif %}
+        if (n < partition_start || n >= partition_end) {
+          continue;
+        }
+
+        auto cur_n = n/kvSplitSize;
+        int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
+
+        auto k_addr =
+            k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
+
+        {{kernel.kernel_name}}_kernel_micro_gemm_transpose_b<static_cast<bool>(false)>(
+            q_data + i * qStrideB + j * qStrideH,
+            k_addr,
+            logits + token_num,
+            cur_qSplitSize,
+            cur_kvSplitSize,
+            headSize,
+            qStrideM,
+            kStrideN,
+            cur_kvSplitSize);
+            
+        {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(logits + token_num, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
+
+{%- if score_mod and mask_mod %}
+        // TODO: reduce the number of calls of q_idx and kv_idx initialization
+        std::vector<int64_t> q_idx(cur_qSplitSize);
+        for (int64_t i = 0; i < cur_qSplitSize; ++i) {
+          q_idx[i] = i;
+        }
+
+        std::vector<int64_t> kv_idx(cur_kvSplitSize);
+        for (int64_t i = 0; i < cur_kvSplitSize; ++i) {
+          kv_idx[i] = n + i;
+        }
+
+        std::vector<int64_t> b_idx = {i};
+        std::vector<int64_t> h_idx = {j};
+
+        accum_t* in_ptr0 = logits + token_num;
+
+        auto in_ptr1 = b_idx.data();
+        auto in_ptr2 = h_idx.data();
+        auto in_ptr3 = q_idx.data();
+        auto in_ptr4 = kv_idx.data();
+
+        // apply score mod function
+        {
+            {{ template.generate_other_buffer("score_others", 0, "len_score_other", kernel.args) }}
+            accum_t* out_ptr{{score_buf_idx}} = in_ptr0;
+            {{ template.modification(score_mod, score_buf_name, score_buf_idx)|indent(12, false) }}
+        }
+
+        if ((std::find(kv_indice_list.begin(), kv_indice_list.end(), cur_n) != kv_indice_list.end()) ){
+          // Apply block mask, fill unused with -inf
+          {
+              {{ template.generate_other_buffer("mask_others", -1, "len_mask_other", kernel.args) }}
+              accum_t* out_ptr{{mask_buf_idx}} = in_ptr0;
+              {{ template.modification(mask_mod, mask_buf_name, mask_buf_idx)|indent(12, false) }}
+          }
+        }
+        token_num += cur_kvSplitSize;
+      }
+{%- endif %}
+
+
+      // 2) calculate the max and exp_sum for this partition
+      auto partition_max = -std::numeric_limits<float>::infinity();
+      {{kernel.kernel_name}}_mul_reduce_max_fusion_kernel(
+          logits,
+          static_cast<accum_t>(1),
+          token_num,
+          logits,
+          partition_max);
+      if (partition_max == -std::numeric_limits<float>::infinity()) {
+          partition_max = 0;
+      }
+      max_logits_ptr[i * max_logits_strideN +
+            j * max_logits_strideH + partition_id] =
+          partition_max;
+      {{kernel.kernel_name}}_exp_reduce_sum_fusion_kernel(
+          logits,
+          token_num,
+          {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced),
+          partition_max);
+      exp_sum_ptr[i * exp_sum_strideN +
+            j * exp_sum_strideH + partition_id] = partition_max;
+
+
+      // 3) calculate the matmul(exp(logits-partition_max), value) for this
+      // partition, need to divide the global exp_sum in the final result.
+      token_num = 0;
+      bool skipped_partition = true;
+{%- if has_full_kv_block %}
+      for (int64_t n_idx = 0; n_idx < kv_indice_num + full_kv_indice_num ; n_idx += 1) {
+        auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
+{%- else %}
+      for (int64_t n_idx = 0; n_idx < kv_indice_num ; n_idx += 1) {
+        auto n = kv_indice_list[n_idx]*kvSplitSize;
+{%- endif %}
+        if (n < partition_start || n >= partition_end) {
+          continue;
+        }
+        skipped_partition = false;
+        int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
+
+        auto v_addr =
+            v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
+        // Fallback Half brgemm is slower than micro gemm
+
+        if (!std::is_same_v<scalar_t, at::Half>) {
+          at::native::cpublas::brgemm(
+                cur_qSplitSize,
+                headSize_v,
+                cur_kvSplitSize,
+                cur_kvSplitSize,
+                vStrideN,
+                headSize_v,
+                token_num > 0,
+                {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
+                v_addr,
+                tmp_out,
+                false);
+        } else {
+          if (token_num > 0) {
+            {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
+              {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
+              v_addr,
+              tmp_out,
+              cur_qSplitSize,
+              headSize_v,
+              cur_kvSplitSize,
+              cur_kvSplitSize,
+              vStrideN,
+              headSize_v);
+          } else {
+            {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
+              {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
+              v_addr,
+              tmp_out,
+              cur_qSplitSize,
+              headSize_v,
+              cur_kvSplitSize,
+              cur_kvSplitSize,
+              vStrideN,
+              headSize_v);
+          }
+        }
+        token_num += cur_kvSplitSize;
+      }
+      if (skipped_partition) {
+        {{kernel.kernel_name}}_fill_stub(tmp_out,
+            static_cast<accum_t>(0), headSize_v);
+      }
+
+      // Move to the next query
+      at::native::data_index_step(i, batchSize, j, num_head, partition_id, num_partitions);
+    }
+
+    if (!std::is_same_v<scalar_t, at::Half>) {
+      at::native::cpublas::brgemm_release();
+    }
+  });
+
+
+  // Calculate the final output
+  at::parallel_for(0, batchSize * num_head, 1, [&](int64_t begin, int64_t end) {
+    int64_t i = 0, j = 0;
+    at::native::data_index_init(begin, i, batchSize, j, num_head);
+
+    for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
+      auto global_max = -std::numeric_limits<float>::infinity();
+      auto global_exp_sum = 0.0;
+
+      // Calculate the global max and exp_sum for this head
+      for (auto partition_id = 0; partition_id < num_partitions;
+           partition_id++) {
+        auto max_logit = max_logits_ptr
+            [i * max_logits_strideN +
+            j * max_logits_strideH + partition_id];
+        global_max = std::max(global_max, max_logit);
+      }
+      
+      // Update the partition 0 result with the global max
+      auto partition0_out_start =
+          tmp_out_ptr + i * tmp_out_strideN + j * tmp_out_strideH;
+      auto max_logit0 = max_logits_ptr
+          [i * max_logits_strideN + j * max_logits_strideH];
+      float exp_val = std::exp(max_logit0 - global_max);
+      global_exp_sum +=
+          exp_sum_ptr[i * exp_sum_strideN + j * exp_sum_strideH] *
+          exp_val;
+      at::vec::map<accum_t>(
+          [exp_val](Vec x) { return x * Vec(exp_val); },
+          partition0_out_start,
+          partition0_out_start,
+          headSize_v);
+
+      // Accumulate the partition 1 to partition n result into partition 0
+      if (num_partitions > 1) {
+        for (auto partition_id = 1; partition_id < num_partitions;
+             partition_id++) {
+          auto tmp_out_start = partition0_out_start + partition_id * tmp_out_strideS;
+          auto max_logit = max_logits_ptr
+              [i * max_logits_strideN + j * max_logits_strideH +
+               partition_id];
+          auto exp_sum = exp_sum_ptr
+              [i * exp_sum_strideN + j * exp_sum_strideH +
+               partition_id];
+          exp_val = std::exp(max_logit - global_max);
+          global_exp_sum += exp_sum * exp_val;
+          at::vec::map2<accum_t>(
+              [exp_val](Vec a, Vec b) { return a + Vec(exp_val) * b; },
+              partition0_out_start,
+              partition0_out_start,
+              tmp_out_start,
+              headSize_v);
+        }
+      }
+
+      // Rescale the partition 0 result with global exp_sum
+      // Sum for full masked out rows are 0, we set them to 1
+      // in order to avoid NaNs in the output and instead set fully
+      // masked out rows to 0
+      global_exp_sum = global_exp_sum == 0 ? 1 : global_exp_sum;
+      float sum_reciprocal = 1.0 / global_exp_sum;
+      // copy the partition 0 result into output
+      at::vec::map<scalar_t>(
+          [sum_reciprocal](Vec x) { return x * Vec(sum_reciprocal); },
+          out_data + i * oStrideB + j * oStrideH,
+          partition0_out_start,
+          headSize_v);
+
+      // Move to the next query
+      at::native::data_index_step(i, batchSize, j, num_head);
+    }
+
+  });
+}
+"""
+
+
 class CppFlexAttentionTemplate(CppTemplate):
     def __init__(
         self,
@@ -985,6 +1412,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.input_dtype = query.layout.dtype
 
         num_threads = parallel_num_threads()
+        PARTITION_SIZE = 128
         assert isinstance(self.output_node, ir.IRNode)
         buf_out = TensorBox.create(self.output_node)
         if template_buffer_node is not None:
@@ -1017,13 +1445,20 @@ class CppFlexAttentionTemplate(CppTemplate):
             mask_buf_name=self.mask_buf_name,
             score_buf_idx=self.score_buf_idx,
             mask_buf_idx=self.mask_buf_idx,
+            PARTITION_SIZE=PARTITION_SIZE,
         )
         with contextlib.ExitStack() as stack:
             for buf in self.fake_buffers:
                 stack.enter_context(
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
-            return self._template_from_string(FLEX_ATTENTION_TEMPLATE).render(**options)
+            if query.data.data.layout.size[2] == 1 \
+                  and PARTITION_SIZE % self.kv_block_size == 0:
+              # use flash decoding when qSize == 1
+              return self._template_from_string(FLEX_DECODING_TEMPLATE).render(**options)
+            else:
+              # use flash attention when qSize > 1
+              return self._template_from_string(FLEX_ATTENTION_TEMPLATE).render(**options)
 
     def codegen_softmax_fusion(self, kernel_name: str):
         # TODO: use inductor IR to rewrite those fusions
