@@ -142,7 +142,7 @@ Tensor qcat_nhwc_kernel(
             continue;
           }
 
-          constexpr auto VLEN = Vec::size();
+          const auto VLEN = Vec::size();
           int64_t c = 0;
 
           // Vectorized loop
@@ -177,9 +177,9 @@ Tensor qcat_nhwc_kernel(
             auto curr_zero_pt_vec = Vectorized<float>((float)curr_zero_pt);
             auto scale_neg_zp_premul = curr_scale_vec * curr_zero_pt_vec.neg();
             int64_t vec_num = elem_size / kVLEN;
-            std::array<typename scalar_t::underlying, VLEN> buf_in{};
-            memcpy(buf_in.data(), iptr + c, vec_num * kVLEN);
-            auto inp_vec = Vec::loadu(buf_in.data());
+            typename scalar_t::underlying buf_in[VLEN] = {};
+            memcpy(buf_in, iptr + c, vec_num * kVLEN);
+            auto inp_vec = Vec::loadu(buf_in);
             auto float_values = inp_vec.dequantize(
                 curr_scale_vec, curr_zero_pt_vec, scale_neg_zp_premul);
             Vec::float_vec_return_type retvals;
@@ -1487,7 +1487,7 @@ void _qmaxpool_2d_nhwc_kernel(
         int64_t c = 0;
 
         // Interleaved vector loop 4x
-        constexpr auto vec_width = Vectorized<scalar_t>::size();
+        const auto vec_width = Vectorized<scalar_t>::size();
         for (; c + 4 * vec_width <= iC; c += 4 * vec_width) {
           Vectorized<scalar_t> acc{
               scalar_t(std::numeric_limits<scalar_t_underlying>::lowest())};
@@ -1623,7 +1623,7 @@ void qmaxpool_3d_nthwc_kernel(
           w_start += dW;
 
         int64_t c = 0;
-        constexpr auto vec_width = Vectorized<scalar_t>::size();
+        const auto vec_width = Vectorized<scalar_t>::size();
         // Vector loop
         for (; c + vec_width <= iC; c += vec_width) {
           Vectorized<scalar_t> acc{

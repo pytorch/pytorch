@@ -8,7 +8,7 @@
 #include <ATen/cpu/vec/sve/sve_helper.h>
 #include <ATen/cpu/vec/vec_base.h>
 
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE) || defined(CPU_CAPABILITY_SVE256)
 #include <ATen/cpu/vec/sve/vec_bfloat16.h>
 #include <ATen/cpu/vec/sve/vec_double.h>
 #include <ATen/cpu/vec/sve/vec_float.h>
@@ -27,7 +27,7 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #define DEFINE_SVE_CAST(t1_t, t1_prefix, t2_t, t2_prefix)                 \
@@ -214,7 +214,6 @@ std::pair<Vectorized<float>, Vectorized<float>> inline deinterleave2<float>(
 template <>
 std::pair<
     Vectorized<c10::BFloat16>,
-    Vectorized<c10::BFloat16>> inline deinterleave2<c10::
                                                         BFloat16>(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
@@ -231,6 +230,5 @@ std::pair<
 #endif // __ARM_FEATURE_BF16
 
 #endif // defined(CPU_CAPABILITY_SVE)
-
 } // namespace CPU_CAPABILITY
-} // namespace at::vec
+}

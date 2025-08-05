@@ -25,15 +25,13 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE)
-
-constexpr int SVE_FLOAT_VEC_SIZE = 8;
+#if defined(CPU_CAPABILITY_SVE) || defined(CPU_CAPABILITY_SVE256)
 
 template <> class Vectorized<float> {
 private:
 
 public:
-  __at_align__ float values[SVE_FLOAT_VEC_SIZE];
+  __at_align__ float values[64];
 
   using value_type = float;
   using size_type = int;
@@ -42,19 +40,23 @@ public:
   }
   inline Vectorized() {}
   inline Vectorized(const float val) {
-    auto v = svdup_n_f32(val);
-    svst1_f32(svptrue_b32(), values, v);
+    svst1_f32(svptrue_b32(), values, svdup_n_f32(val));
   }
   inline Vectorized(const svfloat32_t val) {
     svst1_f32(svptrue_b32(), values, val);
   }
-  inline operator svfloat32_t() const {
-    return svld1_f32(svptrue_b32(), values);
+  template<typename T,
+           typename = std::enable_if_t<std::is_pointer_v<T>>>
+  inline Vectorized(const float * val) {
+    svst1_f32(svptrue_b32(), values, svld1_f32(svptrue_b32(), val));
   }
   template<typename... Args,
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
   inline Vectorized(Args... vals) {
     values = { vals... };
+  }
+  inline operator svfloat32_t() const {
+    return svld1_f32(svptrue_b32(), values);
   }
   static inline Vectorized<float> from_ptr(const float * vs) {
     Vectorized<float> v;

@@ -585,6 +585,14 @@ static PyObject* THPModule_getCpuCapability(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_getSveLen(
+    PyObject* module,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt32(at::get_sve_len());
+  END_HANDLE_TH_ERRORS
+}
+
 namespace {
 
 template <class T>
@@ -1584,6 +1592,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_cxx_flags", THPModule_cxxFlags, METH_NOARGS, nullptr},
     {"_parallel_info", THPModule_parallelInfo, METH_NOARGS, nullptr},
     {"_get_cpu_capability", THPModule_getCpuCapability, METH_NOARGS, nullptr},
+    {"_get_sve_len", THPModule_getSveLen, METH_NOARGS, nullptr},
     {"_set_backcompat_broadcast_warn",
      THPModule_setBackcompatBroadcastWarn,
      METH_O,

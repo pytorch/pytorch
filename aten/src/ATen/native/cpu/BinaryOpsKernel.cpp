@@ -274,7 +274,7 @@ inline Vectorized<scalar_t> div_floor_floating_vec(
   return floordiv;
 }
 
-#if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
+#if (defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)) && defined(__ARM_FEATURE_BF16)
 
 // Since sve lacks sufficient bf16 intrinsics, do the calculations in f32 to
 // avoid rounding errors. This should not cause performance issues as

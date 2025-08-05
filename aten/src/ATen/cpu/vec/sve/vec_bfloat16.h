@@ -19,7 +19,7 @@ namespace vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
+#if (defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)) && defined(__ARM_FEATURE_BF16)
 
 template <>
 struct is_vec_specialized_for<BFloat16> : std::bool_constant<true> {};
@@ -308,8 +308,8 @@ Vectorized<c10::BFloat16> inline operator/(
 }
 
 inline Vectorized<BFloat16>::Vectorized() {
-  const short zero = 0;
-  values = svdup_n_bf16(c10::bit_cast<bfloat16_t>(zero));
+  auto vals_f = svdup_n_f32(0);
+  values = convert_float_bfloat16(vals_f, vals_f);
 }
 
 inline Vectorized<BFloat16>::Vectorized(int val) {

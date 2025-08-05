@@ -102,8 +102,7 @@ struct VecReduceAllSIMD<float, Op> {
 #endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) &&
        // !defined(C10_MOBILE)
 
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
-    !defined(CPU_CAPABILITY_SVE)
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
   static inline float apply(
@@ -143,8 +142,7 @@ struct VecReduceAllSIMD<float, std::plus<Vectorized<float>>> {
 #endif // defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
        // && !defined(CPU_CAPABILITY_SVE)
 
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
-    defined(CPU_CAPABILITY_SVE256)
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && (defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE))
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
   static inline float apply(

@@ -4,7 +4,9 @@
 #include <ATen/cpu/vec/intrinsics.h>
 
 #ifdef __aarch64__
-#if !defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE) || defined(CPU_CAPABILITY_SVE256)
+#include <ATen/cpu/vec/sve/vec_common_sve.h>
+#else
 #include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_half_neon.h>

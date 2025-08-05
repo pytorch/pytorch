@@ -15,4 +15,6 @@ TORCH_API std::string get_cxx_flags();
 
 TORCH_API std::string get_cpu_capability();
 
+TORCH_API int get_sve_len();
+
 } // namespace at

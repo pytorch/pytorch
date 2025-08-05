@@ -2,8 +2,10 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
-#include <ATen/cpu/vec/vec_base.h>
+
+#include <algorithm>
 #include <cmath>
+
 #if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 #include <sleef.h>
 #define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
@@ -22,7 +24,7 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE) || defined(CPU_CAPABILITY_SVE256)
 
 template <>
 struct is_vec_specialized_for<float> : std::bool_constant<true> {};
@@ -30,52 +32,76 @@ struct is_vec_specialized_for<float> : std::bool_constant<true> {};
 template <>
 class Vectorized<float> {
  private:
-  vls_float32_t values;
-
+    __at_align__ float values[8];
  public:
+
   using value_type = float;
   using size_type = int;
-  static constexpr size_type size() {
-    return VECTOR_WIDTH / sizeof(float);
+  static inline size_type size() {
+    return svcntw();
   }
-  Vectorized() {
-    values = svdup_n_f32(0);
+  inline Vectorized() {svst1_f32(ptrue, values, svdup_n_f32(0));}
+  inline Vectorized(const float val) {
+    svst1_f32(ptrue, values, svdup_n_f32(val));
   }
-  Vectorized(svfloat32_t v) : values(v) {}
-  Vectorized(float val) {
-    values = svdup_n_f32(val);
+  inline Vectorized(const svfloat32_t val) {
+    svst1_f32(ptrue, values, val);
   }
-  template <
-      typename... Args,
-      typename = std::enable_if_t<(sizeof...(Args) == size())>>
-  Vectorized(Args... vals) {
-    __at_align__ float buffer[size()] = {vals...};
-    values = svld1_f32(ptrue, buffer);
+  template<typename T,
+           typename = std::enable_if_t<std::is_pointer_v<T>>>
+  inline Vectorized(const float * val) {
+    svst1_f32(ptrue, values, svld1_f32(ptrue, val));
   }
-  operator svfloat32_t() const {
-    return values;
+  template<typename... Args,
+           typename = std::enable_if_t<(sizeof...(Args) == size())>>
+  inline Vectorized(Args... vals) {
+    values = { vals... };
   }
-  template <uint64_t mask>
-  static Vectorized<float> blend(
-      const Vectorized<float>& a,
-      const Vectorized<float>& b) {
-    // Build an array of flags: each element is 1 if the corresponding bit in
-    // 'mask' is set, 0 otherwise.
+  inline operator svfloat32_t() const {
+    return svld1_f32(ptrue, values);
+  }
+  static inline Vectorized<float> from_ptr(const float * vs) {
+    Vectorized<float> v;
+    svst1_f32(ptrue, v.values, svld1_f32(ptrue, static_cast<const float *>(vs)));
+    return v;
+  }
+  static inline Vectorized<float> from_ptr(const float * vs, int count) {
+    Vectorized<float> v;
+    svst1_f32(ptrue, v.values, svld1_f32(svwhilelt_b32_s32(0, count), static_cast<const float *>(vs)));
+    return v;
+  }
+  inline void set_lane(int i, float value) {
+    values[i] = value;
+  }
+  inline Vectorized<float> map(float (*fn)(float)) const {
+    Vectorized<float> result;
+    for (int64_t i = 0; i < size(); ++i) {
+      result.set_lane(i, fn(values[i]));
+    }
+    return result;
+  }
+  inline Vectorized<float> map2(float (*fn)(float, float), const Vectorized<float> &b) const {
+    Vectorized<float> result;
+    for (int64_t i = 0; i < size(); ++i) {
+      result.set_lane(i, fn(values[i], b.values[i]));
+    }
+    return result;
+  }
+
+  static inline Vectorized<float> blend(const Vectorized<float>& a, const Vectorized<float>& b, const uint64_t mask) {
+    // Build an array of flags: each element is 1 if the corresponding bit in 'mask' is set, 0 otherwise.
     __at_align__ int32_t flag_arr[size()];
     for (int i = 0; i < size(); i++) {
       flag_arr[i] = (mask & (1ULL << i)) ? 1 : 0;
     }
     // Load the flag array into an SVE int32 vector.
-    svint32_t int_mask = svld1_s32(svptrue_b32(), flag_arr);
-    // Compare each lane of int_mask to 0; returns an svbool_t predicate where
-    // true indicates a nonzero flag.
-    svbool_t blend_mask = svcmpne_n_s32(svptrue_b32(), int_mask, 0);
-    // Use svsel to select elements from b where the predicate is true, else
-    // from a.
-    svfloat32_t result = svsel_f32(blend_mask, b.values, a.values);
-    return Vectorized<float>(result);
+    svint32_t int_mask = svld1_s32(ptrue, flag_arr);
+    // Compare each lane of int_mask to 0; returns an svbool_t predicate where true indicates a nonzero flag.
+    svbool_t blend_mask = svcmpne_n_s32(ptrue, int_mask, 0);
+    // Use svsel to select elements from b where the predicate is true, else from a.
+    return svsel_f32(blend_mask, b, a);
   }
-  static Vectorized<float> blendv(
+  static inline Vectorized<float> blendv(
       const Vectorized<float>& a,
       const Vectorized<float>& b,
       const Vectorized<float>& mask_) {
@@ -84,16 +110,16 @@ class Vectorized<float> {
     return svsel_f32(mask, b, a);
   }
   template <typename step_t>
-  static Vectorized<float> arange(
+  static inline Vectorized<float> arange(
       float base = 0.f,
       step_t step = static_cast<step_t>(1)) {
     __at_align__ float buffer[size()];
     for (int64_t i = 0; i < size(); i++) {
       buffer[i] = base + i * step;
     }
-    return svld1_f32(ptrue, buffer);
+    return Vectorized<float>::from_ptr(buffer);
   }
-  static Vectorized<float> set(
+  static inline Vectorized<float> set(
       const Vectorized<float>& a,
       const Vectorized<float>& b,
       int64_t count = size()) {
@@ -169,156 +195,116 @@ class Vectorized<float> {
     poly = svsel_f32(svcmpgt_f32(pg, x, max_input), inf, poly);
     return poly;
   }
-  static Vectorized<float> loadu(const void* ptr, int64_t count = size()) {
-    if (count == size())
-      return svld1_f32(ptrue, reinterpret_cast<const float*>(ptr));
-    svbool_t pg = svwhilelt_b32(0ull, count);
-    return svld1_f32(pg, reinterpret_cast<const float*>(ptr));
+  static inline Vectorized<float> loadu(const void* ptr) {
+    return Vectorized<float>::from_ptr(reinterpret_cast<const float *>(ptr));
   }
-  void store(void* ptr, int64_t count = size()) const {
-    if (count == size()) {
-      svst1_f32(ptrue, reinterpret_cast<float*>(ptr), values);
-    } else {
-      svbool_t pg = svwhilelt_b32(0ull, count);
-      svst1_f32(pg, reinterpret_cast<float*>(ptr), values);
-    }
+  static inline Vectorized<float> loadu(const void* ptr, int64_t count) {
+    return Vectorized<float>::from_ptr(reinterpret_cast<const float *>(ptr), count);
   }
-  const float& operator[](int idx) const = delete;
-  float& operator[](int idx) = delete;
-  int64_t zero_mask() const {
-    // returns an integer mask where all zero elements are translated to 1-bit
-    // and others are translated to 0-bit
+  inline void store(void* ptr) const {
+    svst1_f32(ptrue, static_cast<float *>(ptr), svld1_f32(ptrue, values));
+  }
+  inline void store(void* ptr, int count) const {
+    svst1_f32(svwhilelt_b32_s32(0, count), static_cast<float *>(ptr), svld1_f32(ptrue, values));
+  }
+  inline const float& operator[](int idx) const {
+    return values[idx];
+  };
+  inline float& operator[](int idx) {
+    return values[idx];
+  };
+  inline int64_t zero_mask() const {
+    // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
     int64_t mask = 0;
     __at_align__ int32_t mask_array[size()];
 
-    svbool_t svbool_mask = svcmpeq_f32(ptrue, values, ZERO_F32);
-    svst1_s32(
-        ptrue,
-        mask_array,
-        svsel_s32(svbool_mask, ALL_S32_TRUE_MASK, ALL_S32_FALSE_MASK));
-    for (int64_t i = 0; i < size(); ++i) {
-      if (mask_array[i])
-        mask |= (1ull << i);
+    svbool_t svbool_mask = svcmpeq_f32(ptrue, *this, ZERO_F32);
+    svst1_s32(ptrue, mask_array, svsel_s32(svbool_mask,
+                                          ALL_S32_TRUE_MASK,
+                                          ALL_S32_FALSE_MASK));
+    for (int64_t j = 0; j < size(); ++j) {
+      if (mask_array[j]) mask |= (1ull << j);
     }
+
     return mask;
   }
-  Vectorized<float> isnan() const {
+  inline Vectorized<float> isnan() const {
     // NaN check
-    svbool_t mask = svcmpuo_f32(ptrue, values, ZERO_F32);
+    auto mask = svcmpuo_f32(ptrue, *this, ZERO_F32);
     return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
   }
-  bool has_inf_nan() const {
-    return svptest_any(
-        ptrue,
-        svcmpuo_f32(ptrue, svsub_f32_x(ptrue, values, values), ZERO_F32));
+  inline bool has_inf_nan() const {
+    return svptest_any(ptrue, svcmpuo_f32(ptrue, svsub_f32_x(ptrue, *this, *this), ZERO_F32));
   }
-  Vectorized<float> map(float (*f)(float)) const {
-    __at_align__ float tmp[size()];
-    store(tmp);
-    for (int64_t i = 0; i < size(); ++i) {
-      tmp[i] = f(tmp[i]);
-    }
-    return loadu(tmp);
+  
+  inline Vectorized<float> abs() const {
+    return svabs_f32_x(ptrue, *this);
   }
-  Vectorized<float> abs() const {
-    return svabs_f32_x(ptrue, values);
-  }
-  Vectorized<float> angle() const {
+  inline Vectorized<float> angle() const {
     const auto nan_vec = svdup_n_f32(NAN);
-    const auto nan_mask = svcmpuo_f32(ptrue, values, ZERO_F32);
+    const auto nan_mask = svcmpuo_f32(ptrue, *this, ZERO_F32);
     const auto pi = svdup_n_f32(c10::pi<float>);
-
-    const auto neg_mask = svcmplt_f32(ptrue, values, ZERO_F32);
+    const auto neg_mask = svcmplt_f32(ptrue, *this, ZERO_F32);
     auto angle = svsel_f32(neg_mask, pi, ZERO_F32);
-    angle = svsel_f32(nan_mask, nan_vec, angle);
-    return angle;
+    return svsel_f32(nan_mask, nan_vec, angle);
   }
-  Vectorized<float> real() const {
-    return values;
+  inline Vectorized<float> real() const {
+    return *this;
   }
-  Vectorized<float> imag() const {
+  inline Vectorized<float> imag() const {
     return Vectorized<float>(0.f);
   }
-  Vectorized<float> conj() const {
-    return values;
+  inline Vectorized<float> conj() const {
+    return *this;
   }
-  Vectorized<float> acos() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_acosfx_u10sve(values)), map(std::acos));
+  inline Vectorized<float> acos() const {
+    return USE_SLEEF(Sleef_acosfx_u10sve(*this), map(std::acos));
   }
-  Vectorized<float> acosh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_acoshfx_u10sve(values)), map(std::acosh));
+  inline Vectorized<float> acosh() const {
+    return USE_SLEEF(Sleef_acoshfx_u10sve(*this), map(std::acosh));
   }
-  Vectorized<float> asin() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_asinfx_u10sve(values)), map(std::asin));
+  inline Vectorized<float> asin() const {
+    return USE_SLEEF(Sleef_asinfx_u10sve(*this), map(std::asin));
   }
-  Vectorized<float> asinh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_asinhfx_u10sve(values)), map(std::asinh));
+  inline Vectorized<float> asinh() const {
+    return USE_SLEEF(Sleef_asinhfx_u10sve(*this), map(std::asinh));
   }
-  Vectorized<float> atan() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_atanfx_u10sve(values)), map(std::atan));
+  inline Vectorized<float> atan() const {
+    return USE_SLEEF(Sleef_atanfx_u10sve(*this), map(std::atan));
   }
-  Vectorized<float> atanh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_atanhfx_u10sve(values)), map(std::atanh));
+  inline Vectorized<float> atanh() const {
+    return USE_SLEEF(Sleef_atanhfx_u10sve(*this), map(std::atanh));
   }
-  Vectorized<float> atan2(const Vectorized<float>& b) const {USE_SLEEF(
-      { return Vectorized<float>(Sleef_atan2fx_u10sve(values, b)); },
-      {
-        __at_align__ float tmp[size()];
-        __at_align__ float tmp_b[size()];
-        store(tmp);
-        b.store(tmp_b);
-        for (int64_t i = 0; i < size(); i++) {
-          tmp[i] = std::atan2(tmp[i], tmp_b[i]);
-        }
-        return loadu(tmp);
-      })} Vectorized<float> copysign(const Vectorized<float>& sign) const {
-
-      USE_SLEEF(
-          { return Vectorized<float>(Sleef_copysignfx_sve(values, sign)); },
-          {
-            __at_align__ float tmp[size()];
-            __at_align__ float tmp_sign[size()];
-            store(tmp);
-            sign.store(tmp_sign);
-            for (int64_t i = 0; i < size(); ++i) {
-              tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
-            }
-            return loadu(tmp);
-          })} Vectorized<float> erf() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_erffx_u10sve(values)), map(std::erf));
+  inline Vectorized<float> atan2(const Vectorized<float> &b) const {
+    return USE_SLEEF(Sleef_atan2fx_u10sve(*this, b), map2(std::atan2, b));
   }
-  Vectorized<float> erfc() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_erfcfx_u15sve(values)), map(std::erfc));
+  inline Vectorized<float> copysign(const Vectorized<float> &sign) const {
+    return USE_SLEEF(Sleef_copysignfx_sve(*this, sign), map2(std::copysign, sign));
   }
-  Vectorized<float> erfinv() const {
+  inline Vectorized<float> erf() const {
+    return USE_SLEEF(Sleef_erffx_u10sve(*this), map(std::erf));
+  }
+  inline Vectorized<float> erfc() const {
+    return USE_SLEEF(Sleef_erfcfx_u15sve(*this), map(std::erfc));
+  }
+  inline Vectorized<float> erfinv() const {
     return map(calc_erfinv);
   }
-  Vectorized<float> exp() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_expfx_u10sve(values)), map(std::exp));
+  inline Vectorized<float> exp() const {
+    return USE_SLEEF(Sleef_expfx_u10sve(*this), map(std::exp));
   }
-  Vectorized<float> exp2() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_exp2fx_u10sve(values)), map(std::exp2));
+  inline Vectorized<float> exp2() const {
+    return USE_SLEEF(Sleef_exp2fx_u10sve(*this), map(std::exp2));
   }
-  Vectorized<float> expm1() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_expm1fx_u10sve(values)), map(std::expm1));
+  inline Vectorized<float> expm1() const {
+    return USE_SLEEF(Sleef_expm1fx_u10sve(*this), map(std::expm1));
   }
   // Implementation copied from Arm Optimized Routines: 
   // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/sve/expf.c
   Vectorized<float> exp_u20() const {
     // special case to handle special inputs that are too large or too small
     // i.e. where there's at least one element x, s.t. |x| >= 87.3...
-    svbool_t is_special_case = svacgt (svptrue_b32(), values, 0x1.5d5e2ap+6f);
+    svbool_t is_special_case = svacgt (svptrue_b32(), *this, 0x1.5d5e2ap+6f);
     if (svptest_any (svptrue_b32(), is_special_case)) {
       return exp();
     }
@@ -330,11 +316,11 @@ class Vectorized<float> {
     const float shift = 0x1.803f8p17f;    
 
     /* n = round(x/(ln2/N)).  */
-    svfloat32_t z = svmad_x (svptrue_b32(), inv_ln2, values, shift);
+    svfloat32_t z = svmad_x (svptrue_b32(), inv_ln2, *this, shift);
     svfloat32_t n = svsub_x (svptrue_b32(), z, shift);
 
     /* r = x - n*ln2/N.  */
-    svfloat32_t r = values;
+    svfloat32_t r = *this;
     r = svmls_x(svptrue_b32(), r, n, ln2_hi);
     r = svmls_x(svptrue_b32(), r, n, ln2_lo);
 
@@ -349,121 +335,73 @@ class Vectorized<float> {
   Vectorized<float> fexp_u20() const {
     return exp_u20();
   }
-  Vectorized<float> fmod(const Vectorized<float>& q) const {USE_SLEEF(
-      { return Vectorized<float>(Sleef_fmodfx_sve(values, q)); },
-      {
-        __at_align__ float tmp[size()];
-        __at_align__ float tmp_q[size()];
-        store(tmp);
-        q.store(tmp_q);
-        for (int64_t i = 0; i < size(); ++i) {
-          tmp[i] = std::fmod(tmp[i], tmp_q[i]);
-        }
-        return loadu(tmp);
-      })} Vectorized<float> hypot(const Vectorized<float>& b) const {
-      USE_SLEEF(
-          { return Vectorized<float>(Sleef_hypotfx_u05sve(values, b)); },
-          {
-            __at_align__ float tmp[size()];
-            __at_align__ float tmp_b[size()];
-            store(tmp);
-            b.store(tmp_b);
-            for (int64_t i = 0; i < size(); i++) {
-              tmp[i] = std::hypot(tmp[i], tmp_b[i]);
-            }
-            return loadu(tmp);
-          })} Vectorized<float> i0() const {
+  inline Vectorized<float> fmod(const Vectorized<float>& q) const {
+    return USE_SLEEF(Sleef_fmodfx_sve(*this, q), return map2(std::fmod, q));
+  }
+  inline Vectorized<float> hypot(const Vectorized<float> &b) const {
+   return USE_SLEEF(Sleef_hypotfx_u05sve(*this, b), map2(std::hypot, b));
+  }
+  inline Vectorized<float> i0() const {
     return map(calc_i0);
   }
-  Vectorized<float> i0e() const {
-    return map(calc_i0e);
+  inline Vectorized<float> i0e() const {
+    return map(calc_i0e<float>);
   }
-  Vectorized<float> digamma() const {
+  inline Vectorized<float> digamma() const {
     return map(calc_digamma);
   }
-  Vectorized<float> igamma(const Vectorized<float>& x) const {
-    __at_align__ float tmp[size()];
-    __at_align__ float tmp_x[size()];
-    store(tmp);
-    x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
-      tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
-    }
-    return loadu(tmp);
+  inline Vectorized<float> igamma(const Vectorized<float> &x) const {
+    return map2(calc_igamma<float>, x);
   }
-  Vectorized<float> igammac(const Vectorized<float>& x) const {
-    __at_align__ float tmp[size()];
-    __at_align__ float tmp_x[size()];
-    store(tmp);
-    x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
-      tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
-    }
-    return loadu(tmp);
+  inline Vectorized<float> igammac(const Vectorized<float> &x) const {
+    return map2(calc_igammac<float>, x);
   }
-  Vectorized<float> nextafter(const Vectorized<float>& b) const {USE_SLEEF(
-      { return Vectorized<float>(Sleef_nextafterfx_sve(values, b)); },
-      {
-        __at_align__ float tmp[size()];
-        __at_align__ float tmp_b[size()];
-        store(tmp);
-        b.store(tmp_b);
-        for (int64_t i = 0; i < size(); ++i) {
-          tmp[i] = std::nextafter(tmp[i], tmp_b[i]);
-        }
-        return loadu(tmp);
-      })} Vectorized<float> log() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_logfx_u10sve(values)), map(std::log));
+  inline Vectorized<float> nextafter(const Vectorized<float> &b) const {
+    return USE_SLEEF(Sleef_nextafterfx_sve(*this, b), map2(std::nextafter, b));
   }
-  Vectorized<float> log2() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_log2fx_u10sve(values)), map(std::log2));
+  inline Vectorized<float> log() const {
+    return USE_SLEEF(Sleef_logfx_u10sve(*this), map(std::log));
   }
-  Vectorized<float> log10() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_log10fx_u10sve(values)), map(std::log10));
+  inline Vectorized<float> log2() const {
+    return USE_SLEEF(Sleef_log2fx_u10sve(*this), map(std::log2));
   }
-  Vectorized<float> log1p() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_log1pfx_u10sve(values)), map(std::log1p));
+  inline Vectorized<float> log10() const {
+    return USE_SLEEF(Sleef_log10fx_u10sve(*this), map(std::log10));
   }
-  Vectorized<float> frac() const;
-  Vectorized<float> sin() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_sinfx_u10sve(values)), map(std::sin));
+  inline Vectorized<float> log1p() const {
+    return USE_SLEEF(Sleef_log1pfx_u10sve(*this), map(std::log1p));
   }
-  Vectorized<float> sinh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_sinhfx_u10sve(values)), map(std::sinh));
+  inline Vectorized<float> frac() const;
+  inline Vectorized<float> sin() const {
+    return USE_SLEEF(Sleef_sinfx_u10sve(*this), map(std::sin));
   }
-  Vectorized<float> cos() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_cosfx_u10sve(values)), map(std::cos));
+  inline Vectorized<float> sinh() const {
+    return USE_SLEEF(Sleef_sinhfx_u10sve(*this), map(std::sinh));
   }
-  Vectorized<float> cosh() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_coshfx_u10sve(values)), map(std::cosh));
+  inline Vectorized<float> cos() const {
+    return USE_SLEEF(Sleef_cosfx_u10sve(*this), map(std::cos));
   }
-  Vectorized<float> ceil() const {
-    return svrintp_f32_x(ptrue, values);
+  inline Vectorized<float> cosh() const {
+    return USE_SLEEF(Sleef_coshfx_u10sve(*this), map(std::cosh));
   }
-  Vectorized<float> floor() const {
-    return svrintm_f32_x(ptrue, values);
+  inline Vectorized<float> ceil() const {
+    return svrintp_f32_x(ptrue, *this);
   }
-  Vectorized<float> neg() const {
-    return svneg_f32_x(ptrue, values);
+  inline Vectorized<float> floor() const {
+    return svrintm_f32_x(ptrue, *this);
   }
-  Vectorized<float> round() const {
-    return svrinti_f32_x(ptrue, values);
+  inline Vectorized<float> neg() const {
+    return svneg_f32_x(ptrue, *this);
   }
-  Vectorized<float> tan() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_tanfx_u10sve(values)), map(std::tan));
+  inline Vectorized<float> round() const {
+    return svrinti_f32_x(ptrue, *this);
+  }
+  inline Vectorized<float> tan() const {
+    return USE_SLEEF(Sleef_tanfx_u10sve(*this), map(std::tan));
   }
   // Implementation is picked from
   // https://github.com/ARM-software/ComputeLibrary/blob/v25.01/src/core/NEON/SVEMath.inl#L179
-  Vectorized<float> tanh() const {
+  inline Vectorized<float> tanh() const {
     // Constants used for the tanh calculation.
     const svfloat32_t CONST_1 =
         svdup_n_f32(1.f); // Constant 1.0f for the tanh formula.
@@ -480,7 +418,7 @@ class Vectorized<float> {
     // instability. svmax_f32_z ensures values are greater than -10, and
     // svmin_f32_z ensures they are less than 10.
     svfloat32_t x = svmin_f32_z(
-        ptrue, svmax_f32_z(ptrue, values, CONST_MIN_TANH), CONST_MAX_TANH);
+        ptrue, svmax_f32_z(ptrue, *this, CONST_MIN_TANH), CONST_MAX_TANH);
 
     // Step 2: Calculate exp(2 * x), where x is the clamped value.
     // svmul_f32_z computes 2 * x, and svexp_f32_z computes the exponential of
@@ -502,104 +440,85 @@ class Vectorized<float> {
     // Return the calculated tanh values.
     return tanh;
   }
-  Vectorized<float> trunc() const {
-    return svrintz_f32_x(ptrue, values);
+  inline Vectorized<float> trunc() const {
+    return svrintz_f32_x(ptrue, *this);
   }
-  Vectorized<float> lgamma() const {
-    return USE_SLEEF(
-        Vectorized<float>(Sleef_lgammafx_u10sve(values)), map(std::lgamma));
+  inline Vectorized<float> lgamma() const {
+    return USE_SLEEF(Sleef_lgammafx_u10sve(*this), map(std::lgamma));
   }
-  Vectorized<float> sqrt() const {
-    return svsqrt_f32_x(ptrue, values);
+  inline Vectorized<float> sqrt() const {
+    return svsqrt_f32_x(ptrue, *this);
   }
-  Vectorized<float> reciprocal() const {
-    return svdivr_f32_x(ptrue, values, ONE_F32);
+  inline Vectorized<float> reciprocal() const {
+    return svdivr_f32_x(ptrue, *this, svdup_n_f32(1.f));
   }
-  Vectorized<float> rsqrt() const {
-    return svdivr_f32_x(ptrue, svsqrt_f32_x(ptrue, values), ONE_F32);
+  inline Vectorized<float> rsqrt() const {
+    return svdivr_f32_x(ptrue, svsqrt_f32_x(ptrue, *this), ONE_F32);
   }
-  Vectorized<float> pow(const Vectorized<float>& b) const {USE_SLEEF(
-      { return Vectorized<float>(Sleef_powfx_u10sve(values, b)); },
-      {
-        __at_align__ float tmp[size()];
-        __at_align__ float tmp_b[size()];
-        store(tmp);
-        b.store(tmp_b);
-        for (int64_t i = 0; i < size(); i++) {
-          tmp[i] = std::pow(tmp[i], tmp_b[i]);
-        }
-        return loadu(tmp);
-      })} // Comparison using the _CMP_**_OQ predicate.
-          //   `O`: get false if an operand is NaN
-          //   `Q`: do not raise if an operand is NaN
-  Vectorized<float> operator==(const Vectorized<float>& other) const {
-    svbool_t mask = svcmpeq_f32(ptrue, values, other);
+  inline Vectorized<float> pow(const Vectorized<float> &b) const {
+    return USE_SLEEF(Sleef_powfx_u10sve(*this, b), map(std::pow, b));
+  }
+  // Comparison using the _CMP_**_OQ predicate.
+  //   `O`: get false if an operand is NaN
+  //   `Q`: do not raise if an operand is NaN
+  inline Vectorized<float> operator==(const Vectorized<float>& other) const {
+    svbool_t mask = svcmpeq_f32(ptrue, *this, other);
+    return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+  }
+  inline Vectorized<float> operator!=(const Vectorized<float>& other) const {
+    svbool_t mask = svcmpne_f32(ptrue, *this, other);
+    return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
+  }
+  inline Vectorized<float> operator<(const Vectorized<float>& other) const {
+    svbool_t mask = svcmplt_f32(ptrue, *this, other);
     return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
   }
 
-  Vectorized<float> operator!=(const Vectorized<float>& other) const {
-    svbool_t mask = svcmpne_f32(ptrue, values, other);
+  inline Vectorized<float> operator<=(const Vectorized<float>& other) const {
+    svbool_t mask = svcmple_f32(ptrue, *this, other);
     return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
   }
 
-  Vectorized<float> operator<(const Vectorized<float>& other) const {
-    svbool_t mask = svcmplt_f32(ptrue, values, other);
+  inline Vectorized<float> operator>(const Vectorized<float>& other) const {
+    svbool_t mask = svcmpgt_f32(ptrue, *this, other);
     return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
   }
 
-  Vectorized<float> operator<=(const Vectorized<float>& other) const {
-    svbool_t mask = svcmple_f32(ptrue, values, other);
+  inline Vectorized<float> operator>=(const Vectorized<float>& other) const {
+    svbool_t mask = svcmpge_f32(ptrue, *this, other);
     return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
   }
 
-  Vectorized<float> operator>(const Vectorized<float>& other) const {
-    svbool_t mask = svcmpgt_f32(ptrue, values, other);
-    return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
-  }
-
-  Vectorized<float> operator>=(const Vectorized<float>& other) const {
-    svbool_t mask = svcmpge_f32(ptrue, values, other);
-    return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);
-  }
-
-  Vectorized<float> eq(const Vectorized<float>& other) const;
-  Vectorized<float> ne(const Vectorized<float>& other) const;
-  Vectorized<float> gt(const Vectorized<float>& other) const;
-  Vectorized<float> ge(const Vectorized<float>& other) const;
-  Vectorized<float> lt(const Vectorized<float>& other) const;
-  Vectorized<float> le(const Vectorized<float>& other) const;
+  inline Vectorized<float> eq(const Vectorized<float>& other) const;
+  inline Vectorized<float> ne(const Vectorized<float>& other) const;
+  inline Vectorized<float> gt(const Vectorized<float>& other) const;
+  inline Vectorized<float> ge(const Vectorized<float>& other) const;
+  inline Vectorized<float> lt(const Vectorized<float>& other) const;
+  inline Vectorized<float> le(const Vectorized<float>& other) const;
 };
 
 template <>
-Vectorized<float> inline operator+(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b) {
+inline Vectorized<float> operator+(const Vectorized<float>& a, const Vectorized<float>& b) {
   return svadd_f32_x(ptrue, a, b);
 }
 
 template <>
-Vectorized<float> inline operator-(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b) {
+inline Vectorized<float> operator-(const Vectorized<float>& a, const Vectorized<float>& b) {
   return svsub_f32_x(ptrue, a, b);
 }
 
 template <>
-Vectorized<float> inline operator*(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b) {
+inline Vectorized<float> operator*(const Vectorized<float>& a, const Vectorized<float>& b) {
   return svmul_f32_x(ptrue, a, b);
 }
 
 template <>
-Vectorized<float> inline operator/(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b) {
+inline Vectorized<float> operator/(const Vectorized<float>& a, const Vectorized<float>& b) {
   return svdiv_f32_x(ptrue, a, b);
 }
 
 // frac. Implement this here so we can use subtraction
-Vectorized<float> inline Vectorized<float>::frac() const {
+inline Vectorized<float> Vectorized<float>::frac() const {
   return *this - this->trunc();
 }
 
@@ -615,115 +534,91 @@ Vectorized<float> inline maximum(
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorized<float> inline minimum(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b) {
+inline Vectorized<float> minimum(const Vectorized<float>& a, const Vectorized<float>& b) {
   return svmin_f32_x(ptrue, a, b);
 }
 
 template <>
-Vectorized<float> inline clamp(
-    const Vectorized<float>& a,
-    const Vectorized<float>& min,
-    const Vectorized<float>& max) {
+inline Vectorized<float> clamp(const Vectorized<float>& a, const Vectorized<float>& min, const Vectorized<float>& max) {
   return svmin_f32_x(ptrue, max, svmax_f32_x(ptrue, min, a));
 }
 
 template <>
-Vectorized<float> inline clamp_max(
-    const Vectorized<float>& a,
-    const Vectorized<float>& max) {
+inline Vectorized<float> clamp_max(const Vectorized<float>& a, const Vectorized<float>& max) {
   return svmin_f32_x(ptrue, max, a);
 }
 
 template <>
-Vectorized<float> inline clamp_min(
-    const Vectorized<float>& a,
-    const Vectorized<float>& min) {
+inline Vectorized<float> clamp_min(const Vectorized<float>& a, const Vectorized<float>& min) {
   return svmax_f32_x(ptrue, min, a);
 }
 
 template <>
-Vectorized<float> inline operator&(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b) {
-  return svreinterpret_f32_s32(
-      svand_s32_x(ptrue, svreinterpret_s32_f32(a), svreinterpret_s32_f32(b)));
+inline Vectorized<float> operator&(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return svreinterpret_f32_s32(svand_s32_x(ptrue, svreinterpret_s32_f32(a), svreinterpret_s32_f32(b)));
 }
 
 template <>
-Vectorized<float> inline operator|(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b) {
-  return svreinterpret_f32_s32(
-      svorr_s32_x(ptrue, svreinterpret_s32_f32(a), svreinterpret_s32_f32(b)));
+inline Vectorized<float> operator|(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return svreinterpret_f32_s32(svorr_s32_x(ptrue, svreinterpret_s32_f32(a), svreinterpret_s32_f32(b)));
 }
 
 template <>
-Vectorized<float> inline operator^(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b) {
-  return svreinterpret_f32_s32(
-      sveor_s32_x(ptrue, svreinterpret_s32_f32(a), svreinterpret_s32_f32(b)));
+inline Vectorized<float> operator^(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return svreinterpret_f32_s32(sveor_s32_x(ptrue, svreinterpret_s32_f32(a), svreinterpret_s32_f32(b)));
 }
 
-Vectorized<float> inline Vectorized<float>::eq(
-    const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::eq(const Vectorized<float>& other) const {
   return (*this == other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> inline Vectorized<float>::ne(
-    const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ne(const Vectorized<float>& other) const {
   return (*this != other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> inline Vectorized<float>::gt(
-    const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::gt(const Vectorized<float>& other) const {
   return (*this > other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> inline Vectorized<float>::ge(
-    const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ge(const Vectorized<float>& other) const {
   return (*this >= other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> inline Vectorized<float>::lt(
-    const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::lt(const Vectorized<float>& other) const {
   return (*this < other) & Vectorized<float>(1.0f);
 }
 
-Vectorized<float> inline Vectorized<float>::le(
-    const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) const {
   return (*this <= other) & Vectorized<float>(1.0f);
 }
 
 template <>
 inline void convert(const float* src, float* dst, int64_t n) {
-  const int64_t fraction = n % Vectorized<float>::size();
+  const int64_t fraction = n % svcntw();
 #pragma unroll
-  for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
+  for (int64_t i = 0; i < n - fraction; i += svcntw()) {
     svst1_f32(ptrue, dst + i, svldnt1_f32(ptrue, src + i));
   }
 #pragma unroll
-  for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
+  for (int64_t i = n - fraction; i < n; i += svcntw()) {
     svbool_t pg = svwhilelt_b32(i, n);
     svst1_f32(pg, dst + i, svldnt1_f32(pg, src + i));
   }
 }
 
 template <>
-inline void convert(const float* src, at::Half* dst, int64_t n) {
-  const int64_t fraction = n % Vectorized<float>::size();
-  svbool_t pg_16 = svwhilelt_b16(0ull, Vectorized<float>::size());
-  svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<float>::size());
+inline void convert(const float *src, at::Half *dst, int64_t n) {
+  const int64_t fraction = n % svcntw();
+  svbool_t pg_16 = svwhilelt_b16(0ull, svcntw());
+  svbool_t pg_32 = svwhilelt_b32(0ull, svcntw());
 #pragma unroll
-  for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
-    svfloat16_t src_vec = svuzp1_f16(
-        svcvt_f16_f32_x(ptrue, svldnt1_f32(pg_32, src + i)), ZERO_F16);
+  for (int64_t i = 0; i < n - fraction; i += svcntw()) {
+    svfloat16_t src_vec = svuzp1_f16(svcvt_f16_f32_x(ptrue, svldnt1_f32(pg_32, src + i)),
+                                    ZERO_F16);
     svst1_f16(pg_16, reinterpret_cast<float16_t*>(dst) + i, src_vec);
   }
 #pragma unroll
-  for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
+  for (int64_t i = n - fraction; i < n; i += svcntw()) {
     pg_16 = svwhilelt_b16(i, n);
     pg_32 = svwhilelt_b32(i, n);
     svfloat16_t src_vec = svuzp1_f16(
@@ -733,19 +628,18 @@ inline void convert(const float* src, at::Half* dst, int64_t n) {
 }
 
 template <>
-inline void convert(const at::Half* src, float* dst, int64_t n) {
-  const int64_t fraction = n % Vectorized<float>::size();
-  svbool_t pg_16 = svwhilelt_b16(0ull, Vectorized<float>::size());
-  svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<float>::size());
+inline void convert(const at::Half *src, float *dst, int64_t n) {
+  const int64_t fraction = n % svcntw();
+  svbool_t pg_16 = svwhilelt_b16(0ull, svcntw());
+  svbool_t pg_32 = svwhilelt_b32(0ull, svcntw());
 #pragma unroll
-  for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
-    svfloat16_t src_vec = svzip1_f16(
-        svldnt1_f16(pg_16, reinterpret_cast<const float16_t*>(src) + i),
-        ZERO_F16);
+  for (int64_t i = 0; i < n - fraction; i += svcntw()) {
+    svfloat16_t src_vec = svzip1_f16(svldnt1_f16(pg_16, reinterpret_cast<const float16_t*>(src) + i),
+                                    ZERO_F16);
     svst1_f32(pg_32, dst + i, svcvt_f32_f16_x(ptrue, src_vec));
   }
 #pragma unroll
-  for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
+  for (int64_t i =  n - fraction; i < n; i += svcntw()) {
     pg_16 = svwhilelt_b16(i, n);
     pg_32 = svwhilelt_b32(i, n);
     svfloat16_t src_vec = svzip1_f16(
@@ -756,20 +650,19 @@ inline void convert(const at::Half* src, float* dst, int64_t n) {
 }
 
 template <>
-inline void convert(const bool* src, float* dst, int64_t n) {
-  const int64_t fraction = n % Vectorized<float>::size();
-  svbool_t pg_8 = svwhilelt_b8(0ull, Vectorized<float>::size());
-  svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<float>::size());
+inline void convert(const bool *src, float *dst, int64_t n) {
+  const int64_t fraction = n % svcntw();
+  svbool_t pg_8 = svwhilelt_b8(0ull, svcntw());
+  svbool_t pg_32 = svwhilelt_b32(0ull, svcntw());
 #pragma unroll
-  for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
-    svuint8_t src_vec_u8 =
-        svldnt1_u8(pg_8, reinterpret_cast<const uint8_t*>(src) + i);
+  for (int64_t i = 0; i < n - fraction; i += svcntw()) {
+    svuint8_t src_vec_u8 = svldnt1_u8(pg_8, reinterpret_cast<const uint8_t*>(src) + i);
     svuint32_t src_vec_u32 = svunpklo_u32(svunpklo_u16(src_vec_u8));
     svbool_t mask = svcmpne_u32(pg_32, src_vec_u32, ZERO_U32);
     svst1_f32(pg_32, dst + i, svsel_f32(mask, ONE_F32, ZERO_F32));
   }
 #pragma unroll
-  for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
+  for (int64_t i = n - fraction; i < n; i += svcntw()) {
     pg_8 = svwhilelt_b8(i, n);
     pg_32 = svwhilelt_b32(i, n);
     svuint8_t src_vec_u8 =
@@ -781,10 +674,7 @@ inline void convert(const bool* src, float* dst, int64_t n) {
 }
 
 template <>
-Vectorized<float> inline fmadd(
-    const Vectorized<float>& a,
-    const Vectorized<float>& b,
-    const Vectorized<float>& c) {
+inline Vectorized<float> fmadd(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
   return svmad_f32_x(ptrue, a, b, c);
 }
 

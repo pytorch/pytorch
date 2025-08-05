@@ -22,7 +22,7 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)
 
 template <>
 struct is_vec_specialized_for<double> : std::bool_constant<true> {};

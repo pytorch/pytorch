@@ -150,16 +150,16 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
 // BFDOT. Deferring that for now to get the NEON/ASIMD BFDOT path
 // working.
 #if __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
-#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && !defined(CPU_CAPABILITY_SVE256) && defined(__clang__) && __clang_major__ > 15
 // https://godbolt.org/z/z8P4Yncra
 #define COMPILER_SUPPORTS_BF16_TARGET 1
-#elif defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
+#elif defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE) && !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
 // https://gcc.gnu.org/gcc-10/changes.html
 // https://godbolt.org/z/cdGG7vn8o
 #define COMPILER_SUPPORTS_BF16_TARGET 1
-#else // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
+#else // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
 #define COMPILER_SUPPORTS_BF16_TARGET 0
-#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
+#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
 #else // __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
 #define COMPILER_SUPPORTS_BF16_TARGET 0
 #endif // __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
@@ -212,7 +212,7 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
     const vec::Vectorized<c10::Half>& b,
     const vec::Vectorized<float>& acc_low,
     const vec::Vectorized<float>& acc_high) {
-#if defined(__ARM_FEATURE_FP16_FML) && !defined(CPU_CAPABILITY_SVE)
+#if defined(__ARM_FEATURE_FP16_FML) && !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE)
   return std::make_pair(vfmlalq_low_f16(acc_low, a, b), vfmlalq_high_f16(acc_high, a, b));
 #else
   const auto [a_float_low, a_float_high] = convert_half_float(a);
