@@ -3126,7 +3126,7 @@ def get_current_backend() -> str:
     from torch._inductor.virtualized import V
 
     device: torch.device = V.graph.get_current_device_or_throw()
-    device_interface: DeviceInterface = get_interface_for_device(device.type)
+    device_interface: type[DeviceInterface] = get_interface_for_device(device.type)
 
     device_inductor_backend: Optional[str] = device_interface.inductor_backend()
     if device_inductor_backend is None:
