@@ -360,15 +360,45 @@ def try_patch_inductor_backend_config(device: str, key: str,
     Try to patch the backend-specific Inductor options, for the codegen backend
     corresponding to the given ``device``. If that config can't be found to
     patch, skip the test.
+
+    Will patch the member of the global ``config.$BACKEND``, if it exists. If
+    the given device also specifies a custom config module, will also try to
+    patch its ``$BACKEND`` member if it exists.
+
     """
     device_backend = backend_for_device(device)
 
-    if (
-            device_backend is None
-            or not hasattr(torch._inductor.config, f"{device_backend}")
-            or not hasattr(torch._inductor.config, f"{device_backend}.{key}")
-    ):
+    if device_backend is None:
         return unittest.skip(
             f"Can't patch Inductor config {key} for device {device}")
 
-    return torch._inductor.config.patch(f"{device_backend}.{key}", value)
+    config_modules = [torch._inductor.config]
+    if custom_config_module := get_custom_backend_config_for_device(device):
+        config_modules.append(custom_config_module)
+
+    contexts: list[contextlib.ContextDecorator] = []
+
+    for mod in config_modules:
+        if (
+                hasattr(mod, f"{device_backend}")
+                and hasattr(mod, f"{device_backend}.{key}")
+        ):
+            contexts.append(mod.patch(f"{device_backend}.{key}", value))
+
+    if len(contexts) == 0:
+        return unittest.skip(
+            f"Can't patch Inductor config {key} for device {device}")
+
+    class ContextStack(contextlib.ContextDecorator):
+        def __init__(self, contexts: list[contextlib.ContextDecorator]) -> None:
+            self.contexts: list[contextlib.ContextDecorator] = contexts
+
+        def __enter__(self) -> None:
+            for cd in self.contexts:
+                cd.__enter__()
+
+        def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
+            for cd in self.contexts:
+                cd.__exit__(exc_type, exc_val, exc_tb)
+
+    return ContextStack(contexts)

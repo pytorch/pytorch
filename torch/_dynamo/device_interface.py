@@ -148,7 +148,7 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def inductor_backend() -> Union[str, None]:
+    def inductor_backend() -> Optional[str]:
         return None
 
     @staticmethod
@@ -268,7 +268,7 @@ class CudaInterface(DeviceInterface):
             return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
     @staticmethod
-    def inductor_backend() -> Union[str, None]:
+    def inductor_backend() -> Optional[str]:
         return torch._inductor.config.cuda_backend
 
     @staticmethod
@@ -365,6 +365,10 @@ class MtiaInterface(DeviceInterface):
         return cc
 
     @staticmethod
+    def inductor_backend() -> Optional[str]:
+        return "triton"
+
+    @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         return True
 
@@ -448,7 +452,7 @@ class XpuInterface(DeviceInterface):
         return torch.xpu.is_bf16_supported()
 
     @staticmethod
-    def inductor_backend() -> Union[str, None]:
+    def inductor_backend() -> Optional[str]:
         return "triton"
 
     @staticmethod
@@ -525,7 +529,7 @@ class CpuInterface(DeviceInterface):
             raise RuntimeError("triton not built with the 'cpu' backend")
 
     @staticmethod
-    def inductor_backend() -> Union[str, None]:
+    def inductor_backend() -> Optional[str]:
         return torch._inductor.config.cpu_backend
 
 
@@ -568,7 +572,7 @@ class MpsInterface(DeviceInterface):
             return 0
 
     @staticmethod
-    def inductor_backend() -> Union[str, None]:
+    def inductor_backend() -> Optional[str]:
         return "mps"
 
 
