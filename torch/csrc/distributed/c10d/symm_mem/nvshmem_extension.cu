@@ -111,7 +111,7 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
 }
 
 void nvshmem_put(at::Tensor& tensor, int64_t peer) {
-  // TODO: support non-contiguous tensors
+  // TODO: T233502753 T233502752 support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
   // TODO: rendezvous should remember the group name
@@ -119,10 +119,35 @@ void nvshmem_put(at::Tensor& tensor, int64_t peer) {
   auto rank = hdl->get_rank();
   void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
   auto buffer_size = tensor.numel() * tensor.element_size();
+  void* signal_ptr = hdl->get_signal_pad_ptrs()[peer];
 
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_putmem_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, peer, stream);
+  nvshmemx_putmem_signal_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, static_cast<uint64_t*>(signal_ptr), NVSHMEM_SIGNAL_SET, 1, peer, stream);
+}
+
+void nvshmem_wait_for_signal(at::Tensor& tensor, int64_t peer) {
+  auto hdl = c10d::symmetric_memory::rendezvous(tensor, "0");
+  auto rank = hdl->get_rank();
+  void* signal_ptr = hdl->get_signal_pad_ptrs()[rank];
+
+  c10::cuda::CUDAGuard guard(tensor.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  nvshmemx_signal_wait_until_on_stream(static_cast<uint64_t*>(signal_ptr), NVSHMEM_CMP_EQ, 1, stream);
+}
+
+void nvshmem_put_with_signal(at::Tensor& tensor, int64_t peer) {
+  auto hdl = c10d::symmetric_memory::rendezvous(tensor, "0");
+  auto rank = hdl->get_rank();
+  void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
+  auto buffer_size = tensor.numel() * tensor.element_size();
+  void* signal_ptr = hdl->get_signal_pad_ptrs()[peer];
+
+  c10::cuda::CUDAGuard guard(tensor.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  nvshmemx_putmem_signal_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, static_cast<uint64_t*>(signal_ptr), NVSHMEM_SIGNAL_SET, 1, peer, stream);
 }
 
 void nvshmem_get(at::Tensor& tensor, int64_t peer) {
@@ -834,6 +859,8 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
   m.impl("nvshmem_put", c10d::nvshmem_extension::nvshmem_put);
   m.impl("nvshmem_get", c10d::nvshmem_extension::nvshmem_get);
+  m.impl("nvshmem_wait_for_signal", c10d::nvshmem_extension::nvshmem_wait_for_signal);
+  m.impl("nvshmem_put_with_signal", c10d::nvshmem_extension::nvshmem_put_with_signal);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
   m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
