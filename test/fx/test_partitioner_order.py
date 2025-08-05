@@ -32,7 +32,7 @@ class AddModule(torch.nn.Module):
 
 
 class TestPartitionerOrder(TestCase):
-    # partitoner test to check graph node order
+    # partitioner test to check graph node order
     def test_partitioner_order(self):
         m = AddModule()
         traced_m = torch.fx.symbolic_trace(m)

@@ -425,7 +425,7 @@ class TestTorchTidyProfiler(TestCase):
             self.assertEqual(state[0][0], "momentum_buffer")
             self.assertEqual(state[0][1].id, weight_momenumtum_id)
 
-        # Check that we handle first step (lazy initalization) and steady state.
+        # Check that we handle first step (lazy initialization) and steady state.
         check(cold_start=True)
         check(cold_start=False)
 

@@ -765,7 +765,7 @@ class TestQuantizedTensor(TestCase):
                 qr = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
                 qr = qr.transpose(0, 1)
                 rqr = qr.dequantize()
-                # compare transpose + dequantized result with orignal transposed result
+                # compare transpose + dequantized result with original transposed result
                 self.assertTrue(np.allclose(r.cpu().numpy().transpose([1, 0, 2, 3]), rqr.cpu().numpy(), atol=2 / scale))
 
                 qr = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
