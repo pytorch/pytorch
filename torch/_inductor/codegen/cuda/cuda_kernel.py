@@ -355,12 +355,12 @@ class CUDATemplateKernel(CUDAKernel):
 
         dynamic_shape_args = self.get_dynamic_shape_args()
         offset_args = self.get_offset_args()
-        call_args.extend(str(s) for s in dynamic_shape_args)  # type: ignore[arg-type]
-        call_args.extend(str(o) for o in offset_args)  # type: ignore[arg-type]
+        call_args.extend(dynamic_shape_args)  # type: ignore[arg-type]
+        call_args.extend(offset_args)  # type: ignore[arg-type]
         for arg in self.runtime_arg_values:
             call_args.append(str(arg))
-        arg_types.extend("int" for _ in dynamic_shape_args)
-        arg_types.extend("int" for _ in offset_args)
+        arg_types.extend("const int" for _ in dynamic_shape_args)
+        arg_types.extend("const int" for _ in offset_args)
         for arg in self.runtime_arg_info:
             arg_types.append(arg.ty)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
