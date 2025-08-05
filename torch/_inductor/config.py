@@ -81,6 +81,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# Configurable compile worker logging path for subproc_pool
+worker_log_path = "/logs/dedicated_log_torch_compile_worker_rank" if is_fbcode() else None
+
 # precompilation timeout
 precompilation_timeout_seconds: int = 60 * 60
 
