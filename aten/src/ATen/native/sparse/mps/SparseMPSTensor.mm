@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -15,16 +14,17 @@
 
 namespace at::native {
 
+using namespace mps;
+using namespace at::sparse;
+
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Sparse_metallib.h>
 #endif
 
-using namespace at::sparse;
 
 static Tensor flatten_indices(const Tensor& indices, IntArrayRef size) {
-  using namespace mps;
 
   TORCH_CHECK(indices.dim() == 2, "flatten_indices: indices must be 2D");
   TORCH_CHECK(static_cast<size_t>(indices.size(0)) == size.size(),
@@ -61,7 +61,6 @@ static Tensor flatten_indices(const Tensor& indices, IntArrayRef size) {
 }
 
 static Tensor compute_output_positions(const Tensor& is_unique) {
-  using namespace mps;
 
   int64_t nnz = is_unique.size(0);
   if (nnz == 0) {
@@ -86,7 +85,6 @@ static Tensor compute_output_positions(const Tensor& is_unique) {
 }
 
 static Tensor compute_output_positions_parallel(const Tensor& is_unique) {
-  using namespace mps;
 
   int64_t nnz = is_unique.size(0);
   if (nnz == 0) {
@@ -132,7 +130,6 @@ static Tensor compute_output_positions_parallel(const Tensor& is_unique) {
 }
 
 static std::pair<Tensor, int32_t> mark_unique_and_count(const Tensor& flat_indices) {
-  using namespace mps;
 
   int64_t nnz = flat_indices.size(0);
   if (nnz == 0) {
@@ -160,7 +157,6 @@ static std::pair<Tensor, int32_t> mark_unique_and_count(const Tensor& flat_indic
 }
 
 SparseTensor _coalesce_sparse_mps(const SparseTensor& self) {
-  using namespace mps;
   int64_t nnz = self._nnz();
   TORCH_INTERNAL_ASSERT(!self.is_coalesced());
   if (nnz < 2) {
