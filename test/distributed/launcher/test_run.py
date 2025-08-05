@@ -288,7 +288,7 @@ class ElasticLaunchTest(TestCase):
     @patch("torch.accelerator.is_available", return_value=True)
     @patch("torch.accelerator.device_count", return_value=3)
     @patch("torch.accelerator.current_accelerator", return_value=MagicMock(type="xpu"))
-    def test_nproc_gpu_launch_configurations(self, _mock1, _mock2):
+    def test_nproc_xpu_launch_configurations(self, _mock1, _mock2):
         self._test_nproc_launch_configuration("auto", 3)
         self._test_nproc_launch_configuration("xpu", 3)
 
