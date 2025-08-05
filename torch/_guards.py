@@ -159,6 +159,17 @@ class GuardSource(enum.Enum):
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
     def is_specialized_nn_module(self) -> bool:
+        import torch._dynamo.config as config
+
+        if config._unsafe_skip_fsdp_module_guards:
+            return (
+                self
+                in (
+                    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+                    GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
+                )
+                or self.is_fsdp_module()
+            )
         return self in (
             GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
@@ -622,8 +633,8 @@ class GuardsSet:
         if collect_debug_stack:
             if guard.stack is None:
                 guard.stack = CapturedTraceback.extract(skip=1 + skip)
-            if guard.user_stack is None:
-                guard.user_stack = TracingContext.extract_stack()
+        if guard.user_stack is None:
+            guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
 
     def update(self, *others: set[Guard]) -> None:

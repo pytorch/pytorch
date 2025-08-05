@@ -12,6 +12,9 @@ from itertools import product
 import numpy as np
 
 import torch
+import torch._inductor.decomposition
+from torch._higher_order_ops.out_dtype import out_dtype
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -1363,6 +1366,85 @@ class TestBasicGEMM(TestCase):
         gpu_out = torch.matmul(a, b)
         cpu_out = torch.matmul(a.cpu(), b.cpu())
         self.assertEqual(gpu_out.cpu(), cpu_out)
+
+    @parametrize("m", [0, 8, 17])
+    @parametrize("k", [0, 16, 32])
+    @parametrize("n", [16, 32])
+    @parametrize("use_transpose_a", [True, False])
+    @parametrize("use_transpose_b", [True, False])
+    @parametrize("non_contig_type", [0, 1, 2])
+    def test__int_mm(
+        self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type
+    ):
+        # non_contig_type:
+        # 0: the whole data buffer is contiguous (can be transposed)
+        # 1: stride of one dimension is 1, but the whole buffer is not contiguous
+        # 2: Neither stride is 1
+
+        def genf_int_float(x, y, use_transpose, non_contig_type):
+            if use_transpose:
+                x, y = y, x
+            if non_contig_type != 0:
+                y = y * 2
+            x_int8 = torch.randint(-128, 127, (x, y), dtype=torch.int8, device=device)
+            x_float = x_int8.to(torch.float32)
+            if non_contig_type == 1:
+                x_int8 = x_int8[:, : y // 2]
+                x_float = x_float[:, : y // 2]
+            elif non_contig_type == 2:
+                x_int8 = x_int8[:, ::2]
+                x_float = x_float[:, ::2]
+            if use_transpose:
+                return x_int8.t(), x_float.t()
+            return x_int8, x_float
+
+        if non_contig_type != 0 and (m == 0 or k == 0):
+            return
+        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type)
+        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type)
+        c_int32 = torch._int_mm(a_int8, b_int8)
+        self.assertTrue(c_int32.dtype is torch.int32)
+        self.assertEqual(c_int32.device, torch.device(device))
+        self.assertEqual(c_int32.float(), torch.mm(a_float, b_float))
+        c_int32_result = c_int32.new_empty(c_int32.size())
+        # Checking out variant
+        torch._int_mm(a_int8, b_int8, out=c_int32_result)
+        self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
+
+    def test_out_dtype_inductor_decomp_trace(self, device) -> None:
+        def func(x, w):
+            return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
+
+        w = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=device)
+        x = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=device)
+
+        # Check that make_fx with inductor decomps produces _int_mm
+        decomp_table = torch._inductor.decomposition.select_decomp_table()
+        gm = make_fx(func, decomp_table, tracing_mode="symbolic")(x, w)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x_1, w_1):
+    _int_mm = torch.ops.aten._int_mm.default(x_1, w_1);  x_1 = w_1 = None
+    return _int_mm""",
+        )
+
+    def test_out_dtype_int_mm_default_trace(self, device) -> None:
+        def func(x, w):
+            return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
+
+        w = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=device)
+        x = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=device)
+
+        # By default, out_dtype is preserved in the trace
+        gm = make_fx(func, tracing_mode="symbolic")(x, w)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x_1, w_1):
+    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, x_1, w_1);  x_1 = w_1 = None
+    return out_dtype""",
+        )
 
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
