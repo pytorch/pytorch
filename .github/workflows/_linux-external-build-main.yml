@@ -253,7 +253,7 @@ jobs:
         if: ${{ inputs.build-generates-artifacts }}
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         with:
-          name: ${{ inputs.artifacts-folder-name || format('{0}-additional-build', inputs.build-environment) }}
+          name: ${{ inputs.artifacts-folder-name || format('{0}-{1}-additional-build', inputs.build-environment, inputs.build-target) }}
           retention-days: 14
           if-no-files-found: warn
           path: artifacts.zip
