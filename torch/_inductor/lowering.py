@@ -480,7 +480,7 @@ def _register_lowering(
     broadcast: bool,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
-    lowering_dict: dict[torch._ops.OpOverload, Callable[..., Any]],
+    lowering_dict: dict[Union[Callable[..., Any], str], Callable[..., Any]],
 ):
     """
     Add a lowering to lowerings dict
