@@ -528,7 +528,7 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
                     input_specs=(input_spec, src_spec),
                     redistribute_cost=[
                         generate_redistribute_costs(input_strategy, input_spec),
-                        generate_redistribute_costs(input_strategy, src_spec),
+                        generate_redistribute_costs(src_strategy, src_spec),
                     ],
                 )
             )
@@ -547,7 +547,7 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
                     input_specs=(input_spec, src_spec),
                     redistribute_cost=[
                         generate_redistribute_costs(input_strategy, input_spec),
-                        generate_redistribute_costs(input_strategy, src_spec),
+                        generate_redistribute_costs(src_strategy, src_spec),
                     ],
                 )
             )
@@ -565,7 +565,13 @@ def replica_only_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 @register_op_strategy(
-    [aten.scatter_.value, aten.scatter.value, aten.scatter_.src, aten.scatter.src],
+    [
+        aten.scatter_.value,
+        aten.scatter.value,
+        aten.scatter_.src,
+        aten.scatter.src,
+        aten.scatter_add.default,
+    ],
     schema_info=RuntimeSchemaInfo(1),
 )
 def scatter_strategy(op_schema: OpSchema) -> StrategyType:

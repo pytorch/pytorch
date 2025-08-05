@@ -1523,6 +1523,9 @@ class _InProcessFxCompile(FxCompile):
                             },
                         )
 
+                    # Collect and dump collective-op schedule for external diagnostics
+                    torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
+
                     if (
                         cudagraphs
                         and config.triton.cudagraph_skip_dynamic_graphs
@@ -1942,7 +1945,7 @@ def fw_compiler_freezing(
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
 
-    static_input_idxs = []
+    static_input_idxs: list[Any] = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]
@@ -2461,6 +2464,7 @@ def compile_fx(
                     if node.op == "get_attr" and "val" not in node.meta:
                         target = attrgetter(node.target)(gm)
                         if isinstance(target, torch.Tensor):
+                            assert fake_mode is not None
                             node.meta["val"] = fake_mode.from_tensor(
                                 target, static_shapes=True
                             )

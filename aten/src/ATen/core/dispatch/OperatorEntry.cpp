@@ -321,21 +321,21 @@ SafeKernelFunction OperatorEntry::getComputedKernelForDispatchKey(
       !isAliasDispatchKey(k),
       "Alias keys do not have runtime kernel registrations.");
   const auto dispatch_ix = getDispatchTableIndexForDispatchKey(k);
-  TORCH_CHECK(dispatchTable_[dispatch_ix].isValid())
+  TORCH_CHECK(dispatchTable_[dispatch_ix].isValid(), "no kernel for ", k, " for ", name_);
 
   // Get the KernelFunction object from kernels_ to pass to SafeKernelFunction
 
-  // The KernelFunction object in dispatchTable_ is a copy of the KernelFunction in the
-  // AnnotatedKernel in kernels_. A KernelFunction is only truly deregistered when the kernel is
-  // removed from kernels_. However, the KernelFunction in dispatchTable_
-  // might be removed before it is deregistered (when a newer kernel is
-  // registered). Therefore, here we want to return a SafeKernelFunction that
-  // is backed by the original KernelFunction in kernels_, so that we only
-  // invalidate it when the kernel is deregistered.
+  // The KernelFunction object in dispatchTable_ is a copy of the KernelFunction
+  // in the AnnotatedKernel in kernels_. A KernelFunction is only truly
+  // deregistered when the kernel is removed from kernels_. However, the
+  // KernelFunction in dispatchTable_ might be removed before it is deregistered
+  // (when a newer kernel is registered). Therefore, here we want to return a
+  // SafeKernelFunction that is backed by the original KernelFunction in
+  // kernels_, so that we only invalidate it when the kernel is deregistered.
   auto [annotatedKernel, _] =
       computeDispatchTableEntryWithDebug(c10::Dispatcher::singleton(), k);
 
-  return SafeKernelFunction(&annotatedKernel.kernel);
+  return SafeKernelFunction(&annotatedKernel.kernel, annotatedKernel.debug);
 }
 
 const std::vector<at::Tag>& OperatorEntry::getTags() const {

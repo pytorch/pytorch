@@ -276,9 +276,6 @@ class TORCH_API KernelFunction final {
   // Register a token to be invalidated when this KernelFunction is destroyed
   void registerToken(std::weak_ptr<KernelToken> token) const;
 
-  // Invalidate all registered tokens
-  void invalidateTokens();
-
   // List of tokens that need to be invalidated when this KernelFunction is
   // destroyed
   mutable std::vector<std::weak_ptr<KernelToken>> tokens_;
@@ -307,12 +304,12 @@ class KernelToken {
   void invalidate();
 
  private:
-  std::atomic<bool> valid_{true};
+  std::atomic<bool> invalid_{false};
 };
 
 class SafeKernelFunction {
  public:
-  SafeKernelFunction(const KernelFunction* kernel);
+  SafeKernelFunction(const KernelFunction* kernel, std::string debug);
 
   // Safe callBoxed - checks token validity first
   void callBoxed(
@@ -320,9 +317,15 @@ class SafeKernelFunction {
       DispatchKeySet dispatchKeySet,
       Stack* stack) const;
 
+  // Get debug information
+  const std::string& debug() const {
+    return debug_;
+  }
+
  private:
   KernelFunction kernel_;
   std::shared_ptr<KernelToken> token_;
+  std::string debug_;
 };
 
 } // namespace c10

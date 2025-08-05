@@ -25,7 +25,11 @@ inline KernelFunction::KernelFunction()
       sym_unboxed_kernel_func_(nullptr) {}
 
 inline KernelFunction::~KernelFunction() {
-  invalidateTokens();
+  for (auto& weak_token : tokens_) {
+    if (auto token = weak_token.lock()) {
+      token->invalidate();
+    }
+  }
 }
 
 inline KernelFunction::KernelFunction(
@@ -164,14 +168,6 @@ C10_ALWAYS_INLINE Return KernelFunction::call(
 inline void KernelFunction::registerToken(
     std::weak_ptr<KernelToken> token) const {
   tokens_.push_back(std::move(token));
-}
-
-inline void KernelFunction::invalidateTokens() {
-  for (auto& weak_token : tokens_) {
-    if (auto token = weak_token.lock()) {
-      token->invalidate();
-    }
-  }
 }
 
 inline KernelFunction KernelFunction::makeFromBoxedKernel(
@@ -335,16 +331,19 @@ KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
 }
 
 inline bool KernelToken::isValid() const {
-  return valid_.load(std::memory_order_acquire);
+  return !invalid_.load(std::memory_order_acquire);
 }
 
 inline void KernelToken::invalidate() {
-  valid_.store(false, std::memory_order_release);
+  invalid_.store(true, std::memory_order_release);
 }
 
-inline SafeKernelFunction::SafeKernelFunction(const KernelFunction* kernel)
+inline SafeKernelFunction::SafeKernelFunction(
+    const KernelFunction* kernel,
+    std::string debug)
     : kernel_(kernel ? *kernel : KernelFunction()),
-      token_(std::make_shared<KernelToken>()) {
+      token_(std::make_shared<KernelToken>()),
+      debug_(std::move(debug)) {
   // Register the token with the original kernel so it gets invalidated when the
   // kernel is destroyed
   if (kernel) {
@@ -357,7 +356,9 @@ inline void SafeKernelFunction::callBoxed(
     DispatchKeySet dispatchKeySet,
     Stack* stack) const {
   TORCH_CHECK(
-      token_ && token_->isValid(), "SafeKernelFunction has been invalidated");
+      token_ && token_->isValid(),
+      "SafeKernelFunction has been invalidated ",
+      debug_);
   kernel_.callBoxed(opHandle, dispatchKeySet, stack);
 }
 
