@@ -33,12 +33,6 @@ on:
         required: false
         type: boolean
         default: false
-      use_sequential:
-        description: |
-          [Experimental] Build wheels sequentially
-        required: false
-        type: boolean
-        default: false
       ALPINE_IMAGE:
         required: false
         type: string
@@ -124,7 +118,6 @@ jobs:
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
       USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
-      USE_SEQUENTIAL: ${{ inputs.use_sequential }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
@@ -150,7 +143,7 @@ jobs:
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
             echo "USE_SPLIT_BUILD=${{ env.use_split_build }}"
-            echo "USE_SEQUENTIAL=${{ env.use_sequential }}"
+            echo "USE_SEQUENTIAL=${{ env.USE_SEQUENTIAL }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: List the env
