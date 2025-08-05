@@ -4287,18 +4287,18 @@ Please use `add.register_fake` to add an fake impl.""",
 
     def test_library_get_kernel_invalid(self):
         """Test that get_kernel raises an error when no kernel is available."""
-        lib = torch.library.Library("test_invalid_kernel", "DEF")
-        lib.define("cpu_only_op(Tensor x) -> Tensor")
-        lib.impl("cpu_only_op", lambda x: x * 2, "CPU")
+        with torch.library._scoped_library("test_invalid_kernel", "DEF") as lib:
+            lib.define("cpu_only_op(Tensor x) -> Tensor")
+            lib.impl("cpu_only_op", lambda x: x * 2, "CPU")
 
-        cpu_kernel = torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CPU")
-        self.assertIsNotNone(cpu_kernel)
+            cpu_kernel = torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CPU")
+            self.assertIsNotNone(cpu_kernel)
 
-        # CUDA should fail at the isValid() check since no CUDA kernel exists
-        with self.assertRaisesRegex(
-            RuntimeError, "no kernel for CUDA for test_invalid_kernel::cpu_only_op"
-        ):
-            torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
+            # CUDA should fail at the isValid() check since no CUDA kernel exists
+            with self.assertRaisesRegex(
+                RuntimeError, "no kernel for CUDA for test_invalid_kernel::cpu_only_op"
+            ):
+                torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
