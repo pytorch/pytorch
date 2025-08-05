@@ -87,6 +87,7 @@ from .utils import (
     call_func_at_runtime_with_args,
     make_boxed_func,
     partial_flatten_asdict,
+    simple_wraps,
     strict_zip,
     without_output_descs,
 )
@@ -967,7 +968,7 @@ class AOTDedupeWrapper(CompilerWrapper):
                         DuplicateInputs(kept_arg_source, dupe_arg_source)
                     )
 
-        @wraps(flat_fn)
+        @simple_wraps(flat_fn)
         def wrapped_flat_fn(
             *args: FxValue,
         ) -> tuple[list[FxValue], list[AOTOutput]]:
@@ -1152,7 +1153,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                     f_args_inner.append(view_arg)
             return f_args_inner
 
-        @wraps(flat_fn)
+        @simple_wraps(flat_fn)
         def wrapped_flat_fn(*args):
             unpacked_args = _unpack_synthetic_bases(args)
             # This is a bit subtle. The goal of this entire function (aot_dispatch_synthetic_bases)
@@ -1948,12 +1949,11 @@ class AOTDispatchAutograd:
             expected_meta = meta.meta
 
         runtime_type = type(x)
-        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-            # When we're inside compiled autograd's AOTDispatcher step,
-            # regular Tensors look like FunctionalTensors.
-            # Tensor subclasses still look like Tensor subclasses though.
-            if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensor):
-                runtime_type = torch.Tensor
+        # When we're inside compiled autograd's AOTDispatcher step,
+        # regular Tensors look like FunctionalTensors.
+        # Tensor subclasses still look like Tensor subclasses though.
+        if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensor):
+            runtime_type = torch.Tensor
 
         runtime_meta = None
         runtime_subclass_keys: Sequence[str] = []

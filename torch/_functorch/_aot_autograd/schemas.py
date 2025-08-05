@@ -982,6 +982,7 @@ class AOTConfig:
     # Used only by standalone_compile.
     ignore_shape_env: bool = False
     precompile_backend_id: Optional[str] = None
+    force_non_lazy_backward_lowering: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:
@@ -1192,11 +1193,11 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # graph, among other things!
     wrappers: list[CompilerWrapper]
 
-    # The actual captured graph.  In some circumstances (export) this graph
-    # has a specific calling convention that can be relied upon by external
-    # callers.  In other situations, the calling convention is unspecified and
-    # only aot_stage2_compile knows how to deal with them.
-    graph: torch.fx.GraphModule
+    # The actual captured graph module.  In some circumstances (export) this
+    # graph has a specific calling convention that can be relied upon by
+    # external callers.  In other situations, the calling convention is
+    # unspecified and only aot_stage2_compile knows how to deal with them.
+    graph_module: torch.fx.GraphModule
 
     # When compiling with autograd support, this is the joint_inputs, which is
     # larger than the original flat_args as all tangents get inputs.  The
@@ -1279,3 +1280,25 @@ class JointTraceFn(Protocol):
         tuple[list[FxValue], list[Optional[Tensor]]],
         tuple[list[AOTOutput], list[Optional[AOTOutput]]],
     ]: ...
+
+
+@dataclass
+class JointWithDescriptors:
+    _aot_state: AOTState
+    _aot_graph_capture: AOTGraphCapture
+
+    # The exact order parameters and buffers are expected to be passed into
+    # the final compiled function.  Parameters before buffers.
+    params_spec: list[str]
+    buffers_spec: list[str]
+
+    in_spec: pytree.TreeSpec
+    out_spec: pytree.TreeSpec
+
+    @property
+    def graph_module(self):
+        return self._aot_graph_capture.graph_module
+
+    @graph_module.setter
+    def graph_module(self, value):
+        self._aot_graph_capture.graph_module = value
