@@ -1,6 +1,6 @@
 from cement import Controller, ex
+from cli.build_cli.external.vllm_build import build_vllm
 from cli.lib.utils import generate_dataclass_help, read_yaml_file
-from cli.build_cli.external.vllm_build import build_vllm, VllmBuildConfig
 
 
 class ExternalBuildController(Controller):
