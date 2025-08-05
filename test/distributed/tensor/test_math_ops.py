@@ -630,6 +630,8 @@ class DistMathOpsTest(DTensorTestBase):
 
             # TODO: forward pass is sharding strategy is generated from composite, hence 1 more collective than layer_norm
             # see: https://github.com/pytorch/pytorch/pull/158716#issuecomment-3096012679
+            # TODO (xilunwu): why my change causes one collective missing??? Missing the collective causes
+            # y_local == y_dist.full_tensor() check fails
             expected_fwd_comm = 0 if shard_dim < norm_idx else 2
 
             self.assertEqual(
