@@ -518,6 +518,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
+            self.codegen_additional_funcs()
+
             if V.graph.const_module:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
 
@@ -551,8 +553,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
                         """
                     )
-
-                self.codegen_additional_funcs()
 
                 run_impl_proto = f"""
                     void {self.aoti_model_class_name}::run_impl(
