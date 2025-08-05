@@ -710,7 +710,7 @@ extern "C"
   using accum_t = at::opmath_type<{{kernel.dtype(query)}}>;
   using Vec = at::vec::Vectorized<accum_t>;
   accum_t scaling_factor = {{scale}};
-  int64_t PARTITION_SIZE = {{PARTITION_SIZE}};
+  int64_t PARTITION_SIZE = {{partition_size}};
   int64_t batchSize = {{kernel.size(query, 0)}};
   int64_t qSize = {{kernel.size(query, 1)}};
   int64_t num_head = {{kernel.size(query, 2)}};
@@ -890,7 +890,7 @@ extern "C"
             qStrideM,
             kStrideN,
             cur_kvSplitSize);
-            
+
         {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(logits + token_num, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
 
 {%- if score_mod and mask_mod %}
@@ -1051,7 +1051,7 @@ extern "C"
             j * max_logits_strideH + partition_id];
         global_max = std::max(global_max, max_logit);
       }
-      
+
       // Update the partition 0 result with the global max
       auto partition0_out_start =
           tmp_out_ptr + i * tmp_out_strideN + j * tmp_out_strideH;
@@ -1121,6 +1121,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         mask_mod,
         kv_block_size,
         q_block_size,
+        partition_size,
         has_other_buffer,
         no_full_kv_block,
         fake_buffers,
@@ -1152,6 +1153,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.mask_buf_idx = get_idx(self.mask_buf_name) if self.mask_buf_name else None
         self.kv_block_size = kv_block_size
         self.q_block_size = q_block_size
+        self.partition_size = partition_size
         self.has_other_buffer = has_other_buffer
         self.no_full_kv_block = no_full_kv_block
         self.other_buffer_input_offset = 2
@@ -1348,6 +1350,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         mask_mod,
         kv_block_size,
         q_block_size,
+        partition_size,
         has_other_buffer,
         no_full_kv_block,
         fake_buffers,
@@ -1373,6 +1376,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             mask_mod=mask_mod,
             kv_block_size=kv_block_size,
             q_block_size=q_block_size,
+            partition_size=partition_size,
             has_other_buffer=has_other_buffer,
             no_full_kv_block=no_full_kv_block,
             fake_buffers=fake_buffers,
@@ -1412,7 +1416,6 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.input_dtype = query.layout.dtype
 
         num_threads = parallel_num_threads()
-        PARTITION_SIZE = 128
         assert isinstance(self.output_node, ir.IRNode)
         buf_out: ir.IRNode = TensorBox.create(self.output_node)
         if template_buffer_node is not None:
@@ -1445,20 +1448,22 @@ class CppFlexAttentionTemplate(CppTemplate):
             mask_buf_name=self.mask_buf_name,
             score_buf_idx=self.score_buf_idx,
             mask_buf_idx=self.mask_buf_idx,
-            PARTITION_SIZE=PARTITION_SIZE,
+            partition_size=self.partition_size,
         )
         with contextlib.ExitStack() as stack:
             for buf in self.fake_buffers:
                 stack.enter_context(
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
-            if query.data.data.layout.size[2] == 1 \
-                  and PARTITION_SIZE % self.kv_block_size == 0:
-              # use flash decoding when qSize == 1
-              return self._template_from_string(FLEX_DECODING_TEMPLATE).render(**options)
+            if (
+                query.data.data.layout.size[2] == 1
+                and self.partition_size % self.kv_block_size == 0
+            ):
+                # use flash decoding when qSize == 1
+                return self._template_from_string(FLEX_DECODING_TEMPLATE).render(**options)
             else:
-              # use flash attention when qSize > 1
-              return self._template_from_string(FLEX_ATTENTION_TEMPLATE).render(**options)
+                # use flash attention when qSize > 1
+                return self._template_from_string(FLEX_ATTENTION_TEMPLATE).render(**options)
 
     def codegen_softmax_fusion(self, kernel_name: str):
         # TODO: use inductor IR to rewrite those fusions
