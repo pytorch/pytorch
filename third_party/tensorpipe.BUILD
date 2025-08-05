@@ -58,6 +58,7 @@ cc_library(
             "third_party/libuv/src/unix/*.h",
         ],
     ),
+    copts = ["-D_GNU_SOURCE"],
     visibility = ["//visibility:public"],
 )
 
@@ -149,7 +150,7 @@ cc_library(
         ".",
     ],
     copts = [
-        "-std=c++14",
+        "-std=c++17",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -166,7 +167,7 @@ cc_library(
         ".",
     ],
     copts = [
-        "-std=c++14",
+        "-std=c++17",
     ],
     visibility = ["//visibility:public"],
     deps = [
