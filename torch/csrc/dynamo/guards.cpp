@@ -1154,22 +1154,6 @@ std::string get_exception_message() {
   return exc_message;
 }
 
-bool is_nn_module(py::handle example_value) {
-  py::object torch_module_cls = py::module_::import("torch.nn").attr("Module");
-  return py::isinstance(example_value, torch_module_cls);
-}
-
-std::string get_type_str(py::handle example_value) {
-  std::string type_name;
-  try {
-    type_name = py::str(py::type::of(example_value)).cast<std::string>();
-  } catch (const py::error_already_set& e) {
-    // Fallback that never throws in release builds
-    type_name = "<unprintable-type>";
-  }
-  return type_name;
-}
-
 bool is_immutable_object(py::handle example_value) {
   py::object config_module = py::module_::import("torch._dynamo.config");
 
@@ -2611,15 +2595,13 @@ class GuardManager {
       : _root(root),
         _source(std::move(source)),
         _is_dict(py::isinstance<py::dict>(example_value)),
-        _is_immutable(is_immutable_object(example_value)),
-        _is_nn_module(is_nn_module(example_value)),
-        _is_tensor(THPVariable_Check(example_value.ptr())),
-        _type_str(get_type_str(example_value)) {
+        _is_immutable(is_immutable_object(example_value)) {
     if (_is_dict) {
       _dict_tag = get_dict_version_unchecked(example_value.ptr());
-      _is_empty_dict = PyDict_Size(example_value.ptr()) == 0;
     }
-
+    py::object typ = py::type::of(example_value);
+    py::object weakref_mod = py::module_::import("weakref");
+    _weak_type = weakref_mod.attr("ref")(typ);
     py::object config_module = py::module_::import("torch._dynamo.config");
     _max_saved_pointers_for_recursive_dict_tags_check =
         config_module.attr("max_saved_pointers_for_recursive_dict_tags_check")
@@ -2681,28 +2663,19 @@ class GuardManager {
     return _is_immutable;
   }
 
-  bool is_guarded_value_nn_module() {
-    return _is_nn_module;
-  }
-
-  bool is_guarded_value_dict() {
-    return _is_dict;
-  }
-
-  bool is_guarded_value_empty_dict() {
-    return _is_empty_dict;
-  }
-
-  bool is_guarded_value_tensor() {
-    return _is_tensor;
-  }
-
-  std::string type_of_guarded_value() {
-    return _type_str;
-  }
-
   bool is_recursive_dict_tag_matching_disabled() {
     return _disable_dict_tag_matching;
+  }
+
+  py::object get_type_of_guarded_value() {
+    if (!_weak_type || _weak_type.is_none()) {
+      return py::type::of(py::none());
+    }
+
+    if (!PyCallable_Check(_weak_type.ptr())) {
+      throw std::runtime_error("_weak_type is not callable");
+    }
+    return _weak_type();
   }
 
  public:
@@ -2748,19 +2721,13 @@ class GuardManager {
       RootGuardManager* root,
       std::string source,
       bool is_dict,
-      bool is_empty_dict,
       bool is_immutable,
-      bool is_nn_module,
-      bool is_tensor,
-      std::string type_str)
+      py::object weak_type)
       : _root(root),
         _source(std::move(source)),
         _is_dict(is_dict),
-        _is_empty_dict(is_empty_dict),
         _is_immutable(is_immutable),
-        _is_nn_module(is_nn_module),
-        _is_tensor(is_tensor),
-        _type_str(std::move(type_str)) {}
+        _weak_type(weak_type) {}
 
   void clone_common(
       RootGuardManager* cloned_root,
@@ -2792,14 +2759,7 @@ class GuardManager {
       return nullptr;
     }
     GuardManager* cloned_mgr = new GuardManager(
-        cloned_root,
-        _source,
-        _is_dict,
-        _is_empty_dict,
-        _is_immutable,
-        _is_nn_module,
-        _is_tensor,
-        _type_str);
+        cloned_root, _source, _is_dict, _is_immutable, _weak_type);
     if (is_tag_safe()) {
       cloned_mgr->mark_tag_safe();
       if (is_tag_safe_root()) {
@@ -2975,7 +2935,7 @@ class GuardManager {
         // This is a tag safe node, record the dict pointer
         if (_is_dict) {
           record_dict_pointer(_root, value);
-        } else if (_is_tensor && _has_no_tensor_aliasing_guard) {
+        } else if (_has_no_tensor_aliasing_guard) {
           record_tensor_pointer(_root, value);
         }
       }
@@ -3285,11 +3245,7 @@ class GuardManager {
   bool _has_no_tensor_aliasing_guard = false;
 
   bool _is_dict = false;
-  bool _is_empty_dict = false;
   bool _is_immutable = false;
-  bool _is_nn_module = false;
-  bool _is_tensor = false;
-  std::string _type_str;
   uint64_t _dict_tag{0};
   uint64_t _max_saved_pointers_for_recursive_dict_tags_check = 0;
 
@@ -3301,6 +3257,11 @@ class GuardManager {
       _dict_pointers;
   std::unordered_map<PyObject*, std::vector<PyObject*>> _tensor_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
+
+ protected:
+  // weakref to the type of guarded value
+  // protected because it is used for cloning by DictGuardManager
+  py::object _weak_type;
 };
 
 GuardAccessor::GuardAccessor(
@@ -3873,17 +3834,13 @@ class DictGuardManager : public GuardManager {
       PyTypeObject* expected_type,
       bool is_exact_dict_type,
       std::vector<Py_ssize_t> indices,
-      std::string type_of,
-      bool is_empty_dict)
+      py::object weak_type)
       : GuardManager(
             cloned_root,
             std::move(source),
             true, // _is_dict
-            is_empty_dict,
             false, // _is_immutable
-            false, // _is_nn_module
-            false, // _is_tensor
-            std::move(type_of)),
+            weak_type),
         _size(size),
         _expected_type(expected_type),
         _is_exact_dict_type(is_exact_dict_type),
@@ -3903,8 +3860,7 @@ class DictGuardManager : public GuardManager {
         _expected_type,
         _is_exact_dict_type,
         _indices,
-        type_of_guarded_value(),
-        is_guarded_value_empty_dict());
+        _weak_type);
     if (is_tag_safe()) {
       cloned_mgr->mark_tag_safe();
       if (is_tag_safe_root()) {
@@ -4286,6 +4242,10 @@ class GetAttrGuardAccessor : public GuardAccessor {
     // Helpful when printing GuardManager tree structure.
     return "GetAttrGuardAccessor(" + py::str(_attr_name).cast<std::string>() +
         ")";
+  }
+
+  std::string get_attr_name() {
+    return py::str(_attr_name).cast<std::string>();
   }
 
  public: // cloning functions
@@ -6628,11 +6588,11 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardAccessor, std::unique_ptr<GuardAccessor>>(
       py_m, "GuardAccessor")
       .def("repr", &GuardAccessor::repr);
-  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       GetAttrGuardAccessor,
       GuardAccessor,
-      std::unique_ptr<GetAttrGuardAccessor>>(py_m, "GetAttrGuardAccessor");
+      std::unique_ptr<GetAttrGuardAccessor>>(py_m, "GetAttrGuardAccessor")
+      .def("get_attr_name", &GetAttrGuardAccessor::get_attr_name);
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       GenericGetAttrGuardAccessor,
@@ -6752,23 +6712,16 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "is_guarded_value_immutable",
           &GuardManager::is_guarded_value_immutable)
-      .def(
-          "is_guarded_value_nn_module",
-          &GuardManager::is_guarded_value_nn_module)
-      .def("is_guarded_value_dict", &GuardManager::is_guarded_value_dict)
-      .def(
-          "is_guarded_value_empty_dict",
-          &GuardManager::is_guarded_value_empty_dict)
-      .def("is_guarded_value_tensor", &GuardManager::is_guarded_value_tensor)
       .def("has_no_accessors", &GuardManager::has_no_accessors)
       .def("mark_tag_safe", &GuardManager::mark_tag_safe)
       .def("mark_tag_safe_root", &GuardManager::mark_tag_safe_root)
       .def("is_tag_safe", &GuardManager::is_tag_safe)
       .def("is_tag_safe_root", &GuardManager::is_tag_safe_root)
-      .def("type_of_guarded_value", &GuardManager::type_of_guarded_value)
       .def(
           "is_recursive_dict_tag_matching_disabled",
           &GuardManager::is_recursive_dict_tag_matching_disabled)
+      .def(
+          "get_type_of_guarded_value", &GuardManager::get_type_of_guarded_value)
       .def(
           "get_accessors",
           &GuardManager::get_accessors,
