@@ -1239,6 +1239,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
     @requires_distributed()
     @requires_cuda
     @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
     def test_runtime_estimates_simple(self):
         """Test runtime estimates logging with simple compute and collective ops."""
         import torch.distributed as dist
@@ -1299,6 +1300,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
     @requires_distributed()
     @requires_cuda
     @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
     def test_runtime_estimates_mixed(self):
         """Test runtime estimates logging with mixed compute and collective sequence."""
         import torch.distributed as dist
