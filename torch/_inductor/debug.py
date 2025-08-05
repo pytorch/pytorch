@@ -722,15 +722,18 @@ def log_collective_schedule(nodes: Sequence[BaseSchedulerNode]) -> None:
     _dump_collective_schedule(schedule)
 
 
-def log_runtime_estimates(nodes: Sequence[BaseSchedulerNode]) -> None:
+def log_runtime_estimates(node_runtimes: Sequence[tuple[Any, float]]) -> None:
+    """Log per-operation runtime estimates for TLParse."""
+
     ops = [
         {
             "name": getattr(s.node, "python_kernel_name", s.get_name()),
             "type": "collective" if utils.is_collective(s.node) else "compute",
-            "estimated_runtime_ns": s.get_estimated_runtime(),
+            "estimated_runtime_ns": runtime_ns,
         }
-        for s in nodes
+        for s, runtime_ns in node_runtimes
     ]
+
     trace_structured(
         "artifact",
         metadata_fn=lambda: {

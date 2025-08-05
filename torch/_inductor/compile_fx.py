@@ -1522,11 +1522,14 @@ class _InProcessFxCompile(FxCompile):
                                 "node_runtimes": node_runtimes,
                             },
                         )
+                    else:
+                        # Runtimes for TLParse logging
+                        _, _, node_runtimes = graph.count_bytes()
 
                     # Collect and dump collective-op schedule for external diagnostics
                     torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
                     # Collect and dump op runtimes for TLParse
-                    torch._inductor.debug.log_runtime_estimates(graph.scheduler.nodes)
+                    torch._inductor.debug.log_runtime_estimates(node_runtimes)
 
                     if (
                         cudagraphs
