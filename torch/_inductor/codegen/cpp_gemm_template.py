@@ -326,12 +326,12 @@ GEMM_TEMPLATE = r"""
 {%- endif %}
                             if (kc == k_block_start) {
                                 {{ micro_gemm.codegen_call(
-                                    kernel, tile_X, tile_W, acc_slice, accum=False, horizontal_transverse=False
+                                    kernel, tile_X, tile_W, acc_slice, accum=False, qscale_and_zeros=tile_qparam, horizontal_transverse=False
                                 )|indent(28, false)
                                 }}
                             } else {
                                 {{ micro_gemm.codegen_call(
-                                    kernel, tile_X, tile_W, acc_slice, accum=True, horizontal_transverse=False
+                                    kernel, tile_X, tile_W, acc_slice, accum=True, qscale_and_zeros=tile_qparam, horizontal_transverse=False
                                 )|indent(28, false)
                                 }}
                             }
