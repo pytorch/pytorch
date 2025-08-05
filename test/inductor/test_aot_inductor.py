@@ -20,6 +20,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.codecache import WritableTempFile
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
@@ -5495,6 +5496,43 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
         self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
 
+    @requires_gpu
+    def test_d2h_copy(self):
+        # device to copy host should always have the same stride
+        if "cuda" not in self.device:
+            raise unittest.SkipTest("This test is only for CUDA")
+
+        class ToCpuModel(nn.Module):
+            def forward(self, x):
+                predictions = x.permute(1, 0)
+                predictions = torch.nan_to_num(
+                    predictions, nan=0.0, posinf=0.0, neginf=0.0
+                )
+                predictions = predictions.to("cpu", non_blocking=True)
+                p = predictions[0]
+                ones = p.new_ones(1)
+                return p, ones
+
+        model = ToCpuModel().to(GPU_TYPE)
+        input_tensor = torch.randn(5, 10, device=GPU_TYPE).to(dtype=torch.float16)
+        ep = torch.export.export(model, (input_tensor,))
+        package_path = torch._inductor.aoti_compile_and_package(ep)
+
+        aoti_model = torch._inductor.aoti_load_package(package_path)
+
+        expect_res = model(input_tensor)
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
+            true_res = aoti_model(input_tensor)
+
+        self.assertEqual(expect_res, true_res)
+        all_ops = [event.key for event in prof.key_averages()]
+        self.assertTrue(not any("aten::contiguous" in op for op in all_ops))
+
     def test_so_without_weight(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -5602,7 +5640,7 @@ class AOTInductorTestsTemplate:
                 example_inputs=example_inputs,
             )
 
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        with WritableTempFile(suffix=".pt2") as f:
             package_path = package_aoti(
                 f.name,
                 {"model": aoti_files},
@@ -6229,9 +6267,6 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
-    @skipIfXpu(
-        msg="The operator 'aten::_int_mm' is not currently implemented for the XPU device"
-    )
     def test__int_mm(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -6689,6 +6724,34 @@ class AOTInductorTestsTemplate:
         # the output should have int type
         self.check_model(Model2(), (x,))
 
+    def test_upper_bound_i64(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inp = (
+            torch.randint(0, 100, (2**18,), device=self.device, dtype=torch.int8),
+            torch.tensor([4], device=self.device, dtype=torch.int8),
+        )
+        ep = torch.export.export(
+            Model(),
+            inp,
+            dynamic_shapes=({0: Dim("d", min=0, max=2**33)}, {0: Dim.STATIC}),
+        )
+        so_path = torch._inductor.aot_compile(ep.module(), inp)
+        m = torch._export.aot_load(so_path, self.device)
+
+        self.assertEqual(Model()(*inp), m(*inp))
+        del inp
+
+        inp = (
+            torch.randint(0, 100, (3 * 2**30,), device=self.device, dtype=torch.int8),
+            torch.tensor([4], device=self.device, dtype=torch.int8),
+        )
+        # don't check the accuracy of the result to reduce memory usage
+        # this test is mostly checking to ensure there's no IMA.
+        m(*inp)
+
     def test_using_model_name_for_files(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -6737,6 +6800,25 @@ class AOTInductorLoggingTest(LoggingTestCase):
         }
         ep = export(Foo(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
         with torch.no_grad():
+            torch._inductor.aot_compile(ep.module(), inputs)
+        self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
+
+    @make_logging_test(dynamic=logging.DEBUG)
+    def test_shape_env_reuse_zero_consts_use_consts_asm_false(self, records):
+        # make sure ShapeEnv is only created once and reused afterwards
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        inputs = (torch.randn(4, 4),)
+        dynamic_shapes = {
+            "x": {0: Dim.AUTO, 1: Dim.AUTO},
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
+        with (
+            torch.no_grad(),
+            config.patch({"aot_inductor.use_consts_asm_build": False}),
+        ):
             torch._inductor.aot_compile(ep.module(), inputs)
         self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
 
@@ -6842,23 +6924,16 @@ MPS_TEST_FAILURES = {
     # either (1) tell outside to initialize a new kernel or (2) generate
     # subgraph as a separate function, which would(?) cause (1) to happen automatically.
     "test_while_loop_nested": fail_mps(),
+    "test_cond_with_parameters": fail_mps(),
+    "test_cond_share_predicte": fail_mps(),
     # correctness issue
     "test_index_put_with_none_index": fail_mps(),
-    # Dynamism
-    "test_shifted_constraint_ranges": fail_mps(),
-    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_mps(),
-    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_mps(),
-    "test_cond_mismatched_branch_output_dynamic_True": fail_mps(),
-    "test_cond_unbacked_symint_closure_dynamic_True": fail_mps(),
-    "test_cond_non_tensor_predicates_dynamic_True": fail_mps(),
-    "test_zero_grid_with_unbacked_symbols": fail_mps(),
-    "test_reuse_kernel_dynamic": fail_mps(is_skip=True),
-    "test_cond_with_parameters": fail_mps(is_skip=True),
-    "test_cond_share_predicte": fail_mps(is_skip=True),
     # Error device may not be nil
     "test_zero_size_weight": fail_mps(is_skip=True),
     # RuntimeError: Cannot compare two tensors on different devices. Got: cpu and mps:0
     "test_aoti_constant_tensor_name_collision": fail_mps(is_skip=True),
+    # MPSGraph does not support tensor dims > INT_MAX
+    "test_upper_bound_i64": fail_mps(is_skip=True),
     # MPS doesn't support triton
     "test_autotuning_args_reuse": fail_mps(),
     "test_triton_autotuning": fail_mps(),

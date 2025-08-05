@@ -719,6 +719,7 @@
   dispatch:
     CPU, CUDA: all_out
     MPS: all_out_mps
+    MTIA: all_out_mtia
 
 - func: all.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -808,6 +809,7 @@
     CPU, Meta: arange_out
     CUDA: arange_cuda_out
     MPS: arange_mps_out
+    MTIA: arange_mtia_out
   cpp_no_default_args: ['step']
 
 # This function is a temporary hack to allow tracing of arange like constructs with dynamic
@@ -1889,7 +1891,10 @@
 - func: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CUDA: cudnn_batch_norm
-  autogen: cudnn_batch_norm.out
+
+- func: cudnn_batch_norm.out(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon, *, Tensor(a!) out0, Tensor(b!) out1, Tensor(c!) out2, Tensor(d!) out3) -> (Tensor(a!), Tensor(b!), Tensor(c!), Tensor(d!))
+  dispatch:
+    CUDA: cudnn_batch_norm_out
 
 # NB: You can only use this if you used cudnn_batch_norm training=True
 - func: cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon, Tensor reserveSpace) -> (Tensor, Tensor, Tensor)
@@ -4182,11 +4187,13 @@
   dispatch:
     CPU: _int_mm_cpu
     CUDA: _int_mm_cuda
+    XPU: _int_mm_xpu
 
 - func: _int_mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: _int_mm_out_cpu
     CUDA: _int_mm_out_cuda
+    XPU: _int_mm_out_xpu
 
 - func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
   dispatch:
@@ -7124,18 +7131,21 @@
   dispatch:
     CPU: _scaled_mm_cpu
     CUDA: _scaled_mm_cuda
+  tags: needs_exact_strides
 
 - func: _scaled_mm.out(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _scaled_mm_out_cpu
     CUDA: _scaled_mm_out_cuda
+  tags: needs_exact_strides
 
 
 - func: _scaled_grouped_mm(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? offs=None, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False) -> Tensor
   variants: function
   dispatch:
     CUDA: _scaled_grouped_mm_cuda
+  tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
   variants: function
@@ -10487,6 +10497,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_add_scalar_kernel_slow_
     CUDA: foreach_tensor_add_scalar_kernel_cuda_
+    MTIA: foreach_tensor_add_scalar_kernel_mtia_
   autogen: _foreach_add.Scalar_out
 
 - func: _foreach_add.List(Tensor[] self, Tensor[] other, *, Scalar alpha=1) -> Tensor[]
@@ -10495,6 +10506,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_add_list_kernel_slow
     CUDA: foreach_tensor_add_list_kernel_cuda
+    MTIA: foreach_tensor_add_list_kernel_mtia
 
 - func: _foreach_add_.List(Tensor(a!)[] self, Tensor[] other, *, Scalar alpha=1) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -10502,6 +10514,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_add_list_kernel_slow_
     CUDA: foreach_tensor_add_list_kernel_cuda_
+    MTIA: foreach_tensor_add_list_kernel_mtia_
   autogen: _foreach_add.List_out
 
 - func: _foreach_add.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
@@ -10532,6 +10545,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_add_tensor_kernel_slow_
     CUDA: foreach_tensor_add_tensor_kernel_cuda_
+    MTIA: foreach_tensor_add_tensor_kernel_mtia_
   autogen: _foreach_add.Tensor_out
 
 - func: _foreach_sub.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
@@ -10592,6 +10606,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_mul_scalar_kernel_slow_
     CUDA: foreach_tensor_mul_scalar_kernel_cuda_
+    MTIA: foreach_tensor_mul_scalar_kernel_mtia_
   autogen: _foreach_mul.Scalar_out
 
 - func: _foreach_mul.List(Tensor[] self, Tensor[] other) -> Tensor[]
@@ -10600,6 +10615,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_mul_list_kernel_slow
     CUDA: foreach_tensor_mul_list_kernel_cuda
+    MTIA: foreach_tensor_mul_list_kernel_mtia
 
 - func: _foreach_mul_.List(Tensor(a!)[] self, Tensor[] other) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -10607,6 +10623,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_mul_list_kernel_slow_
     CUDA: foreach_tensor_mul_list_kernel_cuda_
+    MTIA: foreach_tensor_mul_list_kernel_mtia_
   autogen: _foreach_mul.List_out
 
 - func: _foreach_mul.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
@@ -10630,6 +10647,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_mul_tensor_kernel_slow
     CUDA: foreach_tensor_mul_tensor_kernel_cuda
+    MTIA: foreach_tensor_mul_tensor_kernel_mtia
 
 - func: _foreach_mul_.Tensor(Tensor(a!)[] self, Tensor other) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -10637,6 +10655,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_mul_tensor_kernel_slow_
     CUDA: foreach_tensor_mul_tensor_kernel_cuda_
+    MTIA: foreach_tensor_mul_tensor_kernel_mtia_
   autogen: _foreach_mul.Tensor_out
 
 - func: _foreach_div.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
@@ -10933,6 +10952,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_addcmul_scalar_slow
     CUDA: foreach_tensor_addcmul_scalar_cuda
+    MTIA: foreach_tensor_addcmul_scalar_mtia
 
 - func: _foreach_addcmul.ScalarList(Tensor[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -10954,6 +10974,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_addcmul_scalar_slow_
     CUDA: foreach_tensor_addcmul_scalar_cuda_
+    MTIA: foreach_tensor_addcmul_scalar_mtia_
   autogen: _foreach_addcmul.Scalar_out
 
 - func: _foreach_addcmul_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> ()
@@ -10978,6 +10999,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_abs_slow
     CUDA: foreach_tensor_abs_cuda
+    MTIA: foreach_tensor_abs_mtia
 
 - func: _foreach_abs_(Tensor(a!)[] self) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -10985,6 +11007,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_abs_slow_
     CUDA: foreach_tensor_abs_cuda_
+    MTIA: foreach_tensor_abs_mtia_
   autogen: _foreach_abs.out
 
 - func: _foreach_acos(Tensor[] self) -> Tensor[]
@@ -11319,6 +11342,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_norm_slow
     CUDA: foreach_tensor_norm_cuda
+    MTIA: foreach_tensor_norm_mtia
   autogen: _foreach_norm.Scalar_out
 
 - func: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
@@ -11491,6 +11515,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_sqrt_slow_
     CUDA: foreach_tensor_sqrt_cuda_
+    MTIA: foreach_tensor_sqrt_mtia_
   autogen: _foreach_sqrt.out
 
 - func: _foreach_tan(Tensor[] self) -> Tensor[]
@@ -11552,6 +11577,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_copy_list_kernel_slow_
     CUDA: foreach_tensor_copy_list_kernel_cuda_
+    MTIA: foreach_tensor_copy_list_kernel_mtia_
   autogen: _foreach_copy.out
 
 - func: _foreach_copy(Tensor[] self, Tensor[] src, bool non_blocking=False) -> Tensor[] self_out
@@ -11559,6 +11585,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: _foreach_copy
+    MTIA: foreach_tensor_copy_list_kernel_mtia
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
@@ -12351,6 +12378,7 @@
   dispatch:
     CPU: avg_pool3d_backward_out_cpu
     CUDA: avg_pool3d_backward_out_cuda
+    MPS: avg_pool3d_backward_out_mps
     MkldnnCPU: mkldnn_avg_pool3d_backward_out
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
@@ -12476,24 +12504,28 @@
   dispatch:
     CPU: max_unpooling2d_forward_out_cpu
     CUDA: max_unpooling2d_forward_out_cuda
+    MPS: max_unpooling2d_forward_out_mps
 
 - func: max_unpool2d(Tensor self, Tensor indices, SymInt[2] output_size) -> Tensor
   python_module: nn
   dispatch:
     CPU: max_unpooling2d_forward_cpu
     CUDA: max_unpooling2d_forward_cuda
+    MPS: max_unpooling2d_forward_mps
 
 - func: max_unpool3d.out(Tensor self, Tensor indices, SymInt[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_forward_out_cpu
     CUDA: max_unpooling3d_forward_out_cuda
+    MPS: max_unpooling3d_forward_out_mps
 
 - func: max_unpool3d(Tensor self, Tensor indices, SymInt[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_forward_cpu
     CUDA: max_unpooling3d_forward_cuda
+    MPS: max_unpooling3d_forward_mps
 
 - func: reflection_pad1d.out(Tensor self, SymInt[2] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

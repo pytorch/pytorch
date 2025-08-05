@@ -579,7 +579,7 @@ class InitDeviceMeshTest(DTensorTestBase):
                 mesh_dim_names=["dp", "tp"],
             )
 
-    def _test_pg_override_argument_dict_with_idx_and_backend(self):
+    def _test_backend_override_argument_dict_with_idx_and_backend(self):
         opts = FakeProcessGroup.Options()
         opts.fake_option = 42
 
@@ -587,7 +587,7 @@ class InitDeviceMeshTest(DTensorTestBase):
             self.device_type,
             (2, 2, 2),
             mesh_dim_names=("dp", "tp", "cp"),
-            pg_override={0: "fake", 2: ("fake", opts)},
+            backend_override={0: "fake", 2: ("fake", opts)},
         )
 
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
@@ -606,8 +606,8 @@ class InitDeviceMeshTest(DTensorTestBase):
         self.assertEqual(get_opts(mesh, 2).fake_option, 42)
 
         dp_tp_mesh = mesh["dp", "tp"]._flatten()
-        dp_cp_mesh = mesh["dp", "cp"]._flatten(pg_override="fake")
-        tp_cp_mesh = mesh["tp", "cp"]._flatten(pg_override=("fake", opts))
+        dp_cp_mesh = mesh["dp", "cp"]._flatten(backend_override="fake")
+        tp_cp_mesh = mesh["tp", "cp"]._flatten(backend_override=("fake", opts))
 
         self.assertNotEqual(dp_tp_mesh.get_group(0)._get_backend_name(), "custom")
         self.assertEqual(dp_cp_mesh.get_group(0)._get_backend_name(), "custom")
@@ -617,15 +617,15 @@ class InitDeviceMeshTest(DTensorTestBase):
         self.assertEqual(get_opts(tp_cp_mesh, 0).fake_option, 42)
 
     @with_comms
-    def test_pg_override_argument_dict_with_idx_and_backend_lazy(self):
-        self._test_pg_override_argument_dict_with_idx_and_backend()
+    def test_backend_override_argument_dict_with_idx_and_backend_lazy(self):
+        self._test_backend_override_argument_dict_with_idx_and_backend()
 
     @with_comms(eager_init=True)
-    def test_pg_override_argument_dict_with_idx_and_backend_eager(self):
-        self._test_pg_override_argument_dict_with_idx_and_backend()
+    def test_backend_override_argument_dict_with_idx_and_backend_eager(self):
+        self._test_backend_override_argument_dict_with_idx_and_backend()
 
     @with_comms(backend="fake")
-    def test_pg_override_argument_dict_with_name_and_options(self):
+    def test_backend_override_argument_dict_with_name_and_options(self):
         opts = FakeProcessGroup.Options()
         opts.fake_option = 42
 
@@ -633,7 +633,7 @@ class InitDeviceMeshTest(DTensorTestBase):
             self.device_type,
             (2, 2, 2),
             mesh_dim_names=("dp", "tp", "cp"),
-            pg_override={"tp": opts},
+            backend_override={"tp": opts},
         )
 
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
@@ -648,44 +648,44 @@ class InitDeviceMeshTest(DTensorTestBase):
         self.assertIsNone(get_opts(mesh, 2))
 
         dp_tp_mesh = mesh["dp", "tp"]._flatten()
-        dp_cp_mesh = mesh["dp", "cp"]._flatten(pg_override=opts)
+        dp_cp_mesh = mesh["dp", "cp"]._flatten(backend_override=opts)
 
         self.assertIsNone(get_opts(dp_tp_mesh, 0))
         self.assertEqual(get_opts(dp_cp_mesh, 0).fake_option, 42)
 
     @with_comms
-    def test_pg_override_argument_errors(self):
+    def test_backend_override_argument_errors(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Found redundant dim index 0 and name dp in pg_override",
+            "Found redundant dim index 0 and name dp in backend_override",
         ):
             init_device_mesh(
                 self.device_type,
                 (2, 4),
                 mesh_dim_names=("dp", "tp"),
-                pg_override={"dp": "foo", 0: "bar"},
+                backend_override={"dp": "foo", 0: "bar"},
             )
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Found invalid keys in pg_override: got \['cp'\]",
+            r"Found invalid keys in backend_override: got \['cp'\]",
         ):
             init_device_mesh(
                 self.device_type,
                 (2, 4),
                 mesh_dim_names=("dp", "tp"),
-                pg_override={"cp": "foo"},
+                backend_override={"cp": "foo"},
             )
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Found invalid keys in pg_override: got \[42\]",
+            r"Found invalid keys in backend_override: got \[42\]",
         ):
             init_device_mesh(
                 self.device_type,
                 (2, 4),
                 mesh_dim_names=("dp", "tp"),
-                pg_override={42: "bar"},
+                backend_override={42: "bar"},
             )
 
 
