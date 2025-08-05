@@ -1115,8 +1115,8 @@ class CppFlexAttentionTemplate(CppTemplate):
     """
     CPP template based FlexAttention CPP Template.
 
-    This class supports generation of C++ code for broad various attention,
-    including Flash Attention and Flash Decoding. It enables template-based
+    This class supports generation of C++ code for broad attention variants,
+    with applying Flash Attention and Flash Decoding. It enables template-based
     code synthesis according to user-defined score and mask modifications
     and configuration settings.
     """
