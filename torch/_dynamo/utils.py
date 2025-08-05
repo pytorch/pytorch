@@ -1484,7 +1484,6 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
         fail_reason=c.fail_reason,
         fail_user_frame_filename=c.fail_user_frame_filename,
         fail_user_frame_lineno=c.fail_user_frame_lineno,
-        stack_trace=c.stack_trace,
         # Sets aren't JSON serializable
         non_compliant_ops=(
             list(c.non_compliant_ops) if c.non_compliant_ops is not None else None
