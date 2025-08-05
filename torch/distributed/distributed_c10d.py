@@ -353,7 +353,9 @@ class Backend(str):  # noqa: SLOT000
                 "`cuda` or `xpu`. Please specify it via the `devices` argument of "
                 "`register_backend`."
             )
-            Backend.backend_capability[name.lower()] = ["cpu", "cuda", "xpu"]
+            Backend.backend_capability[name.lower()] = (
+                ["cpu", "cuda", "xpu"] if torch.xpu.is_available() else ["cpu", "cuda"]
+            )
         elif isinstance(devices, str):
             # Single device string specified. Simply convert to list.
             Backend.backend_capability[name.lower()] = [devices]

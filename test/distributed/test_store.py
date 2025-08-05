@@ -37,7 +37,6 @@ from torch.testing._internal.common_utils import (
     load_tests,
     retry_on_connect_failures,
     run_tests,
-    TEST_CUDA,
     TestCase,
 )
 
@@ -1177,9 +1176,8 @@ class TestClientProtocol(TestCase):
 
 
 if __name__ == "__main__":
-    if TEST_CUDA:
-        assert not torch.cuda._initialized, (
-            "test_distributed must not have initialized cuda context on main process"
+    if device_type != "cpu":
+        assert not torch.get_device_module()._initialized, (
+            "test_distributed must not have initialized {device_type} context on main process"
         )
-
     run_tests()
