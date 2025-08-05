@@ -1289,7 +1289,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_allgather_noncontiguous_input(self):
         # Take a column of 2D tensor, such that memory is not dense
-        self._test_allgather_basics(lambda t: t.expand(2, 2).contiguous()[:, 0])
+        self._test_allgather_basics(lambda t: t.expand(2, 2).tril().contiguous()[:, 0])
 
     @requires_gloo()
     def test_allgather_inference_mode(self):
