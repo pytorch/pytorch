@@ -1,3 +1,4 @@
+#include <c10/core/AllocatorConfig.h>
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
@@ -71,6 +72,10 @@ void initModule(PyObject* module) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
     torch::utils::maybe_initialize_device(device_type);
     return at::accelerator::maybeExchangeDevice(device_index);
+  });
+
+  m.def("_accelerator_setAllocatorSettings", [](std::string env) {
+    c10::CachingAllocator::setAllocatorSettings(env);
   });
 }
 
