@@ -39,16 +39,19 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   return true;
 }
 
-bool input_require_grad(const at::Tensor& query,
-                         const at::Tensor& key,
-                         const at::Tensor& value,
-                         const std::optional<at::Tensor>& attn_mask) {
-  return at::GradMode::is_enabled() && (query.requires_grad() || key.requires_grad() || value.requires_grad()
-      || (attn_mask.has_value() && attn_mask.value().requires_grad()));
+bool input_require_grad(
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const std::optional<at::Tensor>& attn_mask) {
+  return at::GradMode::is_enabled() &&
+      (query.requires_grad() || key.requires_grad() || value.requires_grad() ||
+       (attn_mask.has_value() && attn_mask.value().requires_grad()));
 }
 
 bool check_grad(sdp::sdp_params const& params, bool debug) {
-  if (!input_require_grad(params.query, params.key, params.value, params.attn_mask))
+  if (!input_require_grad(
+          params.query, params.key, params.value, params.attn_mask))
     return true;
 
   auto q_num_heads = params.query.sym_size(-3);
@@ -56,9 +59,11 @@ bool check_grad(sdp::sdp_params const& params, bool debug) {
   auto v_num_heads = params.value.sym_size(-3);
   bool is_gqa = q_num_heads != k_num_heads || q_num_heads != v_num_heads;
   if (debug && is_gqa)
-    TORCH_WARN("scale_dot_product_attention with gqa is not supported for gradient computation on xpu.");
+    TORCH_WARN(
+        "scale_dot_product_attention with gqa is not supported for gradient computation on xpu.");
 
-  bool attn_mask_needs_grad = params.attn_mask.has_value() && params.attn_mask.value().requires_grad();
+  bool attn_mask_needs_grad =
+      params.attn_mask.has_value() && params.attn_mask.value().requires_grad();
   if (debug && attn_mask_needs_grad) {
     TORCH_WARN(
         "scale_dot_product_attention on xpu is not supported with attn_mask.requires_grad() == True.");
@@ -204,7 +209,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       !(attn_bias.has_value() && is_causal),
       "scaled_dot_product_fused_attention_overrideable_xpu: attn_bias cannot present with is_causal");
   TORCH_INTERNAL_ASSERT(
-       !(attn_bias.has_value() && attn_bias.value().requires_grad()),
+      !(attn_bias.has_value() && attn_bias.value().requires_grad()),
       "scaled_dot_product_fused_attention_overrideable_xpu: attn_bias cannot have requires_grad=True");
 
   const int64_t batch_size = query.size(0);
@@ -221,8 +226,8 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   alloc_with_matching_layout(query, attention, attention_shape);
 
   auto opts = query.options();
-  at::Tensor logsumexp = at::empty(
-        {batch_size, num_head_q, seq_len_q}, opts.dtype(at::kFloat));
+  at::Tensor logsumexp =
+      at::empty({batch_size, num_head_q, seq_len_q}, opts.dtype(at::kFloat));
 
   at::native::onednn::gpu_float_sdpa(
       batch_size,
@@ -257,11 +262,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       /*debug_attn_mask */ at::Tensor());
 }
 
-std::tuple<
-    at::Tensor,
-    at::Tensor,
-    at::Tensor,
-    at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 _scaled_dot_product_fused_attention_overrideable_backward_xpu(
     const at::Tensor& grad_out,
     const at::Tensor& query,
@@ -281,12 +282,10 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
     const at::Tensor& philox_offset,
     std::optional<double> scale) {
   TORCH_INTERNAL_ASSERT(
-    grad_out.dim() == 4 && out.dim() == 4 &&
-    grad_out.size(0) == out.size(0) &&
-    grad_out.size(1) == out.size(1) &&
-    grad_out.size(2) == out.size(2) &&
-    grad_out.size(3) == out.size(3),
-    "scaled_dot_product_fused_attention_overrideable_backward_xpu: grad_out and out should have the same shape of {(B), H, T, K}");
+      grad_out.dim() == 4 && out.dim() == 4 &&
+          grad_out.size(0) == out.size(0) && grad_out.size(1) == out.size(1) &&
+          grad_out.size(2) == out.size(2) && grad_out.size(3) == out.size(3),
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: grad_out and out should have the same shape of {(B), H, T, K}");
   TORCH_INTERNAL_ASSERT(
       query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: Accept only 4 dims inputs shape of {(B), H, T, K}");
@@ -295,9 +294,8 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
           (key.size(2) == value.size(2)),
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: K/V should have the same batch / seq / num_head");
   TORCH_INTERNAL_ASSERT(
-      query.size(0) == grad_out.size(0) &&
-      query.size(1) == grad_out.size(1) &&
-      query.size(2) == grad_out.size(2),
+      query.size(0) == grad_out.size(0) && query.size(1) == grad_out.size(1) &&
+          query.size(2) == grad_out.size(2),
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: Q should have the same batch / num_head / seq_len as grad_out");
   TORCH_INTERNAL_ASSERT(
       query.size(3) == key.size(3),
@@ -311,8 +309,8 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
   TORCH_INTERNAL_ASSERT(
       dropout_p == 0.0,
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: Currently do not support dropout > 0");
-  TORCH_INTERNAL_ASSERT(logsumexp.dim() == 3 &&
-      logsumexp.size(0) == query.size(0) &&
+  TORCH_INTERNAL_ASSERT(
+      logsumexp.dim() == 3 && logsumexp.size(0) == query.size(0) &&
       logsumexp.size(1) == query.size(1) &&
       logsumexp.size(2) == query.size(2) &&
       "scaled_dot_product_fused_attention_overrideable_backward_xpu: logsumexp should have the shape of {(B), H, T}");
