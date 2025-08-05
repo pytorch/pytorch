@@ -24,6 +24,7 @@ from torch.optim import (
     Adamax,
     AdamW,
     ASGD,
+    Muon,
     NAdam,
     RAdam,
     RMSprop,
@@ -418,6 +419,10 @@ def check_optim(
     if optim_cls is NAdam:
         atol = 1.5e-5
         rtol = 1.7e-5
+
+    if optim_cls is Muon:
+        atol = 3e-4
+        rtol = 5e-5
 
     self.assertEqual(list(params_eager), list(params_compiled), atol=atol, rtol=rtol)
 

@@ -17,6 +17,11 @@ from .optimizer import _get_scalar_dtype, _to_scalar, Optimizer, ParamsT
 
 __all__ = ["Muon"]
 
+EPS = 1e-7
+DEFAULT_A = 3.4445
+DEFAULT_B = -4.7750
+DEFAULT_C = 2.0315
+
 
 @dataclass
 class BaseMsignFnConfig:
@@ -27,7 +32,7 @@ class BaseMsignFnConfig:
 class NewtonSchulzConfig(BaseMsignFnConfig):
     # """Configuration used by :func:`zeropower_via_newtonschulz`."""
 
-    coefficients: tuple[float, float, float] = (3.4445, -4.7750, 2.0315)
+    coefficients: tuple[float, float, float] = (DEFAULT_A, DEFAULT_B, DEFAULT_C)
     ns_steps: int = 5
 
 
@@ -61,7 +66,7 @@ def zeropower_via_newtonschulz(G: Tensor, ns_config: BaseMsignFnConfig) -> Tenso
     if G.size(0) > G.size(1):
         X = X.T
     # Ensure spectral norm is at most 1
-    X = X / (X.norm() + 1e-7)
+    X = X / (X.norm() + EPS)
     # Perform the NS iterations
     for _ in range(steps):
         A = X @ X.T
