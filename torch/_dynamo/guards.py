@@ -38,6 +38,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+from typing_extensions import TypeAliasType, TypeVar
 from weakref import ReferenceType
 
 import torch
@@ -192,7 +193,7 @@ if TYPE_CHECKING:
     from torch._C import DispatchKeySet
     from torch._dynamo.output_graph import OutputGraph
 
-
+T = TypeVar("T")
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
 recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
@@ -587,7 +588,7 @@ class GuardManagerWrapper:
         visit(self.root)
 
 
-def from_numpy(a: Any) -> Any:
+def from_numpy(a: Any) -> torch.Tensor:
     # If not numpy array, piggy back on e.g. tensor guards to check type
     # Re-enable torch function since we disable it on leaf guards
     # we need it to properly construct the tensor if a default device is set
@@ -2399,9 +2400,9 @@ class GuardBuilder(GuardBuilderBase):
 
             def _get_code_parts(langs: tuple[str, ...]) -> list[_ShapeGuardsHelper]:
                 return output_graph.shape_env.produce_guards_verbose(
-                    [a.fake for a in fs],
+                    [a.fake for a in fs],  # type: ignore[misc]
                     [a.source for a in fs],
-                    input_contexts=input_contexts,
+                    input_contexts=input_contexts,  # type: ignore[arg-type]
                     equalities_inputs=equalities_inputs,
                     source_ref=self.source_ref,
                     # Export keeps static.
@@ -3356,7 +3357,7 @@ class CheckFunctionManager:
                 k: v
                 for k, v in output_graph_guards_state.global_scope[
                     builtins_dict_name
-                ].items()
+                ].items()  # type: ignore[attr-defined]
                 if k in self.used_builtin_vars
             }
             output_graph_guards_state = dataclasses.replace(
@@ -3384,7 +3385,7 @@ class CheckFunctionManager:
                 ),
             )
             guards_state = GuardsState(
-                output_graph=output_graph_guards_state,
+                output_graph=output_graph_guards_state,  # type: ignore[arg-type]
                 shape_code_parts=self.shape_code_parts,
             )
             self.guards_state = pickle_guards_state(guards_state)
@@ -3793,7 +3794,7 @@ def make_torch_function_mode_stack_guard(
     return check_torch_function_mode_stack
 
 
-Scope = dict[str, object]
+Scope = TypeAliasType("Scope", dict[str, object])
 
 
 def recompilation_reason_for_no_tensor_aliasing_guard(
@@ -3838,10 +3839,8 @@ def get_guard_fail_reason_helper(
     Updates `guard_failures` with the generated reason.
     Only the first failed check of guard_manager is reported.
     """
-    assert (
-        guard_manager.global_scope is not None
-        and guard_manager.closure_vars is not None
-    )
+    assert guard_manager.global_scope is not None
+    assert guard_manager.closure_vars is not None
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
     reasons: list[str] = []
@@ -4036,7 +4035,7 @@ def guard_error_hook(
 set_guard_error_hook(guard_error_hook)
 
 
-def unique(seq: Sequence[Any]) -> Generator[Any, None, None]:
+def unique(seq: Sequence[T]) -> Generator[T, None, None]:
     seen = set()
     for x in seq:
         if x not in seen:

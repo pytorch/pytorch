@@ -31,7 +31,7 @@ import re
 import sys
 import traceback
 import weakref
-from collections.abc import Generator,  Sequence
+from collections.abc import Generator, Sequence
 from dataclasses import dataclass, field as dc_field
 from types import CodeType
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
