@@ -43,6 +43,7 @@ __all__ = [
     "SequentialLR",
     "CosineAnnealingLR",
     "ChainedScheduler",
+    "ParamwiseScheduler",
     "ReduceLROnPlateau",
     "CyclicLR",
     "CosineAnnealingWarmRestarts",
@@ -1190,6 +1191,150 @@ class ChainedScheduler(LRScheduler):
         self._last_lr = [
             group["lr"] for group in self._schedulers[-1].optimizer.param_groups
         ]
+
+    @override
+    def state_dict(self) -> dict[str, Any]:
+        """Return the state of the scheduler as a :class:`dict`.
+
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer.
+        The wrapped scheduler states will also be saved.
+        """
+        state_dict = {
+            key: value
+            for key, value in self.__dict__.items()
+            if key not in ("optimizer", "_schedulers")
+        }
+        state_dict["_schedulers"] = [None] * len(self._schedulers)
+
+        for idx, s in enumerate(self._schedulers):
+            state_dict["_schedulers"][idx] = s.state_dict()
+
+        return state_dict
+
+    @override
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Load the scheduler's state.
+
+        Args:
+            state_dict (dict): scheduler state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        _schedulers = state_dict.pop("_schedulers")
+        self.__dict__.update(state_dict)
+        # Restore state_dict keys in order to prevent side effects
+        # https://github.com/pytorch/pytorch/issues/32756
+        state_dict["_schedulers"] = _schedulers
+
+        for idx, s in enumerate(_schedulers):
+            self._schedulers[idx].load_state_dict(s)
+
+
+class ParamwiseScheduler(LRScheduler):
+    """Applies a different learning rate scheduler to each parameter group.
+
+    This scheduler is useful when you want to apply different learning rate
+    scheduling policies to different parts of your model. A common use case is
+    in fine-tuning a pre-trained model, where the newly added layers (classifier head)
+    might use a more aggressive learning rate schedule than the pre-trained base layers.
+
+    The number of schedulers provided must match the number of parameter groups
+    in the optimizer. Each scheduler will control the learning rate for the
+    corresponding parameter group.
+
+    Args:
+        schedulers (Sequence[LRScheduler]): A list of learning rate schedulers.
+            The length of this list must be equal to the number of parameter
+            groups in the optimizer. All schedulers must be attached to the
+            same optimizer instance.
+
+    Example:
+        >>> # Assuming a model with a 'base' and a 'head' part
+        >>> from torch.optim import Adam
+        >>> from torch.optim.lr_scheduler import StepLR, ExponentialLR
+        >>>
+        >>> param_groups = [
+        ...     {"params": model.base.parameters(), "lr": 0.0001},
+        ...     {"params": model.head.parameters(), "lr": 0.001},
+        ... ]
+        >>> optimizer = Adam(param_groups)
+        >>>
+        >>> # Apply a StepLR to the base and an ExponentialLR to the head
+        >>> scheduler1 = StepLR(optimizer, step_size=10, gamma=0.1)
+        >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
+        >>>
+        >>> # The ParamwiseScheduler coordinates them
+        >>> scheduler = ParamwiseScheduler([scheduler1, scheduler2])
+        >>>
+        >>> # During training loop
+        >>> scheduler.step()
+    """
+
+    def __init__(self, schedulers: Sequence[LRScheduler]):
+        self._schedulers = schedulers
+        self.optimizer = schedulers[0].optimizer  # Assuming all schedulers use the same optimizer
+
+        # Ensure the number of schedulers matches the number of parameter groups.
+        if len(schedulers) != len(self.optimizer.param_groups):
+            raise ValueError(
+                "Number of schedulers must match the number of parameter groups "
+                f"in the optimizer. Got {len(schedulers)} schedulers and "
+                f"{len(self.optimizer.param_groups)} parameter groups."
+            )
+        # Ensure all schedulers are linked to the *exact same* optimizer instance.
+        if not all(s.optimizer is self.optimizer for s in schedulers):
+            raise ValueError("All schedulers must use the same optimizer instance.")
+
+        # Reset learning rates back to initial values
+        for group in self.optimizer.param_groups:
+            group["lr"] = group["initial_lr"]
+
+        # "Undo" the step performed by other schedulers
+        self.recursive_undo()
+
+        # Do initial step
+        self._initial_step()
+
+        self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
+
+    def recursive_undo(self, sched=None):
+        """
+        Recursively undo any step performed by the initialisation of
+        schedulers.
+        """
+        scheds = self if sched is None else sched
+
+        if hasattr(scheds, "_schedulers"):
+            for s in scheds._schedulers:
+                self.recursive_undo(s)
+        elif hasattr(scheds, "last_epoch"):
+            scheds.last_epoch -= 1
+
+    def step(self):  # type: ignore[override]
+        """Perform a step."""
+        # Backup learning rates
+        lrs = [group["lr"] for group in self.optimizer.param_groups]
+
+        # Update each scheduler's learning rate
+        for scheduler in self._schedulers:
+            if self._is_initial:
+                scheduler._initial_step()
+            else:
+                scheduler.step()
+
+            # Reset LR for the next scheduler
+            for param_group, lr in zip(self.optimizer.param_groups, lrs):
+                param_group["lr"] = lr
+
+        # Now update the optimizer's parameter groups with the new learning rates
+        for idx, (param_group, scheduler) in enumerate(
+            zip(self.optimizer.param_groups, self._schedulers)
+        ):
+            # The scheduler provides one learning rate for each parameter group
+            # So only take the correct ones by indexing
+            param_group["lr"] = scheduler.get_last_lr()[idx]
+
+        self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
 
     @override
     def state_dict(self) -> dict[str, Any]:
