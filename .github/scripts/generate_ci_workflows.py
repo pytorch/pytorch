@@ -179,7 +179,6 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
             arches=["12.6", "12.8", "12.9"],
             python_versions=["3.9"],
         ),
-        use_sequential=True,
         branches="main",
     ),
     # See https://github.com/pytorch/pytorch/issues/138750
