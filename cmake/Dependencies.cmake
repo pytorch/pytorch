@@ -1166,17 +1166,10 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     # Tensorpipe uses cuda_add_library
     torch_update_find_cuda_flags()
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-      message(WARNING "Archived TensorPipe forces CMake compatibility mode")
-      set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-    endif()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
     # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-      unset(CMAKE_POLICY_VERSION_MINIMUM)
-    endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
