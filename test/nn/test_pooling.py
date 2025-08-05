@@ -376,7 +376,6 @@ class TestPoolingNN(NNTestCase):
         self.assertFalse(torch.isinf(out).any())
         self.assertFalse(torch.isnan(out).any())
 
-    @expectedFailureMPS  # MaxUnpool2D not implemented
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
         mu = nn.MaxUnpool2d(3, stride=2)
