@@ -64,6 +64,7 @@ class BinaryBuildWorkflow:
     use_split_build: bool = False
     # Mainly used for libtorch builds
     build_variant: str = ""
+    use_sequential: bool = False
 
     def __post_init__(self) -> None:
         if self.build_environment == "":
