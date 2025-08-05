@@ -70,7 +70,7 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.fp32_precision = 'ieee'
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
@@ -581,7 +581,9 @@ class TestMaxAutotune(TestCase):
         self.assertTrue(torch.allclose(act, ref, atol=4 * 1e-3, rtol=4 * 1e-3))
 
     @config.patch(max_autotune=True)
-    def test_empty_conv_input(self, kernel_size=3):
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    @parametrize("kernel_size", (1, 3))
+    def test_empty_conv_input(self, search_space, kernel_size):
         x = torch.randn(0, 256, 14, 14, device=GPU_TYPE)
         weight = torch.randn(256, 256, kernel_size, kernel_size, device=GPU_TYPE)
 
@@ -598,14 +600,11 @@ class TestMaxAutotune(TestCase):
                 groups=1,
             )
 
-        opt_f = torch.compile(f)
-        ref = f(x, weight)
-        act = opt_f(x, weight)
-        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
-
-    @config.patch(max_autotune=True)
-    def test_empty_conv_input_with_1x1_kernel(self):
-        self.test_empty_conv_input(kernel_size=1)
+        with config.patch({"max_autotune_gemm_search_space": search_space}):
+            opt_f = torch.compile(f)
+            ref = f(x, weight)
+            act = opt_f(x, weight)
+            self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
 
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_baddmm(self):

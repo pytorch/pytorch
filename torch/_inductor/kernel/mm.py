@@ -802,7 +802,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
         for config in extra_mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -869,6 +872,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     )
+    dtype = mat1.get_dtype()
 
     if use_cutlass and _use_cutlass_for_op("int_mm"):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
@@ -879,7 +883,10 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_triton_template(layout, enable_int32=True):
         for config in int8_mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             mm_template.maybe_append_choice(
                 choices,
