@@ -1217,6 +1217,13 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 128): FlexConfig(128, 64, 1, 16),
             (torch.float16, 256): FlexConfig(32, 64, 1, 4),
         }
+        self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
+            FlexConfig(128, 64, 3, 4),
+            FlexConfig(128, 128, 3, 4),
+            FlexConfig(128, 128, 2, 8),
+            FlexConfig(64, 128, 3, 4),
+            FlexConfig(64, 64, 3, 4),
+        ]
 
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
