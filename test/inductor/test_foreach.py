@@ -1122,6 +1122,17 @@ class ForeachTests(TestCase):
                 non_pointwise, (x,), (y,), assert_fused=True
             )
 
+    def test_foreach_map_assert_fused_multi_pointwise(self):
+        def fn(a, b):
+            tmp = a + b
+            return tmp * 2.0
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        compiled = torch.compile(foreach_map, fullgraph=True)
+        compiled(fn, (x,), (y,), assert_fused=True)
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
