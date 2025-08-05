@@ -77,6 +77,10 @@ else:
             self.flatten_name_to_root_dims: dict[
                 DeviceMesh, dict[str, tuple[int, ...]]
             ] = {}
+            self.root_to_unflatten_mesh: dict[
+                DeviceMesh, dict[str, set[DeviceMesh]]
+            ] = {}
+            self.unflatten_name_to_root_numel: dict[DeviceMesh, dict[str, int]] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -109,9 +113,9 @@ else:
             # keep track of the number of dims that have been flattened so we can get the correct slice_dim_idx in the
             # flattened mesh tensor.
             num_dims_flatten = 0
+            # Currently, this only allows slicing out a contiguous flattened dim.
+            # TODO: we need to handle reconstructing a non-contiguous flattened dim.
             for mesh_dim_indices, mesh_dim_name in zip(submesh_dims, submesh_dim_names):
-                # Currently, this only allows slicing out a contiguous flattened dim.
-                # TODO: we need to handle reconstructing a non-contiguous flattened dim.
                 if len(mesh_dim_indices) > 1:
                     # We need to move the start_dim and end_dim to the left if some dims are already flattened.
                     mesh_tensor = mesh_tensor.flatten(
@@ -162,7 +166,9 @@ else:
                     res_submesh = submesh
 
             res_submesh._dim_group_names = slice_dim_group_name  # type: ignore[possibly-undefined, has-type]
-            self.child_to_root_mapping[res_submesh] = device_mesh
+            self.child_to_root_mapping[res_submesh] = _mesh_resources.get_root_mesh(
+                device_mesh
+            )
 
             return res_submesh
 
@@ -177,10 +183,16 @@ else:
         ) -> "DeviceMesh":
             root_mesh = _mesh_resources.get_root_mesh(device_mesh)
 
-            flatten_dims_in_root = [
-                not_none(root_mesh.mesh_dim_names).index(flatten_mesh_dim_name)
-                for flatten_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
-            ]
+            try:
+                flatten_dims_in_root = [
+                    not_none(root_mesh.mesh_dim_names).index(flatten_mesh_dim_name)
+                    for flatten_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
+                ]
+            except ValueError as err:
+                raise NotImplementedError(
+                    f"Cannot find {device_mesh.mesh_dim_names} in the root mesh {root_mesh}."
+                    "This means you are trying to flatten a unflattened submesh, which is not supported yet. "
+                ) from err
 
             if not mesh_dim_name:
                 mesh_dim_name = "_".join(not_none(device_mesh.mesh_dim_names))
@@ -237,6 +249,186 @@ else:
             )  # type: ignore[possibly-undefined]
 
             return res_flattened_mesh
+
+        def create_unflatten_mesh(
+            self,
+            device_mesh: "DeviceMesh",
+            dim: Union[int, str],
+            mesh_sizes: tuple[int, ...],
+            mesh_dim_names: tuple[str, ...],
+        ) -> "DeviceMesh":
+            unflatten_idx = dim
+            if isinstance(unflatten_idx, str):
+                unflatten_idx = not_none(device_mesh.mesh_dim_names).index(
+                    unflatten_idx
+                )
+            if math.prod(mesh_sizes) != device_mesh.mesh.size(unflatten_idx):
+                raise ValueError(
+                    f"Cannot unflatten {dim} into {mesh_sizes}."
+                    f"The size {mesh_sizes} does not match dize of {dim}."
+                )
+
+            # Since we only support unflattened on a contiguous mesh, we relies on the accumulated numel
+            # to detect whether one dim_name has been unflatten into a different shape before. And this
+            # includes both root mesh and all unflattened meshes.
+            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+            root_numel_mapping = {}
+            root_numel = 1
+            for idx, mesh_dim_name in enumerate(not_none(root_mesh.mesh_dim_names)):
+                root_numel *= root_mesh.mesh.size(idx)
+                root_numel_mapping[mesh_dim_name] = root_numel
+
+            # Calculate the start and end index of the submesh in the root mesh.
+            start_idx_in_root = not_none(root_mesh.mesh_dim_names).index(
+                not_none(device_mesh.mesh_dim_names)[0]
+            )
+            end_idx_in_root = not_none(root_mesh.mesh_dim_names).index(
+                not_none(device_mesh.mesh_dim_names)[-1]
+            )
+            mesh_start_numel_in_root = math.prod(
+                root_mesh.mesh.size()[:start_idx_in_root]
+            )
+            mesh_remaining_numel_in_root = math.prod(
+                root_mesh.mesh.size()[end_idx_in_root + 1 :]
+            )
+            dim_start_numel = math.prod(device_mesh.mesh.size()[:unflatten_idx])
+            dim_remaining_numel = math.prod(
+                device_mesh.mesh.size()[unflatten_idx + 1 :]
+            )
+            unflatten_numel_in_root = mesh_start_numel_in_root * dim_start_numel
+            unchanged_dim_numel = 1
+            unflatten_dim_numel = 1
+            unflatten_sub_mesh_dim_sizes = []
+            unflatten_sub_dim_names = []
+            numel_mapping = (
+                self.unflatten_name_to_root_numel.get(root_mesh, {})
+                | root_numel_mapping
+            )
+            unflatten_numel_map = {}
+            # We need to check whether one dim_name is used in unflatten into more than one shape/dim.
+            # For example, if we have already unflatten into a 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp, "cp", "tp")
+            # and we want to unflatten into a 2D mesh with mesh_shape (4, 2) mesh_dim_names ("dp", "cp"), this is wrong.
+            # But unflatten into another 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp, "ep", "ep_tp") is legit.
+            # This is allowed and we will reuse the PG created on the "dp" dimension.
+            for idx, mesh_dim_name in enumerate(mesh_dim_names):
+                unflatten_numel_in_root *= mesh_sizes[idx]
+                if mesh_dim_name in numel_mapping:
+                    # Case when one dim name has been unflatten into and now it is used to unflatten into another shape.
+                    if numel_mapping[mesh_dim_name] != unflatten_numel_in_root:
+                        raise RuntimeError(
+                            f"You are trying to use {mesh_dim_name} on dim {dim} to unflatten into different shapes."
+                            f"This causes ambiguity in and please use another dim name."
+                        )
+                    # Case when one dim name has been unflatten into and now it is used to unflatten into same shape.
+                    else:
+                        # Reuse the existing pg
+                        unchanged_dim_numel *= mesh_sizes[idx]
+                else:
+                    # This dim name has never been unflatten into, and we need to create a new PG.
+                    unflatten_dim_numel *= mesh_sizes[idx]
+                    unflatten_sub_mesh_dim_sizes.append(mesh_sizes[idx])
+                    unflatten_sub_dim_names.append(mesh_dim_name)
+                    unflatten_numel_map[mesh_dim_name] = unflatten_numel_in_root
+
+            self.unflatten_name_to_root_numel.setdefault(root_mesh, {}).update(
+                unflatten_numel_map
+            )
+
+            # Step one: create new PGs for the unflatten dims.
+            pg_ranks_by_dim = (
+                root_mesh.mesh.view(
+                    mesh_start_numel_in_root * dim_start_numel * unchanged_dim_numel,
+                    unflatten_dim_numel,
+                    mesh_remaining_numel_in_root * dim_remaining_numel,
+                )
+                .permute(0, 2, 1)
+                .reshape(-1, *unflatten_sub_mesh_dim_sizes)
+            )
+
+            cur_rank = root_mesh.get_rank()
+            for mesh_nd in pg_ranks_by_dim:
+                # need to init backend here since the unflatten dim has no pg created.
+                mesh = DeviceMesh(
+                    root_mesh.device_type,
+                    mesh_nd,
+                    mesh_dim_names=(*unflatten_sub_dim_names,),
+                )
+                if cur_rank in mesh_nd:
+                    unflatten_sub_mesh = mesh
+
+            # Step two: create the device mesh by combining the newly created PGs and existing PGs.
+            new_mesh_size = (
+                device_mesh.mesh.size()[:unflatten_idx]
+                + mesh_sizes
+                + device_mesh.mesh.size()[unflatten_idx + 1 :]
+            )
+            new_mesh_dim_names = (
+                not_none(device_mesh.mesh_dim_names)[:unflatten_idx]
+                + mesh_dim_names
+                + not_none(device_mesh.mesh_dim_names)[unflatten_idx + 1 :]
+            )
+            pg_ranks_by_dim = (
+                root_mesh.mesh.view(
+                    mesh_start_numel_in_root,
+                    math.prod(new_mesh_size),
+                    mesh_remaining_numel_in_root,
+                )
+                .permute(0, 2, 1)
+                .reshape(-1, *new_mesh_size)
+            )
+            # We need to create a new device mesh with partially created new PGs and partially existing PGs.
+            for mesh_nd in pg_ranks_by_dim:
+                unflatten_mesh = DeviceMesh(
+                    device_mesh.device_type,
+                    mesh_nd,
+                    mesh_dim_names=(*new_mesh_dim_names,),
+                    _init_backend=False,
+                )
+                if cur_rank in mesh_nd:
+                    unflatten_mesh._dim_group_names = [""] * len(new_mesh_dim_names)  # type: ignore[possibly-undefined, has-type]
+                    for idx, mesh_dim_name in enumerate(new_mesh_dim_names):
+                        # Case one: when the pg is created in an unflatten mesh.
+                        if mesh_dim_name in self.root_to_unflatten_mesh.get(
+                            root_mesh, {}
+                        ):
+                            existing_unflatten_mesh = next(
+                                iter(
+                                    self.root_to_unflatten_mesh[root_mesh][
+                                        mesh_dim_name
+                                    ]
+                                )
+                            )
+                            dim_idx = not_none(
+                                existing_unflatten_mesh.mesh_dim_names
+                            ).index(mesh_dim_name)
+                            unflatten_mesh._dim_group_names[idx] = (
+                                existing_unflatten_mesh._dim_group_names[dim_idx]
+                            )
+                        # Case two: when the pg is created in root mesh.
+                        elif mesh_dim_name in not_none(root_mesh.mesh_dim_names):
+                            dim_idx = not_none(root_mesh.mesh_dim_names).index(
+                                mesh_dim_name
+                            )
+                            unflatten_mesh._dim_group_names[idx] = (
+                                root_mesh._dim_group_names[dim_idx]  # type: ignore[possibly-undefined]
+                            )
+                        # Case three: when the pg is created in the sub-mesh above.
+                        else:
+                            dim_idx = unflatten_sub_dim_names.index(mesh_dim_name)
+                            unflatten_mesh._dim_group_names[idx] = (
+                                unflatten_sub_mesh._dim_group_names[dim_idx]  # type: ignore[possibly-undefined]
+                            )
+
+                    # This condition will be only called once, so this assignment won't be called again.
+                    res_unflatten_mesh = unflatten_mesh  # type: ignore[possibly-undefined]
+
+            self.child_to_root_mapping[res_unflatten_mesh] = root_mesh  # type: ignore[possibly-undefined]
+            for mesh_dim_name in mesh_dim_names:
+                self.root_to_unflatten_mesh.setdefault(root_mesh, {}).setdefault(
+                    mesh_dim_name, set()
+                ).add(res_unflatten_mesh)  # type: ignore[possibly-undefined]
+
+            return res_unflatten_mesh
 
         def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
             # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
@@ -295,6 +487,35 @@ else:
             pg_options: Optional[C10dBackend.Options] = None,
         ) -> None:
             self.mesh_dim_group_options[dim] = (backend, pg_options)
+
+        def _find_mesh_to_slice(self, device_mesh, mesh_dim_names) -> "DeviceMesh":
+            # If user don't slice from root mesh, the mesh have to contain all sliced mesh dim names.
+            if device_mesh != self.get_root_mesh(device_mesh):
+                return device_mesh
+
+            # If user slice from root mesh, we will swap to unflattened mesh if users specify any unflatten dims.
+            mesh_to_slice = self.root_to_unflatten_mesh.get(device_mesh, {}).get(
+                mesh_dim_names[0], set()
+            )
+            has_unflatten_dim = False
+            for mesh_dim_name in mesh_dim_names:
+                unflatten_mesh_set = self.root_to_unflatten_mesh.get(
+                    device_mesh, {}
+                ).get(mesh_dim_name, set())
+                mesh_to_slice &= unflatten_mesh_set
+                if len(unflatten_mesh_set) > 0:
+                    has_unflatten_dim = True
+
+            if not has_unflatten_dim:
+                return device_mesh
+
+            if len(mesh_to_slice) == 0:
+                raise RuntimeError(
+                    "Cannot find the mesh to slice from. Because the mesh dim names you are "
+                    "trying to slice does not map to any existing unflatten mesh."
+                )
+
+            return next(iter(mesh_to_slice))
 
         def _get_slice_mesh_dims(
             self, device_mesh, mesh_dim_names
@@ -772,8 +993,9 @@ else:
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             else:
+                device_mesh = _mesh_resources._find_mesh_to_slice(self, mesh_dim_names)
                 slice_mesh_dims = _mesh_resources._get_slice_mesh_dims(
-                    self, mesh_dim_names
+                    device_mesh, mesh_dim_names
                 )
                 # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
                 # fail as it will require a real tensor to manipulate.
@@ -786,7 +1008,7 @@ else:
                 # TODO: compiler + device_mesh slicing.
                 with torch._subclasses.fake_tensor.unset_fake_temporarily():
                     submesh = _mesh_resources.create_sub_mesh(
-                        self, mesh_dim_names, slice_mesh_dims
+                        device_mesh, mesh_dim_names, slice_mesh_dims
                     )
                 return submesh
 
@@ -1035,6 +1257,46 @@ else:
 
             return _mesh_resources.create_flatten_mesh(
                 self, mesh_dim_name, backend_override_tuple
+            )
+
+        def _unflatten(
+            self,
+            dim: Union[int, str],
+            mesh_sizes: tuple[int, ...],
+            mesh_dim_names: tuple[str, ...],
+        ) -> "DeviceMesh":
+            """
+            Returns a DeviceMesh by unflatten the current DeviceMesh.
+
+            This api can be used to unflatten a N-D DeviceMesh into N-1+len(mesh_sizes)-D meshes or submeshes.
+            The dim is the dimension to be unflattened which can be either a string or an integer.
+            The mesh_sizes is a tuple which specifies the shape of the mesh unflatten into for the given dim.
+            The mesh_dim_names is a list of strings which specifies the names of the dimensions of the mesh unflatten into.
+            Its length must match the length of mesh_sizes.
+
+            For example, if we have a 1D mesh DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7], mesh_dim_names=("world")),
+            calling mesh_1d._unflatten(0, (2, 2, 4), ["dp", "pp", "tp"]) will create a 3D mesh
+            DeviceMesh([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], mesh_dim_names=("dp", "cp", "tp")).
+
+            After calling the unflatten, to access the unflattened dimension in mesh_1d, one can use the
+            existing slicing method to obtain the unflattened mesh through calling mesh_1d["dp"].
+            """
+            if isinstance(dim, int):
+                assert dim < self.ndim, (
+                    f"dim {dim} specified in `_unflatten` is out of range {self.ndim}"
+                )
+            elif isinstance(dim, str):
+                assert dim in not_none(self.mesh_dim_names), (
+                    f"dim {dim} specified in `_unflatten` is not in {self.mesh_dim_names}"
+                )
+
+            if len(mesh_sizes) != len(mesh_dim_names):
+                raise RuntimeError(
+                    "mesh_dim_names must have same length as mesh_sizes in _unflatten!"
+                )
+
+            return _mesh_resources.create_unflatten_mesh(
+                self, dim, mesh_sizes, mesh_dim_names
             )
 
     def _normalize_backend_override(
