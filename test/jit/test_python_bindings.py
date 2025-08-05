@@ -2,15 +2,8 @@
 
 import torch
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TestPythonBindings\n\n"
-        "instead."
-    )
 
 
 class TestPythonBindings(JitTestCase):
@@ -114,3 +107,7 @@ graph(%p207 : Tensor,
         graph3 = torch._C.parse_ir(ir)
         graph3 = torch._C._jit_pass_canonicalize(graph3, False)
         FileCheck().check_not("%p207").run(graph3)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

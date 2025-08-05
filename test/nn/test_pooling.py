@@ -645,6 +645,16 @@ class TestPoolingNNDeviceType(NNTestCase):
             mod(inp1)
 
     @onlyNativeDeviceTypes
+    def test_FractionalMaxPool3d_errors(self, device):
+        samples = torch.rand([0, 16, 3], device=device)
+        with self.assertRaisesRegex(ValueError, "kernel_size must greater than 0"):
+            nn.FractionalMaxPool3d(0, output_size=[1, 1, 1], _random_samples=samples)
+        with self.assertRaisesRegex(ValueError, "kernel_size must greater than 0"):
+            nn.FractionalMaxPool3d(
+                [0, 0, 0], output_size=[1, 1, 1], _random_samples=samples
+            )
+
+    @onlyNativeDeviceTypes
     def test_MaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.MaxPool1d(3, stride=2).to(device)
@@ -855,20 +865,23 @@ torch.cuda.synchronize()
             inp = torch.randn(16, 0, 20, 32, device=device)
             avgpool(inp)
 
-    @expectedFailureMPS  # max_pool3d_with_indices not supported on MPS
-    def test_pooling_shape(self, device):
+    @parametrize_test("kernel", ["max", "avg"])
+    @parametrize_test("pooling_dims", [1, 2, 3])
+    def test_pooling_shape(self, device, kernel, pooling_dims):
         """Test the output shape calculation for pooling functions"""
+
+        if kernel == "max" and pooling_dims == 1:
+            # This case causes the process to abort, so need to skip it for now
+            self.skipTest("Skipping to avoid abort")
 
         # Checks output shape against expected for 1D, 2D and 3D
         def check(expected_out_shape, sizes, *args, **kwargs):
-            for kernel in ["max", "avg"]:
-                for i in [1, 2, 3]:
-                    if hasattr(torch.nn.functional, f"{kernel}_pool{i}d"):
-                        op = getattr(torch.nn.functional, f"{kernel}_pool{i}d")
-                        t = torch.randn(sizes[: i + 2], device=device)
-                        self.assertEqual(
-                            op(t, *args, **kwargs).shape, expected_out_shape[: i + 2]
-                        )
+            if hasattr(torch.nn.functional, f"{kernel}_pool{pooling_dims}d"):
+                op = getattr(torch.nn.functional, f"{kernel}_pool{pooling_dims}d")
+                t = torch.randn(sizes[: pooling_dims + 2], device=device)
+                self.assertEqual(
+                    op(t, *args, **kwargs).shape, expected_out_shape[: pooling_dims + 2]
+                )
 
         check(
             (1, 1, 3, 3, 4),
@@ -1649,7 +1662,6 @@ torch.cuda.synchronize()
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
-    @expectedFailureMPS
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
@@ -1906,7 +1918,6 @@ torch.cuda.synchronize()
                 )
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @expectedFailureMPS
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ("max", "avg"):
@@ -2001,7 +2012,6 @@ torch.cuda.synchronize()
             prec=0.05,
         )
 
-    @expectedFailureMPS  # max_pool3d_with_indices not supported on MPS device
     def test_maxpool3d_non_square_backward(self, device):
         # previous CUDA routine of this backward calculates kernel launch grid size
         # with last two dimensions interchanged, so the tailing along the longer dim

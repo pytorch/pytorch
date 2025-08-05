@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -47,10 +47,11 @@ def enable_symm_mem_for_group(group_name: str) -> None:
 
 
 _is_test_mode: bool = False
+_mocked_group_names: Optional[set[str]] = None
 
 
 @contextmanager
-def _test_mode() -> Generator[None, None, None]:
+def _test_mode(group_names: Optional[set[str]] = None) -> Generator[None, None, None]:
     """
     Forces ``is_symm_mem_enabled_for_group()`` to return ``True`` and the ops
     defined in the ``symm_mem`` namespace to use fallback implementations.
@@ -58,12 +59,16 @@ def _test_mode() -> Generator[None, None, None]:
     The context manager is not thread safe.
     """
     global _is_test_mode
+    global _mocked_group_names
     prev = _is_test_mode
+    prev_group_names = _mocked_group_names
     try:
         _is_test_mode = True
+        _mocked_group_names = group_names
         yield
     finally:
         _is_test_mode = prev
+        _mocked_group_names = prev_group_names
 
 
 def is_symm_mem_enabled_for_group(group_name: str) -> bool:
@@ -73,7 +78,9 @@ def is_symm_mem_enabled_for_group(group_name: str) -> bool:
     Args:
         group_name (str): the name of the process group.
     """
-    return _is_test_mode or group_name in _group_name_to_store
+    if _is_test_mode:
+        return _mocked_group_names is None or group_name in _mocked_group_names
+    return group_name in _group_name_to_store
 
 
 _group_name_to_workspace_tensor: dict[str, Optional[torch.Tensor]] = {}
@@ -1235,7 +1242,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # To handle case where A is 3D+, reshape to 2D to prepare for mm which requires 2D inputs.
     A_2D_with_scatter_dim_0 = A_with_scatter_dim_0.flatten(0, -2)
 
-    # Parition A along the first dim to prepare for sharding across TP process group.
+    # Partition A along the first dim to prepare for sharding across TP process group.
     A_shards = A_2D_with_scatter_dim_0.chunk(group.size())
 
     # Now that 'A' is sharded along the first dim, we need to update its scale(s) accordingly.
@@ -1602,6 +1609,29 @@ def _low_contention_reduce_scatter(
         )
 
 
+@torch.library.impl(lib, "all_to_all_vdev_2d", "Meta")
+def _all_to_all_vdev_2d_meta(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    in_splits: torch.Tensor,
+    out_splits_offsets: torch.Tensor,
+    group_name: str,
+    major_align: Optional[int] = None,
+) -> None:
+    return None
+
+
+@torch.library.impl(lib, "all_to_all_vdev_2d_offset", "Meta")
+def _all_to_all_vdev_2d_offset_meta(
+    input: torch.Tensor,
+    out: torch.Tensor,
+    in_splits_offsets: torch.Tensor,
+    out_splits_offsets: torch.Tensor,
+    group_name: str,
+) -> None:
+    return None
+
+
 # =============================================================================
 # User-facing APIs
 # =============================================================================
@@ -1704,4 +1734,46 @@ def rendezvous(
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
-__all__ = ["empty", "rendezvous"]
+def is_nvshmem_available() -> bool:
+    r"""
+    is_nvshmem_available() -> bool
+
+    Check if NVSHMEM is available in current build and on current system.
+    """
+    try:
+        from torch._C._distributed_c10d import _is_nvshmem_available
+    except ImportError:
+        # Not all builds have NVSHMEM support.
+        return False
+
+    # Check if NVSHMEM is available on current system.
+    return _is_nvshmem_available()
+
+
+def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
+    r"""
+    Set the backend for symmetric memory allocation. This is a global setting
+    and affects all subsequent calls to
+    :func:`torch._distributed._symmetric_memory.empty()`.  Note that the backend
+    cannot be changed once a symmetric memory tensor has been allocated.
+
+    Args:
+        backend (str): the backend for symmetric memory allocation. Currently,
+        only "NVSHMEM", "CUDA", "NCCL" are supported.
+    """
+    _SymmetricMemory.set_backend(name)
+
+
+def get_backend(device: _device) -> Optional[str]:
+    r"""
+    Get the backend for symmetric memory allocation for a given device. If not
+    found, return None.
+
+    Args:
+        device (class:`torch.device` or str): the device for which to get the
+        backend.
+    """
+    return _SymmetricMemory.get_backend(torch.device(device))
+
+
+__all__ = ["empty", "rendezvous", "is_nvshmem_available", "set_backend", "get_backend"]

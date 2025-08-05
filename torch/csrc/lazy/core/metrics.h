@@ -232,7 +232,7 @@ TORCH_API std::string CreateMetricReport(
     const std::vector<std::string>& metric_names);
 
 // Returns the currently registered metric names. Note that the list can grow
-// since metrics are usually function intialized (they are static function
+// since metrics are usually function initialized (they are static function
 // variables).
 TORCH_API std::vector<std::string> GetMetricNames();
 
@@ -241,7 +241,7 @@ TORCH_API std::vector<std::string> GetMetricNames();
 TORCH_API MetricData* GetMetric(const std::string& name);
 
 // Returns the currently registered counter names. Note that the list can grow
-// since counters are usually function intialized (they are static function
+// since counters are usually function initialized (they are static function
 // variables).
 TORCH_API std::vector<std::string> GetCounterNames();
 

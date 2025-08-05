@@ -1069,7 +1069,7 @@ Tools for working with sparse compressed tensors
 ------------------------------------------------
 
 All sparse compressed tensors --- CSR, CSC, BSR, and BSC tensors ---
-are conceptionally very similar in that their indices data is split
+are conceptually very similar in that their indices data is split
 into two parts: so-called compressed indices that use the CSR
 encoding, and so-called plain indices that are orthogonal to the
 compressed indices. This allows various tools on these tensors to

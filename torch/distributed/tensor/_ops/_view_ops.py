@@ -10,8 +10,8 @@ from torch._prims_common import DimsType
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
+    OpSpec,
     OpStrategy,
-    PlacementStrategy,
     RuntimeSchemaInfo,
     StrategyType,
 )
@@ -300,7 +300,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
             Flatten((InputDim(1), InputDim(2)))
         )
 
-    - ouptut dimension 0 maps to input dimension 0
+    - output dimension 0 maps to input dimension 0
     - output dimension 1 maps to a flattened input dimensions 1 and 2
 
 
@@ -666,7 +666,7 @@ def register_op_strategy_map(
 
             output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
             output_strategy.strategies.append(
-                PlacementStrategy(
+                OpSpec(
                     output_specs=output_spec,
                     input_specs=(input_tgt_spec,),
                     redistribute_cost=redistribute_costs,
