@@ -7583,16 +7583,18 @@ def _constant_pad_nd_meta(input, pad, value=0):
         f"{l_inp} dimensions.",
     )
 
-    c_input = input
-    for i in range(l_diff, l_inp):
-        pad_idx = 2 * (l_inp - i - 1)
-        if pad[pad_idx] < 0:
-            c_input = c_input.narrow(i, -pad[pad_idx], c_input.shape[i] + pad[pad_idx])
+    if all(isinstance(p, int) and p <= 0 for p in pad):
+        c_input = input
+        for i in range(l_diff, l_inp):
+            pad_idx = 2 * (l_inp - i - 1)
+            if pad[pad_idx] < 0:
+                c_input = c_input.narrow(
+                    i, -pad[pad_idx], c_input.shape[i] + pad[pad_idx]
+                )
 
-        if pad[pad_idx + 1] < 0:
-            c_input = c_input.narrow(i, 0, c_input.shape[i] + pad[pad_idx + 1])
+            if pad[pad_idx + 1] < 0:
+                c_input = c_input.narrow(i, 0, c_input.shape[i] + pad[pad_idx + 1])
 
-    if all(p <= 0 for p in pad):
         return c_input.clone()
 
     new_shape = list(input_sizes[:l_diff])
