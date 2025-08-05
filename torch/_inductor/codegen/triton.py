@@ -26,7 +26,7 @@ from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
-from torch.utils._triton import has_triton_package
+from torch.utils._triton import has_triton_package, has_triton_stable_tma_api
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
@@ -951,10 +951,14 @@ class TritonOverrides(OpOverrides):
 
         if dtype == torch.bool:
             return f"({x} != 0)"
-        elif dtype == torch.uint8:
-            # to work around llvm uint conversion semantics
-            # that produces 0's for negative values
-            return f"{x}.to(tl.int8).to(tl.uint8)"
+        elif dtype == torch.uint8 and (
+            src_dtype is not None and src_dtype.is_floating_point or src_dtype is None
+        ):
+            # to work around llvm uint conversion semantics that produces 0's for negative
+            # values when converting from floating types.
+            # optimization - if source type is known and it's not a floating type, then
+            # do not apply conversion to the intermediate type.
+            return f"{x}.to(tl.int16).to(tl.uint8)"
 
         if use_compute_types:
             out_dtype = triton_compute_type(dtype)
@@ -1688,14 +1692,12 @@ class TMACompatibilityChecker:
     def can_use_tma(
         self,
     ) -> bool:
-        import triton
-
         if not (
             V.graph.get_current_device_or_throw().type == "cuda"
             and torch.cuda.get_device_capability()[0] >= 9
             and config.triton.use_tensor_descriptor
             and config.assume_aligned_inputs
-            and triton.__version__ >= "3.4.0"
+            and has_triton_stable_tma_api()
             # For CUDA The base ptr needs to be aligned
         ):
             log.debug(

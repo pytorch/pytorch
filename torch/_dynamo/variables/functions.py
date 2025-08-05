@@ -56,7 +56,13 @@ from ..exc import (
     Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
+from ..source import (
+    AttrSource,
+    ClosureSource,
+    ConstantSource,
+    DefaultsSource,
+    GetItemSource,
+)
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
@@ -161,7 +167,10 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
         elif name in spec.pos_default_map:
             idx = spec.pos_default_map[name]
             default_source = None
-            if fn_source:
+            if fn_source and not (
+                ConstantVariable.is_literal(spec.defaults[idx])
+                and config.skip_guards_on_constant_func_defaults
+            ):
                 default_source = DefaultsSource(fn_source, idx)
             ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
         else:
@@ -433,9 +442,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 cell_var = side_effects[cell]
 
             elif self.source:
-                closure_cell = GetItemSource(
-                    AttrSource(self.source, "__closure__"), idx
-                )
+                closure_cell = GetItemSource(ClosureSource(self.source), idx)
                 closure_cell_contents = AttrSource(closure_cell, "cell_contents")
                 try:
                     contents_var = VariableTracker.build(
@@ -1115,12 +1122,25 @@ class UserMethodVariable(UserFunctionVariable):
         return super().inspect_parameter_names()[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        source = self.source and AttrSource(self.source, name)
+        if name == "__func__":
+            # self.source points to the source of the function object and not
+            # the method object
+            return VariableTracker.build(tx, self.fn, self.source)
         if name == "__self__":
             return self.obj
-        if name == "__func__":
-            return VariableTracker.build(tx, self.fn, source)
         return super().var_getattr(tx, name)
+
+    def reconstruct(self, codegen):
+        if not self.obj.source or not self.source:
+            raise NotImplementedError
+
+        def get_bound_method():
+            codegen(self.source)
+            codegen.extend_output(codegen.create_load_attrs("__get__"))
+
+        codegen.add_push_null(get_bound_method)
+        codegen(self.obj.source)
+        codegen.extend_output(create_call_function(1, False))
 
 
 class WrappedUserMethodVariable(UserMethodVariable):

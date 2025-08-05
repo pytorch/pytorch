@@ -2063,22 +2063,24 @@ communication mechanism.
           .def("rank", &::c10d::ProcessGroup::getRank, R"(Get the rank of this process group.)")
           .def("size", &::c10d::ProcessGroup::getSize, R"(Get the size of this process group.)")
           .def("name", &::c10d::ProcessGroup::getBackendName, R"(Get the name of this process group.)")
+          .def("get_group_store", &::c10d::ProcessGroup::getStore, R"(Get the store of this process group.)")
           .def(
               "split_group",
               &::c10d::ProcessGroup::splitGroup,
               py::arg("ranks"),
               py::arg("timeout") = std::nullopt,
               py::arg("opts") = std::nullopt,
-              py::arg("groupDesc") = std::nullopt,
+              py::arg("group_name") = std::nullopt,
+              py::arg("group_desc") = std::nullopt,
               py::call_guard<py::gil_scoped_release>())
            .def(
               "merge_remote_group",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const c10::intrusive_ptr<::c10d::Store>& store,
-                 int size,
-                 std::chrono::milliseconds timeout,
-                 std::optional<std::string> groupName,
-                 std::optional<std::string> groupDesc) {
+                 const int& size,
+                 const std::chrono::milliseconds& timeout,
+                 const std::optional<std::string>& groupName,
+                 const std::optional<std::string>& groupDesc) {
                 ::c10d::ProcessGroup::MergeOptions opts;
                 opts.timeout = timeout;
                 opts.group_name = groupName;
@@ -3774,14 +3776,27 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 
   auto fakeProcessGroup =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeProcessGroup>(
-          module, "FakeProcessGroup", backend)
-          .def(
-              py::init([](int rank, int size) {
-                return c10::make_intrusive<::c10d::FakeProcessGroup>(
-                    rank, size);
-              }),
-              py::arg("rank"),
-              py::arg("world_size"));
+          module, "FakeProcessGroup", backend);
+  intrusive_ptr_class_<::c10d::FakeProcessGroup::Options>(
+      fakeProcessGroup, "Options", backendOptions)
+      .def(py::init())
+      .def_readwrite(
+          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option);
+  fakeProcessGroup
+      .def(
+          py::init([](int rank,
+                      int size,
+                      c10::intrusive_ptr<::c10d::FakeProcessGroup::Options>
+                          options) {
+            return c10::make_intrusive<::c10d::FakeProcessGroup>(
+                rank, size, std::move(options));
+          }),
+          py::arg("rank"),
+          py::arg("world_size"),
+          py::arg("options") =
+              c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+      .def_property_readonly(
+          "options", &::c10d::FakeProcessGroup::getBackendOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
           module, "FakeWork", work)

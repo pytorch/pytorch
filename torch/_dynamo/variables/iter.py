@@ -16,9 +16,8 @@ handling of iterator operations during code transformation and optimization.
 """
 
 import itertools
-import operator
 import sys
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -69,77 +68,6 @@ class ItertoolsVariable(VariableTracker):
             items = [
                 variables.TupleVariable(list(item)) for item in itertools.product(*seqs)
             ]
-            return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
-            )
-        elif self.value is itertools.accumulate:
-            from .builtin import BuiltinVariable
-
-            if any(key not in ["initial", "func"] for key in kwargs.keys()):
-                unimplemented_v2(
-                    gb_type="Unsupported kwargs for itertools.accumulate",
-                    context=f"call_function {self} {args} {kwargs}",
-                    explanation=f"Expected kwargs: 'initial', 'func', but got "
-                    f"{','.join(set(kwargs.keys()) - {'initial', 'func'})}",
-                    hints=[*graph_break_hints.USER_ERROR],
-                )
-
-            if len(args) in [1, 2] and args[0].has_unpack_var_sequence(tx):
-                seq = args[0].unpack_var_sequence(tx)
-
-                if "func" in kwargs and len(args) == 1:
-                    func = kwargs["func"].call_function
-                elif len(args) == 2:
-                    func = args[1].call_function
-                elif len(args) == 1:
-                    # Default to operator.add
-                    func = BuiltinVariable(operator.add).call_function
-                else:
-                    unimplemented_v2(
-                        gb_type="Unsupported `func` in itertools.accumulate",
-                        context=f"call_function {self} {args} {kwargs}",
-                        explanation="Dynamo does not know how to get the "
-                        "function to use for itertools.accumulate. "
-                        "itertools.accumulate expects the `func` as the second "
-                        "argument or as a keyword argument.",
-                        hints=[*graph_break_hints.USER_ERROR],
-                    )
-            else:
-                unimplemented_v2(
-                    gb_type="Unsupported arguments for itertools.accumulate",
-                    context=f"call_function {self} {args} {kwargs}",
-                    explanation="Dynamo does not know how to trace "
-                    f"itertools.accumulate with args: {args} and kwargs: {kwargs}. "
-                    "itertools.accumulate expects an iterable, an optional "
-                    "binary function for accumulation, and an optional initial "
-                    "value to set the starting state.",
-                    hints=[
-                        "Make sure the arguments to itertools.accumulate are correct.",
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-            items = []
-            acc = kwargs.get("initial")
-            if acc is not None:
-                items.append(acc)
-            for item in seq:
-                if acc is None:
-                    acc = item
-                else:
-                    try:
-                        acc = func(tx, [acc, item], {})
-                    except Exception as e:
-                        unimplemented_v2(
-                            gb_type="Unexpected failure during itertools.accumulate() iteration",
-                            context=f"call_function {self} {args} {kwargs}",
-                            explanation="Unexpected failure in invoking function during accumulate. "
-                            f"Failed running func {func}({item}{acc})",
-                            hints=[*graph_break_hints.DIFFICULT],
-                            from_exc=e,
-                        )
-                items.append(acc)
-
             return variables.ListIteratorVariable(
                 items, mutation_type=ValueMutationNew()
             )
@@ -252,10 +180,6 @@ class ItertoolsVariable(VariableTracker):
             return variables.CountIteratorVariable(
                 *args, mutation_type=ValueMutationNew()
             )
-        elif self.value is itertools.cycle:
-            return variables.CycleIteratorVariable(
-                *args, mutation_type=ValueMutationNew()
-            )
         else:
             return super().call_function(tx, args, kwargs)
 
@@ -293,6 +217,38 @@ class IteratorVariable(VariableTracker):
     # IteratorVariable state!
     def has_force_unpack_var_sequence(self, tx) -> bool:
         return True
+
+
+class ObjectIteratorVariable(IteratorVariable):
+    """
+    VariableTracker for iter(obj) that implements the iterator protocol (i.e.,
+    has a `__next__` method).
+
+    We use this class to track the state of the iterator and handle the case
+    when the iterator is exhausted:
+
+    Example usage:
+        > b = iter(obj)
+        > list(b)  # exhaust the iterator
+        > list(b)  # empty list
+    """
+
+    def __init__(self, obj: VariableTracker, **kwargs):
+        super().__init__(**kwargs)
+        self.obj = obj
+        self.generator_exhausted = False
+
+    def next_variable(self, tx):
+        if self.generator_exhausted:
+            raise_observed_exception(StopIteration, tx)
+
+        try:
+            return self.obj.next_variable(tx)
+        except ObservedUserStopIteration:
+            # Do not rely on the object to always return StopIteration once it
+            # is exhausted.
+            self.generator_exhausted = True
+            raise
 
 
 class RepeatIteratorVariable(IteratorVariable):
@@ -346,54 +302,6 @@ class CountIteratorVariable(IteratorVariable):
         codegen(self.item)
         codegen(self.step)
         codegen.extend_output(create_call_function(2, False))
-
-
-class CycleIteratorVariable(IteratorVariable):
-    def __init__(
-        self,
-        iterator: IteratorVariable,
-        saved: Optional[list[VariableTracker]] = None,
-        saved_index: int = 0,
-        item: Optional[VariableTracker] = None,
-        **kwargs,
-    ) -> None:
-        if saved is None:
-            saved = []
-        super().__init__(**kwargs)
-        self.iterator = iterator
-        self.saved = saved
-        self.saved_index = saved_index
-        self.item = item
-
-    def next_variable(self, tx):
-        assert self.is_mutable()
-
-        if self.iterator is not None:
-            try:
-                new_item = self.iterator.next_variable(tx)
-                if len(self.saved) > MAX_ITERATOR_LIMIT:
-                    unimplemented_v2(
-                        gb_type="input iterator to itertools.cycle has too many items",
-                        context=f"next({self})",
-                        explanation=f"Has reached internal Dynamo max iterator limit: {MAX_ITERATOR_LIMIT}",
-                        hints=[],
-                    )
-                tx.output.side_effects.mutation(self)
-                self.saved.append(new_item)
-                self.item = new_item
-                if self.item is None:
-                    return self.next_variable(tx)
-                return self.item
-            except ObservedUserStopIteration:
-                handle_observed_exception(tx)
-                self.iterator = None
-                return self.next_variable(tx)
-        elif len(self.saved) > 0:
-            tx.output.side_effects.mutation(self)
-            self.saved_index = (self.saved_index + 1) % len(self.saved)
-            return self.item
-        else:
-            raise_observed_exception(StopIteration, tx)
 
 
 class ZipVariable(IteratorVariable):
@@ -606,7 +514,10 @@ class FilterVariable(IteratorVariable):
         while True:
             item = _next()
             self.index += 1
-            res = self.fn.call_function(tx, [item], {})
+            if isinstance(self.fn, ConstantVariable) and self.fn.value is None:
+                res = item
+            else:
+                res = self.fn.call_function(tx, [item], {})
             pred_res = variables.UserFunctionVariable(
                 polyfills.predicate
             ).call_function(tx, [res], {})
