@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
+    TEST_XPU,
     TestCase,
     xfailIfLinux,
 )
@@ -3133,7 +3134,7 @@ class TestDictDataLoader(TestCase):
             self.assertTrue(sample["a_tensor"].is_pinned())
             self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
 
-    @unittest.skipIf(TEST_CUDA, "Test for when CUDA is not available")
+    @unittest.skipIf(TEST_CUDA or TEST_XPU, "Test for when CUDA/XPU is not available")
     def test_pin_memory_no_cuda(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for sample in loader:
