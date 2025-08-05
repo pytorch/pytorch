@@ -7025,8 +7025,7 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
 @register_meta([aten.nan_to_num.default, aten.nan_to_num.out])
 @out_wrapper()
 def nan_to_num(self, nan=None, posinf=None, neginf=None):
-    result_size = list(self.size())
-    return self.new_empty(result_size)
+    return torch.empty_like(self)
 
 
 @register_meta(torch.ops.aten.transpose_)
@@ -7368,6 +7367,12 @@ def _meta_grouped_mm_common(
 
     mat_a_is_2d = mat_a.dim() == 2
     mat_b_is_2d = mat_b.dim() == 2
+
+    if not mat_a_is_2d or not mat_b_is_2d:
+        torch._check(
+            mat_a.size(-1) == mat_b.size(-2),
+            "contraction dimension of mat_a and mat_b must match",
+        )
 
     if scaled:
 
