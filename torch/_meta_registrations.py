@@ -7583,7 +7583,7 @@ def _constant_pad_nd_meta(input, pad, value=0):
         f"{l_inp} dimensions.",
     )
 
-    if all(isinstance(p, int) and p <= 0 for p in pad):
+    if all(isinstance(p, utils.IntWithoutSymInt) and p <= 0 for p in pad):
         c_input = input
         for i in range(l_diff, l_inp):
             pad_idx = 2 * (l_inp - i - 1)
