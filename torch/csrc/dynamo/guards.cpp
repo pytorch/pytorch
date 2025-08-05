@@ -1176,7 +1176,7 @@ bool is_immutable_object(py::handle example_value) {
       PyLong_Check(example_value.ptr()) || PyFloat_Check(example_value.ptr()) ||
       PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
-      PyCode_Check(example_value.ptr()) || PyType_Check(example_value.ptr()) ||
+      PyCode_Check(example_value.ptr()) ||
       (Py_TYPE(example_value.ptr()) == &PyCFunction_Type) ||
       (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
 }
