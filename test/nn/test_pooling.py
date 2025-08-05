@@ -688,7 +688,6 @@ class TestPoolingNNDeviceType(NNTestCase):
             inp = torch.ones(1, 0, 50, 44, 31, device=device)
             mod(inp)
 
-    @expectedFailureMPS  # Not implemented
     @onlyNativeDeviceTypes
     def test_MaxUnpool_zero_batch_dim(self, device):
         pool = torch.nn.MaxPool1d(2, stride=2, return_indices=True).to(device)
