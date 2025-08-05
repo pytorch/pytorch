@@ -1861,6 +1861,8 @@ class test_configs:
 
     graphsafe_rng_func_ignores_fallback_random = False
 
+    track_memory_lifecycle: Optional[Literal["assert", "log"]] = None
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
