@@ -3,9 +3,17 @@
 ARG CUDA_VERSION=12.8.1
 ARG PYTHON_VERSION=3.12
 
+# Build_BASE_IMAGE: used to build xformers, and vllm wheels, it can be replaced with a different base image from local machine,
+# by default, it uses the torch-nightly-base stage from this docker image
 ARG BUILD_BASE_IMAGE=torch-nightly-base
+
+# FINAL_BASE_IMAGE: used to set up vllm-instaled environment and build flashinfer,
+# by default, it uses devel-ubuntu22.04 official image.
 ARG FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 
+
+#################### TORCH NIGHTLY  BASE IMAGE ####################
+# A base image for building vLLM with devel ubuntu 22.04, this is mainly used to build vllm in vllm builtkite ci
 From nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 as torch-nightly-base
 ARG CUDA_VERSION=12.8.1
 ARG PYTHON_VERSION=3.12
@@ -64,8 +72,11 @@ ENV UV_INDEX_STRATEGY="unsafe-best-match"
 # this won't be needed for future versions of this docker image
 # or future versions of triton.
 RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
+#################### TORCH NIGHTLY  BASE IMAGE ####################
+
 
 #################### BASE BUILD IMAGE ####################
+# A base image for building vLLM with torch nightly or torch wheels
 # prepare basic build environment
 FROM ${BUILD_BASE_IMAGE} AS base
 USER root
@@ -95,6 +106,9 @@ RUN python3 use_existing_torch.py
 ARG TORCH_WHEELS_PATH="./requirements"
 ARG PINNED_TORCH_VERSION
 
+# Install torch, torchaudio and torchvision based on the input
+# if TORCH_WHEELS_PATH is default "./requirements", it will pull thethe nightly versions using pip
+# otherwise, it will use the whls from TORCH_WHEELS_PATH from the host machine
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     --mount=type=cache,target=/root/.cache/uv \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
@@ -112,24 +126,24 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128; \
     fi
 
+# Install numba 0.61.2 for cuda environment
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system numba==0.61.2
 
+# Install common dependencies from vllm common.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
 uv pip install --system -r requirements/common.txt
 
 
-# must put before installing xformers, so it can install the correct version of xfomrers.
+# Must put before installing xformers, so it can install the correct version of xfomrers.
 ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
-# Build xformers with cuda and torch nightly
+
+# Build xformers with cuda and torch nightly/wheel
 # following official xformers guidance: https://github.com/facebookresearch/xformers#build
-# todo(elainewy): cache xformers build result for faster build
-
 ARG XFORMERS_COMMIT=f2de641ef670510cadab099ce6954031f52f191c
-
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/uv \
@@ -143,7 +157,6 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     && python3 setup.py bdist_wheel --dist-dir=../xformers-dist --verbose \
     && cd .. \
     && rm -rf xformers
-
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system xformers-dist/*.whl --verbose
 
@@ -165,7 +178,9 @@ ENV VLLM_FA_CMAKE_GPU_ARCHES=${vllm_fa_cmake_gpu_arches}
 
 #################### BASE BUILD IMAGE ####################
 
+
 #################### WHEEL BUILD IMAGE ####################
+# Image used to build vllm wheel
 FROM base AS build
 ARG TARGETPLATFORM
 
@@ -233,8 +248,9 @@ RUN echo "[DEBUG] Listing  current directory:" && \
 
 #################### WHEEL BUILD IMAGE ####################
 
+
 ################### VLLM INSTALLED IMAGE ####################
-# Setup clean environment for vLLM and its dependencies for test and api server using ubuntu22.04 with AOT flashinfer
+# Setup clean environment for vLLM for test and api server using ubuntu22.04 with AOT flashinfer
 FROM ${FINAL_BASE_IMAGE} AS vllm-base
 USER root
 # prepare for environment starts
@@ -266,7 +282,7 @@ RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHO
    && python3 --version && python3 -m pip --version
 
 
-# get the nightly torch version used in the build to make sure the version is the same
+# Get the torch version used in previous stagtes for consistency
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
@@ -285,8 +301,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
 
-# default mount file as placeholder, this just avoid the mount error
-# change to a different vllm folder if this does not exist anymore
+# Default mount file as placeholder, this just avoid the mount error
 ARG TORCH_WHEELS_PATH="./requirements"
 
 # Workaround for https://github.com/openai/triton/issues/2507 and
@@ -296,6 +311,8 @@ ARG TORCH_WHEELS_PATH="./requirements"
 RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
 
 # Install torch, torchaudio and torchvision
+# if TORCH_WHEELS_PATH is default "./requirements", it will pull the nightly versions using pip using torch_build_versions.txt
+# otherwise, it will use the whls from TORCH_WHEELS_PATH from the host machine
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     --mount=type=cache,target=/root/.cache/uv \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
@@ -311,19 +328,21 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
     fi
 
-# install the vllm wheel
+# Install the vllm wheel from previous stage
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /wheels/vllm/*.whl --verbose
 
-# install xformers again for the new environment
+# Install xformers wheel from previous stage
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /wheels/xformers/*.whl --verbose
 
 
+# Build flashinfer from source.
 ARG torch_cuda_arch_list='8.0;8.9;9.0a'
 # install package for build flashinfer
 # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
-RUN pip install build
+
+RUN pip install build==1.3.0
 RUN pip freeze | grep -E 'setuptools|packaging|build'
 
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
@@ -345,6 +364,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # install flashinfer python
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system wheels/flashinfer/*.whl --verbose
+################### VLLM INSTALLED IMAGE ####################
+
 
 #################### UNITTEST IMAGE #############################
 FROM vllm-base as test
