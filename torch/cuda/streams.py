@@ -39,7 +39,7 @@ class Stream(torch._C._CudaStreamBase):
     def __new__(cls, device=None, priority=0, **kwargs):
         # Check CUDA availability before attempting to create stream
         if not _is_compiled():
-            raise RuntimeError("torch.cuda.Stream() requires CUDA support")
+            raise RuntimeError("torch.cuda.Stream() requires CUDA")
         # setting device manager is expensive, so we avoid it unless necessary
         if device is None or ("stream_id" in kwargs and "device_index" in kwargs):
             return super().__new__(cls, priority=priority, **kwargs)
