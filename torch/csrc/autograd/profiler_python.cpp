@@ -1466,14 +1466,16 @@ int PythonTracer::pyProfileFn(
     case PyTrace_RETURN:
       local_results.exit_times_.emplace_back(c10::getApproximateTime());
       local_results.active_frames_--;
-      if (local_results.active_frames_ < local_results.remaining_start_frames_) {
+      if (local_results.active_frames_ <
+          local_results.remaining_start_frames_) {
         local_results.remaining_start_frames_ = local_results.active_frames_;
       }
       break;
 
     case PyTrace_C_EXCEPTION:
     case PyTrace_C_RETURN:
-      if (local_results.active_frames_ > local_results.remaining_start_frames_) {
+      if (local_results.active_frames_ >
+          local_results.remaining_start_frames_) {
         local_results.c_exit_times_.emplace_back(c10::getApproximateTime());
         local_results.active_frames_--;
       }

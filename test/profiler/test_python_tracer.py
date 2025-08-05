@@ -97,13 +97,12 @@ with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], wi
     """
 
         result = subprocess.run(
-            [sys.executable, '-c', code],
-            capture_output=True,
-            text=True,
-            check=True
+            [sys.executable, "-c", code], capture_output=True, text=True, check=True
         )
 
-        self.assertFalse("Python replay stack is empty during pop operation" in result.stderr)
+        self.assertFalse(
+            "Python replay stack is empty during pop operation" in result.stderr
+        )
 
 
 if __name__ == "__main__":
