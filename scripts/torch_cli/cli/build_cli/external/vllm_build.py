@@ -11,8 +11,9 @@ from cli.lib.utils import (
     get_env,
     get_existing_abs_path,
     get_post_build_pinned_commit,
-    run_cmd
+    run_cmd,
 )
+
 
 @dataclass
 class VllmBuildConfig:
@@ -30,6 +31,7 @@ class VllmBuildConfig:
     torch_whl_dir: str = ""
     base_image: str = ""
     dockerfile_path: str = ""
+
 
 _DEFAULT_RESULT_PATH = "./results"
 _VLLM_TEMP_FOLDER = "tmp"
@@ -52,23 +54,25 @@ def _prepare_artifact_dir(path: str):
     ensure_dir_exists(abs_path)
     return abs_path
 
-def getVllmBuildConfig(config: Dict[str,Any]):
-    print("config",config)
-    build_config = config.get("build",{})
+
+def getVllmBuildConfig(config: Dict[str, Any]):
+    print("config", config)
+    build_config = config.get("build", {})
 
     return VllmBuildConfig(
-        artifact_dir=build_config.get("artifact_dir",""),
+        artifact_dir=build_config.get("artifact_dir", ""),
         torch_whl_dir=build_config.get("torch_whl_dir", ""),
         base_image=build_config.get("base_image", ""),
-        dockerfile_path= build_config.get("dockerfile_path", ""),
+        dockerfile_path=build_config.get("dockerfile_path", ""),
     )
 
-def build_vllm(config: Dict[str,Any]):
+
+def build_vllm(config: Dict[str, Any]):
     cfg = getVllmBuildConfig(config)
     print(f"Target artifact dir path is {cfg.artifact_dir}", flush=True)
-    print("config peek",cfg)
+    print("config peek", cfg)
     if cfg.dev:
-        vllm_commit = get_post_build_pinned_commit("vllm",".")
+        vllm_commit = get_post_build_pinned_commit("vllm", ".")
     else:
         vllm_commit = get_post_build_pinned_commit("vllm")
     clone_vllm(vllm_commit)
@@ -76,18 +80,22 @@ def build_vllm(config: Dict[str,Any]):
     # replace dockerfile
     if cfg.dockerfile_path:
         abs_file_path = get_existing_abs_path(cfg.dockerfile_path)
-        print(f"use user provided dockerfile {cfg.dockerfile_path} with path {abs_file_path}")
+        print(
+            f"use user provided dockerfile {cfg.dockerfile_path} with path {abs_file_path}"
+        )
         run_cmd(
-        f"cp {abs_file_path} ./vllm/docker/Dockerfile.nightly_torch",
+            f"cp {abs_file_path} ./vllm/docker/Dockerfile.nightly_torch",
         )
     else:
         print("using vllm default dockerfile.torch_nightly for build")
 
     reault_path = _prepare_artifact_dir(cfg.artifact_dir)
     torch_arg, _ = _prepare_torch_wheels(cfg.torch_whl_dir)
-    base_arg, final_base_img,pull_flag = _get_base_image_args(cfg.base_image)
+    base_arg, final_base_img, pull_flag = _get_base_image_args(cfg.base_image)
 
-    cmd = _generate_docker_build_cmd(cfg, reault_path, torch_arg, base_arg,final_base_img, pull_flag)
+    cmd = _generate_docker_build_cmd(
+        cfg, reault_path, torch_arg, base_arg, final_base_img, pull_flag
+    )
     print("Running docker build", flush=True)
     print(cmd, flush=True)
     run_cmd(cmd, cwd="vllm", env=os.environ.copy())
@@ -111,19 +119,19 @@ def _get_base_image_args(base_image: str) -> tuple[str, str, str]:
     """
     pull_flag = ""
     if not base_image:
-        return "","",""
+        return "", "", ""
 
     base_image_arg = f"--build-arg BUILD_BASE_IMAGE={base_image}"
     final_base_image_arg = f"--build-arg FINAL_BASE_IMAGE={base_image}"
     if local_image_exists(base_image):
         print(f"[INFO] Found local image: {base_image}", flush=True)
         pull_flag = "--pull=false"
-        return base_image_arg,final_base_image_arg, pull_flag
+        return base_image_arg, final_base_image_arg, pull_flag
     print(
         f"[INFO] Local image not found: {base_image}, will try to pull from remote",
         flush=True,
     )
-    return base_image_arg,final_base_image_arg, ""
+    return base_image_arg, final_base_image_arg, ""
 
 
 def _generate_docker_build_cmd(
@@ -134,7 +142,8 @@ def _generate_docker_build_cmd(
     final_base_image_arg: str,
     pull_flag: str,
 ) -> str:
-    return textwrap.dedent(f"""
+    return textwrap.dedent(
+        f"""
         docker buildx build \
             --output type=local,dest={result_path} \
             -f docker/Dockerfile.nightly_torch \
@@ -153,4 +162,5 @@ def _generate_docker_build_cmd(
             --target {cfg.target} \
             -t {cfg.tag_name} \
             --progress=plain .
-    """).strip()
+    """
+    ).strip()

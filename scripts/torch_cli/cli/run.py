@@ -1,10 +1,22 @@
 from cement import App, Controller, ex
 from cli.build_cli import BUILD_CONTROLLERS
 
+
 class MainController(Controller):
     class Meta:
         label = "base"
         description = "Main entry point"
+        arguments = [
+            (
+                ["--config"],
+                {
+                    "help": "Path to config file for ci build and test",
+                    "dest": "config",
+                    "default": "",
+                    "required": False,
+                },
+            ),
+        ]
 
 
 class TorchCli(App):
@@ -12,6 +24,7 @@ class TorchCli(App):
         label = "cli"
         base_controller = "base"
         handlers = [MainController] + BUILD_CONTROLLERS
+
 
 def main():
     with TorchCli() as app:

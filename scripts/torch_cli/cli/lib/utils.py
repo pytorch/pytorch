@@ -64,6 +64,7 @@ def run_cmd(
         print("STDOUT:\n", e.stdout)
         print("STDERR:\n", e.stderr)
 
+
 # eliainwy
 def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> str:
     path = Path(prefix) / f"{name}.txt"
@@ -180,10 +181,14 @@ def read_yaml_file(file_path: str) -> dict:
         if data is None:
             return {}
         if not isinstance(data, dict):
-            raise ValueError(f"YAML content must be a dictionary, got {type(data).__name__}")
+            raise ValueError(
+                f"YAML content must be a dictionary, got {type(data).__name__}"
+            )
         return data
 
     except yaml.YAMLError as e:
         raise ValueError(f"Failed to parse YAML file '{file_path}': {e}") from e
     except Exception as e:
-        raise RuntimeError(f"Unexpected error while reading YAML file '{file_path}': {e}") from e
+        raise RuntimeError(
+            f"Unexpected error while reading YAML file '{file_path}': {e}"
+        ) from e
