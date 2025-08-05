@@ -747,11 +747,7 @@ class TestCutlassBackend(TestCase):
         Make sure autotuning mm in sub processes work without crashes.
         """
 
-        def mm(a, b):
-            return a @ b
-
-        a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(128, 16).cuda().half().t()
+        compiled_model = torch.compile(torch.mm, dynamic=dynamic)
 
         with config.patch(
             {
@@ -778,11 +774,65 @@ class TestCutlassBackend(TestCase):
             ):
                 a = torch.randn(M, K).cuda().half()
                 b = torch.randn(N, K).cuda().half().t()
-                Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
-                Y = mm(a, b)
+                Y_compiled = compiled_model(a, b)
+                Y = torch.mm(a, b)
                 # we need relaxed numerical limits due to the sheer size of the
                 # matmuls involved. Many small addition differences add up.
                 torch.testing.assert_close(Y_compiled, Y, atol=0.01, rtol=0.01)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    def test_streamk_with_dynamic(
+        self,
+    ):
+        """
+        Test streamk with dynamic=True. Streamk should be filtered out.
+
+        Problem is streamk can have a different workspace depending on the
+        shape. Without a correct workspace, the kernel will fail at runtime.
+        """
+
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+            }
+        ):
+            with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
+                _ = torch.compile(torch.mm, dynamic=True)(a, b)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    def test_streamk_with_static(
+        self,
+    ):
+        """
+        Test streamk with dynamic=False. Streamk should work.
+        """
+
+        shapes = [
+            (18432, 3072, 6144),
+            (9216, 3072, 6144),
+            (4608, 3072, 6144),
+        ]
+        compiled_model = torch.compile(torch.mm, dynamic=False)
+
+        for shape in shapes:
+            M, N, K = shape
+            a = torch.randn(M, K).cuda().half()
+            b = torch.randn(N, K).cuda().half().t()
+
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                    "cuda.cutlass_max_profiling_configs": 1,
+                    "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+                }
+            ):
+                _ = compiled_model(a, b)
 
     def _test_max_autotune_cutlass_backend_epilogue_fusion(
         self,
@@ -2051,23 +2101,25 @@ class TestCutlassBackend(TestCase):
         ),
     )
     @parametrize("has_bias", (False, True))
-    @parametrize("use_fast_accum", (False,))
+    @parametrize("use_fast_accum", (False, True))
+    @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     def test_fp8_rowwise_scaling(
         self,
         float8_dtype: torch.dtype,
         shape: tuple[int, int, int],
         has_bias: bool,
         use_fast_accum: bool,
+        input_dtype: torch.dtype,
     ):
         # Only bf16 output type is supported for row-wise scaling, not fp32
         output_dtype: torch.dtype = torch.bfloat16
         device = "cuda"
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
-        x = torch.randn(M, K, dtype=output_dtype, device=device)
-        w = torch.randn(N, K, dtype=output_dtype, device=device)
+        x = torch.randn(M, K, dtype=input_dtype, device=device)
+        w = torch.randn(N, K, dtype=input_dtype, device=device)
         bias = None
         if has_bias:
-            bias = torch.randn(N, device=device, dtype=torch.bfloat16)
+            bias = torch.randn(N, device=device, dtype=input_dtype).to(torch.bfloat16)
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_rowwise(w, float8_dtype)
@@ -2124,24 +2176,25 @@ class TestCutlassBackend(TestCase):
     )
     @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False,))
+    @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     def test_fp8_tensorwise_scaling(
         self,
         float8_dtype: torch.dtype,
         shape: tuple[int, int, int],
         has_bias: bool,
         use_fast_accum: bool,
+        input_dtype: torch.dtype,
     ):
         device = "cuda"
         M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
-        input_dtype = torch.bfloat16
-        output_dtype = torch.bfloat16
+        output_dtype = input_dtype
         # input and output dtypes of _scaled_mm do not need to be the same, but
         # typically in a model they are
         x = torch.randn(M, K, dtype=input_dtype, device=device)
         w = torch.randn(N, K, dtype=input_dtype, device=device)
         bias = None
         if has_bias:
-            bias = torch.randn(N, device=device, dtype=torch.bfloat16)
+            bias = torch.randn(N, device=device, dtype=input_dtype)
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_tensorwise(w, float8_dtype)

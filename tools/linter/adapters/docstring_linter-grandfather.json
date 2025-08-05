@@ -31,19 +31,16 @@
     "class OpOverrides": 198
   },
   "torch/_inductor/codegen/cpp.py": {
-    "class CppKernel": 572,
-    "class CppKernelProxy": 611,
+    "class CppKernelProxy": 617,
     "class CppOverrides": 429,
     "class CppScheduling": 786,
-    "class CppVecKernel": 857,
+    "class CppVecKernel": 865,
     "class OuterLoopFusedSchedulerNode": 159,
     "def CppKernel.codegen_loops_impl()": 144,
-    "def CppKernelProxy.aggregate_reduction_buffers()": 81,
     "def CppKernelProxy.codegen_functions()": 183,
     "def CppKernelProxy.legalize_lowp_fp_dtype_loopbody()": 224,
     "def CppScheduling.fuse()": 81,
-    "def CppVecKernel.reduction()": 195,
-    "def CppVecKernel.reduction_combine_vec()": 96,
+    "def CppVecKernel.reduction_combine_vec()": 100,
     "def OuterLoopFusedSchedulerNode.check_outer_fusion_loop_level_attr()": 85,
     "def TilingSelect.select_tiling()": 170
   },
@@ -177,13 +174,13 @@
     "def move_reshape_out_of_split_stack()": 110
   },
   "torch/_inductor/graph.py": {
-    "class GraphLowering": 2138,
-    "def GraphLowering.call_function()": 108,
+    "class GraphLowering": 2144,
+    "def GraphLowering.call_function()": 112,
     "def GraphLowering.create_deferred_runtime_asserts()": 84,
     "def GraphLowering.extract_autotune_inputs()": 93,
     "def GraphLowering.output()": 92,
     "def GraphLowering.placeholder()": 102,
-    "def GraphLowering.run_node()": 359
+    "def GraphLowering.run_node()": 361
   },
   "torch/_inductor/ir.py": {
     "class Buffer": 131,
@@ -213,14 +210,6 @@
   },
   "torch/_inductor/kernel/conv.py": {
     "def convolution()": 239
-  },
-  "torch/_inductor/kernel/flex_attention.py": {
-    "def flex_attention()": 325,
-    "def flex_attention_backward()": 344,
-    "def lower_cpu()": 297
-  },
-  "torch/_inductor/kernel/flex_decoding.py": {
-    "def create_flex_decoding_kernel()": 302
   },
   "torch/_inductor/kernel/mm.py": {
     "def tuned_addmm()": 151
