@@ -246,6 +246,7 @@ def assign_memory_planning_info_for_scheduler_nodes(
     node_to_pred_nodes: dict[BaseSchedulerNode, OrderedSet[BaseSchedulerNode]] = (
         collections.defaultdict(OrderedSet)
     )
+    node_to_succ_nodes: dict[BaseSchedulerNode, OrderedSet[BaseSchedulerNode]] = {}
     node_to_pred_buffers: dict[
         BaseSchedulerNode, OrderedSet[SchedulerBuffer | FreeableInputBuffer]
     ] = collections.defaultdict(OrderedSet)
@@ -257,6 +258,7 @@ def assign_memory_planning_info_for_scheduler_nodes(
             for buffer in node.get_outputs()
             for succ_node in buffer.mpi_buffer.succ_nodes
         )
+        node_to_succ_nodes[node] = succ_nodes
 
         # For each successor, add current node as its predecessor
         for succ_node in succ_nodes:
@@ -268,15 +270,14 @@ def assign_memory_planning_info_for_scheduler_nodes(
             for succ_node in buffer.mpi_buffer.succ_nodes:
                 node_to_pred_buffers[succ_node].add(buffer)
 
+    for freeable_buffer in name_to_freeable_input_buf.values():
+        for succ_node in freeable_buffer.mpi_buffer.succ_nodes:
+            node_to_pred_buffers[succ_node].add(freeable_buffer)
+
     # Second pass: assign memory planning info using completed predecessor mappings
     for index, node in enumerate(nodes):
         size_alloc = sum(buffer.mpi_buffer.size_alloc for buffer in node.get_outputs())
-
-        succ_nodes = OrderedSet(
-            succ_node
-            for buffer in node.get_outputs()
-            for succ_node in buffer.mpi_buffer.succ_nodes
-        )
+        succ_nodes = node_to_succ_nodes[node]
 
         node.mpi_node = MemoryPlanningInfoForNode(
             index=index,
