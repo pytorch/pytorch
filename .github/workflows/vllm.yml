@@ -3,6 +3,8 @@ name: vllm-unittest
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - ciflow/vllm/*
 
