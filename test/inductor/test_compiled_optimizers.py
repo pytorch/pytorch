@@ -24,6 +24,7 @@ from torch.optim import (
     Adamax,
     AdamW,
     ASGD,
+    Muon,
     NAdam,
     RAdam,
     RMSprop,
@@ -419,6 +420,10 @@ def check_optim(
         atol = 1.5e-5
         rtol = 1.7e-5
 
+    if optim_cls is Muon:
+        atol = 3e-4
+        rtol = 5e-5
+
     self.assertEqual(list(params_eager), list(params_compiled), atol=atol, rtol=rtol)
 
     for p_eager, p_compiled in zip(params_eager, params_compiled):
@@ -617,9 +622,11 @@ class CompiledOptimizerParityTests(TestCase):
                         param.grad = param.grad.to_sparse()
 
                 opt_compiled = optim_cls(
-                    model_compiled.parameters(), **deepcopy(kwargs)
+                    model_compiled.named_parameters(), **deepcopy(kwargs)
                 )
-                opt_eager = optim_cls(model_eager.parameters(), **deepcopy(kwargs))
+                opt_eager = optim_cls(
+                    model_eager.named_parameters(), **deepcopy(kwargs)
+                )
                 if scheduler_cls:
                     scheduler_compiled = create_scheduler(scheduler_cls, opt_compiled)
                     scheduler_eager = create_scheduler(scheduler_cls, opt_eager)
