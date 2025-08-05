@@ -22,8 +22,8 @@
 #define AOTI_NOINLINE
 #endif
 
-#define AOTI_TORCH_ERROR_CODE_CHECK(call)       \
-  if ((call) != AOTI_TORCH_SUCCESS) {           \
+#define AOTI_TORCH_ERROR_CODE_CHECK(call)                                  \
+  if ((call) != AOTI_TORCH_SUCCESS) {                                      \
     torch::headeronly::detail::throw_exception(#call, __FILE__, __LINE__); \
   }
 
@@ -31,8 +31,8 @@ using AOTIRuntimeError = int32_t;
 #define AOTI_RUNTIME_SUCCESS 0
 #define AOTI_RUNTIME_FAILURE 1
 
-#define AOTI_RUNTIME_ERROR_CODE_CHECK(call)     \
-  if ((call) != AOTI_RUNTIME_SUCCESS) {         \
+#define AOTI_RUNTIME_ERROR_CODE_CHECK(call)                                \
+  if ((call) != AOTI_RUNTIME_SUCCESS) {                                    \
     torch::headeronly::detail::throw_exception(#call, __FILE__, __LINE__); \
   }
 
