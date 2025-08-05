@@ -26,11 +26,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_FBCODE,
-    MACOS_VERSION,
     parametrize,
     serialTest,
     TEST_CUDA_MEM_LEAK_CHECK,
-    TEST_MPS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -89,11 +87,6 @@ test_failures = {
         ("mps",), is_skip=True
     ),
 }
-
-if TEST_MPS and MACOS_VERSION >= 15.0:
-    test_failures["test_scaled_dot_product_attention_dynamic_shapes"] = TestFailure(
-        "mps"
-    )
 
 if not torch._inductor.config.cpp_wrapper:
     test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
