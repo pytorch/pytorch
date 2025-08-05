@@ -7025,8 +7025,7 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
 @register_meta([aten.nan_to_num.default, aten.nan_to_num.out])
 @out_wrapper()
 def nan_to_num(self, nan=None, posinf=None, neginf=None):
-    result_size = list(self.size())
-    return self.new_empty(result_size)
+    return torch.empty_like(self)
 
 
 @register_meta(torch.ops.aten.transpose_)
@@ -7313,13 +7312,18 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
 
     out_dtype = out_dtype or mat1.dtype
 
-    alignment = 16 // out_dtype.itemsize
-    size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
-    if mat1_is_2d == mat2_is_2d:
-        out_stride = [out_size[1] * size_padded, size_padded, 1]
+    if torch.version.cuda:
+        alignment = 16 // out_dtype.itemsize
+        size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
+        if mat1_is_2d == mat2_is_2d:
+            out_stride = [out_size[1] * size_padded, size_padded, 1]
+        else:
+            out_stride = [size_padded, 1]
+        out = torch.empty_strided(
+            out_size, out_stride, dtype=out_dtype, device=mat1.device
+        )
     else:
-        out_stride = [size_padded, 1]
-    out = torch.empty_strided(out_size, out_stride, dtype=out_dtype, device=mat1.device)
+        out = torch.empty(out_size, dtype=out_dtype, device=mat1.device)
     return out
 
 
@@ -7345,8 +7349,9 @@ def _meta_grouped_mm_common(
     # aten/src/ATen/native/cuda/Blas.cpp.
 
     if scaled:
+        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         torch._check(
-            mat_a.dtype == torch.float8_e4m3fn and mat_b.dtype == torch.float8_e4m3fn,
+            mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
             lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
         )
     else:
@@ -7362,6 +7367,12 @@ def _meta_grouped_mm_common(
 
     mat_a_is_2d = mat_a.dim() == 2
     mat_b_is_2d = mat_b.dim() == 2
+
+    if not mat_a_is_2d or not mat_b_is_2d:
+        torch._check(
+            mat_a.size(-1) == mat_b.size(-2),
+            "contraction dimension of mat_a and mat_b must match",
+        )
 
     if scaled:
 
