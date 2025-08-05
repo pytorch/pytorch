@@ -552,6 +552,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         """
                     )
 
+                self.codegen_additional_funcs()
+
                 run_impl_proto = f"""
                     void {self.aoti_model_class_name}::run_impl(
                         AtenTensorHandle*
@@ -673,6 +675,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         code.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
         )
+
+    def codegen_additional_funcs(self):
+        pass
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")

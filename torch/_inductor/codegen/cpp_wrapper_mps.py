@@ -47,12 +47,12 @@ class CppWrapperMps(CppWrapperGpu):
         """
         Generates MPS kernel call code. It should look something like:
         ```
-        mps_lib_0_func->runCommandBlock([&] {
-            mps_lib_0_func->startEncoding();
-            aoti_torch_mps_set_arg(mps_lib_0_func_handle, 0, buf0);
-            aoti_torch_mps_set_arg(mps_lib_0_func_handle, 1, arg0_1);
+        get_mps_lib_0()->runCommandBlock([&] {
+            get_mps_lib_0()->startEncoding();
+            aoti_torch_mps_set_arg(get_mps_lib_0_handle(), 0, buf0);
+            aoti_torch_mps_set_arg(get_mps_lib_0_handle(), 1, arg0_1);
             ...
-            mps_lib_0_func->dispatch(9);
+            get_mps_lib_0()->dispatch(9);
         });
         ```
         """
@@ -79,11 +79,11 @@ class CppWrapperMps(CppWrapperGpu):
         for idx, (arg, arg_type) in enumerate(zip(call_args[:-2], arg_types[:-2])):
             if isinstance(arg_type, torch.dtype):
                 new_args.append(
-                    f"aoti_torch_mps_set_arg_tensor({kernel_name}_handle, {idx}, {arg});"
+                    f"aoti_torch_mps_set_arg_tensor(get_{kernel_name}_handle(), {idx}, {arg});"
                 )
             elif arg_type in (int, sympy.core.symbol.Symbol):
                 new_args.append(
-                    f"aoti_torch_mps_set_arg_int({kernel_name}_handle, {idx}, {arg});"
+                    f"aoti_torch_mps_set_arg_int(get_{kernel_name}_handle(), {idx}, {arg});"
                 )
             else:
                 raise NotImplementedError(
@@ -94,9 +94,11 @@ class CppWrapperMps(CppWrapperGpu):
         if threads is None:
             raise NotImplementedError("No threads or group_size provided")
         elif group_size is None:
-            new_args.append(f"{kernel_name}->dispatch({threads});\n")
+            new_args.append(f"get_{kernel_name}()->dispatch({threads});\n")
         else:
-            new_args.append(f"{kernel_name}->dispatch({threads}, {group_size});\n")
+            new_args.append(
+                f"get_{kernel_name}()->dispatch({threads}, {group_size});\n"
+            )
 
         # debug printer related logic for cpp kernel type.
         debug_printer_manager = V.graph.wrapper_code.debug_printer
@@ -114,8 +116,8 @@ class CppWrapperMps(CppWrapperGpu):
         # Initialization of the kernel function and kernel function handle
         # variables have already been done at the beginning, which was
         # codegen-ed in `codegen_mps_func_init`
-        self.writeline(f"{name}->runCommandBlock([&] {{")
-        self.writeline(f"    {name}->startEncoding();")
+        self.writeline(f"get_{name}()->runCommandBlock([&] {{")
+        self.writeline(f"    get_{name}()->startEncoding();")
         for call_arg in call_args:
             self.writeline(f"    {call_arg}")
         self.writeline("});")
@@ -128,11 +130,7 @@ class CppWrapperMps(CppWrapperGpu):
             "#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>"
         )
 
-    def codegen_inputs(self) -> None:
-        super().codegen_inputs()
-        self.codegen_mps_func_init()
-
-    def codegen_mps_func_init(self) -> None:
+    def codegen_additional_funcs(self) -> None:
         """
         We want to codegen the mps kernel function variable initializations
         ahead of time.  This is so that if we reuse kernels within subgraphs, we
@@ -142,8 +140,14 @@ class CppWrapperMps(CppWrapperGpu):
 
         The kernel function variable initializations should look something like:
         ```
-        auto mps_lib_0_func = mps_lib_0.getKernelFunction("generated_kernel");
-        auto mps_lib_0_func_handle = AOTIMetalKernelFunctionHandle(mps_lib_0_func.get());
+        const std::shared_ptr<at::native::mps::MetalKernelFunction> get_mps_lib_0() {
+            static const auto func = mps_lib_0.getKernelFunction("generated_kernel");
+            return func;
+        }
+        AOTIMetalKernelFunctionHandle get_mps_lib_0_handle() {
+            static const auto handle = AOTIMetalKernelFunctionHandle(get_mps_lib_0().get());
+            return handle;
+        }
         ```
         """
 
@@ -155,10 +159,20 @@ class CppWrapperMps(CppWrapperGpu):
             if line.kernel_name not in self._used_kernel_names:
                 self._used_kernel_names.add(line.kernel_name)
 
-                lib_name = line.kernel_name[: -len("_func")]
                 self.prefix.writeline(
-                    f'auto {line.kernel_name} = {lib_name}.getKernelFunction("generated_kernel");'
+                    f"const std::shared_ptr<at::native::mps::MetalKernelFunction> get_{line.kernel_name}() {{"
                 )
                 self.prefix.writeline(
-                    f"auto {line.kernel_name}_handle = AOTIMetalKernelFunctionHandle({line.kernel_name}.get());"
+                    f'    static const auto func = {line.kernel_name}.getKernelFunction("generated_kernel");'
                 )
+                self.prefix.writeline("    return func;")
+                self.prefix.writeline("}")
+
+                self.prefix.writeline(
+                    f"AOTIMetalKernelFunctionHandle get_{line.kernel_name}_handle() {{"
+                )
+                self.prefix.writeline(
+                    f"    static const auto handle = AOTIMetalKernelFunctionHandle(get_{line.kernel_name}().get());"
+                )
+                self.prefix.writeline("    return handle;")
+                self.prefix.writeline("}")
