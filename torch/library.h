@@ -89,7 +89,7 @@ struct NoInferSchemaTag {};
 
 #define HAS_PT2_COMPLIANT_TAG
 
-// For multipy/torchdeploy use case
+// For multipy/torchdeploy use case  // codespell:ignore multipy
 enum class _RegisterOrVerify { REGISTER, VERIFY };
 
 template <class CurClass>
@@ -605,13 +605,18 @@ class TORCH_API Library final {
   /// }
   /// ```
 
-  template <typename Schema>
   Library& def(
-      Schema&& raw_schema,
+      c10::FunctionSchema&& s,
       const std::vector<at::Tag>& tags = {},
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
-    c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
     return _def(std::move(s), nullptr, tags, rv);
+  }
+
+  Library& def(
+      const char* raw_schema,
+      const std::vector<at::Tag>& tags = {},
+      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
+    return _def(schema(raw_schema), nullptr, tags, rv);
   }
 
   /// Declares that for all operators that are subsequently def'ed, their
@@ -1017,7 +1022,7 @@ class TorchLibraryInit final {
 /// Macro for defining a function that will be run at static
 /// initialization time to define operator overrides for dispatch key
 /// `k` (must be an unqualified enum member of c10::DispatchKey) in
-/// namespace `ns` (must be a valid C++ identifer, no quotes).  Use this
+/// namespace `ns` (must be a valid C++ identifier, no quotes).  Use this
 /// macro when you want to implement a preexisting set of custom
 /// operators on a new dispatch key (e.g., you want to provide CUDA
 /// implementations of already existing operators).  One common usage

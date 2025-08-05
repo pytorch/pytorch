@@ -88,20 +88,19 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
 * If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
 
-* When installing with `python setup.py develop` (in contrast to `python setup.py install`) Python runtime will use
+* When installing with `python -m pip install -e .` (in contrast to `python -m pip install .`) Python runtime will use
   the current local source-tree when importing `torch` package. (This is done by creating [`.egg-link`](https://wiki.python.org/moin/PythonPackagingTerminology#egg-link) file in `site-packages` folder)
   This way you do not need to repeatedly install after modifying Python files (`.py`).
-  However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or
-   non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
+  However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
 
-  One way to avoid running `python setup.py develop` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
+  One way to avoid running `python -m pip install -e .` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
   is to create a symbolic link from `build` folder to `torch/lib`, for example, by issuing following:
   ```bash
-   pushd torch/lib; sh -c "ln -sf ../../build/lib/libtorch_cpu.* ."; popd
+  pushd torch/lib; sh -c "ln -sf ../../build/lib/libtorch_cpu.* ."; popd
   ```
-   Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
-   would be sufficient to make change visible in `torch` package.
+  Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
+  would be sufficient to make change visible in `torch` package.
 
 
   To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
@@ -112,13 +111,12 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
   lazy.)
 
   ```bash
-  conda uninstall pytorch -y
-  yes | pip uninstall torch
+  pip uninstall torch
   ```
 
-  Next run `python setup.py clean`. After that, you can install in `develop` mode again.
+  Next run `python setup.py clean`. After that, you can install in editable mode again.
 
-* If you run into errors when running `python setup.py develop`, here are some debugging steps:
+* If you run into errors when running `python -m pip install -e .`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
   2. Nuke your `build` directory. The `setup.py` script compiles binaries into the `build` folder and caches many
@@ -130,14 +128,21 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
       git submodule deinit -f .
       git clean -xdf
       python setup.py clean
-      git submodule update --init --recursive # very important to sync the submodules
-      python setup.py develop                 # then try running the command again
+      git submodule update --init --recursive
+      python -m pip install -r requirements.txt
+      python -m pip install --no-build-isolation -v -e .
       ```
-  4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
+  4. The main step within `python -m pip install -e .` is running `cmake --build build` from the `build` directory. If you want to
     experiment with some environment variables, you can pass them into the command:
       ```bash
-      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
+      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* CMAKE_FRESH=1 python -m pip install --no-build-isolation -v -e .
       ```
+  5. Try installing PyTorch without build isolation by adding `--no-build-isolation` to the `pip install` command.
+  This will use the current environment's packages instead of creating a new isolated environment for the build.
+      ```bash
+      python -m pip install --no-build-isolation -v -e .
+      ```
+
 
 * If you run into issue running `git submodule update --init --recursive`. Please try the following:
   - If you encounter an error such as
@@ -149,7 +154,7 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
   - If you encounter an error such as
     ```
-    fatal: unable to access 'https://github.com/pybind11/pybind11.git': could not load PEM client certificate ...
+    fatal: unable to access 'https://github.com/pybind/pybind11.git': could not load PEM client certificate ...
     ```
     this is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
     `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate valid date by running
@@ -178,14 +183,6 @@ You can use this script to check out a new nightly branch with the following:
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch
 source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
-```
-
-Or if you would like to re-use an existing conda environment, you can pass in
-the prefix argument (`--prefix`):
-
-```bash
-./tools/nightly.py checkout -b my-nightly-branch -p my-env
-source my-env/bin/activate  # or `& .\my-env\Scripts\Activate.ps1` on Windows
 ```
 
 To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
@@ -237,6 +234,8 @@ dependencies as well as the nightly binaries into the repo directory.
           details.
         * [cuda](aten/src/ATen/native/cuda) - CUDA implementations of
           operators.
+        * [mps](aten/src/ATen/native/mps) - MPS implementations of
+          operators for Apple's Metal GPU family.
         * [sparse](aten/src/ATen/native/sparse) - CPU and CUDA
           implementations of COO sparse tensor operations
         * [mkl](aten/src/ATen/native/mkl) [mkldnn](aten/src/ATen/native/mkldnn)
@@ -281,8 +280,6 @@ dependencies as well as the nightly binaries into the repo directory.
 * [caffe2](caffe2) - The Caffe2 library.
   * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
     blobs, etc.
-  * [operators](caffe2/operators) - Operators of Caffe2.
-  * [python](caffe2/python) - Python bindings to Caffe2.
   * ...
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
@@ -291,7 +288,7 @@ dependencies as well as the nightly binaries into the repo directory.
 ### Python Unit Testing
 
 **Prerequisites**:
-The following packages should be installed with either `conda` or `pip`:
+The following packages should be installed with `pip`:
 - `expecttest` and `hypothesis` - required to run tests
 - `mypy` - recommended for linting
 - `pytest` - recommended to run tests more selectively
@@ -354,13 +351,7 @@ command runs tests such as `TestNN.test_BCELoss` and
 
 ### Local linting
 
-Install all prerequisites by running
-
-```bash
-make setup-lint
-```
-
-You can now run the same linting steps that are used in CI locally via `make`:
+You can run the same linting steps that are used in CI locally via `make`:
 
 ```bash
 make lint
@@ -436,7 +427,7 @@ PyTorch has two main types of documentation:
 These are the docs that you see over at [our docs website](https://pytorch.org/docs).
 - **Developer facing documentation**:
 Developer facing documentation is spread around our READMEs in our codebase and in
-the [PyTorch Developer Wiki](https://pytorch.org/wiki).
+the [PyTorch Developer Wiki](https://github.com/pytorch/pytorch/wiki).
 If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation) on our best practices for where to put it.
 
 The rest of this section is about user-facing documentation.
@@ -484,7 +475,7 @@ In addition to the standard Google Style docstring formatting rules, the followi
 
 ### Building documentation
 
-To build the documentation:
+Note that the docs will only build with Python versions <3.13. To build the documentation:
 
 1. Build and install PyTorch
 
@@ -499,8 +490,7 @@ pip install -r requirements.txt
 # Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
 # npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
 ```
-> Note: if you installed `nodejs` with a different package manager (e.g.,
-`conda`) then `npm` will probably install a version of `katex` that is not
+> Note: if you installed `nodejs` with a different package manager then `npm` will probably install a version of `katex` that is not
 compatible with your version of `nodejs` and doc builds will fail.
 A combination of versions that is known to work is `node@6.13.1` and
 `katex@0.13.18`. To install the latter with `npm` you can run
@@ -595,9 +585,8 @@ rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
 
 ### Previewing documentation on PRs
 
-PyTorch will host documentation previews at `https://docs-preview.pytorch.org/pytorch/pytorch/<pr number>/index.html` once the
-`pytorch_python_doc_build` GitHub Actions job has completed on your PR. You can visit that page directly
-or find its link in the automated Dr. CI comment on your PR.
+PyTorch will host documentation previews at `https://docs-preview.pytorch.org/pytorch/pytorch/<pr number>/index.html` once the docs GitHub Actions job has completed on your PR. You can find its link in the automated pytorchbot comment on your PR or go to the URL
+directly.
 
 ### Adding documentation tests
 
@@ -656,9 +645,9 @@ can be selected interactively with your mouse to zoom in on a particular part of
 the program execution timeline. The `--native` command-line option tells
 `py-spy` to record stack frame entries for PyTorch C++ code. To get line numbers
 for C++ code it may be necessary to compile PyTorch in debug mode by prepending
-your `setup.py develop` call to compile PyTorch with `DEBUG=1`. Depending on
-your operating system it may also be necessary to run `py-spy` with root
-privileges.
+your `python -m pip install -e .` call to compile PyTorch with `DEBUG=1`.
+Depending on your operating system it may also be necessary to run `py-spy` with
+root privileges.
 
 `py-spy` can also work in an `htop`-like "live profiling" mode and can be
 tweaked to adjust the stack sampling rate, see the `py-spy` readme for more
@@ -666,21 +655,21 @@ details.
 
 ## Managing multiple build trees
 
-One downside to using `python setup.py develop` is that your development
+One downside to using `python -m pip install -e .` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
 used).
 
 If you want to manage multiple builds of PyTorch, you can make use of
-[conda environments](https://conda.io/docs/using/envs.html) to maintain
+[venv environments](https://docs.python.org/3/library/venv.html) to maintain
 separate Python package environments, each of which can be tied to a
 specific build of PyTorch. To set one up:
 
 ```bash
-conda create -n pytorch-myfeature
-source activate pytorch-myfeature
+python -m venv pytorch-myfeature
+source pytorch-myfeature/bin/activate  # or `& .\pytorch-myfeature\Scripts\Activate.ps1` on Windows
 # if you run python now, torch will NOT be installed
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 ## C++ development tips
@@ -718,7 +707,9 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `USE_FLASH_ATTEN
 For example:
 
 ```bash
-DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 \
+    USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 \
+    python -m pip install --no-build-isolation -v -e .
 ```
 
 For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
@@ -728,7 +719,7 @@ options.
 
 ### Code completion and IDE support
 
-When using `python setup.py develop`, PyTorch will generate
+When using `python -m pip install -e .`, PyTorch will generate
 a `compile_commands.json` file that can be used by many editors
 to provide command completion and error highlighting for PyTorch's
 C++ code. You need to `pip install ninja` to generate accurate
@@ -756,7 +747,6 @@ same. Using ccache in a situation like this is a real time-saver.
 Before building pytorch, install ccache from your package manager of choice:
 
 ```bash
-conda install ccache -c conda-forge
 sudo apt install ccache
 sudo yum install ccache
 brew install ccache
@@ -790,7 +780,7 @@ If not, you can define these variables on the command line before invoking `setu
 export CMAKE_C_COMPILER_LAUNCHER=ccache
 export CMAKE_CXX_COMPILER_LAUNCHER=ccache
 export CMAKE_CUDA_COMPILER_LAUNCHER=ccache
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 #### Use a faster linker
@@ -803,7 +793,7 @@ If you are editing a single file and rebuilding in a tight loop, the time spent 
 Starting with CMake 3.29, you can specify the linker type using the [`CMAKE_LINKER_TYPE`](https://cmake.org/cmake/help/latest/variable/CMAKE_LINKER_TYPE.html) variable. For example, with `mold` installed:
 
 ```sh
-CMAKE_LINKER_TYPE=MOLD python setup.py develop
+CMAKE_LINKER_TYPE=MOLD python -m pip install --no-build-isolation -v -e .
 ```
 
 #### Use pre-compiled headers
@@ -815,7 +805,7 @@ setting `USE_PRECOMPILED_HEADERS=1` either on first setup, or in the
 `CMakeCache.txt` file.
 
 ```sh
-USE_PRECOMPILED_HEADERS=1 python setup.py develop
+USE_PRECOMPILED_HEADERS=1 python -m pip install --no-build-isolation -v -e .
 ```
 
 This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
@@ -838,7 +828,7 @@ A compiler-wrapper to fix this is provided in `tools/nvcc_fix_deps.py`. You can 
 this as a compiler launcher, similar to `ccache`
 ```bash
 export CMAKE_CUDA_COMPILER_LAUNCHER="python;`pwd`/tools/nvcc_fix_deps.py;ccache"
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 ### Rebuild few files with debug information
@@ -990,7 +980,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
 3. CUDA supports a lot of C++11/14 features such as, `std::numeric_limits`, `std::nextafter`,
    `std::tuple` etc. in device code. Many of such features are possible because of the
    [--expt-relaxed-constexpr](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#constexpr-functions)
-   nvcc flag. There is a known [issue](https://github.com/ROCm-Developer-Tools/HIP/issues/374)
+   nvcc flag. There is a known [issue](https://github.com/ROCm/hip/issues/374)
    that ROCm errors out on device code, which uses such stl functions.
 4. A good performance metric for a CUDA kernel is the
    [Effective Memory Bandwidth](https://devblogs.nvidia.com/how-implement-performance-metrics-cuda-cc/).
@@ -1048,8 +1038,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
 
 3. If you have a Windows box (we have a few on EC2 which you can request access to) and
    you want to run the build, the easiest way is to just run `.ci/pytorch/win-build.sh`.
-   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh` (this will avoid
-   blowing away your Conda environment.)
+   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh`.
 
 Even if you don't know anything about MSVC, you can use cmake to build simple programs on
 Windows; this can be helpful if you want to learn more about some peculiar linking behavior
@@ -1137,7 +1126,7 @@ CUDA, MSVC, and PyTorch versions are interdependent; please install matching ver
 | 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
 | 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
 
-Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
+Note: There's a [compilation issue](https://github.com/uxlfoundation/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
 ## Pre-commit tidy/linting hook
 
@@ -1190,7 +1179,7 @@ build_with_asan()
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
   USE_CUDA=0 USE_OPENMP=0 USE_DISTRIBUTED=0 DEBUG=1 \
-  python setup.py develop
+  python -m pip install --no-build-isolation -v -e .
 }
 
 run_with_asan()
@@ -1266,7 +1255,7 @@ in the meantime there will be some separation.
 There are a few "unusual" directories which, for historical reasons,
 are Caffe2/PyTorch specific. Here they are:
 
-- `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `conda`, `modules`,
+- `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `modules`,
   `scripts` are Caffe2-specific. Don't put PyTorch code in them without
   extra coordination.
 

@@ -296,6 +296,58 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         arg_count = ifdynstaticdefault(3, 4)
         self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
+    def test_allow_python_side_effects_utility(self):
+        from torch._dynamo.utils import (
+            _disable_side_effect_safety_checks_for_current_subtracer,
+        )
+        from torch._higher_order_ops.wrap import dynamo_bypassing_wrapper
+
+        def wrapper(fn):
+            return fn
+
+        count = 0
+
+        def does_side_effect(x):
+            nonlocal count
+            count += 1
+            return x.sin()
+
+        def does_side_effect_wrapped(*args, **kwargs):
+            return _disable_side_effect_safety_checks_for_current_subtracer(
+                does_side_effect, *args, **kwargs
+            )
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return dynamo_bypassing_wrapper(wrapper, does_side_effect_wrapped, x)
+
+        x = torch.tensor(1.0)
+        fn(x)
+
+        def inner_does_side_effect(x):
+            nonlocal count
+            count += 1
+            return x
+
+        # Test that any nested HOPs are unaffected
+        def outer(x):
+            return dynamo_bypassing_wrapper(wrapper, inner_does_side_effect, x)
+
+        def outer_wrapped(*args, **kwargs):
+            return _disable_side_effect_safety_checks_for_current_subtracer(
+                outer, *args, **kwargs
+            )
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn_nested(x):
+            return dynamo_bypassing_wrapper(wrapper, outer_wrapped, x)
+
+        x = torch.tensor(1.0)
+        with self.assertRaisesRegex(
+            RuntimeError, "Mutating a variable not in the current scope"
+        ):
+            fn_nested(x)
+
     def test_symint_input(self):
         def f(x):
             i = x.size(0)
@@ -1134,7 +1186,7 @@ class GraphModule(torch.nn.Module):
         pred = a.sum() > 0
         with self.assertRaisesRegex(
             NotImplementedError,
-            "no rule registered for HOP cond and mode .*MyMode",
+            "no rule registered for HigherOrderOperator cond and mode .*MyMode",
         ):
             with MyMode():
                 res = cond_op(pred, torch.sin, torch.cos, (a,))
@@ -1791,7 +1843,13 @@ def forward(self, child : torch.Tensor):
 
     def test_map_pytree_return(self):
         def _construct_pytree(a):
-            return (a, [[[a]]], a, (a, (a,), a), {"a": a})
+            return (
+                a.clone(),
+                [[[a.clone()]]],
+                a.clone(),
+                (a.clone(), (a.clone(),), a.clone()),
+                {"a": a.clone()},
+            )
 
         def f(x):
             def inner_f(xs):
@@ -1823,7 +1881,14 @@ def forward(self, L_x_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, child : torch.Tensor):
-    return (child, child, child, child, child, child, child)""",
+    child_1 = child.clone()
+    child_2 = child.clone()
+    child_3 = child.clone()
+    child_4 = child.clone()
+    child_5 = child.clone()
+    child_6 = child.clone()
+    child_7 = child.clone();  child = None
+    return (child_1, child_2, child_3, child_4, child_5, child_6, child_7)""",
             )
 
     def test_map_kwargs(self):
@@ -2068,7 +2133,7 @@ def forward(self, child : torch.Tensor, const_unused : int):
                 and node.target == torch.ops.higher_order.cond
             ):
                 _, _, _, operands = node.args
-                # Since we compile wit dynamic, each branch takes 4 inputs (buffer, x, z, s1)
+                # Since we compile with dynamic, each branch takes 4 inputs (buffer, x, z, s1)
                 self.assertEqual(len(operands), 4)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
@@ -3121,14 +3186,14 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             )
 
         pred = torch.tensor(True)
-        for pytree_in in [(1,), ("string",), (1.0,)]:
+        for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
                 RuntimeError,
                 r"Expect operands to be a tuple of possibly nested dict/list/tuple",
             ):
                 fn(pred, pytree_in)
 
-        for pytree_in in [(1,), ("string",), (1.0,)]:
+        for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
                 r"Cond doesn't work unless it is captured completely with torch.compile",
@@ -3150,6 +3215,65 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         ones = torch.ones(1)
         self.assertEqual(fn(zeros, ones, ones), torch.tensor([2.0]))
         self.assertEqual(fn(ones, ones, ones), torch.tensor([3.0]))
+
+    def test_hopify_generic_wrap(self):
+        from torch._higher_order_ops.wrap import dynamo_bypassing_wrapper
+
+        def my_hop_fn_impl(fn, *args, k=1, **kwargs):
+            def wrapper(*args, **kwargs):
+                out = fn(*args, **kwargs)
+                if isinstance(out, tuple):
+                    return (out[0] + k,)
+                return out + k
+
+            return wrapper
+
+        def my_hop_fn(fn, *args, k=1, **kwargs):
+            return dynamo_bypassing_wrapper(
+                functools.partial(my_hop_fn_impl, k=k), fn, *args, **kwargs
+            )
+
+        def my_hop_fn_2_impl(fn, *args, g=None):
+            def wrapper(*args, **kwargs):
+                assert g is not None
+                out = fn(*args)
+                if isinstance(out, tuple):
+                    return (g(out[0]),)
+                return g(out)
+
+            return wrapper
+
+        def my_hop_fn_2(fn, *args, g=None, **kwargs):
+            return dynamo_bypassing_wrapper(
+                functools.partial(my_hop_fn_2_impl, g=g), fn, *args, **kwargs
+            )
+
+        def gn(x, h=1):
+            return x.sin() + h
+
+        def fn(x, b):
+            out = my_hop_fn(gn, x, h=b, k=2)
+            return out
+
+        a = torch.rand((4, 4), requires_grad=True)
+        b = torch.rand((4, 4))
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        self.assertEqual(compiled_fn(a, b), fn(a, b))
+
+        def g(x):
+            return x.cos()
+
+        def fn_2(x, b):
+            out = my_hop_fn_2(fn, x, b, g=g)
+            return out
+
+        a = torch.rand((4, 4), requires_grad=True)
+        compiled_fn_2 = torch.compile(
+            fn_2, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        self.assertEqual(compiled_fn_2(a, b), fn_2(a, b))
 
     def test_hints_wrapper(self):
         def ref_fn(x, y):
@@ -4359,15 +4483,13 @@ class GraphModule(torch.nn.Module):
         if torch._dynamo.config.inline_inbuilt_nn_modules:
             expected = """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
-        l_params_l1_weight_ = L_params_l1_weight_
-        l_params_l1_bias_ = L_params_l1_bias_
-        l_buffers_buffer_ = L_buffers_buffer_
+    def forward(self, L_inputs_: "f32[1, 1]", L_model_modules_l1_parameters_weight_: "f32[1, 1]", L_model_modules_l1_parameters_bias_: "f32[1]", L_model_buffers_buffer_: "f32[1]"):
         l_inputs_ = L_inputs_
-
-        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
-
-        add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
+        l_model_modules_l1_parameters_weight_ = L_model_modules_l1_parameters_weight_
+        l_model_modules_l1_parameters_bias_ = L_model_modules_l1_parameters_bias_
+        l_model_buffers_buffer_ = L_model_buffers_buffer_
+        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_model_modules_l1_parameters_weight_, l_model_modules_l1_parameters_bias_);  l_inputs_ = l_model_modules_l1_parameters_weight_ = l_model_modules_l1_parameters_bias_ = None
+        add: "f32[1, 1]" = linear + l_model_buffers_buffer_;  linear = l_model_buffers_buffer_ = None
         return (add,)
 """
             # We found Windows/Linux have some empty line difference, empty_line_normalizer will help fix it.
@@ -6902,7 +7024,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def test(pred, x):
             def true_fn(x):
-                return x
+                return x.clone()
 
             def false_fn(x):
                 return -x
@@ -6926,7 +7048,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def test(pred, mode, x):
             def true_fn(x):
-                return x
+                return x.clone()
 
             def false_fn(x):
                 return -x
@@ -6983,6 +7105,103 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             AssertionError, "inputs to function body cannot alias outputs"
         ):
             _assert_tensors_nonaliasing(a, a)
+
+    def test_flop_counter_for_cond(self):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return torch.cond(
+                    torch.tensor(True),
+                    lambda x: self.linear(x),
+                    lambda x: self.linear(self.linear(x)),
+                    (x,),
+                )
+
+        mod = Mod()
+        with FlopCounterMode(mod, display=False) as mode:
+            mod(torch.randn(4, 4))
+
+        self.assertEqual(
+            mode.get_flop_counts(),
+            {
+                "Global": {torch.ops.aten.addmm: 256},
+                "Mod": {torch.ops.aten.addmm: 256},
+                "Mod.linear": {torch.ops.aten.addmm: 256},
+            },
+        )
+
+    def test_flop_counter_for_nested_cond(self):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(4, 4)
+                self.linear2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                def true_branch(x):
+                    # Nested cond inside true branch
+                    return torch.cond(
+                        torch.tensor(True),
+                        lambda x: self.linear1(x),
+                        lambda x: self.linear2(x),
+                        (x,),
+                    )
+
+                def false_branch(x):
+                    return self.linear1(self.linear2(x))
+
+                return torch.cond(torch.tensor(True), true_branch, false_branch, (x,))
+
+        mod = Mod()
+        with FlopCounterMode(mod, display=False) as mode:
+            mod(torch.randn(4, 4))
+
+        self.assertEqual(
+            mode.get_flop_counts(),
+            {
+                "Global": {torch.ops.aten.addmm: 256},
+                "Mod": {torch.ops.aten.addmm: 256},
+                "Mod.linear1": {torch.ops.aten.addmm: 128},
+                "Mod.linear2": {torch.ops.aten.addmm: 128},
+            },
+        )
+
+    def test_flop_counter_for_cond_unbalanced_branches(self):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                def true_branch(x):
+                    return self.linear(x)
+
+                def false_branch(x):
+                    return x.clone()
+
+                return torch.cond(torch.tensor(True), true_branch, false_branch, (x,))
+
+        mod = Mod()
+        with FlopCounterMode(mod, display=False) as mode:
+            mod(torch.randn(4, 4))
+
+        self.assertEqual(
+            mode.get_flop_counts(),
+            {
+                "Global": {torch.ops.aten.addmm: 128},
+                "Mod": {torch.ops.aten.addmm: 128},
+                "Mod.linear": {torch.ops.aten.addmm: 128},
+            },
+        )
 
 
 xfail_hops_compile = {

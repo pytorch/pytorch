@@ -38,6 +38,7 @@ from torch.onnx._internal.exporter import (
     _registration,
     _reporting,
     _tensors,
+    _type_casting,
     _verification,
 )
 
@@ -61,6 +62,7 @@ _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
     torch.float8_e4m3fnuz: ir.DataType.FLOAT8E4M3FNUZ,
     torch.float8_e5m2: ir.DataType.FLOAT8E5M2,
     torch.float8_e5m2fnuz: ir.DataType.FLOAT8E5M2FNUZ,
+    torch.float4_e2m1fn_x2: ir.DataType.FLOAT4E2M1,
     torch.int16: ir.DataType.INT16,
     torch.int32: ir.DataType.INT32,
     torch.int64: ir.DataType.INT64,
@@ -109,22 +111,43 @@ def torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
 class TorchTensor(ir.Tensor):
     def __init__(self, tensor: torch.Tensor, name: str | None = None):
         # Pass the tensor as the raw data to ir.Tensor's constructor
+        if tensor.dtype == torch.float4_e2m1fn_x2:
+            # Change the shape to the unpacked shape
+            shape = ir.Shape(_type_casting.get_float4_shape(tensor), frozen=True)
+        else:
+            # The base class will set the shape to the tensor's shape
+            shape = None
         super().__init__(
-            tensor, dtype=torch_dtype_to_onnx_dtype(tensor.dtype), name=name
+            tensor,
+            dtype=torch_dtype_to_onnx_dtype(tensor.dtype),
+            shape=shape,
+            name=name,
         )
 
     def numpy(self) -> npt.NDArray:
         self.raw: torch.Tensor
+
+        # Handle dtypes that are not natively supported by NumPy:
+        # We pick an uint dtype that has the same size as the original dtype,
+        # view the tensor as that dtype so that it is convertible to NumPy,
+        # and then view it back to the proper dtype (using ml_dtypes obtained by
+        # calling dtype.numpy()).
         if self.dtype == ir.DataType.BFLOAT16:
-            return self.raw.view(torch.uint16).numpy(force=True)
+            return (
+                self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
+            )
         if self.dtype in {
             ir.DataType.FLOAT8E4M3FN,
             ir.DataType.FLOAT8E4M3FNUZ,
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
-            # TODO: Use ml_dtypes
-            return self.raw.view(torch.uint8).numpy(force=True)
+            return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
+        if self.dtype == ir.DataType.FLOAT4E2M1:
+            return _type_casting.unpack_float4x2_as_uint8(self.raw).view(
+                self.dtype.numpy()
+            )
+
         return self.raw.numpy(force=True)
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> npt.NDArray:
@@ -205,7 +228,13 @@ def _set_shape_type(
         logger.warning("Setting shape and type of tensors is not supported yet")
     if isinstance(meta_val, torch.Tensor):
         dims = []
-        for dim in meta_val.shape:
+        shape: tuple[int, ...]
+        if meta_val.dtype == torch.float4_e2m1fn_x2:
+            # Change the shape to the unpacked shape
+            shape = _type_casting.get_float4_shape(meta_val)
+        else:
+            shape = meta_val.shape
+        for dim in shape:
             if isinstance(dim, int):
                 dims.append(dim)
             else:
@@ -448,6 +477,20 @@ def _get_onnxscript_opset(opset_version: int) -> onnxscript.values.Opset:
     return onnxscript.values.Opset("", opset_version)
 
 
+def _is_onnx_op(op: Any) -> bool:
+    """Whether the op overload is an ONNX custom op implemented with PyTorch."""
+    if not isinstance(op, torch._ops.OpOverload):
+        return False
+    return op.name().startswith("onnx::")
+
+
+def _parse_onnx_op(op: torch._ops.OpOverload) -> tuple[str, int]:
+    """Parse the ONNX custom op overload name to get the op type and opset version."""
+    name = op.name()[len("onnx::") :]
+    name, _, opset = name.partition(".opset")
+    return name, int(opset)
+
+
 def _handle_call_function_node_with_lowering(
     model: ir.Model,
     node: torch.fx.Node,
@@ -483,17 +526,6 @@ def _handle_call_function_node_with_lowering(
             # use SequenceAt to get the value. This is handled by torchlib
             pass
 
-    # Find the matching ONNX overload for the node
-    # NOTE: Create different registries for different ONNX opset versions
-    # TODO: Log the message here to expose false positives
-    onnx_function, message = _dispatching.dispatch(node, registry)
-
-    if onnx_function is None:
-        # TODO(justinchuby): Fall back to ATen op or do something else?
-        raise _errors.DispatchError(
-            f"No ONNX function found for {node.target!r}. Failure message: {message}"
-        )
-
     # Map FX inputs to ONNX inputs and fill optional inputs.
     # torch_args and torch_kwargs are for op-level validation
     fx_args = node.args
@@ -517,19 +549,68 @@ def _handle_call_function_node_with_lowering(
             # TODO(justinchuby): Maybe keep it as None?
             onnx_kwargs[key] = -1
 
-    with onnxscript.evaluator.default_as(
-        tracer := _building.OpRecorder(opset, constant_farm)
-    ):
-        global current_tracer
-        current_tracer = tracer
-        try:
-            outputs = onnx_function(*onnx_args, **onnx_kwargs)
-        except Exception as e:
-            raise _errors.GraphConstructionError(
-                f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
-            ) from e
-        finally:
-            current_tracer = None
+    if _is_onnx_op(node.target):
+        # Handle torch.ops.onnx.* ops. These ops can be directly added to the graph
+        op_type, opset_version = _parse_onnx_op(node.target)  # type: ignore[arg-type]
+        # If final inputs are None, strip them from the node inputs
+        for input_ in reversed(onnx_args):
+            if input_ is not None:
+                break
+            onnx_args.pop()
+        onnx_node = ir.Node(
+            "",
+            op_type,
+            onnx_args,
+            ir.convenience.convert_attributes(onnx_kwargs),
+            name=node.name,
+            num_outputs=len(node.target._schema.returns),  # type: ignore[union-attr]
+            version=opset_version,
+        )
+        # Store the single node in a list to be consistent with the rest of the code for further processing
+        onnx_nodes = [onnx_node]
+        if len(onnx_node.outputs) == 1:
+            outputs = onnx_node.outputs[0]
+        else:
+            outputs = onnx_node.outputs  # type: ignore[assignment]
+    else:
+        # Find the matching ONNX overload for the node
+        # TODO: Log the message here to expose false positives
+        onnx_function, message = _dispatching.dispatch(node, registry)
+
+        if onnx_function is None:
+            raise _errors.DispatchError(
+                f"No ONNX function found for {node.target!r}. Failure message: {message}"
+            )
+
+        with onnxscript.evaluator.default_as(
+            tracer := _building.OpRecorder(opset, constant_farm)
+        ):
+            global current_tracer
+            current_tracer = tracer
+            try:
+                outputs = onnx_function(*onnx_args, **onnx_kwargs)
+            except Exception as e:
+                raise _errors.GraphConstructionError(
+                    f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
+                ) from e
+            finally:
+                current_tracer = None
+
+        # Add the defined functions to the model
+        for identifier, onnxscript_function in tracer.functions.items():
+            if identifier in model.functions:
+                continue
+            if isinstance(onnxscript_function, ir.Function):
+                ir_function = onnxscript_function
+            else:
+                # TODO: Get IR function directly when onnxscript is updated
+                proto = onnxscript_function.to_function_proto()
+                ir_function = ir.serde.deserialize_function(proto)
+            model.functions[identifier] = ir_function
+            # Opset imports are added to the model in the final add_opset_imports pass
+
+        onnx_nodes = tracer.nodes
+        del tracer  # tracer is no longer needed
 
     # NOTE: Instead of using the output names from node.target._schema,
     # we always use the index if there are more than one outputs so the
@@ -543,31 +624,26 @@ def _handle_call_function_node_with_lowering(
         node_name_to_values[node.name] = outputs
         for i, output in enumerate(outputs):
             output.name = f"{node.name}__{i}"
+            # Set the name of the producing node using the value name for correspondence
+            producer = output.producer()
+            if producer is not None:
+                producer.name = f"node_{output.name}"
     else:
         _set_shape_type(outputs, node.meta["val"], complex_to_float=True)
         node_name_to_values[node.name] = outputs
         outputs.name = node.name
+        producer = outputs.producer()
+        if producer is not None:
+            producer.name = f"node_{outputs.name}"
 
-    for ir_node in tracer.nodes:
+    for ir_node in onnx_nodes:
         ir_node.meta["node"] = node
         # Record the nn.Module stack for the node
         _set_node_metadata(node, ir_node)
 
     # Add the traced nodes to the current graph
     # Must add nodes to this graph, not model.graph, because it can be a subgraph that is currently being constructed
-    graph_like.extend(tracer.nodes)
-    # Add the defined functions to the model
-    for identifier, onnxscript_function in tracer.functions.items():
-        if identifier in model.functions:
-            continue
-        if isinstance(onnxscript_function, ir.Function):
-            ir_function = onnxscript_function
-        else:
-            # TODO: Get IR function directly when onnxscript is updated
-            proto = onnxscript_function.to_function_proto()
-            ir_function = ir.serde.deserialize_function(proto)
-        model.functions[identifier] = ir_function
-        # Opset imports are added to the model in the final add_opset_imports pass
+    graph_like.extend(onnx_nodes)
 
 
 def _handle_placeholder_node(
@@ -872,7 +948,7 @@ def exported_program_to_ir(
     Args:
         exported_program: The exported program to convert.
         lower: Whether to lower the graph to core ONNX operators.
-            at_conversion: Lower whe translating the FX graph to ONNX IR.
+            at_conversion: Lower when translating the FX graph to ONNX IR.
             none: Do not lower the graph.
         registry: The registry of all ONNX Script decomposition.
     """
@@ -950,7 +1026,7 @@ def _exported_program_to_onnx_program(
         exported_program: The exported program to convert. The exported program
             should be the one that is after decompositions have been applied.
         lower: Whether to lower the graph to core ONNX operators.
-            at_conversion: Lower whe translating the FX graph to ONNX IR.
+            at_conversion: Lower when translating the FX graph to ONNX IR.
             none: Do not lower the graph.
         registry: The registry of all ONNX Script decomposition.
     """
@@ -1237,7 +1313,8 @@ def export(
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
         # are not used.
         program = model
-        export_status.torch_export = True
+        # torch.export.export has strict default to False
+        export_status.torch_export_non_strict = True
     else:
         # Convert an nn.Module to an ExportedProgram
         # Try everything 🐰 (all paths for getting an ExportedProgram)
@@ -1255,12 +1332,10 @@ def export(
             # Record the status
             if strategy_class is _capture_strategies.TorchExportNonStrictStrategy:
                 export_status.torch_export_non_strict = result.success
-            elif strategy_class is _capture_strategies.TorchExportStrategy:
-                export_status.torch_export = result.success
+            elif strategy_class is _capture_strategies.TorchExportStrictStrategy:
+                export_status.torch_export_strict = result.success
             elif strategy_class is _capture_strategies.TorchExportDraftExportStrategy:
                 export_status.torch_export_draft_export = result.success
-            elif strategy_class is _capture_strategies.JitTraceConvertStrategy:
-                export_status.torch_jit = result.success
 
             if result.exception is not None:
                 failed_results.append(result)

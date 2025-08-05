@@ -149,9 +149,9 @@ class SymNode:
                 # This is technically not TV, but this assert is expensive so
                 # let's only do it when we're already doing expensive things
                 computed_hint = compute_hint()
-                assert (
-                    hint == computed_hint
-                ), f"{hint} != {computed_hint} (for {self.expr})"
+                assert hint == computed_hint, (
+                    f"{hint} != {computed_hint} (for {self.expr})"
+                )
         else:
             hint = compute_hint()
         self._hint = hint
@@ -460,7 +460,9 @@ class SymNode:
         return self.float_pow(other)
 
     def is_non_overlapping_and_dense(self, sizes, strides):
-        return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(to_node(self, 1))  # type: ignore[attr-defined]
+        return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(
+            to_node(self, 1)
+        )  # type: ignore[attr-defined]
 
     def int_(self):
         return self.guard_int("", 0)  # NB: uses Python backtrace
@@ -554,7 +556,7 @@ class SymNode:
         # a regular guard if we can!)
         # TODO: file/line here is very important, because the assert has been
         # deferred so you can't backtrace easily
-        return self.shape_env.defer_runtime_assert(
+        return self.shape_env.guard_or_defer_runtime_assert(
             self.expr, f"{file}:{line}", fx_node=self.fx_node
         )
 
@@ -571,6 +573,12 @@ class SymNode:
         if r and not self.has_hint():
             _advise_is_size(SymInt(self))
         return r
+
+    def statically_known_true(self, file, line):
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        assert self.is_bool()
+        return statically_known_true(SymBool(self))
 
     def guard_size_oblivious(self, file, line):
         """
@@ -1219,11 +1227,6 @@ sizes_strides_methods = {
     "is_non_overlapping_and_dense_indicator": _sympy_is_non_overlapping_and_dense_indicator,
 }
 
-alternate_impl_if_hinted_methods = {
-    "sym_min": builtins.min,
-    "sym_max": builtins.max,
-}
-
 
 def to_node(self, num):
     if isinstance(num, SymTypes):
@@ -1342,10 +1345,6 @@ def _make_node_magic(method, func):
         if self.hint is not None and other.hint is not None:
             out_hint = op(self.hint, other.hint)
 
-        alternate_impl = alternate_impl_if_hinted_methods.get(method)
-        if alternate_impl and out_hint is not None:
-            return to_node(self, alternate_impl(wrap_node(self), wrap_node(other)))
-
         if get_proxy_mode():
             return to_node(
                 self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
@@ -1418,7 +1417,7 @@ def _make_node_magic(method, func):
             out,
             self.shape_env,
             pytype,
-            out_hint,
+            out_hint,  # type: ignore[arg-type]
             fx_node=fx_node,
             optimized_summation=optimized_summation,  # see Note [optimized_summation]
         )

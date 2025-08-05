@@ -52,7 +52,7 @@ class Interval:
 
 
 class EventKey:
-    def __init__(self, event):
+    def __init__(self, event) -> None:
         self.event = event
 
     def __hash__(self):
@@ -61,7 +61,7 @@ class EventKey:
     def __eq__(self, other):
         return self.event.id == other.event.id
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.event.name}"
 
     def intervals_overlap(self, intervals: list[Interval]):
@@ -98,7 +98,7 @@ class EventKey:
 
 
 class BasicEvaluation:
-    def __init__(self, prof: profile):
+    def __init__(self, prof: profile) -> None:
         self.profile = prof
         self.metrics: dict[EventKey, EventMetrics] = {}
         self.compute_self_time()
@@ -110,7 +110,7 @@ class BasicEvaluation:
         self.queue_depth_list = self.compute_queue_depth()
         self.compute_idle_time()
 
-    def compute_self_time(self):
+    def compute_self_time(self) -> None:
         """
         Computes event's self time(total time - time in child ops).
         """
@@ -142,12 +142,29 @@ class BasicEvaluation:
         cuda_event_list = self.profile.kineto_results.events()
 
         def is_cuda_launch_kernel(e):
-            # TODO: find a better way to identify cudaLaunchKernel
-            return e.name == "cudaLaunchKernel"
+            """Check if the event is a CUDA launch kernel."""
+            launch_patterns = {
+                "cudaLaunchKernel",  # Standard CUDA
+                "cudaLaunchKernelExC",  # Extended C
+                "__cudaLaunchKernel",  # Internal
+                "cudaLaunchCooperativeKernel",  # Collaborative (single-device)
+                "cudaLaunchCooperativeKernelMultiDevice",  # Collaborative (multi-devices)
+            }
+            name = str(getattr(e, "name", e))
+            return any(name.startswith(pattern) for pattern in launch_patterns)
 
         def is_cuda_kernel(e):
-            # TODO: find a better way to identify CUDA Kernel
-            return e.device_type() == DeviceType.CUDA and "mem" not in e.name.lower()
+            """Check if the event is a CUDA runtime kernel."""
+            # Check if the kernel is CUDA
+            if e.device_type() != DeviceType.CUDA:
+                return False
+
+            name = str(getattr(e, "name", e)).lower()
+
+            # Exclude memory operations
+            exclude_patterns = {"mem", "cpy", "alloc", "free"}
+
+            return not any(pattern in name for pattern in exclude_patterns)
 
         cuda_launch_events = sorted(
             (e for e in cuda_event_list if is_cuda_launch_kernel(e)),
@@ -226,7 +243,7 @@ class BasicEvaluation:
 
         return queue_depth_list
 
-    def compute_idle_time(self):
+    def compute_idle_time(self) -> None:
         """
         Computes idle time of the profile.
         """
@@ -378,7 +395,7 @@ def source_code_location(event):
 # https://github.com/pytorch/pytorch/issues/75504
 # TODO(dberard) - deprecate / remove workaround for CUDA >= 12, when
 # we stop supporting older CUDA versions.
-def _init_for_cuda_graphs():
+def _init_for_cuda_graphs() -> None:
     from torch.autograd.profiler import profile
 
     with profile():

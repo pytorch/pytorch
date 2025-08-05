@@ -920,7 +920,7 @@ class SymPyValueRangeAnalysis:
         return (a, b)
 
     # piecewise function can be used to convert a SymBool to SymInt:
-    # int_expr = Piecewise((1, bool_expr), (0, True)), it evalutes to 1 when sym_bool is True and 0 otherwise.
+    # int_expr = Piecewise((1, bool_expr), (0, True)), it evaluates to 1 when sym_bool is True and 0 otherwise.
     #
     # ranges is a sequence of (expr_range, condition_range) pairs. The range pair is constructed in expr_cond_pair.
     # The ValueRange of Piecewise is just the union of all expr ranges whose condition expr can be True.
@@ -1028,7 +1028,7 @@ def bound_sympy(
 
     # If there's a tracing context, augment available constrained ranges.
     context = torch._guards.TracingContext.try_get()
-    if context and context.fake_mode.shape_env:
+    if context and context.fake_mode and context.fake_mode.shape_env:
         if ranges:
             ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
         else:

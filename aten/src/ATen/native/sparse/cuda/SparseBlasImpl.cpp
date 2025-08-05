@@ -626,11 +626,11 @@ void spmm(
       mat1.device());
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1_32);
   auto algorithm = CUSPARSE_MM_ALG_DEFAULT;
-#else
+#else // defined(USE_ROCM) && (ROCM_VERSION < 60300)
   // TODO: update this to support COO sparse layout
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1);
   auto algorithm = CUSPARSE_SPMM_CSR_ALG2;
-#endif
+#endif // defined(USE_ROCM) && (ROCM_VERSION < 60300)
 
   auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(
       transpose_B ? mat2_->mT() : *mat2_);

@@ -103,10 +103,10 @@ struct BuiltinFunctionRegistry {
     // re-lock, the mutex without waiting), and report no loaded builtins during
     // init.
     std::lock_guard<std::recursive_mutex> guard(mutex);
-    if (state == INTIIALIZING) {
+    if (state == INITIALIZING) {
       return empty;
     } else if (state == UNINITIALIZED) {
-      state = INTIIALIZING;
+      state = INITIALIZING;
       loadBuiltinFunctions();
       state = INITIALIZED;
     }
@@ -168,10 +168,16 @@ struct BuiltinFunctionRegistry {
     loadSource(aten_ops_additional, "aten");
 
     // These are under `prim` instead of `aten` since they exist to bind certain
-    // tensor property getters to correpsonding methods
+    // tensor property getters to corresponding methods
     loadSource(tensor_properties, "prim");
   }
-  enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;
+  enum {
+    UNINITIALIZED = 0,
+    INITIALIZING = 1,
+    // typo in the original code, keeping for compatibility
+    INTIIALIZING = 1, // codespell:ignore
+    INITIALIZED = 2
+  } state = UNINITIALIZED;
   std::recursive_mutex mutex;
   std::vector<std::shared_ptr<CompilationUnit>> modules;
   std::unordered_map<Symbol, std::vector<Function*>> builtins_by_name_;

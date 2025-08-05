@@ -27,8 +27,7 @@ static void start_manager() {
   std::array<int, 2> pipe_ends;
   SYSCHECK_ERR_RETURN_NEG1(pipe(pipe_ends.data()));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  pid_t pid;
+  pid_t pid = -1;
   SYSCHECK_ERR_RETURN_NEG1(pid = fork());
   if (!pid) {
     SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
@@ -99,8 +98,7 @@ THManagedMapAllocatorInit::THManagedMapAllocatorInit(
     : manager_handle_(manager_handle ? manager_handle : "") {
   // TODO: unlock GIL when contacting the manager
   try {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    ClientSocket* socket;
+    ClientSocket* socket = nullptr;
     if (!manager_handle_.empty()) {
       socket = &get_manager_socket(manager_handle_);
     } else {

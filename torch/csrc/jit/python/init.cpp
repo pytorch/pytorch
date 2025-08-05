@@ -163,7 +163,8 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
 }
 } // anonymous namespace
 
-#if !defined(USE_ROCM)
+#if defined(BUILDING_TESTS) && !defined(USE_ROCM)
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 TORCH_API void runJITCPPTests();
 #endif
 
@@ -292,6 +293,9 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) {
             return EliminateDeadCode(g->block()); // overload resolution
           })
+      .def(
+          "_jit_pass_dce_graph",
+          [](std::shared_ptr<Graph>& g) { return EliminateDeadCode(g); })
       .def(
           "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
           [](std::shared_ptr<Graph>& g) {
@@ -1260,6 +1264,16 @@ void initJITBindings(PyObject* module) {
             return a->guard_size_oblivious(file, line);
           })
       .def(
+            "guard_or_false",
+            [](const c10::SymNode& a, const char* file, int64_t line) {
+              return a->guard_or_false(file, line);
+            })
+      .def(
+              "guard_or_true",
+              [](const c10::SymNode& a, const char* file, int64_t line) {
+                return a->guard_or_true(file, line);
+              })
+      .def(
           "has_hint",
           [](const c10::SymNode& a) {
             return a->has_hint();
@@ -1638,7 +1652,7 @@ void initJITBindings(PyObject* module) {
           "get_record_offset_no_read",
           [](PyTorchStreamReader& self,
              size_t zipfile_header_offset,
-             const std::string filename,
+             const std::string& filename,
              size_t size,
              uint64_t storage_alignment) {
             return self.getRecordOffsetNoRead(
@@ -1748,7 +1762,7 @@ void initJITBindings(PyObject* module) {
 
   m.def(
       "_jit_resolve_packet",
-      [](const char* op_name, py::args args, const py::kwargs& kwargs) {
+      [](const char* op_name, const py::args& args, const py::kwargs& kwargs) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
@@ -2140,7 +2154,7 @@ void initJITBindings(PyObject* module) {
                 return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) { // NOLINT
+              [](const py::tuple& /* unused */) {
                 TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy PyBind's API
@@ -2177,7 +2191,7 @@ void initJITBindings(PyObject* module) {
                 return py::make_tuple();
               },
               /* __setstate__ */
-              [](const py::tuple& /* unused */) { // NOLINT
+              [](const py::tuple& /* unused */) {
                 TORCH_CHECK(false, "Can not unpickle torch.jit._Await");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy PyBind's API
@@ -2302,7 +2316,7 @@ void initJITBindings(PyObject* module) {
               // Throw errors when calling wait() on the returned Future if
               // any of the original futures would throw.
               // NB: PythonFutureWrapper takes an unwrap_func which serves as a
-              // callback to evalute the value in the Future. RPC uses this
+              // callback to evaluate the value in the Future. RPC uses this
               // unwrap_func to check whether the returned py::object is a
               // RemoteException object, and re-throw the exception if it is.
               // By extracting the c10::ivalue::Future from PythonFutureWrapper

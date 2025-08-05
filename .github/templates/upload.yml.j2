@@ -23,6 +23,7 @@
 {%- endif %}
 {%- if not is_windows %}
       DOCKER_IMAGE: !{{ config["container_image"] }}
+      DOCKER_IMAGE_TAG_PREFIX: !{{ config["container_image_tag_prefix"] }}
 {%- endif %}
 {%- if config["package_type"] == "manywheel" %}
   {%- if config.use_split_build is defined %}

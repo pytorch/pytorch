@@ -7,10 +7,15 @@ import torch
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
-from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
+from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import get_func_call, HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    get_func_call,
+    HAS_CPU,
+    HAS_CUDA,
+    IS_BIG_GPU,
+)
 
 
 # Make the helper files in test/ importable
@@ -91,9 +96,12 @@ class BenchmarkFusionTestTemplate:
 
         # Disable dynamic_scale_rblock to make it easier to trigger register
         # spilling.
-        with unittest.mock.patch.object(
-            Scheduler, "benchmark_fused_nodes", new_benchmark_fn
-        ), config.patch("dynamic_scale_rblock", False):
+        with (
+            unittest.mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", new_benchmark_fn
+            ),
+            config.patch("dynamic_scale_rblock", False),
+        ):
             S = 512
 
             def f(*inputs):
@@ -127,6 +135,9 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (a, b))
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_avoid_register_spilling(self):
         if self.device != "cuda":
@@ -162,9 +173,10 @@ class BenchmarkFusionTestTemplate:
                 ".run", 2, exactly=True
             ).run(out_code[0])
 
-        with config.patch(
-            {"benchmark_fusion": False, "epilogue_fusion": False}
-        ), torch.no_grad():
+        with (
+            config.patch({"benchmark_fusion": False, "epilogue_fusion": False}),
+            torch.no_grad(),
+        ):
             torch._dynamo.reset()
 
             foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
@@ -275,7 +287,7 @@ if HAS_CUDA:
             self.assertEqual(res, res2, atol=1e-4, rtol=1.1)
             return code, code2
 
-        @fresh_inductor_cache()
+        @fresh_cache()
         @config.patch(max_autotune_gemm_backends="TRITON")
         def test_equivalent_template_code(self):
             code, code2 = self._equivalent_output_code_impl(256)
@@ -284,13 +296,9 @@ if HAS_CUDA:
                     "empty_strided", 1, exactly=True
                 ).check("triton_tem_fused_addmm_relu_0").check_count(
                     ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
-                ).check(
-                    "" if config.cpp_wrapper else "return"
-                ).run(
-                    out_code[0]
-                )
+                ).check("" if config.cpp_wrapper else "return").run(out_code[0])
 
-        @fresh_inductor_cache()
+        @fresh_cache()
         @config.patch(max_autotune_gemm_backends="ATEN")
         def test_equivalent_extern_code(self):
             torch._dynamo.reset()
@@ -302,11 +310,7 @@ if HAS_CUDA:
                     "empty_strided", 1, exactly=True
                 ).check("" if config.cpp_wrapper else "extern_kernels.").check_count(
                     ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
-                ).check(
-                    "" if config.cpp_wrapper else "return"
-                ).run(
-                    out_code[0]
-                )
+                ).check("" if config.cpp_wrapper else "return").run(out_code[0])
 
         def test_changed_layout(self):
             # cat addmm planning will change layout - make sure propagated

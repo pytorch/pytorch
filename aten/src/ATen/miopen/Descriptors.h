@@ -39,7 +39,7 @@ struct DescriptorDeleter {
 // function.
 template <typename T, miopenStatus_t (*ctor)(T**), miopenStatus_t (*dtor)(T*)>
 // NOLINTNEXTLINE(bugprone-exception-escape)
-class TORCH_CUDA_CPP_API Descriptor {
+class TORCH_HIP_CPP_API Descriptor {
  public:
   // Use desc() to access the underlying descriptor pointer in
   // a read-only fashion.  Most client code should use this.
@@ -65,7 +65,7 @@ private:
   std::unique_ptr<T, DescriptorDeleter<T, dtor>> desc_;
 };
 
-class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
+class TORCH_HIP_CPP_API TensorDescriptor : public Descriptor<
                                                miopenTensorDescriptor,
                                                &miopenCreateTensorDescriptor,
                                                &miopenDestroyTensorDescriptor> {
@@ -88,7 +88,7 @@ private:
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d);
 
-class TORCH_CUDA_CPP_API FilterDescriptor : public Descriptor<
+class TORCH_HIP_CPP_API FilterDescriptor : public Descriptor<
                                                miopenTensorDescriptor,
                                                &miopenCreateTensorDescriptor,
                                                &miopenDestroyTensorDescriptor> {
@@ -105,7 +105,7 @@ private:
   }
 };
 
-struct TORCH_CUDA_CPP_API ConvolutionDescriptor
+struct TORCH_HIP_CPP_API ConvolutionDescriptor
     : public Descriptor<
           miopenConvolutionDescriptor,
           &miopenCreateConvolutionDescriptor,
@@ -121,7 +121,7 @@ struct TORCH_CUDA_CPP_API ConvolutionDescriptor
 };
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
-struct TORCH_CUDA_CPP_API DropoutDescriptor
+struct TORCH_HIP_CPP_API DropoutDescriptor
     : public Descriptor<
           miopenDropoutDescriptor,
           &miopenCreateDropoutDescriptor,
@@ -137,14 +137,19 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
     }
 };
 
-struct TORCH_CUDA_CPP_API RNNDescriptor
+struct TORCH_HIP_CPP_API RNNDescriptor
   : public Descriptor<miopenRNNDescriptor,
                       &miopenCreateRNNDescriptor,
                       &miopenDestroyRNNDescriptor>
 {
     void set(int64_t hidden_size, int64_t num_layers, miopenRNNInputMode_t input_mode, miopenRNNDirectionMode_t direction, miopenRNNMode_t rnn_mode,
-              miopenRNNBiasMode_t bias_mode, miopenRNNAlgo_t algorithm, miopenDataType_t datatype) {
+             miopenRNNBiasMode_t bias_mode, miopenRNNAlgo_t algorithm, miopenDataType_t datatype) {
       MIOPEN_CHECK(miopenSetRNNDescriptor(mut_desc(), hidden_size, num_layers, input_mode, direction, rnn_mode, bias_mode, algorithm, datatype));
+    }
+
+    void setWithDropout(DropoutDescriptor& dropout_desc, int64_t hidden_size, int64_t num_layers, miopenRNNInputMode_t input_mode, miopenRNNDirectionMode_t direction,
+                        miopenRNNMode_t rnn_mode, miopenRNNBiasMode_t bias_mode, miopenRNNAlgo_t algorithm, miopenDataType_t datatype) {
+      MIOPEN_CHECK(miopenSetRNNDescriptor_V2(mut_desc(), hidden_size, num_layers, dropout_desc.mut_desc(), input_mode, direction, rnn_mode, bias_mode, algorithm, datatype));
     }
 };
 

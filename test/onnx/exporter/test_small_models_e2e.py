@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import logging
 
+import onnxruntime
+import pytest
 import transformers
 from onnxscript import ir
+from packaging import version
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
@@ -14,8 +17,11 @@ from torch.testing._internal import common_utils
 from torch.utils import _pytree as torch_pytree
 
 
-@common_utils.instantiate_parametrized_tests
-class DynamoExporterTest(common_utils.TestCase):
+def has_onnxruntime_opset_23() -> bool:
+    return version.parse(onnxruntime.__version__) >= version.parse("1.23")
+
+
+class _WithExport:
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
         onnx_program = torch.onnx.export(
             model,
@@ -29,6 +35,9 @@ class DynamoExporterTest(common_utils.TestCase):
         assert onnx_program is not None
         return onnx_program
 
+
+@common_utils.instantiate_parametrized_tests
+class DynamoExporterTest(common_utils.TestCase, _WithExport):
     def test_insert_contiguous_between_transpose_and_view(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
@@ -150,22 +159,18 @@ class DynamoExporterTest(common_utils.TestCase):
                 x = torch.cond(x.sum() > 0, true_fn, false_fn, (x, z))
                 return x, z
 
-        onnx_program = torch.onnx.export(
-            CondModel(),
-            (torch.tensor([1, 2]),),
-            dynamo=True,
-            fallback=False,
-        )
+        onnx_program = self.export(CondModel(), (torch.tensor([1, 2]),))
         onnx_testing.assert_onnx_program(onnx_program)
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
 
     def test_empty(self):
-        def func(x):
-            return torch.empty(x.size(), dtype=torch.int64)
+        class EmptyModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.empty(x.size(), dtype=torch.int64)
 
         # Since `torch.empty` returns tensor with uninitialized data, we cannot
         # test this under `test_fx_to_onnx_with_onnxruntime.py` with result comparison.
-        _ = self.export(func, (torch.randn(1, 2),))
+        _ = self.export(EmptyModel(), (torch.randn(1, 2),))
 
     def test_multiple_outputs_op_with_evaluator(self):
         class TopKModel(torch.nn.Module):
@@ -194,33 +199,45 @@ class DynamoExporterTest(common_utils.TestCase):
             _ = self.export(exported_program)
 
     @common_utils.parametrize(
-        "float8_type",
+        "float8_type, onnx_type",
         [
             common_utils.subtest(
-                torch.float8_e5m2,
+                (torch.float8_e5m2, ir.DataType.FLOAT8E5M2),
                 name="torch_float8_e5m2",
             ),
             common_utils.subtest(
-                torch.float8_e5m2fnuz,
+                (torch.float8_e5m2fnuz, ir.DataType.FLOAT8E5M2FNUZ),
                 name="torch_float8_e5m2fnuz",
             ),
             common_utils.subtest(
-                torch.float8_e4m3fn,
+                (torch.float8_e4m3fn, ir.DataType.FLOAT8E4M3FN),
                 name="torch_float8_e4m3fn",
             ),
             common_utils.subtest(
-                torch.float8_e4m3fnuz,
+                (torch.float8_e4m3fnuz, ir.DataType.FLOAT8E4M3FNUZ),
                 name="torch_float8_e4m3fnuz",
             ),
         ],
     )
-    def test_float8_support(self, float8_type):
+    def test_float8_support(self, float8_type: torch.dtype, onnx_type: ir.DataType):
         class Float8Module(torch.nn.Module):
             def forward(self, input: torch.Tensor):
                 input = input.to(float8_type)
                 return input
 
-        _ = self.export(Float8Module(), (torch.randn(1, 2),))
+        onnx_program = self.export(Float8Module(), (torch.randn(1, 2),))
+        self.assertEqual(onnx_program.model.graph.outputs[0].dtype, onnx_type)
+
+    def test_float4_support(self):
+        class Float4Module(torch.nn.Module):
+            def forward(self):
+                return torch.empty([1], dtype=torch.float4_e2m1fn_x2)
+
+        onnx_program = self.export(Float4Module(), optimize=False)
+        output = onnx_program.model.graph.outputs[0]
+        self.assertEqual(output.dtype, ir.DataType.FLOAT4E2M1)
+        # The shape is [*shape[:-1], shape[-1]*2] because ONNX stores the shape of the unpacked tensor
+        self.assertEqual(output.shape.numpy(), [2])
 
     def test_bfloat16_support(self):
         class BfloatModel(torch.nn.Module):
@@ -298,7 +315,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 return x + y
 
         dim0_x = torch.export.Dim("dim0_x", min=6)
-        dynamic_shapes = {"x": {0: dim0_x}, "y": None}
+        dynamic_shapes = {"x": {0: dim0_x}, "y": torch.export.Dim.STATIC}
         # specialized input y to 5 during tracing
         onnx_program = self.export(
             Model(),
@@ -539,13 +556,255 @@ class DynamoExporterTest(common_utils.TestCase):
         # all of these should be fine
         dynamic_shapes = (
             {0: dx, 1: torch.export.Dim.AUTO},
-            {0: dy, 1: None},
+            {0: dy, 1: torch.export.Dim.STATIC},
             {0: dz, 1: 3},
         )
         onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
-        onnx_testing.assert_onnx_program(onnx_program, args=inputs)
+        onnx_testing.assert_onnx_program(onnx_program)
         # make sre the naming is working
         self.assertEqual(onnx_program.model.graph.inputs[0].shape[0], "dx")
+
+    def test_export_sym_max(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.sym_max(*x.shape)
+
+        inputs = (torch.zeros((2, 3)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertIn(
+            "Max",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_export_sym_min(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.sym_min(*x.shape)
+
+        inputs = (torch.zeros((2, 3)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(Model(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertIn(
+            "Min",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_export_sym_not(self):
+        class SymNotModel(torch.nn.Module):
+            def forward(self, x):
+                comparison = x.shape[0] == x.shape[1]
+                return torch.sym_not(comparison)
+
+        inputs = (torch.zeros((2, 2)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(SymNotModel(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertIn(
+            "Not",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_export_sym_float(self):
+        class SymFloatModel(torch.nn.Module):
+            def forward(self, x):
+                a = x.shape[0]
+                return torch.sym_float(a)
+
+        inputs = (torch.zeros((2, 2)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(
+            SymFloatModel(), inputs, dynamic_shapes=dynamic_shapes
+        )
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertIn(
+            "Cast",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_scan_cdist_add(self):
+        def dist(unused: torch.Tensor, x: torch.Tensor, samex: torch.Tensor):
+            sub = samex - x.reshape((1, -1))
+            sq = sub * sub
+            rd = torch.sqrt(sq.sum(axis=1))
+            return [unused.clone(), rd]
+
+        class ScanModel(torch.nn.Module):
+            def forward(self, x):
+                z = torch.tensor([0], dtype=torch.float32)
+                y = x.clone()
+                out = torch.ops.higher_order.scan(dist, [z], [x], additional_inputs=[y])
+                return out[1]
+
+        inputs = (
+            torch.tensor(
+                [[1, 2, 3, -1], [4, 5, 6, -1], [7, 8, 9, -1]], dtype=torch.float32
+            ),
+        )
+        onnx_program = self.export(ScanModel(), inputs)
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_scan_cdist_dynamic_shapes(self):
+        def dist(y: torch.Tensor, scanned_x: torch.Tensor):
+            sub = y - scanned_x.reshape((1, -1))
+            sq = sub * sub
+            rd = torch.sqrt(sq.sum(axis=1))
+            return [y.clone(), rd]
+
+        class ScanModel(torch.nn.Module):
+            def forward(self, x, y):
+                carry, out = torch.ops.higher_order.scan(
+                    dist, [y], [x], additional_inputs=[]
+                )
+                return out
+
+        x_rows = torch.export.Dim("x_rows")
+        y_rows = torch.export.Dim("y_rows")
+        dim = torch.export.Dim("dim")
+        inputs = (torch.randn(3, 4), torch.randn(5, 4))
+        onnx_program = self.export(
+            ScanModel(),
+            inputs,
+            dynamic_shapes=({0: x_rows, 1: dim}, {0: y_rows, 1: dim}),
+        )
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    @pytest.mark.xfail(reason="Data dependent error.")
+    def test_scan_loop_inplace(self):
+        def dummy_loop(padded: torch.Tensor, pos: torch.Tensor):
+            copy = torch.zeros(padded.shape)
+            for i in range(pos.shape[0]):
+                p = pos[i]
+                copy[i, :p] = padded[i, :p]
+            return copy
+
+        def dummy_loop_with_scan(padded: torch.Tensor, pos: torch.Tensor):
+            def pad_row(padded, p):
+                row = torch.zeros((padded.shape[0],))
+                torch._check(p.item() > 0)
+                torch._check(p.item() < padded.shape[0])
+                # this check is not always true, we add it anyway to make this dimension >= 2
+                # and avoid raising an exception about dynamic dimension in {0, 1}
+                if torch.compiler.is_exporting():
+                    torch._check(p.item() > 1)
+                row[: p.item()] = padded[: p.item()]
+                return (row,)
+
+            return torch.ops.higher_order.scan(pad_row, [], [padded, pos], [])
+
+        def select_when_exporting(f, f_scan):
+            return f_scan if torch.compiler.is_exporting() else f
+
+        class ScanModel(torch.nn.Module):
+            def forward(self, images, position):
+                return select_when_exporting(dummy_loop, dummy_loop_with_scan)(
+                    images, position
+                )
+
+        DYN = torch.export.Dim.DYNAMIC
+        x = torch.randn((5, 6))
+        y = torch.arange(5, dtype=torch.int64) + 1
+        ep = torch.export.export(
+            ScanModel(),
+            (x, y),
+            dynamic_shapes={"images": {0: DYN, 1: DYN}, "position": {0: DYN}},
+            strict=False,
+        )
+        onnx_program = self.export(ep)
+        onnx_testing.assert_onnx_program(onnx_program)
+
+
+@common_utils.instantiate_parametrized_tests
+class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
+    def test_group_norm_opset_21(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.group_norm(x, 4)
+
+        x = torch.randn(1, 4, 4, 4, dtype=torch.float32)
+        onnx_program = self.export(Model(), (x,), opset_version=21)
+        # TODO(after ort support): As of ONNX Runtime 1.22, the operator is not implemented yet.
+        # call assert_onnx_program after ort support
+        self.assertIn(
+            "GroupNormalization",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_attention_opset_23(self):
+        class Model(torch.nn.Module):
+            def forward(self, query, key, value):
+                return torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value
+                )
+
+        query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+
+        onnx_program = self.export(Model(), (query, key, value), opset_version=23)
+        self.assertEqual(["Attention"], [n.op_type for n in onnx_program.model.graph])
+
+        if has_onnxruntime_opset_23():
+            onnx_testing.assert_onnx_program(onnx_program, atol=1e-2, rtol=1)
+        else:
+            # Test with reference evaluator because ORT does not support the op as of version 1.22
+            onnx_testing.assert_onnx_program(
+                onnx_program, atol=1e-2, rtol=1, backend="reference"
+            )
+
+    def test_rms_norm(self):
+        """Test RMS normalization with various configurations."""
+
+        class RMSNormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [3])
+
+        x = torch.randn(2, 5, 3)
+        onnx_program = self.export(RMSNormModel(), (x,), opset_version=23)
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+
+        # Test with multi-dimensional normalized_shape
+        class RMSNormModel2D(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [7, 3])
+
+        x = torch.randn(2, 5, 7, 3)
+        onnx_program = self.export(RMSNormModel2D(), (x,), opset_version=23)
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+
+    def test_rms_norm_with_weight(self):
+        """Test RMS normalization with weight parameter."""
+
+        class RMSNormWithWeight(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(3))
+
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [3], weight=self.weight)
+
+        x = torch.randn(2, 5, 3)
+
+        onnx_program = self.export(RMSNormWithWeight(), (x,), opset_version=23)
+
+        # Test with reference evaluator because ORT does not support the op as of version 1.22
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+
+    def test_rms_norm_with_eps(self):
+        """Test RMS normalization with custom epsilon."""
+
+        class RMSNormWithEps(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [3], eps=1e-5)
+
+        x = torch.randn(2, 5, 3)
+
+        onnx_program = self.export(RMSNormWithEps(), (x,), opset_version=23)
+
+        # Test with reference evaluator because ORT does not support the op as of version 1.22
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
 
 if __name__ == "__main__":
