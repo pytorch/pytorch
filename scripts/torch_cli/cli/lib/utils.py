@@ -18,16 +18,23 @@ def run_shell(
 ):
     if logging:
         print(f"[shell] {cmd}", flush=True)
-    subprocess.run(
-        cmd,
-        shell=True,
-        executable="/bin/bash",
-        stdout=sys.stdout,
-        stderr=sys.stderr,
-        check=True,
-        env=env,
-        cwd=cwd,
-    )
+    try:
+        subprocess.run(
+            cmd,
+            shell=True,
+            executable="/bin/bash",
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+            check=True,
+            env=env,
+            cwd=cwd,
+        )
+    except subprocess.CalledProcessError as e:
+        print("[❌ docker build failed]")
+        print("Command:", " ".join(cmd))
+        print("Exit code:", e.returncode)
+        print("STDOUT:\n", e.stdout)
+        print("STDERR:\n", e.stderr)
 
 
 def run_cmd(
@@ -40,15 +47,22 @@ def run_cmd(
 
     if logging:
         print(f"[cmd] {' '.join(args)}", flush=True)
-    subprocess.run(
-        args,
-        shell=False,
-        stdout=sys.stdout,
-        stderr=sys.stderr,
-        check=True,
-        env=env,
-        cwd=cwd,
-    )
+    try:
+        subprocess.run(
+            args,
+            shell=False,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+            check=True,
+            env=env,
+            cwd=cwd,
+        )
+    except subprocess.CalledProcessError as e:
+        print("[❌ docker build failed]")
+        print("Command:", " ".join(cmd))
+        print("Exit code:", e.returncode)
+        print("STDOUT:\n", e.stdout)
+        print("STDERR:\n", e.stderr)
 
 # eliainwy
 def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> str:
@@ -147,3 +161,29 @@ def pip_install(package: str):
 def uv_pip_install(package: str):
     cmd = f"python3 -m  uv pip install --system {package}"
     subprocess.run(shlex.split(cmd), check=True)
+
+
+def read_yaml_file(file_path: str) -> dict:
+    p = get_abs_path(file_path)
+
+    if not os.path.exists(p):
+        raise FileNotFoundError(f"YAML file not found: {file_path}")
+
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            raw_content = f.read()
+
+        # Replace environment variables with env var such as ${DOCKER_IMAGE}
+        expanded_content = os.path.expandvars(raw_content)
+
+        data = yaml.safe_load(expanded_content)
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            raise ValueError(f"YAML content must be a dictionary, got {type(data).__name__}")
+        return data
+
+    except yaml.YAMLError as e:
+        raise ValueError(f"Failed to parse YAML file '{file_path}': {e}") from e
+    except Exception as e:
+        raise RuntimeError(f"Unexpected error while reading YAML file '{file_path}': {e}") from e

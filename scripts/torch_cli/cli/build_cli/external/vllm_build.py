@@ -2,6 +2,7 @@ import os
 import subprocess
 import textwrap
 from dataclasses import dataclass
+from typing import Any, Dict
 from cli.lib.utils import (
     clone_vllm,
     ensure_dir_exists,
@@ -25,7 +26,10 @@ class VllmBuildConfig:
     torch_cuda_arch_list: str = get_env("TORCH_CUDA_ARCH_LIST", "8.0")
     vllm_fa_cmake_gpu_arches = get_env("VLLM_FA_CMAKE_GPU_ARCHES", "80-real")
     dev = get_env("DEV")
-
+    artifact_dir: str = ""
+    torch_whl_dir: str = ""
+    base_image: str = ""
+    dockerfile_path: str = ""
 
 _DEFAULT_RESULT_PATH = "./results"
 _VLLM_TEMP_FOLDER = "tmp"
@@ -41,19 +45,28 @@ def local_image_exists(image: str):
         return False
 
 
-def prepare_artifact_dir(path: str):
+def _prepare_artifact_dir(path: str):
     if not path:
         path = _DEFAULT_RESULT_PATH
     abs_path = get_abs_path(path)
     ensure_dir_exists(abs_path)
     return abs_path
 
+def getVllmBuildConfig(config: Dict[str,Any]):
+    print("config",config)
+    build_config = config.get("build",{})
 
-def build_vllm(artifact_dir: str, torch_whl_dir: str, base_image: str, dockerfile_path: str = ""):
-    cfg = VllmBuildConfig()
-    result_path = prepare_artifact_dir(artifact_dir)
-    print(f"Target artifact dir path is {result_path}", flush=True)
+    return VllmBuildConfig(
+        artifact_dir=build_config.get("artifact_dir",""),
+        torch_whl_dir=build_config.get("torch_whl_dir", ""),
+        base_image=build_config.get("base_image", ""),
+        dockerfile_path= build_config.get("dockerfile_path", ""),
+    )
 
+def build_vllm(config: Dict[str,Any]):
+    cfg = getVllmBuildConfig(config)
+    print(f"Target artifact dir path is {cfg.artifact_dir}", flush=True)
+    print("config peek",cfg)
     if cfg.dev:
         vllm_commit = get_post_build_pinned_commit("vllm",".")
     else:
@@ -61,19 +74,20 @@ def build_vllm(artifact_dir: str, torch_whl_dir: str, base_image: str, dockerfil
     clone_vllm(vllm_commit)
 
     # replace dockerfile
-    # todo: remove this once the dockerfile is updated in vllm
-    if dockerfile_path:
-        abs_file_path = get_existing_abs_path(dockerfile_path)
-        print(f"use user provided dockerfile {dockerfile_path} with path {abs_file_path}")
+    if cfg.dockerfile_path:
+        abs_file_path = get_existing_abs_path(cfg.dockerfile_path)
+        print(f"use user provided dockerfile {cfg.dockerfile_path} with path {abs_file_path}")
         run_cmd(
         f"cp {abs_file_path} ./vllm/docker/Dockerfile.nightly_torch",
         )
     else:
         print("using vllm default dockerfile.torch_nightly for build")
 
-    torch_arg, _ = _prepare_torch_wheels(torch_whl_dir)
-    base_arg, final_base_img,pull_flag = _get_base_image_args(base_image)
-    cmd = _generate_docker_build_cmd(cfg, result_path, torch_arg, base_arg,final_base_img, pull_flag)
+    reault_path = _prepare_artifact_dir(cfg.artifact_dir)
+    torch_arg, _ = _prepare_torch_wheels(cfg.torch_whl_dir)
+    base_arg, final_base_img,pull_flag = _get_base_image_args(cfg.base_image)
+
+    cmd = _generate_docker_build_cmd(cfg, reault_path, torch_arg, base_arg,final_base_img, pull_flag)
     print("Running docker build", flush=True)
     print(cmd, flush=True)
     run_cmd(cmd, cwd="vllm", env=os.environ.copy())
