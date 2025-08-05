@@ -207,7 +207,7 @@ def _get_fqns(
             if not skip_compiler_prefix:
                 fqn_obj_names.append(curr_obj_name)
         else:
-            # In some modeuls, _fqn_modifiers would not shown in the state_dict keys,
+            # In some modules, _fqn_modifiers would not shown in the state_dict keys,
             # skip them in the fqn to ensure load stat dict successfully for them.
             if hasattr(curr_obj, dsd_fqn_modifiers):
                 if removed_fqn := getattr(curr_obj, dsd_fqn_modifiers)().get(
@@ -791,7 +791,7 @@ def _get_optim_state_dict(
             # We need to specially handle FlatParameter FSDP as
             # FlatParameter FSDP converts the FQNs.
             # There are no easy ways to do this conversion systematically.
-            # We can only use a string replacment without correctness check.
+            # We can only use a string replacement without correctness check.
             if not osd:
                 continue
             for k in list(osd[_STATE].keys()):

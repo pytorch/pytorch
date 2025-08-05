@@ -462,6 +462,12 @@ class PythonMod(sympy.Function):
     def _eval_is_nonpositive(self) -> Optional[bool]:
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
+    def _ccode(self, printer):
+        p = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        q = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        abs_q = str(q) if self.args[1].is_positive else f"abs({q})"
+        return f"({p} % {q}) < 0 ? {p} % {q} + {abs_q} : {p} % {q}"
+
 
 # Generic modulus: only defined on non-negative arguments
 class Mod(sympy.Function):
@@ -1062,7 +1068,7 @@ class PowByNatural(sympy.Function):
 
 
 # base is assumed to be nonnegative, thereby prevent complex numbers from
-# occuring
+# occurring
 class FloatPow(sympy.Function):
     is_real = True
 
@@ -1307,6 +1313,12 @@ class Identity(sympy.Function):
         # Removes the identity op.
         return self.args[0]
 
+    def __int__(self) -> int:
+        return int(self.args[0])
+
+    def __float__(self) -> float:
+        return float(self.args[0])
+
 
 def make_opaque_unary_fn(name):
     class OpaqueUnaryFn(sympy.Function):
@@ -1316,7 +1328,7 @@ def make_opaque_unary_fn(name):
         constant propagation.  This helps avoid performing transformations
         that are valid for real numbers but are invalid for floating point;
         in particular, while we are willing to make optimizations that change
-        numerics for Tensor compute, we are NOT willing to make optimziations
+        numerics for Tensor compute, we are NOT willing to make optimizations
         that change numerics for size compute.
         """
 

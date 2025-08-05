@@ -2,6 +2,7 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include <csignal>
 #include <optional>
 
 #ifndef _MSC_VER
@@ -136,6 +137,8 @@
 #ifdef USE_ITT
 #include <torch/csrc/itt.h>
 #endif
+
+#include <torch/nativert/python/Bindings.h>
 
 namespace py = pybind11;
 
@@ -280,6 +283,8 @@ static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
     virtual ~Baz() = default;
   };
   Baz x{};
+  // Purposely cast through `void*` so there's no fixups applied.
+  // NOLINTNEXTLINE(bugprone-casting-through-void,-warnings-as-errors)
   auto y = static_cast<Foo*>(static_cast<void*>(&x));
   auto rc = y->bar();
   return THPUtils_packInt32(rc);
@@ -404,10 +409,10 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   // associated with the TensorImpl. Swap this field as well.
   std::optional<PyObject*> mb_obj_a =
       a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+          /*ignore_hermetic_tls=*/false);
   std::optional<PyObject*> mb_obj_b =
       b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+          /*ignore_hermetic_tls=*/false);
   TORCH_INTERNAL_ASSERT(
       mb_obj_a.has_value() && mb_obj_b.has_value(),
       "Both tensors should have PyObjects tagged by the current python interpreter");
@@ -417,10 +422,8 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   a->cdata = b->cdata;
   b->cdata = tmp;
 
-  a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
-      getPyInterpreter(), a_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
-  b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
-      getPyInterpreter(), b_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(a_);
+  b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(b_);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -583,8 +586,11 @@ static PyObject* THPModule_getCpuCapability(
   END_HANDLE_TH_ERRORS
 }
 
-static void DLPack_Capsule_Destructor(PyObject* data) {
-  if (C10_LIKELY(!PyCapsule_IsValid(data, "dltensor"))) {
+namespace {
+
+template <class T>
+void DLPack_Capsule_Destructor(PyObject* data) {
+  if (C10_LIKELY(!PyCapsule_IsValid(data, at::DLPackTraits<T>::capsule))) {
     // early out, see DLPack spec: if a consuming library sets the capsule
     // name to something else, they own it and we don't need to do anything
     return;
@@ -594,21 +600,65 @@ static void DLPack_Capsule_Destructor(PyObject* data) {
   // since consuming libraries should rename the capsule according to spec.
   // Note that this cannot set a python error (we checked validity above),
   // so we don't need to handle python error state here.
-  DLManagedTensor* dlMTensor =
-      (DLManagedTensor*)PyCapsule_GetPointer(data, "dltensor");
+  T* tensor = (T*)PyCapsule_GetPointer(data, at::DLPackTraits<T>::capsule);
   // the dlMTensor has not been consumed, call deleter ourselves.
   // DLPack spec mentions that deleter may be NULL, but deleter from
   // `at::toDLPack` is never NULL, so no need for an additional check here.
-  dlMTensor->deleter(dlMTensor);
+  tensor->deleter(tensor);
   END_HANDLE_TH_ERRORS_RET()
 }
 
-static PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
+template <class T>
+PyObject* THPModule_toDLPackImpl(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(THPVariable_Check(data), "data must be a Tensor");
-  DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_Unpack(data));
-  return PyCapsule_New(dlMTensor, "dltensor", DLPack_Capsule_Destructor);
+  static torch::PythonArgParser parser(
+      {"_to_dlpack(Tensor data, *, IntArrayRef? dl_device=None, bool? copy=None)"});
+  torch::ParsedArgs<3> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  TORCH_INTERNAL_ASSERT(r.idx == 0);
+
+  auto data = r.tensor(0);
+  auto dl_device = r.intlist(1);
+  auto copy = r.toBoolOptional(2);
+
+  // Parse the int list into a tuple.
+  std::optional<DLDevice> optional_dl_device;
+
+  if (!dl_device.empty()) {
+    TORCH_CHECK(
+        dl_device.size() == 2,
+        "dl_device must be either None or a tuple of ints");
+    optional_dl_device = DLDevice{
+        static_cast<DLDeviceType>(dl_device[0]),
+        static_cast<int32_t>(dl_device[1])};
+  }
+
+  auto tensor = at::DLPackTraits<T>::toDLPack(
+      at::maybeCopyTensor(data, optional_dl_device, copy));
+  return PyCapsule_New(
+      tensor, at::DLPackTraits<T>::capsule, DLPack_Capsule_Destructor<T>);
+
   END_HANDLE_TH_ERRORS
+}
+
+} // namespace
+
+static PyObject* THPModule_toDLPack(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  return THPModule_toDLPackImpl<DLManagedTensor>(self, args, kwargs);
+}
+
+static PyObject* THPModule_toDLPackVersioned(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  return THPModule_toDLPackImpl<DLManagedTensorVersioned>(self, args, kwargs);
 }
 
 static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
@@ -616,6 +666,28 @@ static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
   HANDLE_TH_ERRORS
   auto tensor = torch::utils::tensor_fromDLPack(data);
   return THPVariable_Wrap(tensor);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_torchDeviceToDLDevice(
+    PyObject* _unused,
+    PyObject* data) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPDevice_Check(data),
+      "torchDeviceToDLDevice: expected torch.device argument.");
+  auto device = reinterpret_cast<THPDevice*>(data)->device;
+  auto dl_device = at::torchDeviceToDLDevice(device);
+
+  auto tuple = PyTuple_New(2);
+  if (!tuple) {
+    throw python_error();
+  }
+
+  PyTuple_SET_ITEM(tuple, 0, THPUtils_packInt64(dl_device.device_type));
+  PyTuple_SET_ITEM(tuple, 1, THPUtils_packInt64(dl_device.device_id));
+
+  return tuple;
   END_HANDLE_TH_ERRORS
 }
 
@@ -667,10 +739,12 @@ static PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
 }
 
 static PyObject* THPModule_allowTF32CuDNN(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   if (at::globalContext().allowTF32CuDNN())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_setFloat32MatmulPrecision(
@@ -691,6 +765,7 @@ static PyObject* THPModule_setFloat32MatmulPrecision(
 static PyObject* THPModule_float32MatmulPrecision(
     PyObject* _unused,
     PyObject* noargs) {
+  HANDLE_TH_ERRORS
   std::string s = "highest";
   auto p = at::globalContext().float32MatmulPrecision();
   if (p == at::Float32MatmulPrecision::HIGH) {
@@ -699,6 +774,7 @@ static PyObject* THPModule_float32MatmulPrecision(
     s = "medium";
   }
   return THPUtils_packString(s);
+  END_HANDLE_TH_ERRORS
 }
 static PyObject* THPModule_setSDPPriorityOrder(
     PyObject* _unused,
@@ -1096,6 +1172,29 @@ static PyObject* THPModule_benchmarkCuDNN(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_FALSE;
 }
 
+static PyObject* THPModule_setImmediateMiopen(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_immediate_miopen expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setImmediateMiopen(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_immediateMiopen(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().immediateMiopen()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 static PyObject* THPModule_setAllowTF32CuBLAS(
     PyObject* _unused,
     PyObject* arg) {
@@ -1113,10 +1212,12 @@ static PyObject* THPModule_setAllowTF32CuBLAS(
 static PyObject* THPModule_allowTF32CuBLAS(
     PyObject* _unused,
     PyObject* noargs) {
+  HANDLE_TH_ERRORS
   if (at::globalContext().allowTF32CuBLAS()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
@@ -1248,6 +1349,7 @@ static PyObject* THPModule_setQEngine(PyObject* /* unused */, PyObject* arg) {
       "but got ",
       THPUtils_typename(arg));
   auto qengine = THPUtils_unpackLong(arg);
+  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
   at::globalContext().setQEngine(static_cast<at::QEngine>(qengine));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1563,6 +1665,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_onednn_allow_tf32", THPModule_setAllowTF32OneDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
+    {"_get_miopen_immediate", THPModule_immediateMiopen, METH_NOARGS, nullptr},
+    {"_set_miopen_immediate", THPModule_setImmediateMiopen, METH_O, nullptr},
     {"_get_cudnn_deterministic",
      THPModule_deterministicCuDNN,
      METH_NOARGS,
@@ -1663,8 +1767,19 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_are_vmap_fallback_warnings_enabled,
      METH_NOARGS,
      nullptr},
-    {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
+    {"_to_dlpack",
+     castPyCFunctionWithKeywords(THPModule_toDLPack),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_to_dlpack_versioned",
+     castPyCFunctionWithKeywords(THPModule_toDLPackVersioned),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
+    {"_torchDeviceToDLDevice",
+     THPModule_torchDeviceToDLDevice,
+     METH_O,
+     nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
@@ -1742,6 +1857,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {nullptr, nullptr, 0, nullptr}};
 
 #ifdef USE_CUDA
+// NOLINTBEGIN(misc-use-internal-linkage)
 void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
@@ -1750,6 +1866,7 @@ PyMethodDef* THCPModule_methods();
 namespace torch::cuda {
 void initModule(PyObject* module);
 } // namespace torch::cuda
+// NOLINTEND(misc-use-internal-linkage)
 #endif
 
 #ifdef USE_XPU
@@ -1790,6 +1907,66 @@ class WeakTensorRef {
     return weakref_.expired();
   }
 };
+
+namespace {
+
+using SigHandler = void (*)(int);
+
+SigHandler* _getOldHandler(int signum) {
+#define SIG_CHECK(n)                     \
+  if (signum == (n)) {                   \
+    static SigHandler handler = nullptr; \
+    return &handler;                     \
+  }
+
+  SIG_CHECK(SIGSEGV);
+  SIG_CHECK(SIGILL);
+
+  throw std::runtime_error("unexpected signal number");
+#undef SIG_CHECK
+}
+
+extern "C" void _signalHandler(int signum) {
+  // Note that technically there's not much you're allowed to do here - but
+  // we're probably dying anyway so give it a try...
+
+  auto oldAction = *_getOldHandler(signum);
+  *_getOldHandler(signum) = nullptr;
+
+  // If we hit another signal don't run this handler again.
+  std::signal(signum, oldAction);
+
+#ifdef _WIN32
+  const char* signame = "<unknown>";
+#else
+  const char* signame = strsignal(signum);
+#endif
+
+  fprintf(
+      stderr,
+      "Process %d crashed with signal %s (%d):\n",
+      getpid(),
+      signame,
+      signum);
+
+  auto bt = c10::get_backtrace();
+  fwrite(bt.data(), 1, bt.size(), stderr);
+
+  // Try to run the previous signal handler
+  if (oldAction != SIG_IGN && oldAction != SIG_DFL) {
+    oldAction(signum);
+  }
+  if (oldAction != SIG_IGN) {
+    _exit(-1);
+  }
+}
+
+void _initCrashHandler() {
+  *_getOldHandler(SIGILL) = std::signal(SIGILL, _signalHandler);
+  *_getOldHandler(SIGSEGV) = std::signal(SIGSEGV, _signalHandler);
+}
+
+} // anonymous namespace
 
 extern "C" TORCH_PYTHON_API PyObject* initModule();
 // separate decl and defn for msvc error C2491
@@ -1969,6 +2146,7 @@ PyObject* initModule() {
   });
 
   auto py_module = py::reinterpret_borrow<py::module>(module);
+  py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
@@ -2010,6 +2188,12 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_cached_tensor", [](const at::Tensor& t) {
     return at::caching::is_cached_tensor(t);
+  });
+
+  py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    return c10::raw::intrusive_ptr::use_count(storage_impl);
   });
 
   ASSERT_TRUE(
@@ -2288,6 +2472,18 @@ Call this whenever a new thread is created in order to propagate values from
       });
 
   py_module.def(
+      "_get_fp32_precision_getter", [](std::string backend, std::string op) {
+        return at::globalContext().float32Precision(backend, op);
+      });
+
+  py_module.def(
+      "_set_fp32_precision_setter",
+      [](std::string backend, std::string op, std::string precision) {
+        at::globalContext().setFloat32Precision(backend, op, precision);
+        return precision;
+      });
+
+  py_module.def(
       "_stash_obj_in_tls", [](const std::string& key, py::handle arg) {
         at::impl::ThreadLocalPythonObjects::get_state().set(
             key,
@@ -2365,7 +2561,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto acc = at::getAccelerator(check.value_or(false));
         if (acc.has_value()) {
           bool is_available = at::globalContext()
-                                  .getAcceleratorHooksInterface(acc.value())
+                                  .getAcceleratorHooksInterface(acc)
                                   .isAvailable();
 
           if (!is_available) {
@@ -2584,6 +2780,8 @@ Call this whenever a new thread is created in order to propagate values from
 #ifdef USE_KINETO
   torch::global_kineto_init();
 #endif
+  auto nativert_module = py_module.def_submodule("_nativert");
+  torch::nativert::initModelRunnerPybind(nativert_module);
   return module;
   END_HANDLE_TH_ERRORS
 }

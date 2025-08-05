@@ -507,7 +507,7 @@ def t__getitem__(self, input):
     for i in reversed(dim_packs):
         input[i : i + 1] = input[i]
 
-    # currenty:
+    # currently:
     # input is flat, containing either Dim, or Tensor, or something valid for standard indexing
     # self may have first-class dims as well.
 
@@ -515,7 +515,7 @@ def t__getitem__(self, input):
     # drop the first class dims from self, they just become direct indices of their positions
 
     # figure out the dimensions of the indexing tensors: union of all the dims in the tensors in the index.
-    # these dimensions will appear and need to be bound at the first place tensor occures
+    # these dimensions will appear and need to be bound at the first place tensor occurs
 
     if isinstance(self, _Tensor):
         ptensor_self, levels = self._tensor, list(self._levels)

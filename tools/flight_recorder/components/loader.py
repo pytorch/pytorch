@@ -46,7 +46,7 @@ exp = re.compile(r"([\w\-\_]*?)(\d+)$")
 
 def _determine_prefix(files: list[str]) -> str:
     """If the user doesn't specify a prefix, but does pass a dir full of similarly-prefixed files, we should be able to
-    infer the common prefix most of the time.  But if we can't confidently infer, just fall back to requring the user
+    infer the common prefix most of the time.  But if we can't confidently infer, just fall back to requiring the user
     to specify it
     """
     possible_prefixes: defaultdict[str, set[int]] = defaultdict(set)

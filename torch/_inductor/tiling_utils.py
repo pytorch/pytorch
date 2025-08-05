@@ -36,7 +36,8 @@ if TYPE_CHECKING:
     from torch._inductor.scheduler import FusedSchedulerNode, SchedulerNode
 
 
-def solve_for_zero(expr: sympy.Expr, free_symbol) -> Optional[sympy.Expr]:
+
+def solve_for_zero(expr: sympy.Expr) -> Optional[sympy.Expr]:
     """
     Given an expr with a single free symbol, solve for a constant relation that would make
     this expression 0.
@@ -46,20 +47,18 @@ def solve_for_zero(expr: sympy.Expr, free_symbol) -> Optional[sympy.Expr]:
     elif isinstance(expr, FloorDiv):
         return None
 
-    # assert len(expr.free_symbols) == 1
-    # free_symbol = next(iter(expr.free_symbols))
+    assert len(expr.free_symbols) == 1
+    free_symbol = next(iter(expr.free_symbols))
     if isinstance(expr, ModularIndexing):
         out = try_solve(sympy.Eq(expr.args[0], expr.args[2]), free_symbol)
     else:
         out = try_solve(sympy.Eq(expr, 0), free_symbol)
-    if not out:  # or not out[1].is_constant():
+    if not out or not out[1].is_constant():
         return None
     return out[1]
 
 
-def solve_for_tiling(
-    expr: sympy.Expr, free_symbol: sympy.Symbol
-) -> Optional[sympy.Expr]:
+def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
     """
     Giving an expr with a single free symbol, try to find a tiling that would
     make the expression coalesced with respect to that symbol.
@@ -74,14 +73,15 @@ def solve_for_tiling(
     if len(expr.free_symbols) == 0:
         return None
 
-    additional_symbols = len(expr.free_symbols) != 1
+    free_symbol = next(iter(expr.free_symbols))
 
     def _solve_simple_expr(expr: sympy.Expr) -> Optional[sympy.Expr]:
-        if not additoinal_symbols:
-            assert not expr.has(ModularIndexing) and not expr.has(FloorDiv)
+        assert not expr.has(ModularIndexing) and not expr.has(FloorDiv)
+        if len(expr.free_symbols) != 1:
+            return None
 
         out = try_solve(sympy.Eq(expr, 1), free_symbol)
-        if not out:  # or not out[1].is_constant():
+        if not out or not out[1].is_constant():
             return None
         return out[1]
 
@@ -103,11 +103,11 @@ def solve_for_tiling(
             # TODO - only need one of these to be solvable to zero
             #
             for mul_arg in arg.args:
-                out = solve_for_zero(mul_arg, free_symbol)
+                out = solve_for_zero(mul_arg)
                 if out is None:
                     continue
 
-                # assert out.is_constant()
+                assert out.is_constant()
                 seen = True
                 required_values.append(out)
 
@@ -136,20 +136,51 @@ def solve_for_tiling(
 
     out = _solve_simple_expr(eq_1_expr_simplified)
     # since we approximated FloorDiv/ModularIndexing, double check here
-    if (
-        not out
-        or not V.graph.sizevars.atomically_apply_size_hint(
-            sympy_subs(eq_1_expr, {free_symbol: out}),
-            fallback=config.unbacked_symint_fallback,
-        )
-        == 1
-    ):
+    if not out or not (sympy_subs(eq_1_expr, {free_symbol: out})) == 1:
         return None
 
     required_values.append(out)
 
     if len(OrderedSet(required_values)) == 1:
         return required_values[0]
+
+    return None
+
+
+def find_coalesced_var(
+    index: sympy.Expr, var_ranges: dict[sympy.Expr, int]
+) -> Optional[sympy.Expr]:
+    """
+    Try to find the symbol which coalesces this index
+    """
+    top_level_terms = sympy.Add.make_args(index)
+    for v in var_ranges:
+        if v in top_level_terms:
+            return v
+
+    # Approximate analysis by evaluating at 1 and 0
+    variables: dict[sympy.Symbol, int] = {}
+    for v in index.free_symbols:
+        if v in var_ranges:
+            variables[v] = 0
+        else:
+            variables[v] = get_hint(v)
+
+    zero_index = sympy_subs(index, variables)
+    for v in var_ranges.keys():
+        variables[v] = 1
+        try:
+            new_val = sympy_subs(index, variables)
+        except ZeroDivisionError:
+            loop_tiling_log.info("zero division error %s %s", index, variables)
+            continue
+        if new_val - zero_index == 1:
+            variables[v] = 2
+            # in some more complex expressions, 0->1 will be coalesced,
+            # but not 1->2
+            if (sympy_subs(index, variables) - new_val) == 1:
+                return v
+        variables[v] = 0
 
     return None
 
@@ -308,7 +339,7 @@ class NodeSplitGetter:
             # initially, we are just going to do a single reduction split since
             # reduction tiling is off by default. even if we miss a reduction split,
             # we can recover it in the split var analysis.
-            # TODO: an earlier version fo this code tried to iteratively try the maximum number
+            # TODO: an earlier version for this code tried to iteratively try the maximum number
             # of split vars, by iterating over both pointwise and reduction. but not worth
             # the complexity yet.
 
@@ -344,7 +375,7 @@ class NodeSplitGetter:
                     )
                     self.pw_split_options[len(new_split)].add(new_split)
 
-        # if for whatever reason we couldnt split above, return default split
+        # if for whatever reason we couldn't split above, return default split
         return ((self.pointwise_numel,), (self.red_numel,))
 
     def try_split(self, pw: Split, red: Split) -> Optional[tuple[Split, Split]]:
@@ -485,13 +516,6 @@ def extract_normalized_read_writes(
 
     pointwise_numel: sympy.Expr = node.group[1][0]
     red_numel: sympy.Expr = node.group[1][1]
-
-    # TODO - a few dynamic shapes issues to resolve
-    # if any(
-    #     (isinstance(var, sympy.Expr) and not var.is_constant())
-    #     for var in (pointwise_numel, red_numel)
-    # ):
-    #     return None
 
     pw_splits, red_splits = NodeSplitGetter(node).get_node_splits()
 
@@ -711,11 +735,13 @@ def analyze_memory_coalescing(
             if addr_score == 0:
                 continue
             del expr_subs[v]
-            # breakpoint()
             single_var_expr = sympy_subs(uncoalesced_expr, expr_subs)
             expr_subs[v] = 0
-            tiling_factor = solve_for_tiling(single_var_expr, v)
-            # breakpoint()
+            tiling_factor = solve_for_tiling(single_var_expr)
+
+            # TODO: skip dynamic shapes for now,
+            if len(single_var_expr.free_symbols) != 1:
+                continue
 
             if (
                 tiling_factor is None

@@ -165,6 +165,10 @@ class TORCH_API Dispatcher final {
   // Returns a list of all operator names present in the operatorLookupTable_
   const std::vector<OperatorName> getAllOpNames();
 
+  // Returns a list of all operator names present in the operatorLookupTable_
+  // for a given dispatch key
+  const std::vector<OperatorName> getAllOpNamesForDispatchKey(DispatchKey k);
+
   // ------------------------------------------------------------------------
   //
   // Invoking operators
@@ -367,7 +371,10 @@ class TORCH_API Dispatcher final {
 
 #ifdef FBCODE_CAFFE2
   static bool profilingOperatorEvents();
-  static void fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref);
+  static void fireOpStartUSDT(
+      at::RecordFunction::schema_ref_t schema_ref,
+      std::vector<void*>& argsAddresses,
+      std::vector<const char*>& argsTypes);
   static void fireOpEndUSDT(at::RecordFunction::schema_ref_t schema_ref);
 #endif // FBCODE_CAFFE2
 
@@ -791,16 +798,21 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
 
 #ifdef FBCODE_CAFFE2
   if (profilingOperatorEvents()) {
+    std::vector<void*> argsAddresses = {(void*)(&args)...};
+    std::vector<const char*> argsTypes = {(typeid(args).name())...};
     struct FireOpRAII {
-      FireOpRAII(at::RecordFunction::schema_ref_t schema_ref)
+      FireOpRAII(
+          at::RecordFunction::schema_ref_t schema_ref,
+          std::vector<void*>& argsAddresses,
+          std::vector<const char*>& argsTypes)
           : schema_ref_(schema_ref) {
-        fireOpStartUSDT(schema_ref);
+        fireOpStartUSDT(schema_ref, argsAddresses, argsTypes);
       }
       ~FireOpRAII() {
         fireOpEndUSDT(schema_ref_);
       }
       at::RecordFunction::schema_ref_t schema_ref_;
-    } event(op.schema());
+    } event(op.schema(), argsAddresses, argsTypes);
     return kernel.template call<Return, Args...>(
         op, dispatchKeySet, std::forward<Args>(args)...);
   } else {

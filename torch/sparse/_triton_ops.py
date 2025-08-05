@@ -333,7 +333,7 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
       this property enables defining swizzle operators via
       rearrangements of ``r_offsets`` items..
 
-    Auxilary functions are provided for pre-computing
+    Auxiliary functions are provided for pre-computing
     :attr:`indices_data`. For example,
     :func:`bsr_scatter_mm_indices_data` is used to define indices data
     for matrix multiplication of BSR and strided tensors.
@@ -836,7 +836,7 @@ def bsr_dense_addmm_meta(
 
 class TensorAsKey:
     """A light-weight wrapper of a tensor that enables storing tensors as
-    keys with efficient memory reference based comparision as an
+    keys with efficient memory reference based comparison as an
     approximation to data equality based keys.
 
     Motivation: the hash value of a torch tensor is tensor instance

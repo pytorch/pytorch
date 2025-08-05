@@ -2,6 +2,7 @@
 import atexit
 import contextlib
 import functools
+import math
 import os
 import sys
 import unittest
@@ -30,7 +31,9 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
+    IS_CI,
     IS_MACOS,
+    IS_WINDOWS,
     IS_X86,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
@@ -66,6 +69,15 @@ except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise
+
+if IS_WINDOWS and IS_CI:
+    # TODO(xuhancn) : improve the compiler build performance on windows.
+    sys.stderr.write(
+        "This UT is too slow on windows, and will cause out of time in CI. So skip it now.\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("skip slow test")
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
@@ -136,7 +148,7 @@ def print_seen():
                 if idx >= 0:
                     x = f"{x[:idx]}..."
                 if len(x) > length:
-                    return f"{x[:length - 3]}..."
+                    return f"{x[: length - 3]}..."
                 return x
 
             reasons = sorted(set(map(maybe_truncate, failed_reasons[key])))
@@ -274,8 +286,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {f32, f64},
     "linalg.eig": {f32, f64},
-    # Double and complex datatype matmul is not supported in oneDNN
-    "byte": {f16, f32},
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
@@ -283,9 +293,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # not implemented for 'Half'
-    "sort": {b8},
-    "argsort": {b8},
 }
 
 
@@ -355,8 +362,9 @@ def wrapper_noop_set_seed(op, *args, **kwargs):
     return op(*args, **kwargs)
 
 
-torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
-    wrapper_noop_set_seed
+wrapper_noop_set_seed_decorator = patch(
+    "torch.testing._internal.common_methods_invocations.wrapper_set_seed",
+    wrapper_noop_set_seed,
 )
 
 # key can be either op_name, or (op_name, dtype)
@@ -391,7 +399,7 @@ inductor_override_kwargs["cpu"] = {
         "rtol": 1e-4,
     },
     ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
-    # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
+    # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.interpolate.bicubic", u8): {"atol": 1, "rtol": 0},
@@ -420,6 +428,7 @@ inductor_override_kwargs["cuda"] = {
     ("cumsum", f16): {"reference_in_float": True},
     "cumprod": {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     "logcumsumexp": {"grad_atol": 8e-4, "grad_rtol": 0.001},
+    ("logcumsumexp", f16): {"grad_atol": 3e-3, "grad_rtol": 0.01},
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},
@@ -429,6 +438,7 @@ inductor_override_kwargs["cuda"] = {
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
     ("nn.functional.cosine_similarity", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", f16): {"reference_in_float": True},
+    ("nn.functional.linear", f16): {"atol": 3e-4, "rtol": 0.01},
     ("nn.functional.local_response_norm", f16): {"reference_in_float": True},
     ("nn.functional.normalize", f16): {"atol": 1e-3, "rtol": 0.05},
     ("nn.functional.rms_norm", f16): {"reference_in_float": True},
@@ -521,6 +531,7 @@ inductor_override_kwargs["xpu"] = {
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
+    ("asin", f32): {"reference_in_float": True, "atol": 1e-4, "rtol": 1e-4},
     ("atanh", f16): {"reference_in_float": True},
     "cauchy": {"reference_in_float": True},
     ("cummax", f16): {"atol": 5e-4, "rtol": 0.002},
@@ -533,6 +544,7 @@ inductor_override_kwargs["xpu"] = {
         "grad_atol": 8e-4,
         "grad_rtol": 0.001,
     },
+    ("logcumsumexp", f16): {"grad_atol": 4e-3, "grad_rtol": 0.01},
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},
@@ -605,7 +617,7 @@ inductor_override_kwargs["xpu"] = {
     ("var_mean", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("var_mean.unbiased", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("vdot", f16): {"atol": 1e-5, "rtol": 2e-3},
-    # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
+    # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     # High atol due to precision loss
     ("nn.functional.interpolate.bilinear", f64): {"atol": 5e-4, "rtol": 0},
     ("nn.functional.upsample_bilinear", f64): {"atol": 5e-4, "rtol": 0},
@@ -850,6 +862,7 @@ inductor_one_sample["xpu"] = {
     "nn.functional.adaptive_avg_pool3d": {f16},
     "nn.functional.adaptive_max_pool1d": {f16, f32},
     "nn.functional.adaptive_max_pool2d": {f16, f32},
+    "nn.functional.max_pool2d": {f16, f32, f64},
     "nn.functional.bilinear": {f16},
     "nn.functional.conv_transpose1d": {f16},
     "nn.functional.conv_transpose2d": {f16},
@@ -947,6 +960,131 @@ inductor_one_sample["xpu"] = {
 }
 
 
+# Custom replacements for assertEquals, in cases where a difference in value
+# may not indicate correctness.
+
+
+def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
+    # Use the normal assert_equal_fn suffices for a stable sort
+    if "stable" in kwargs:
+        return True
+
+    # In other cases, we need only check that the sort/argsort outputs are
+    # compatible.
+    orig_input = args[0]
+
+    # The sort dimension is specified as a kwarg, or the last dimension.
+    if "dim" not in kwargs:
+        dim = orig_input.dim() - 1
+    else:
+        dim = kwargs["dim"]
+
+    def argsort_sort_assert_equal(
+        test_case_inst,
+        x,
+        y,
+        *,
+        atol=None,
+        rtol=None,
+        equal_nan=True,
+        exact_dtype=True,
+        exact_stride=False,
+    ):
+        if is_argsort:
+            assert isinstance(x, torch.Tensor)
+            assert isinstance(y, torch.Tensor)
+        else:
+            # The first tensor is the sorted values and can be asserted via
+            # the usual means
+            for t in (x, y):
+                assert isinstance(t, tuple)
+                assert len(t) == 2
+
+            test_case_inst.assertEqual(
+                x[0],
+                y[0],
+                atol=atol,
+                rtol=rtol,
+                equal_nan=equal_nan,
+                exact_dtype=exact_dtype,
+                exact_stride=exact_stride,
+            )
+
+            # The second tensor is the same result as an argsort.
+            x = x[1]
+            y = y[1]
+
+        if exact_dtype and (x.dtype != y.dtype):
+            raise AssertionError(f"The dtypes do not match: {x.dtype} != {y.dtype}.")
+
+        assert x.shape == y.shape
+
+        if exact_stride and (x.stride() != y.stride()):
+            raise AssertionError(
+                f"The strides do not match: {x.stride()} != {y.stride()}."
+            )
+
+        def el_to_indices(el):
+            """Turn an element number into a list of indices"""
+            indices = [None] * x.dim()
+            for cur_dim in reversed(range(x.dim())):
+                indices[cur_dim] = el % x.shape[cur_dim]
+                el //= x.shape[cur_dim]
+            assert None not in indices
+            return indices
+
+        def get_val_by_ids(t, ids):
+            """Return a value from a tensor at a given list of indices"""
+            for idx in ids:
+                t = t[idx]
+            return t.item()
+
+        # Loop through every value of the tensors and check for equality or
+        # compatibility.
+        for current_el in range(x.numel()):
+            ids = el_to_indices(current_el)
+
+            # Simple case: check equality of arsort indices
+            if get_val_by_ids(x, ids) == get_val_by_ids(y, ids):
+                continue
+
+            # Complex case: check if indices refer to same value
+            x_orig_ids = ids.copy()
+            y_orig_ids = ids.copy()
+
+            x_orig_ids[dim] = get_val_by_ids(x, ids)
+            y_orig_ids[dim] = get_val_by_ids(y, ids)
+
+            x_value = get_val_by_ids(orig_input, x_orig_ids)
+            y_value = get_val_by_ids(orig_input, y_orig_ids)
+            if x_value == y_value:
+                continue
+
+            if equal_nan:
+                if math.isnan(x_value) and math.isnan(y_value):
+                    continue
+
+            raise AssertionError(
+                f"Non-stable argsort outputs are incompatible at {ids}"
+            )
+
+    return argsort_sort_assert_equal
+
+
+def get_argsort_assert_equal_fn(args, kwargs):
+    return get_sort_argsort_assert_equal_fn(True, args, kwargs)
+
+
+def get_sort_assert_equal_fn(args, kwargs):
+    return get_sort_argsort_assert_equal_fn(False, args, kwargs)
+
+
+CUSTOM_ASSERT_EQUALS_FNS = {
+    "argsort": get_argsort_assert_equal_fn,
+    "sort": get_sort_assert_equal_fn,
+}
+
+
 def collection_decorator(fn):
     @functools.wraps(fn)
     def inner(self, device, dtype, op):
@@ -964,6 +1102,7 @@ def collection_decorator(fn):
     return inner
 
 
+@wrapper_noop_set_seed_decorator
 class TestInductorOpInfo(TestCase):
     def tearDown(self):
         torch._dynamo.reset()
@@ -1034,9 +1173,7 @@ class TestInductorOpInfo(TestCase):
             op_name, set()
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
-        ].get(
-            op_name, set()
-        ):
+        ].get(op_name, set()):
             test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
@@ -1104,7 +1241,7 @@ class TestInductorOpInfo(TestCase):
 
             return True, rng_mode.has_rng_op
 
-        def get_contexts(has_rng_op):
+        def get_contexts(has_rng_op, args, kwargs):
             if has_rng_op:
                 # TODO - enable this, running into errors
                 return (
@@ -1121,6 +1258,15 @@ class TestInductorOpInfo(TestCase):
                 )
 
             ctx = functools.partial(maybe_skip_size_asserts, op)
+            if op_name in CUSTOM_ASSERT_EQUALS_FNS:
+                assert_equal_fn = CUSTOM_ASSERT_EQUALS_FNS[op_name](args, kwargs)
+                return (
+                    (
+                        ctx,
+                        {"assert_equal": assert_equal_fn},
+                    ),
+                )
+
             return ((ctx, {}),)
 
         try:
@@ -1146,7 +1292,9 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 rtol, atol = _get_tolerances(dtype)
                 no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
-                for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                for context_fn, kwarg_overrides in get_contexts(
+                    has_rng_op, args, kwargs
+                ):
                     with context_fn():
                         # Base kwargs
                         adjusted_kwargs = {

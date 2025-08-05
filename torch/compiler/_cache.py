@@ -48,6 +48,9 @@ class CacheArtifact(ABC):
     def populate_cache(self) -> None:
         pass
 
+    def precompile_compatible(self) -> bool:
+        return False
+
     @staticmethod
     def type() -> str:
         """
@@ -69,9 +72,9 @@ class CacheArtifactFactory:
     @classmethod
     def register(cls, artifact_cls: type[CacheArtifact]) -> type[CacheArtifact]:
         artifact_type_key = artifact_cls.type()
-        assert (
-            artifact_cls.type() not in cls._artifact_types
-        ), f"Artifact of type={artifact_type_key} already registered in mega-cache artifact factory"
+        assert artifact_cls.type() not in cls._artifact_types, (
+            f"Artifact of type={artifact_type_key} already registered in mega-cache artifact factory"
+        )
         cls._artifact_types[artifact_type_key] = artifact_cls
         setattr(
             CacheInfo,
@@ -82,9 +85,9 @@ class CacheArtifactFactory:
 
     @classmethod
     def _get_artifact_type(cls, artifact_type_key: str) -> type[CacheArtifact]:
-        assert (
-            artifact_type_key in cls._artifact_types
-        ), f"Artifact of type={artifact_type_key} not registered in mega-cache artifact factory"
+        assert artifact_type_key in cls._artifact_types, (
+            f"Artifact of type={artifact_type_key} not registered in mega-cache artifact factory"
+        )
         return cls._artifact_types[artifact_type_key]
 
     @classmethod
@@ -128,6 +131,14 @@ class CacheInfo:
     def pgo_artifacts(self) -> list[str]:  # type: ignore[empty-body]
         ...
 
+    @property
+    def precompile_aot_autograd_artifacts(self) -> list[str]:  # type: ignore[empty-body]
+        ...
+
+    @property
+    def precompile_dynamo_artifacts(self) -> list[str]:  # type: ignore[empty-body]
+        ...
+
     def add(self, artifact: CacheArtifact) -> None:
         self.artifacts[artifact.type()].append(artifact.key)
 
@@ -159,6 +170,9 @@ def _deserialize_single_cache(
     return artifact_type_key, artifacts
 
 
+CacheArtifactsResult = dict[str, list[CacheArtifact]]
+
+
 class CacheArtifactManager:
     """
     Lightweight manager class for collecting and processing cache artifacts for
@@ -172,21 +186,21 @@ class CacheArtifactManager:
     - Call CacheArtifactManager.deserialize to hot load the cache artifacts on
         a potentially different process
 
-    NOTE: There's no FB/FC guarentees, results of cache artifacts will not be
+    NOTE: There's no FB/FC guarantees, results of cache artifacts will not be
           used unless code version matches.
     """
 
     # Protected by the compile_lock
-    _new_cache_artifacts: defaultdict[str, list[CacheArtifact]] = defaultdict(list)
-    # Keep a seperate seen artifacts list to make avoid unnecessary duplicates
+    _new_cache_artifacts: CacheArtifactsResult = defaultdict(list)
+    # Keep a separate seen artifacts list to make avoid unnecessary duplicates
     # This list will not be cleared between serialize() calls
     _seen_artifacts: OrderedSet[CacheArtifact] = OrderedSet()
     # When serialize() is called, artifacts are transferred from _cache_artifacts to
     # internal data structure of the _serializer
     # This allows us to only pay the cost of serialization if serialize() is called
-    _serializer: AppendingByteSerializer[
-        tuple[str, list[CacheArtifact]]
-    ] = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
+    _serializer: AppendingByteSerializer[tuple[str, list[CacheArtifact]]] = (
+        AppendingByteSerializer(serialize_fn=_serialize_single_cache)
+    )
     _cache_info: CacheInfo = CacheInfo()
 
     @classmethod
@@ -207,7 +221,7 @@ class CacheArtifactManager:
         cls._new_cache_artifacts = defaultdict(list)
         cls._seen_artifacts = OrderedSet()
         cls._serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
-        cls._cache_info = CacheInfo()
+        cls._cache_info = cls._cache_info.__class__()
         try:
             yield
         finally:
@@ -268,9 +282,9 @@ class CacheArtifactManager:
         return None
 
     @staticmethod
-    def deserialize(serialized_artifacts: bytes) -> Optional[CacheInfo]:
+    def deserialize(serialized_artifacts: bytes) -> Optional[CacheArtifactsResult]:
         """
-        Converts the portable format back into various filesystem caches
+        Converts the portable format back into CacheArtifacts
         """
         try:
             CacheArtifactManager._ensure_cache_artifacts_registered()
@@ -284,6 +298,10 @@ class CacheArtifactManager:
             log.warning("Failed to un-pickle cache artifacts", exc_info=True)
             return None
 
+        return artifacts
+
+    @staticmethod
+    def populate_caches(artifacts: CacheArtifactsResult) -> CacheInfo:
         info = CacheInfo()
         for artifact in chain(*artifacts.values()):
             log.debug("writing: %s", artifact)
@@ -292,8 +310,8 @@ class CacheArtifactManager:
 
         return info
 
-    @staticmethod
-    def _ensure_cache_artifacts_registered() -> None:
+    @classmethod
+    def _ensure_cache_artifacts_registered(cls) -> None:
         """When deserializing caches in fresh process, we need to ensure that all
         cache artifacts are registered in the cache registry. This is done by
         simply importing all the cache artifacts already wrapped with register call.

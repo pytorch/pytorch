@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -49,9 +50,8 @@ namespace c10::cuda::CUDACachingAllocator {
 
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
+using c10::CachingAllocator::kLargeBuffer;
 using c10::CachingDeviceAllocator::DeviceStats;
-
-extern const size_t kLargeBuffer;
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
 
@@ -535,7 +535,8 @@ struct C10_CUDA_API MemPool {
   MemPool(
       CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
       bool is_user_created = true,
-      bool use_on_oom = false);
+      bool use_on_oom = false,
+      bool symmetric = false);
   MemPool(const MemPool&) = delete;
   MemPool(MemPool&&) = default;
   MemPool& operator=(const MemPool&) = delete;
@@ -543,6 +544,7 @@ struct C10_CUDA_API MemPool {
   ~MemPool();
 
   MempoolId_t id();
+  bool is_symmetric();
   CUDACachingAllocator::CUDAAllocator* allocator();
   int use_count();
   c10::DeviceIndex device();
@@ -554,6 +556,7 @@ struct C10_CUDA_API MemPool {
   CUDACachingAllocator::CUDAAllocator* allocator_;
   bool is_user_created_;
   MempoolId_t id_;
+  bool symmetric_;
   c10::DeviceIndex device_;
 };
 

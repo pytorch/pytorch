@@ -1,3 +1,4 @@
+#include <c10/core/AllocatorConfig.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
@@ -20,8 +21,6 @@ constexpr size_t kMinBlockSize = 512;
 constexpr size_t kSmallSize = 1048576;
 // "small" allocations are packed in 2 MiB blocks
 constexpr size_t kSmallBuffer = 2097152;
-// "large" allocations may be packed in 20 MiB blocks
-constexpr size_t kLargeBuffer = 20971520;
 // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kMinLargeAlloc = 10485760;
 // round up large allocations to 2 MiB
@@ -251,9 +250,12 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  bool alloc_block(AllocParams& p) {
+  bool alloc_block(AllocParams& p, bool isRetry) {
     auto size = p.alloc_size;
     auto device = p.device();
+    if (isRetry) {
+      stats.num_alloc_retries += 1;
+    }
     void* ptr = sycl::aligned_alloc_device(
         kDeviceAlignment,
         size,
@@ -425,8 +427,8 @@ class DeviceCachingAllocator {
     bool block_found = get_free_block(params);
     // Can't reuse an existing block, try to get a new one.
     if (!block_found) {
-      block_found = alloc_block(params) ||
-          (release_cached_blocks() && alloc_block(params));
+      block_found = alloc_block(params, false) ||
+          (release_cached_blocks() && alloc_block(params, true));
     }
     if (!block_found) {
       c10::xpu::DeviceProp device_prop;
@@ -519,6 +521,7 @@ class DeviceCachingAllocator {
       stats.active_bytes[statType].reset_accumulated();
       stats.requested_bytes[statType].reset_accumulated();
     }
+    stats.num_alloc_retries = 0;
   }
 
   void resetPeakStats() {

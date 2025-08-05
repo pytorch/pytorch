@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
@@ -212,6 +213,40 @@ class CondModels:
 
             return y.sum() - torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
 
+    class FunctionalCall(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(4, 4)
+
+        def forward(self, p, x):
+            true_new_weight = torch.ones(x.size(0), x.size(0), device=x.device)
+            false_new_weight = torch.zeros(x.size(0), x.size(0), device=x.device)
+            true_new_bias = torch.ones(x.size(0), device=x.device)
+            false_new_bias = torch.zeros(x.size(0), device=x.device)
+            x = x.reshape(-1, x.size(0))
+
+            def true_fn(x):
+                return torch.func.functional_call(
+                    self.linear,
+                    {
+                        "weight": true_new_weight,
+                        "bias": true_new_bias,
+                    },
+                    x,
+                )
+
+            def false_fn(x):
+                return torch.func.functional_call(
+                    self.linear,
+                    {
+                        "weight": false_new_weight,
+                        "bias": false_new_bias,
+                    },
+                    x,
+                )
+
+            return torch.cond(p, true_fn, false_fn, (x,))
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -293,6 +328,7 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
+    @skipIfXpu(msg="Remove this skip after issue #154949 resolved.")
     @requires_gpu
     def test_cond_control_flow_with_precomputed_size(self):
         class TestModel(torch.nn.Module):
@@ -669,6 +705,17 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
                 torch.randn(10, 20),
             },
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_cond_functional_call(self, device, dynamic):
+        self._run_test(
+            model=CondModels.FunctionalCall(),
+            inputs=(torch.randn(10, 20),),
             device=device,
             dynamic=dynamic,
         )
@@ -1302,7 +1349,7 @@ class AssociativeScanTests(TestCase):
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("backend", ["inductor"])
     @parametrize("device", [torch.device("cpu"), GPU_TYPE])
-    # This test will fail as flip in combination with particular input lenghts
+    # This test will fail as flip in combination with particular input lengths
     # produces weird results.
     # This is under investigations in
     # https://github.com/pytorch/pytorch/issues/131805
@@ -1326,7 +1373,7 @@ class AssociativeScanTests(TestCase):
                         fct, x, 0, reverse=False, combine_mode=combine_mode
                     )
 
-                # Skipping test because combine_mode currently only suppors CUDA tensors
+                # Skipping test because combine_mode currently only supports CUDA tensors
                 return
 
             result1 = associative_scan1(
@@ -1563,12 +1610,13 @@ class ScanModels:
                 grad_weight, grad_bias, loss_acc = carry
                 input_chunk, target_chunk = xs
                 (
-                    chunk_grad_input,
-                    chunk_grad_weight,
-                    chunk_grad_bias,
-                ), chunk_loss = torch.func.grad_and_value(
-                    compute_loss, argnums=(0, 1, 2)
-                )(
+                    (
+                        chunk_grad_input,
+                        chunk_grad_weight,
+                        chunk_grad_bias,
+                    ),
+                    chunk_loss,
+                ) = torch.func.grad_and_value(compute_loss, argnums=(0, 1, 2))(
                     input_chunk, weight, bias, target_chunk
                 )
                 return (
@@ -1616,12 +1664,13 @@ class ScanModels:
 
             def accumulate_chunk(input_chunk, target_chunk):
                 (
-                    chunk_grad_input,
-                    chunk_grad_weight,
-                    chunk_grad_bias,
-                ), chunk_loss = torch.func.grad_and_value(
-                    compute_loss, argnums=(0, 1, 2)
-                )(
+                    (
+                        chunk_grad_input,
+                        chunk_grad_weight,
+                        chunk_grad_bias,
+                    ),
+                    chunk_loss,
+                ) = torch.func.grad_and_value(compute_loss, argnums=(0, 1, 2))(
                     input_chunk, weight, bias, target_chunk
                 )
                 grad_weight.add_(chunk_grad_weight)

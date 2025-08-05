@@ -552,6 +552,11 @@ def _handle_call_function_node_with_lowering(
     if _is_onnx_op(node.target):
         # Handle torch.ops.onnx.* ops. These ops can be directly added to the graph
         op_type, opset_version = _parse_onnx_op(node.target)  # type: ignore[arg-type]
+        # If final inputs are None, strip them from the node inputs
+        for input_ in reversed(onnx_args):
+            if input_ is not None:
+                break
+            onnx_args.pop()
         onnx_node = ir.Node(
             "",
             op_type,
@@ -943,7 +948,7 @@ def exported_program_to_ir(
     Args:
         exported_program: The exported program to convert.
         lower: Whether to lower the graph to core ONNX operators.
-            at_conversion: Lower whe translating the FX graph to ONNX IR.
+            at_conversion: Lower when translating the FX graph to ONNX IR.
             none: Do not lower the graph.
         registry: The registry of all ONNX Script decomposition.
     """
@@ -1021,7 +1026,7 @@ def _exported_program_to_onnx_program(
         exported_program: The exported program to convert. The exported program
             should be the one that is after decompositions have been applied.
         lower: Whether to lower the graph to core ONNX operators.
-            at_conversion: Lower whe translating the FX graph to ONNX IR.
+            at_conversion: Lower when translating the FX graph to ONNX IR.
             none: Do not lower the graph.
         registry: The registry of all ONNX Script decomposition.
     """
