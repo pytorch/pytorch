@@ -80,11 +80,11 @@ from .higher_order_ops import (
 )
 from .iter import (
     CountIteratorVariable,
-    CycleIteratorVariable,
     FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
+    ObjectIteratorVariable,
     RepeatIteratorVariable,
     ZipVariable,
 )
@@ -140,6 +140,7 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    FrozenDataClassVariable,
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -167,7 +168,6 @@ __all__ = [
     "CreateTMADescriptorExperimentalVariable",
     "CreateTMADescriptorStableVariable",
     "CUDADeviceVariable",
-    "CycleIteratorVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
