@@ -5,10 +5,10 @@
   id: vllm_basic_correctness_test
   steps:
   - export VLLM_WORKER_MULTIPROC_METHOD=spawn
-  - pytest -v -s basic_correctness/test_cumem.py
-  - pytest -v -s basic_correctness/test_basic_correctness.py
-  - pytest -v -s basic_correctness/test_cpu_offload.py
-  - VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 pytest -v -s basic_correctness/test_preemption.py
+  - VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s basic_correctness/test_cumem.py
+  - VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s basic_correctness/test_basic_correctness.py
+  - VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s basic_correctness/test_cpu_offload.py
+  - VLLM_WORKER_MULTIPROC_METHOD=spawn VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 pytest -v -s basic_correctness/test_preemption.py
 
 - label: Regression Test # 5min
   id: vllm_regression_test
@@ -39,19 +39,19 @@
 - label: Entrypoints Test (LLM) # 40min
   id: vllm_entrypoints_test_llm
   steps:
-  - export VLLM_WORKER_MULTIPROC_METHOD=spawn
-  - pytest -v -s entrypoints/llm --ignore=entrypoints/llm/test_lazy_outlines.py --ignore=entrypoints/llm/test_generate.py --ignore=entrypoints/llm/test_generate_multiple_loras.py --ignore=entrypoints/llm/test_collective_rpc.py
-  - pytest -v -s entrypoints/llm/test_lazy_outlines.py # it needs a clean process
-  - pytest -v -s entrypoints/llm/test_generate.py # it needs a clean process
-  - pytest -v -s entrypoints/llm/test_generate_multiple_loras.py # it needs a clean process
-  - VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode # Needs to avoid interference with other tests
+  - VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s entrypoints/llm/test_lazy_outlines.py # it needs a clean process
+  - VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s entrypoints/llm/test_generate.py # it needs a clean process
+  - VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s entrypoints/llm/test_generate_multiple_loras.py # it needs a clean process
+  - VLLM_WORKER_MULTIPROC_METHOD=spawn VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode # Needs to avoid interference with other tests
+  - VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s entrypoints/llm --ignore=entrypoints/llm/test_lazy_outlines.py --ignore=entrypoints/llm/test_generate.py --ignore=entrypoints/llm/test_generate_multiple_loras.py --ignore=entrypoints/llm/test_collective_rpc.py
+
 
 - label: Entrypoints Test (API Server) # 40min
   id: vllm_entrypoints_test_api_server
   steps:
   - export VLLM_WORKER_MULTIPROC_METHOD=spawn
-  - pytest -v -s entrypoints/openai --ignore=entrypoints/openai/test_chat_with_tool_reasoning.py --ignore=entrypoints/openai/test_oot_registration.py --ignore=entrypoints/openai/test_tensorizer_entrypoint.py --ignore=entrypoints/openai/correctness/
-  - pytest -v -s entrypoints/test_chat_utils.py
+  - VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s entrypoints/openai --ignore=entrypoints/openai/test_chat_with_tool_reasoning.py --ignore=entrypoints/openai/test_oot_registration.py --ignore=entrypoints/openai/test_tensorizer_entrypoint.py --ignore=entrypoints/openai/correctness/
+  - VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s entrypoints/test_chat_utils.py
 
 - label: PyTorch Compilation Unit Tests
   id: vllm_pytorch_compilation_unit_tests
