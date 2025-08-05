@@ -49,9 +49,11 @@ from torch._C._dynamo.eval_frame import code_framelocals_names
 from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
+    ClosureGuardAccessor,
     dict_version,
     DictGetItemGuardAccessor,
     DictGuardManager,
+    GetAttrGuardAccessor,
     GetGenericDictGuardAccessor,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
@@ -59,6 +61,8 @@ from torch._C._dynamo.guards import (
     install_symbolic_shape_guard,
     profile_guard_manager,
     RootGuardManager,
+    TupleGetItemGuardAccessor,
+    TypeGuardAccessor,
 )
 from torch._dynamo.source import (
     get_global_source_name,
@@ -412,7 +416,9 @@ class GuardManagerWrapper:
                 accessors = node.get_accessors()
                 child_mgrs = node.get_child_managers()
                 is_subtree_tag_safe = all(
-                    isinstance(accessor, GetGenericDictGuardAccessor)
+                    isinstance(
+                        accessor, (GetGenericDictGuardAccessor, TypeGuardAccessor)
+                    )
                     and mgr.is_tag_safe()
                     for accessor, mgr in zip(accessors, child_mgrs)
                 )
@@ -423,6 +429,43 @@ class GuardManagerWrapper:
                     return [
                         node,
                     ]
+            elif node.get_type_of_guarded_value() in (
+                types.FunctionType,
+                types.MethodType,
+            ):
+                accessors = node.get_accessors()
+                child_mgrs = node.get_child_managers()
+                is_subtree_tag_safe = all(
+                    isinstance(accessor, ClosureGuardAccessor) and mgr.is_tag_safe()
+                    for accessor, mgr in zip(accessors, child_mgrs)
+                )
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+            elif issubclass(node.get_type_of_guarded_value(), types.CellType):
+                accessors = node.get_accessors()
+                child_mgrs = node.get_child_managers()
+                is_subtree_tag_safe = all(
+                    isinstance(accessor, GetAttrGuardAccessor) and mgr.is_tag_safe()
+                    for accessor, mgr in zip(accessors, child_mgrs)
+                )
+
+                is_subtree_tag_safe &= all(
+                    accessor.get_attr_name() == "cell_contents"
+                    for accessor in accessors
+                )
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+            elif issubclass(node.get_type_of_guarded_value(), tuple):
+                accessors = node.get_accessors()
+                child_mgrs = node.get_child_managers()
+                is_subtree_tag_safe = all(
+                    isinstance(accessor, TupleGetItemGuardAccessor)
+                    and mgr.is_tag_safe()
+                    for accessor, mgr in zip(accessors, child_mgrs)
+                )
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+
             return tag_safe_roots
 
         def visit(node):
