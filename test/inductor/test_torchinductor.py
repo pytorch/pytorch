@@ -80,6 +80,9 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     largeTensorTest,
+    onlyNativeDeviceTypes,
+    onlyCUDA,
+    skipMetaIf,
 )
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_quantization import (
@@ -102,6 +105,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfS390X,
+    runOnRocmArch,
+    MI300_ARCH,
 )
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils import _pytree as pytree
@@ -2441,7 +2446,7 @@ class CommonTemplate:
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
-    def test__dyn_quant_matmul_4bit(self):
+    def test__dyn_quant_matmul_4bit_fp32_input(self):
         q_group = 32
         m = 32
         k = 128
@@ -2480,6 +2485,145 @@ class CommonTemplate:
             return res
 
         self.common(fn, (a, q_group, in_features, out_features))
+
+
+    # @xfail_if_mps_unimplemented
+    # @xfail_if_triton_cpu
+    # @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
+    @skipIfRocm
+    # @skipCUDAIfNotRocm
+    @runOnRocmArch(MI300_ARCH)
+    @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
+    def test__dyn_quant_matmul_4bit_bf16_input(self):
+        m = 32
+        k = 64
+        n = 128
+        # self.device_type = "cpu"
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16)
+        b = torch.rand((k, n), dtype=torch.bfloat16)
+        in_features = b.size(0)
+        out_features = b.size(1)
+        q_group = in_features
+        a = a.to(torch.bfloat16)
+        b = b.to(torch.bfloat16)
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest(f"torch.bfloat16 not supported for device {self.device}")
+
+        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                b, n_bit=4, groupsize=q_group
+            )
+
+            if q_group == in_features:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+                # print('goes here')
+            else:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def fn(a, q_group, in_features, out_features):
+            b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
+            a = a.to(torch.bfloat16)
+            res = torch.ops.aten._dyn_quant_matmul_4bit(
+                a,
+                b_int4pack,
+                q_group,
+                in_features,
+                out_features,
+            )
+            return res
+
+        # self.common(fn, (a, q_group, in_features, out_features))
+        self.common(fn, (a, q_group, in_features, out_features))
+
+    # @xfail_if_mps_unimplemented
+    # @xfail_if_triton_cpu
+    # @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
+    # @skipIfRocm
+    # @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
+    # def test__dyn_quant_matmul_4bit_bf16(self):
+    #     m = 32
+    #     k = 128
+    #     n = 128
+
+    #     torch.manual_seed(1)
+    #     a = torch.rand(m, k, dtype=torch.float32)
+    #     b = torch.rand(k, n, dtype=torch.float32)
+    #     in_features = b.size(0)
+    #     out_features = b.size(1)
+    #     q_group = in_features
+
+    #     def dyn_quant_pack_4bit_weight(b, in_features, out_features):
+    #         b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+    #             b, n_bit=4, groupsize=q_group
+    #         )
+
+    #         if q_group == in_features:
+    #             b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
+    #         else:
+    #             b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+    #         b_int4pack = torch._dyn_quant_pack_4bit_weight(
+    #             b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+    #         )
+
+    #         return b_int4pack, b_scales_and_zeros
+
+    #     def fn(a, q_group, in_features, out_features):
+    #         b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
+    #         res = torch._dyn_quant_matmul_4bit(
+    #             a,
+    #             b_int4pack,
+    #             q_group,
+    #             in_features,
+    #             out_features,
+    #         )
+    #         return res
+
+    #     self.common(fn, (a, q_group, in_features, out_features))
+
+
+    @xfail_if_mps_unimplemented
+    @xfail_if_triton_cpu
+    @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
+    @skipIfRocm
+    @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
+    def test__dyn_quant_pack_4bit_weight_bf16(self):
+        q_group = 32
+        k = 128
+        n = 128
+
+        torch.manual_seed(1)
+        b = torch.rand((k, n), dtype=torch.bfloat16)
+        in_features = b.size(0)
+        out_features = b.size(1)
+
+        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                b, n_bit=4, groupsize=q_group
+            )
+
+            if q_group == in_features:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
+            else:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def fn(b, in_features, out_features):
+            b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
+            return b_int4pack
+
+        # self.common(fn, (b, in_features, out_features))
+        out = fn(b, in_features, out_features)
+
 
     def test_expanded_reduction(self):
         def fn(x, y):
