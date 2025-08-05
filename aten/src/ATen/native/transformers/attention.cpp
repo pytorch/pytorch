@@ -769,7 +769,7 @@ Tensor scaled_dot_product_attention(
     }
     case SDPBackend::overrideable: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
-      compute_logsumexp = compute_logsumexp || 
+      compute_logsumexp = compute_logsumexp ||
           (at::GradMode::is_enabled() && attn_mask.has_value() && attn_mask.value().requires_grad());
       auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
