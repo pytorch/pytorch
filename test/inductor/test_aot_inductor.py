@@ -5016,7 +5016,7 @@ class AOTInductorTestsTemplate:
             _, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
-            shim_fn_codes = "RAIIAtenRecordFunctionHandle);"
+            shim_fn_codes = f'RAIIAtenRecordFunctionHandle("{kernel_calls}"'
             if enable_kernel_profile:
                 FileCheck().check(shim_fn_codes).run(code)
             else:
