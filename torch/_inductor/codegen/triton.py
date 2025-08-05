@@ -978,10 +978,7 @@ class TritonOverrides(OpOverrides):
             # do not apply conversion to the intermediate type.
             return f"{x}.to(tl.int16).to(tl.uint8)"
 
-        if V.kernel.is_native_matmul:
-            # do not promote float16 / bfloat16 to float32 during native matmul codegen
-            out_dtype = triton_store_type(dtype)
-        elif use_compute_types:
+        if use_compute_types:
             out_dtype = triton_compute_type(dtype)
         else:
             out_dtype = triton_store_type(dtype)
@@ -1119,11 +1116,10 @@ class TritonOverrides(OpOverrides):
         dense_sizes = V.kernel.dense_size_list()
         allow_tf32 = torch.backends.cuda.matmul.allow_tf32
         assert torch._inductor.config.triton.enable_native_matmul
-        
         # TODO:
         # 1. when there is broadcasting operands (A.repeat() @ B), adjust manually.
         # 2. Not here, but remove tl.broadcast_to in index expression.
-        # 4. fp16 vs fp32?
+        # 3. online softmax error happens on timm model but cannot reproduce.
 
         def is_where_needed(var):
             # Skip if the variable doesn't have a reduction mask
@@ -1136,7 +1132,6 @@ class TritonOverrides(OpOverrides):
                 if (
                     v == var
                     and "tl.load" in k
-                    and "r0_mask" in k
                     and "other=0.0" in k
                 ):
                     return False
@@ -1158,14 +1153,31 @@ class TritonOverrides(OpOverrides):
         #
         # This produces incorrect results because outside of r0_mask is not zero. 
         # So before calling tl.dot, apply tl.where to zero out values properly.
-        # Optimize - We don't need both operands to be zeroed 
-        if is_where_needed(a) :
+        if is_where_needed(a) and is_where_needed(b) :
+            # Optimize - We don't need both operands to be zeroed
             a = where_cond(a)
-        elif is_where_needed(b) :
-            b = where_cond(b)
 
-        # dtype cast
-        # CAUTION - don't miss the where condition above.
+
+        # downcast if we upcasted to fp32 before
+        for node in V.kernel.features.node_schedule:
+            if not isinstance(node, SchedulerNode):
+                continue
+            if not isinstance(node.node, ir.ComputedBuffer):
+                continue
+            if not node.node.get_reduction_type() == "dot":
+                continue
+            
+            matmul_dtype = node.node.dtype
+            # recover the upcasted dtype to original dtype before tl.dot
+            if matmul_dtype in (torch.float16, torch.bfloat16):
+                triton_dtype = triton_store_type(matmul_dtype)
+                a = f"{a}.to({triton_dtype})"
+                b = f"{b}.to({triton_dtype})"
+            
+            # Need to check:
+            # can multiple matmuls in horizontal fusion have different dtypes?
+            break
+
 
         # mm case
         if len(dense_sizes) == 3:
@@ -2006,7 +2018,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.init_cooperative_reduction()
 
         self.codegen_range_tree()
-
+        
         if self.cooperative_reduction:
             self.init_cooperative_reduction_mask()
 
@@ -2754,7 +2766,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if (
                 dtype in (torch.float16, torch.bfloat16)
                 and config.triton.codegen_upcast_to_fp32
-                and not self.is_native_matmul
             ):
                 line += ".to(tl.float32)"
                 dtype = torch.float32
