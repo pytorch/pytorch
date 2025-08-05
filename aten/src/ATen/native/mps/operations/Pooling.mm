@@ -21,6 +21,8 @@
 #include <ATen/ops/max_pool2d_with_indices_native.h>
 #include <ATen/ops/max_pool3d_with_indices_backward_native.h>
 #include <ATen/ops/max_pool3d_with_indices_native.h>
+#include <ATen/ops/max_unpool2d_native.h>
+#include <ATen/ops/max_unpool3d_native.h>
 #endif
 
 namespace at::native {
@@ -492,6 +494,60 @@ static void max_pool_with_indices_backward_out_mps_template(Tensor& grad_input,
   });
 }
 
+static void max_unpool_out_mps_template(const Tensor& input,
+                                        const Tensor& indices,
+                                        IntArrayRef output_size_,
+                                        IntArrayRef stride,
+                                        IntArrayRef padding,
+                                        Tensor& output,
+                                        const int32_t pooling_dims,
+                                        const std::string& op_name) {
+  auto dims = input.dim();
+  auto leading_dims = input.dim() - pooling_dims;
+
+  const auto memory_format = input.suggest_memory_format();
+  std::vector<int64_t> output_size(dims);
+  for (int dim : c10::irange(leading_dims)) {
+    output_size[dim] = input.sizes()[dim];
+  }
+  for (int dim : c10::irange(pooling_dims)) {
+    output_size[leading_dims + dim] = output_size_[dim];
+  }
+
+  output.resize_(output_size, memory_format);
+  output.fill_(0);
+
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+  const auto numThreads = input.numel();
+  MaxUnpoolingParams<5> params;
+
+  params.dims = dims;
+  params.pooling_dims = pooling_dims;
+
+  for (const auto dim : c10::irange(dims)) {
+    params.output_sizes[dim] = safe_downcast<int32_t, int64_t>(output.size(dim));
+    params.output_strides[dim] = safe_downcast<int32_t, int64_t>(output.stride(dim));
+    params.input_sizes[dim] = safe_downcast<int32_t, int64_t>(input.size(dim));
+    params.input_strides[dim] = safe_downcast<int32_t, int64_t>(input.stride(dim));
+    params.indices_strides[dim] = safe_downcast<int32_t, int64_t>(indices.stride(dim));
+  }
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      auto PSO = lib.getPipelineStateForFunc("max_unpool_" + scalarToMetalTypeString(input));
+
+      getMPSProfiler().beginProfileKernel(PSO, op_name, {input});
+      [computeEncoder setComputePipelineState:PSO];
+      mtl_setArgs(computeEncoder, output, input, indices, params);
+
+      mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
+      getMPSProfiler().endProfileKernel(PSO);
+    }
+  });
+}
+
 static void avg_pool2d_template(const Tensor& input,
                                 const Tensor& output,
                                 const std::optional<Tensor>& grad_output_opt,
@@ -894,6 +950,68 @@ Tensor max_pool3d_with_indices_backward_mps(const Tensor& grad_output,
                                                        /*pooling_dims=*/3,
                                                        "max_pool3d_backward");
   return grad_input;
+}
+
+Tensor& max_unpooling2d_forward_out_mps(const Tensor& self,
+                                        const Tensor& indices,
+                                        IntArrayRef output_size,
+                                        Tensor& output) {
+  mps::max_unpool_out_mps_template(self,
+                                   indices,
+                                   output_size,
+                                   /*stride=*/{},
+                                   /*padding=*/{},
+                                   output,
+                                   /*pooling_dims=*/2,
+                                   "max_unpool2d");
+  return output;
+}
+
+Tensor max_unpooling2d_forward_mps(const Tensor& self, const Tensor& indices, IntArrayRef output_size) {
+  auto output = at::empty({0}, self.options());
+  mps::max_unpool_out_mps_template(self,
+                                   indices,
+                                   output_size,
+                                   /*stride=*/{},
+                                   /*padding=*/{},
+                                   output,
+                                   /*pooling_dims=*/2,
+                                   "max_unpool2d");
+  return output;
+}
+
+Tensor& max_unpooling3d_forward_out_mps(const Tensor& self,
+                                        const Tensor& indices,
+                                        IntArrayRef output_size,
+                                        IntArrayRef stride,
+                                        IntArrayRef padding,
+                                        Tensor& output) {
+  mps::max_unpool_out_mps_template(self,
+                                   indices,
+                                   output_size,
+                                   stride,
+                                   padding,
+                                   output,
+                                   /*pooling_dims=*/3,
+                                   "max_unpool3d");
+  return output;
+}
+
+Tensor max_unpooling3d_forward_mps(const Tensor& self,
+                                   const Tensor& indices,
+                                   IntArrayRef output_size,
+                                   IntArrayRef stride,
+                                   IntArrayRef padding) {
+  auto output = at::empty({0}, self.options());
+  mps::max_unpool_out_mps_template(self,
+                                   indices,
+                                   output_size,
+                                   stride,
+                                   padding,
+                                   output,
+                                   /*pooling_dims=*/3,
+                                   "max_unpool3d");
+  return output;
 }
 
 TORCH_IMPL_FUNC(avg_pool2d_out_mps)
