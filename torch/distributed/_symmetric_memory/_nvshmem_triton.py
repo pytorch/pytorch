@@ -8,7 +8,7 @@ from torch.utils._triton import has_triton
 
 def _find_nvshmem_device_library() -> str:
     paths = [os.path.join(sysconfig.get_path("purelib"), "nvidia", "nvshmem", "lib")]
-    
+
     # Add common system installation paths
     common_paths = [
         "/usr/local/lib",
