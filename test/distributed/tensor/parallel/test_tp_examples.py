@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     MLPModule,
     ModelArgs,
     NUM_DEVICES,
@@ -57,7 +57,7 @@ class ExpCommCounts(NamedTuple):
     optim: Optional[dict] = None
 
 
-class DistTensorParallelExampleTest(DTensorTestBase):
+class DistTensorParallelExampleTest(DTensorContinuousTestBase):
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
@@ -178,8 +178,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output = model(inp)
         output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
-
-    @with_comms
     @parametrize("is_seq_parallel", [True, False])
     # TODO: need to revisit input_reshard API about why it failed multi-gpu tests.
     # @parametrize("recompute_activation", [True, False])
@@ -188,8 +186,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self._test_mlp_training_e2e(
             is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation
         )
-
-    @with_comms
     def test_mlp_inference(self):
         device_mesh = DeviceMesh(
             self.device_type,
@@ -276,8 +272,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             for n, p in target_model.named_parameters():
                 if n not in thaw_params:
                     p.requires_grad_(False)
-
-    @with_comms
     @skip_unless_torch_gpu
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("dtype", [torch.float64, torch.float32])
@@ -331,8 +325,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             self._validate_optim_step(
                 model, model_tp, optim, optim_tp, expected_optim_comms
             )
-
-    @with_comms
     @skip_unless_torch_gpu
     @parametrize(
         "thaw_params, is_seq_parallel, dtype, exp_cnts",
@@ -445,8 +437,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self._validate_optim_step(
             model, model_tp, optim, optim_tp, exp_cnts.optim, check_comms=True
         )
-
-    @with_comms
     def test_weight_tying(self):
         class TestModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -492,8 +482,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output.sum().backward()
         self.assertEqual(model.embedding.weight.grad, model.fc.weight.grad)
         self.assertEqual(id(model.embedding.weight.grad), id(model.fc.weight.grad))
-
-    @with_comms
     def test_loss_parallel(self):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()

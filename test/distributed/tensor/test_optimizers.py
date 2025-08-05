@@ -14,7 +14,7 @@ from torch.distributed.tensor import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     MLPModule,
     with_comms,
 )
@@ -47,7 +47,7 @@ def output_fn(mod, outputs, device_mesh):
     return outputs.redistribute(placements=[Replicate()] * device_mesh.ndim).to_local()
 
 
-class TestDTensorOptimizer(DTensorTestBase):
+class TestDTensorOptimizer(DTensorContinuousTestBase):
     def _assert_optimizer(
         self,
         mesh,
@@ -85,8 +85,6 @@ class TestDTensorOptimizer(DTensorTestBase):
         from torch.optim.optimizer import _foreach_supported_types
 
         self.assertTrue(DTensor in _foreach_supported_types)
-
-    @with_comms
     def test_adam_1d_sharding(self):
         mesh = self.build_device_mesh()
 
@@ -144,8 +142,6 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
-
-    @with_comms
     def test_adamw_1d_sharding(self):
         mesh = self.build_device_mesh()
 
@@ -220,8 +216,6 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
-
-    @with_comms
     def test_sgd_1d_sharding(self):
         mesh = self.build_device_mesh()
 
@@ -260,8 +254,6 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
-
-    @with_comms
     def test_adagrad_1d_sharding(self):
         mesh = self.build_device_mesh()
 
@@ -316,8 +308,6 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
-
-    @with_comms
     def test_RMSprop_1d_sharding(self):
         mesh = self.build_device_mesh()
 
@@ -383,8 +373,6 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
-
-    @with_comms
     def test_adadelta_1d_sharding(self):
         mesh = self.build_device_mesh()
 
@@ -427,8 +415,6 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
-
-    @with_comms
     def test_nadam_1d_sharding(self):
         mesh = self.build_device_mesh()
 
@@ -464,8 +450,6 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
-
-    @with_comms
     def test_radam_1d_sharding(self):
         mesh = self.build_device_mesh()
 
@@ -504,8 +488,6 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
-
-    @with_comms
     def test_adamax_1d_sharding(self):
         mesh = self.build_device_mesh()
 
@@ -548,8 +530,6 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
-
-    @with_comms
     def test_asgd_1d_sharding(self):
         mesh = self.build_device_mesh()
 
@@ -605,8 +585,6 @@ class TestDTensorOptimizer(DTensorTestBase):
             self._assert_optimizer(
                 mesh, mod, opt, dist_mod, dist_opt, inp, atol=1.3e-5, rtol=1e-4
             )
-
-    @with_comms
     def test_admaw_fused_across_meshes(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(

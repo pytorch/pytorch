@@ -17,7 +17,7 @@ from torch.distributed.tensor.experimental import local_map
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     with_comms,
 )
 
@@ -64,13 +64,10 @@ def mul_forward(X, scalar):  # no device mesh needed since we don't do collectiv
     return torch.mul(X, scalar)
 
 
-class TestLocalMap(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 2
+class TestLocalMap(DTensorContinuousTestBase):
+    world_size = 2
 
     # simple correctness check
-    @with_comms
     def test_local_map_correctness(self):
         device_mesh = init_device_mesh(
             device_type=self.device_type, mesh_shape=(self.world_size,)
@@ -124,7 +121,6 @@ class TestLocalMap(DTensorTestBase):
         self.assertEqual(Y_dt.to_local(), Y)
 
     # check for `out_placements`
-    @with_comms
     def test_local_map_out_placements(self):
         # Test 1: wrap out into DTensor w/ `out_placements`
         device_mesh = init_device_mesh(
@@ -171,7 +167,6 @@ class TestLocalMap(DTensorTestBase):
         self.assertEqual(Y, Y_replicate)  # Y is a torch.Tensor
 
     # check for `in_placements` handling
-    @with_comms
     def test_local_map_in_placements(self):
         device_mesh = init_device_mesh(
             device_type=self.device_type, mesh_shape=(self.world_size,)
@@ -278,7 +273,6 @@ class TestLocalMap(DTensorTestBase):
             Y_dt = local_mm_forward(X_dt, W_dt)
 
     # check for `redistribute_inputs` handling
-    @with_comms
     def test_local_map_redistribute(self):
         device_mesh = init_device_mesh(
             device_type=self.device_type, mesh_shape=(self.world_size,)
@@ -326,7 +320,6 @@ class TestLocalMap(DTensorTestBase):
             Y_dt = local_mm_allreduce_forward(device_mesh, X_dt, W_dt)
 
     # check for `in_grad_placements` handling
-    @with_comms()
     def test_local_map_with_grad_placement(self):
         """
         Test the gradient result is correct when we specify the right
@@ -387,7 +380,6 @@ class TestLocalMap(DTensorTestBase):
             self.assertEqual(W_dt.grad.full_tensor(), W.grad)
 
     @skip_if_lt_x_gpu(4)
-    @with_comms
     def test_multi_mesh_inputs(self):
         """
         Test the function can be applied to accept DTensors that lives

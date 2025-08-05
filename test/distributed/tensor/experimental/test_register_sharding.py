@@ -8,7 +8,7 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.experimental import register_sharding
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     with_comms,
 )
 
@@ -16,8 +16,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 aten = torch.ops.aten
 
 
-class TestRegisterSharding(DTensorTestBase):
-    @with_comms
+class TestRegisterSharding(DTensorContinuousTestBase):
     def test_softmax_fwd(self):
         # After registering the custom softmax sharding strategy,
         # the original entry would have been replaced.
@@ -77,8 +76,6 @@ class TestRegisterSharding(DTensorTestBase):
             else:
                 self.assertTrue(dist_y.placements[0].is_shard(dim=shard_dim))
                 self.assertEqual(dist_y.full_tensor(), local_y)
-
-    @with_comms
     def test_argmax(self):
         @register_sharding(aten.argmax.default)
         def custom_argmax_sharding(x, dim, keepdim):

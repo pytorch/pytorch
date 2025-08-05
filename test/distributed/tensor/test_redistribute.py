@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import (
     TEST_HPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     with_comms,
 )
 
@@ -31,12 +31,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 funcol = torch.ops.c10d_functional
 
 
-class RedistributeTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
-
-    @with_comms
+class RedistributeTest(DTensorContinuousTestBase):
+    world_size = 4
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_shard_to_replicate_forward_backward(self, dtype):
         # 1) test shard -> replicate forward
@@ -79,8 +75,6 @@ class RedistributeTest(DTensorTestBase):
                 torch.ones(dtensor.to_local().size(), dtype=dtype),
             )
             self.assertEqual(comm_mode.get_total_counts(), 0)
-
-    @with_comms
     def test_replicate_to_replicate_forward_backward(self):
         device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
@@ -107,8 +101,6 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(grad_input.placements, replica_spec)
         self.assertEqual(grad_input.to_local(), torch.ones(12, 3))
         self.assertEqual(comm_mode.get_total_counts(), 0)
-
-    @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_replicate_to_local_partial_grad(self, dtype):
         device_mesh = self.build_device_mesh()
@@ -129,8 +121,6 @@ class RedistributeTest(DTensorTestBase):
 
         self.assertEqual(comm_mode.get_total_counts(), 1)
         self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
-
-    @with_comms
     def test_replicate_to_shard_forward_backward(self):
         device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
@@ -177,8 +167,6 @@ class RedistributeTest(DTensorTestBase):
             self.assertEqual(
                 comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
             )
-
-    @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_partial_to_replicate_forward_backward(self, dtype):
         # Although we don't allow user to reshard to produce a partial
@@ -217,8 +205,6 @@ class RedistributeTest(DTensorTestBase):
             partial_local.grad, torch.ones_like(partial_local, dtype=dtype)
         )
         self.assertEqual(comm_mode.get_total_counts(), 0)
-
-    @with_comms
     def test_replicate_to_replicate_forward_backward_datatype_conversion(self):
         device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
@@ -274,8 +260,6 @@ class RedistributeTest(DTensorTestBase):
             self.assertEqual(grad_input.placements, replica_spec)
             self.assertEqual(grad_input.to_local(), torch.ones(12, 3))
             self.assertEqual(comm_mode.get_total_counts(), 0)
-
-    @with_comms
     def test_shard_to_replicate_forward_backward_datatype_conversion(self):
         device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
@@ -346,8 +330,6 @@ class RedistributeTest(DTensorTestBase):
                     grad_input.to_local(), torch.ones(dtensor.to_local().size())
                 )
                 self.assertEqual(comm_mode.get_total_counts(), 0)
-
-    @with_comms
     def test_replicate_to_partial(self):
         device_mesh = self.build_device_mesh()
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
@@ -394,8 +376,6 @@ class RedistributeTest(DTensorTestBase):
             partial_tensor.to_local(),
         )
         self.assertEqual(comm_mode.get_total_counts(), 0)
-
-    @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_partial_to_shard(self, dtype):
         device_mesh = self.build_device_mesh()
@@ -450,8 +430,6 @@ class RedistributeTest(DTensorTestBase):
             self.assertEqual(
                 comm_mode.get_comm_counts()[funcol.reduce_scatter_tensor], 1
             )
-
-    @with_comms
     def test_redistribute_negative_shard_dim(self):
         device_mesh = self.build_device_mesh()
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
@@ -462,8 +440,6 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(shard_tensor.placements[0].dim, 1)
         reshard_tensor = shard_tensor.redistribute(device_mesh, shard_minus_spec)
         self.assertEqual(reshard_tensor.placements[0].dim, 1)
-
-    @with_comms
     def test_redistribute_uneven_sharding(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
         data_to_test = [
@@ -486,8 +462,6 @@ class RedistributeTest(DTensorTestBase):
                 dt = distribute_tensor(input_tensor, mesh, placements)
                 dt_full_tensor = dt.full_tensor()
                 self.assertEqual(dt_full_tensor, input_tensor)
-
-    @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_redistribute_shard_dim_change(self, dtype):
         # test 1d device mesh
@@ -584,8 +558,6 @@ class RedistributeTest(DTensorTestBase):
                 local_out_dt = out_dt.to_local()
                 local_expected_dt = expected_dt.to_local()
                 self.assertEqual(local_out_dt, local_expected_dt)
-
-    @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_shard_dim_alltoall(self, dtype):
         # init 2d mesh here so we can test when group_rank != global_rank
@@ -603,12 +575,8 @@ class RedistributeTest(DTensorTestBase):
 instantiate_parametrized_tests(RedistributeTest)
 
 
-class MultiDimRedistributeTest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        return 8
-
-    @with_comms
+class MultiDimRedistributeTest(DTensorContinuousTestBase):
+    world_size = 8
     def test_multi_dim_mesh(self):
         devices = torch.arange(self.world_size)
         for mesh_shape in [devices, devices.view(4, 2), devices.view(2, 2, 2)]:
@@ -656,8 +624,6 @@ class MultiDimRedistributeTest(DTensorTestBase):
                                 num_sums *= mesh_shape.size(idx)
                         expected = num_sums * full_tensor
                         self.assertEqual(local_full, expected)
-
-    @with_comms
     def test_redistribute_shard_dim_multi_dim_mesh(self):
         mesh = init_device_mesh(self.device_type, (2, 2, 2))
         input_data = torch.randn((8, 8, 8), device=self.device_type)

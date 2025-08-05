@@ -12,7 +12,7 @@ from torch.distributed.tensor.parallel.style import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     with_comms,
 )
 
@@ -51,7 +51,7 @@ class DummyModel(torch.nn.Module):
         return self.bn(self.fc(x))
 
 
-class TensorParallelTest(DTensorTestBase):
+class TensorParallelTest(DTensorContinuousTestBase):
     def setUp(self) -> None:
         super().setUp()
 
@@ -64,8 +64,6 @@ class TensorParallelTest(DTensorTestBase):
                 if "c10d_functional" in str(node.target):
                     actual_ops_count[str(node.target)] += 1
         self.assertDictEqual(expected_ops_count, actual_ops_count)
-
-    @with_comms
     def test_tp_transform_with_uncovered_op(self):
         model = DummyModel().to(device=self.device_type)
         inputs = (torch.randn(7, 3, requires_grad=False).to(device=self.device_type),)
@@ -93,8 +91,6 @@ class TensorParallelTest(DTensorTestBase):
                 "_c10d_functional.wait_tensor.default": 1,
             },
         )
-
-    @with_comms
     def test_tp_transform_e2e(self):
         torch.manual_seed(0)
         model = MLPListModule(2).to(device=self.device_type)
@@ -130,8 +126,6 @@ class TensorParallelTest(DTensorTestBase):
                 "_c10d_functional.wait_tensor.default": 2,
             },
         )
-
-    @with_comms
     def test_tp_transform_no_bias(self):
         torch.manual_seed(0)
         model = MLPListModule(1, bias=False).to(device=self.device_type)

@@ -5,12 +5,12 @@ import torch
 from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     with_comms,
 )
 
 
-class DTensorInitOpsTest(DTensorTestBase):
+class DTensorInitOpsTest(DTensorContinuousTestBase):
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -23,17 +23,13 @@ class DTensorInitOpsTest(DTensorTestBase):
         torch.manual_seed(self.rank)
         dtensor = init_op(dtensor, *args, **kwargs)
         self.assertEqual(local_tensor_clone, dtensor.to_local())
-
-    @with_comms
     def test_init_ops(self):
         # NOTE: random init tests are moved to test_random_ops.py
         self._run_init_op(torch.nn.init.constant_, 2.4)
 
 
-class DTensorConstructorTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
+class DTensorConstructorTest(DTensorContinuousTestBase):
+    world_size = 4
 
     def _run_init_op(self, init_op, dist_init_op, eq_op, *args, **kwargs):
         # 1d mesh test
@@ -89,8 +85,6 @@ class DTensorConstructorTest(DTensorTestBase):
         ).to_local()
         expected_tensor = init_op([], *args, **kwargs)
         eq_op(expected_tensor, local_tensor)
-
-    @with_comms
     def test_ones(self):
         self._run_init_op(
             torch.ones,
@@ -98,8 +92,6 @@ class DTensorConstructorTest(DTensorTestBase):
             self.assertEqual,
             requires_grad=True,
         )
-
-    @with_comms
     def test_empty(self):
         self._run_init_op(
             torch.empty,
@@ -109,8 +101,6 @@ class DTensorConstructorTest(DTensorTestBase):
             and (x.layout == y.layout),
             requires_grad=True,
         )
-
-    @with_comms
     def test_full(self):
         self._run_init_op(
             torch.full,
@@ -119,8 +109,6 @@ class DTensorConstructorTest(DTensorTestBase):
             123.4,
             requires_grad=True,
         )
-
-    @with_comms
     def test_zeros(self):
         self._run_init_op(
             torch.zeros,
@@ -128,8 +116,6 @@ class DTensorConstructorTest(DTensorTestBase):
             self.assertEqual,
             requires_grad=True,
         )
-
-    @with_comms
     def test_zeros_full_mesh(self):
         # construct a cuda device 1d mesh
         mesh = self.build_device_mesh()
@@ -193,8 +179,6 @@ class DTensorConstructorTest(DTensorTestBase):
             self.assertEqual(local_tensor, torch.zeros([15, 2]))
         elif self.rank == 3:
             self.assertEqual(local_tensor, torch.zeros([15, 1]))
-
-    @with_comms
     def test_zeros_submesh(self):
         # default world_size is 4
         # construct a cuda device 1d mesh, with no sub pg initialized

@@ -38,7 +38,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorOpTestBase,
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     with_comms,
 )
 
@@ -114,9 +114,7 @@ class TestEinsumDims(TestCase):
 
 
 class TestEinsumStrategies(DTensorOpTestBase):
-    @property
-    def world_size(self) -> int:
-        return 4
+    world_size = 4
 
     def test_mm_1d_mesh(self):
         mesh = self.build_device_mesh()
@@ -169,9 +167,7 @@ class TestEinsumStrategies(DTensorOpTestBase):
 
 
 class TestCostModel(DTensorOpTestBase):
-    @property
-    def world_size(self) -> int:
-        return 4
+    world_size = 4
 
     def test_redistribute_cost_mesh_1d(self):
         mesh_1d = self.build_device_mesh()
@@ -528,8 +524,7 @@ def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
         return len(output_strategy_str_list) == len(set(output_strategy_str_list))
 
 
-class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
-    @with_comms
+class DistTensorReplicateStrategyRegistrationTest(DTensorContinuousTestBase):
     @patch(
         "torch.distributed.tensor._sharding_prop.ShardingPropagator._select_strategy"
     )
@@ -595,8 +590,6 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
                         strategy_function=replicate_op_strategy,
                     )
                 )
-
-    @with_comms
     def test_tuple_replicate_strategy_placement(self):
         mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
         test_op = torch.ops.mylib.numpy_tuple_sin
@@ -621,8 +614,7 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
             self.assertEqual(output_dt.placements, [Replicate(), Replicate()])
 
 
-class TestStrategyHashing(DTensorTestBase):
-    @with_comms
+class TestStrategyHashing(DTensorContinuousTestBase):
     def test_call_with_different_nontensor_args(self):
         mesh = self.build_device_mesh()
         global_tensor = torch.tensor(

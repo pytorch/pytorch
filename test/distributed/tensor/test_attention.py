@@ -32,7 +32,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     ModelArgs,
     Transformer,
     with_comms,
@@ -54,10 +54,8 @@ rotater_enum_to_str = {
 }  # mapping from _RotateMethod enum to string
 
 
-class RingAttentionTest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        return torch.cuda.device_count()
+class RingAttentionTest(DTensorContinuousTestBase):
+    world_size = torch.cuda.device_count()
 
     @property
     def destroy_pg_upon_exit(self) -> bool:
@@ -69,7 +67,6 @@ class RingAttentionTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
     )
-    @with_comms
     def test_ring_attention_sdpa(self) -> None:
         self.run_subtests(
             {
@@ -268,7 +265,6 @@ class RingAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    @with_comms
     def test_ring_attention_native_transformer(self) -> None:
         self.run_subtests(
             {
@@ -364,7 +360,6 @@ class RingAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    @with_comms
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
     def test_ring_attention_custom_transformer(self) -> None:
         self.run_subtests(
@@ -446,10 +441,8 @@ compiled_create_block_mask = torch.compile(
 )
 
 
-class RingFlexAttentionTest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        return 2
+class RingFlexAttentionTest(DTensorContinuousTestBase):
+    world_size = 2
 
     def _test_ring_flex_attention(self, qkv_size) -> None:
         def causal_mask(b, h, q_idx, kv_idx):
@@ -593,7 +586,6 @@ class RingFlexAttentionTest(DTensorTestBase):
         )
 
     @skip_if_lt_x_gpu(2)
-    @with_comms
     def test_ring_flex_attention(self) -> None:
         self.run_subtests(
             {"qkv_size": [128 * self.world_size, 2048]},

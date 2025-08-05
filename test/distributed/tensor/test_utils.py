@@ -16,7 +16,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, Replicate, Shard
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     with_comms,
 )
 
@@ -131,18 +131,14 @@ class LocalTest(TestCase):
             self.assertEqual(global_offset, (expected_shard_offset, 0))
 
 
-class UtilTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 8
+class UtilTest(DTensorContinuousTestBase):
+    world_size = 8
 
     def _compute_start_end_offsets(self, global_offset, local_size, n_dim):
         offset = []
         for i in range(n_dim):
             offset.append(((global_offset[i]), (global_offset[i] + local_size[i])))
         return offset
-
-    @with_comms
     def test_compute_global_tensor_shape_1D(self):
         one_d_placements = [[Shard(1)], [Shard(0)], [Replicate()]]
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
@@ -166,8 +162,6 @@ class UtilTest(DTensorTestBase):
                 local_shape, device_mesh, placements
             )
             self.assertEqual(global_shape, expected_global_shape)
-
-    @with_comms
     def test_compute_global_tensor_shape_1D_invalid_shape(self):
         one_d_placement = [Shard(1)]
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
@@ -186,8 +180,6 @@ class UtilTest(DTensorTestBase):
                 device_mesh,
                 one_d_placement,
             )
-
-    @with_comms
     def test_compute_global_tensor_shape_failure_2D(self):
         placement_2D = [Shard(0), Shard(1)]
         device_mesh_2D = init_device_mesh(self.device_type, (2, 2))
@@ -210,8 +202,6 @@ class UtilTest(DTensorTestBase):
                 device_mesh_2D,
                 placement_1D,
             )
-
-    @with_comms
     def test_compute_local_shape_and_global_offset_1D(self):
         one_d_placements = [[Shard(0)], [Replicate()]]
 
@@ -238,8 +228,6 @@ class UtilTest(DTensorTestBase):
                     dtensor.to_local(),
                     global_tensor[dim0_start:dim0_end],
                 )
-
-    @with_comms
     def test_compute_local_shape_and_global_offset_2D(self):
         two_d_placements_options = [Shard(0), Shard(1), Replicate()]
         # Generating 6 two-d placements combinations
@@ -270,8 +258,6 @@ class UtilTest(DTensorTestBase):
                     dtensor.to_local(),
                     global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
                 )
-
-    @with_comms
     def test_fsdp_tp_meta_compute(self):
         # FSDP + TP sharding
         tp_size = 2
@@ -294,8 +280,6 @@ class UtilTest(DTensorTestBase):
         expected_global_offset = (shard_idx_on_dim_0 * 2, 0)
         self.assertEqual(local_shape, expected_local_shape)
         self.assertEqual(global_offset, expected_global_offset)
-
-    @with_comms
     def test_uneven_fsdp_tp_meta_compute(self):
         # FSDP + TP uneven sharding
         tp_size = 2
@@ -313,8 +297,6 @@ class UtilTest(DTensorTestBase):
         expected_offsets = [0, 8, 2, 10, 4, 12, 6, 14]
         self.assertEqual(local_shape[0], expected_shapes[rank])
         self.assertEqual(global_offset[0], expected_offsets[rank])
-
-    @with_comms
     def test_hsdp_tp_meta_compute(self):
         # HSDP + TP sharding
         tp_size = 2
@@ -342,7 +324,6 @@ class UtilTest(DTensorTestBase):
         self.assertEqual(global_offset, expected_global_offset)
 
     # TODO: remove this test once we support general meta compute on strided sharding
-    @with_comms
     def test_strided_sharding_assumption_in_meta_compute(self):
         # current ``compute_local_shape_and_global_offset`` does not allow Shard(i)
         # placement to appear after the strided sharding part has ended. This test
@@ -442,12 +423,8 @@ class UtilTest(DTensorTestBase):
             )
 
 
-class TestStridedSharding(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
-
-    @with_comms
+class TestStridedSharding(DTensorContinuousTestBase):
+    world_size = 4
     def test_1d_mesh_strided_sharding(self):
         mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
         # Test 1: 1-d tensor over 1-d mesh
@@ -485,8 +462,6 @@ class TestStridedSharding(DTensorTestBase):
             current_logical_shape=list(x.shape),
         )
         self.assertEqual(full_tensor, x)
-
-    @with_comms
     def test_2d_mesh_strided_sharding(self):
         # Test 2: 1-d tensor over 2-d mesh
         mesh_2d = init_device_mesh(
@@ -579,8 +554,6 @@ class TestStridedSharding(DTensorTestBase):
             current_logical_shape=list(x.shape),
         )
         self.assertEqual(full_tensor, x)
-
-    @with_comms
     def test_2d_mesh_2d_tensor_strided_sharding(self):
         # Test 2: 1-d tensor over 2-d mesh
         mesh_2d = init_device_mesh(
@@ -639,12 +612,8 @@ class TestStridedSharding(DTensorTestBase):
         self.assertEqual(full_tensor, x)
 
 
-class Test2DStridedLocalShard(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
-
-    @with_comms
+class Test2DStridedLocalShard(DTensorContinuousTestBase):
+    world_size = 4
     def test_fsdp1_tp_2d_dtensor_local_shards_and_offsets(self):
         # We are mimicking the behavior of FSDP1 + TP.
         # Currently, the 2D DTensor's local shard is correct, since from_local + redistribute incurs a all_gather behind the scene.
@@ -676,8 +645,6 @@ class Test2DStridedLocalShard(DTensorTestBase):
         )
         self.assertEqual(local_size, torch.Size([1, 2]))
         self.assertEqual(global_offset, torch.Size([self.rank, 0]))
-
-    @with_comms
     def test_fsdp2_tp_2d_dtensor_local_shards_and_offsets(self):
         # We are mimicking the behavior of FSDP2 + TP.
         # Currently, the 2D DTensor's local shard is incorrect for resharding, since we want to avoid extra communication.

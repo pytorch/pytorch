@@ -13,7 +13,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_utils import run_tests, skipIfHpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     MLPModule,
     MLPStacked,
     ModelArgs,
@@ -27,7 +27,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 c10d_functional = torch.ops.c10d_functional
 
 
-class TestCommModeFeatures(DTensorTestBase):
+class TestCommModeFeatures(DTensorContinuousTestBase):
     # checks if parameter / sharding info is the same as ground truth
     def check_same_set_of_keys(self, dict1, dict2):
         """
@@ -74,8 +74,6 @@ class TestCommModeFeatures(DTensorTestBase):
                 module_sharding_dict[key_name] = parameters.data.placements
 
         return module_parameters_dict, module_sharding_dict
-
-    @with_comms
     def test_MLP_distributed_sharding_display(self):
         """
         tests parameters and sharding on a module level
@@ -112,7 +110,6 @@ class TestCommModeFeatures(DTensorTestBase):
         self.check_same_set_of_keys(module_sharding_dict, comm_mode.get_sharding_info())
 
     @skipIfHpu
-    @with_comms
     def test_MLPStacked_distributed_sharding_display(self):
         """
         tests model with nested modules and makes sure comm_mode correctly resets parameter and sharding information
@@ -166,8 +163,6 @@ class TestCommModeFeatures(DTensorTestBase):
         )
         self.check_same_set_of_keys(module_sharding_dict, comm_mode.get_sharding_info())
         self.assertEqual(len(comm_mode.get_sharding_info()), 8)
-
-    @with_comms
     def test_MLP_module_tracing(self):
         """
         tests module-level tracing for MLP module
@@ -221,7 +216,6 @@ class TestCommModeFeatures(DTensorTestBase):
 
     @skipIfHpu
     @skip_unless_torch_gpu
-    @with_comms
     def test_transformer_module_tracing(self, is_seq_parallel=False):
         """
         tests module-level tracing for more complicated transformer module and
