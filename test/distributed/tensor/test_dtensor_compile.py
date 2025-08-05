@@ -166,8 +166,6 @@ def forward(self, b_buffer, x):
     return (view_as_1,)""",  # noqa: B950
         )
 
-        # During tracing, sharding propagation cache is skipped, so an extra dry run for
-        # add is performed in _propagate_tensor_meta_non_cached, hence add_1 instead of add
         self.assertExpectedInline(
             str(ep.run_decompositions({}).graph_module.code).strip(),
             """\
@@ -175,8 +173,8 @@ def forward(self, b_parametrizations_buffer_original0, x):
     _assert_tensor_metadata = torch.ops.aten._assert_tensor_metadata.default(x, None, None, torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata = None
     _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  x = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
-    add_1 = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
-    view_1 = torch.ops.aten.view.default(add_1, [4, 4]);  add_1 = None
+    add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
+    view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
     return (view_1,)""",  # noqa: B950
         )
 
@@ -296,29 +294,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
         res = opt_fn(x)
-        self.assertEqual(res, ref)
-
-    @skipIfHpu
-    def test_dtensor_dynamic_cat(self):
-        # RESET COUNTS
-
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-        # test passing in tuple of DTensors as
-        def fn(x, y):
-            return (
-                torch.cat((x, y), dim=0)
-                .redistribute(device_mesh=x.device_mesh, placements=[Replicate()])
-                .to_local()[0]
-            )
-
-        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
-        y = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
-        torch._dynamo.mark_dynamic(x, 0)
-        ref = fn(x, y)
-
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        res = opt_fn(x, y)
         self.assertEqual(res, ref)
 
     def test_dtensor_attribute_access_on_intermediate(self):

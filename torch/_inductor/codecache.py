@@ -30,6 +30,7 @@ from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
 from functools import lru_cache, partial
 from pathlib import Path
+from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
 from typing import (
@@ -357,6 +358,36 @@ def get_hash(
     if hash_type in {"cubin", "hsaco", "spv"}:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
+
+
+class WritableTempFile:
+    """
+    Avoid "Permission denied error" on Windows:
+      with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
+        # Not writable on Windows:
+        # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
+
+    Example:
+        with WritableTempFile("w", suffix=".gv") as temp_file:
+            tree.to_dotfile(temp_file.name)
+    """
+
+    def __init__(
+        self, mode: str = "w", *, encoding: Any = None, suffix: Any = None
+    ) -> None:
+        self.mode = mode
+        self.encoding = encoding
+        self.suffix = suffix
+
+    def __enter__(self) -> _TemporaryFileWrapper[Any]:
+        self.temp_file = tempfile.NamedTemporaryFile(
+            self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
+        )
+        return self.temp_file
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.temp_file.close()
+        os.unlink(self.temp_file.name)
 
 
 def write(
@@ -1622,36 +1653,6 @@ class CudaKernelParamCache:
         return cls.cache.keys()
 
 
-class WritableTempFile:
-    """
-    Avoid "Permission denied error" on Windows:
-      with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
-        # Not writable on Windows:
-        # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
-
-    Example:
-        with WritableTempFile("w", suffix=".gv") as temp_file:
-            tree.to_dotfile(temp_file.name)
-    """
-
-    def __init__(
-        self, mode: str = "w", *, encoding: Any = None, suffix: Any = None
-    ) -> None:
-        self.mode = mode
-        self.encoding = encoding
-        self.suffix = suffix
-
-    def __enter__(self) -> Any:
-        self.temp_file = tempfile.NamedTemporaryFile(
-            self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
-        )
-        return self.temp_file
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self.temp_file.close()
-        os.unlink(self.temp_file.name)
-
-
 class AotCodeCompiler:
     """
     Compile AOT Inductor generated code.
@@ -2003,7 +2004,11 @@ end
                     f.seek(0)
                     hdr = f.read(1024)
                     # Search for magic number and write the actual data over it
-                    start_idx = hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
+                    start_idx = (
+                        hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
+                        if sys.byteorder == "little"
+                        else hdr.find(b"\x12\x34\x56\x78\x99\xab\xcd\xef")
+                    )
                     assert start_idx != -1
                     f.seek(start_idx)
                     pos = 0
