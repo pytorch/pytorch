@@ -379,8 +379,8 @@ class TestOperatorReorderForPeakMemory(TestCase):
 
             return out, out2, inp2 @ inp2
 
-        inp = torch.rand([256, 256], device="cuda")
-        inp2 = torch.rand([256, 256], device="cuda")
+        inp = torch.rand([256, 256], device=GPU_TYPE)
+        inp2 = torch.rand([256, 256], device=GPU_TYPE)
 
         def replace_foreach(gm):
             nodes = gm.find_nodes(

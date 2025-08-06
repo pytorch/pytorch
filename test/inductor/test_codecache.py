@@ -2801,8 +2801,8 @@ class TestAutotuneCache(TestCase):
         def fn(x, y):
             return (x + y).relu()
 
-        x = torch.randn(100, 100).cuda()
-        y = torch.randn(100, 100).cuda()
+        x = torch.randn(100, 100).to(GPU_TYPE)
+        y = torch.randn(100, 100).to(GPU_TYPE)
 
         with config.patch(
             {

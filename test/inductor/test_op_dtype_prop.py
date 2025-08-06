@@ -260,7 +260,7 @@ class TestCase(InductorTestCase):
         def fn(x, y):
             return x % y, x / y
 
-        x, y = (torch.rand([8], dtype=torch.float16, device="cuda") for _ in range(2))
+        x, y = (torch.rand([8], dtype=torch.float16, device=GPU_TYPE) for _ in range(2))
 
         out, code = run_and_get_code(torch.compile(fn), x, y)
 
@@ -271,7 +271,7 @@ class TestCase(InductorTestCase):
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     def test_constant(self):
         def fn():
-            return (torch.full((2, 3), 3.1416, device="cuda", dtype=torch.float16),)
+            return (torch.full((2, 3), 3.1416, device=GPU_TYPE, dtype=torch.float16),)
 
         out, code = run_and_get_code(torch.compile(fn))
         FileCheck().check("static_assert").check_same(".dtype").run(code[0])
@@ -284,7 +284,7 @@ class TestCase(InductorTestCase):
         def fn(x):
             return torch.any(x)
 
-        x = torch.rand([40], device="cuda").to(torch.bool)
+        x = torch.rand([40], device=GPU_TYPE).to(torch.bool)
         out, code = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(fn(x), out)
 
@@ -293,7 +293,7 @@ class TestCase(InductorTestCase):
     def test_assoc_scan(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 
-        x = torch.randn(10, device="cuda")
+        x = torch.randn(10, device=GPU_TYPE)
         # dtype check correctly
         associative_scan(
             lambda acc, curr: acc + torch.abs(curr), x, dim=-1, combine_mode="pointwise"
