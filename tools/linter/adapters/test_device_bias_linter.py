@@ -51,7 +51,9 @@ def is_main_has_gpu(tree) -> bool:
         elif isinstance(node, ast.UnaryOp):
             return _contains_has_gpu(node.operand)
         elif isinstance(node, ast.Compare):
-            return _contains_has_gpu(node.left) or any(_contains_has_gpu(comp) for comp in node.comparators)
+            return _contains_has_gpu(node.left) or any(
+                _contains_has_gpu(comp) for comp in node.comparators
+            )
         elif isinstance(node, (ast.IfExp, ast.Call)):
             return False
         return False

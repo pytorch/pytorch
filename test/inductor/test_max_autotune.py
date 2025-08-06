@@ -67,6 +67,7 @@ from torch.testing._internal.inductor_utils import (
     get_func_call,
     get_kernel_launch,
     GPU_TYPE,
+    HAS_CPU,
     HAS_CUDA,
     HAS_GPU,
 )
