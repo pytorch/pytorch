@@ -18,19 +18,6 @@ BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 RUN_BUILD_DEPS = any(arg in {"clean", "dist_info"} for arg in sys.argv)
 
 
-def check_env_flag(name, default=""):
-    return os.getenv(name, default).upper() in ["ON", "1", "YES", "TRUE", "Y"]
-
-
-if "CMAKE_BUILD_TYPE" not in os.environ:
-    if check_env_flag("DEBUG"):
-        os.environ["CMAKE_BUILD_TYPE"] = "Debug"
-    elif check_env_flag("REL_WITH_DEB_INFO"):
-        os.environ["CMAKE_BUILD_TYPE"] = "RelWithDebInfo"
-    else:
-        os.environ["CMAKE_BUILD_TYPE"] = "Release"
-
-
 def make_relative_rpath_args(path):
     if IS_DARWIN:
         return ["-Wl,-rpath,@loader_path/" + path]
@@ -67,7 +54,7 @@ def build_deps():
         "--target",
         "install",
         "--config",
-        os.environ["CMAKE_BUILD_TYPE"],
+        "Release",
         "--",
     ]
 
@@ -100,13 +87,15 @@ def main():
     if IS_WINDOWS:
         # /NODEFAULTLIB makes sure we only link to DLL runtime
         # and matches the flags set for protobuf and ONNX
-        extra_link_args: list[str] = ["/NODEFAULTLIB:LIBCMT.LIB"]
+        extra_link_args: list[str] = ["/NODEFAULTLIB:LIBCMT.LIB"] + [
+            *make_relative_rpath_args("lib")
+        ]
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
         # /EHsc is about standard C++ exception handling
         extra_compile_args: list[str] = ["/MD", "/FS", "/EHsc"]
     else:
-        extra_link_args = []
+        extra_link_args = [*make_relative_rpath_args("lib")]
         extra_compile_args = [
             "-Wall",
             "-Wextra",
@@ -120,21 +109,6 @@ def main():
             "-fno-strict-aliasing",
         ]
 
-    if os.environ["CMAKE_BUILD_TYPE"] == "Debug":
-        if IS_WINDOWS:
-            extra_compile_args += ["/Z7"]
-            extra_link_args += ["/DEBUG:FULL"]
-        else:
-            extra_compile_args += ["-O0", "-g"]
-            extra_link_args += ["-O0", "-g"]
-    elif os.environ["CMAKE_BUILD_TYPE"] == "RelWithDebInfo":
-        if IS_WINDOWS:
-            extra_compile_args += ["/Z7"]
-            extra_link_args += ["/DEBUG:FULL"]
-        else:
-            extra_compile_args += ["-g"]
-            extra_link_args += ["-g"]
-
     ext_modules = [
         Extension(
             name="torch_openreg._C",
@@ -143,7 +117,7 @@ def main():
             extra_compile_args=extra_compile_args,
             libraries=["torch_bindings"],
             library_dirs=[os.path.join(BASE_DIR, "torch_openreg/lib")],
-            extra_link_args=[*make_relative_rpath_args("lib")],
+            extra_link_args=extra_link_args,
         )
     ]
 

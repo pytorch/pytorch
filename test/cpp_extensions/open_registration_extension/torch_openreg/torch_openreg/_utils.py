@@ -1,38 +1,10 @@
 import ctypes
 import glob
 import os
-import platform
-import sys
-import sysconfig
-import textwrap
 
 
 def _load_dll_libraries() -> None:
-    py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
-    th_dll_path = os.path.join(os.path.dirname(__file__), "lib")
-    usebase_path = os.path.join(sysconfig.get_config_var("userbase"), "Library", "bin")
-    py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
-
-    # When users create a virtualenv that inherits the base environment,
-    # we will need to add the corresponding library directory into
-    # DLL search directories. Otherwise, it will rely on `PATH` which
-    # is dependent on user settings.
-    if sys.exec_prefix != sys.base_exec_prefix:
-        base_py_dll_path = os.path.join(sys.base_exec_prefix, "Library", "bin")
-    else:
-        base_py_dll_path = ""
-
-    dll_paths = [
-        p
-        for p in (
-            th_dll_path,
-            py_dll_path,
-            base_py_dll_path,
-            usebase_path,
-            py_root_bin_path,
-        )
-        if os.path.exists(p)
-    ]
+    openreg_dll_path = os.path.join(os.path.dirname(__file__), "lib")
 
     kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
     with_load_library_flags = hasattr(kernel32, "AddDllDirectory")
@@ -42,25 +14,9 @@ def _load_dll_libraries() -> None:
     if with_load_library_flags:
         kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
-    for dll_path in dll_paths:
-        os.add_dll_directory(dll_path)
+    os.add_dll_directory(openreg_dll_path)
 
-    try:
-        ctypes.CDLL("vcruntime140.dll")
-        ctypes.CDLL("msvcp140.dll")
-        if platform.machine() != "ARM64":
-            ctypes.CDLL("vcruntime140_1.dll")
-    except OSError:
-        print(
-            textwrap.dedent(
-                """
-                Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
-                It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe
-                """
-            ).strip()
-        )
-
-    dlls = glob.glob(os.path.join(th_dll_path, "*.dll"))
+    dlls = glob.glob(os.path.join(openreg_dll_path, "*.dll"))
     path_patched = False
     for dll in dlls:
         is_loaded = False
@@ -75,7 +31,7 @@ def _load_dll_libraries() -> None:
                 is_loaded = True
         if not is_loaded:
             if not path_patched:
-                os.environ["PATH"] = ";".join(dll_paths + [os.environ["PATH"]])
+                os.environ["PATH"] = ";".join([openreg_dll_path] + [os.environ["PATH"]])
                 path_patched = True
             res = kernel32.LoadLibraryW(dll)
             if res is None:
