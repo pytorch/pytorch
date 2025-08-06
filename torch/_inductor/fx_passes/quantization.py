@@ -72,7 +72,13 @@ def _get_pattern_output_dtype(match: Match):
     output_node = pattern_output_nodes[0]
     assert isinstance(output_node, torch.fx.Node)
     output_dtype = output_node.meta["val"].dtype
-    assert output_dtype in [torch.int8, torch.uint8, torch.float32, torch.bfloat16]
+    assert output_dtype in [
+        torch.int8,
+        torch.uint8,
+        torch.float32,
+        torch.bfloat16,
+        torch.float16,
+    ]
     return output_dtype
 
 
@@ -1924,6 +1930,13 @@ def _register_qlinear_weight_prepack_pass(
         ) = _get_linear_dq_node(
             linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
         )
+        # Argument dtype is used for mark whether AMP is enabled or not for
+        # pattern matching. It does not claim the dtype of pattern output.
+        # The real output dtype of pattern is determined by the dequant node instead.
+        dequant_dtype = dequant_node.kwargs.get("out_dtype", dtype)
+        is_amp = dtype == torch.bfloat16
+        if is_amp:
+            dequant_dtype = torch.bfloat16
 
         if input_dim_exceeds_two and not input_contiguous:
             wgt_expand_node = linear_node.args[weight_index]
@@ -1985,7 +1998,7 @@ def _register_qlinear_weight_prepack_pass(
                 bias,
                 1.0,  # output_scale
                 0,  # output_zero_point
-                dtype,  # output_dtype
+                dequant_dtype,  # output_dtype
                 "none",  # post op name
                 [],  # post op args
                 "",  # post op algorithm
@@ -3309,7 +3322,7 @@ def _register_qlinear_unary_fusion():
         _gelu_fusion_2 as _gelu_fusion_tanh,
     )
 
-    for original_pattern_output_dtype in [torch.float32, torch.bfloat16]:
+    for original_pattern_output_dtype in [torch.float32, torch.bfloat16, torch.float16]:
         is_bf16 = original_pattern_output_dtype == torch.bfloat16
         for x_scale_zp_are_tensors in (False, True):
             qlinear_pattern = get_qlinear_pt2e_pattern(x_scale_zp_are_tensors)
