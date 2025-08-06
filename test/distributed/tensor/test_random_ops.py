@@ -94,13 +94,12 @@ class DistTensorRandomInitTest(DTensorTestBase):
         torch.manual_seed(42)
         rng = torch.Generator(device="cuda").manual_seed(42)
         t1 = torch.distributed.tensor.empty(
-            (2, 3), device_mesh=device_mesh, placements=[Shard(0)]
+            (8, 3), device_mesh=device_mesh, placements=[Shard(0)]
         )
         t2 = torch.distributed.tensor.empty(
-            (2, 3), device_mesh=device_mesh, placements=[Shard(0)]
+            (8, 3), device_mesh=device_mesh, placements=[Shard(0)]
         )
         for i in range(2):
-            print(f"{i=}")
             # run a second time, to make sure that `rng`'s offset-state is advancing on the second usage
             torch.nn.init.uniform_(t1, 0.0, 1.0)
             torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
