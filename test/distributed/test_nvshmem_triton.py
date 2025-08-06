@@ -1125,7 +1125,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
-    @skip_on_a100()
+    @requires_h100()
     @parametrize(
         "dtype",
         [
