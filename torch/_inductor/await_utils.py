@@ -140,10 +140,10 @@ def _patch_loop(loop: AbstractEventLoop) -> AbstractSet[Future]:  # type: ignore
 
     def _safe_task_factory(
         loop: AbstractEventLoop,
-        coro: TCoro,
+        coro: TCoro,  # type: ignore[type-arg]
         *,
         context: Context | None = None,
-    ) -> asyncio.Future:  # type: ignore[valid-type]
+    ) -> asyncio.Future:  # type: ignore[valid-type, type-arg]
         task_factory = task_factories[0]
         if task_factory is None:
             if sys.version_info >= (3, 11):
@@ -151,11 +151,13 @@ def _patch_loop(loop: AbstractEventLoop) -> AbstractSet[Future]:  # type: ignore
             else:
                 task = asyncio.Task(coro, loop=loop)
             # pyre-ignore[16]: `Task` has no attribute `_source_traceback`.
-            if task._source_traceback:
-                del task._source_traceback[-1]  # pragma: no cover
+            if task._source_traceback:  # type: ignore[attr-defined]
+                del task._source_traceback[
+                    -1
+                ]  # pragma: no cover  # type: ignore[attr-defined]
         else:
             if sys.version_info >= (3, 11):
-                task = task_factory(loop, coro, context=context)  # type: ignore[arg-type]
+                task = task_factory(loop, coro, context=context)  # type: ignore[arg-type, call-arg]
             else:
                 task = task_factory(loop, coro)  # type: ignore[arg-type]
         #  `Union[Task[Any], Future[Any]]`.
@@ -165,8 +167,8 @@ def _patch_loop(loop: AbstractEventLoop) -> AbstractSet[Future]:  # type: ignore
     # pyre-ignore[6]
     loop.set_task_factory(_safe_task_factory)  # type: ignore[method-assign]
     # pyre-ignore[8]
-    loop.set_task_factory = _set_task_factory  # type: ignore[method-assign]
+    loop.set_task_factory = _set_task_factory  # type: ignore[method-assign, assignment]
     # pyre-ignore[8]
-    loop.get_task_factory = _get_task_factory  # type: ignore[method-assign]
+    loop.get_task_factory = _get_task_factory  # type: ignore[method-assign, assignment]
 
     return tasks

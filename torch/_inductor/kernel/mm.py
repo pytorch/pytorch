@@ -848,7 +848,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
         best_config_future = gen_best_config(mat1, mat2)
 
     return autotune_select_algorithm(
-        name, choices, kernel_inputs.nodes(), layout, best_config_future=best_config_future
+        name,
+        choices,
+        kernel_inputs.nodes(),
+        layout,
+        best_config_future=best_config_future,
     )
 
 
