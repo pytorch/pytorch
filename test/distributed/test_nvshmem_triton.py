@@ -16,14 +16,21 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import requires_triton
+from torch.testing._internal.inductor_utils import IS_H100, requires_triton
 
 
-# Decorator
+# Decorators
 def requires_nvshmem():
     return skip_but_pass_in_sandcastle_if(
         not symm_mem.is_nvshmem_available(),
         "test_nvshmem requires NVSHMEM, skipping tests",
+    )
+
+
+def requires_h100():
+    return skip_but_pass_in_sandcastle_if(
+        not IS_H100,
+        "NVSHMEM requires H100. Skipping test on non-H100 GPU.",
     )
 
 
@@ -276,6 +283,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_put(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -297,7 +305,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         inp_hdl = symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
 
-        peer = (self.world_size - 1) - rank
+        peer = 1 - rank
         if rank == 0:
             dst_ptr = out_hdl.buffer_ptrs[rank]
             src_ptr = inp_hdl.buffer_ptrs[rank]
@@ -317,6 +325,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_get(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -336,7 +345,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         inp_hdl = symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
         dist.barrier()
-        peer = (self.world_size - 1) - rank
+        peer = 1 - rank
         if rank == 1:
             # Rank 1 gets data from rank 0
             dst_ptr = out_hdl.buffer_ptrs[rank]
@@ -355,6 +364,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_get_ring(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -397,6 +407,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_put_signal_set(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -422,7 +433,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # as the flag buffer for signaling completion.
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
-        peer = (self.world_size - 1) - rank
+        peer = 1 - rank
         NVSHMEM_SIGNAL_SET = 0  # value defined by NVSHMEM for atomic set
         SIGNAL_VAL = 1  # Signal completion value
         NVSHMEM_CMP_EQ = 0  # compare equal for signal wait until
@@ -462,6 +473,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_put_signal_add(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -487,7 +499,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # as the flag buffer for signaling completion.
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
-        peer = (self.world_size - 1) - rank
+        peer = 1 - rank
         NVSHMEM_SIGNAL_ADD = 5  # atomic add operation
         SIGNAL_VAL = 16  # val + NVSHMEM_SIGNAL_ADD
         NVSHMEM_CMP_EQ = 0
@@ -525,6 +537,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_wait_until(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -534,7 +547,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         symm_mem.enable_symm_mem_for_group(group_name)
 
         rank = self.rank
-        peer = (self.world_size - 1) - rank
+        peer = 1 - rank
         NVSHMEM_CMP_EQ = 0  # equal comparison
         FLAG_INITIAL_VALUE = 0
         FLAG_FINAL_VALUE = 42
@@ -583,6 +596,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_signal_wait_until(self) -> None:
         self._init_device()
         # Enable NVSHMEM for Triton
@@ -590,7 +604,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
-        peer = (self.world_size - 1) - rank
+        peer = 1 - rank
 
         # NVSHMEM constants from documentation
         NVSHMEM_CMP_EQ = 0  # equal comparison
@@ -651,6 +665,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_fence(self) -> None:
         """
         Rank 0 performs two put operations into Rank 1's buffers with a fence
@@ -667,7 +682,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         group_name = dist.distributed_c10d._get_default_group().group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
-        peer = (self.world_size - 1) - rank
+        peer = 1 - rank
         # Message configuration
         msg_size_bytes = 8
         dtype = torch.int8
@@ -735,6 +750,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_quiet(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -755,7 +771,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         out_hdl = symm_mem.rendezvous(out, group=group_name)
         # Use signal pad as completion flag
         flag_val = 42
-        peer = (self.world_size - 1) - rank
+        peer = 1 - rank
         NVSHMEM_CMP_EQ = 0
 
         if rank == 0:
@@ -793,6 +809,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_barrier(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -832,6 +849,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_sync(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -870,6 +888,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_alltoall(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -919,6 +938,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_broadcast(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -967,6 +987,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_sum_reduce(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -1013,6 +1034,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
 
     @skipIfRocm
     @requires_triton()
+    @requires_h100()
     def test_triton_minmax_reduce(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
