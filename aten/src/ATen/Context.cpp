@@ -738,6 +738,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
   static auto supported_qengines = []() {
     std::vector<at::QEngine> engines = {};
     // Engines are listed in priority order: later one wins
+    engines.push_back(at::kNoQEngine);
     // By default we prefer FBGEMM if we're running on server side
     // QNNPACK on server side has some issue, so we disable it by default.
 #ifdef USE_PYTORCH_QNNPACK

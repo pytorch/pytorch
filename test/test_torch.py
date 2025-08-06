@@ -9741,7 +9741,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     # FIXME: port to a quantization test suite
     @xfailIfS390X
     def test_qengine(self):
-        qengines = torch.backends.quantized.supported_engines
+        qengines = ['none'] + torch.backends.quantized.supported_engines
         original_qe = torch.backends.quantized.engine
         for qe in qengines:
             torch.backends.quantized.engine = qe
