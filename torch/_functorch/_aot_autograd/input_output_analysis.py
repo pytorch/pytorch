@@ -306,12 +306,11 @@ def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
     tracing_context = torch._guards.TracingContext.try_get()
 
     if tracing_context is not None:
-        assert tracing_context.fake_mode is not None
         shape_env = tracing_context.fake_mode.shape_env
 
         # Check whether we can actually get the dynamo sources from within AOTAutograd.
         if aot_config.aot_autograd_arg_pos_to_source and shape_env is not None:
-            maybe_suppress_guards = shape_env.suppress_guards  # type: ignore[assignment]
+            maybe_suppress_guards = shape_env.suppress_guards
 
     # Check whether there are any symbolic values being used.
     # We do this for 2 reasons:

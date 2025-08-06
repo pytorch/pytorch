@@ -556,9 +556,11 @@ REGISTER_UNARY_OP(abs, half, half);
   REGISTER_UNARY_OP(acos, DTYPE1, DTYPE0);         \
   REGISTER_UNARY_OP(atan, DTYPE1, DTYPE0)
 
+#if __METAL_VERSION__ >= 310
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
 REGISTER_UNARY_OP(neg, bfloat, bfloat);
 REGISTER_UNARY_OP(abs, bfloat, bfloat);
+#endif
 INSTANTIATE_UNARY_KERNELS2(half, half);
 INSTANTIATE_UNARY_KERNELS2(float, float);
 INSTANTIATE_UNARY_KERNELS2(float, bool);
@@ -598,4 +600,6 @@ INSTANTIATE_UNARY_KERNELS_VEC2(float);
 
 REGISTER_UNARY_ALPHA_OP(round_decimals, float, long, float);
 REGISTER_UNARY_ALPHA_OP(round_decimals, half, long, half);
+#if __METAL_VERSION__ >= 310
 REGISTER_UNARY_ALPHA_OP(round_decimals, bfloat, long, bfloat);
+#endif

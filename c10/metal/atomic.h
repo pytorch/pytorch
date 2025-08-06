@@ -85,6 +85,7 @@ struct AtomicType<uchar> {
   }
 };
 
+#if __METAL_VERSION__ >= 310
 template <>
 struct AtomicType<bfloat> {
   using type = ::metal::atomic<uint>;
@@ -92,6 +93,7 @@ struct AtomicType<bfloat> {
     atomic_add_helper<bfloat>(data, offset, value);
   }
 };
+#endif
 
 // Metal supports atomic_store_explicit for bools, but
 // sizeof(::metal::atomic_bool) is 4 Therefore it could not be used to
