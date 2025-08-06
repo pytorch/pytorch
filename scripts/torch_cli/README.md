@@ -22,7 +22,7 @@ this will run the build steps defined in the default config file for vllm projec
 
 with config file:
 ```bash
-python3 -m cli.run --config ".github/ci_configs/vllm.yaml" build external vllm
+python3 -m cli.run --config ".github/ci_configs/CONFIG_TEMPLATE.yaml" build external vllm
 ```
 this will run the build steps defined in the config file for vllm project
 

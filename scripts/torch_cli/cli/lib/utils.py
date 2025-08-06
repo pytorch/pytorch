@@ -1,13 +1,16 @@
 import os
+import re
 from dataclasses import fields
 from textwrap import indent
+
 import yaml
-import re
 
 from scripts.torch_cli.cli.lib.logger import get_logger
 
+
 def get_abs_path(path: str):
     return os.path.abspath(path)
+
 
 def generate_dataclass_help(cls) -> str:
     """Auto-generate help text for dataclass default values."""
@@ -28,8 +31,8 @@ def get_existing_abs_path(path: str) -> str:
     return path
 
 
-def read_yaml_file(file_path: str) -> dict:
-    log = get_logger()
+def read_yaml_file(file_path: str, app=None) -> dict:
+    log = get_logger(app)
     p = get_abs_path(file_path)
 
     if not os.path.exists(p):
@@ -52,9 +55,7 @@ def read_yaml_file(file_path: str) -> dict:
             else:
                 missing_vars.add(match.group(2))
         if missing_vars:
-            log.warn(
-                f"Missing environment variables: {', '.join(missing_vars)}"
-            )
+            log.warning(f"Missing environment variables: {', '.join(missing_vars)}")
 
         # remove $VAR or ${VAR} if it does not exist in the yml file
         cleaned = re.sub(r"\$(\w+)|\$\{[^}]+\}", "", expanded_content)
