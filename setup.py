@@ -595,13 +595,16 @@ def mirror_files_into_torchgen() -> None:
         raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
 
 
+# ATTENTION: THIS IS AI SLOP
 def extract_variant_from_version(version: str) -> str:
     """Extract variant from version string, defaulting to 'cpu'."""
     import re
-    variant_match = re.search(r'\+([^-\s,)]+)', version)
-    return variant_match.group(1) if variant_match else 'cpu'
+
+    variant_match = re.search(r"\+([^-\s,)]+)", version)
+    return variant_match.group(1) if variant_match else "cpu"
 
 
+# ATTENTION: THIS IS AI SLOP
 def get_nightly_git_hash(version: str) -> str:
     """Download a nightly wheel and extract the git hash from its version.py file."""
     # Extract variant from version to construct correct URL
@@ -617,16 +620,23 @@ def get_nightly_git_hash(version: str) -> str:
         # Download the wheel
         report(f"-- Downloading {version} wheel to extract git hash...")
         download_cmd = [
-            "uvx", "pip", "download",
-            "--index-url", nightly_index_url,
-            "--pre", "--no-deps",
-            "--dest", str(temp_path),
-            torch_version_spec
+            "uvx",
+            "pip",
+            "download",
+            "--index-url",
+            nightly_index_url,
+            "--pre",
+            "--no-deps",
+            "--dest",
+            str(temp_path),
+            torch_version_spec,
         ]
 
         result = subprocess.run(download_cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(f"Failed to download {version} wheel for git hash extraction: {result.stderr}")
+            raise RuntimeError(
+                f"Failed to download {version} wheel for git hash extraction: {result.stderr}"
+            )
 
         # Find the downloaded wheel file
         wheel_files = list(temp_path.glob("torch-*.whl"))
@@ -636,10 +646,12 @@ def get_nightly_git_hash(version: str) -> str:
         wheel_file = wheel_files[0]
 
         # Extract the wheel and look for version.py
-        with tempfile.TemporaryDirectory(prefix="pytorch-wheel-extract-") as extract_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="pytorch-wheel-extract-"
+        ) as extract_dir:
             extract_path = Path(extract_dir)
 
-            with zipfile.ZipFile(wheel_file, 'r') as zip_ref:
+            with zipfile.ZipFile(wheel_file, "r") as zip_ref:
                 zip_ref.extractall(extract_path)
 
             # Find torch directory and version.py
@@ -656,68 +668,87 @@ def get_nightly_git_hash(version: str) -> str:
 
             # Read and parse version.py to extract git_version (nightly branch commit)
             from ast import literal_eval
+
             nightly_commit = None
             with version_file.open(encoding="utf-8") as f:
                 for line in f:
                     if line.strip().startswith("git_version"):
                         try:
                             # Parse the git_version assignment, e.g., git_version = "abc123def456"
-                            nightly_commit = literal_eval(line.partition("=")[2].strip())
+                            nightly_commit = literal_eval(
+                                line.partition("=")[2].strip()
+                            )
                             break
                         except (ValueError, SyntaxError):
                             continue
 
             if not nightly_commit:
-                raise RuntimeError(f"Could not parse git_version from {version} wheel's version.py")
+                raise RuntimeError(
+                    f"Could not parse git_version from {version} wheel's version.py"
+                )
 
             # Now fetch the nightly branch and extract the real source commit from the message
             report("-- Fetching nightly branch to extract source commit...")
 
             # Fetch only the nightly branch
-            subprocess.check_call([
-                "git", "fetch", "origin", "nightly"
-            ], cwd=str(CWD))
+            subprocess.check_call(["git", "fetch", "origin", "nightly"], cwd=str(CWD))
 
             # Get the commit message from the nightly commit
-            commit_message = subprocess.check_output([
-                "git", "show", "--no-patch", "--format=%s", nightly_commit
-            ], cwd=str(CWD), text=True).strip()
+            commit_message = subprocess.check_output(
+                ["git", "show", "--no-patch", "--format=%s", nightly_commit],
+                cwd=str(CWD),
+                text=True,
+            ).strip()
 
             # Parse the commit message to extract the real hash
             # Format: "2025-08-06 nightly release (74a754aae98aabc2aca67e5edb41cc684fae9a82)"
             import re
-            hash_match = re.search(r'\(([0-9a-fA-F]{40})\)', commit_message)
+
+            hash_match = re.search(r"\(([0-9a-fA-F]{40})\)", commit_message)
             if hash_match:
                 real_commit = hash_match.group(1)
                 report(f"-- Extracted source commit: {real_commit[:12]}...")
                 return real_commit
             else:
-                raise RuntimeError(f"Could not parse commit hash from nightly commit message: {commit_message}")
+                raise RuntimeError(
+                    f"Could not parse commit hash from nightly commit message: {commit_message}"
+                )
 
 
+# ATTENTION: THIS IS AI SLOP
 def get_latest_nightly_version(variant: str = "cpu") -> str:
     """Get the latest available nightly version using pip to query the PyTorch nightly index."""
     # Get the latest available nightly version for the specified variant
     nightly_index_url = f"https://download.pytorch.org/whl/nightly/{variant}/"
 
     # Run pip index to get available versions
-    output = subprocess.check_output([
-        "uvx", "pip", "index", "versions",
-        "--index-url", nightly_index_url,
-        "--pre", "torch"
-    ], text=True, timeout=30)
+    output = subprocess.check_output(
+        [
+            "uvx",
+            "pip",
+            "index",
+            "versions",
+            "--index-url",
+            nightly_index_url,
+            "--pre",
+            "torch",
+        ],
+        text=True,
+        timeout=30,
+    )
 
     # Parse the first line to get the latest version
     # Format: "torch (2.9.0.dev20250806)" or "torch (2.9.0.dev20250806+cpu)"
-    first_line = output.strip().split('\n')[0]
-    if '(' in first_line and ')' in first_line:
+    first_line = output.strip().split("\n")[0]
+    if "(" in first_line and ")" in first_line:
         # Extract version from parentheses exactly as reported
-        version = first_line.split('(')[1].split(')')[0]
+        version = first_line.split("(")[1].split(")")[0]
         return version
 
     raise RuntimeError(f"Could not parse version from pip index output: {first_line}")
 
 
+# ATTENTION: THIS IS AI SLOP
 def download_and_extract_nightly_wheel(version: str) -> None:
     """Download and extract nightly PyTorch wheel for USE_NIGHTLY=VERSION builds."""
 
@@ -755,7 +786,9 @@ def download_and_extract_nightly_wheel(version: str) -> None:
                 report(f"-- Detecting latest {variant} nightly version...")
                 latest_version = get_latest_nightly_version(variant)
                 error_msg = f"Failed to download nightly wheel for version {version}: {result.stderr.strip()}"
-                error_msg += f"\n\nLatest available {variant} nightly version: {latest_version}"
+                error_msg += (
+                    f"\n\nLatest available {variant} nightly version: {latest_version}"
+                )
                 error_msg += f'\nTry: USE_NIGHTLY="{latest_version}"'
 
                 # Also get the git hash for the latest version
@@ -771,7 +804,8 @@ def download_and_extract_nightly_wheel(version: str) -> None:
                     error_msg += f'\nTry: USE_NIGHTLY="{latest_version}"'
                 except Exception:
                     error_msg = f"Failed to download nightly wheel for version {version}: {result.stderr.strip()}"
-                    error_msg += "\n\nCould not determine latest nightly version. Check https://download.pytorch.org/whl/nightly/ for available versions."
+                    error_msg += "\n\nCould not determine latest nightly version. "
+                    error_msg += "Check https://download.pytorch.org/whl/nightly/ for available versions."
 
             raise RuntimeError(error_msg)
 
@@ -813,7 +847,7 @@ def download_and_extract_nightly_wheel(version: str) -> None:
 
             # Copy the essential files from the wheel to our local directory
             # Based on the file listing logic from tools/nightly.py
-            files_to_copy = []
+            files_to_copy: list[Path] = []
 
             # Get platform-specific binary files
             if IS_LINUX:
@@ -889,9 +923,12 @@ def download_and_extract_nightly_wheel(version: str) -> None:
 def build_deps() -> None:
     report(f"-- Building version {TORCH_VERSION}")
 
+    # ATTENTION: THIS IS AI SLOP
     # Check for USE_NIGHTLY=VERSION to bypass normal build and download nightly wheel
     nightly_version = os.getenv("USE_NIGHTLY")
     if nightly_version is not None:
+        import re
+
         if nightly_version == "":
             # Empty string should show error with latest CPU version suggestion
             variant = "cpu"  # Default to CPU for empty string
@@ -899,18 +936,27 @@ def build_deps() -> None:
             latest_version = get_latest_nightly_version(variant)
             # Also get the git hash to tell user which commit to checkout
             git_hash = get_nightly_git_hash(latest_version)
-            error_msg = f'USE_NIGHTLY cannot be empty. Latest available version: {latest_version}\nTry: USE_NIGHTLY="{latest_version}"'
+            error_msg = f"USE_NIGHTLY cannot be empty. Latest available version: {latest_version}\n"
+            error_msg += 'Try: USE_NIGHTLY="{latest_version}"'
             error_msg += f"\n\nIMPORTANT: You must checkout the matching source commit for this binary:\ngit checkout {git_hash}"
             raise RuntimeError(error_msg)
-        elif nightly_version in ["cpu", "cu121", "cu118", "cu124", "rocm5.7", "rocm6.0"]:
+        elif (
+            nightly_version == "cpu"
+            or re.match(r"^cu\d+$", nightly_version)
+            or re.match(r"^rocm\d+\.\d+$", nightly_version)
+        ):
             # Variant-only specification, get latest version for that variant
             latest_version = get_latest_nightly_version(nightly_version)
-            report(f"-- USE_NIGHTLY={nightly_version} detected, using latest {nightly_version} nightly: {latest_version}")
+            report(
+                f"-- USE_NIGHTLY={nightly_version} detected, using latest {nightly_version} nightly: {latest_version}"
+            )
             download_and_extract_nightly_wheel(latest_version)
             return
         else:
             # Full version specification
-            report(f"-- USE_NIGHTLY={nightly_version} detected, downloading nightly wheel")
+            report(
+                f"-- USE_NIGHTLY={nightly_version} detected, downloading nightly wheel"
+            )
             download_and_extract_nightly_wheel(nightly_version)
             return
 
