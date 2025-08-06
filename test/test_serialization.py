@@ -1362,7 +1362,7 @@ class TestSerialization(TestCase, SerializationMixin):
         import zoneinfo
 
         data = {
-            "a": torch.tensor([1,2,3]),
+            "a": torch.tensor([1, 2, 3]),
             "b": datetime.datetime(2025, 1, 1, 12, 0, tzinfo=zoneinfo.ZoneInfo(key="UTC")),
         }
         with tempfile.NamedTemporaryFile() as f:
