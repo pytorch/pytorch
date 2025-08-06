@@ -27,6 +27,7 @@ set XPU_BUNDLE_ROOT=%ProgramFiles(x86)%\Intel\oneAPI
 call "%XPU_BUNDLE_ROOT%\compiler\latest\env\vars.bat"
 call "%XPU_BUNDLE_ROOT%\ocloc\latest\env\vars.bat"
 set USE_ONEMKL=1
+set TORCH_XPU_ARCH_LIST=mtl,mtl-h,bmg,dg2,arl-h,lnl-m,ptl-h,ptl-u
 IF ERRORLEVEL 1 goto :eof
 
 if exist "%NIGHTLIES_PYTORCH_ROOT%" cd %NIGHTLIES_PYTORCH_ROOT%\..
