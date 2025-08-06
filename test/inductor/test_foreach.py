@@ -1102,14 +1102,23 @@ class ForeachTests(TestCase):
         for ref, act in zip(ref_inp, inp):
             torch.allclose(ref.grad, act.grad)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
-
     def test_foreach_map_assert_fused_passes(self):
         def fn(a, b):
             return a + b
-        x = torch.randn(10)
-        y = torch.randn(10)
-        torch.compile(foreach_map, fullgraph=True)(fn, (x,), (y,), assert_fused=True)
+
+        def test_foreach_map(*args):
+            return foreach_map(fn, *args)
+
+        inps = (
+            torch.randn(10),
+            torch.randn(10),
+        )
+
+        out_eager = test_foreach_map(*inps)
+        out_compiled = torch.compile(foreach_map, fullgraph=True)(fn, *inps, assert_fused=True)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     def test_foreach_map_assert_fused_raises(self):
         from torch._dynamo.exc import BackendCompilerFailed
@@ -1126,12 +1135,20 @@ class ForeachTests(TestCase):
         def fn(a, b):
             tmp = a + b
             return tmp * 2.0
+        
+        def test_foreach_map(*args):
+            return foreach_map(fn, *args)
 
-        x = torch.randn(10)
-        y = torch.randn(10)
+        inps = (
+            torch.randn(10),
+            torch.randn(10),
+        )
 
-        compiled = torch.compile(foreach_map, fullgraph=True)
-        compiled(fn, (x,), (y,), assert_fused=True)
+        out_eager = test_foreach_map(*inps)
+        out_compiled = torch.compile(foreach_map, fullgraph=True)(fn, *inps, assert_fused=True)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
