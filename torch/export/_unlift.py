@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+import functools
 import warnings
 from collections.abc import Sequence
 from itertools import chain
@@ -85,6 +86,19 @@ def _check_input_constraints_pre_hook(self, args, kwargs):
         flat_args_with_path,
         self.range_constraints,
     )
+
+
+def _check_autocast_state(state):
+    if not state.check(check_cache_enabled=False):
+        raise RuntimeError(
+            "Current autocast state does not match export-time state; this may lead to program incorrectness: " + \
+            state.reason(check_cache_enabled=False),
+        )
+
+
+@torch._dynamo.disable
+def _check_autocast_state_pre_hook(self, args, kwargs, state):
+    return _check_autocast_state(state)
 
 
 def _unlift_inputs_as_getattr(
@@ -338,6 +352,11 @@ def _create_stateful_graph_module(
     stateful_gm.register_forward_pre_hook(
         _check_input_constraints_pre_hook, with_kwargs=True
     )
+    if ep._autocast_state is not None:
+        stateful_gm.register_forward_pre_hook(
+            functools.partial(_check_autocast_state_pre_hook, state=ep._autocast_state),
+            with_kwargs=True,
+        )
 
     stateful_gm.register_forward_hook(
         lambda *args, **kwargs: _exit_enable_graph_inputs_of_type_nn_module(

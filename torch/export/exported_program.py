@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Callable, final, NamedTuple, Optional, TYPE_CHECKING, Union
 
+from torch._C._dynamo.guards import AutocastState
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
@@ -343,7 +344,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_placeholder_names,
         _verify_stack_trace,
     )
+    from torch.export._unlift import _check_autocast_state
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    _check_autocast_state(ep._autocast_state)
 
     def _is_joint_ir_decomp(ep, joint_loss_index):
         return (
@@ -1003,6 +1007,7 @@ def _decompose_exported_program(
         module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
         constants=ep.constants,
+        autocast_state=AutocastState(),
     )
     return exported_program
 
@@ -1047,6 +1052,9 @@ class ExportedProgram:
     _verifiers: list[type[Verifier]]
     """List of verifier classes used to validate the exported program."""
 
+    _autocast_state: AutocastState
+    """Ambient autocast state at time of exported program creation."""
+
     def __init__(
         self,
         root: Union[torch.nn.Module, dict[str, Any]],
@@ -1059,6 +1067,7 @@ class ExportedProgram:
         constants: Optional[dict[str, _ConstantAttributeType]] = None,
         *,
         verifiers: Optional[list[type[Verifier]]] = None,
+        autocast_state: Optional[AutocastState] = None,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -1077,6 +1086,7 @@ class ExportedProgram:
         self._example_inputs = example_inputs
 
         self._constants = constants or {}
+        self._autocast_state = autocast_state
 
         verifiers = verifiers or [Verifier]
         assert all(issubclass(v, Verifier) for v in verifiers)
@@ -1605,6 +1615,7 @@ class ExportedProgram:
         state_dict=None,
         constants=None,
         verifiers=None,
+        autocast_state=None,
     ) -> "ExportedProgram":
         return ExportedProgram(
             root=graph_module,
@@ -1616,6 +1627,7 @@ class ExportedProgram:
             example_inputs=self.example_inputs,
             constants=constants if constants is not None else self.constants,
             verifiers=verifiers if verifiers is not None else self.verifiers,
+            autocast_state=autocast_state if autocast_state is not None else self._autocast_state,
         )
 
 
