@@ -941,12 +941,12 @@ def build_deps() -> None:
             latest_version = get_latest_nightly_version(variant)
             # Also get the git hash to tell user which commit to checkout
             git_hash = get_nightly_git_hash(latest_version)
-            
+
             if nightly_version == "":
                 error_msg = f"USE_NIGHTLY cannot be empty. Latest available version: {latest_version}\n"
             else:
                 error_msg = f"USE_NIGHTLY requires a specific version, not just a variant. Latest available {nightly_version} version: {latest_version}\n"
-            
+
             error_msg += f'Try: USE_NIGHTLY="{latest_version}"'
             error_msg += f"\n\nIMPORTANT: You must checkout the matching source commit for this binary:\ngit checkout {git_hash}"
             raise RuntimeError(error_msg)
