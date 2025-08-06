@@ -13654,6 +13654,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
 
+    def test_inductor_triton_bucketize_respects_masking(self):
+        def fn(inp, repeats, output_size):
+            # return torch.repeat_interleave(inp, repeats, dim=0, output_size=output_size)
+            idx = torch.searchsorted(
+                repeats.cumsum(0),
+                torch.arange(0, output_size, device=repeats.device),
+                right=True,
+            )
+            return torch.index_select(inp, 0, idx)
+
+        inp = torch.arange(0, 4, device="cuda")  # .reshape(-1, 1)
+        repeats = torch.tensor([1, 2, 3, 4], device="cuda")
+        output_size = repeats.sum().item()
+        args = (inp, repeats, output_size)
+        self.assertEqual(fn(*args), torch.compile(fn)(*args))
+
+    # end of class CommonTemplate - add new tests here
+
 
 @dataclasses.dataclass
 class TestFailure:
