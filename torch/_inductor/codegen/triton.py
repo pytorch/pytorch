@@ -2720,6 +2720,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             dtype=indexing_dtype,  # type: ignore[attr-defined]
         )
 
+        result.mask_vars = values.mask_vars  # type: ignore[attr-defined]
+
         return result
 
     def reduction_resize(self, value) -> str:
