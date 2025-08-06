@@ -1,1 +1,11 @@
 - This is the only AGENTS.md, there are no recursive AGENTS.md
+- Do NOT run setup.py, you do not have a working build environment
+- Do NOT run pre-commit, it is not setup
+- Do NOT add tests or try to run tests unless the user has given specific
+  instructions on how to do so.
+- Do NOT attempt to install dependencies, you do not have Internet access
+- When you are ready to make a PR, do exactly these steps:
+  - git stash -u
+  - git reset --hard $(cat /tmp/orig_work.txt) # NB: reset to the LOCAL branch, do NOT fetch
+  - git stash pop
+  - Resolve conflicts if necessary
