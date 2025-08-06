@@ -623,7 +623,7 @@ class TritonTemplateKernel(TritonKernel):
             arg_defs, *_ = self.args.python_argdefs()
             return f"{', '.join(x.full_name() for x in arg_defs)}"
 
-        return self._register_hook("<ARGDEFS>", hook)
+        return self._register_hook("<ARGDEFS>", hook, allow_overwriting=True)
 
     def gen_defines(self):
         return self.defines
@@ -1078,14 +1078,29 @@ class TritonTemplateKernel(TritonKernel):
 
         return self._register_hook("<STORE_OUTPUT>", hook)
 
-    def _register_hook(self, hook_name: str, hook_fn: PartialRender.HookFn) -> str:
+    def _register_hook(
+        self,
+        hook_name: str,
+        hook_fn: PartialRender.HookFn,
+        *,
+        allow_overwriting: bool = False,
+    ) -> str:
         """
         Register a hook function with a name.
 
         ``hook_name`` should match the string that will be replaced via
         ``hook_fn``, and should not already be in use for a hook.
+
+        If ``allow_overwriting`` is ``False``, will assert that there isn't
+        currently a registered hook of the same name before registering the new
+        one.
         """
-        assert hook_name not in self.render_hooks
+
+        if not allow_overwriting:
+            assert hook_name not in self.render_hooks, (
+                f"Tried to register the hook {hook_name} multiple times. If "
+                "desired, pass allow_overwriting=True to _register_hook"
+            )
         self.render_hooks[hook_name] = hook_fn
         return hook_name
 
