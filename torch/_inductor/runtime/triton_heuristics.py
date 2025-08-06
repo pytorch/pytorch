@@ -2439,7 +2439,7 @@ def pointwise(
 
 
 def _reduction_configs(
-    *, size_hints: dict[str, int], inductor_meta: dict[str, Any]
+    *, size_hints: dict[str, int], inductor_meta: dict[str, Any], is_dynamic=False
 ) -> list[Config]:
     reduction_hint = inductor_meta.get("reduction_hint", None)
 
@@ -2491,13 +2491,40 @@ def _reduction_configs(
                 num_stages=num_stages,
                 register_intensive=register_intensive,
             )
+    
+    def make_outer_config():
+        min_x_block, max_x_block = 8, 256
+        load_factor = inductor_meta.get("num_load", 0)
+        x = size_hints["x"]
+        imbalance_threshold = 256
+
+        if is_dynamic:
+            # Dynamic shapes introduce a lot register pressure for indexing
+            outer_r_block = 1 if load_factor >= 3 else min(next_power_of_2(max(rnumel, 128) // 128), 16)
+            max_x_block = 128
+            x_block = 64
+        else:
+            # Try to do reduction in 1 pass
+            outer_r_block = min(next_power_of_2(rnumel), 128)
+            # xblock * rblock shouldn't exceed 1024, maximize x_block for coalesced loads
+            # TODO: x_block might want to be set to the lower power of 2
+            x_block = min(1024 // outer_r_block, max_x_block)
+
+        x_block = max(min_x_block, x_block)
+
+        # Resolve imbalance if the grid dim of x is much larger than r
+        while x // x_block > (rnumel // outer_r_block) * imbalance_threshold and outer_r_block > x_block and outer_r_block > 1 and x_block < max_x_block:
+            x_block *= 2
+            outer_r_block //= 2
+
+        return make_config(x_block, outer_r_block, register_intensive=register_intensive)
 
     contiguous_config = make_config(
         1,
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
-    outer_config = make_config(64, 8, register_intensive=register_intensive)
+    outer_config = make_outer_config()
     tiny_config = make_config(
         2 * (256 // rnumel) if rnumel <= 256 else 1,
         min(rnumel, MAX_R0_BLOCK),
@@ -2622,7 +2649,9 @@ def reduction(
 
     assert triton_meta is not None
 
-    configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
+    is_dynamic = any(["ks" in k for k in triton_meta["signature"].keys()])
+    configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta, is_dynamic=is_dynamic)
+
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     return cached_autotune(
         size_hints,
