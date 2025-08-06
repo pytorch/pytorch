@@ -11103,7 +11103,6 @@ def add_neg_dim_tests():
 
         assert not hasattr(TestTorch, test_name), "Duplicated test name: " + test_name
         setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
-
 # TODO: these empty classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
 class TestViewOps(TestCase):
