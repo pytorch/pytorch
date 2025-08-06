@@ -102,10 +102,12 @@ def greedy_bucket_collective_by_mb(
     if not found_candidates:
         return []
 
-    nodes_groups: dict[Any, list[torch.fx.Node]] = defaultdict(list)
     nodes_successors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = defaultdict(
         OrderedSet
     )
+    nodes_groups: list[list[torch.fx.Node]] = []
+    cur_group: list[torch.fx.Node] = []
+    cur_group_key = None
 
     for node in g.nodes:
         for n, successors in nodes_successors.items():
@@ -115,10 +117,19 @@ def greedy_bucket_collective_by_mb(
             if (filter_wait_node is None) or filter_wait_node(node):
                 coll_node = node.args[0]
                 group_key = node_group_key(coll_node)
-                nodes_groups[group_key].append(coll_node)
+                if group_key == cur_group_key:
+                    cur_group.append(coll_node)
+                else:
+                    if len(cur_group) > 1:
+                        nodes_groups.append(cur_group)
+                    cur_group = [coll_node]
+                    cur_group_key = group_key
+
+    if len(cur_group) > 1:
+        nodes_groups.append(cur_group)
 
     buckets: list[list[torch.fx.Node]] = []
-    for nodes in nodes_groups.values():
+    for nodes in nodes_groups:
         cur_bucket: list[torch.fx.Node] = []
         cur_bucket_successors: OrderedSet[torch.fx.Node] = OrderedSet()
         cur_bucket_size_bytes: int = 0
