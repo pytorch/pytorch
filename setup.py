@@ -945,7 +945,10 @@ def build_deps() -> None:
             if nightly_version == "":
                 error_msg = f"USE_NIGHTLY cannot be empty. Latest available version: {latest_version}\n"
             else:
-                error_msg = f"USE_NIGHTLY requires a specific version, not just a variant. Latest available {nightly_version} version: {latest_version}\n"
+                error_msg = (
+                    "USE_NIGHTLY requires a specific version, not just a variant. "
+                    "Latest available {nightly_version} version: {latest_version}\n"
+                )
 
             error_msg += f'Try: USE_NIGHTLY="{latest_version}"'
             error_msg += f"\n\nIMPORTANT: You must checkout the matching source commit for this binary:\ngit checkout {git_hash}"
