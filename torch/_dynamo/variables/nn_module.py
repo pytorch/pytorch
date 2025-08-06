@@ -1047,7 +1047,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 hasattr(method, "__code__")
                 and id(method.__code__) in self._nn_module_method_ids()
             ):
-                breakpoint()
                 unimplemented_v2(
                     gb_type="UnspecializedNNModuleVariable missing method",
                     context=f"call_method: {self} {name} {args} {kwargs}",
