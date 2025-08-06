@@ -109,6 +109,10 @@ def graph_desc(fn):
 
 
 class TestAutograd(TestCase):
+    def tearDown(self):
+        torch.autograd._force_original_view_tracking(False)
+        super(TestCase, self).tearDown()
+
     def test_copy_slices_graph_task_updates(self):
         def f1(x, y):
             out = x.clone().view(-1)
@@ -610,8 +614,6 @@ class TestAutograd(TestCase):
 
         with disable_gc():
             unpack_hook_ref = scope()
-            if torch._dynamo.is_compiling():
-                torch._dynamo.reset()
             self.assertIsNone(unpack_hook_ref())
 
     def test_will_engine_execute_node(self):

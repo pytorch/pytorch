@@ -428,7 +428,7 @@ class _StridedShard(Shard):
     TODO: we should remove _StridedShard placement once we can unify it with Shard
     """
 
-    split_factor: int
+    split_factor: int = 1
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, _StridedShard):
