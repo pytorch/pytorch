@@ -260,6 +260,7 @@ class TestDynamoTimed(TestCase):
     @mock.patch("time.time", return_value=0.001)
     @mock.patch("time.time_ns", return_value=100000)
     @dynamo_config.patch(specialize_float=False)
+    @mock.patch.dict(os.environ, {"EXPECTTEST_ACCEPT": "1"})
     def test_dynamo_timed(self, mock_time, mock_time_ns):
         """
         Run a compilation that includes a forward and a backward and validate
