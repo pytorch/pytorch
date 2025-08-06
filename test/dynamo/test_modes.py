@@ -687,7 +687,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             flex_attention as flex_attention_eager,
         )
 
-        with torch.device(device_type):
+        with torch.device("cuda"):
             flex_attention = torch.compile(flex_attention_eager, dynamic=False)
 
             with self.assertRaisesRegex(
@@ -711,7 +711,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             flex_attention as flex_attention_eager,
         )
 
-        with torch.device(device_type):
+        with torch.device("cuda"):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
                 "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
