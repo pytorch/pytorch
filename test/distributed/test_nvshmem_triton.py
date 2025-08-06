@@ -225,13 +225,12 @@ def nvshmem_broadcast_kernel(
 @triton.jit
 def nvshmem_reduce_kernel(
     team_handle,
-    dest_ptr,
-    src_ptr,
+    dest_tensor,
+    source_tensor,
     nreduce,
     operation: tl.constexpr,
-    dtype_id: tl.constexpr,
 ):
-    nvshmem.reduce(team_handle, dest_ptr, src_ptr, nreduce, operation, dtype_id)
+    nvshmem.reduce(team_handle, dest_tensor, source_tensor, nreduce, operation)
 
 
 @instantiate_parametrized_tests
@@ -830,7 +829,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             launch_cooperative_grid=True,
             num_ctas=1,
         )
-        
+
         # Verify results
         # Each PE should have written rank + 100 to its local_data
         expected_local = rank + 100
@@ -982,8 +981,8 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
             src[i] = (rank + 1) * (i + 1)  # Rank 0: [1,2,3], Rank 1: [2,4,6], etc.
         # Destination buffer
         dst = symm_mem.empty(nreduce, dtype=dtype, device=self.device).fill_(-1)
-        src_hdl = symm_mem.rendezvous(src, group=group_name)
-        dst_hdl = symm_mem.rendezvous(dst, group=group_name)
+        symm_mem.rendezvous(src, group=group_name)
+        symm_mem.rendezvous(dst, group=group_name)
         # Calculate expected results
         expected = []
         for i in range(nreduce):
@@ -998,11 +997,10 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         team_handle = 0  # NVSHMEM_TEAM_WORLD
         nvshmem_reduce_kernel[(1,)](
             team_handle,
-            dst_hdl.buffer_ptrs[rank],
-            src_hdl.buffer_ptrs[rank],
+            dst,
+            src,
             nreduce,
             operation="sum",
-            dtype_id=src.dtype,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
@@ -1056,10 +1054,10 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # Destination buffers
         dst_min = symm_mem.empty(nreduce, dtype=dtype, device=self.device).fill_(-1)
         dst_max = symm_mem.empty(nreduce, dtype=dtype, device=self.device).fill_(-1)
-        src_min_hdl = symm_mem.rendezvous(src_min, group=group_name)
-        src_max_hdl = symm_mem.rendezvous(src_max, group=group_name)
-        dst_min_hdl = symm_mem.rendezvous(dst_min, group=group_name)
-        dst_max_hdl = symm_mem.rendezvous(dst_max, group=group_name)
+        symm_mem.rendezvous(src_min, group=group_name)
+        symm_mem.rendezvous(src_max, group=group_name)
+        symm_mem.rendezvous(dst_min, group=group_name)
+        symm_mem.rendezvous(dst_max, group=group_name)
         # Calculate expected results
         all_values = []
         for i in range(nreduce):
@@ -1077,22 +1075,20 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         team_handle = 0
         nvshmem_reduce_kernel[(1,)](
             team_handle,
-            dst_min_hdl.buffer_ptrs[rank],
-            src_min_hdl.buffer_ptrs[rank],
+            dst_min,
+            src_min,
             nreduce,
             operation="min",
-            dtype_id=src_min.dtype,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
         # Execute MAX reduction
         nvshmem_reduce_kernel[(1,)](
             team_handle,
-            dst_max_hdl.buffer_ptrs[rank],
-            src_max_hdl.buffer_ptrs[rank],
+            dst_max,
+            src_max,
             nreduce,
             operation="max",
-            dtype_id=src_max.dtype,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
@@ -1146,8 +1142,8 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 src[i] = 1 if (rank // 2) % 2 == 0 else 2
         # Destination buffer
         dst = symm_mem.empty(nreduce, dtype=dtype, device=self.device).fill_(-1)
-        src_hdl = symm_mem.rendezvous(src, group=group_name)
-        dst_hdl = symm_mem.rendezvous(dst, group=group_name)
+        symm_mem.rendezvous(src, group=group_name)
+        symm_mem.rendezvous(dst, group=group_name)
         # Calculate expected results
         expected = []
         for i in range(nreduce):
@@ -1172,11 +1168,10 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         team_handle = 0  # NVSHMEM_TEAM_WORLD
         nvshmem_reduce_kernel[(1,)](
             team_handle,
-            dst_hdl.buffer_ptrs[rank],
-            src_hdl.buffer_ptrs[rank],
+            dst,
+            src,
             nreduce,
             operation="prod",
-            dtype_id=src.dtype,
             extern_libs=nvshmem_lib,
             launch_cooperative_grid=True,
         )
@@ -1188,7 +1183,6 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         torch.testing.assert_close(
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
         )
-
 
 if __name__ == "__main__":
     run_tests()

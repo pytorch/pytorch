@@ -837,10 +837,48 @@ if has_triton():
         )
 
     # Reduction Operation
-    @core.extern  # type: ignore[misc]
-    def reduce(team, dest, source, nreduce, operation: str, dtype_id, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit
+    def reduce(team, dest, source, nreduce, operation: tl.constexpr):
         """
-        Performs a collective reduction operation on symmetric data across a team of PEs.
+        Performs a collective reduction on tensors across a team of PEs.
+
+        This high-level function provides a tensor-aware interface for NVSHMEM
+        reduction operations. It automatically infers the data type from the
+        input tensors and calls the appropriate underlying NVSHMEM function.
+
+        Args:
+            team: The team handle for the collective (0 for NVSHMEM_TEAM_WORLD).
+            dest: Destination tensor for the reduction results.
+            source: Source tensor containing data to be reduced. Must be the same type as dest.
+            nreduce: The number of elements in the source tensor to reduce.
+            operation: The reduction operation to perform ("sum", "max", "min", "prod").
+
+        Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - This is a collective operation that must be called by all PEs in the team.
+            - Requires a cooperative grid launch.
+
+        Example:
+            ```
+            # Perform a sum reduction on two tensors
+            nvshmem.reduce(0, dest_tensor, src_tensor, 100, "sum")
+            ```
+        """
+        tl.static_assert(dest.type == source.type)
+        dtype_id = dest.type.element_ty
+        return reduce_extern_wrapper(
+            team,
+            dest.to(tl.int64),
+            source.to(tl.int64),
+            nreduce,
+            operation,
+            dtype_id,
+        )
+
+    @core.extern  # type: ignore[misc]
+    def reduce_extern_wrapper(team, dest, source, nreduce, operation: str, dtype_id, _semantic=None):  # type: ignore[no-untyped-def]
+        """
+        Low-level extern wrapper for NVSHMEM reduction operations.
 
         This function provides a generic interface to NVSHMEM reduction operations,
         automatically selecting the appropriate NVSHMEM function based on the data type
@@ -871,35 +909,23 @@ if has_triton():
             "uint16": "uint16",
             "uint32": "uint32",
             "uint64": "uint64",
-            "float16": "half",
-            "bfloat16": "bfloat16",
-            "float32": "float",
-            "float64": "double",
+            "fp16": "half",
+            "bf16": "bfloat16",
+            "fp32": "float",
+            "fp64": "double",
         }
+
+        # Triton dtype names are standardized as fp16, bf16, fp32, etc.
+        dtype_name = str(dtype_id)
+        dtype_name = dtype_name.replace("tl.", "").replace("torch.", "")
+
+        if dtype_name not in DTYPE_TO_NVSHMEM_MAP:
+            raise TypeError(
+                f"Unsupported reduction dtype: {dtype_name}. Supported dtypes: {list(DTYPE_TO_NVSHMEM_MAP.keys())}"
+            )
 
         # Extract operation name from constexpr if needed
         op_name = operation.value if hasattr(operation, "value") else operation
-
-        # Normalize dtype_id to a canonical string name
-        # Handle different input formats: tl.dtype, torch.dtype, str, constexpr[dtype]
-        if hasattr(dtype_id, "name"):
-            # Triton language dtype (e.g., tl.float32)
-            dtype_name = dtype_id.name
-        elif isinstance(dtype_id, str):
-            # Already a plain string name
-            dtype_name = dtype_id
-        elif hasattr(dtype_id, "value"):
-            # Constexpr wrapper around a dtype
-            inner_value = dtype_id.value
-            if hasattr(inner_value, "name"):
-                # Triton dtype inside constexpr
-                dtype_name = inner_value.name
-            else:
-                # PyTorch dtype inside constexpr
-                dtype_name = str(inner_value).replace("torch.", "")
-        else:
-            # PyTorch dtype (e.g., torch.float32)
-            dtype_name = str(dtype_id).replace("torch.", "")
 
         # Validate operation is supported
         supported_ops = {"sum", "max", "min", "prod"}
