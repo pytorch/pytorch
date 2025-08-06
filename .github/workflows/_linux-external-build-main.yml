@@ -226,7 +226,7 @@ jobs:
             cd scripts/torch_cli
             python3 -m pip install -e .
           )
-          python3 -m cli.run --config ".github/ci_configs/vllm.yaml" build external "$BUILD_TARGET"
+          python3 -m cli.run --config ".github/ci_configs/vllm_ci_config.yaml" build external "$BUILD_TARGET"
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 
