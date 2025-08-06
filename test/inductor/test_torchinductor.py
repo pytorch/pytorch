@@ -14538,11 +14538,11 @@ if RUN_GPU:
             else:
                 self.assertTrue("Graph fragment" in code)
                 self.assertTrue(
-                    '%sin : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.sin.default]'
+                    f'%sin : Tensor "f32[4, 4][4, 1]{GPU_TYPE}:0"[num_users=1] = call_function[target=torch.ops.aten.sin.default]'
                     in code
                 )
                 self.assertTrue(
-                    '%relu : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.relu.default]'
+                    f'%relu : Tensor "f32[4, 4][4, 1]{GPU_TYPE}:0"[num_users=1] = call_function[target=torch.ops.aten.relu.default]'
                     in code
                 )
 
