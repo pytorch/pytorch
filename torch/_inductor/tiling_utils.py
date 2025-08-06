@@ -221,13 +221,17 @@ def get_pw_red_splits(
     red_numel: sympy.Expr,
     none_if_not_divisible: bool = False,
 ) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]:
-    if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
+    n_pointwise_numel = V.graph.sizevars.simplify(sympy_product(n._body.sizes[0]))
+    if n.is_reduction() or n_pointwise_numel == pointwise_numel:
         return (
             (n._body.iter_vars, n._body.sizes[0]),
             (n._body.reduce_vars, n._body.sizes[1]),
         )  # type: ignore[return-value]
 
-    assert sympy_product(n._body.sizes[0]) == pointwise_numel * red_numel  # type: ignore[operator]
+    assert V.graph.sizevars.atomically_apply_size_hint(
+        n_pointwise_numel - (pointwise_numel * red_numel), fallback=config.unbacked_symint_fallback
+    ) == 0
+
     i = len(n._body.sizes[0]) - 1
     prod = 1
     while i >= 0:
@@ -317,8 +321,9 @@ class NodeSplitGetter:
         Get a compatible pointwise, reduction split of the node
         """
 
-        # if len(self.all_node_sizes) == 1:
-        #     return next(iter(self.all_node_sizes))
+        if len(self.all_node_sizes) == 1:
+            return next(iter(self.all_node_sizes))
+        # TODO - return default pointwise, reduction
 
         max_pw_split = max(self.pw_split_options.keys())
         for pw_split_len in range(max_pw_split, 0, -1):

@@ -2179,12 +2179,15 @@ class SIMDScheduling(BaseScheduling):
         pw_ranges = [ranges[v] for v in all_iter_vars]
         red_ranges = [ranges[v] for v in all_red_vars]
 
+        def check_eq(a, b):
+            return V.graph.sizevars.atomically_apply_size_hint(a - b, fallback=32) == 0
+
         torch._check(
-            sympy_product(pw_ranges) == pointwise_numel,
+            check_eq(sympy_product(pw_ranges), pointwise_numel),
             lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}",
         )
         torch._check(
-            sympy_product(red_ranges) == reduction_numel,
+            check_eq(sympy_product(red_ranges), reduction_numel),
             lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}",
         )
 
