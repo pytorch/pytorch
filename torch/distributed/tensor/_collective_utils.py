@@ -345,6 +345,7 @@ def redistribute_cost(
             continue
 
         num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[i]
+        # TODO: Support cost computation with device ordering
         if current.is_shard() and target.is_replicate():
             # allgather gives larger comm bytes
             comm_bytes_gb *= num_devices_on_mesh_dim

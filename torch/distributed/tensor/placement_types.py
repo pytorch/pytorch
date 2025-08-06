@@ -59,14 +59,19 @@ class Shard(Placement):
     used by all DTensor APIs (i.e. distribute_tensor, from_local, etc.)
 
     Args:
-        dim (int): The tensor dimension that describes the DTensor is sharded over its
-            corresponding DeviceMesh dimension.
+        dim (int): The tensor dimension that describes the DTensor is sharded
+        over its corresponding DeviceMesh dimension.
+
+        priority (int, optional): The priority that determines which device mesh
+        dimension to shard a tensor dimension on first. Lower values indicate
+        higher priority.
 
     .. warning:: sharding on a tensor dimension where the tensor dimension size is not
         evenly divisible on a DeviceMesh dimension is currently experimental and subject to change.
     """
 
     dim: int
+    priority: int = 100
 
     def _split_tensor(
         self,
