@@ -192,9 +192,6 @@ retry brew install libomp
 # For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
 
-if [[ -n "$CROSS_COMPILE_ARM64" ]]; then
-    export CMAKE_OSX_ARCHITECTURES=arm64
-fi
 export USE_MKLDNN=OFF
 export USE_QNNPACK=OFF
 export BUILD_TEST=OFF

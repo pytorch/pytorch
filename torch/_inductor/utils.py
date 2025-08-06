@@ -3366,13 +3366,12 @@ def tabulate_2d(elements: Sequence[Sequence[T]], headers: Sequence[T]) -> str:
         for i, e in enumerate(row):
             widths[i] = max(widths[i], len(str(e)))
     lines = []
-    # Need nested {} for string formatting; ignore SET_LINTER here
-    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))  # noqa: set_linter
+    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))
     #              widths          whitespace      horizontal separators
     total_width = sum(widths) + (len(widths) * 2) + (len(widths) - 1)
     lines.append("-" * total_width)
     for row in elements:
-        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))  # noqa: set_linter
+        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))
     return "\n".join(lines)
 
 
