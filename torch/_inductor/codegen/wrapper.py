@@ -2805,6 +2805,7 @@ class PythonWrapperCodegen(CodeGen):
                 f"dtype={dtype}, "
                 f"device='{device.type}', "
                 f"name='{name}')"
+            )
         elif device.type == "cpu" and is_pinned:
             out = (
                 f"{name} = empty_strided_cpu_pinned("
