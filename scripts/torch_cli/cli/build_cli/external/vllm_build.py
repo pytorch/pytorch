@@ -65,6 +65,8 @@ def getVllmBuildConfig(config: Dict[str, Any]):
         base_image=external_build_config.get("base_image", ""),
         dockerfile_path=external_build_config.get("dockerfile_path", ""),
     )
+
+
 def build_vllm(config: Dict[str, Any]):
     cfg = getVllmBuildConfig(config)
     print(f"Target artifact dir path is {cfg.artifact_dir}", flush=True)
