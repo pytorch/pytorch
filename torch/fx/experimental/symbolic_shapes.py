@@ -4712,7 +4712,7 @@ class ShapeEnv:
         self,
         sym: sympy.Expr,
         *,
-        hint: Optional[int],
+        hint: Optional[int | float | bool],
         source: Optional[Source] = None,
     ) -> FloatLikeType:
         """Create a SymFloat value from a symbolic expression"""
@@ -4810,7 +4810,6 @@ class ShapeEnv:
         )
         self.counter["create_unbacked_symbol"] += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
-            print(f"adding {symbol}")
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
