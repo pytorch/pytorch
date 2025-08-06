@@ -448,6 +448,7 @@ class ForwardRef {{
     ptr_ = std::make_unique<T>(*other.ptr_);
     return *this;
   }}
+  ~ForwardRef();
   const T& operator*() const {{
     return *ptr_;
   }}
@@ -519,6 +520,7 @@ inline void from_json(const nlohmann::json& j, F64& f) {{
 
 template <typename T> ForwardRef<T>::ForwardRef(ForwardRef<T>&&) = default;
 template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) = default;
+template <typename T> ForwardRef<T>::~ForwardRef() = default;
 }} // namespace _export
 }} // namespace torch
 """
@@ -689,7 +691,7 @@ def check(commit: _Commit, force_unsafe: bool = False):
             for f, d in fields.items():
                 if kind == "struct" and "default" not in d:
                     reason += (
-                        f"Field {k}.{f} is added to schema.py without a default value as an incomparible change "
+                        f"Field {k}.{f} is added to schema.py without a default value as an incompatible change "
                         + "which requires major version bump.\n"
                     )
                     next_version = [commit.base["SCHEMA_VERSION"][0] + 1, 1]

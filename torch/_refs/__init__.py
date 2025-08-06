@@ -385,7 +385,7 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 
 def _broadcast_shapes(*_shapes):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -407,13 +407,20 @@ def _broadcast_shapes(*_shapes):
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
-            if guard_size_oblivious(common_shape[idx] == 1):
+            # if both 1, or statically known the same, we rather pick non-broadcast path.
+            if guard_or_false(common_shape[idx] == shape[idx]):
+                continue
+            elif guard_or_false(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
-            elif guard_size_oblivious(shape[idx] != 1):
+            elif guard_or_false(shape[idx] == 1):
+                # broadcast case .
+                continue
+            else:
+                # If broadcasting is undecided we pick non-broadcast path and add runtime assertion.
                 torch._check(
                     common_shape[idx] == shape[idx],
                     lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
@@ -6070,7 +6077,7 @@ def bucketize(
     if n_boundaries == 0:
         return torch.zeros_like(a)
     # We are trying to find the bucket (defined by pairs of consecutive elements of `boundaries`)
-    # each element of `a` belongs to. We use binary search to achieve logarithimic complexity,
+    # each element of `a` belongs to. We use binary search to achieve logarithmic complexity,
     # but each step of the search is done "in parallel" over all elements of `a`
     # can't use int32 as indexes, so we have to do all computations with int64 and convert at the end
     start = torch.zeros(a.shape, device=a.device, dtype=torch.int64)

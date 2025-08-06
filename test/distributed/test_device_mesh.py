@@ -5,6 +5,7 @@ import os
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
+from torch._C._distributed_c10d import Backend as C10dBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
@@ -30,7 +31,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.testing._internal.distributed.fake_pg import FakeProcessGroup, FakeStore
 from torch.utils._typing_utils import not_none
 
 
@@ -578,6 +579,115 @@ class InitDeviceMeshTest(DTensorTestBase):
                 mesh_dim_names=["dp", "tp"],
             )
 
+    def _test_backend_override_argument_dict_with_idx_and_backend(self):
+        opts = FakeProcessGroup.Options()
+        opts.fake_option = 42
+
+        mesh = init_device_mesh(
+            self.device_type,
+            (2, 2, 2),
+            mesh_dim_names=("dp", "tp", "cp"),
+            backend_override={0: "fake", 2: ("fake", opts)},
+        )
+
+        def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
+            return (
+                mesh.get_group(dim_idx)
+                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
+                .options
+            )
+
+        # Fake pg only have BackendType as BackendType::CUSTOM.
+        self.assertEqual(mesh.get_group(0)._get_backend_name(), "custom")
+        self.assertNotEqual(mesh.get_group(1)._get_backend_name(), "custom")
+        self.assertEqual(mesh.get_group(2)._get_backend_name(), "custom")
+
+        self.assertIsNone(get_opts(mesh, 0))
+        self.assertEqual(get_opts(mesh, 2).fake_option, 42)
+
+        dp_tp_mesh = mesh["dp", "tp"]._flatten()
+        dp_cp_mesh = mesh["dp", "cp"]._flatten(backend_override="fake")
+        tp_cp_mesh = mesh["tp", "cp"]._flatten(backend_override=("fake", opts))
+
+        self.assertNotEqual(dp_tp_mesh.get_group(0)._get_backend_name(), "custom")
+        self.assertEqual(dp_cp_mesh.get_group(0)._get_backend_name(), "custom")
+        self.assertEqual(tp_cp_mesh.get_group(0)._get_backend_name(), "custom")
+
+        self.assertIsNone(get_opts(dp_cp_mesh, 0))
+        self.assertEqual(get_opts(tp_cp_mesh, 0).fake_option, 42)
+
+    @with_comms
+    def test_backend_override_argument_dict_with_idx_and_backend_lazy(self):
+        self._test_backend_override_argument_dict_with_idx_and_backend()
+
+    @with_comms(eager_init=True)
+    def test_backend_override_argument_dict_with_idx_and_backend_eager(self):
+        self._test_backend_override_argument_dict_with_idx_and_backend()
+
+    @with_comms(backend="fake")
+    def test_backend_override_argument_dict_with_name_and_options(self):
+        opts = FakeProcessGroup.Options()
+        opts.fake_option = 42
+
+        mesh = init_device_mesh(
+            self.device_type,
+            (2, 2, 2),
+            mesh_dim_names=("dp", "tp", "cp"),
+            backend_override={"tp": opts},
+        )
+
+        def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
+            return (
+                mesh.get_group(dim_idx)
+                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
+                .options
+            )
+
+        self.assertIsNone(get_opts(mesh, 0))
+        self.assertEqual(get_opts(mesh, 1).fake_option, 42)
+        self.assertIsNone(get_opts(mesh, 2))
+
+        dp_tp_mesh = mesh["dp", "tp"]._flatten()
+        dp_cp_mesh = mesh["dp", "cp"]._flatten(backend_override=opts)
+
+        self.assertIsNone(get_opts(dp_tp_mesh, 0))
+        self.assertEqual(get_opts(dp_cp_mesh, 0).fake_option, 42)
+
+    @with_comms
+    def test_backend_override_argument_errors(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Found redundant dim index 0 and name dp in backend_override",
+        ):
+            init_device_mesh(
+                self.device_type,
+                (2, 4),
+                mesh_dim_names=("dp", "tp"),
+                backend_override={"dp": "foo", 0: "bar"},
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Found invalid keys in backend_override: got \['cp'\]",
+        ):
+            init_device_mesh(
+                self.device_type,
+                (2, 4),
+                mesh_dim_names=("dp", "tp"),
+                backend_override={"cp": "foo"},
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Found invalid keys in backend_override: got \[42\]",
+        ):
+            init_device_mesh(
+                self.device_type,
+                (2, 4),
+                mesh_dim_names=("dp", "tp"),
+                backend_override={42: "bar"},
+            )
+
 
 class TestDeviceMeshGetItem(DTensorTestBase):
     @property
@@ -665,6 +775,10 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(hsdp_mesh_1.mesh.tolist(), hsdp_group[hsdp_group_idx])
         self.assertEqual(hsdp_mesh_2.mesh.tolist(), hsdp_group[hsdp_group_idx])
         self.assertEqual(hsdp_mesh_1, hsdp_mesh_2)
+
+        # Test slicing out 1D mesh from a sub-2D mesh.
+        shard_mesh = hsdp_mesh_2["Shard"]
+        self.assertEqual(shard_mesh.mesh.tolist(), shard_group[shard_group_idx])
 
     @with_comms
     def test_cache_and_reuse_submesh_slice_result(self):

@@ -222,7 +222,7 @@ class SplitResult(NamedTuple):
         split_module: root module after splitting.
         submodule_inputs: a dict that maps submodule name to its inputs.
         non_acc_submodule_prefix: the prefix for non acc submodules. For
-            acc submodule the prefix is alwasy "_run_on_acc_".
+            acc submodule the prefix is always "_run_on_acc_".
     """
 
     split_module: torch.fx.GraphModule

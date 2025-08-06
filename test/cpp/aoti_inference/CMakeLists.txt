@@ -18,8 +18,9 @@ add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/script_data.pt
            ${CMAKE_CURRENT_BINARY_DIR}/script_model_cpu.pt
            ${CMAKE_CURRENT_BINARY_DIR}/script_model_cuda.pt
+    # This script requires the torch package to be installed.
     COMMAND python ${AOT_INDUCTOR_TEST_ROOT}/compile_model.py
-    DEPENDS compile_model.py
+    DEPENDS torch torch_python aoti_custom_class ${AOT_INDUCTOR_TEST_ROOT}/compile_model.py
 )
 add_custom_target(aoti_script_model ALL
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/script_data.pt

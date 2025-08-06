@@ -2842,6 +2842,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @parametrize_test("strided", [False, True])
     # Test with both contiguous and non-contiguous inputs.
     @parametrize_test("contiguous", [False, True])
+    @expectedFailureMPS  # No double support
     def test_conv_backend(
         self,
         device,
@@ -4055,13 +4056,13 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @skipCUDAIfRocm
     @onlyCUDA
     @largeTensorTest("20GB")
-    @largeTensorTest("80GB", "cpu")
+    @largeTensorTest("64GB", "cpu")
     def test_depthwise_conv_64bit_indexing(self, device):
-        x = torch.randn(1, 2, 32800, 32800, dtype=torch.bfloat16).to(
+        x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
             memory_format=torch.channels_last
         )
         c = nn.Conv2d(
-            2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.bfloat16
+            2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.half
         ).to(memory_format=torch.channels_last)
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))

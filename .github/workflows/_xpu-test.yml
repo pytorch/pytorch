@@ -133,7 +133,7 @@ jobs:
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
+          python3 -m pip install psutil==5.9.8 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
           python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
@@ -191,9 +191,6 @@ jobs:
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
-          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-          SCCACHE_REGION: us-east-1
-          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
