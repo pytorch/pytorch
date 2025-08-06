@@ -13,9 +13,11 @@ static inline c10::ScalarType qlinear_decide_out_dtype(
   bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
   bool bfloat16_output =
       output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+  bool fp16_output = output_dtype.has_value() && (output_dtype == c10::kHalf);
   auto dst_dtype = fp32_output
       ? c10::kFloat
-      : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
+      : (bfloat16_output ? c10::kBFloat16
+                         : (fp16_output ? c10::kHalf : act.scalar_type()));
   return dst_dtype;
 }
 
