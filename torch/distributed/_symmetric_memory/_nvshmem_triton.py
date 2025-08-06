@@ -268,7 +268,9 @@ if has_triton():
             ```
             # Transfer data and set completion flag to 1
             NVSHMEM_SIGNAL_SET = 0
-            nvshmem.putmem_signal_block(dst_ptr, src_ptr, 1024, sig_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe)
+            nvshmem.putmem_signal_block(
+                dst_ptr, src_ptr, 1024, sig_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe
+            )
             ```
         """
         return core.extern_elementwise(
@@ -535,7 +537,9 @@ if has_triton():
             # Ensure all data transfers complete before setting completion flag
             nvshmem.putmem_block(data_ptr, src_ptr, data_size, target_pe)
             nvshmem.quiet()  # Wait for data transfer completion
-            nvshmem.putmem_block(flag_ptr, flag_src_ptr, 8, target_pe)  # Signal completion
+            nvshmem.putmem_block(
+                flag_ptr, flag_src_ptr, 8, target_pe
+            )  # Signal completion
             ```
         """
         return core.extern_elementwise(
