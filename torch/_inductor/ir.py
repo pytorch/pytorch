@@ -5365,6 +5365,11 @@ class ConcatKernel(NopKernel):
 
 @ir_dataclass(frozen=False)
 class ExternKernel(InputsKernel):
+    """
+    A class that represents Kernels which are not directly lowered to Inductor
+    Loop Level IR, such as custom operators, or aten operators which we fallback to.
+    """
+
     constant_args: Sequence[Any] = ()
     kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
     output_view: Optional[ReinterpretView] = None
@@ -6161,6 +6166,17 @@ class ExternKernel(InputsKernel):
                 wrapper.writeline(
                     f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
                 )
+
+    def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
+        """
+        Track outputs of fallback operators if config.test_configs.track_memory_lifecycle
+        """
+        if not config.test_configs.track_memory_lifecycle or V.graph.cpp_wrapper:
+            return
+
+        wrapper.write_memory_track_allocation_once()
+        name = self.get_name()
+        wrapper.writeline(f"track_tensor({name}, '{name}')")
 
     def get_group_stride(self) -> tuple[list[Sequence[Expr]], list[Expr]]:
         """
@@ -7047,6 +7063,12 @@ class DeviceCopy(ExternKernelOut):
 
         developer_warning("DeviceCopy in input program")
         constant_args = (non_blocking,)
+        # Device Copy should keep the same layout as input
+        x = ExternKernel.require_contiguous(x)
+        stride = None
+        if x.get_size():
+            # x.get_stride() may be unimplemented if x's size is empty
+            stride = x.get_stride()
         is_destination_pinned = (
             x_device.type == "cuda" and device.type == "cpu" and non_blocking
         )
@@ -7056,10 +7078,11 @@ class DeviceCopy(ExternKernelOut):
         if is_source_pinned and is_storage_and_layout(x):
             x.get_layout().is_pinned = True
         return DeviceCopy(
-            FlexibleLayout(
-                device=device,
-                dtype=x.get_dtype(),
-                size=x.get_size(),
+            FixedLayout(
+                device,
+                x.get_dtype(),
+                x.get_size(),
+                stride,
                 is_pinned=is_destination_pinned,
             ),
             [cls.realize_input(x)],
@@ -7623,6 +7646,7 @@ class FallbackKernel(ExternKernelAlloc):
             if isinstance(self.layout, Layout):
                 self.codegen_size_asserts(wrapper)
                 self.codegen_alignment_asserts(wrapper)
+                self.codegen_memory_tracking(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 
@@ -7769,6 +7793,31 @@ class ComplexView(FallbackKernel):
             unflatten_args,
             unbacked_bindings=unbacked_bindings,
         )
+
+
+class MemoryCheckKernel(FallbackKernel):
+    """
+    Custom kernel for memory checking that generates direct function calls
+
+    TODO - the custom op was erroring with str inputs. should be able to custom op directly.
+    """
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        """Override codegen to write direct function call"""
+        # Extract our arguments from nontensor_args
+        wrapper.write_memory_track_allocation_once()
+        alive_list, dead_list, is_final_step = self.constant_args
+
+        alive_repr = repr(alive_list)
+        dead_repr = repr(dead_list)
+        if is_final_step:
+            wrapper.writeline(
+                "# note: dont currently distinguish between buffers returned and dealloc'd in last step"
+            )
+            call = f"check_memory_step(allocated={alive_repr}, freed={dead_repr}, is_final_step={is_final_step})"
+        else:
+            call = f"check_memory_step(allocated={alive_repr}, freed={dead_repr})"
+        wrapper.writeline(call)
 
 
 @ir_dataclass
