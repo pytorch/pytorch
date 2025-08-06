@@ -7811,6 +7811,32 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
+    @slowTest
+    @onlyCPU
+    @largeTensorTest('12GB', device='cpu')
+    def test__int8_mm_large_shape(self, device):
+        torch.manual_seed(1)
+        m = 65536
+        k = 64
+        n = 50400
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
+
+        def convert_weight_to_int8pack(b):
+            b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
+                b, -128, 127, torch.int8
+            )
+            return b_int8pack, b_scales
+
+        def weight_int8pack_mm(a, b_int8pack, b_scales):
+            return torch._weight_int8pack_mm(
+                a, b_int8pack, b_scales
+            )
+
+        b_int8pack, b_scales = convert_weight_to_int8pack(b)
+        # should pass without segfault
+        weight_int8pack_mm(a, b_int8pack, b_scales)
+
     @onlyCPU
     @parametrize("m", [32, 35, 36, 40, 64])
     @parametrize("k", [32, 35, 36, 40, 64])
