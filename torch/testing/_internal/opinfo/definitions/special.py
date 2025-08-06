@@ -482,6 +482,10 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.skip, "TestCommon", "test_compare_cpu", device_type="xpu"
             ),
+            # Too slow
+            DecorateInfo(
+                unittest.skip, "TestCommon", "test_compare_cpu", device_type="xpu"
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
