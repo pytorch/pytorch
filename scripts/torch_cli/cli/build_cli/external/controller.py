@@ -4,14 +4,14 @@ from cli.lib.utils import read_yaml_file
 
 class ExternalBuildController(Controller):
     class Meta:
-        label = "build_external"
-        aliases = ["external"]
+        label = "build_external"  # must be unique among all controllers
+        aliases = ["external"]  # alias for the controller
         stacked_on = "build"
         stacked_type = "nested"
         help = "Build external libraries with pytorch ci"
 
     @ex(
-        help="Build vllm",
+        help='Build vllm,  Example: python3 -m cli.run --config".github/ci_configs/CONFIG_TEMPLATE.yaml" build external vllm',
     )
     def vllm(self):
         config = self.app.pargs.config
