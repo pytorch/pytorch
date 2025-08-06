@@ -265,22 +265,13 @@ else
 
       WERROR=1 python setup.py clean
 
-      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        python3 tools/packaging/split_wheel.py bdist_wheel
-      else
-        WERROR=1 python setup.py bdist_wheel
-      fi
+      WERROR=1 python setup.py bdist_wheel
     else
       python setup.py clean
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
-      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
-        exit 1
-      else
-        python setup.py bdist_wheel
-      fi
+      python setup.py bdist_wheel
     fi
     pip_install_whl "$(echo dist/*.whl)"
 
