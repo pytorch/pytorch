@@ -1509,21 +1509,19 @@ def get_kernel(
         >>> kernel = torch.library.get_kernel(torch.ops.aten.add.Tensor, "CPU")
         >>>
         >>> # Use the kernel to call the operator
-        >>> op_handle = torch._C._dispatch_find_schema_or_throw("aten::add", "Tensor")
         >>> a = torch.tensor([1.0, 2.0])
         >>> b = torch.tensor([3.0, 4.0])
-        >>> result = kernel.call_boxed(op_handle, torch._C.DispatchKeySet("CPU"), a, b)
+        >>> result = kernel.call_boxed(torch._C.DispatchKeySet("CPU"), a, b)
         >>> print(result)  # tensor([4., 6.])
         >>>
         >>> # Example: Using get_kernel in a custom op with conditional dispatch
         >>> # Get the original kernel for torch.sin
         >>> original_sin_kernel = torch.library.get_kernel("aten::sin", "CPU")
         >>>
-        >>> def conditional_sin_impl(dispatch_keys, x):
         >>> # If input has negative values, use original sin, otherwise return zeros
+        >>> def conditional_sin_impl(dispatch_keys, x):
         >>>     if (x < 0).any():
-        >>>         op_handle = torch.ops.aten.sin.default._handle
-        >>>         return original_sin_kernel.call_boxed(op_handle, dispatch_keys, x)
+        >>>         return original_sin_kernel.call_boxed(dispatch_keys, x)
         >>>     else:
         >>>         return torch.zeros_like(x)
         >>>

@@ -1694,7 +1694,9 @@ _after_ADInplaceOrView_keyset: DispatchKeySet
 _after_autograd_keyset: DispatchKeySet
 
 class _SafeKernelFunction:
-    def call_boxed(self, handle: _DispatchOperatorHandle, keyset: DispatchKeySet, *args, **kwargs) -> Any: ...
+    def call_boxed(self, keyset: DispatchKeySet, *args, **kwargs) -> Any: ...
+    @property
+    def op_handle(self) -> _DispatchOperatorHandle: ...
 
 def _dispatch_library(
     kind: str,

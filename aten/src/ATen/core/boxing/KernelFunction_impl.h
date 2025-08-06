@@ -340,10 +340,12 @@ inline void KernelToken::invalidate() {
 
 inline SafeKernelFunction::SafeKernelFunction(
     const KernelFunction* kernel,
-    std::string debug)
+    std::string debug,
+    std::shared_ptr<OperatorHandle> opHandle)
     : kernel_(kernel ? *kernel : KernelFunction()),
       token_(std::make_shared<KernelToken>()),
-      debug_(std::move(debug)) {
+      debug_(std::move(debug)),
+      opHandle_(std::move(opHandle)) {
   // Register the token with the original kernel so it gets invalidated when the
   // kernel is destroyed
   if (kernel) {

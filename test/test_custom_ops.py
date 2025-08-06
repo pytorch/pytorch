@@ -4177,15 +4177,14 @@ Please use `add.register_fake` to add an fake impl.""",
             lib.impl("arange.start", dummy_arange_cpu, "CPU", with_keyset=True)
 
             kernel = torch.library.get_kernel("aten::arange.start", "CPU")
-            op_handle = torch.ops.aten.arange.start._handle
             dispatch_keys = torch._C.DispatchKeySet(torch._C.DispatchKey.CPU)
-            result = kernel.call_boxed(op_handle, dispatch_keys, 0, 5)
+            result = kernel.call_boxed(dispatch_keys, 0, 5)
 
             self.assertEqual(result, torch.ones(5))
 
         # The kernel should now be invalidated after exiting the scoped_library context
         with self.assertRaisesRegex(RuntimeError, "has been invalidated"):
-            kernel.call_boxed(op_handle, dispatch_keys, 0, 5)
+            kernel.call_boxed(dispatch_keys, 0, 5)
 
     def test_library_get_kernel_with_conditional_dispatch(self):
         """Test registering a custom kernel with conditional dispatch logic."""
@@ -4204,7 +4203,6 @@ Please use `add.register_fake` to add an fake impl.""",
             if end % 2 == 0:
                 op_handle = torch.ops.aten.arange.start._handle
                 return original_kernel.call_boxed(
-                    op_handle,
                     dispatch_keys,
                     start,
                     end,
@@ -4231,7 +4229,6 @@ Please use `add.register_fake` to add an fake impl.""",
             if start % 2 == 0:
                 op_handle = torch.ops.aten.arange.start._handle
                 return original_kernel.call_boxed(
-                    op_handle,
                     dispatch_keys,
                     start,
                     end,

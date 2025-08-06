@@ -2,6 +2,7 @@
 
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/core/boxing/BoxedKernel.h>
+#include <ATen/core/function_schema.h>
 #include <ATen/core/stack.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/TypeList.h>
@@ -309,7 +310,10 @@ class KernelToken {
 
 class SafeKernelFunction {
  public:
-  SafeKernelFunction(const KernelFunction* kernel, std::string debug);
+  SafeKernelFunction(
+      const KernelFunction* kernel,
+      std::string debug,
+      std::shared_ptr<OperatorHandle> opHandle);
 
   // Safe callBoxed - checks token validity first
   void callBoxed(
@@ -322,10 +326,16 @@ class SafeKernelFunction {
     return debug_;
   }
 
+  // Get the OpHandle that lives on this SafeKernelFunction
+  const OperatorHandle& opHandle() const {
+    return *opHandle_;
+  }
+
  private:
   KernelFunction kernel_;
   std::shared_ptr<KernelToken> token_;
   std::string debug_;
+  std::shared_ptr<OperatorHandle> opHandle_;
 };
 
 } // namespace c10

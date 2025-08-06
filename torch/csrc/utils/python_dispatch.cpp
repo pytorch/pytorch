@@ -607,10 +607,10 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "call_boxed",
           [](const c10::SafeKernelFunction& self,
-             const c10::OperatorHandle& op,
              c10::DispatchKeySet keyset,
              py::args args,
              const py::kwargs& kwargs) {
+            const auto& op = self.opHandle();
             auto stack = torch::jit::createStackForSchema(
                 op.schema(),
                 std::move(args),
@@ -619,9 +619,15 @@ void initDispatchBindings(PyObject* module) {
             self.callBoxed(op, keyset, &stack);
             return torch::jit::createPyObjectForStack(std::move(stack));
           })
-      .def("__repr__", [](const c10::SafeKernelFunction& self) {
-        return "SafeKernelFunction(debug='" + self.debug() + "')";
-      });
+      .def(
+          "__repr__",
+          [](const c10::SafeKernelFunction& self) {
+            return "SafeKernelFunction(debug='" + self.debug() + "')";
+          })
+      .def_property_readonly(
+          "op_handle", [](const c10::SafeKernelFunction& self) -> py::object {
+            return py::cast(self.opHandle());
+          });
 
   m.def(
       "_dispatch_get_computed_kernel_for_dispatch_key",

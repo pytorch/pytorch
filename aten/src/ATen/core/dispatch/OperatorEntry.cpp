@@ -321,7 +321,12 @@ SafeKernelFunction OperatorEntry::getComputedKernelForDispatchKey(
       !isAliasDispatchKey(k),
       "Alias keys do not have runtime kernel registrations.");
   const auto dispatch_ix = getDispatchTableIndexForDispatchKey(k);
-  TORCH_CHECK(dispatchTable_[dispatch_ix].isValid(), "no kernel for ", k, " for ", name_);
+  TORCH_CHECK(
+      dispatchTable_[dispatch_ix].isValid(),
+      "no kernel for ",
+      k,
+      " for ",
+      name_);
 
   // Get the KernelFunction object from kernels_ to pass to SafeKernelFunction
 
@@ -335,7 +340,15 @@ SafeKernelFunction OperatorEntry::getComputedKernelForDispatchKey(
   auto [annotatedKernel, _] =
       computeDispatchTableEntryWithDebug(c10::Dispatcher::singleton(), k);
 
-  return SafeKernelFunction(&annotatedKernel.kernel, annotatedKernel.debug);
+  // Use findSchemaOrThrow to get OpHandle for the OperatorEntry
+  auto& dispatcher = c10::Dispatcher::singleton();
+  auto opHandle = dispatcher.findSchemaOrThrow(
+      name_.name.c_str(), name_.overload_name.c_str());
+
+  return SafeKernelFunction(
+      &annotatedKernel.kernel,
+      annotatedKernel.debug,
+      std::make_shared<OperatorHandle>(opHandle));
 }
 
 const std::vector<at::Tag>& OperatorEntry::getTags() const {
